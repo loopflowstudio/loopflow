@@ -63,8 +63,10 @@ existing host, run `lf cron sync --wave infrastructure` to replace the old skill
 target with this Flow target, then inspect `lf cron list --wave infrastructure`.
 
 `lf cron sync --wave infrastructure` validates both targets and both fixed
-daily schedules before it writes a plist. It captures the non-secret host path,
-Home id, Home/store paths, authoritative checkout, installed binary, exact
+daily schedules before it writes a plist. A declared `flow` must resolve to a
+flow; missing or malformed repository content cannot fall back to a same-named
+skill. Repository flows take precedence over reusable skills. Sync captures the
+non-secret host path, Home id, Home/store paths, authoritative checkout, installed binary, exact
 schedule, and log path. Scheduled execution repeats the placement check and
 fails with a receipt instead of running after ownership moves.
 
@@ -100,3 +102,106 @@ does not claim that elapsed evidence in advance.
 
 Loopflow remains the concrete deployment. Mirror this shape into Cadenza only
 when its release needs it; do not extract a generic deployment platform.
+
+## Scheduled release settlements
+
+```bash
+lf release history --wave infrastructure --days 35 --json
+lf cron disposition <failed-receipt-or-closed-opportunity-id> \
+  --wave infrastructure --owner <registered-task-work-id> \
+  --reason "Repair the failed check; retry through the next configured firing"
+```
+
+Infrastructure resolves `release-run` to the repository's mechanical flow.
+Each scheduled wake captures all outstanding original due times and executes
+one release operation. Earlier misses point to that execution; they cannot
+supply extra publication or no-change settlements. Due times arriving while
+it runs wait for the next wake. An incomplete candidate keeps its original
+owner, tag, and commit through recovery.
+Collapse preserves each due time's first-attempt timing. Operator-triggered or
+manual attempts on covered misses still disqualify the owner's unattended pair,
+including when those misses fall before the displayed history window.
+
+`release history` joins retained obligations, execution attempts, verification,
+product outcomes, and physical cron receipts. It also reports failed telemetry
+and late or missing repair dispositions. `observation_frontier: null` means
+opportunity observation has not begun; historical process success never fills
+that gap. Due times reconstructed before observation retain uncertain timezone
+provenance. The report keeps older owner records when current rows refer to them.
+
+The scheduler's exit status and the release outcome are separate facts. A zero
+exit without product proof remains unverified. Published settlement requires
+exact artifact hashes, required checks, and a public exact-version installer
+smoke. No-change requires an empty fetched source range, a fully verified
+published baseline, and current scheduled telemetry. Deferred work retains its
+reason and continuation; failed attempts survive later recovery.
+
+Each release attempt freezes `telemetry` observations for its covered due times.
+Original prerequisite intervals retain their receipt ids and `obligation_id`,
+which names the retained telemetry schedule, timezone and Home segment in
+`obligations`. Sync and removal preserve those segments before replacing the
+installed job. Telemetry segments contain no release opportunities. Unobserved
+history, installation gaps and dues before the segment's first scheduled check
+remain explicitly unknown. Linked receipts stay in history even when older than
+its requested window; a replacement job's receipt cannot repair an old interval.
+
+Missing or failed current telemetry gets at most one automatic retry through the
+installed cron executor before release selection. Its receipt has source
+`recovery` and is reserved on the attempt before launch. Catch-up does not retry
+once per missed day. A running prerequisite defers release while its runner is
+live or its identity is unknown. New receipts retain the runner's OS start time;
+confirmed runner death permits recovery only after the existing job lock can be
+acquired. A surviving check keeps that lock. Historical receipts without start
+identity remain unresolved, regardless of age or PID availability. Recovery
+retains the interrupted receipt without inventing its result; a failed retry
+stops release. Recovery does not rewrite failures, supply repair ownership, or
+change `doctor`'s scheduling-continuity checks.
+
+Recovery waits up to one hour. If the check has not finished, release defers with
+its receipt id, log path and next configured release due time. The physical
+receipt stays Running with no exit result. The check continues holding its job
+lock; the deadline never kills it or authorizes overlap. After the lock is free,
+a later wake can run a fresh check. An unobserved late exit does not retroactively
+pass the original receipt. Ordinary scheduled/manual targets retain their
+existing wait behavior.
+
+Release overlap records the exact next configured due time, obligation and Home
+observed by the contender. The active execution keeps its frozen coverage.
+If closure is already observed, the continuation points to the original Home's
+opportunity disposition command. A later schedule change can supersede a saved
+retry time; history retains it as an observation, not a reservation. History
+keeps physical attempt and overlap receipts linked to retained opportunities,
+even outside the display window. An overlap never adds a successful settlement.
+
+A repair disposition references an existing registered Task and records local
+repair ownership. It does not start work, assign a remote issue, or erase the
+failure. The earliest disposition timestamp determines whether ownership was
+recorded within a day. Pending external handoffs remain pending.
+
+Closed schedules retain unfinished opportunities on their original Home.
+`release history` lists their execution owners under `summary.closed_unsettled`,
+even outside `--days`, and prints the retained candidate and disposition command.
+Use the opportunity id on that Home to assign its repair; ownership is late if
+first recorded more than a day after closure. Collapsed dues share their owner's
+blocker. Disposition leaves the blocker, attempts and candidate intact: it neither
+settles a release nor moves execution to a replacement Home. An already running
+operation can still record its exact settlement; closure does not prove its exit.
+Saved waits show their previously expected firing as history after closure.
+A replacement schedule on the same Home resumes the original candidate owner
+and freezes all outstanding predecessor and successor dues in one execution.
+`attempts[].execution_obligation` identifies the segment that fired; original due
+identities and historical telemetry stay on their own segments. Collapse links
+in history are derived from the frozen `covered` set. A changed Home breaks the
+continuation chain. A removed schedule requires repair because it cannot fire.
+
+Ordinary `cron trigger` records intervention before asking launchd to kickstart;
+it does not terminate an active job. A firing that may have resulted from that
+request is marked `triggered`. Triggered executions cannot qualify as unattended
+settlements. Two adjacent original due opportunities need two distinct automatic
+executions, with at least one publication; collapsed rows cannot form that pair.
+
+The publisher launcher must preserve the inherited `LF_RELEASE_LOCK_FD`
+descriptor and its environment reference through `exec`. It is an OS lock
+capability, not a permission flag. The Python publisher retains it through its
+subprocesses, so a surviving publication child still excludes another release
+when its parent exits. A launcher that closes it fails with a named diagnostic.

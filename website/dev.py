@@ -68,7 +68,7 @@ def test(args: argparse.Namespace) -> None:
     # Install playwright browsers if needed
     run(["uv", "run", "playwright", "install", "chromium"], cwd=ROOT)
 
-    cmd = ["uv", "run", "pytest", "tests/", "-v"]
+    cmd = ["uv", "run", "--no-sync", "pytest", "tests/", "-v"]
 
     if args.a11y:
         cmd.extend(["-k", "accessibility or Accessibility or aria or focus or contrast"])
@@ -79,7 +79,10 @@ def test(args: argparse.Namespace) -> None:
     if args.headed:
         cmd.append("--headed")
 
-    run(cmd, cwd=ROOT)
+    run(
+        ["uv", "run", "--no-sync", "python", str(REPO_ROOT / "scripts/test_network.py"), *cmd],
+        cwd=ROOT,
+    )
 
 
 INSTALL_REWRITES = [
@@ -105,9 +108,7 @@ def sync_docs(args: argparse.Namespace) -> None:
 
     # Preserve the source tree so relative links and nested developer guides
     # resolve the same way in Markdown and HTML.
-    source_paths = {
-        path.relative_to(docs_source) for path in docs_source.rglob("*.md")
-    }
+    source_paths = {path.relative_to(docs_source) for path in docs_source.rglob("*.md")}
     for existing in docs_dest.rglob("*.md"):
         if existing.relative_to(docs_dest) not in source_paths:
             existing.unlink()

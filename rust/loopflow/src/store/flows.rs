@@ -182,6 +182,20 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn retire_flow(
+        &self,
+        id: &str,
+        version: u64,
+        reason: &str,
+    ) -> StoreResult<()> {
+        let id = id.to_string();
+        let reason = reason.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.retire_flow(&id, version, &reason)
+        })
+        .await
+    }
+
     pub async fn end_flow(
         &self,
         id: &str,

@@ -1,0 +1,11 @@
+- step:
+    id: implement
+    name: implement
+- compress
+- flow: refresh
+- step:
+    id: decide
+    name: loop-decide
+    repeat:
+      from: implement
+- flow: ship

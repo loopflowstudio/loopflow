@@ -11,6 +11,8 @@ integration investigation. They are not release or Task Flow prerequisites.
 Jack Heart retired the required hosted gate and five-run quota on 2026-09-30
 (LOO-357). Required Desktop checks build the app and exercise production views
 headless through the `swift` suite in gate and CI; see [TESTING.md](../TESTING.md).
+Publisher preparation and public artifact verification do not run this diagnostic
+or require a saved UI-host receipt.
 
 The explicit `--ui-host` command keeps bounded execution, a machine-wide lock,
 per-run `.xcresult` artifacts, and classification of permission/bootstrap

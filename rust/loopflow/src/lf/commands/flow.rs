@@ -191,6 +191,17 @@ pub fn control(command: &FlowCommand, cli: &Cli) -> Result<()> {
                 report_outcome(runtime.block_on(drive(store, flow, None, cli))?)
             })
         }
+        FlowCommand::End { invocation } => {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            let store = runtime.block_on(open_flow_store())?;
+            // A driver holds this lock for its whole pass.
+            let _driver = flow_run::driver_lock(invocation)?;
+            runtime.block_on(crate::ops::task::end_stopped_flow(&store, invocation))?;
+            println!("Flow {invocation} ended");
+            Ok(())
+        }
         _ => anyhow::bail!("not a Flow control: {command:?}"),
     }
 }
@@ -454,12 +465,8 @@ async fn drive_loop(
                 .is_some_and(|managed| managed.id() == flow.id())
             {
                 let task = store.get_task(task_id).await?.context("Task disappeared")?;
-                if let Err(error) = crate::ops::task::resolve_managed_task_planning(
-                    &store,
-                    &task,
-                    crate::ops::pm::PmRefresh::Auto,
-                )
-                .await
+                if let Err(error) =
+                    crate::ops::task::resolve_managed_task_planning(&store, &task).await
                 {
                     if owned_claim.is_some() {
                         store
@@ -834,7 +841,15 @@ impl SkillExecutor for &CliFlowExecutor<'_> {
 
 /// Execute only the captured boundary named by the driver. No definition lookup
 /// or driver lock: the parent owns traversal while this process owns the effect.
-pub fn execute_step(id: &str, version: u64) -> Result<()> {
+pub fn execute_step(id: &str, version: u64, cli: &Cli) -> Result<()> {
+    let cron = cli
+        .cron_receipt
+        .as_ref()
+        .zip(cli.cron_lock_fd)
+        .map(|(id, fd)| crate::ops::cron::accounting::CronExecution {
+            receipt_id: id.clone(),
+            lock_fd: fd,
+        });
     let claim = std::env::var(crate::durable::TASK_WORKER_CLAIM_ENV)
         .ok()
         .map(|value| serde_json::from_str::<TaskWorkerClaim>(&value))
@@ -863,7 +878,7 @@ pub fn execute_step(id: &str, version: u64) -> Result<()> {
         let cwd = flow.cwd.clone();
         let item = op.item.clone();
         let result = tokio::task::spawn_blocking(move || {
-            crate::ops::execute_flow_command(&cwd, &item, &NullProgress)
+            crate::ops::execute_flow_command_with_cron(&cwd, &item, &NullProgress, cron.as_ref())
         })
         .await
         .context("Flow operation worker failed")?;
@@ -902,13 +917,29 @@ async fn execute_child(store: &SharedStore, flow: &FlowSession, cli: &Cli) -> Re
         tokio::process::Command::new(crate::engine::process::resolve_pinned_lf_binary()?);
     command
         .current_dir(&flow.cwd)
-        .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV);
+        .env_remove(crate::durable::TASK_WORKER_CLAIM_ENV)
+        .envs(flow.invocation.isolation_env());
     if matches!(flow.current_step(), Some(ConcreteStep::Command(_))) {
+        if let Some((id, fd)) = cli.cron_receipt.as_ref().zip(cli.cron_lock_fd) {
+            command.args(["--__cron-receipt", id, "--__cron-lock-fd", &fd.to_string()]);
+            // SAFETY: the cron launcher owns the descriptor throughout spawn;
+            // fcntl preserves that exact capability in the captured step child.
+            unsafe {
+                command.pre_exec(move || {
+                    if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
         command.args(["__flow-step", flow.id(), &flow.version.to_string()]);
     } else {
         let mut step_cli = cli.exec_options();
         step_cli.account.clear();
         step_cli.only_account.clear();
+        step_cli.isolate = false;
+        step_cli.shared = false;
         command.args(step_cli.step_args());
         command.args([
             "--__flow-step",

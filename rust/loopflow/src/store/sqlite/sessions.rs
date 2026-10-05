@@ -249,6 +249,28 @@ fn read_summary(
 }
 
 impl SqliteStore {
+    pub(crate) fn resume_candidates(&self) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "SELECT candidates.*, (
+                SELECT MAX(json_extract(payload,'$.opened_at_ms'))
+                FROM session_events WHERE session_id=candidates.id AND kind='observed'
+                AND json_extract(payload,'$.type')='interactive_opened'
+            ) AS opened_at FROM ({SESSION_SELECT}
+            WHERE s.interactive=1 AND (s.kind!='flow_review' OR
+                (s.completed_at IS NULL AND EXISTS(SELECT 1 FROM flow_sessions f
+                 WHERE f.pending_session_id=s.id AND f.state='current'
+                 AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.id=s.task_id
+                    AND t.work_state IN ('done','abandoned')))))) AS candidates"
+        ))?;
+        let rows = query.query_map([], |row| Ok((read_session(row)?, row.get("opened_at")?)))?;
+        rows.map(|row| {
+            let (session, opened) = row?;
+            Ok((session?, opened))
+        })
+        .collect()
+    }
+
     pub(crate) fn session_summaries(
         &self,
         filter: &crate::session::SessionFilter,
@@ -296,6 +318,21 @@ impl SqliteStore {
             [] => Err(StoreError::NotFound),
             _ => Err(invalid(format!("Input selector {selector:?} is ambiguous"))),
         }
+    }
+
+    /// Sessions that recorded `thread` as their provider's own conversation id.
+    pub(crate) fn sessions_for_provider_thread(&self, thread: &str) -> StoreResult<Vec<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT id FROM agent_sessions WHERE provider_thread=?1
+             UNION SELECT session_id FROM session_events WHERE kind='observed'
+                AND json_extract(payload,'$.evidence.provider_session_id')=?1
+             ORDER BY 1",
+        )?;
+        let ids = query
+            .query_map([thread], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(ids)
     }
 
     /// Project retained input history, with its own attribution and chronology.
@@ -556,6 +593,115 @@ impl SqliteStore {
         Ok((histories, truncated))
     }
 
+    pub(crate) fn record_review_service(
+        &self,
+        flow: &FlowSession,
+        exec: &crate::id::ExecId,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if super::flows::flow_in(&tx, flow.id())?.as_ref() != Some(flow) {
+            return Err(StoreError::InvalidAuthority(
+                "review service changed before admission".into(),
+            ));
+        }
+        let id = flow
+            .pending_session_id
+            .as_ref()
+            .ok_or(StoreError::NotFound)?;
+        if tx.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,?3,?4,'{\"type\":\"review_service\"}',current_capture
+             FROM agent_sessions WHERE id=?1 AND completed_at IS NULL",
+            params![id, format!("review_service:{exec}"), exec, crate::store::rows::now_unix()],
+        )? != 1 {
+            return Err(StoreError::InvalidAuthority("review has been retired".into()));
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Fence the exact review before stopping its execution. Keep process owners
+    /// and history so an interrupted restart can finish stopping the same work.
+    pub(crate) fn retire_task_review(&self, expected: &FlowSession) -> StoreResult<()> {
+        let Some(id) = expected.pending_session_id.as_deref() else {
+            return Ok(());
+        };
+        let _dispatch = self.lock_session_driver(id)?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if super::flows::task_flow_in(&tx, expected.task_id.as_ref().ok_or(StoreError::NotFound)?)?
+            .as_ref()
+            != Some(expected)
+        {
+            return Err(StoreError::InvalidAuthority(
+                "Task review changed before retirement".into(),
+            ));
+        }
+        let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if session.completed_at.is_none() {
+            tx.execute(
+                "UPDATE agent_sessions SET completed_at=?2,driver_generation=driver_generation+CASE WHEN driver_generation>0 THEN 1 ELSE 0 END WHERE id=?1",
+                params![id, crate::store::rows::now_unix()],
+            )?;
+            tx.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+                 VALUES(?1,'observed','task_restart:retired',?2,?3,?4)",
+                params![id, crate::store::rows::now_unix(),
+                    serde_json::json!({"type":"review_retired","reason":"explicit Task restart","flow_id":expected.id()}).to_string(), session.captured],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn review_stop_processes(&self, id: &str) -> StoreResult<Option<Vec<(u32, i64)>>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT payload FROM session_events WHERE session_id=?1 AND receipt_key='task_restart:processes'",
+            [id], |row| row.get::<_, String>(0),
+        ).optional()?.map(|value| serde_json::from_str(&value).map_err(StoreError::from)).transpose()
+    }
+
+    pub(crate) fn record_review_stop_processes(
+        &self,
+        id: &str,
+        owners: &[(u32, i64)],
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+             SELECT id,'observed','task_restart:processes',?2,?3,current_capture FROM agent_sessions
+             WHERE id=?1 AND completed_at IS NOT NULL ON CONFLICT DO NOTHING",
+            params![id, crate::store::rows::now_unix(), serde_json::to_string(owners)?],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn review_execution_stopped(&self, id: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+             SELECT id,'observed','task_restart:stopped',?2,'{\"type\":\"review_execution_stopped\"}',current_capture
+             FROM agent_sessions WHERE id=?1 AND completed_at IS NOT NULL
+             ON CONFLICT DO NOTHING",
+            params![id, crate::store::rows::now_unix()],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn review_execs(&self, id: &str) -> StoreResult<Vec<crate::id::ExecId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT e.exec_id FROM session_events e JOIN agent_sessions s ON s.current_capture=e.seq WHERE s.id=?1 AND e.exec_id IS NOT NULL
+             UNION SELECT exec_id FROM session_events WHERE session_id=?1 AND receipt_key='review_service:'||exec_id AND exec_id IS NOT NULL
+             UNION SELECT driver_exec_id FROM agent_sessions WHERE id=?1 AND driver_exec_id IS NOT NULL
+             UNION SELECT provider_exec_id FROM agent_sessions WHERE id=?1 AND provider_exec_id IS NOT NULL",
+        )?;
+        let rows = query.query_map([id], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     pub fn reserve_review_run(
         &self,
         expected: &FlowSession,
@@ -729,6 +875,25 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(session)
+    }
+
+    /// Called under the Session launch lock after proving there is no live client.
+    pub(crate) fn move_primary_workspace(
+        &self,
+        session: &AgentSession,
+        cwd: &std::path::Path,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE agent_sessions SET cwd=?3 WHERE id=?1 AND current_capture IS ?2 AND primary_scope IS NOT NULL AND completed_at IS NULL AND task_id IS NULL",
+            params![session.id, session.captured, cwd.to_string_lossy()],
+        )?;
+        if updated != 1 {
+            return Err(StoreError::InvalidAuthority(
+                "primary Session changed before workspace admission".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// The scope a Session is or was primary for.
@@ -1426,6 +1591,54 @@ mod metadata_tests {
     use super::SqliteStore;
 
     use crate::session::{FlowSummaryState, SessionFilter};
+
+    #[test]
+    fn resume_candidates_keep_completed_conversations_and_original_opening_times() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let session =
+            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let background =
+            store.test_session("background", &crate::session_record::new_artifact_key());
+        let review = store.test_session("review", &crate::session_record::new_artifact_key());
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET completed_at=10 WHERE id=?1",
+                [&session.id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
+                [&background.id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET kind='flow_review' WHERE id=?1",
+                [&review.id],
+            )
+            .unwrap();
+        }
+        for (source, opened) in [("first", 30_000), ("recovered-earlier", 20_000)] {
+            store
+                .retain_session_observation(
+                    &session,
+                    &crate::session::SessionObservation {
+                        artifact_key: session.artifact_key.clone(),
+                        source: source.into(),
+                        observed_at: 999_999,
+                        task_id: None,
+                        wave_id: None,
+                        payload: json!({"type":"interactive_opened", "opened_at_ms":opened}),
+                    },
+                )
+                .unwrap();
+        }
+        let candidates = store.resume_candidates().unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].0.id, session.id);
+        assert_eq!(candidates[0].1, Some(30_000));
+    }
 
     #[test]
     fn retained_sessions_without_repo_use_their_recorded_wave() {

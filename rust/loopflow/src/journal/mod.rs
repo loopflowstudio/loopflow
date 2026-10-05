@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -92,6 +93,7 @@ thread_local! {
 // Only the executable entry point sets this. Library calls retain their own
 // outer with_runtime scope; inherited environment cannot opt into or out of it.
 static PROCESS_STARTED_AT: OnceLock<i64> = OnceLock::new();
+static PROCESS_START: OnceLock<Instant> = OnceLock::new();
 // An actual lf process keeps one identity across async and blocking workers.
 // Library callers retain the thread-scoped with_runtime lifetime above.
 static PROCESS_CONTEXT: Mutex<Option<ExecContext>> = Mutex::new(None);
@@ -120,6 +122,38 @@ struct ExecContext {
     /// True when this process minted the trace id (vs inheriting LF_TRACE_ID);
     /// the export is removed again when the Exec ends.
     minted_trace_id: bool,
+    receipts: Arc<Mutex<ReceiptCost>>,
+}
+
+/// What an Exec's ledger receipts cost, and how many did not land.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReceiptCost {
+    pub waited: Duration,
+    pub unrecorded: u32,
+}
+
+/// How long one Exec waits for a contended store across all of its receipts.
+/// A start receipt that used the whole wait leaves its finish receipt a single
+/// attempt, so a held write lock delays a command once, not once per receipt.
+#[cfg(not(test))]
+fn receipt_wait() -> Duration {
+    crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_RECEIPT_WAIT: std::cell::Cell<Duration> =
+        const { std::cell::Cell::new(crate::store::sqlite::SQLITE_WRITE_BUSY_TIMEOUT) };
+}
+
+#[cfg(test)]
+fn receipt_wait() -> Duration {
+    TEST_RECEIPT_WAIT.with(std::cell::Cell::get)
+}
+
+/// Time since this lf process entered its entry point; `None` in a library caller.
+pub(crate) fn process_elapsed() -> Option<Duration> {
+    PROCESS_START.get().map(Instant::elapsed)
 }
 
 /// Exact, process-local ownership evidence for a live Loopflow Exec.
@@ -226,16 +260,26 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
     PROCESS_STARTED_AT
         .set(OffsetDateTime::now_utc().unix_timestamp())
         .expect("one lf entry point per process");
+    PROCESS_START
+        .set(Instant::now())
+        .expect("one lf entry point per process");
     let result = run();
     if current_context().is_none() {
         observe_process(&std::env::args().collect::<Vec<_>>());
     }
     crate::engine::agent::wait_for_interrupt_cleanup();
-    if let Some(context) = current_context() {
+    let receipts = if let Some(context) = current_context() {
         finish_runtime(&context.cwd, &result);
+        let cost = *context
+            .receipts
+            .lock()
+            .expect("receipt cost mutex poisoned");
+        Some(cost)
     } else {
         eprintln!("Exec history unavailable: no compatible process ledger for this process");
-    }
+        None
+    };
+    crate::ops::wt_timing::finish(result.is_ok(), receipts);
     result
 }
 
@@ -474,17 +518,29 @@ fn ledger_insert(context: &ExecContext, event: &LfEvent, repo_root: &Path, exit_
         error: event.error.clone(),
     };
 
-    match context
+    let started = Instant::now();
+    let already_waited = context
+        .receipts
+        .lock()
+        .expect("receipt cost mutex poisoned")
+        .waited;
+    let recorded = match context
         .ledger
         .clone()
         .map_or_else(|| SqliteStore::new(&context.ledger_path), Ok)
     {
         Ok(store) => {
-            if let Err(err) = store.record_exec(&record) {
-                if first_ledger_failure() {
-                    warn!(error = %err, trace_id = %record.trace_id, "ledger insert failed — this Exec is not being recorded");
-                } else {
-                    debug!(error = %err, trace_id = %record.trace_id, "ledger insert failed");
+            let wait = receipt_wait().saturating_sub(already_waited + started.elapsed());
+            match store.record_exec_within(&record, wait) {
+                Ok(()) => true,
+                Err(err) => {
+                    let waited = (already_waited + started.elapsed()).as_secs_f64();
+                    if first_ledger_failure() {
+                        warn!(error = %err, trace_id = %record.trace_id, waited_seconds = waited, "ledger insert failed — this Exec is not being recorded");
+                    } else {
+                        debug!(error = %err, trace_id = %record.trace_id, waited_seconds = waited, "ledger insert failed");
+                    }
+                    false
                 }
             }
         }
@@ -494,7 +550,16 @@ fn ledger_insert(context: &ExecContext, event: &LfEvent, repo_root: &Path, exit_
             } else {
                 debug!(error = %err, "ledger unavailable");
             }
+            false
         }
+    };
+    let mut cost = context
+        .receipts
+        .lock()
+        .expect("receipt cost mutex poisoned");
+    cost.waited += started.elapsed();
+    if !recorded {
+        cost.unrecorded += 1;
     }
 }
 
@@ -699,6 +764,7 @@ fn create_exec_context(
         wave: wave_name.clone(),
         finished: Arc::new(AtomicBool::new(false)),
         minted_trace_id,
+        receipts: Arc::default(),
     };
     set_context(context.clone());
     let interrupted = context.clone();
@@ -893,6 +959,9 @@ pub(crate) fn task_worker_owner_evidence(
     if let Some(receipt) = receipt {
         return receipt.process_evidence();
     }
+    if began_before_boot(owner.started_at) {
+        return ProcessIdentityEvidence::Dead;
+    }
 
     let Ok(path) = crate::store::database_path_from_env() else {
         return ProcessIdentityEvidence::Unknown;
@@ -911,6 +980,14 @@ pub(crate) fn task_worker_owner_evidence(
     }
 }
 
+pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIdentityEvidence {
+    match process_started_at(pid) {
+        Ok(Some(observed)) if observed.abs_diff(started_at) <= 3 => ProcessIdentityEvidence::Live,
+        Ok(Some(_)) | Ok(None) => ProcessIdentityEvidence::Dead,
+        Err(_) => ProcessIdentityEvidence::Unknown,
+    }
+}
+
 pub(crate) fn exec_process_evidence(store: &SqliteStore, exec: &ExecId) -> ProcessIdentityEvidence {
     let Ok(receipts) = read_exec_process_receipts_at(&crate::store::lf_home_dir()) else {
         return ProcessIdentityEvidence::Unknown;
@@ -921,10 +998,63 @@ pub(crate) fn exec_process_evidence(store: &SqliteStore, exec: &ExecId) -> Proce
     {
         return receipt.process_evidence();
     }
+    // Receipts are keyed by PID, so a later process or a prune can remove the
+    // only record of one that never settled. A restart still proves its exit.
     match store.exec(exec) {
-        Ok(Some(record)) if record.completed_at.is_some() => ProcessIdentityEvidence::Dead,
+        Ok(Some(record))
+            if record.completed_at.is_some() || began_before_boot(record.started_at) =>
+        {
+            ProcessIdentityEvidence::Dead
+        }
         _ => ProcessIdentityEvidence::Unknown,
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_MACHINE_BOOTED_AT: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Pretend this machine booted at `at` for the rest of the test thread.
+#[cfg(test)]
+pub(crate) fn set_test_machine_booted_at(at: Option<i64>) {
+    TEST_MACHINE_BOOTED_AT.with(|cell| cell.set(at));
+}
+
+/// When this machine last booted. No local process survives that boundary, so
+/// work that began earlier and never settled has exited.
+pub(crate) fn machine_booted_at() -> Option<i64> {
+    #[cfg(test)]
+    if let Some(at) = TEST_MACHINE_BOOTED_AT.with(std::cell::Cell::get) {
+        return Some(at);
+    }
+    static BOOTED_AT: OnceLock<Option<i64>> = OnceLock::new();
+    *BOOTED_AT.get_or_init(read_machine_booted_at)
+}
+
+pub(crate) fn began_before_boot(started_at: i64) -> bool {
+    machine_booted_at().is_some_and(|booted_at| started_at < booted_at)
+}
+
+fn read_machine_booted_at() -> Option<i64> {
+    if let Ok(stat) = fs::read_to_string("/proc/stat") {
+        return stat
+            .lines()
+            .find_map(|line| line.strip_prefix("btime "))
+            .and_then(|value| value.trim().parse().ok());
+    }
+    let output = Command::new("sysctl")
+        .args(["-n", "kern.boottime"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    parse_sysctl_boottime(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// `{ sec = 1791140551, usec = 157377 } Sun Oct  4 12:02:31 2026`
+fn parse_sysctl_boottime(value: &str) -> Option<i64> {
+    let seconds = value.split_once("sec = ")?.1;
+    seconds.split([',', ' ']).next()?.parse().ok()
 }
 
 pub(crate) fn process_started_at(pid: u32) -> Result<Option<i64>, std::io::Error> {
@@ -1128,6 +1258,22 @@ mod tests {
     use loopflow_test_support::TestRepo;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
+
+    #[test]
+    fn boot_time_parses_and_bounds_what_can_still_run() {
+        assert_eq!(
+            super::parse_sysctl_boottime(
+                "{ sec = 1791140551, usec = 157377 } Sun Oct  4 12:02:31 2026"
+            ),
+            Some(1_791_140_551)
+        );
+        assert_eq!(super::parse_sysctl_boottime("unavailable"), None);
+        // This test began after the machine that runs it booted.
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        assert!(super::machine_booted_at().is_some_and(|booted_at| booted_at <= now));
+        assert!(!super::began_before_boot(now));
+        assert!(super::began_before_boot(1));
+    }
 
     const CHILD_APPEND_ENV: &str = "LOOPFLOW_JOURNAL_APPEND_CHILD";
     const CHILD_EVENT_COUNT_ENV: &str = "LOOPFLOW_JOURNAL_CHILD_EVENT_COUNT";
@@ -1670,6 +1816,80 @@ mod tests {
         assert!(super::read_exec_process_receipts_at(guard.home())
             .expect("read terminal receipt state")
             .is_empty());
+    }
+
+    /// Run one Exec while another connection holds SQLite's write lock, through
+    /// the finish receipt unless it is released first.
+    fn exec_under_foreign_write_lock(
+        wait: std::time::Duration,
+        release_before_finish: bool,
+    ) -> (super::ReceiptCost, bool) {
+        let guard = journal_test_guard();
+        let repo = TestRepo::new();
+        let command = vec!["lf".to_string(), "wt".to_string(), "list".to_string()];
+        let run = |finish: &dyn Fn()| {
+            emit(
+                repo.path(),
+                LfNode::Exec,
+                LfEventType::Started,
+                started_fields(&command, repo.path(), "main"),
+            );
+            let context = super::current_context().expect("Exec context");
+            finish();
+            emit(
+                repo.path(),
+                LfNode::Exec,
+                LfEventType::Completed,
+                LfEventFields::default(),
+            );
+            context
+        };
+        // An initialized Home, as every real listing has.
+        run(&|| {});
+
+        let ledger = guard.home().join("loopflow.db");
+        let foreign = rusqlite::Connection::open(&ledger).unwrap();
+        foreign.execute_batch("BEGIN IMMEDIATE").unwrap();
+        super::TEST_RECEIPT_WAIT.with(|current| current.set(wait));
+        let context = run(&|| {
+            if release_before_finish {
+                foreign.execute_batch("ROLLBACK").unwrap();
+            }
+        });
+        if !release_before_finish {
+            foreign.execute_batch("ROLLBACK").unwrap();
+        }
+
+        let cost = *context.receipts.lock().unwrap();
+        let recorded = super::open_ledger()
+            .unwrap()
+            .process_is_recorded(context.process_id.as_str())
+            .unwrap();
+        (cost, recorded)
+    }
+
+    #[test]
+    fn a_held_write_lock_delays_an_exec_by_one_receipt_wait() {
+        let wait = std::time::Duration::from_millis(1500);
+
+        let (cost, recorded) = exec_under_foreign_write_lock(wait, false);
+
+        assert!(cost.waited >= wait, "start receipt waited: {cost:?}");
+        assert!(
+            cost.waited < wait * 2,
+            "finish receipt waited again: {cost:?}"
+        );
+        assert_eq!(cost.unrecorded, 2);
+        assert!(!recorded);
+    }
+
+    #[test]
+    fn a_finish_receipt_lands_whole_once_the_write_lock_clears() {
+        let (cost, recorded) =
+            exec_under_foreign_write_lock(std::time::Duration::from_millis(300), true);
+
+        assert_eq!(cost.unrecorded, 1);
+        assert!(recorded);
     }
 
     #[test]

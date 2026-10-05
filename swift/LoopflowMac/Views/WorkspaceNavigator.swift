@@ -6,27 +6,31 @@ struct WorkspaceNavigator: View {
     let onOpenSession: (SessionRecord) -> Void
     let onOpenTask: ((WorkReference) -> Void)?
     let onConversation: ((WorkReference?) -> Void)?
+    let onNewSession: ((SessionSkillLaunch) -> Void)?
     let onNewShell: (() -> Void)?
     let onShowTerminals: (() -> Void)?
     @Environment(\.palette) private var palette
     @State private var scrollPosition: ScrollPosition
     @State private var hoveringPresentation = false
+    @State private var choosingSessionSkill = false
 
     init(model: PodiumModel, onOpenSession: @escaping (SessionRecord) -> Void,
          onConversation: ((WorkReference?) -> Void)? = nil,
          onNewShell: (() -> Void)? = nil, onShowTerminals: (() -> Void)? = nil,
-         onOpenTask: ((WorkReference) -> Void)? = nil) {
+         onOpenTask: ((WorkReference) -> Void)? = nil,
+         onNewSession: ((SessionSkillLaunch) -> Void)? = nil) {
         self.model = model
         self.onOpenSession = onOpenSession
         self.onOpenTask = onOpenTask
         self.onConversation = onConversation
+        self.onNewSession = onNewSession
         self.onNewShell = onNewShell
         self.onShowTerminals = onShowTerminals
         _scrollPosition = State(initialValue: ScrollPosition(y: model.navigation.listScrollOffset))
     }
 
-    private var rows: [WorkspaceOutlineRow] {
-        model.visibleWorkspace.outline(
+    private func rows(_ workspace: WorkspaceProjection) -> [WorkspaceOutlineRow] {
+        workspace.outline(
             presentation: model.navigation.presentation, collapsed: model.navigation.collapsed,
             search: model.navigation.search,
             planningReadable: model.roadmap.value != nil && model.roadmap.errorMessage == nil
@@ -38,17 +42,63 @@ struct WorkspaceNavigator: View {
             + [model.repoPath].compactMap { $0 }).map { model.repoIdentity($0) }).sorted()
     }
 
+    @ViewBuilder
+    private var sessionComposer: some View {
+        if let onNewSession, let launch = model.sessionSkillLaunch {
+            HStack(spacing: 0) {
+                Button { onNewSession(launch) } label: {
+                    Label("New Session", systemImage: "square.and.pencil")
+                        .fixedSize()
+                        .padding(.horizontal, 10)
+                        .frame(height: 34)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("workspace-create-task")
+                Rectangle().fill(palette.textTertiary.opacity(0.25)).frame(width: 1)
+                Button { choosingSessionSkill.toggle() } label: {
+                    HStack(spacing: 7) {
+                        Text(launch.skill).lineLimit(1).truncationMode(.tail)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 12, weight: .medium))
+                            .offset(y: -0.5)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .frame(height: 34)
+                    .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Choose skill, currently \(launch.skill)")
+                .accessibilityIdentifier("workspace-session-skill")
+                .popover(isPresented: $choosingSessionSkill, arrowEdge: .bottom) {
+                    SessionSkillPicker(model: model, repo: launch.repoPath) {
+                        choosingSessionSkill = false
+                    }
+                    .id(launch.repoPath)
+                }
+            }
+            .font(Font(NSFont.systemFont(ofSize: 13, weight: NSFont.Weight(rawValue: 0.265))))
+            .frame(height: 34)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 5))
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(palette.textTertiary.opacity(0.25)))
+            .padding(.horizontal, 10)
+            .padding(.bottom, 8)
+        }
+    }
+
     var body: some View {
         @Bindable var navigation = model.navigation
-        let rows = rows
+        // One projection per render: rows and every row's menu share it.
+        let workspace = model.visibleWorkspace
+        let rows = rows(workspace)
+        let orphans = workspace.orphanSessions(search: model.navigation.search)
         VStack(spacing: 0) {
-            header
+            header(orphans)
+            sessionComposer
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     forReadErrors
-                    ForEach(rows) { row in outlineRow(row) }
-                    if model.repoPath != nil, rows.isEmpty, !model.roadmap.isLoading, !model.sessions.isLoading,
-                       model.roadmap.errorMessage == nil, model.sessions.errorMessage == nil {
+                    ForEach(rows) { row in outlineRow(row, orphans) }
+                    if model.repoPath != nil, rows.isEmpty, model.workspaceStatus == .current {
                         Text(navigation.presentation == .sessions ? "No open Sessions." : "No matching Work.")
                             .foregroundStyle(palette.textSecondary).padding(8)
                     }
@@ -82,10 +132,14 @@ struct WorkspaceNavigator: View {
         .tint(palette.text)
         .buttonStyle(.plain)
         .background(palette.surfaceMuted)
-        .contextMenu { repositoryActions }
+        .contextMenu { repositoryActions(orphans) }
         .accessibilityIdentifier("workspace-navigator")
+        .onChange(of: model.repoPath) { _, _ in choosingSessionSkill = false }
         .onChange(of: rows.isEmpty, initial: true) { _, empty in
-            if !empty { Perf.endAfterCommit(Perf.coldStart, id: "launch") }
+            guard !empty else { return }
+            Perf.endAfterCommit(Perf.coldStart, id: "launch")
+            let source = model.showsSavedWorkspace ? "saved" : "fresh"
+            DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
         }
         .onChange(of: rows.map(\.id)) { _, _ in
             Perf.endAfterCommit(Perf.hierarchyInteraction, id: "outline")
@@ -93,7 +147,7 @@ struct WorkspaceNavigator: View {
     }
 
     /// The repository heads its own outline: one scope, switched in place.
-    private var header: some View {
+    private func header(_ orphans: [SessionRecord]) -> some View {
         @Bindable var navigation = model.navigation
         return HStack(spacing: Spacing.sm) {
             Menu {
@@ -102,7 +156,7 @@ struct WorkspaceNavigator: View {
                         .accessibilityIdentifier("workspace-repository-\(repo)")
                 }
                 Divider()
-                repositoryActions
+                repositoryActions(orphans)
             } label: {
                 HStack(spacing: Spacing.xs) {
                     Text(model.repoPath.map { URL(fileURLWithPath: model.repoIdentity($0)).lastPathComponent }
@@ -165,15 +219,14 @@ struct WorkspaceNavigator: View {
     }
 
     @ViewBuilder private var forReadErrors: some View {
-        if model.roadmap.isLoading {
-            Text("Reading planning…").foregroundStyle(palette.textSecondary)
-                .accessibilityIdentifier("workspace-planning-loading")
+        let status = model.workspaceStatus
+        if let message = status.message {
+            Group {
+                if case .failed = status { warning(message) }
+                else { Text(message).foregroundStyle(palette.textSecondary).padding(4) }
+            }
+            .accessibilityIdentifier("workspace-status")
         }
-        if let error = model.roadmap.errorMessage {
-            warning("Planning unavailable: \(error)").accessibilityIdentifier("workspace-planning-unavailable")
-        }
-        if model.sessions.isLoading { Text("Reading Sessions…").foregroundStyle(palette.textSecondary) }
-        if let error = model.sessions.errorMessage { warning("Sessions unavailable: \(error)") }
         ForEach(model.workspace.waves) { wave in
             if let reason = wave.roadmap.tasks.unavailableReason { warning(reason) }
             if case .available(_, let truncated) = wave.roadmap.tasks, truncated {
@@ -185,7 +238,7 @@ struct WorkspaceNavigator: View {
     /// One row component at two levels. A Wave is a sans section head with a
     /// chevron and nothing else; a Task carries a dot only while it needs eyes
     /// (running, blocked, waiting on you) and a count only while Sessions exist.
-    private func outlineRow(_ row: WorkspaceOutlineRow) -> some View {
+    private func outlineRow(_ row: WorkspaceOutlineRow, _ orphans: [SessionRecord]) -> some View {
         let isWave = row.workKey?.work.kind == .wave
         return HStack(spacing: 6) {
             if case .work(let subject, true, _) = row.content {
@@ -264,7 +317,7 @@ struct WorkspaceNavigator: View {
                 subjectActions(ancestor.key.work, title: ancestor.title)
             }
             Divider()
-            repositoryActions
+            repositoryActions(orphans)
         }
     }
 
@@ -286,16 +339,16 @@ struct WorkspaceNavigator: View {
         .accessibilityIdentifier("workspace-session-count-\(work.id)")
     }
 
-    // MARK: - Orphan Sessions
-
-    private var orphans: [SessionRecord] { model.visibleWorkspace.orphanSessions(search: model.navigation.search) }
-
     @ViewBuilder private func subjectActions(_ work: WorkReference, title: String) -> some View {
+        if work.kind == .wave, let onNewSession, let launch = model.sessionSkillLaunch(for: work) {
+            Button("New Session · \(title)") { onNewSession(launch) }
+                .accessibilityIdentifier("workspace-capture-wave-\(work.id)")
+        }
         Button("Inspect \(title)") { model.select(work) }
         if let onConversation { Button("New conversation · \(title)") { onConversation(work) } }
     }
 
-    @ViewBuilder private var repositoryActions: some View {
+    @ViewBuilder private func repositoryActions(_ orphans: [SessionRecord]) -> some View {
         Menu("Debug") {
             Menu("Sessions") {
                 Menu("Orphan Sessions") {

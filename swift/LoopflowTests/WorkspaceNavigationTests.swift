@@ -454,7 +454,7 @@ struct WorkspaceNavigationTests {
         #expect(model.workspace.waves[0].tasks.map(\.id) == keys)
         #expect(model.workspace.subject(for: "human") == model.selection)
         let view = WorkspaceNavigator(model: model, onOpenSession: { _ in })
-        #expect(throws: Never.self) { try view.inspect().find(text: "Sessions unavailable: offline") }
+        #expect(throws: Never.self) { try view.inspect().find(text: "Couldn't update: offline") }
     }
 
     @Test("Returning to a repository retains its last-good Sessions when refresh fails")

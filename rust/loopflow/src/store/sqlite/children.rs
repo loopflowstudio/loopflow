@@ -169,6 +169,20 @@ impl SqliteStore {
                     .into(),
             ));
         }
+        if let Some(id) = current
+            .as_ref()
+            .and_then(|flow| flow.pending_session_id.as_deref())
+        {
+            let stopped: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1 AND receipt_key='task_restart:stopped')",
+                [id], |row| row.get(0),
+            )?;
+            if !stopped {
+                return Err(StoreError::InvalidAuthority(
+                    "previous review execution must be retired before restart".into(),
+                ));
+            }
+        }
         validate_task_project(&transaction, task)?;
         transaction.execute(
             &format!(

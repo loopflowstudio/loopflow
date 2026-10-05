@@ -57,7 +57,7 @@ struct WorkSurfaceView: View {
            model.navigation.selectedTaskEvidence?.task.id == selection.id {
             taskDetail
         } else if snapshot == nil, queryError == nil {
-            ProgressView("Reading roadmap…")
+            ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("podium-work-loading")
         } else if snapshot == nil {

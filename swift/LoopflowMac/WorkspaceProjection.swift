@@ -395,6 +395,8 @@ final class WorkspaceNavigation {
     var recentDestinations: [WorkspacePaletteRow] = []
     /// Source revisions isolate disclosure from changed definitions and repositories.
     var expandedTemplateGroups: [String: Set<String>] = [:]
+    /// Show a launched repository shell while retaining the selected Task.
+    var showsRetainedTerminals = false
     var showsActivity = false
     var presentation: WorkspacePresentation = .compact
     var selectedSessionId: String? {

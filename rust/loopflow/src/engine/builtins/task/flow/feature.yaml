@@ -1,4 +1,8 @@
 - flow: task-design
 - flow: pursue
+- step:
+    id: review_delivery
+    name: demo
+    human: true
 - flow: queue
-- cmd: task pr land -c
+- cmd: pr land -c

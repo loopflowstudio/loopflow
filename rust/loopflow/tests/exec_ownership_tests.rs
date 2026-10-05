@@ -333,7 +333,7 @@ async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
     let output = command(
         home.path(),
         home.path(),
-        &["install", "preflight", "--json"],
+        &["home", "install", "preflight", "--json"],
     )
     .output()
     .unwrap();
@@ -342,7 +342,7 @@ async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
     let output = command(
         home.path(),
         home.path(),
-        &["screenshot", "missing.html", "-o", "missing.png"],
+        &["home", "screenshot", "missing.html", "-o", "missing.png"],
     )
     .env("PATH", "")
     .output()
@@ -383,7 +383,7 @@ fn remote_command_status_is_the_local_exec_status() {
     let output = command(
         home.path(),
         repo.path(),
-        &["ssh", "proof@example.invalid", "catalog"],
+        &["home", "ssh", "proof@example.invalid", "catalog"],
     )
     .env_clear()
     .env("HOME", home.path())
@@ -979,7 +979,7 @@ fn monitor_prune_preview_preserves_receipts_in_text_and_json() {
     for json in [false, true] {
         std::fs::write(&receipt, &bytes).unwrap();
         for dry_run in [true, false] {
-            let mut args = vec!["mon", "prune"];
+            let mut args = vec!["monitor", "prune"];
             if dry_run {
                 args.push("--dry-run");
             }
@@ -1066,7 +1066,11 @@ async fn monitor_separates_waiting_finished_and_missing_observations() {
         .unwrap()
         .iter()
         .all(|item| item["state"] != "active"));
-    for args in [["ps", "--help"], ["top", "--help"], ["mon", "--help"]] {
+    for args in [
+        vec!["monitor", "ps", "--help"],
+        vec!["monitor", "top", "--help"],
+        vec!["monitor", "--help"],
+    ] {
         let help = command(home.path(), home.path(), &args).output().unwrap();
         assert!(help.status.success(), "{help:?}");
         assert!(String::from_utf8_lossy(&help.stdout).contains("monitor"));

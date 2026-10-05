@@ -1630,7 +1630,8 @@ fn submit_does_not_rotate_worktree() {
     let script = gh_land_script(log_path.to_string_lossy().as_ref());
     let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
 
-    let worktree = create_named_worktree(repo.path(), "sub", None, false).expect("create worktree");
+    let worktree =
+        create_named_worktree(repo.path(), "sub", None, &|_| {}).expect("create worktree");
     fs::write(worktree.path.join("feature.txt"), "feature").expect("write feature file");
     let status = Command::new("git")
         .args(["add", "."])
@@ -1758,7 +1759,6 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
     let directive_path = repo.path().join("directive.txt");
     let status = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
-            "task",
             "pr",
             "arm",
             "--strict",
@@ -1838,7 +1838,7 @@ fn lf_pr_land_returns_before_later_checks_repair_and_observe_merge() {
   while [ ! -f "$LF_TEST_REPAIR_LAUNCHES.release" ]; do sleep 0.05; done
   echo repair >>"$LF_TEST_REPAIR_LAUNCHES"
   if [ "$(wc -l <"$LF_TEST_REPAIR_LAUNCHES")" -gt 1 ]; then exit 1; fi
-  "$LF_TEST_BIN" task sync --manual >"$LF_TEST_SYNC_LOG" 2>&1 || exit 1
+  "$LF_TEST_BIN" sync --manual >"$LF_TEST_SYNC_LOG" 2>&1 || exit 1
   if [ "$LF_TEST_REPAIR_BLOCKED" != "1" ]; then
     git rev-parse HEAD >"$LF_TEST_REPAIR_PROOF"
   fi
@@ -1869,7 +1869,7 @@ fi"#;
             fs::create_dir_all(worktree.join(".lf/flows")).unwrap();
             fs::write(
                 worktree.join(".lf/flows/repair-proof.yaml"),
-                "- cmd: task pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
+                "- cmd: pr land --strict --title watched-landing --body Observe-GitHub-before-returning.\n",
             )
             .unwrap();
         }
@@ -2193,4 +2193,54 @@ fi"#;
             assert_eq!(repaired_head.trim(), merged_head);
         }
     }
+}
+
+#[test]
+fn persistent_submit_keeps_scratch_and_post_commit_edits() {
+    let gh = gh_no_pr_script();
+    let _env = EnvGuard::new(&[("gh", &gh)]);
+    let repo = TestRepo::new();
+    let persistent = loopflow::engine::worktrees::ensure_agent_worktree(
+        repo.path(),
+        loopflow::engine::worktrees::WorktreeSegment::parse("repo").unwrap(),
+    )
+    .unwrap();
+    fs::write(persistent.path.join("memory.md"), "accepted\n").unwrap();
+    loopflow::ops::commit_selected(&persistent.path, &["memory.md".into()], Some("Memory"))
+        .unwrap();
+    fs::create_dir_all(persistent.path.join("scratch/nested")).unwrap();
+    fs::write(persistent.path.join("scratch/nested/plan.md"), "private\n").unwrap();
+    fs::write(persistent.path.join("memory.md"), "next decision\n").unwrap();
+    submit(
+        &persistent.path,
+        &LandOptions {
+            strict: false,
+            local: false,
+            create_pr: true,
+            complete: false,
+            next_slug: None,
+            worktree: None,
+            commit_message: None,
+            pr_title: Some("Document memory".into()),
+            pr_body: Some("Accepted decisions".into()),
+            agent: None,
+        },
+        &NullProgress,
+    )
+    .unwrap();
+    assert!(persistent.path.is_dir());
+    assert_eq!(
+        fs::read_to_string(persistent.path.join("scratch/nested/plan.md")).unwrap(),
+        "private\n"
+    );
+    assert_eq!(
+        fs::read_to_string(persistent.path.join("memory.md")).unwrap(),
+        "next decision\n"
+    );
+    let committed = Command::new("git")
+        .current_dir(&persistent.path)
+        .args(["show", "HEAD:memory.md"])
+        .output()
+        .unwrap();
+    assert_eq!(committed.stdout, b"accepted\n");
 }

@@ -9,6 +9,9 @@ mod codex_mapping;
 mod common;
 #[cfg(test)]
 mod conformance_tests;
+mod dispatch;
+#[cfg(all(test, unix))]
+mod dispatch_tests;
 mod lf_tag;
 pub mod opencode;
 pub(crate) mod opencode_history;

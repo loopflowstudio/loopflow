@@ -1,7 +1,7 @@
 //! A native client may keep displaying a conversation after driver transfer.
 //! Its writes must still pass the Session fence at dispatch, including approval
-//! replies. This connection forwards to the existing engine; it never starts,
-//! stops or claims one. The caller owns the private socket and its lifetime.
+//! replies. Connections relay to the existing engine. Driver exit also uses
+//! this transport to inspect and close its engine under the ownership fence.
 
 use std::path::Path;
 use std::time::Duration;
@@ -15,6 +15,138 @@ use tokio_tungstenite::{accept_async, client_async, tungstenite::Message, WebSoc
 use crate::exec::SessionDriver;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
+
+/// Called under the Session driver transaction, so takeover cannot race the
+/// provider shutdown. Saved history and the provider thread ID survive.
+pub(crate) fn close_engine(endpoint: &str, thread: &str, pid: u32, started: i64) -> Result<()> {
+    let same_process = || -> Result<bool> {
+        Ok(crate::journal::process_started_at(pid)?
+            .is_some_and(|actual| (actual - started).abs() <= 3))
+    };
+    if !same_process()? {
+        return Ok(());
+    }
+    // Use a separate runtime: exit is also reached from synchronous capture
+    // settlement and signal cleanup, sometimes inside an existing runtime.
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?
+                    .block_on(async {
+                        tokio::time::timeout(
+                            Duration::from_secs(3),
+                            inspect_engine_threads(endpoint, thread),
+                        )
+                        .await
+                        .map_err(|_| anyhow!("engine inspection timed out"))?
+                    })
+            })
+            .join()
+            .map_err(|_| anyhow!("engine close worker panicked"))?
+    })?;
+    if !same_process()? {
+        return Ok(());
+    }
+    let group = i32::try_from(pid)?;
+    // SAFETY: getpgid reads process metadata. Only the exact recorded process
+    // leading the group that Loopflow created may authorize a group signal.
+    if unsafe { libc::getpgid(group) } != group {
+        return Err(anyhow!(
+            "recorded Codex process does not own its process group"
+        ));
+    }
+    for signal in [libc::SIGTERM, libc::SIGKILL] {
+        // SAFETY: the PID/start pair and group ownership were checked above;
+        // the Session transaction excludes driver transfer throughout close.
+        if unsafe { libc::kill(-group, signal) } != 0 {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::ESRCH) {
+                return Err(error.into());
+            }
+        }
+        for _ in 0..40 {
+            // SAFETY: WNOHANG only reaps our child if it has already exited.
+            // A reconnected driver is not its parent and gets ECHILD instead.
+            unsafe {
+                libc::waitpid(group, std::ptr::null_mut(), libc::WNOHANG);
+            }
+            if !same_process()? {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+    Err(anyhow!("Codex process {pid} did not exit"))
+}
+
+async fn inspect_engine_threads(endpoint: &str, thread: &str) -> Result<()> {
+    let socket = match UnixStream::connect(endpoint).await {
+        Ok(socket) => socket,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            return Ok(())
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let (mut upstream, _) = client_async("ws://localhost", socket).await?;
+    read_rpc(
+        &mut upstream,
+        "initialize",
+        json!({"clientInfo": {"name":"loopflow_close", "version":env!("CARGO_PKG_VERSION")}}),
+    )
+    .await?;
+    let mut cursor = Value::Null;
+    loop {
+        let loaded = read_rpc(
+            &mut upstream,
+            "thread/loaded/list",
+            json!({"cursor":cursor,"limit":100}),
+        )
+        .await?;
+        let threads = loaded["data"]
+            .as_array()
+            .ok_or_else(|| anyhow!("loaded threads response has no data"))?;
+        for id in threads {
+            let mut current = id
+                .as_str()
+                .ok_or_else(|| anyhow!("loaded thread has no ID"))?
+                .to_owned();
+            let mut ancestors = std::collections::HashSet::new();
+            while current != thread {
+                if !ancestors.insert(current.clone()) {
+                    return Err(anyhow!("provider thread parent cycle"));
+                }
+                let detail =
+                    read_rpc(&mut upstream, "thread/read", json!({"threadId":current})).await?;
+                // Codex's own subagents are part of this engine's work. A
+                // separately started conversation must survive this exit.
+                current = detail
+                    .pointer("/thread/parentThreadId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        anyhow!("engine still serves another conversation; leaving it running")
+                    })?
+                    .to_owned();
+            }
+        }
+        let next = loaded.get("nextCursor").cloned().unwrap_or(Value::Null);
+        if next.is_null() {
+            break;
+        }
+        if next == cursor {
+            return Err(anyhow!("loaded threads returned a repeated cursor"));
+        }
+        cursor = next;
+    }
+    upstream.close(None).await?;
+    Ok(())
+}
 
 /// One already selected conversation. `driver=None` is a passive display;
 /// accepting its connection does not acquire a claim.
@@ -58,13 +190,15 @@ impl CodexConnection {
                 }),
             )
             .await?;
-            history.record(
-                &self.store,
-                &self.session_id,
-                None,
-                Some(&self.thread_id),
-                &json!({"result":result}),
-            )?;
+            super::dispatch::off_reactor(|| {
+                history.record(
+                    &self.store,
+                    &self.session_id,
+                    None,
+                    Some(&self.thread_id),
+                    &json!({"result":result}),
+                )
+            })?;
             let next = result.get("nextCursor").cloned().unwrap_or(Value::Null);
             if next.is_null() {
                 break;
@@ -131,8 +265,10 @@ impl CodexConnection {
                         Message::Close(_) => break,
                         Message::Text(text) => {
                             let rpc: Value = serde_json::from_str(&text)?;
-                            history.record(&self.store, &self.session_id,
-                                self.driver.as_ref(), Some(&self.thread_id), &rpc)?;
+                            super::dispatch::off_reactor(|| {
+                                history.record(&self.store, &self.session_id,
+                                    self.driver.as_ref(), Some(&self.thread_id), &rpc)
+                            })?;
                             client.send(Message::Text(text)).await?;
                         }
                         message => client.send(message).await?,
@@ -158,24 +294,12 @@ impl CodexConnection {
         };
         let store = self.store.clone();
         let session = self.session_id.clone();
-        let runtime = tokio::runtime::Handle::current();
         // A second connection can transfer the driver in another process.
-        // Keep the SQLite comparison and bounded socket dispatch in one
-        // transaction, rather than checking before an asynchronous queue.
+        // Keep the driver comparison and bounded socket dispatch under the
+        // Session lock. History and other Sessions can still use the database.
         tokio::task::spawn_blocking(move || {
             let outcome = store.with_session_driver(&session, &driver, || {
-                runtime.block_on(async {
-                    tokio::time::timeout(Duration::from_secs(2), upstream.send(message))
-                        .await
-                        .map_err(|_| {
-                            StoreError::InvalidData(
-                                "Native dispatch timed out; outcome is unknown".into(),
-                            )
-                        })?
-                        .map_err(|error| {
-                            StoreError::InvalidData(format!("Native dispatch failed: {error}"))
-                        })
-                })
+                super::dispatch::send_fenced(&mut upstream, message)
             });
             (upstream, outcome)
         })

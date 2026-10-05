@@ -17,10 +17,13 @@ import signal
 import statistics
 import subprocess
 import sys
+import time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+RECORDER = REPO / "scripts/benchmarks/desktop-performance/record_live.py"
 COMMAND = [
     "swift",
     "test",
@@ -133,6 +136,7 @@ def _summarize(events: list[dict]) -> dict:
                 "attempted": len(values),
                 "passed": len(durations),
                 "failure_rate": (len(values) - len(durations)) / len(values),
+                "outcomes": dict(Counter(value["outcome"] for value in values)),
                 "p50_ms": statistics.median(durations) if durations else None,
                 "p95_ms": durations[math.ceil(len(durations) * 0.95) - 1]
                 if len(durations) >= 20
@@ -146,8 +150,36 @@ def _summarize(events: list[dict]) -> dict:
         "expected_attempts": len(planned) if plan else None,
         "not_started": len(planned - observed) if plan else None,
         "journal_errors": errors,
+        "soak": _soak(events, plan),
         "journey_errors": [
             event for event in events if event["event"] in {"setup", "setup_or_journey"}
+        ],
+    }
+
+
+def _soak(events: list[dict], plan: dict | None) -> dict:
+    seconds = (plan or {}).get("soak_seconds", 0)
+    starts = [e for e in events if e["event"] == "soak_begin"]
+    ends = [e for e in events if e["event"] == "soak_end"]
+    rounds = [e for e in events if e["event"] == "soak_round"]
+    complete = (
+        len(starts) == len(ends) == 1
+        and ends[0]["elapsed_seconds"] >= seconds
+        and ends[0]["preserved"]
+        and len(rounds) >= 4
+        and [e["round"] for e in rounds] == list(range(len(rounds)))
+        and all(e["preserved"] for e in rounds)
+    )
+    return {
+        "requested_seconds": seconds,
+        "status": "not_requested" if not seconds else "complete" if complete else "incomplete",
+        "rounds": rounds,
+        "phases": [e for e in events if e["event"] == "soak_phase"],
+        "end": ends[0] if len(ends) == 1 else None,
+        "limits": [
+            "Fixture reads, not CLI processes or SQLite query volume",
+            "Retained cat PTYs, not native provider startup or identity",
+            "Bitmap/OCR and PTY echo, not key-to-glyph presentation",
         ],
     }
 
@@ -158,7 +190,14 @@ def _comparison(current: dict, baseline: dict) -> dict:
     for key in ["host", "build_mode", "command", "measurement_source"]:
         if current["metadata"][key] != baseline["metadata"][key]:
             return {"available": False, "reason": f"Different {key}"}
-    for key in ["population_version", "populations", "scenarios", "endpoint", "poll_interval_ms"]:
+    for key in [
+        "population_version",
+        "populations",
+        "scenarios",
+        "endpoint",
+        "poll_interval_ms",
+        "soak_seconds",
+    ]:
         if (current.get("plan") or {}).get(key) != (baseline.get("plan") or {}).get(key):
             return {"available": False, "reason": f"Different {key}"}
     if current["status"] != "complete" or baseline["status"] != "complete":
@@ -198,6 +237,7 @@ def _report(output: Path, baseline: Path | None) -> dict:
         and metadata.get("source_before") == metadata.get("source_after")
         and summary["expected_attempts"] is not None
         and summary["not_started"] == 0
+        and summary["soak"]["status"] != "incomplete"
         and not summary["journey_errors"]
         and not errors
         and all(attempt["outcome"] == "passed" for attempt in summary["attempts"])
@@ -205,6 +245,18 @@ def _report(output: Path, baseline: Path | None) -> dict:
     summary.update(
         metadata=metadata, status="complete" if complete else "incomplete", journal_errors=errors
     )
+    recording = output / "soak-resources" / "report.json"
+    summary["soak"]["resources"] = json.loads(recording.read_text()) if recording.exists() else None
+    summary["soak"]["memory_after_four_rounds_mib"] = None
+    rss_path = output / "soak-resources" / "rss.jsonl"
+    if rss_path.exists() and len(summary["soak"]["rounds"]) >= 4:
+        rss = [json.loads(line) for line in rss_path.read_text().splitlines()]
+        boundary = summary["soak"]["rounds"][3]["time"]
+        after = next((row for row in rss if row["t"] >= boundary), None)
+        if rss and after and rss[0]["t"] < boundary:
+            summary["soak"]["memory_after_four_rounds_mib"] = (
+                after["rss_kib"] - rss[0]["rss_kib"]
+            ) / 1024
     if baseline:
         summary["comparison"] = _comparison(
             summary, json.loads((baseline / "report.json").read_text())
@@ -252,6 +304,17 @@ def _report(output: Path, baseline: Path | None) -> dict:
                     f"| {delta['population']} | {delta['scenario']} | {delta['state']} | "
                     f"{delta['p50_delta_ms']:+.2f} | {p95} |"
                 )
+    if summary["soak"]["requested_seconds"]:
+        soak = summary["soak"]
+        lines += [
+            "",
+            f"Soak: {soak['status']}; requested {soak['requested_seconds']} s; "
+            f"{len(soak['rounds'])} preserved rounds.",
+            f"RSS growth after four rounds: {soak['memory_after_four_rounds_mib']} MiB.",
+            "CPU, RSS, signposts and trace availability: soak-resources/report.json. "
+            "Missing recording is unmeasured. "
+            "Mixed-phase trace totals do not score the idle budget.",
+        ]
     if not complete:
         lines += [
             "",
@@ -263,7 +326,18 @@ def _report(output: Path, baseline: Path | None) -> dict:
     return summary
 
 
-def _run(output: Path, samples: int, baseline: Path | None) -> int:
+def _stop(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+
+
+def _run(output: Path, samples: int, baseline: Path | None, soak_seconds: int = 0) -> int:
     output.mkdir(parents=True, exist_ok=False)
     metadata = {
         "schema": 1,
@@ -279,6 +353,13 @@ def _run(output: Path, samples: int, baseline: Path | None) -> int:
                     "swift/LoopflowTests/DesktopPerformanceTests.swift",
                     "swift/LoopflowTests/SessionActionFixtures.swift",
                     "tests/fixtures/dto/roadmap_snapshot.json",
+                    "tests/fixtures/dto/session_actions.json",
+                    "tests/fixtures/dto/session_history_summary.json",
+                    "tests/fixtures/dto/task_work.json",
+                    "tests/fixtures/dto/task_comments.json",
+                    "tests/fixtures/dto/context_report.json",
+                    "scripts/desktop_performance.py",
+                    "scripts/benchmarks/desktop-performance/record_live.py",
                 ]
             )
         ).hexdigest(),
@@ -290,11 +371,15 @@ def _run(output: Path, samples: int, baseline: Path | None) -> int:
             outcome="unavailable", reason="Native benchmark requires macOS", exit_code=None
         )
     else:
-        environment = os.environ.copy()
+        environment = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
+        isolated = output / "home"
+        isolated.mkdir()
+        environment.update(LF_HOME=str(isolated), HOME=str(isolated))
         environment.update(
             LOOPFLOW_NATIVE_TESTS="1",
             LF_DESKTOP_PERF_OUTPUT=str(output / "attempts.jsonl"),
             LF_DESKTOP_PERF_SAMPLES=str(samples),
+            LF_DESKTOP_PERF_SOAK_SECONDS=str(soak_seconds),
         )
         # These are host-boundary time limits, never latency targets. The attempt
         # journal survives termination; only this invocation's process group stops.
@@ -313,18 +398,57 @@ def _run(output: Path, samples: int, baseline: Path | None) -> int:
                 process = None
             if process is not None:
                 try:
-                    metadata["exit_code"] = process.wait(timeout=600 + samples * 30)
+                    deadline = time.monotonic() + 600 + samples * 120 + soak_seconds
+                    recorder = None
+                    recorder_attempted = False
+                    while process.poll() is None:
+                        if time.monotonic() >= deadline:
+                            raise subprocess.TimeoutExpired(COMMAND, deadline)
+                        if soak_seconds and not recorder_attempted:
+                            events, _ = _read_events(output / "attempts.jsonl")
+                            began = next((e for e in events if e["event"] == "soak_begin"), None)
+                            if began:
+                                recorder_attempted = True
+                                try:
+                                    recorder = subprocess.Popen(
+                                        [
+                                            sys.executable,
+                                            str(RECORDER),
+                                            "record",
+                                            "--pid",
+                                            str(began["pid"]),
+                                            "--seconds",
+                                            str(soak_seconds),
+                                            "--output",
+                                            str(output / "soak-resources"),
+                                        ],
+                                        stdout=log,
+                                        stderr=subprocess.STDOUT,
+                                        start_new_session=True,
+                                    )
+                                except OSError as error:
+                                    metadata["recorder_error"] = str(error)
+                        if recorder is not None and recorder.poll() is not None:
+                            (output / "resources-finished").touch(exist_ok=True)
+                        elif recorder_attempted and recorder is None:
+                            (output / "resources-finished").touch(exist_ok=True)
+                        time.sleep(0.25)
+                    metadata["exit_code"] = process.returncode
+                    if recorder is not None:
+                        try:
+                            metadata["recorder_exit_code"] = recorder.wait(timeout=30)
+                        except subprocess.TimeoutExpired:
+                            _stop(recorder)
+                            metadata["recorder_exit_code"] = recorder.returncode
                 except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
                     metadata["outcome"] = (
                         "timeout" if isinstance(error, subprocess.TimeoutExpired) else "interrupted"
                     )
-                    os.killpg(process.pid, signal.SIGTERM)
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(process.pid, signal.SIGKILL)
-                        process.wait()
+                    _stop(process)
                     metadata["exit_code"] = process.returncode
+                finally:
+                    if recorder is not None:
+                        _stop(recorder)
     metadata["source_after"] = _sources()
     _write(output / "run.json", metadata)
     summary = _report(output, baseline)
@@ -350,6 +474,12 @@ def main() -> int:
         help="Attempts per scenario/population; default 1 first + 20 warm",
     )
     run.add_argument("--baseline", type=Path)
+    run.add_argument(
+        "--soak-seconds",
+        type=int,
+        default=0,
+        help="Append unattended idle/navigation/typing; 3600 for the acceptance soak",
+    )
     report = commands.add_parser(
         "report", help="Rebuild reports, including interrupted invocation evidence"
     )
@@ -357,9 +487,11 @@ def main() -> int:
     report.add_argument("--baseline", type=Path)
     args = parser.parse_args()
     if args.command == "run":
+        if args.soak_seconds < 0:
+            parser.error("--soak-seconds cannot be negative")
         if args.samples < 1:
             parser.error("--samples must be positive")
-        return _run(args.output.resolve(), args.samples, args.baseline)
+        return _run(args.output.resolve(), args.samples, args.baseline, args.soak_seconds)
     summary = _report(args.output, args.baseline)
     print(args.output / "report.md")
     return 0 if summary["status"] == "complete" else 1

@@ -119,3 +119,54 @@ def test_ambiguous_results_cannot_complete_a_run(tmp_path: Path, defect: str) ->
     result = _report(tmp_path, events)
     assert result["status"] == "incomplete"
     assert result["journal_errors"]
+
+
+def _soak_events() -> list[dict]:
+    events = _events()
+    events[0]["soak_seconds"] = 3600
+    events += [{"event": "soak_begin", "seconds": 3600}]
+    events += [
+        {"event": "soak_round", "round": i, "time": i + 10, "preserved": True} for i in range(4)
+    ]
+    events += [{"event": "soak_end", "elapsed_seconds": 3600, "preserved": True}]
+    return events
+
+
+def test_soak_reports_missing_resources_without_inventing_measurements(tmp_path: Path) -> None:
+    result = _report(tmp_path, _soak_events())
+    assert result["status"] == "complete"
+    assert result["soak"]["resources"] is None
+    assert result["soak"]["memory_after_four_rounds_mib"] is None
+
+
+@pytest.mark.parametrize("failure", ["interrupted", "short", "lost_draft", "no_rounds"])
+def test_soak_cannot_pass_without_duration_and_preservation(tmp_path: Path, failure: str) -> None:
+    events = _soak_events()
+    if failure == "interrupted":
+        events.pop()
+    elif failure == "short":
+        events[-1]["elapsed_seconds"] = 3599
+    elif failure == "lost_draft":
+        events[-2]["preserved"] = False
+    else:
+        events = [event for event in events if event["event"] != "soak_round"]
+    result = _report(tmp_path, events)
+    assert result["status"] == "incomplete"
+    assert result["soak"]["status"] == "incomplete"
+
+
+def test_four_round_memory_uses_the_round_boundary(tmp_path: Path) -> None:
+    directory = tmp_path / "soak-resources"
+    directory.mkdir()
+    (directory / "rss.jsonl").write_text(
+        "\n".join(
+            json.dumps(row)
+            for row in [
+                {"t": 9, "rss_kib": 1024},
+                {"t": 13, "rss_kib": 3072},
+                {"t": 99, "rss_kib": 9000},
+            ]
+        )
+    )
+    result = _report(tmp_path, _soak_events())
+    assert result["soak"]["memory_after_four_rounds_mib"] == 2

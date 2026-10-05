@@ -19,8 +19,8 @@ uv run python scripts/benchmarks/desktop-performance/launch.py run --work /tmp/d
 uv run python scripts/benchmarks/desktop-performance/startup.py capture --repo ~/src/loopflow --output /tmp/startup-capture
 uv run python scripts/benchmarks/desktop-performance/startup.py run --capture /tmp/startup-capture --output /tmp/startup-run
 
-# The older capture/OCR journeys and their hash-pinned baseline.
-uv run python scripts/desktop_performance.py run --output /tmp/desktop-after --baseline scripts/benchmarks/desktop-performance/20260924-capture-input
+# Native capture/OCR journeys; the historical September receipt remains on disk.
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-after
 ```
 
 The app appends to `<Home>/desktop-cache/timings/launches.ndjson` and
@@ -107,3 +107,46 @@ fail, and a second window in the process that saved. Twenty samples by default,
 with `lf` reads counted before usable and until settled. It runs without a
 display, so it reports no first frame, CPU, memory or stalls;
 `20261004-startup-inprocess/` is its receipt.
+
+## Unattended workspace journeys and soak
+
+```sh
+uv run python scripts/desktop_performance.py run --samples 21 --soak-seconds 3600 --output /tmp/workspace-baseline
+# Run the same harness on the candidate, on the same display host.
+uv run python scripts/desktop_performance.py run --samples 21 --soak-seconds 3600 --output /tmp/workspace-candidate --baseline /tmp/workspace-baseline
+```
+
+The native runner retains three owned `cat` PTYs while navigating and refreshing
+8- and 256-Task fixtures. It exercises filtering, scrolling during refresh,
+Session return with an unsubmitted terminal draft, Monitor, split/zoom restore,
+and the Task details sheet. Mounted Flow, complete history (one record per Task),
+and file editor views add component-level capture endpoints; they do not measure
+the workspace's file-sidebar or Flow/history disclosure routing. A fresh `cat`
+PTY is created and verified each round. Its startup is not provider startup;
+retained surface equality is not native provider identity proof.
+
+After the large-population journeys, the soak alternates thirty seconds idle
+with Session switching, typing/echo and split focus/restore for the requested
+duration. The production `keepWorkspaceCurrent` owner supplies refresh cadence.
+Every round checks retained surfaces, layout, Session records and the file draft.
+The native journal records phase times, fixture-read counts, window counts and
+focus endpoints. The existing live recorder attaches to that test PID for CPU,
+RSS, signposts and optional xctrace evidence. The report includes RSS change at
+the fourth soak round. Mixed-phase trace totals do not establish idle-only hitch
+budgets; raw phase timestamps remain available for trace analysis. A missing
+trace or resource report stays unmeasured. Interrupted or shortened soaks and
+failed preservation checks cannot produce a complete journey report.
+
+These fixtures never open a configured Home, provider or real Task checkout.
+The runner removes inherited `LF_*` context, uses a private Home, and fixture
+transport rejects mutations. Reports distinguish completed harness execution
+from acceptance: bitmap/OCR and PTY echo do not measure compositor paint or
+key-to-glyph latency. Baseline comparison requires the same host, measurement
+sources, fixture contract and soak duration. The September 24 receipt is kept
+but is incompatible with the expanded harness.
+
+LOO-371 owns the representative snapshot runner for real CLI comparisons. Its
+October 5 committed tree and checkout contained no such runner, so this harness
+supplies no real-snapshot CLI receipt. `launch.py`'s database backup alone does
+not isolate copied checkout/process references, credentials or external writes;
+it is not a substitute for that handoff.

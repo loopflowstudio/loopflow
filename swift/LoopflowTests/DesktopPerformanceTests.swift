@@ -22,12 +22,13 @@ struct DesktopPerformanceTests {
         let output = URL(fileURLWithPath: try #require(environment["LF_DESKTOP_PERF_OUTPUT"]))
         let samples = try #require(Int(environment["LF_DESKTOP_PERF_SAMPLES"] ?? "20"))
         let journal = try PerformanceJournal(url: output)
+        let soakSeconds = Double(environment["LF_DESKTOP_PERF_SOAK_SECONDS"] ?? "0") ?? 0
         let scenarios = ["full", "fold", "expand", "compact", "sessions", "filter", "scroll_refresh",
-                         "monitor_active", "monitor_empty", "session_return", "combined_zoom", "combined_restore"]
-        try journal.write(["event": "plan", "population_version": "desktop-v1",
+                         "monitor_active", "monitor_empty", "session_return", "combined_zoom", "combined_restore", "task_details", "task_flow", "task_history", "file_edit_refresh", "new_pty"]
+        try journal.write(["event": "plan", "population_version": "desktop-v2",
                            "populations": ["small": 8, "large": 256], "samples": samples,
                            "scenarios": scenarios, "endpoint": "native_capture_ocr_and_pty_reply",
-                           "poll_interval_ms": 5, "frame_hitches": NSNull(),
+                           "poll_interval_ms": 5, "frame_hitches": NSNull(), "soak_seconds": soakSeconds,
                            "scroll_refresh": ["window_height": 300, "destination": "end",
                                               "refresh_release": "after_captured_scroll", "updated_title_prefix": "Updated"],
                            "gaps": ["Compositor presentation and frame hitches are not measured.",
@@ -49,7 +50,7 @@ struct DesktopPerformanceTests {
         }
         for (population, taskCount) in [("small", 8), ("large", 256)] {
             do {
-                try await measure(population: population, taskCount: taskCount, samples: samples, journal: journal)
+                try await measure(population: population, taskCount: taskCount, samples: samples, soakSeconds: population == "large" ? soakSeconds : 0, journal: journal)
             } catch {
                 try journal.write(["event": "setup_or_journey", "population": population,
                                    "outcome": (error as? PerformanceFailure)?.outcome ?? "failed",
@@ -64,8 +65,14 @@ struct DesktopPerformanceTests {
     }
 
 #if canImport(GhosttyKit)
-    private func measure(population: String, taskCount: Int, samples: Int, journal: PerformanceJournal) async throws {
+    private func measure(population: String, taskCount: Int, samples: Int, soakSeconds: Double, journal: PerformanceJournal) async throws {
         let (query, planning) = try populationQuery(taskCount: taskCount)
+        let files = TaskFilesStore(issue: "PERF-0", cwd: NSTemporaryDirectory(), query: query)
+        files.autosave = false
+        let detailWindow = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 800),
+                                            styleMask: [.titled], backing: .buffered, defer: false)
+        detailWindow.isReleasedWhenClosed = false
+        defer { detailWindow.contentView = nil; detailWindow.close() }
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         try #require(model.workspace.waves.first?.tasks.count == taskCount)
@@ -107,6 +114,7 @@ struct DesktopPerformanceTests {
         let first = try #require(records.first { $0.id == "perf-session-0" })
         let other = try #require(records.first { $0.id == "perf-session-2" })
         let openTask = try #require(navigator.onOpenTask)
+        let selected = try #require(model.task(id: "perf-task-0"))
 
         for attempt in 0..<samples {
             // Reset outside the measured interval; every attempt starts from the
@@ -123,7 +131,7 @@ struct DesktopPerformanceTests {
             }, ready: { hasRendered(window, "workspace-wave-wave-1") && !hasRendered(window, "workspace-task-perf-task-0") })
             try await sample("expand", population, attempt, journal, window, action: {
                 try disclosure.tap()
-            }, ready: { hasRendered(window, "workspace-task-perf-task-0") && hasRendered(window, "workspace-session-count-perf-task-0") })
+            }, ready: { hasRendered(window, "workspace-task-perf-task-0")  })
             try await sample("compact", population, attempt, journal, window, action: {
                 try picker.select(value: WorkspacePresentation.compact)
             }, ready: { hasRendered(window, "workspace-task-perf-task-0") && !hasRendered(window, "workspace-wave-wave-1") })
@@ -222,7 +230,7 @@ struct DesktopPerformanceTests {
                       terminals[2].surface == surfaces[2],
                       model.navigation.selectedSessionId == first.id,
                       multiplexer.focusedPane.content == .session(id: first.id) else { return false }
-                return hasRendered(window, "breadcrumb-session")
+                return window.contentText.contains { $0.contains("Conversation 000") }
             }, input: {
                 try send(window, "\n")
                 try await wait(window) { terminalText(surfaces[0]).components(separatedBy: draft).count >= 3 }
@@ -245,12 +253,119 @@ struct DesktopPerformanceTests {
                 window.firstResponder === terminals[0] && terminals.allSatisfy { $0.window === window }
                     && hasRendered(window, "monitor-session-perf-session-0")
             })
+            try await sample("task_details", population, attempt, journal, window, action: {
+                model.select(.task(id: "perf-task-0"))
+                workspace.showsDetails = true
+            }, ready: { window.attachedSheet != nil && window.allText.contains { $0.contains("Task 000") } })
+            workspace.showsDetails = false
+            try await wait(window) { window.attachedSheet == nil }
+            detailWindow.orderFront(nil)
+            try await sample("task_flow", population, attempt, journal, detailWindow, action: {
+                detailWindow.contentView = NSHostingView(rootView:
+                    TaskFlowView(model: model, task: selected.task, wave: selected.wave.wave))
+            }, ready: { detailWindow.allText.contains { $0.lowercased().contains("feature") } })
+            try await sample("task_history", population, attempt, journal, detailWindow, action: {
+                model.navigation.expandedRuns.insert(selected.task.id)
+                await model.loadRecentRuns(task: selected.task, wave: selected.wave.wave)
+                detailWindow.contentView = NSHostingView(rootView:
+                    TaskRunsView(model: model, task: selected.task, wave: selected.wave.wave))
+            }, ready: {
+                model.recentRuns[selected.task.id].value?.count == taskCount
+                    && detailWindow.allText.contains { $0.contains("implement") }
+            })
+            try await sample("file_edit_refresh", population, attempt, journal, detailWindow, action: {
+                files.selection = "notes.txt"
+                await files.refresh()
+                await files.loadFile()
+                let document = try #require(files.selectedDocument)
+                document.editor.insertText("Preserved draft", replacementRange: NSRange(location: 0, length: document.editor.string.utf16.count))
+                document.editor.setSelectedRange(NSRange(location: 2, length: 3))
+                await files.refresh()
+                await files.loadFile()
+                detailWindow.contentView = NSHostingView(rootView: TaskFilesView(store: files, prURL: nil))
+            }, ready: {
+                files.selectedDocument?.text == "Preserved draft"
+                    && files.selectedDocument?.editor.selectedRange() == NSRange(location: 2, length: 3)
+                    && detailWindow.allText.contains { $0.contains("Preserved draft") }
+            })
+            let freshIdentity = TerminalIdentity.shell("benchmark-\(UUID().uuidString)")
+            let fresh = registry.surfaces.view(for: freshIdentity)
+            defer { registry.surfaces.release(freshIdentity) }
+            try await sample("new_pty", population, attempt, journal, detailWindow, action: {
+                fresh.frame = CGRect(x: 0, y: 0, width: 1100, height: 800)
+                fresh.workingDirectory = NSTemporaryDirectory()
+                fresh.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
+                detailWindow.contentView = fresh
+                fresh.createSurface(manager: GhosttyManager.shared)
+                let surface = try #require(fresh.surface)
+                let text = "New terminal ready\n"
+                text.withCString { ghostty_surface_text(surface, $0, UInt(text.utf8.count)) }
+                try await wait(detailWindow) {
+                    terminalText(surface).components(separatedBy: "New terminal ready").count >= 3
+                }
+            }, ready: { detailWindow.allText.contains { $0.contains("New terminal ready") } })
+            detailWindow.contentView = nil
+            registry.surfaces.release(freshIdentity)
+            detailWindow.orderOut(nil)
+            navigator.onOpenSession(first)
+            try await wait(window) { window.firstResponder === terminals[0] }
             guard terminals.enumerated().allSatisfy({ $0.element.surface == surfaces[$0.offset] }),
                   multiplexer.layout.pane(for: companionPane)?.content == .shell,
                   multiplexer.layout.pane(for: otherPane)?.content == .session(id: other.id) else {
                 throw PerformanceFailure("failed", "Retained terminal identity or companion changed")
             }
         }
+        if soakSeconds > 0 {
+            // One owner keeps the real refresh cadences running for the whole soak.
+            let refresh = Task { await model.keepWorkspaceCurrent() }
+            defer { refresh.cancel() }
+            let retainedLayout = multiplexer.layout
+            let start = ContinuousClock.now
+            var round = 0
+            try journal.write(["event": "soak_begin", "pid": ProcessInfo.processInfo.processIdentifier,
+                               "seconds": soakSeconds, "time": Date().timeIntervalSince1970])
+            while start.duration(to: .now) < .seconds(soakSeconds) {
+                try journal.write(["event": "soak_phase", "phase": "idle", "round": round,
+                                   "time": Date().timeIntervalSince1970, "reads": planning.reads])
+                // Yield to AppKit, without forcing bitmap capture during idle.
+                let remaining = Double(soakSeconds) - Double(start.duration(to: .now).components.seconds)
+                try await Task.sleep(for: .seconds(min(30, max(0, remaining))))
+                if start.duration(to: .now) >= .seconds(soakSeconds) { break }
+                try journal.write(["event": "soak_phase", "phase": "navigation_typing", "round": round,
+                                   "time": Date().timeIntervalSince1970])
+                for record in [other, first] {
+                    navigator.onOpenSession(record)
+                    let index = record.id == first.id ? 0 : 2
+                    try await wait(window) { window.firstResponder === terminals[index] }
+                    let text = "soak-\(round)-\(index)"
+                    try send(window, text + "\n")
+                    try await wait(window) { terminalText(surfaces[index]).components(separatedBy: text).count >= 3 }
+                }
+                multiplexer.toggleZoom(sessionPane)
+                multiplexer.toggleZoom(sessionPane)
+                try #require(terminals.enumerated().allSatisfy { $0.element.surface == surfaces[$0.offset] })
+                try #require(files.selectedDocument?.text == "Preserved draft")
+                try #require(multiplexer.layout == retainedLayout)
+                try #require(model.sessions.value == records)
+                try journal.write(["event": "soak_round", "round": round, "reads": planning.reads,
+                                   "time": Date().timeIntervalSince1970, "windows": NSApp.windows.filter(\.isVisible).count,
+                                   "focused_session": model.navigation.selectedSessionId ?? "none", "preserved": true])
+                round += 1
+            }
+            refresh.cancel()
+            await refresh.value
+            try journal.write(["event": "soak_end", "elapsed_seconds": Double(start.duration(to: .now).components.seconds),
+                               "rounds": round, "preserved": true, "reads": planning.reads])
+            // Let the recorder finish its fixed-duration attachment before this
+            // test process exits. The tail is outside the measured soak.
+            let finished = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["LF_DESKTOP_PERF_OUTPUT"]))
+                .deletingLastPathComponent().appendingPathComponent("resources-finished")
+            let deadline = ContinuousClock.now + .seconds(60)
+            while !FileManager.default.fileExists(atPath: finished.path), ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+        }
+        await model.stopActiveSessions()
     }
 
     private func terminalText(_ surface: ghostty_surface_t) -> String {
@@ -270,11 +385,15 @@ struct DesktopPerformanceTests {
                         action: () async throws -> Void, ready: () -> Bool,
                         observation: () -> [String: Any] = { [:] },
                         input: () async throws -> Void = {}) async throws {
-        let metric = ["full", "fold", "expand", "compact", "sessions", "filter", "scroll_refresh"].contains(scenario)
-            ? "hierarchy_interaction_ms" : "task_workspace_ready_ms"
+        let metric = scenario == "new_pty" ? "new_pty_capture_and_echo_ms"
+            : ["full", "fold", "expand", "compact", "sessions", "filter", "scroll_refresh"].contains(scenario)
+                ? "hierarchy_interaction_ms" : "task_workspace_ready_ms"
         var record: [String: Any] = ["event": "begin", "id": "\(population)-\(scenario)-\(attempt)",
             "metric": metric, "scenario": scenario, "population": population, "attempt": attempt,
             "state": attempt == 0 ? "first_interaction" : "warm"]
+        record["windows_before"] = NSApp.windows.filter(\.isVisible).count
+        record["window_number"] = window.windowNumber
+        record["focus_before"] = window.firstResponder.map { String(describing: type(of: $0)) } ?? "none"
         try journal.write(record)
         let start = DispatchTime.now().uptimeNanoseconds
         do {
@@ -282,7 +401,9 @@ struct DesktopPerformanceTests {
             try await wait(window, render: true, ready: ready)
             let captured = Double(window.observedAt - start) / 1_000_000
             let verified = milliseconds(start)
+            let inputStart = DispatchTime.now().uptimeNanoseconds
             try await input()
+            if scenario == "session_return" { record["pty_echo_ms"] = milliseconds(inputStart) }
             record["outcome"] = "passed"
             record["capture_ready_ms"] = captured
             record["verification_ms"] = verified - captured
@@ -298,6 +419,8 @@ struct DesktopPerformanceTests {
         record["event"] = "end"
         record["duration_ms"] = milliseconds(start)
         record["observation"] = observation()
+        record["windows_after"] = NSApp.windows.filter(\.isVisible).count
+        record["focus_after"] = window.firstResponder.map { String(describing: type(of: $0)) } ?? "none"
         try journal.write(record)
     }
 
@@ -353,7 +476,7 @@ struct DesktopPerformanceTests {
         return view.subviews.lazy.compactMap { scrollView(in: $0) }.first
     }
 
-    private func populationQuery(taskCount: Int) throws -> (RegistryQuery, PerformancePlanning) {
+    fileprivate func populationQuery(taskCount: Int) throws -> (RegistryQuery, PerformancePlanning) {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"))
@@ -391,13 +514,27 @@ struct DesktopPerformanceTests {
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let planning = PerformancePlanning(roadmap: roadmap)
         let sessions = try JSONSerialization.data(withJSONObject: stride(from: 0, to: taskCount, by: 2).map { index in
-            ["id": "perf-session-\(index)", "run_id": "perf-run-\(index)", "interactive": true, "kind": "conversation",
+            ["id": "perf-session-\(index)", "interactive": true, "kind": "conversation",
              "work": ["kind": "task", "id": "perf-work-\(index)"],
+             "workspace": ["home_id": fixtureHomeId, "worktree": "/src/loopflow",
+                           "task_id": "perf-work-\(index)", "unavailable": NSNull()],
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
              "cwd": "/src/loopflow", "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
              "actions": sessionActionFixture(kind: "conversation", state: "active"),
              "title_source": "generated", "flow_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
+        let historyTemplate = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
+            root.appendingPathComponent("tests/fixtures/dto/session_history_summary.json"))) as? [String: Any])
+        let history = try JSONSerialization.data(withJSONObject: (0..<taskCount).map { index in
+            var row = historyTemplate
+            row["session_id"] = "history-\(index)"
+            return row
+        })
+        let historyJSON = String(decoding: history, as: UTF8.self)
+        let fixtureRoot = root.appendingPathComponent("tests/fixtures/dto")
+        let workJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("task_work.json"), encoding: .utf8)
+        let commentsJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("task_comments.json"), encoding: .utf8)
+        let contextJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("context_report.json"), encoding: .utf8)
         let active = try JSONSerialization.data(withJSONObject: [
             "discovery": "ready", "home": "benchmark-fixture", "observed_at": 1790270400, "task": NSNull(), "gaps": [],
             "sessions": [0, 2].map { index in
@@ -409,10 +546,18 @@ struct DesktopPerformanceTests {
         let activeJSON = String(decoding: active, as: UTF8.self)
         let feed = ActiveSessionsTestFeed()
         let query = RegistryQuery(watchActiveSessions: { try await feed.open(initial: activeJSON) }) { args, _ in
+            await planning.count(args)
             switch args.first {
             case "roadmap": return await planning.read()
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
+            case "usage": return args.contains("--context") ? contextJSON : historyJSON
+            case "task" where args.dropFirst().first == "status": return "{\"work\":\(workJSON)}"
+            case "task" where args.dropFirst().first == "comment" && args.contains("--json"): return commentsJSON
+            case "task" where args.dropFirst().first == "files":
+                return #"{"path":"","entries":[{"path":"notes.txt","kind":"file"}],"next_cursor":null}"#
+            case "task" where args.dropFirst().first == "file":
+                return #"{"issue_identifier":"PERF-0","task_id":"perf-work-0","path":"notes.txt","content":"Original notes","state":"text","revision":"fixed","size_bytes":14,"recoveries":[],"read_only_reason":null}"#
             case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Benchmark does not launch providers or mutate planning")
             }
@@ -421,11 +566,44 @@ struct DesktopPerformanceTests {
     }
 }
 
+@Suite("Desktop benchmark fixtures")
+@MainActor
+struct DesktopPerformanceFixtureTests {
+    @Test func completeHistoryAndDraftRefreshUseOnlyFixtureTransport() async throws {
+        let (query, _) = try DesktopPerformanceTests().populationQuery(taskCount: 256)
+        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        await model.refresh()
+        #expect(model.workspace.waves.first?.tasks.count == 256)
+        #expect(model.sessions.value?.count == 128)
+        let task = try #require(model.task(id: "perf-task-0"))
+        await model.loadRecentRuns(task: task.task, wave: task.wave.wave)
+        #expect(model.recentRuns[task.task.id].value?.count == 256)
+        #expect(model.recentRuns[task.task.id].errorMessage == nil)
+        let store = TaskFilesStore(issue: "PERF-0", cwd: NSTemporaryDirectory(), query: query)
+        store.autosave = false
+        store.selection = "notes.txt"
+        await store.refresh()
+        await store.loadFile()
+        let document = try #require(store.selectedDocument)
+        #expect(document.text == "Original notes")
+        document.editor.insertText("Preserved draft", replacementRange: NSRange(location: 0, length: 14))
+        await store.refresh()
+        await store.loadFile()
+        #expect(document.text == "Preserved draft")
+        #expect(store.directories[""]?.entries.map(\.path) == ["notes.txt"])
+        await #expect(throws: RegistryQueryError.self) {
+            try await query.updateTaskDirective(id: "PERF-0", wave: "product", text: "denied", cwd: "/src/loopflow")
+        }
+    }
+}
+
 /// Hold the fixture's transport response to exercise scrolling while the real
 /// Podium reader is refreshing. No product state is changed outside that reader.
 @MainActor
-private final class PerformancePlanning {
+fileprivate final class PerformancePlanning {
     let roadmap: String
+    var reads: [String: Int] = [:]
+    func count(_ args: [String]) { reads[args.prefix(2).joined(separator: " "), default: 0] += 1 }
     var holdNextRead = false
     var pending: CheckedContinuation<Void, Never>?
 
@@ -451,9 +629,10 @@ private final class PerformanceWindow: NSWindow {
     var outlineText: [String] = []
     var contentText: [String] = []
     var observedAt: UInt64 = 0
+    var allText: [String] { outlineText + contentText }
 
     func capture() throws {
-        guard let host = contentView,
+        guard let host = attachedSheet?.contentView ?? contentView,
               let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
             throw PerformanceFailure("unavailable", "Native capture is unavailable")
         }

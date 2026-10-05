@@ -646,9 +646,6 @@ pub enum SessionCommand {
     /// Run one prepared conversation in its durable terminal
     #[command(name = "serve-conversation", hide = true)]
     ServeConversation { input: String },
-    /// Stop one exact native provider client after its review completes
-    #[command(name = "stop-client", hide = true)]
-    StopClient { input: String },
 }
 
 #[derive(Subcommand, Debug)]

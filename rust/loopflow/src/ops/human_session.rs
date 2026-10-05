@@ -1831,23 +1831,6 @@ pub(crate) fn resume_native_session(
     Ok(true)
 }
 
-pub(crate) fn stop_session_client(run_id: &String) -> Result<()> {
-    #[cfg(test)]
-    if action_test::stop(run_id) {
-        return Ok(());
-    }
-    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(
-        &crate::store::database_path_from_env()?,
-    )
-    .context("cannot resolve the provider for this Session input")?;
-    let input = store
-        .input_history(run_id.as_str())
-        .context("cannot resolve the provider for this Session input")?;
-    let dir =
-        local_session_run_dir(run_id).ok_or_else(|| anyhow!("invalid Session input {run_id}"))?;
-    crate::lf::commands::util::stop_provider_session(&dir, &input.harness)
-}
-
 pub(crate) async fn token_is_current(
     store: &SharedStore,
     token: &FlowSessionToken,
@@ -2365,28 +2348,6 @@ mod tests {
             CONVERSATION_LAUNCHERS.lock().unwrap().clear();
             FAILED_CONVERSATION_LAUNCHERS.lock().unwrap().clear();
         }
-    }
-
-    #[test]
-    fn session_stop_requires_retained_input_identity() {
-        let _lock = crate::journal::test_env_lock();
-        let home = SessionHome::new();
-        let run_id = crate::session_record::new_artifact_key();
-        assert!(super::stop_session_client(&run_id)
-            .unwrap_err()
-            .to_string()
-            .contains("cannot resolve the provider for this Session input"));
-        let dir = crate::session_record::record_dir(home.home.path(), &run_id).unwrap();
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("manifest.json"), b"invalid manifest").unwrap();
-        assert!(super::stop_session_client(&run_id)
-            .unwrap_err()
-            .to_string()
-            .contains("cannot resolve the provider for this Session input"));
-        assert_eq!(
-            std::fs::read(dir.join("manifest.json")).unwrap(),
-            b"invalid manifest"
-        );
     }
 
     #[test]

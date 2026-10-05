@@ -245,6 +245,7 @@ pub(crate) struct ProviderClientRef {
 pub(crate) enum ProviderClientStopReason {
     Retired,
     Moved,
+    // Primary succession still completes its predecessor; old receipts remain readable.
     Completed,
 }
 

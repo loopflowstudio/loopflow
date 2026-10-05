@@ -41,7 +41,10 @@ claims, managed selection, internal recovery and new review launch still exist.
 Public saved Flow resume is deleted; inspection retains native child completion
 and mechanical effects without restarting or consuming them.
 Compression removes duplicate Flow feedback plumbing; Session observations retain
-the history. It does not remove those controllers. Ordinary detached launch, Task
+the history. It also removes hidden `session stop-client` and its completion-only
+shutdown helper; native replacement and primary succession retain process fencing
+and history. Public command deletion does not remove internal recovery, worker
+claims or `serve-flow`. Ordinary detached launch, Task
 primary selection, Waiting and workflow/loop authoring remain unimplemented.
 Focused migration, projection, CLI, Desktop and crash/effect checks establish local
 behavior only. Preserve main's confirmed-dead completed-provider admission exemption

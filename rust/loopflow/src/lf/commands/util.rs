@@ -357,13 +357,6 @@ fn lock_provider_clients(dir: &Path) -> Result<File> {
     Ok(file)
 }
 
-pub(crate) fn stop_provider_session(dir: &Path, harness: &str) -> Result<()> {
-    let _launch = lock_provider_clients(dir)?;
-    let clients = active_provider_clients(dir, harness)?;
-    replace_provider_clients_locked(dir, harness, &clients, ProviderClientStopReason::Completed)?;
-    Ok(())
-}
-
 pub(crate) fn require_provider_session_exec(dir: &Path) -> Result<()> {
     let input = crate::session_record::input_id_from_dir(dir)?;
     let store = SqliteStore::open_execs_read_only(&crate::store::database_path_from_env()?)?;
@@ -1155,7 +1148,7 @@ mod tests {
                 &dir,
                 "fake-provider",
                 &clients,
-                ProviderClientStopReason::Completed,
+                ProviderClientStopReason::Moved,
             )
             .is_err());
             assert!(fixture.child.try_wait().unwrap().is_none());
@@ -1175,7 +1168,7 @@ mod tests {
             &dir,
             "fake-provider",
             &clients,
-            ProviderClientStopReason::Completed,
+            ProviderClientStopReason::Moved,
         )
         .is_err());
         assert!(fixture.child.try_wait().unwrap().is_none());
@@ -1198,7 +1191,7 @@ mod tests {
             &dir,
             "fake-provider",
             &clients,
-            ProviderClientStopReason::Completed,
+            ProviderClientStopReason::Moved,
         )
         .unwrap();
         assert!(fixture.child.try_wait().unwrap().is_none());
@@ -1208,7 +1201,7 @@ mod tests {
             &dir,
             "fake-provider",
             &clients,
-            ProviderClientStopReason::Completed,
+            ProviderClientStopReason::Moved,
         )
         .is_err());
         assert!(fixture.child.try_wait().unwrap().is_none());
@@ -1234,7 +1227,7 @@ mod tests {
             &dir,
             "fake-provider",
             &[],
-            ProviderClientStopReason::Completed,
+            ProviderClientStopReason::Moved,
         )
         .is_err());
         assert!(fixture.child.try_wait().unwrap().is_none());
@@ -1247,7 +1240,7 @@ mod tests {
     }
 
     #[test]
-    fn session_stop_retries_unknown_native_client_without_resolving_history() {
+    fn provider_client_move_preserves_unknown_exit_and_native_history() {
         let _lock = crate::journal::test_env_lock();
         let _env = EnvRestore::capture(&["PATH", "LF_HOME"]);
         let original_path = std::env::var_os("PATH").unwrap();
@@ -1255,9 +1248,15 @@ mod tests {
         std::env::set_var("LF_HOME", fixture.temp.path());
         let dir = fixture.capture.artifact_dir();
         crate::session_record::write_provider_session(&dir, "native-history", None).unwrap();
-        let run = fixture.capture.artifact_key();
+        let clients = active_provider_clients(&dir, "fake-provider").unwrap();
         fixture.mock_ps("echo unreadable fake-provider");
-        assert!(crate::ops::human_session::stop_session_client(&run).is_err());
+        assert!(replace_provider_clients(
+            &dir,
+            "fake-provider",
+            &clients,
+            ProviderClientStopReason::Moved
+        )
+        .is_err());
         assert!(fixture.child.try_wait().unwrap().is_none());
         assert!(!crate::session_record::read_provider_clients(&dir)
             .unwrap()
@@ -1276,7 +1275,13 @@ mod tests {
                 .join(format!("{}.json", fixture.child.id()))
                 .display(),
         ));
-        assert!(crate::ops::human_session::stop_session_client(&run).is_err());
+        assert!(replace_provider_clients(
+            &dir,
+            "fake-provider",
+            &clients,
+            ProviderClientStopReason::Moved
+        )
+        .is_err());
         assert!(fixture.child.try_wait().unwrap().is_none());
         assert!(!crate::session_record::read_provider_clients(&dir)
             .unwrap()
@@ -1289,7 +1294,13 @@ mod tests {
         );
 
         std::env::set_var("PATH", original_path);
-        crate::ops::human_session::stop_session_client(&run).unwrap();
+        replace_provider_clients(
+            &dir,
+            "fake-provider",
+            &clients,
+            ProviderClientStopReason::Moved,
+        )
+        .unwrap();
         assert!(!fixture.child.wait().unwrap().success());
         assert!(crate::session_record::read_provider_clients(&dir)
             .unwrap()
@@ -1301,7 +1312,6 @@ mod tests {
                 .provider_session_id,
             "native-history"
         );
-        crate::ops::human_session::stop_session_client(&run).unwrap();
     }
 
     #[test]
@@ -1314,7 +1324,7 @@ mod tests {
             &dir,
             "fake-provider",
             &clients,
-            ProviderClientStopReason::Completed,
+            ProviderClientStopReason::Moved,
         )
         .unwrap();
         assert!(!fixture.child.wait().unwrap().success());
@@ -1328,7 +1338,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn session_stop_retains_history_published_after_client_exit() {
+    fn provider_client_move_retains_history_published_after_client_exit() {
         let _environment = crate::journal::test_env_lock();
         let mut fixture = NativeClient::new();
         let dir = fixture.capture.artifact_dir();
@@ -1336,7 +1346,14 @@ mod tests {
             .unwrap()
             .is_none());
 
-        stop_provider_session(&dir, "fake-provider").unwrap();
+        let clients = active_provider_clients(&dir, "fake-provider").unwrap();
+        replace_provider_clients(
+            &dir,
+            "fake-provider",
+            &clients,
+            ProviderClientStopReason::Moved,
+        )
+        .unwrap();
         assert!(!fixture.child.wait().unwrap().success());
         // The startup observer may drain buffered logs after stop has returned.
         observe_opencode_session(
@@ -1356,68 +1373,6 @@ mod tests {
             .unwrap()
             .is_empty());
         assert!(!dir.join("session-resolution.json").exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn session_stop_waits_for_native_client_publication() {
-        let _environment = crate::journal::test_env_lock();
-        let mut fixture = NativeClient::new();
-        let dir = fixture.capture.artifact_dir();
-        crate::session_record::write_provider_session(&dir, "retained-history", None).unwrap();
-        let launch = lock_provider_clients(&dir).unwrap();
-        // A live child exists, but its launcher has not published ownership yet.
-        crate::session_record::remove_provider_client(&dir, fixture.child.id()).unwrap();
-        let (entered, ready) = std::sync::mpsc::channel();
-        let (finished, result) = std::sync::mpsc::channel();
-        let stop_dir = dir.clone();
-        let stop = std::thread::spawn(move || {
-            entered.send(()).unwrap();
-            finished
-                .send(stop_provider_session(&stop_dir, "fake-provider"))
-                .unwrap();
-        });
-        ready.recv().unwrap();
-        let premature = result.recv_timeout(std::time::Duration::from_millis(100));
-        crate::session_record::write_provider_client(&dir, fixture.child.id()).unwrap();
-        drop(launch);
-        let waited = matches!(premature, Err(std::sync::mpsc::RecvTimeoutError::Timeout));
-        let stopped = match premature {
-            Ok(value) => value,
-            Err(_) => result
-                .recv_timeout(std::time::Duration::from_secs(10))
-                .unwrap(),
-        };
-        stop.join().unwrap();
-        stopped.unwrap();
-        assert!(waited);
-        assert!(!fixture.child.wait().unwrap().success());
-        assert!(active_provider_clients(&dir, "fake-provider")
-            .unwrap()
-            .is_empty());
-        assert!(crate::session_record::read_provider_clients(&dir)
-            .unwrap()
-            .is_empty());
-        let history = crate::session_record::read_provider_session(&dir)
-            .unwrap()
-            .unwrap();
-        assert_eq!(history.provider_session_id, "retained-history");
-        // Deliberate historical resumption remains supported for unrelated Runs.
-        let provider = fake_provider(&fixture.temp, "touch resumed");
-        let command = SessionCommand {
-            program: provider.display().to_string(),
-            args: Vec::new(),
-            cwd: fixture.temp.path().to_path_buf(),
-        };
-        spawn_session_command_with_env(
-            &command,
-            &fixture.capture.environment(),
-            Some(&history.provider_session_id),
-            None,
-            None,
-        )
-        .unwrap();
-        assert!(fixture.temp.path().join("resumed").exists());
     }
 
     #[cfg(unix)]

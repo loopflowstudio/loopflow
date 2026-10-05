@@ -231,7 +231,7 @@ fn stop_client(session: &AgentSession) -> Result<()> {
     if !native.dir.is_dir() {
         return Ok(());
     }
-    crate::lf::commands::util::stop_provider_session(&native.dir, native.provider)
+    native.stop_clients(crate::session_record::ProviderClientStopReason::Completed)
 }
 
 /// Admission and replacement of one scope are serial across processes.

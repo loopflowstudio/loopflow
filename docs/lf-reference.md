@@ -541,17 +541,6 @@ Internal command; invoked by the owning operation.
 | `<input>` | input |
 | `--help / -h` | Print help |
 
-## lf session stop-client
-
-Stop one exact native provider client after its review completes
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `<input>` | input |
-| `--help / -h` | Print help |
-
 ## lf account
 
 Refresh account access and capacity, or manage logins and routing

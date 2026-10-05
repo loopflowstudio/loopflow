@@ -85,6 +85,12 @@ Batch selects provider behavior; detachment is separate. Delete the worker path.
 October 4 source reconciliation corrects stale iteration feedback: Ready/Complete
 handlers and `exec_driver` no longer execute. `TaskWorkerClaim`, Task `__worker`,
 `serve-flow` and managed selection still do.
+At `77721ca23` plus the local compression changes, public saved Flow resume is
+also gone, contrary to the supplied previous-step feedback. Internal
+`recover_flow`, `retry_flow`, `reserve_task_review` and worker claims remain in
+`store/flows.rs`; `human_session::launch_flow` still launches `serve-flow`.
+Removing entry points has not removed store/driver authority. The next runtime
+cut remains necessary; no new product decision is needed to proceed with it.
 The public saved `flow resume` command and its managed dispatch branch are now
 deleted; Flow inventory and error messages direct callers to retained evidence.
 The surviving-agent crash proof retains exact native completion without consuming
@@ -239,6 +245,12 @@ reversible Close view remain; conversations stay reopenable. Add no finish,
 resolve or archive-and-stop replacement. Primary replacement retains its own
 successor/history semantics, never review settlement.
 
+Compression also deletes the orphaned `session stop-client` command and its
+completion-specific shutdown helper. Primary replacement uses the existing native
+client replacement path; its successor/history semantics and legacy stop receipts
+remain. Native move tests retain unknown-exit, exact-client and delayed-history
+coverage. Task-worker claims and managed review launch remain deletion targets.
+
 Compression removes the unused feedback payload from `SkillOutcome::Completed`
 and the duplicate feedback field/query from `FlowSession`. Archived feedback is
 read through Session evidence only; autonomous decision direction remains intact.
@@ -282,7 +294,7 @@ modernize first. Paths below are under `rust/loopflow/src/` unless qualified.
 - New `FlowReview` Session creation in `ops/flow_session.rs`; review-complete-to-driver
   restart and `exec_driver` are deleted. `serve-flow` and managed review launch/token branches
   in `ops/human_session.rs`. Preserve existing review histories during conversion.
-- Ready/Complete CLI handlers, store mutations, Session action/Ready state,
+- Ready/Complete and hidden `stop-client` CLI handlers, store mutations, Session action/Ready state,
   Desktop completion controls and pane-resolution callback are deleted. Historical
   feedback remains in the read DTOs, sourced from Session evidence. Generated
   instructions and affected docs no longer prescribe those commands. Preserve
@@ -444,4 +456,4 @@ in Desktop, and three two-hour sessions without crash/lost access forcing a move
 No metric targets are supplied. Local checks earn neither KR completion nor
 Cube/Etude/Kata/Hootro weekly-progress credit.
 
-Checks: `cargo build -p loopflow --bin lf`, four focused `cargo test -p loopflow --test flow_tests <case> -- --exact` cases (native-child and mechanical-effect crash/no-restart, multi-provider accounts, schema-change effect retention), `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` and `git diff --check` passed; the initial native assertion used the wrong Exec, corrected to exact Session/turn correlation. `lf context --skill implement`: memory 15,926/16,000, scratch below budget; stored Task goal excerpted, submitted input within budget. Prior checks remain at `cbf04180a:scratch/focus-on-your-own-work.md`; store/driver worker removal, final migration, full gate and configured demo remain outstanding. Authored Task steers remain unchanged.
+Checks (compression, reused): `cargo build -p loopflow --bin lf`; focused `cargo test -p loopflow` filters `--test session_cli_tests session_cli_uses_one_truthful_resolution_contract -- --exact`, `--lib lf::commands::util::tests::provider_client_`, `--lib ops::human_session::primary::tests`, `--lib engine::flow_graph::tests`; `cargo fmt --check`; `git diff --check` — passed (24 tests). Prior Flow crash/effect/account checks and Clippy remain at `77721ca23:scratch/focus-on-your-own-work.md`; Flow code is unchanged by this reduction. `lf context --skill compress`: memory and scratch fit; stored Task goal excerpted, submitted input within budget. Store/driver worker removal, final migration, gate and configured demo remain outstanding; live Home and authored Task steers are unchanged. Realign: source audit and `git diff --check` passed; `lf context --skill realign` reports memory 15,965/16,000 and scratch within budget; stored goal remains excerpted (659 tokens over), with no authored-steer edits.

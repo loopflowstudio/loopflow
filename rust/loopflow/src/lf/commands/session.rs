@@ -192,9 +192,6 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             let store = open_shared_store().await?;
             crate::ops::human_session::serve_conversation(&store, input).await
         }
-        SessionCommand::StopClient { input } => {
-            crate::ops::human_session::stop_session_client(input)
-        }
     }
 }
 

@@ -61,6 +61,7 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     for args in [
         &["session", "ready", "Feedback"][..],
         &["session", "complete", "missing-session"],
+        &["session", "stop-client", "missing-input"],
     ] {
         let output = run(home.path(), args);
         assert!(!output.status.success());

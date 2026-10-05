@@ -103,8 +103,9 @@ upstream test that asserted the old result is changed in the patch.
 agent output policy: `NO_COLOR`, `FORCE_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`,
 `COLORTERM`, `TERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `TMUX`,
 `TMUX_PANE`, `CI`, `PAGER`, `GIT_PAGER`, `GH_PAGER`, `AI_AGENT`, `CLAUDECODE`,
-and the `WARP_`, `CLAUDE_CODE_` and `CODEX_` families except `CODEX_HOME`
-(account authority, owned elsewhere). One list, one place, covering `lf desktop`,
+and the `WARP_`, `CLAUDE_CODE_` and `CODEX_` families except the provider
+account variables `lf` reads (`CODEX_HOME`, `CODEX_ACCESS_TOKEN`,
+`CODEX_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`: account authority, owned elsewhere). One list, one place, covering `lf desktop`,
 the dev launcher and a hand-typed `open`.
 
 Rejected: rebuilding the environment by asking a login shell for its `env`.
@@ -259,9 +260,13 @@ Interaction acceptance is Jack's demo review.
   most likely to change at demo.
 - Padding on provider TUIs changes their column count by about three cells.
 
+Realigned 2026-10-05: the prefix scrub also removed three provider credentials
+`lf` reads from the environment; they are now kept and the launch test names
+them. `main` has not moved since the base, and the `lf2` URL still returns 404.
+
 Check: against the local `lf2` framework (pin swapped to a path, then restored),
-`swift build` and `swift test --filter "GhosttyShellBlockTests|LocalWaveAgentLauncherTests"`
-— 13 passed, three runs. Display suite and Zig tests not rerun; gate owns them.
+`swift test --filter "GhosttyShellBlockTests|LocalWaveAgentLauncherTests"` —
+13 passed. Display suite and Zig tests not rerun; gate owns them.
 
 Check: kickoff PTY capture of the Codex 0.160.0 footer per environment (throwaway
 script, not in the repository) — colored under Ghostty and Warp environments,

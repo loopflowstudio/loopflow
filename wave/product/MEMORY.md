@@ -994,8 +994,9 @@ no owning Task (LOO-375 owns `wt list` only).
   zsh prompt are kickoff choices awaiting his demo.
 - **Desktop inherits its launcher's environment.** Opened from an agent shell it
   carried `NO_COLOR=1`, `PAGER=cat` and `TERM_PROGRAM`, and every pane lost
-  color. The GUI drops the launcher's terminal and agent output variables at
-  launch, beside the execution markers. Palette and Ghostty config were not the cause.
+  color. The GUI drops those variables at launch, beside the execution markers.
+  A prefix scrub also caught provider credentials `lf` reads; keep them by name.
+  Palette and Ghostty config were not the cause.
 - **The terminal owns block state.** A Swift-side `(id, text)` snapshot produced
   two competing highlights and stale copies; pointer-derived ids died on reflow.
   The `lf2` patch keeps exit status on the prompt row and one text-or-block

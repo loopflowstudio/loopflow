@@ -37,6 +37,9 @@ struct LocalWaveAgentLauncherTests {
             "LF_HOME": "/tmp/loopflow-development-home",
             "LF_ACCOUNT": "work",
             "CODEX_HOME": "/tmp/codex-home",
+            "CODEX_ACCESS_TOKEN": "codex-token",
+            "CODEX_API_KEY": "codex-key",
+            "CLAUDE_CODE_OAUTH_TOKEN": "claude-token",
         ]
         let leaked = [
             "NO_COLOR": "1", "FORCE_COLOR": "0", "CLICOLOR": "0", "CLICOLOR_FORCE": "0",

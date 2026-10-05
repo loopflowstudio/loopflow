@@ -27,9 +27,10 @@ Missing payload cannot erase a resumable native conversation's SQLite identity.
 Exact SQLite compatibility does not prove layout completion; advancement and recovery
 must retain the candidate before moving bytes. Released v0.13.3 can journal before
 installation checks; receipt versions and installer locks cannot exclude it.
-The network-isolated hosted Home-exclusion experiment is wired but unexecuted. Directory
-permissions survive worker death but cannot revoke open descriptors; quiescence,
-explicit target-account recovery and access restoration remain unimplemented.
+The hosted exclusion experiment is wired but unexecuted; its empty store and
+synthetic payload cannot prove conversion. Permissions survive worker death but
+cannot revoke open descriptors. Quiescence, target-account recovery and access restoration
+remain unimplemented; recovery must retain exclusion until validation succeeds.
 `runs/` remains in use. Source inspection and runtime tests prove neither conversion
 nor installed preservation; Linux exclusion alone would not prove macOS behavior.
 

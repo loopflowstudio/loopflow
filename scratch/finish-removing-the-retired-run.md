@@ -45,8 +45,8 @@ Earlier runtime/compression findings and exact checks are preserved at
 `c79203717c5e812284835591fe514d37b543d813:scratch/finish-removing-the-retired-run.md`.
 That checkpoint records passing Session CLI/lifecycle, PR authority, history/DTO,
 Session-owner, formatting, architecture and Clippy checks, with a Session skip.
-Those earlier checks did not cover the controller alias fixtures; the October 5
-focused pass below covers their repair. Conversion and full gate remain unproved.
+Those earlier checks did not cover the controller alias fixtures; the retained
+October 5 Session/controller evidence below covers their repair. Conversion and full gate remain unproved.
 The earlier disk-capacity limitation is superseded by October 5 source builds.
 
 Preservation findings remain binding: a native conversation can resume without its
@@ -80,7 +80,9 @@ passes nor the checkpoint establishes conversion or a full gate.
 
 The preceding implementation verified the exclusion runner's pinned checksums against published v0.13.3 SHA256SUMS; no container or hosted exclusion result is established.
 
-Check (compress, October 5): isolated `cargo nextest run -p loopflow --lib -E 'test(replay_uses_recorded_request)' --no-fail-fast` passed 1/1; compilation, `cargo fmt --check`, all-target Clippy, runner Ruff lint/format and `git diff --check` passed. Docker refusal remains explicit (missing daemon socket); hosted exclusion and conversion acceptance remain with implementation/gate.
+Compression evidence is preserved at
+`514bb9f3e4c2664fe93522d4795082b46e9f5be2:scratch/finish-removing-the-retired-run.md`: replay passed 1/1, compilation, formatting, all-target Clippy and runner Ruff checks passed.
+These checks are reused for the unchanged source; exclusion and conversion remain unproved.
 
 This runtime slice cannot land independently as the finished cutover. No installed
 conversion, interruption, installation or production release is authorized.
@@ -138,8 +140,6 @@ ownership would select the wrong installation. Source authorization permits
 designing this mechanism in isolation, but supplies no installed maintenance
 authority. No storage path, receipt version or schema is changed by this finding.
 
-Check: released-source entry/ledger inspection and `git diff --check` passed; no runtime check was run for this documentation-only finding; offline conversion and its released-Home proof remain unimplemented.
-
 ### Privileged exclusion experiment — October 5
 
 The next candidate mechanism uses an external administrator, with the target
@@ -179,9 +179,19 @@ changes independently of the ordinary gate's scratch-clear condition. It has
 not run: all three local Docker endpoints were unavailable on October 5, and no
 hosted result is established. Wiring the runner does not prove exclusion.
 
-Candidate account targeting,
-crash-safe privilege restoration and complete quiescence detection remain source
-design/implementation work; layout deletion is still dependent on their proof.
+The experiment seeds an empty released SQLite store and synthetic payload; it
+owns the one retained writer explicitly. It neither discovers arbitrary writers
+nor restores account access. A passing result therefore establishes only pathname
+exclusion for those released commands on Linux, including after worker death.
+
+Candidate account targeting, crash-safe privilege restoration and complete
+quiescence detection remain source design/implementation work. Their isolated
+fault matrix must cover death after each ownership/mode change, recovery using
+the saved target rather than the caller's account, and repeated restoration of
+original access only after validation. Missing recovery evidence must retain
+exclusion. The receipt's durable location and recovery invocation must remain
+accessible to the administrator while the target account is excluded. Layout
+mutation remains dependent on these proofs; this experiment alone cannot enable it.
 
 ## Problem and observable outcome
 
@@ -394,8 +404,9 @@ config for prompt recording and the temporary context file, removing two complet
 request clones. The exclusion runner uses foreground `docker run` exit status,
 removing create/attach/wait orchestration and success flags. Cleanup still removes
 its named container after timeout and attempts image removal even if container
-cleanup fails. Local `lf commit` returned an empty `Error:`; incoming notes are
-preserved and this compression remains a working-tree diff.
+cleanup fails. Checkpoint `514bb9f3e4c2664fe93522d4795082b46e9f5be2` preserves
+this compression and its incoming evidence; it supersedes the earlier failed
+checkpoint attempt.
 
 Still delete the `runs/` root reader in `session_record::record_dir`, hard-coded
 watch classification and `context_ablation.py`'s old layout/`--runs` interface
@@ -490,3 +501,5 @@ retired UI receipt prerequisite and replaces removed `lf catalog` smoke with
 acceptance. Required headless and public-artifact checks remain. The conversion
 fixture must use the existing candidate-owned recovery interface without claiming
 these adjacent proofs or changing their schedules/checkouts.
+
+Check (realign, October 5): `git diff --check` passed; source and Release-memory inspection reused recorded checks; `lf context --skill realign` confirms budgets; conversion, exclusion execution and full gate remain outstanding.

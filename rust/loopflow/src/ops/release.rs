@@ -1952,7 +1952,6 @@ fn verify_release_outcome(
         || proof.source_commit != commit
         || proof.workflow_run_id != workflow_id.to_string()
         || ![
-            "ui_host_verified",
             "public_artifacts_verified",
             "versioned_dmg_verified",
             "latest_dmg_verified",
@@ -2318,7 +2317,9 @@ fn prepare_publisher(
                 .current_dir(repo)
                 .args(["run", "download", &run_id, "--dir"])
                 .arg(directory.path()),
-            std::time::Duration::from_secs(300),
+            // This downloads the complete multi-platform set. A healthy transfer
+            // at 200 KiB/s already needs over six minutes for today's artifacts.
+            std::time::Duration::from_secs(900),
         )?;
         Ok(directory)
     })?;

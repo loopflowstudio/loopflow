@@ -2,7 +2,7 @@
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.13.2 makes returning to work easier: resume the last conversation in a worktree, reopen Desktop on saved workspace content, and keep repository and Wave plans in persistent workspaces. Recovery preserves conversations, review history, and release candidates through interruptions, while new timing reports make remaining waits visible. These notes cover the cycle since v0.13.0, including improvements already shipped in v0.13.1.
+v0.13.2 makes returning to work easier: resume the last conversation in a worktree, reopen Desktop on saved workspace content, and keep repository and Wave plans in persistent workspaces. Recovery preserves conversations, review history, and release candidates through interruptions, while release publication uses headless verification and allows more time for artifact downloads. These notes cover the cycle since v0.13.0, including improvements already shipped in v0.13.1.
 
 ## Pick up the conversation where you left it
 
@@ -47,12 +47,13 @@ Existing Tasks can continue through a Linear outage, and replacing a waiting rev
 
 ## Know whether a scheduled release reached users
 
-Release history connects scheduled opportunities to verified outcomes, retaining unfinished candidates and failures through retries. Cleanup now also allows time for repair children to release inherited checkout locks.
+Release history connects scheduled opportunities to verified outcomes, retaining unfinished candidates and failures through retries. Publication no longer depends on optional macOS UI automation, and healthy multi-platform downloads have more time to finish. Cleanup also allows time for repair children to release inherited checkout locks.
 
 - Inspect verified publication, verified no-change, deferred work, and failures with `lf release history`; record repair ownership through `lf cron disposition`.
 - Catch up missed release opportunities with one execution per wake, preserving original timing and unfinished candidates. Multiple missed opportunities covered by one execution do not become multiple successful releases.
 - Recover interrupted checks using process and lock evidence. Publication settlement requires the exact candidate, public artifact read-back, and installer smoke checks; retained artifacts support retries of missing publication stages.
-- Retry transient artifact downloads and individual check-page reads up to three times, with bounded cleanup and a fresh directory for each download attempt.
+- Complete artifact downloads have a fifteen-minute deadline, increased from five minutes. Transient artifact downloads and individual check-page reads retry up to three times, with bounded cleanup and a fresh directory for each download attempt.
+- Publisher preparation and public verification no longer require the retired UI host. Required headless preparation, release locks, notarization, artifact validation, and public installer smoke checks remain in place.
 - Release cleanup and repair re-entry wait up to five seconds for an independent checkout lease. A timeout preserves the existing owner's lock and checkout.
 
 ## Operational notes
@@ -65,7 +66,7 @@ The `pr`, `wt`, `sync`, and `commit` commands move out of the Task hierarchy whi
 
 Release locks and checkout leases extend through Git, PR, hook, CI-repair, and publisher children. Schedule replacements on the same Home retain unfinished candidates; changing Homes leaves unresolved work available for repair without transferring execution authority. Upgrade running binaries to receive dispatch fixes, and pair Desktop with a CLI containing the new skill-launch support.
 
-Recorded installation evidence includes published v0.13.0 installing at a real login after a missed release, launchd calendar refresh firings, receipt/app/signature checks, containerized fresh install and repair, and checkout sync preserving unpublished commits and uncommitted bytes in a sandbox. This does not establish acceptance of v0.13.2: Monday 09:00 and sleep-coalesced wake firings, interactive app acceptance, and repeated automatic release publication remain unverified. Native skill-picker interaction and live cross-repository Task capture also remain follow-up validation. Rendered Desktop launch measurements are now available, with the limits described above.
+Recorded installation evidence includes published v0.13.0 installing at a real login after a missed release, launchd calendar refresh firings, receipt/app/signature checks, containerized fresh install and repair, and checkout sync preserving unpublished commits and uncommitted bytes in a sandbox. This does not establish acceptance of v0.13.2: live publication recovery after the headless-verification and download-deadline repair, Monday 09:00 and sleep-coalesced wake firings, interactive app acceptance, and repeated automatic release publication remain unverified. Infrastructure retains responsibility through publication and installed acceptance. Native skill-picker interaction and live cross-repository Task capture also remain follow-up validation. Rendered Desktop launch measurements are now available, with the limits described above.
 
 ## Small changes
 

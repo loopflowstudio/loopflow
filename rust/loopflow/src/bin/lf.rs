@@ -1268,6 +1268,7 @@ fn piped_task_report() -> anyhow::Result<Option<String>> {
 }
 
 fn main() -> std::process::ExitCode {
+    let _measurement = loopflow::performance::ProcessMeasurement::start();
     let result = journal::with_process(run);
     let code = journal::command_exit_code(&result);
     if let Err(error) = result {

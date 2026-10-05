@@ -24,15 +24,15 @@ struct DesktopPerformanceTests {
         let journal = try PerformanceJournal(url: output)
         let soakSeconds = Double(environment["LF_DESKTOP_PERF_SOAK_SECONDS"] ?? "0") ?? 0
         let scenarios = ["full", "fold", "expand", "compact", "sessions", "filter", "scroll_refresh",
-                         "monitor_active", "monitor_empty", "session_return", "combined_zoom", "combined_restore", "task_details", "task_flow", "task_history", "file_edit_refresh", "new_pty"]
-        try journal.write(["event": "plan", "population_version": "desktop-v2",
+                         "monitor_active", "monitor_empty", "session_return", "combined_zoom", "combined_restore", "task_details", "task_flow", "task_history", "file_edit_refresh", "new_pty", "native_session_reopen"]
+        try journal.write(["event": "plan", "population_version": "desktop-v3",
                            "populations": ["small": 8, "large": 256], "samples": samples,
                            "scenarios": scenarios, "endpoint": "native_capture_ocr_and_pty_reply",
                            "poll_interval_ms": 5, "frame_hitches": NSNull(), "soak_seconds": soakSeconds,
                            "scroll_refresh": ["window_height": 300, "destination": "end",
                                               "refresh_release": "after_captured_scroll", "updated_title_prefix": "Updated"],
                            "gaps": ["Compositor presentation and frame hitches are not measured.",
-                                    "Fixture transport excludes CLI, retained-registry discovery and provider readiness.",
+                                    "Planning transport is synthetic; native reopening uses the real CLI with an owned provider stub.",
                                     "Actions use SwiftUI controls; OS event delivery latency is excluded.",
                                     "Forced bitmap capture and OCR are intrusive observer costs, recorded separately."]])
 #if canImport(GhosttyKit)
@@ -322,6 +322,7 @@ struct DesktopPerformanceTests {
                 throw PerformanceFailure("failed", "Retained terminal identity or companion changed")
             }
         }
+        try await measureNativeReopening(population: population, samples: samples, journal: journal)
         if soakSeconds > 0 {
             // One owner keeps the real refresh cadences running for the whole soak.
             let refresh = Task { await model.keepWorkspaceCurrent() }
@@ -373,6 +374,61 @@ struct DesktopPerformanceTests {
             }
         }
         await model.stopActiveSessions()
+    }
+
+    private func measureNativeReopening(population: String, samples: Int, journal: PerformanceJournal) async throws {
+        let fixture = try DesktopNativeSessionFixture.load()
+        let store = SessionsStore(repoPath: fixture.home, query: fixture.query)
+        let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 900, height: 500),
+                                       styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer {
+            window.contentView = nil
+            store.surfaces.release(.session(fixture.sessionId))
+            window.close()
+        }
+        let identity = TerminalIdentity.session(fixture.sessionId)
+        for attempt in 0..<samples {
+            let records = try await fixture.records()
+            try #require(records.count == 1 && records[0].id == fixture.sessionId)
+            store.reconcile(records)
+            var terminal: GhosttyMetalView?
+            try await sample("native_session_reopen", population, attempt, journal, window, action: {
+                await store.select(fixture.sessionId)
+                let record = try #require(store.sessions.first?.surface)
+                try #require(record.id == fixture.sessionId)
+                let view = GhosttyTerminalView(workingDirectory: fixture.home,
+                    argv: fixture.isolatedCommand(record.openArgv), terminal: identity,
+                    surfacePool: store.surfaces, isFocused: true,
+                    onSurfaceCreated: { store.recordPaneLive(fixture.sessionId) })
+                window.contentView = NSHostingView(rootView: view)
+                window.orderFront(nil)
+                terminal = store.surfaces.view(for: identity)
+            }, ready: {
+                guard let terminal, let surface = terminal.surface else { return false }
+                return window.firstResponder === terminal
+                    && terminalText(surface).contains("native:\(fixture.nativeId):retained-history")
+            }, observation: {
+                ["session_id": fixture.sessionId, "native_id": fixture.nativeId,
+                 "provider": "owned Codex stub", "history_preserved": (try? fixture.historyIsPreserved()) == true]
+            }, input: {
+                let surface = try #require(terminal?.surface)
+                let message = "reopened-\(population)-\(attempt)"
+                try send(window, message + "\n")
+                try await wait(window) { terminalText(surface).contains("reply:\(fixture.nativeId):\(message)") }
+                try #require(try fixture.historyIsPreserved())
+            })
+            // Native client exits naturally; explicit select must relaunch the same
+            // conversation, not mint another Session or complete its durable owner.
+            try send(window, "quit\n")
+            try await wait(window) { !store.surfaces.hasSurface(identity) }
+            window.contentView = nil
+            store.surfaces.release(identity)
+            store.noteSurfaceClosed(identity)
+            let reopened = try await fixture.records()
+            try #require(reopened.count == 1 && reopened[0].id == fixture.sessionId)
+            try #require(try fixture.historyIsPreserved())
+        }
     }
 
     private func terminalText(_ surface: ghostty_surface_t) -> String {

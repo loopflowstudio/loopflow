@@ -758,11 +758,14 @@ refresh. Copied SQLite alone cannot isolate retained checkout/process references
 or external effects. Release's installed filtering proof above supplies none of
 these performance measurements.
 
-Harness completion and execution need separate evidence: LOO-304's synthetic
-soak records fixture reads and retained cat surfaces, not SQLite query/process
-volume or native conversation reopening. A capable display host cannot supply
-missing instrumentation. Release's retirement of the publisher UI receipt does
-not waive this Task's accepted rendered performance proof.
+Harness completion and execution need separate evidence. LOO-304 now counts
+actual CLI processes and main-store SQLite statements/rows without recording SQL
+or values; interrupted receipts remain partial. Its real-CLI, owned-provider
+reopen fixture preserves one Session and native history through three headless
+cycles. Post-exit inventory needs `--history`, not `--all` alone. The mounted
+scenario compiles but has no rendered result. Planning/soak remain synthetic;
+realistic volume and real-provider preservation still need LOO-371 integration.
+Release's retired publisher UI receipt does not waive this rendered acceptance.
 
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)

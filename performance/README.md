@@ -1,8 +1,9 @@
 # Performance
 
 ```bash
-uv run python scripts/desktop_performance.py run --output /tmp/desktop-baseline
-uv run python scripts/desktop_performance.py run --output /tmp/desktop-after \
+cargo build -p loopflow --bin lf
+uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-baseline
+uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-after \
   --baseline /tmp/desktop-baseline
 ```
 
@@ -11,8 +12,14 @@ workspace. `--samples 1` runs the short behavioral check; the default records on
 first interaction and twenty warm attempts per scenario and population. The
 runner opens an owned native window and three retained `/bin/cat` PTYs, with
 fixed populations of 8 Tasks/4 Sessions and 256 Tasks/128 Sessions. Planning and
-active Runs come from synthetic shared DTOs; no configured Home or provider is
-used.
+active Sessions come from synthetic shared DTOs. `--cli` names the source binary
+used only with a fresh owned Home, native transcript and Codex stub; no configured
+Home, credential or provider is used. The separate `native_session_reopen` scenario
+selects that Session through `SessionsStore` and `session connect`, mounts its
+returned launch command, waits for native identity and input replies, lets the
+client exit, then reopens the same conversation. Every pass preserves one Session
+ID and the exact native history bytes. This proves the public resume boundary
+with a synthetic provider, not real Codex readiness or a realistic data snapshot.
 
 `hierarchy_interaction_ms` covers full/compact/Session presentations, folding,
 expansion, filtering and scrolling during planning refresh. The scroll case uses

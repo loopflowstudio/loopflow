@@ -170,3 +170,64 @@ def test_four_round_memory_uses_the_round_boundary(tmp_path: Path) -> None:
     )
     result = _report(tmp_path, _soak_events())
     assert result["soak"]["memory_after_four_rounds_mib"] == 2
+
+
+def test_cli_volume_keeps_partial_counts_and_missing_measurements(tmp_path: Path) -> None:
+    assert performance._cli_volume(tmp_path)["observed_totals"]["statements"] is None
+    start = {
+        "event": "start",
+        "pid": 7,
+        "time": 10,
+        "elapsed_ms": 0,
+        "connections": 0,
+        "statements": 0,
+        "rows": 0,
+    }
+    sample = {
+        **start,
+        "event": "sample",
+        "time": 11,
+        "elapsed_ms": 1000,
+        "connections": 2,
+        "statements": 12,
+        "rows": 41,
+    }
+    path = tmp_path / "lf-7-owned.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in [start, sample]) + '\n{"event":')
+    partial = performance._cli_volume(tmp_path)
+    assert partial["status"] == "partial"
+    assert partial["processes_ended"] == 0
+    assert partial["observed_totals"]["statements"] == 12
+    assert partial["errors"]
+    path.write_text("\n".join(json.dumps(e) for e in [start, sample, {**sample, "event": "end"}]))
+    complete = performance._cli_volume(tmp_path)
+    assert complete["status"] == "complete"
+    assert complete["processes_started"] == complete["processes_ended"] == 1
+    assert complete["observed_totals"]["statements"] == 12  # cumulative, not 24
+
+
+@pytest.mark.parametrize("change", [{"statements": 1}, {"pid": 8}, {"elapsed_ms": -1}])
+def test_cli_volume_rejects_counter_reset_or_identity_change(tmp_path: Path, change: dict) -> None:
+    start = {
+        "event": "start",
+        "pid": 7,
+        "time": 10,
+        "elapsed_ms": 0,
+        "connections": 1,
+        "statements": 12,
+        "rows": 41,
+    }
+    end = {**start, "event": "end", **change}
+    (tmp_path / "lf-7-owned.jsonl").write_text("\n".join(json.dumps(e) for e in [start, end]))
+    result = performance._cli_volume(tmp_path)
+    assert result["status"] == "partial"
+    assert result["errors"]
+    assert result["processes_ended"] == 0
+
+
+def test_changed_cli_binary_invalidates_completed_journey(tmp_path: Path) -> None:
+    _report(tmp_path, _events())
+    metadata = json.loads((tmp_path / "run.json").read_text())
+    metadata.update(cli_sha256="before", cli_sha256_after="after")
+    (tmp_path / "run.json").write_text(json.dumps(metadata))
+    assert performance._report(tmp_path, None)["status"] == "incomplete"

@@ -20,7 +20,7 @@ uv run python scripts/benchmarks/desktop-performance/startup.py capture --repo ~
 uv run python scripts/benchmarks/desktop-performance/startup.py run --capture /tmp/startup-capture --output /tmp/startup-run
 
 # Native capture/OCR journeys; the historical September receipt remains on disk.
-uv run python scripts/desktop_performance.py run --output /tmp/desktop-after
+uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-after
 ```
 
 The app appends to `<Home>/desktop-cache/timings/launches.ndjson` and
@@ -111,9 +111,9 @@ display, so it reports no first frame, CPU, memory or stalls;
 ## Unattended workspace journeys and soak
 
 ```sh
-uv run python scripts/desktop_performance.py run --samples 21 --soak-seconds 3600 --output /tmp/workspace-baseline
+uv run python scripts/desktop_performance.py run --cli target/debug/lf --samples 21 --soak-seconds 3600 --output /tmp/workspace-baseline
 # Run the same harness on the candidate, on the same display host.
-uv run python scripts/desktop_performance.py run --samples 21 --soak-seconds 3600 --output /tmp/workspace-candidate --baseline /tmp/workspace-baseline
+uv run python scripts/desktop_performance.py run --cli target/debug/lf --samples 21 --soak-seconds 3600 --output /tmp/workspace-candidate --baseline /tmp/workspace-baseline
 ```
 
 The native runner retains three owned `cat` PTYs while navigating and refreshing
@@ -151,3 +151,37 @@ October 5 committed tree and checkout contained no such runner, so this harness
 supplies no real-snapshot CLI receipt. `launch.py`'s database backup alone does
 not isolate copied checkout/process references, credentials or external writes;
 it is not a substitute for that handoff.
+
+### CLI volume and native reopening
+
+```bash
+mkdir /tmp/cli-volume
+# Set this only on commands inside the isolated snapshot runner:
+# LF_PERF_OUTPUT=/tmp/cli-volume <isolated CLI command>
+uv run python scripts/desktop_performance.py volume /tmp/cli-volume
+```
+
+`LF_PERF_OUTPUT` observes actual CLI processes and their main-store SQLite
+connections. Each process writes start, cumulative one-second samples and end to
+its own receipt, without SQL, arguments or row contents. Counts include schema
+validation, PRAGMAs, writes and triggers. Rows are emitted results, not scanned
+rows. Non-CLI children and other SQLite connections are outside coverage. A
+missing end or malformed tail is partial; no receipt is unmeasured, never zero.
+Use the same instrumentation on baseline and candidate: row counters and the
+writer add overhead. The output directory must already exist; observation never
+selects a Home or grants execution authority.
+
+The native runner collects these receipts under `cli-volume/` and uses `--cli`
+for a fresh synthetic native Session fixture. `native_session_reopen` exercises
+Desktop's Session store, public connect command and mounted returned launch
+command across client exit/relaunch. The owned provider checks its resume ID and
+reads only its owned transcript; input replies establish readiness. The test
+verifies one stable Loopflow Session and byte-identical native history on every
+reopen. Headless `DesktopNativeSessionTests` exercises the same fixture and public
+API without Ghostty when `LOOPFLOW_TEST_NATIVE_FIXTURE` names the runner's
+`native-fixture.json`. No live conversation or credentials are used.
+
+These CLI totals cover fixture setup and native reopening, not the DTO-backed
+planning refresh or the retained-cat soak. Native provider service costs and
+realistic workspace process/query volume still require LOO-371's isolated
+snapshot runner; this fixture is not a replacement for that runner.

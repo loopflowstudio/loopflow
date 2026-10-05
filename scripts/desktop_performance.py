@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Measure native desktop journeys and compare like-for-like observations.
 
-uv run python scripts/desktop_performance.py run --output /tmp/desktop-baseline
-uv run python scripts/desktop_performance.py run --output /tmp/after --baseline /tmp/baseline
+uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/before
+uv run python scripts/desktop_performance.py report /tmp/after --baseline /tmp/before
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import statistics
 import subprocess
 import sys
 import time
+import uuid
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -181,8 +182,73 @@ def _soak(events: list[dict], plan: dict | None) -> dict:
         "end": ends[0] if len(ends) == 1 else None,
         "limits": [
             "Fixture reads, not CLI processes or SQLite query volume",
-            "Retained cat PTYs, not native provider startup or identity",
+            "Soak retains cat PTYs; the separate reopen scenario uses synthetic native history",
             "Bitmap/OCR and PTY echo, not key-to-glyph presentation",
+        ],
+    }
+
+
+def _cli_volume(directory: Path) -> dict:
+    processes = []
+    errors = []
+    counters = ("connections", "statements", "rows")
+    for path in sorted(directory.glob("lf-*.jsonl")):
+        events, malformed = _read_events(path)
+        errors.extend(f"{path.name}: {error}" for error in malformed)
+        valid = []
+        for event in events:
+            if (
+                not isinstance(event, dict)
+                or event.get("event") not in {"start", "sample", "end"}
+                or any(type(event.get(key)) is not int or event[key] < 0 for key in counters)
+                or not isinstance(event.get("pid"), int)
+                or any(
+                    not isinstance(event.get(key), (int, float)) or not math.isfinite(event[key])
+                    for key in ("time", "elapsed_ms")
+                )
+            ):
+                errors.append(f"{path.name}: invalid volume record")
+                break
+            if valid and (
+                event["pid"] != valid[0]["pid"]
+                or event["event"] == "start"
+                or valid[-1]["event"] == "end"
+                or event["elapsed_ms"] < valid[-1]["elapsed_ms"]
+                or any(event[key] < valid[-1][key] for key in counters)
+            ):
+                errors.append(f"{path.name}: inconsistent volume sequence")
+                break
+            valid.append(event)
+        if not valid or valid[0]["event"] != "start":
+            errors.append(f"{path.name}: missing process start")
+            continue
+        processes.append(
+            {
+                "receipt": path.name,
+                "pid": valid[0]["pid"],
+                "complete": not malformed
+                and len(valid) == len(events)
+                and valid[-1]["event"] == "end",
+                "samples": valid,
+            }
+        )
+    complete = bool(processes) and not errors and all(p["complete"] for p in processes)
+    return {
+        "status": "complete" if complete else "partial" if processes or errors else "unmeasured",
+        "processes_started": len(processes) if processes else None,
+        "processes_ended": sum(p["complete"] for p in processes) if processes else None,
+        "observed_totals": {
+            key: sum(p["samples"][-1][key] for p in processes) if processes else None
+            for key in counters
+        },
+        "processes": processes,
+        "errors": errors,
+        "limits": [
+            "Only instrumented lf processes; excludes Git, providers and other executables",
+            "SQLite statement starts (including PRAGMAs, writes and triggers), not only SELECTs",
+            "Rows emitted by SQLite, not underlying rows scanned; main store connections only",
+            "Cumulative one-second samples; missing end means counts are lower bounds",
+            "Counters and a writer add overhead; use the same instrumentation in both builds",
         ],
     }
 
@@ -238,6 +304,7 @@ def _report(output: Path, baseline: Path | None) -> dict:
     complete = (
         metadata.get("exit_code") == 0
         and metadata.get("source_before") == metadata.get("source_after")
+        and metadata.get("cli_sha256") == metadata.get("cli_sha256_after")
         and summary["expected_attempts"] is not None
         and summary["not_started"] == 0
         and summary["soak"]["status"] != "incomplete"
@@ -248,6 +315,7 @@ def _report(output: Path, baseline: Path | None) -> dict:
     summary.update(
         metadata=metadata, status="complete" if complete else "incomplete", journal_errors=errors
     )
+    summary["cli_volume"] = _cli_volume(output / "cli-volume")
     recording = output / "soak-resources" / "report.json"
     summary["soak"]["resources"] = json.loads(recording.read_text()) if recording.exists() else None
     summary["soak"]["memory_after_four_rounds_mib"] = None
@@ -273,7 +341,8 @@ def _report(output: Path, baseline: Path | None) -> dict:
         "**Not compositor paint time. Frame-hitch evidence is unavailable.**",
         "",
         "Fixture data excludes CLI/registry discovery, network and provider startup. "
-        "Three retained cat PTYs per population.",
+        "Three retained cat PTYs per population; "
+        "separate native Session reopen uses a real CLI and owned provider stub.",
         f"Attempts: {len(summary['attempts'])}/{summary['expected_attempts']}; "
         f"not started: {summary['not_started']}.",
         "First interaction and warm samples are separate. "
@@ -318,6 +387,14 @@ def _report(output: Path, baseline: Path | None) -> dict:
             "Missing recording is unmeasured. "
             "Idle-only trace coverage is reported separately; partial coverage is not acceptance.",
         ]
+    volume = summary["cli_volume"]
+    lines += [
+        "",
+        f"CLI volume: {volume['status']}; "
+        f"processes started/ended {volume['processes_started']}/{volume['processes_ended']}; "
+        f"observed SQLite totals {volume['observed_totals']}. "
+        "Scope and partial receipts are retained in report.json.",
+    ]
     if not complete:
         lines += [
             "",
@@ -340,13 +417,89 @@ def _stop(process: subprocess.Popen) -> None:
         process.wait()
 
 
-def _run_native(output: Path, samples: int, soak_seconds: int) -> dict:
+def _prepare_native_fixture(output: Path, cli: Path) -> Path:
+    home = output / "native-home"
+    native = home / "codex"
+    bin_dir = home / "bin"
+    bin_dir.mkdir(parents=True)
+    native_id = str(uuid.uuid4())
+    transcript = native / "sessions/2026/10/05" / f"rollout-time-{native_id}.jsonl"
+    transcript.parent.mkdir(parents=True)
+    history = json.dumps({"cwd": str(home), "message": "retained-history"}) + "\n"
+    transcript.write_text(history)
+    provider = bin_dir / "codex"
+    provider.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = --version ]; then exit 0; fi\n'
+        'case " $* " in *" $PERF_NATIVE_ID "*) ;; *) exit 42;; esac\n'
+        'grep -q retained-history "$PERF_TRANSCRIPT" || exit 43\n'
+        'printf "native:%s:retained-history\\n" "$PERF_NATIVE_ID"\n'
+        "while IFS= read -r input; do\n"
+        '  [ "$input" = quit ] && exit 0\n'
+        '  printf "reply:%s:%s\\n" "$PERF_NATIVE_ID" "$input"\n'
+        "done\n"
+    )
+    provider.chmod(0o755)
+    environment = {
+        "HOME": str(home),
+        "LF_HOME": str(home),
+        "LF_BIN": str(cli),
+        "CODEX_HOME": str(native),
+        "CLAUDE_CONFIG_DIR": str(home / "claude"),
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "TMPDIR": str(home),
+        "PERF_NATIVE_ID": native_id,
+        "PERF_TRANSCRIPT": str(transcript),
+        "LF_PERF_OUTPUT": str(output / "cli-volume"),
+        "RUST_LOG": "off",
+    }
+    for args in (["resume", native_id], ["session", "list", "--all", "--history", "--json"]):
+        process = subprocess.Popen(
+            [str(cli), *args],
+            cwd=home,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=60)
+        except subprocess.TimeoutExpired:
+            _stop(process)
+            raise RuntimeError("Native fixture setup timed out") from None
+        if process.returncode:
+            raise RuntimeError(f"Native fixture setup failed: {stderr.decode(errors='replace')}")
+    records = json.loads(stdout)
+    if len(records) != 1:
+        raise RuntimeError("Native fixture did not retain exactly one Session")
+    fixture = output / "native-fixture.json"
+    _write(
+        fixture,
+        {
+            "cli": str(cli),
+            "home": str(home),
+            "environment": environment,
+            "session_id": records[0]["id"],
+            "native_id": native_id,
+            "transcript": str(transcript),
+            "history": history,
+        },
+    )
+    return fixture
+
+
+def _run_native(output: Path, samples: int, soak_seconds: int, cli: Path) -> dict:
     metadata: dict = {}
     environment = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
     isolated = output / "home"
     isolated.mkdir()
-    environment.update(LF_HOME=str(isolated), HOME=str(isolated))
+    volume = output / "cli-volume"
+    volume.mkdir()
+    environment.update(LF_HOME=str(isolated), HOME=str(isolated), LF_PERF_OUTPUT=str(volume))
+    fixture = _prepare_native_fixture(output, cli)
     environment.update(
+        LOOPFLOW_TEST_NATIVE_FIXTURE=str(fixture),
         LOOPFLOW_NATIVE_TESTS="1",
         LF_DESKTOP_PERF_OUTPUT=str(output / "attempts.jsonl"),
         LF_DESKTOP_PERF_SAMPLES=str(samples),
@@ -422,10 +575,11 @@ def _run_native(output: Path, samples: int, soak_seconds: int) -> dict:
     return metadata
 
 
-def _run(output: Path, samples: int, baseline: Path | None, soak_seconds: int = 0) -> int:
+def _run(output: Path, samples: int, baseline: Path | None, soak_seconds: int, cli: Path) -> int:
     output.mkdir(parents=True, exist_ok=False)
     metadata = {
         "schema": 1,
+        "cli_sha256": hashlib.sha256(cli.read_bytes()).hexdigest(),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "host": {"name": platform.node(), "os": platform.platform(), "arch": platform.machine()},
         "build_mode": "SwiftPM debug -gnone",
@@ -436,6 +590,7 @@ def _run(output: Path, samples: int, baseline: Path | None, soak_seconds: int = 
                 (REPO / path).read_bytes()
                 for path in [
                     "swift/LoopflowTests/DesktopPerformanceTests.swift",
+                    "swift/LoopflowTests/DesktopNativeSessionFixture.swift",
                     "swift/LoopflowTests/SessionActionFixtures.swift",
                     "tests/fixtures/dto/roadmap_snapshot.json",
                     "tests/fixtures/dto/session_actions.json",
@@ -445,6 +600,7 @@ def _run(output: Path, samples: int, baseline: Path | None, soak_seconds: int = 
                     "tests/fixtures/dto/context_report.json",
                     "tests/fixtures/dto/flow_catalog.json",
                     "scripts/desktop_performance.py",
+                    "rust/loopflow/src/performance.rs",
                     "scripts/benchmarks/desktop-performance/record_live.py",
                 ]
             )
@@ -457,8 +613,12 @@ def _run(output: Path, samples: int, baseline: Path | None, soak_seconds: int = 
             outcome="unavailable", reason="Native benchmark requires macOS", exit_code=None
         )
     else:
-        metadata.update(_run_native(output, samples, soak_seconds))
+        try:
+            metadata.update(_run_native(output, samples, soak_seconds, cli))
+        except (OSError, RuntimeError, ValueError) as error:
+            metadata.update(outcome="failed", reason=str(error), exit_code=None)
     metadata["source_after"] = _sources()
+    metadata["cli_sha256_after"] = hashlib.sha256(cli.read_bytes()).hexdigest()
     _write(output / "run.json", metadata)
     summary = _report(output, baseline)
     print(f"{summary['status']}: {output / 'report.md'}")
@@ -484,6 +644,9 @@ def main() -> int:
     )
     run.add_argument("--baseline", type=Path)
     run.add_argument(
+        "--cli", type=Path, required=True, help="Source CLI for the owned native Session fixture"
+    )
+    run.add_argument(
         "--soak-seconds",
         type=int,
         default=0,
@@ -494,13 +657,27 @@ def main() -> int:
     )
     report.add_argument("output", type=Path)
     report.add_argument("--baseline", type=Path)
+    volume = commands.add_parser(
+        "volume", help="Summarize instrumented CLI receipts; launches nothing"
+    )
+    volume.add_argument("directory", type=Path)
     args = parser.parse_args()
+    if args.command == "volume":
+        result = _cli_volume(args.directory)
+        print(json.dumps(result, indent=2))
+        return 0 if result["status"] == "complete" else 1
     if args.command == "run":
         if args.soak_seconds < 0:
             parser.error("--soak-seconds cannot be negative")
         if args.samples < 1:
             parser.error("--samples must be positive")
-        return _run(args.output.resolve(), args.samples, args.baseline, args.soak_seconds)
+        return _run(
+            args.output.resolve(),
+            args.samples,
+            args.baseline,
+            args.soak_seconds,
+            args.cli.resolve(),
+        )
     summary = _report(args.output, args.baseline)
     print(args.output / "report.md")
     return 0 if summary["status"] == "complete" else 1

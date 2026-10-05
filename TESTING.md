@@ -79,7 +79,7 @@ uv run python scripts/check_architecture.py            # architecture owners and
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
 uv run pytest python/tests/test_lifecycle_scorecard.py # scorecard behavior
-uv run python scripts/desktop_performance.py run --output /tmp/desktop-check --samples 1
+uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-check --samples 1
 lf telemetry-daily                                     # maintainer report
 ```
 

@@ -96,7 +96,7 @@ def _export(trace: Path, table: str) -> str:
     ).stdout
 
 
-def _sample_rss(pid: int, seconds: int, path: Path) -> None:
+def _sample_resources(pid: int, seconds: int, path: Path) -> None:
     with path.open("w", encoding="utf-8") as out:
         for _ in range(seconds):
             reading = subprocess.run(
@@ -128,13 +128,13 @@ def record(args: argparse.Namespace) -> Path:
     trace_error: str | None = "skipped (--no-xctrace)"
     if args.xctrace:
         sampler = threading.Thread(
-            target=_sample_rss, args=(pid, args.seconds, output / "rss.jsonl"), daemon=True
+            target=_sample_resources, args=(pid, args.seconds, output / "rss.jsonl"), daemon=True
         )
         sampler.start()
         trace_error = _xctrace(pid, args.seconds, output / "hitches.trace", args.template)
         sampler.join()
     else:
-        _sample_rss(pid, args.seconds, output / "rss.jsonl")
+        _sample_resources(pid, args.seconds, output / "rss.jsonl")
     end = datetime.now()
     time.sleep(2)  # logd flushes signposts a moment after they are emitted.
     _log_show(pid, start, end, output / "signposts.ndjson")
@@ -211,7 +211,9 @@ def intervals(lines: list[str]) -> tuple[list[dict], list[dict]]:
             closed.append(
                 {
                     "name": started["name"],
-                    "scenario": _field(started["message"], "scenario") or _verb(started["message"]),
+                    "scenario": _field(started["message"], "scenario")
+                    or started["message"].strip()
+                    or "-",
                     "ms": (_stamp(entry) - started["begin"]) * 1000,
                     "outcome": message or "ready",
                 }
@@ -224,14 +226,17 @@ def _field(message: str, name: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _verb(message: str) -> str:
-    return message.strip() or "-"
+def _trace_rows(output: Path, table: str, recorded: bool) -> list[dict] | None:
+    path = output / f"{table}.xml"
+    if not recorded or not path.exists():
+        return None
+    try:
+        root = ElementTree.fromstring(path.read_text(encoding="utf-8"))
+    except ElementTree.ParseError:
+        return None
+    if not any(schema.get("name") == table for schema in root.iter("schema")):
+        return None
 
-
-def hitches(xml_text: str) -> list[dict]:
-    """Rows of an exported xctrace table: start and duration in nanoseconds."""
-    if not xml_text.strip():
-        return []
     rows = []
     values: dict[str, str] = {}
 
@@ -245,7 +250,6 @@ def hitches(xml_text: str) -> list[dict]:
             return element.text
         return values.get(element.get("ref", ""))
 
-    root = ElementTree.fromstring(xml_text)
     for row in root.iter("row"):
         start = text(row.find("start-time"))
         duration = text(row.find("duration"))
@@ -259,20 +263,6 @@ def hitches(xml_text: str) -> list[dict]:
             }
         )
     return rows
-
-
-def _trace_rows(output: Path, table: str, recorded: bool) -> list[dict] | None:
-    path = output / f"{table}.xml"
-    if not recorded or not path.exists():
-        return None
-    xml = path.read_text(encoding="utf-8")
-    try:
-        root = ElementTree.fromstring(xml)
-    except ElementTree.ParseError:
-        return None
-    if not any(schema.get("name") == table for schema in root.iter("schema")):
-        return None
-    return hitches(xml)
 
 
 def summarize(output: Path) -> dict:

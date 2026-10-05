@@ -13,6 +13,10 @@ ongoing conversation while recovery is active.
 
 The v0.13.1 version PR merged while v0.13.0 remained the latest published release.
 That gap left the Session filtering in PR #1421 absent from the installed Desktop.
+Release's October 5 evidence records v0.13.2 publication and CLI/app installation,
+with 43 interactive Sessions and no headless/closed records in default inventory.
+That closes this filtering-delivery gap, not LOO-304's performance acceptance.
+Its manual recovery does not prove unattended settlements or public smoke proof.
 Release-specific recovery evidence belongs in [Release memory](release/MEMORY.md).
 
 ## Review replacement (2026-10-04)
@@ -740,6 +744,14 @@ pass, including unchanged-cache writes and overlapping enumeration. The live
 recorder now includes sampled app CPU and requires twenty samples for p95;
 old RSS-only receipts remain CPU-unmeasured. These are source proofs, not
 installed steady-state or soak acceptance.
+Jack Heart's current LOO-304 brief removes interactive kickoff/demo gates, not
+rendered acceptance. The native journey harness and live recorder are starting
+points; full current-workspace coverage and the automated hour-long soak remain
+implementation work before a capable host can supply that evidence. Same-window
+Session coalescing does not prove cross-window deduplication or change-driven
+refresh. Copied SQLite alone cannot isolate retained checkout/process references
+or external effects. Release's installed filtering proof above supplies none of
+these performance measurements.
 
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)

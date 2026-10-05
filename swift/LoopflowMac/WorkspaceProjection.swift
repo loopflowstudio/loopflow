@@ -70,14 +70,12 @@ struct WorkspaceProjection {
         }
         waves = roadmaps.map { wave in
             let repo = wave.wave.repo
+            let records = waveSessions[wave.wave.id] ?? []
+            matched.formUnion(records.map(\.id))
             return WorkspaceWave(
                 id: WorkspaceNodeKey(repo: repo, work: .wave(id: wave.wave.id)),
                 roadmap: wave,
-                sessions: {
-                    let records = waveSessions[wave.wave.id] ?? []
-                    matched.formUnion(records.map(\.id))
-                    return records
-                }(),
+                sessions: records,
                 tasks: wave.tasks.items.sorted { $0.task.rank < $1.task.rank }.map { task in
                     let records = task.runtime.flatMap { taskSessions[$0.workId] } ?? []
                     matched.formUnion(records.map(\.id))

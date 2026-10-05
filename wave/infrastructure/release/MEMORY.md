@@ -1,5 +1,21 @@
 # Release memory
 
+## Installed schedule repair (2026-10-05)
+
+Infrastructure's installed release and telemetry jobs still referenced an old
+immutable executable after v0.13.3 installation. Both were reinstalled through
+`lf wave cron add` with their original 10:00 and 09:00 local schedules unchanged.
+Readback confirms loaded jobs now use the machine installation gate, so future
+published CLI promotions do not strand them on that old executable.
+
+The installed owner remains `infrastructure`: `infrastructure/release` is not
+registered, and no child-owner migration was attempted. Release history after
+refresh exposes three unresolved historical opportunities with unknown timezone
+provenance, zero executions and no qualifying pair. Do not backfill success or
+count this repair as unattended settlement. LOO-285 remains open for two adjacent
+original scheduled opportunities, distinct automatic executions, required proof
+and at least one publication without manual repair.
+
 ## Release completion responsibility (2026-10-05)
 
 Jack Heart directed Infrastructure on October 4 to ensure releases finish through

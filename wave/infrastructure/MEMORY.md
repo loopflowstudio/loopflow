@@ -1,5 +1,28 @@
 # infrastructure wave memory
 
+## Project configuration and review direction (2026-10-05)
+
+Jack Heart selected one shared local Wave configuration as the owner of the
+current Project binding for LOO-366. Checkout-local Git files must not reverse
+that binding or create duplicate Projects. This resolves the implementation's
+shared-file versus publication/synchronization question; retain exact-ID ensure,
+authored content, ongoing work, optional chapter creation with KRs and separate
+Task admission. The decision was delivered to LOO-366 as new direction; source
+implementation and configured acceptance remain unfinished.
+
+The current Infrastructure Project now recommends `code` (pursue, then PR review),
+following Jack's accepted review direction and installation of v0.13.3. Its KRs
+and targets are unchanged. Existing captured Flows retain their review boundaries.
+
+The October 5 operation retired LOO-326's two stopped recovery Flows and closed
+its finished independent conversation through supported commands. Completion
+still rejects unfinished read-only Exec `5f239ead-89f9-49c4-92c4-4c2f8b97ca94`;
+shipped PRs #1413/#1435 do not resolve that remaining lifecycle evidence gap.
+LOO-367's saved loop-decide failed on a native-thread mismatch; do not replace
+its conversation or replay on unchanged evidence. LOO-370's earlier disk blocker
+has cleared (169 GiB available); its unfinished conversion remains source work,
+not permission to migrate the installed Home.
+
 ## Release follow-through (2026-10-04)
 
 Jack Heart directed Infrastructure to take responsibility for finishing every

@@ -96,7 +96,7 @@ and the `WARP_`, `CLAUDE_CODE_` and `CODEX_` families except `CODEX_HOME`
 (account authority, owned elsewhere). One list, one place, covering `lf desktop`,
 the dev launcher and a hand-typed `open`.
 
-Rejected: rebuilding the environment from a login shell (`$SHELL -l -c env`).
+Rejected: rebuilding the environment by asking a login shell for its `env`.
 It would also retire `enrichedPath`, but costs hundreds of milliseconds against
 LOO-376's 400/1000 ms launch targets and depends on interactive rc files.
 Rejected: a clean environment only in `lf desktop`; other launchers stay tainted.
@@ -242,5 +242,6 @@ Interaction acceptance is Jack's demo review.
   most likely to change at demo.
 - Padding on provider TUIs changes their column count by about three cells.
 
-Check: kickoff probe `python3 lf381_probe.py <env>` (PTY capture of Codex
-footer) — colored under Ghostty/Warp environments, colorless with `NO_COLOR=1`.
+Check: kickoff PTY capture of the Codex 0.160.0 footer per environment (throwaway
+script, not in the repository) — colored under Ghostty and Warp environments,
+colorless with `NO_COLOR=1`.

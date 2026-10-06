@@ -39,6 +39,24 @@ rows and a per-row change log (the next step when a bulk reading stops fitting
 its budget; nothing here blocks it). Jack said he wants derived state in the
 database; this plan stores none (question 23).
 
+### Measuring
+
+A snapshot copy of Jack's store with this branch's schema is at
+`/private/tmp/claude-501/-Users-jack-src-loopflow-update-the-workspace-automatically-when/4ec913e9-a411-4564-b44d-282182f16a26/scratchpad/jhome`
+(made with `VACUUM INTO`, draft applied with `sqlite3`). It is disposable;
+never point a development `lf` at `~/.lf`. After changing the draft's
+indexes, recreate them on the copy by hand. Use a release build: a debug
+build compiles SQLite unoptimized.
+
+```bash
+cargo build --release -p loopflow
+python3 scratch/measure/warm.py <home> target/release/lf [sample.txt]   # six refreshes, request to answering frame
+python3 scratch/measure/cold.py <home> target/release/lf sample.txt     # first reading, sampled
+python3 scratch/measure/hot.py sample.txt 40 80                         # hot frames by sample count
+```
+
+Always record `uptime` beside a number; this machine is rarely quiet.
+
 ### Slices
 
 Each is implemented, compressed and realigned before the next.
@@ -50,8 +68,13 @@ Each is implemented, compressed and realigned before the next.
    scans every Exec (350 ms against 23 ms). Warm planning in the watch,
    release `lf`, request to answering frame: 0.30–0.69 s at load 71, against
    2.8–6.6 s at load 32 before. Six samples; the machine was never quiet.
-2. **Cold cost.** Profile the first reading and `wave list`; stop asking Git
-   about repositories and checkouts that no longer exist.
+2. **Cold cost. Started, unmeasured.** A first reading took 6.5–7.1 s at
+   load 18–70: about 2.7 s in Git subprocesses (`worktree_root`,
+   `is_clean_for_pathspec`, `rev_parse`, `git_common_dir`), 1.25 s in process
+   admission, the rest waiting on them. Written and compiled, not measured or
+   tested: `wave_main_repo` and `task_reference` no longer ask Git about a
+   repository or checkout directory that is gone. Still asking about missing
+   directories: `task_configuration_refusal`. Admission cost is out of scope.
 3. **Whatever the warm profile shows next**, until a warm planning reading is
    at most 300 ms on the copy. Then commit-to-frame for a Task and a Session.
 4. **A failing part backs off** instead of being re-read every second.

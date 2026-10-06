@@ -11,7 +11,7 @@
 //! than one that says nothing at all.
 
 use std::io::IsTerminal;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -871,12 +871,21 @@ fn now() -> time::OffsetDateTime {
     time::OffsetDateTime::now_utc()
 }
 
+/// A Wave's main checkout. A repository that is gone answers for itself:
+/// Git is asked only about directories that exist.
+fn wave_main_repo(repo: &str) -> PathBuf {
+    let repo = Path::new(repo);
+    repo.is_dir()
+        .then(|| crate::engine::worktrees::main_repo_root(repo).ok())
+        .flatten()
+        .unwrap_or_else(|| repo.to_path_buf())
+}
+
 /// Build the registry snapshot for one wave, probing its discovery endpoint
 /// for liveness.
 pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot> {
     let repo = wave.repo().to_string();
-    let goal_repo = crate::engine::worktrees::main_repo_root(Path::new(&repo))
-        .unwrap_or_else(|_| Path::new(&repo).to_path_buf());
+    let goal_repo = wave_main_repo(&repo);
     let tasks = store
         .list_tasks(Some(wave.id()))
         .await
@@ -966,8 +975,7 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
 async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()> {
     let mut ownership = std::collections::HashMap::<_, PmPortfolioValidator>::new();
     for wave in waves {
-        let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
-            .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
+        let repo = wave_main_repo(wave.repo());
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
         let row = match store.pm_snapshot(wave.id()).await {
             Ok(Some(row)) => row,
@@ -1501,7 +1509,8 @@ fn task_reference(
             .or_else(|| prs.iter().max_by_key(|pr| pr.sequence))
             .map(|pr| pr.branch.clone());
         let local = home_id.as_ref() == Some(local_home);
-        let worktree = if local {
+        // A removed checkout has no root to resolve.
+        let worktree = if local && task.worktree.is_dir() {
             crate::engine::git::worktree_root(&task.worktree)
                 .ok()
                 .and_then(|root| root.canonicalize().ok())

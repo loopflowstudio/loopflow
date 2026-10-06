@@ -17,7 +17,7 @@ def test_commands_distinguish_execution_from_reading_test_names():
     assert not _is_check(["cat", "scripts/test.py"])
 
 
-def test_report_counts_overlapping_checks_once_and_exposes_missing_runs(tmp_path: Path):
+def test_report_counts_overlapping_checks_once_and_exposes_missing_captures(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
     runs = tmp_path / "runs"
@@ -52,20 +52,20 @@ def test_report_counts_overlapping_checks_once_and_exposes_missing_runs(tmp_path
     (pending / "manifest.json").write_text(json.dumps(manifest))
     report = summarize(runs, repo, "2026-09-30T00:00:00Z", "2026-10-01T00:00:00Z")
     step = report["steps"]["implement"]
-    assert step["run_seconds"] == 60
+    assert step["capture_seconds"] == 60
     assert step["check_seconds"] == 30
     assert step["check_commands"] == 2
-    assert step["settled_runs"] == 1
-    assert step["unsettled_runs"] == 1
-    assert step["missing_context_runs"] == 1
+    assert step["settled_captures"] == 1
+    assert step["unsettled_captures"] == 1
+    assert step["missing_context_captures"] == 1
 
 
 @pytest.mark.parametrize("gap", ["runs_without_command_records", "commands_without_start"])
 def test_comparison_does_not_call_missing_commands_an_improvement(gap: str):
     baseline = {
-        "steps": {"implement": {"settled_runs": 2, "run_seconds": 100, "check_seconds": 30}}
+        "steps": {"implement": {"settled_captures": 2, "capture_seconds": 100, "check_seconds": 30}}
     }
-    current = {"steps": {"implement": {"settled_runs": 1, "run_seconds": 100, "check_seconds": 10}}}
+    current = {"steps": {"implement": {"settled_captures": 1, "capture_seconds": 100, "check_seconds": 10}}}
     assert compare(baseline, current)["implement"]["change_percentage_points"] == -20
     current["steps"]["implement"][gap] = 1
     assert compare(baseline, current) == {}

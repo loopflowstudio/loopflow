@@ -754,7 +754,7 @@ def _print_report(report: ResourceReport) -> None:
 
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Measure Loopflow build, cache, Run record, disk, and CPU budgets."
+        description="Measure Loopflow build, cache, capture history, disk, and CPU budgets."
     )
     parser.add_argument("--json", action="store_true", help="emit the complete report as JSON")
     parser.add_argument(

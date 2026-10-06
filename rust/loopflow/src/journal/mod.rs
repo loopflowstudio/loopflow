@@ -465,7 +465,6 @@ fn try_emit(
     ledger_insert(&context, &event, repo_root, exit_code);
 
     if terminal {
-        remove_exec_process_receipt();
         if context.minted_trace_id {
             std::env::remove_var(LF_TRACE_ID_ENV);
         }
@@ -474,6 +473,29 @@ fn try_emit(
     }
 
     Ok(())
+}
+
+fn record_exec_interruption(context: &ExecContext) {
+    if context.finished.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let event = LfEvent {
+        trace_id: context.trace_id.clone(),
+        ts: OffsetDateTime::now_utc(),
+        node: LfNode::Exec,
+        event: LfEventType::Escalated,
+        wave_name: context.wave.clone(),
+        worktree: Some(context.cwd.display().to_string()),
+        command: None,
+        flow: None,
+        skill: None,
+        index: None,
+        error: None,
+        signal: None,
+    };
+    // ctrlc's termination hook does not identify which signal arrived.
+    // Keep that unknown while recording the observed interrupted exit.
+    ledger_insert(context, &event, &context.cwd, Some(130));
 }
 
 /// Best-effort write into the machine-grain SQLite ledger. Never fails the
@@ -553,6 +575,10 @@ fn ledger_insert(context: &ExecContext, event: &LfEvent, repo_root: &Path, exit_
             false
         }
     };
+    // Both ordinary completion and interrupt cleanup retain identity until settlement.
+    if recorded && record.completed_at.is_some() {
+        remove_exec_process_receipt(context);
+    }
     let mut cost = context
         .receipts
         .lock()
@@ -640,11 +666,15 @@ fn create_exec_context(
     };
 
     let agent_caller = same_store
-        .then(|| std::env::var(AGENT_CALLER_ENV).ok())
+        .then(|| std::env::var_os(AGENT_CALLER_ENV))
         .flatten()
-        .map(|value| serde_json::from_str::<AgentCaller>(&value))
-        .transpose()
-        .map_err(std::io::Error::other)?;
+        .map(|value| {
+            let value = value
+                .into_string()
+                .map_err(|_| std::io::Error::other("agent caller is not valid UTF-8"))?;
+            serde_json::from_str::<AgentCaller>(&value).map_err(std::io::Error::other)
+        })
+        .transpose()?;
     // A direct child of this lf process must inherit this Exec, not the agent
     // edge that admitted it. Provider launches install their own fresh caller.
     std::env::remove_var(AGENT_CALLER_ENV);
@@ -768,35 +798,13 @@ fn create_exec_context(
     };
     set_context(context.clone());
     let interrupted = context.clone();
-    let directory = repo_root.to_path_buf();
     crate::engine::agent::register_interrupt_cleanup(move || {
-        if interrupted.finished.swap(true, Ordering::AcqRel) {
-            return;
-        }
-        let event = LfEvent {
-            trace_id: interrupted.trace_id.clone(),
-            ts: OffsetDateTime::now_utc(),
-            node: LfNode::Exec,
-            event: LfEventType::Escalated,
-            wave_name: interrupted.wave.clone(),
-            worktree: Some(directory.display().to_string()),
-            command: None,
-            flow: None,
-            skill: None,
-            index: None,
-            error: None,
-            signal: None,
-        };
-        // ctrlc's termination hook does not identify which signal arrived.
-        // Keep that unknown while recording the observed interrupted exit.
-        ledger_insert(&interrupted, &event, &directory, Some(130));
+        record_exec_interruption(&interrupted)
     });
     // Never write process-control receipts into a different inherited Home.
     if same_store {
         if let Err(error) = write_exec_process_receipt(&context) {
             debug!(error = %error, exec_id = %context.process_id, "live Exec receipt unavailable");
-        } else {
-            crate::engine::agent::register_interrupt_cleanup(remove_exec_process_receipt);
         }
     }
 
@@ -939,6 +947,18 @@ pub(crate) fn current_process_identity() -> Option<crate::durable::TaskWorkerOwn
     })
 }
 
+/// Caller provenance captured at process entry, before the environment is consumed.
+pub fn agent_caller() -> Option<AgentCaller> {
+    current_context().and_then(|context| context.agent_caller)
+}
+
+/// A nested command leaves checkpoint composition to its caller.
+pub fn has_caller() -> bool {
+    current_context().is_some_and(|context| {
+        context.agent_caller.is_some() || context.parent_process_id.is_some()
+    })
+}
+
 pub(crate) fn current_exec_id() -> Option<ExecId> {
     current_context().map(|context| context.process_id)
 }
@@ -998,8 +1018,7 @@ pub(crate) fn exec_process_evidence(store: &SqliteStore, exec: &ExecId) -> Proce
     {
         return receipt.process_evidence();
     }
-    // Receipts are keyed by PID, so a later process or a prune can remove the
-    // only record of one that never settled. A restart still proves its exit.
+    // Historical Execs can lack identity evidence. A restart still proves exit.
     match store.exec(exec) {
         Ok(Some(record))
             if record.completed_at.is_some() || began_before_boot(record.started_at) =>
@@ -1128,6 +1147,15 @@ fn clear_context() {
 pub(crate) fn read_exec_process_receipts_at(
     lf_home: &Path,
 ) -> Result<Vec<ExecProcessReceipt>, std::io::Error> {
+    Ok(read_exec_process_receipt_files_at(lf_home)?
+        .into_iter()
+        .map(|(_, receipt)| receipt)
+        .collect())
+}
+
+fn read_exec_process_receipt_files_at(
+    lf_home: &Path,
+) -> Result<Vec<(PathBuf, ExecProcessReceipt)>, std::io::Error> {
     let root = lf_home.join(EXEC_PROCESS_ROOT);
     let entries = match fs::read_dir(root) {
         Ok(entries) => entries,
@@ -1141,38 +1169,55 @@ pub(crate) fn read_exec_process_receipts_at(
             continue;
         }
         let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("json")
-            || path
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .and_then(|value| value.parse::<u32>().ok())
-                .is_none()
-        {
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
             continue;
         }
-        let Ok(content) = fs::read(path) else {
+        let Ok(content) = fs::read(&path) else {
             continue;
         };
         let Ok(receipt) = serde_json::from_slice::<ExecProcessReceipt>(&content) else {
             continue;
         };
         if receipt.schema_version == 1 {
-            receipts.push(receipt);
+            receipts.push((path, receipt));
         }
     }
     Ok(receipts)
 }
 
-pub(crate) fn remove_exec_process_receipt_at(
+pub(crate) fn prune_exec_process_receipts_at(
     lf_home: &Path,
-    pid: u32,
-) -> Result<bool, std::io::Error> {
-    let path = lf_home.join(EXEC_PROCESS_ROOT).join(format!("{pid}.json"));
-    match fs::remove_file(path) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error),
+    pids: &[u32],
+) -> Result<u32, std::io::Error> {
+    if pids.is_empty() {
+        return Ok(0);
     }
+    let store = SqliteStore::open_execs_read_only(&lf_home.join("loopflow.db"))
+        .map_err(std::io::Error::other)?;
+    let mut removed = 0;
+    for (path, receipt) in read_exec_process_receipt_files_at(lf_home)? {
+        if !pids.contains(&receipt.pid)
+            || receipt.process_evidence() != ProcessIdentityEvidence::Dead
+        {
+            continue;
+        }
+        let Ok(id) = ExecId::parse(&receipt.exec_id) else {
+            continue;
+        };
+        let record = store.exec(&id).map_err(std::io::Error::other)?;
+        if !record.is_some_and(|record| {
+            record.trace_id.as_str() == receipt.trace_id && record.completed_at.is_some()
+        }) {
+            continue;
+        }
+        // Unfinished or unrecorded Execs retain the only evidence of their exit.
+        match fs::remove_file(path) {
+            Ok(()) => removed += 1,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(removed)
 }
 
 fn write_exec_process_receipt(context: &ExecContext) -> Result<(), std::io::Error> {
@@ -1190,16 +1235,19 @@ fn write_exec_process_receipt(context: &ExecContext) -> Result<(), std::io::Erro
         started_at,
     };
     let bytes = serde_json::to_vec(&receipt).map_err(std::io::Error::other)?;
-    let path = root.join(format!("{pid}.json"));
-    let temporary = root.join(format!(".{pid}.json.tmp"));
+    let path = root.join(format!("{}.json", context.process_id));
+    let temporary = root.join(format!(".{}.json.tmp", context.process_id));
     fs::write(&temporary, bytes)?;
     fs::rename(temporary, path)
 }
 
-fn remove_exec_process_receipt() {
-    let path = crate::store::lf_home_dir()
+fn remove_exec_process_receipt(context: &ExecContext) {
+    let Some(home) = context.ledger_path.parent() else {
+        return;
+    };
+    let path = home
         .join(EXEC_PROCESS_ROOT)
-        .join(format!("{}.json", std::process::id()));
+        .join(format!("{}.json", context.process_id));
     if let Err(error) = fs::remove_file(path) {
         if error.kind() != std::io::ErrorKind::NotFound {
             debug!(error = %error, "failed to remove live Exec receipt");
@@ -1556,11 +1604,13 @@ mod tests {
             fields.clone(),
         );
         let parent = super::current_context().expect("parent");
+        assert!(!super::has_caller());
         super::clear_context();
         let child = super::ensure_exec_context(repo.path(), &fields)
             .expect("child context")
             .expect("child");
 
+        assert!(super::has_caller());
         assert_ne!(parent.process_id, child.process_id);
         assert_eq!(
             child.trace_id, parent.trace_id,
@@ -1816,6 +1866,85 @@ mod tests {
         assert!(super::read_exec_process_receipts_at(guard.home())
             .expect("read terminal receipt state")
             .is_empty());
+    }
+
+    #[test]
+    fn unfinished_exec_retains_identity_across_terminal_failure_interrupt_and_pid_reuse() {
+        let guard = journal_test_guard();
+        let repo = TestRepo::new();
+        for interrupt in [false, true] {
+            emit(
+                repo.path(),
+                LfNode::Exec,
+                LfEventType::Started,
+                started_fields(&["lf".into(), "task".into()], repo.path(), "runtime"),
+            );
+            let context = super::current_context().unwrap();
+            let store = super::open_ledger().unwrap();
+            let before = store.exec(&context.process_id).unwrap().unwrap();
+            assert!(before.completed_at.is_none());
+            let foreign = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
+            foreign.execute_batch("BEGIN IMMEDIATE").unwrap();
+            super::TEST_RECEIPT_WAIT.with(|wait| wait.set(std::time::Duration::ZERO));
+            if interrupt {
+                super::record_exec_interruption(&context);
+                super::clear_context();
+            } else {
+                emit(
+                    repo.path(),
+                    LfNode::Exec,
+                    LfEventType::Completed,
+                    LfEventFields::default(),
+                );
+                // Cleanup following the failed ordinary finish must not erase identity.
+                super::record_exec_interruption(&context);
+            }
+            foreign.execute_batch("ROLLBACK").unwrap();
+            assert_eq!(
+                super::exec_process_evidence(&store, &context.process_id),
+                ProcessIdentityEvidence::Live
+            );
+
+            // Another Exec with the same PID must neither replace nor remove this receipt.
+            let mut replacement = context.clone();
+            replacement.process_id = ExecId::new();
+            super::write_exec_process_receipt(&replacement).unwrap();
+            super::remove_exec_process_receipt(&replacement);
+            assert_eq!(
+                super::prune_exec_process_receipts_at(guard.home(), &[std::process::id()]).unwrap(),
+                0
+            );
+            assert_eq!(
+                super::exec_process_evidence(&store, &context.process_id),
+                ProcessIdentityEvidence::Live
+            );
+
+            // A failed OS observation stays unknown, including during pruning.
+            let previous_path = std::env::var_os("PATH");
+            std::env::set_var("PATH", guard.home().join("no-programs"));
+            let unknown = super::exec_process_evidence(&store, &context.process_id);
+            let pruned = super::prune_exec_process_receipts_at(guard.home(), &[std::process::id()]);
+            match previous_path {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+            assert_eq!(unknown, ProcessIdentityEvidence::Unknown);
+            assert_eq!(pruned.unwrap(), 0);
+
+            // Model a reused PID: the retained birth belongs to an earlier process.
+            let mut dead = context.clone();
+            dead.process_started_at = Some(context.process_started_at.unwrap() - 60);
+            super::write_exec_process_receipt(&dead).unwrap();
+            assert_eq!(
+                super::exec_process_evidence(&store, &context.process_id),
+                ProcessIdentityEvidence::Dead
+            );
+            assert_eq!(
+                super::prune_exec_process_receipts_at(guard.home(), &[std::process::id()]).unwrap(),
+                0
+            );
+            assert_eq!(store.exec(&context.process_id).unwrap().unwrap(), before);
+        }
     }
 
     /// Run one Exec while another connection holds SQLite's write lock, through

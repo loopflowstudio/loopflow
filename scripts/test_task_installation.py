@@ -12,6 +12,9 @@ PROOFS = {
     "declared_agent_can_start_another_tasks_flow": "session_lifecycle_tests",
     "task_operation_starts_with_durable_history_after_claim_only_failure": "flow_tests",
     "task_flow_read_pins_topology_counts_both_returns_and_rejects_a_bad_restart": "flow_tests",
+    "installation_uses_candidate_authority_from_any_checkout": "global_commands",
+    "installation_reaches_candidate_verdict_with_an_unreadable_task_registry": "global_commands",
+    "early_observation_records_preflight_and_screenshot_child_ancestry": "exec_ownership_tests",
 }
 
 

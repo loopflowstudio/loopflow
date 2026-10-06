@@ -315,7 +315,10 @@ async fn reconcile_task(
         return Ok(reason);
     }
     let Some(flow) = store.task_flow(&task.id).await.map_err(error)? else {
-        return Ok("no unfinished captured Flow; select a Flow with lf task run".into());
+        return Ok(
+            "no unfinished captured Flow; select a Flow with lf --task <issue> flow start <flow>"
+                .into(),
+        );
     };
     if let Some(failure) = &flow.failure {
         return Ok(format!(
@@ -352,7 +355,7 @@ async fn reconcile_task(
         state.exec_id = None;
     }
     let completed = flow
-        .current_attempt
+        .selected_capture
         .as_ref()
         .is_some_and(|attempt| attempt.completed())
         || store
@@ -360,7 +363,7 @@ async fn reconcile_task(
             .flow_operation_completed(flow.id())
             .map_err(error)?;
     let retry = !completed
-        && (state.exec_id.is_some() || flow.current_attempt.is_some() || flow.claim.is_some());
+        && (state.exec_id.is_some() || flow.selected_capture.is_some() || flow.claim.is_some());
     let config = crate::engine::config::load_config_or_default(Some(&task.worktree));
     if retry && state.retries >= config.automation.retries {
         return Ok(

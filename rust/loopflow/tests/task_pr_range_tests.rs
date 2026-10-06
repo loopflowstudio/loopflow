@@ -462,7 +462,7 @@ fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
     let before_publish = repo.head_sha();
 
     let task = register_task(home.path(), repo.path(), branch, &stale_base);
-    std::env::set_var("LF_RUN_ID", "run_00000000000000000000000000000000");
+    std::env::set_var("LF_CAPTURE_KEY", "run_00000000000000000000000000000000");
 
     create_or_update_pr(
         repo.path(),

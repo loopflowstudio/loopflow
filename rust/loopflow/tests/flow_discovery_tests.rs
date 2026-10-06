@@ -75,7 +75,7 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
             cwd: dir.path().into(),
             message: None,
             model: None,
-            current_attempt: None,
+            selected_capture: None,
             pending_session_id: None,
             ready_summary: None,
             worker_generation: 0,

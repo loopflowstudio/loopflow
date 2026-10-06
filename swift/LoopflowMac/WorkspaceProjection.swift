@@ -49,9 +49,15 @@ struct WorkspaceProjection {
     init(roadmaps: [WaveRoadmap], sessions: [SessionRecord]) {
         var matched = Set<String>()
         let visibleTaskIds = Set(roadmaps.flatMap { $0.tasks.items.compactMap { $0.runtime?.workId } })
+        // One pass over the Sessions, so a plan of many Tasks costs no more.
+        var byTask: [String: [SessionRecord]] = [:]
+        for session in sessions where session.primaryScope == nil {
+            var ids = Set(session.taskIds)
+            if let id = session.workspace?.taskId { ids.insert(id) }
+            for id in ids { byTask[id, default: []].append(session) }
+        }
         func attached(to taskId: String?) -> [SessionRecord] {
-            guard let taskId else { return [] }
-            let records = sessions.filter { $0.primaryScope == nil && ($0.workspace?.taskId == taskId || $0.taskIds.contains(taskId)) }
+            guard let taskId, let records = byTask[taskId] else { return [] }
             matched.formUnion(records.map(\.id))
             return records
         }
@@ -412,8 +418,8 @@ final class WorkspaceNavigation {
     var preparedTaskWorktrees: [String: WorkspaceIdentity] = [:]
     /// Tasks whose Comments are expanded; a presentation fact, not a reading.
     var expandedComments: Set<String> = []
-    /// Tasks whose recent Runs are disclosed; the Runs are read only then.
-    var expandedRuns: Set<String> = []
+    /// Tasks whose Session history is disclosed; history is read only then.
+    var expandedHistory: Set<String> = []
     /// Wave planning notices whose Details are open, keyed by Task ID.
     var expandedNotices: Set<String> = []
     var repositoryCollapsed = false

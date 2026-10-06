@@ -48,7 +48,7 @@ and verify the resulting artifact. Otherwise edit the local working design.
 Record named, dated decisions, explicit draft or acceptance status, remaining
 work, and proof. Omit session/step instructions and ambient Home facts. Name
 historical skills without dollar prefixes; keep verbatim transcripts as separate
-reference evidence. Reread the plan as input to another skill in a fresh Run:
+reference evidence. Reread the plan as input to another skill in a fresh Session:
 it must not select that reader's skill or claim its execution environment.
 
 The design should make the intended outcome, chosen approach, remaining work,

@@ -16,3 +16,16 @@ INSERT INTO pm_project_name_cutover
     (repo, provider, id, body, observed_at, archived, membership_unresolved)
 SELECT repo, provider, id, body, observed_at, archived, membership_unresolved
 FROM pm_projects WHERE provider = 'linear';
+
+-- Mutation recovery only: the Home-local Wave binding owns current selection.
+CREATE TABLE project_transitions (
+    wave_id TEXT NOT NULL REFERENCES waves(id),
+    successor_id TEXT NOT NULL,
+    predecessor_id TEXT,
+    reset_name TEXT,
+    created_at INTEGER NOT NULL,
+    settled_at INTEGER,
+    PRIMARY KEY (wave_id, successor_id)
+);
+CREATE UNIQUE INDEX project_transitions_pending
+    ON project_transitions(wave_id) WHERE settled_at IS NULL;

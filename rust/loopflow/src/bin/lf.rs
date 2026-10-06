@@ -830,6 +830,19 @@ fn print_task_control(
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     match command {
+        WaveCommand::Ensure { wave, json } => {
+            let result = tokio::runtime::Runtime::new()?
+                .block_on(loopflow::ops::project::ensure(repo, wave))?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!(
+                    "Wave {wave}: Project {} ({}) is active",
+                    result.name, result.id
+                );
+            }
+            Ok(())
+        }
         WaveCommand::BindProject {
             wave,
             project,

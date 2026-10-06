@@ -21,6 +21,7 @@ other implementation and proof gaps.
 
 ```bash
 lf wave bind-project product <project-uuid> --json
+lf wave ensure product --json
 ```
 
 Validate one existing Project and record `pm.linear_project` in
@@ -32,7 +33,16 @@ Project summary carries a required `current` boolean for Desktop. Status and
 roadmap retain predecessor Projects and Tasks. Registration and unstarted managed
 work require that exact Project to be In Progress; another In Progress Project
 does not compete with the binding. Already-started Tasks retain continuation in
-predecessor Projects. Ensure and rotation recovery must finish before release.
+predecessor Projects.
+
+`ensure` activates the configured Backlog or Planned Project with a status-only
+write. Without a binding it reserves one UUID in SQLite before creation, attaches
+it to the Wave's Initiative, activates it, then writes the shared binding. Retry
+reuses the reservation across uncertain responses and failed binding writes.
+Terminal, archived, paused or foreign Projects report their condition without
+replacement. Names, content and empty Flow remain intact. Ensure neither searches
+for candidates nor performs rotation; status and roadmap never call it. Rotation
+recovery and Desktop activation remain unfinished in this branch.
 
 ## Rotate the plan, preserve the work
 

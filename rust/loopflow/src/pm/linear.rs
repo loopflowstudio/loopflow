@@ -848,6 +848,22 @@ impl LinearClient {
         Ok(project_id)
     }
 
+    /// Check the exact destination before reserving or creating an ordinary Project.
+    pub(crate) async fn require_initiative(&self, initiative_id: &str) -> PmResult<()> {
+        let response: Value = self
+            .graphql(
+                "query ProjectInitiative($id: String!) { initiative(id: $id) { id } }",
+                json!({"id": initiative_id}),
+            )
+            .await?;
+        if response["initiative"]["id"].as_str() != Some(initiative_id) {
+            return Err(PmError::Message(format!(
+                "Initiative {initiative_id} is unavailable"
+            )));
+        }
+        Ok(())
+    }
+
     pub async fn attach_project(&self, initiative_id: &str, project_id: &str) -> PmResult<()> {
         let _: Value = self
             .graphql(

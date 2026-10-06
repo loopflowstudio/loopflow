@@ -243,6 +243,7 @@ struct Provider {
     interrupt_after: Option<usize>,
     unavailable: bool,
     interrupt_after_transfer_readback: bool,
+    binding_collision: Option<std::path::PathBuf>,
     status_change_at_final_inventory: Option<(String, String)>,
     inventory_pause: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
 }
@@ -301,6 +302,8 @@ async fn graphql(
     }
     let data = if query.contains("query ListTeams") {
         json!({"teams":page(vec![json!({"id":"team-1", "name":"Fixture", "key":"FIX", "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"})])})
+    } else if query.contains("query ProjectInitiative") {
+        json!({"initiative":{"id":id}})
     } else if query.contains("query ListInitiatives") {
         json!({"initiatives":page(vec![
             json!({"id":"initiative-a","name":"A","description":""}),
@@ -378,6 +381,11 @@ async fn graphql(
     } else {
         panic!("unexpected fixture operation: {query}")
     };
+    if query.contains("mutation SetProjectStatus") && vars["statusId"] == "started" {
+        if let Some(path) = provider.binding_collision.take() {
+            std::fs::create_dir_all(path).unwrap();
+        }
+    }
     if query.starts_with("mutation") {
         provider.mutations += 1;
         provider.revision += 1;
@@ -1777,6 +1785,312 @@ async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
             assert_eq!(
                 provider.lock().await.projects["a-old"]["status"]["type"],
                 "backlog"
+            );
+        })
+        .await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn project_ensure_retries_each_uncertain_mutation_with_one_identity() {
+    for interrupted in 1..=3 {
+        let directory = tempfile::tempdir().unwrap();
+        let repo = fixture_repo(directory.path());
+        let provider = Arc::new(Mutex::new(Provider {
+            interrupt_after: Some(interrupted),
+            ..Provider::default()
+        }));
+        let (url, server) = serve_fixture(provider.clone()).await;
+        let context = context(&directory.path().join("registry.db"), &repo, &url).await;
+        let store = context.store.clone();
+        PM_TEST_CONTEXT
+            .scope(context, async {
+                let wave = store
+                    .get_wave_at(&WaveLocator::discover(&repo, "a").unwrap())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(crate::ops::project::ensure(&repo, "a").await.is_err());
+                let pending = store
+                    .pending_project_transition(wave.id())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(provider.lock().await.projects.len(), 1);
+                assert!(provider
+                    .lock()
+                    .await
+                    .projects
+                    .contains_key(&pending.successor_id));
+                provider.lock().await.unavailable = false;
+                let project = crate::ops::project::ensure(&repo, "a").await.unwrap();
+                let repeated = crate::ops::project::ensure(&repo, "a").await.unwrap();
+                assert_eq!(project, repeated);
+                assert_eq!(project.id, pending.successor_id);
+                assert_eq!(project.status, ProjectStatus::Started);
+                assert!(project.flow.is_empty());
+                assert!(project.krs.is_empty());
+                assert_eq!(provider.lock().await.projects.len(), 1);
+                assert_eq!(provider.lock().await.mutations, 3);
+                assert!(store
+                    .pending_project_transition(wave.id())
+                    .await
+                    .unwrap()
+                    .is_none());
+                assert_eq!(
+                    crate::work::wave::project_binding::read_project_binding(
+                        directory.path(),
+                        wave.id()
+                    )
+                    .unwrap()
+                    .as_deref(),
+                    Some(project.id.as_str())
+                );
+            })
+            .await;
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn project_ensure_concurrent_callers_share_one_project() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(Provider::default()));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let context = context(&directory.path().join("registry.db"), &repo, &url).await;
+    PM_TEST_CONTEXT
+        .scope(context, async {
+            let (first, second) = tokio::join!(
+                crate::ops::project::ensure(&repo, "a"),
+                crate::ops::project::ensure(&repo, "a"),
+            );
+            assert_eq!(first.unwrap(), second.unwrap());
+            assert_eq!(provider.lock().await.projects.len(), 1);
+            assert_eq!(provider.lock().await.mutations, 3);
+        })
+        .await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn project_ensure_activates_exact_backlog_without_changing_content_or_tasks() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let mut fixture = provider_fixture();
+    let id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
+    let mut project = fixture.projects.remove("a-old").unwrap();
+    project["id"] = json!(id);
+    project["name"] = json!("Summer work — customer requests");
+    project["status"]["type"] = json!("backlog");
+    let content = "# Authored plan\n\n## KRs\n- [ ] Preserve work\n";
+    project["content"] = json!(content);
+    fixture.projects.insert(id.into(), project);
+    for issue in fixture.issues.values_mut() {
+        if issue["project"]["id"] == "a-old" {
+            issue["project"]["id"] = json!(id);
+        }
+        issue["branchName"] = Value::Null;
+        issue["updatedAt"] = json!("1970-01-01T00:00:00Z");
+    }
+    // Unrelated current Projects cannot override explicit selection.
+    let mut competing = fixture.projects[id].clone();
+    competing["id"] = json!("competing");
+    competing["status"]["type"] = json!("started");
+    fixture.projects.insert("competing".into(), competing);
+    let issues = fixture.issues.clone();
+    let provider = Arc::new(Mutex::new(fixture));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let context = context(&directory.path().join("registry.db"), &repo, &url).await;
+    PM_TEST_CONTEXT
+        .scope(context, async {
+            crate::ops::project::bind_project(&repo, "a", id)
+                .await
+                .unwrap();
+            let first = crate::ops::project::ensure(&repo, "a").await.unwrap();
+            assert_eq!(
+                first,
+                crate::ops::project::ensure(&repo, "a").await.unwrap()
+            );
+            assert_eq!(first.id, id);
+            assert_eq!(first.name, "Summer work — customer requests");
+            assert_eq!(first.status, ProjectStatus::Started);
+            assert!(first.flow.is_empty());
+            assert_eq!(first.krs.len(), 1);
+            let state = provider.lock().await;
+            assert_eq!(state.projects[id]["content"], content);
+            assert_eq!(state.issues, issues);
+            assert_eq!(state.projects.len(), 3);
+            assert_eq!(state.mutations, 1);
+        })
+        .await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn project_ensure_preserves_archived_pending_identity_and_failed_reads() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(Provider {
+        unavailable: true,
+        ..Provider::default()
+    }));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let context = context(&directory.path().join("registry.db"), &repo, &url).await;
+    let store = context.store.clone();
+    PM_TEST_CONTEXT
+        .scope(context, async {
+            let wave = store
+                .get_wave_at(&WaveLocator::discover(&repo, "a").unwrap())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(crate::ops::project::ensure(&repo, "a").await.is_err());
+            assert!(store
+                .pending_project_transition(wave.id())
+                .await
+                .unwrap()
+                .is_none());
+            assert_eq!(provider.lock().await.mutations, 0);
+            {
+                let mut state = provider.lock().await;
+                state.unavailable = false;
+                state.interrupt_after = Some(1);
+            }
+            assert!(crate::ops::project::ensure(&repo, "a").await.is_err());
+            let pending = store
+                .pending_project_transition(wave.id())
+                .await
+                .unwrap()
+                .unwrap();
+            {
+                let mut state = provider.lock().await;
+                state.unavailable = false;
+                state.projects.get_mut(&pending.successor_id).unwrap()["archivedAt"] =
+                    json!("2026-10-05T00:00:00Z");
+            }
+            let error = crate::ops::project::ensure(&repo, "a").await.unwrap_err();
+            assert!(error.to_string().contains("archived"), "{error}");
+            assert_eq!(
+                store.pending_project_transition(wave.id()).await.unwrap(),
+                Some(pending)
+            );
+            assert_eq!(provider.lock().await.projects.len(), 1);
+            assert_eq!(provider.lock().await.mutations, 1);
+        })
+        .await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn project_ensure_recovers_failed_binding_and_post_binding_interruption() {
+    for already_bound in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let repo = fixture_repo(directory.path());
+        let provider = Arc::new(Mutex::new(Provider::default()));
+        let (url, server) = serve_fixture(provider.clone()).await;
+        let context = context(&directory.path().join("registry.db"), &repo, &url).await;
+        let store = context.store.clone();
+        PM_TEST_CONTEXT
+            .scope(context, async {
+                let wave = store
+                    .get_wave_at(&WaveLocator::discover(&repo, "a").unwrap())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let config = directory
+                    .path()
+                    .join("waves")
+                    .join(wave.id().as_str())
+                    .join("config.yaml");
+                provider.lock().await.binding_collision = Some(config.clone());
+                assert!(crate::ops::project::ensure(&repo, "a").await.is_err());
+                let pending = store
+                    .pending_project_transition(wave.id())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    provider.lock().await.projects[&pending.successor_id]["status"]["type"],
+                    "started"
+                );
+                std::fs::remove_dir(&config).unwrap();
+                // A real unrelated edit survives recovery. The second case models the
+                // complete binding write with its settlement response still missing.
+                let initial = if already_bound {
+                    format!(
+                        "# retained\npm:\n  linear_project: {}\nowner: 'policy'\n",
+                        pending.successor_id
+                    )
+                } else {
+                    "# retained\nowner: 'policy'\n".into()
+                };
+                std::fs::write(&config, &initial).unwrap();
+                let project = crate::ops::project::ensure(&repo, "a").await.unwrap();
+                assert_eq!(project.id, pending.successor_id);
+                assert_eq!(provider.lock().await.mutations, 3);
+                assert_eq!(provider.lock().await.projects.len(), 1);
+                assert!(store
+                    .pending_project_transition(wave.id())
+                    .await
+                    .unwrap()
+                    .is_none());
+                let saved = std::fs::read_to_string(config).unwrap();
+                assert!(saved.starts_with("# retained\n"));
+                assert!(saved.contains("owner: 'policy'\n"));
+                if already_bound {
+                    assert_eq!(saved, initial);
+                }
+            })
+            .await;
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn project_ensure_does_not_reopen_newer_completed_history() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(Provider::default()));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let context = context(&directory.path().join("registry.db"), &repo, &url).await;
+    let store = context.store.clone();
+    PM_TEST_CONTEXT
+        .scope(context, async {
+            let wave = store
+                .get_wave_at(&WaveLocator::discover(&repo, "a").unwrap())
+                .await
+                .unwrap()
+                .unwrap();
+            let mut completed = crate::ops::project::ensure(&repo, "a").await.unwrap();
+            let id = completed.id.clone();
+            completed.status = ProjectStatus::Completed;
+            completed.revision = Some("2026-10-05T00:00:00Z".into());
+            store
+                .put_pm_project(
+                    wave.id(),
+                    "linear",
+                    "initiative-a",
+                    completed.clone(),
+                    1791158400,
+                    None,
+                )
+                .await
+                .unwrap();
+            provider.lock().await.projects.get_mut(&id).unwrap()["status"]["type"] =
+                json!("backlog");
+            let error = crate::ops::project::ensure(&repo, "a").await.unwrap_err();
+            assert!(error.to_string().contains("completed"), "{error}");
+            assert_eq!(provider.lock().await.mutations, 3);
+            assert_eq!(
+                store
+                    .get_project_by_project(&id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .plan
+                    .status,
+                ProjectStatus::Completed
             );
         })
         .await;

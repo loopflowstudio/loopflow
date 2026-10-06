@@ -30,6 +30,7 @@ mod flows;
 mod metrics;
 mod planning;
 mod pr_landings;
+mod project_transitions;
 mod session_events;
 pub(crate) mod sessions;
 mod task_work;

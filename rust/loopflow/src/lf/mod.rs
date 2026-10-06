@@ -671,6 +671,12 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
+    /// Ensure the configured Project is active, or create one with a durable identity
+    Ensure {
+        wave: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Bind an existing Project UUID as this Wave's shared current selection
     BindProject {
         wave: String,

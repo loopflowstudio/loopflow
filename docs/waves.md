@@ -1,6 +1,15 @@
 # Waves
 
 ```bash
+lf wave ensure product --json
+```
+
+Prepare the Wave's configured Project for work. With no binding, reserve and create
+one ordinary Project; retries reuse its identity. To select an existing Project,
+run `lf wave bind-project product <project-uuid>` first. Ensure activates Backlog
+or Planned status without changing its name, content, Tasks or optional Flow.
+
+```bash
 lf --wave shipper wave/operate "invoices first"
 lf wave status shipper
 ```

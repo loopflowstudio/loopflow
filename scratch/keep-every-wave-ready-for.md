@@ -69,8 +69,8 @@ Operation routing, metrics and Project editing now select the shared ID through
 `project::current_project`/`select_project`. Status/roadmap retain all Project/Task
 planning; Rust/Swift summaries carry required `current` selection rather than
 Desktop inferring it from Started status. Retained Task navigation uses the latest
-Wave even during a selection switch. SQLite admission now validates the binding; rotation still uses name selectors.
-Ensure, transitions and Desktop activation remain unfinished;
+Wave even during a selection switch. SQLite admission now validates the binding. Exact-ID ensure and creation recovery are
+implemented below; rotation still uses name selectors and Desktop activation is unfinished;
 Intelligence has not been bound or activated on the installed Home.
 
 ## Intelligence repair — Jack Heart's October 5 steer
@@ -96,8 +96,8 @@ Source inspection confirms `migration_adoption_accepts_a_started_project_without
 uses Started status and disables promotion. It proves neither Backlog activation
 nor the configured Intelligence repair. Existing migration adoption can promote
 only from retained migration evidence; it is not a general bootstrap API.
-The empty-Flow refusal is removed and explicit binding exists in source; ensure
-and activation remain unimplemented. No installed repair is established, and a branch binary must not write
+The empty-Flow refusal is removed; explicit binding and status-only ensure exist
+in source. No installed repair is established, and a branch binary must not write
 the installed Home. Delivery must report the actual supported binding/activation
 commands once implemented and available in a published installation.
 
@@ -145,50 +145,38 @@ Wave acceptance.
 
 ## Remaining coherent cut
 
-Registration selects accepted issue ownership, content and acquisition age within
-its insertion transaction, rejecting invalid, removed or terminal observations.
-Both public APIs return the committed Task for publication, checkout finishing and
-execution. They now share one SQLite insertion path, including admission, optional
-initialization event and readback. The queued writer receives the existing Wave
-guard by ownership; cancellation cannot release it before commit. Planning is accepted
-into that owned Task without another full Task copy. Reserved Task/PR/
-checkout identity and initial facts without a cached observation remain intact.
-Registration now uses one runtime, store and resolved Wave through selection and
-insertion; `resolve_project_for_task` borrows them. The redundant store opener is
-deleted, and the prepared-registration operation fixture supplies its binding.
+Registration and rotation membership work, exact-ID readers and SQLite admission
+are implemented. Both registration APIs share accepted-fact insertion and retain
+Wave/checkout guards through commit. Already-started Tasks can continue in a
+predecessor. Retained evidence, malformed-body failures, writer inventory and
+identity-preservation details remain below and at
+`1825a5a45c743833f625e8c8144949ed139b97f9:scratch/keep-every-wave-ready-for.md`.
 
-Rotation takes ordered Wave locks, enumerates exact Task roots and acquires one
-checkout lock set before classification. Queued writers retain both scopes through
-commit. Failed reset releases exclusion so starts can retry. Automatic backlog
-cancellation is deleted; unreviewed backlog remains historical and unresolved
-abandonment needs explicit settlement. Hierarchical admission covers missing roots
-without scanning Task population and permits sibling progress. Git leases remain
-separate. Detailed registration, rotation and admission evidence remains at
-`7e7204ddad0092beb1a633676f5d44af0853a9a8:scratch/keep-every-wave-ready-for.md`.
-These proofs establish neither configuration-switch recovery nor readiness.
+October 5: step 4 now adds `project_transitions` to the existing `project_readiness`
+draft and exposes `lf wave ensure <wave> --json`. One unfinished receipt per Wave
+reserves a random UUID before provider creation. Queued receipt writes retain the
+Wave guard. Ensure checks exact destination access, recovers an unattached reserved
+Project, activates Backlog/Planned with status-only writes, accepts provider facts,
+then writes/reads the shared binding and settles the receipt. Ordinary ensure has
+no KR or Flow prerequisite and no candidate scan. It leaves pending reset recovery
+to rotation. Explicit binding cannot strand another pending reservation.
 
-October 5 reconciliation: step 3's SQLite selector replacement is complete,
-superseding the previous iteration's instruction to implement it. The branch is
-not releasable. Steps 4–7 still own ensure,
-transition recovery, KR-first rotation, Desktop activation and configured acceptance.
-Registration and first managed start now share `durable::require_selected_project`: the
-configured provider ID and Started status are required; other Started Projects do
-not compete. `require_current_task_project` preserves the Started exemption. Both
-use the existing database's Home, including inside queued SQLite transactions.
-Rotation still owns `chapter::select_current`/name inference and needs exact
-transitions under the existing admission boundary. Operation fixtures still need
-explicit bindings as their callers move to ensure and exact-ID rotation.
-The single migration draft currently contains only the cached-name cutover;
-transition persistence and the `ensure` operation/CLI are absent. Step 4 is the
-next implementation boundary, followed by exact-ID rotation and its retained
-created-successor and configuration-switch interruption proofs.
+Six stateful operation tests pass: concurrent callers; response loss after each
+of create/attach/activation; failed binding replacement and post-binding settlement;
+archived reservation and unavailable reads; existing Backlog with empty Flow,
+authored content and Tasks; delayed Backlog after accepted completion. Review
+caught activation preceding accepted-fact ingestion: ensure now accepts the read
+before deciding whether to activate, preserving newer completed history. A separate
+released-frontier migration test checks pending uniqueness and settled history.
+These are synthetic operation proofs, not configured Intelligence acceptance.
 
-Reader/DTO evidence and the malformed-body failure remain at
-`ff458672407194236da0ad04705b23006d6db5bf:scratch/keep-every-wave-ready-for.md`.
-Exact selection retains predecessor backlog, names, empty Flow and observation
-ages; unknown configured IDs never fall back to Started Projects. Snapshot reads
-decode before membership filtering so malformed bodies remain errors. Desktop
-retains Task evidence with the latest Wave context. Configured acceptance remains unproved.
+Step 5 is next: replace `chapter::select_current`, `plan_rotation`'s name inference
+and name-derived UUIDs with exact transitions. Created-successor and before/after-
+configuration-switch rotation proofs remain open. KR-first Wave/repository
+rotation, Desktop activation and configured readiness (steps 5–7) are unfinished.
+Operation/CLI fixtures still need explicit bindings as rotation moves to the new
+owner; CI repair and the earlier output-handle leak remain with gate. The branch
+is not releasable and no installed-Home write is authorized.
 
 ### Accepted planning must own durable projection — October 5
 
@@ -701,9 +689,9 @@ cases below own requirements; this list identifies each next cut:
    proofs retain Task/PR identity, rollback and queued guard lifetime. Store fixtures
    now configure IDs; operation/CLI fixtures remain with the ensure/rotation cut.
    Preserve the designated Intelligence Project.
-4. Add transition persistence and ensure, exercising concurrency and uncertain
-   responses through operations with a stateful fake provider. Test this Task's
-   single migration draft from the released frontier.
+4. Transition persistence and exact-ID ensure are implemented with stateful
+   operation recovery coverage. Retain the released-frontier migration test;
+   cross-checkout CLI proof remains with gate's project-readiness acceptance.
 5. Replace rotation through Wave-scoped KR-first creation and repository
    composition, retaining preservation coverage with the new recovery semantics.
 6. Add Desktop activation and explicit reset preview/apply/retry per **Outcome and
@@ -884,10 +872,8 @@ Earlier compression evidence in this plan's Git history: checkout admission at
 `25542c7b1`, binding at `1e5086aa3` (the empty mapping template failed two tests),
 and reteam at `3555375af`. Their surviving constraints are retained above.
 
-Reconciliation October 5 inspected Release's complete goal and memory, the only
-immediate child scope. Its operation-entry recovery lesson still applies: store
-proofs cannot establish ensure/rotation retry. No new product decision changes
-steps 4–7 or authorizes installed-Home writes. Registration compression and its
-prior check evidence are preserved at `eb80d7198178a418cf44b3074f9b666f3e11cd40`.
+Release's operation-entry recovery lesson still applies; its publication and
+installation evidence establishes no Project-readiness acceptance. Registration
+compression and prior check evidence remain at `eb80d7198178a418cf44b3074f9b666f3e11cd40`.
 
-Checks: `git diff --check` passed; `lf context --skill realign` fits both budgets. Prior five focused tests, formatting and all-target Clippy passes remain at `eb80d7198`; no code changed during realign, so they were not rerun. Gate retains the unresolved output-handle leak, CI repair and configured acceptance.
+Checks: six `project_ensure` operation tests passed under `scripts/test_network.py`; released-frontier receipt migration check passed; `cargo check -p loopflow --all-targets`, formatting and all-target Clippy passed. Gate owns configured/CLI/Desktop acceptance, the prior output-handle leak and CI repair.

@@ -20,6 +20,7 @@ mod migration_catalog;
 mod migration_schema;
 pub mod migrations;
 mod pr_landings;
+pub(crate) mod project_transitions;
 pub mod rows;
 mod sessions;
 pub mod sqlite;

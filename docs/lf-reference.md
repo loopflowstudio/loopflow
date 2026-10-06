@@ -1034,6 +1034,16 @@ Manage Wave identity, placement and planning
 |---|---|
 | `--help / -h` | Print help |
 
+## lf wave ensure
+
+Ensure the configured Project is active, or create one with a durable identity
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
 ## lf wave bind-project
 
 Bind an existing Project UUID as this Wave's shared current selection

@@ -328,14 +328,10 @@ conversations, Task/PR atomicity and unset Started. The rejected Home-wide guard
 remains at `2d96630b3:wave/infrastructure/MEMORY.md`; both missing-root failures
 remain at `be36cde18:wave/infrastructure/MEMORY.md`. Git leases remain separate.
 
-October 5 source now returns the inserted Task from registration and uses it for
-publication, checkout finishing and execution. Existing accepted issue facts win
-transactionally, preserving their own acquisition age and reserved placement.
-Both registration APIs now share one insertion transaction, including optional
-initialization evidence and committed readback; downstream effects use that Task.
-Selection and insertion reuse one store and resolved Wave; no second opener is
-needed. Initial facts remain usable without a cached observation; the binding
-selects registration's Project.
+Both registration APIs share one insertion transaction and return its committed
+Task for publication, checkout setup and execution. Accepted issue facts retain
+age and reserved placement; uncached initial facts remain usable. One store and
+resolved Wave serve selection and insertion.
 
 Rotation now gathers exact Task roots under ordered Wave locks and acquires one
 checkout lock set. Queued planning writers retain both scopes after cancellation;
@@ -345,16 +341,19 @@ backlog stays with its Project; unresolved abandonment keeps its separate settle
 Shared binding is implemented; transition recovery, CI repair acceptance and
 configured readiness remain open. Operation proofs establish no readiness.
 
-October 5 binding preserves YAML bytes and committed ownership; delayed Backlog
-cannot bind newer completed history. Routing, metrics and Project editing use its
-exact ID; status/roadmap retain predecessor Tasks. Decode bodies before
-membership filtering: SQL hid malformed content as an empty plan. SQLite registration and first managed start now share exact binding validation,
-requiring Started status without counting other Projects. Already-started Tasks
-retain continuation even when their Project becomes history. Five focused checks
-pass; the continuation test reports an unresolved leaked output handle. These
-store proofs establish no activation or switch recovery; operation fixtures, ensure
-and configured Intelligence repair remain open. Release’s operation-entry recovery
-lesson still applies.
+October 5 binding preserves YAML bytes and accepted ownership. Routing, editing
+and SQLite admission select its exact ID; started Tasks continue in predecessors
+and remain visible. Malformed bodies stay errors. Earlier reader/store evidence
+and the unresolved output-handle leak remain at
+`1825a5a45c743833f625e8c8144949ed139b97f9:wave/infrastructure/MEMORY.md`.
+
+`lf wave ensure` now reserves a creation UUID before provider effects and settles
+after binding confirmation. Six operation tests cover concurrency, uncertain
+create/attach/activation, binding failures and Backlog content/Task preservation
+without Flow. Accepting facts before activation prevents delayed Backlog from
+reopening newer completed history. These are source proofs. Exact-ID rotation,
+configuration-switch recovery, KRs, Desktop and configured Intelligence acceptance
+remain unfinished; no installed-Home write is authorized.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 

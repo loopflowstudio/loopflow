@@ -62,3 +62,8 @@ Third look, at `4fdea296d` with main merged and the cleanups in: "ok good
 enough". Open items he was shown and did not rule on: a reopened Task
 cannot run; an opened Flow exec's diagram clips; eleven chapter tests fail
 only in the full parallel library run; a Project may have no workflow.
+
+October 6, after that look: "lets get this landed." "approved." Follow-ups
+filed before landing: LOO-391 (real provider, real data, real screen),
+LOO-392 (exec diagram clipping), a note on LOO-385 (a reopened Task cannot
+run); earlier, LOO-384 (Waiting) and LOO-386 (names).

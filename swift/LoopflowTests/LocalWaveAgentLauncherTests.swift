@@ -29,6 +29,33 @@ struct LocalWaveAgentLauncherTests {
         #expect(environment["LF_WORK_ADVANCE_CLAIM"] == nil)
     }
 
+    @Test("the launcher's terminal and agent output policy are dropped; account authority stays")
+    func launchEnvironmentDropsLauncherTerminal() throws {
+        let kept = [
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/Users/someone",
+            "LF_HOME": "/tmp/loopflow-development-home",
+            "LF_ACCOUNT": "work",
+            "CODEX_HOME": "/tmp/codex-home",
+            "CODEX_ACCESS_TOKEN": "codex-token",
+            "CODEX_API_KEY": "codex-key",
+            "CLAUDE_CODE_OAUTH_TOKEN": "claude-token",
+        ]
+        let leaked = [
+            "NO_COLOR": "1", "FORCE_COLOR": "0", "CLICOLOR": "0", "CLICOLOR_FORCE": "0",
+            "COLORTERM": "24bit", "TERM": "dumb", "TERM_PROGRAM": "WarpTerminal",
+            "TERM_PROGRAM_VERSION": "v0", "TMUX": "/tmp/tmux", "TMUX_PANE": "%1",
+            "CI": "1", "PAGER": "cat", "GIT_PAGER": "cat", "GH_PAGER": "cat",
+            "AI_AGENT": "codex", "CLAUDECODE": "1", "WARP_IS_LOCAL_SHELL_SESSION": "1",
+            "CLAUDE_CODE_ENTRYPOINT": "cli", "CODEX_CI": "1", "CODEX_THREAD_ID": "t",
+        ]
+        let environment = GUIProcessEnvironment.enriched(kept.merging(leaked) { first, _ in first })
+
+        for (key, value) in kept where key != "PATH" { #expect(environment[key] == value) }
+        #expect(environment["PATH"]?.hasSuffix("/usr/bin:/bin") == true)
+        for key in leaked.keys { #expect(environment[key] == nil, "\(key) leaked") }
+    }
+
 
     @Test("Task controls use the bounded worker commands")
     func taskControlCommandShapes() {

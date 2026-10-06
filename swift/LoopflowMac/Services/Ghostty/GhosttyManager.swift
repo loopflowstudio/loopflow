@@ -84,7 +84,7 @@ final class GhosttyManager: ObservableObject {
     // Loopflow color scheme — warm charcoal in the canvas's hue family
     // (`TerminalPalette`). Every ANSI color except 0 clears 3:1 on it; 0 is
     // black by convention and stays near the surface.
-    private static let loopflowConfig = """
+    static let loopflowConfig = """
     # Loopflow Terminal Theme - Warm charcoal
     background = \(TerminalPalette.css(TerminalPalette.backgroundHex))
     foreground = \(TerminalPalette.css(TerminalPalette.foregroundHex))
@@ -119,13 +119,24 @@ final class GhosttyManager: ObservableObject {
     // These settings load after user defaults. Resources enable Ghostty's
     // native shell integration for detected shells; provider Sessions launch
     // `lf`, so they receive no shell hooks. Keep their historical TERM value
-    // even though the matching Ghostty terminfo is now bundled.
-    private static let embeddedConfig = """
+    // even though the matching Ghostty terminfo is now bundled. The padding
+    // is fixed here because block overlays are laid out from the same numbers.
+    // Command-Up and Command-Down move between prompts whatever the person's
+    // own Ghostty config binds them to.
+    static let embeddedConfig = """
     term = xterm-256color
     shell-integration = detect
     scrollback-limit = 10000000
+    window-padding-x = \(Int(GhosttyTerminalPadding.x))
+    window-padding-y = \(Int(GhosttyTerminalPadding.y))
+    window-padding-balance = false
     image-storage-limit = 67108864
+    keybind = super+arrow_up=jump_to_prompt:-1
+    keybind = super+arrow_down=jump_to_prompt:1
     """
+
+    /// Ghostty's process-wide state is set up once, however many callers ask.
+    static let libraryReady = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == GHOSTTY_SUCCESS
 
     private init() {}
 
@@ -155,9 +166,8 @@ final class GhosttyManager: ObservableObject {
         }
 
         // Initialize Ghostty library
-        let initResult = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
-        guard initResult == GHOSTTY_SUCCESS else {
-            state = .failed("ghostty_init failed with code \(initResult)")
+        guard Self.libraryReady else {
+            state = .failed("ghostty_init failed")
             return
         }
 

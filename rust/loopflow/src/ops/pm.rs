@@ -2225,10 +2225,11 @@ async fn apply_or_plan_repository_reteam(
     if apply {
         // Linear requires the destination Team on a Project before its Issues
         // can move. Expand first; narrowing is the final provider phase.
-        for (_, project) in &projects {
-            if !project.team_ids.iter().any(|team| team == team_id) {
-                let mut teams = project.team_ids.clone();
-                teams.push(team_id.clone());
+        for (wave, project) in &projects {
+            let (wave, acquisition) = &locked_waves[*wave];
+            let mut expected_teams = project.team_ids.clone();
+            if !expected_teams.contains(team_id) {
+                expected_teams.push(team_id.clone());
                 progress.status(&format!(
                     "attaching team {team_key} to Project `{}`",
                     project.name
@@ -2236,17 +2237,9 @@ async fn apply_or_plan_repository_reteam(
                 resolved
                     .repository
                     .client
-                    .set_project_teams(&project.id, &teams)
+                    .set_project_teams(&project.id, &expected_teams)
                     .await
                     .map_err(pm_to_ops)?;
-            }
-        }
-
-        for (wave, project) in &projects {
-            let (wave, acquisition) = &locked_waves[*wave];
-            let mut expected_teams = project.team_ids.clone();
-            if !expected_teams.contains(team_id) {
-                expected_teams.push(team_id.clone());
             }
             accept_reteam_project(
                 resolved,
@@ -2308,7 +2301,8 @@ async fn apply_or_plan_repository_reteam(
             mv.new_identifier = Some(new_identifier);
         }
 
-        for (_, project) in &projects {
+        for (wave, project) in &projects {
+            let (wave, acquisition) = &locked_waves[*wave];
             if project_needs_reteam(team_id, &project.team_ids) {
                 progress.status(&format!(
                     "narrowing Project `{}` onto team {team_key}",
@@ -2321,10 +2315,6 @@ async fn apply_or_plan_repository_reteam(
                     .await
                     .map_err(pm_to_ops)?;
             }
-        }
-
-        for (wave, project) in &projects {
-            let (wave, acquisition) = &locked_waves[*wave];
             accept_reteam_project(
                 resolved,
                 wave,
@@ -3482,8 +3472,8 @@ mod tests {
                 true,
             )])),
             project_update_response("project-survival"),
-            project_update_response("project-infrastructure"),
             project_readback(&expanded_survival),
+            project_update_response("project-infrastructure"),
             project_readback(&expanded_infrastructure),
             issue_comments_response(),
             json_response(
@@ -3526,8 +3516,8 @@ mod tests {
                 &expanded_infrastructure,
             ),
             project_update_response("project-survival"),
-            project_update_response("project-infrastructure"),
             project_readback(&new_survival),
+            project_update_response("project-infrastructure"),
             project_readback(&new_infrastructure),
             projects_response(json!([new_survival])),
             issues_response(json!([migration_issue_node(

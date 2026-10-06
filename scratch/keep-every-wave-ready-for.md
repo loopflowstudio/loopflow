@@ -135,46 +135,25 @@ Wave acceptance.
 Earlier acquisition/admission repairs and their 13-test checkpoint remain at
 `972a253559:scratch/keep-every-wave-ready-for.md`.
 
-Step 2 remains next: accepted registration facts and rotation exclusion.
-`create_prepared_task` now acquires the Wave guard before Project resolution.
-Both registration APIs carry a supplied guard into the shared SQLite worker,
-retaining it through commit after caller cancellation. The caller releases it
-before steer publication, checkout creation or execution. New-issue creation's
-provider guard has already returned before this registration entry point, so
-registration acquires a fresh guard rather than nesting that acquisition.
-The cancellation regression covers both APIs, Task/PR atomicity and unset Started.
-Registration still inserts supplied planning under the Started-count selector;
-transactional accepted ownership/content/age and rotation checkout exclusion
-remain unimplemented. This is not rotation/start safety.
+Step 2 remains next: transactional accepted registration facts and rotation
+checkout exclusion. Registration now holds the Wave guard before Project resolution
+and through SQLite commit, including caller cancellation, then releases it before
+steer publication, checkout creation or execution. New-issue creation's provider
+guard has already returned; registration acquires a fresh guard without nesting.
+Both registration APIs retain Task/PR atomicity and unset Started.
 
-October 5: both missing-root regressions failed before repair. A taskless start
-beneath an unregistered missing root could bypass registration's exclusion, and
-registration could bypass the descendant's held admission. Admission now locks
-canonical workspace paths exclusively and their ancestors shared, merging modes
-before acquisition in path order. An exclusive ancestor conflicts with every
-descendant; unrelated siblings retain shared ancestors and progress independently.
-Explicit Task bindings add the immutable Task checkout. The Task-population scan
-is deleted: discovering or revalidating registered roots is unnecessary for this
-path exclusion. Guards still live inside the SQLite worker through commit.
+Hierarchical admission repaired both missing-root orderings and preserves sibling
+progress; the population scan is deleted. **Preservation boundary** below owns the
+remaining lock contract. Earlier failures and detailed evidence remain at
+`1981e4e7a7d808c5b05015ea088e98784c00f5e6:scratch/keep-every-wave-ready-for.md`
+and `44fe36620:scratch/keep-every-wave-ready-for.md`. Git leases and admission are
+separate; these store proofs establish neither rotation recovery nor readiness.
 
-`44fe36620:scratch/keep-every-wave-ready-for.md` retains the missing-root
-regressions, sibling progress and rejected Home-wide fence evidence. Those
-synthetic admission proofs establish neither rotation recovery nor readiness.
-
-`create_prepared_task` holds a Git worktree lease; registration acquires its own
-checkout admission inside the SQLite worker. These are separate locks. Wave planning now precedes checkout admission and its supplied guard survives
-caller cancellation. Registration must select accepted issue ownership/content/age in its
-transaction. Steps 3–5 still own the configured selector and created-successor
-recovery.
-
-The branch is not releasable: shared binding, exact-ID ensure, transition recovery,
-KR-first rotation, backlog preservation, Desktop activation and configured
-acceptance remain. The implementation order below owns their sequencing. The October 5 source audit also finds a separate Started-count selector in
-`sqlite/children.rs::insert_initial_task`, shared by both registration APIs. Replace
-it alongside `require_current_task_chapter` (worker claim and managed Flow admission),
-`resolve_project_for_task` and rotation’s provider-name comparisons. The
-preservation findings below identify additional writers outside those callers.
-No further cached-name policy decision is needed.
+The branch is not releasable. Steps 3–7 still own shared binding, exact-ID ensure,
+transition recovery, KR-first rotation, backlog preservation, Desktop and configured
+acceptance. Replace `sqlite/children.rs::insert_initial_task`'s Started-count selector
+alongside `require_current_task_chapter`, `resolve_project_for_task` and rotation's
+provider-name comparisons. No further cached-name policy decision is needed.
 
 ### Accepted planning must own durable projection — October 5
 
@@ -900,4 +879,10 @@ APIs. Review retained canonical path order, ancestor sharing and guard lifetime
 through commit. This refactor establishes no rotation exclusion or readiness.
 Earlier checks and the failed Home-wide fence remain in the history above.
 
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; isolated `scripts/test_network.py` ran `cancelled_registration_retains_planning_exclusion_through_commit` and `checkout_exclusion_preserves_registration` (2 passed); all-target Clippy and formatting passed. Gate owns operation-entry, rotation and configured acceptance.
+Compression keeps each reteam Team mutation beside its exact readback and accepted
+projection. Expansion computes one expected Team set; narrowing remains after all
+Issue moves. Full repository preflight still precedes writes, and every Wave guard
+survives through acceptance. The existing multi-Project and interruption fixtures
+retain names, ownership and recovery assertions. No old selector was extended.
+
+Checks: `cargo test -p loopflow --lib --no-run --jobs 4`, isolated `scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b repository_team_reteam --test-threads=1` (5 passed), `cargo clippy --all-targets --jobs 4 -- -D warnings` and formatting passed; gate retains operation-entry, rotation and configured acceptance.

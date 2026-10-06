@@ -333,8 +333,8 @@ October 5's missing-root regressions failed in both admission orderings. The rep
 locks canonical workspace/explicit Task paths exclusively and ancestors shared,
 through SQLite commit. Ancestor exclusion covers future roots without a Task
 population scan; siblings progress independently. The rejected Home-wide guard
-remains at `2d96630b3:wave/infrastructure/MEMORY.md`. Registration still needs
-accepted facts and Wave serialization; rotation exclusion remains unimplemented.
+remains at `2d96630b3:wave/infrastructure/MEMORY.md`. Registration now holds Wave
+exclusion through commit but still needs accepted facts; rotation exclusion remains unimplemented.
 Git leases and admission remain separate. `store/sqlite/admission.rs` merges all
 roots' ancestor modes before locking. Registration retry retains unbound
 conversations without setting Started; it proves neither rotation recovery nor

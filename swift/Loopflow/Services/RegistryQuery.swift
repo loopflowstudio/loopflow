@@ -89,6 +89,17 @@ public struct RegistryQuery: Sendable {
     }
 
 
+    /// Explicit opening/retry operation. Periodic status reads remain observational.
+    public func ensureProject(wave: String, cwd: String) async throws {
+        _ = try await run(["wave", "ensure", wave, "--json"], cwd)
+    }
+
+    public func realignProjects(name: String, plan: String, preview: Bool, cwd: String) async throws -> ProjectRotationPreview {
+        var args = ["repo", "new-chapter", name, "--plan", "/dev/stdin", "--json"]
+        if preview { args.append("--dry-run") }
+        return try Self.decode(ProjectRotationPreview.self, from: await runWithInput(args, cwd, plan))
+    }
+
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
         var args = ["roadmap"]
         if let wave {
@@ -752,4 +763,35 @@ public struct CodeSlice: Decodable, Sendable, Identifiable {
     public let ext: String
     public let lines: Int
     public let tokens: Int
+}
+
+/// Display projection of the rotation report; provider bodies stay owned by Rust.
+public struct ProjectRotationPreview: Decodable, Sendable {
+    public let name: String
+    public let waves: [WaveRotation]
+
+    public struct WaveRotation: Decodable, Sendable {
+        public let wave: String
+        public let successor_id: String
+        public let predecessor: Project?
+        public let successor: Project?
+        public let tasks: [Task]
+    }
+
+    public struct Project: Decodable, Sendable {
+        public let id: String
+        public let name: String
+    }
+
+    public struct Task: Decodable, Sendable {
+        public let task: Issue
+        public let disposition: String
+        public let reason: String
+    }
+
+    public struct Issue: Decodable, Sendable {
+        public let id: String
+        public let identifier: String
+        public let name: String
+    }
 }

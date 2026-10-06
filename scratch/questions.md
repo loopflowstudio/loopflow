@@ -12,8 +12,9 @@ status and evidence; earlier review notes remain at
   Operation fixtures and remaining CLI/crash acceptance are recorded in the design.
 - Chapter metadata representation and projection. Cross-Wave historical inspection
   remains proposed; Wave-scoped chapter creation is implemented.
-- Skill/Flow composition and the retained Task-candidate format between KR planning,
-  chapter creation and separate Task admission.
+- Skill composition uses retained exact-ID JSON plus candidate notes grouped by destination
+  UUID, with stable local keys and admitted issue IDs. This reversible implementation
+  choice preserves candidates across separate admission; operation-backed proof remains at gate.
 - Designated fixture Waves and provider write authority beyond Intelligence.
   Jack Heart selected its exact Project for autonomous repair; the design retains
   that authority and the unproved Backlog/empty-Flow acceptance boundary.

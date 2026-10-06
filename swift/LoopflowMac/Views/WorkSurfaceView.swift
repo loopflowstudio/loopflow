@@ -139,9 +139,9 @@ struct WorkSurfaceView: View {
                         .accessibilityIdentifier("wave-chapter-history")
                     }
                     if let chapter = roadmap.currentProject {
-                        WaveChapterView(chapter: chapter)
+                        WaveProjectView(project: chapter)
                     } else {
-                        Text("No current chapter plan.").font(Typography.body(13)).foregroundStyle(palette.textSecondary)
+                        Text("No current Project plan.").font(Typography.body(13)).foregroundStyle(palette.textSecondary)
                     }
                 }
 

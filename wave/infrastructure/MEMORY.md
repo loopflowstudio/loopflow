@@ -381,12 +381,17 @@ Operation fixtures cover partial settlement and both sides of the switch;
 CLI crashes, Desktop and configured Intelligence acceptance remain open.
 Earlier counterexamples: `fc6df439424bd341ec3cd8182c19b13ed45cffd7:wave/infrastructure/MEMORY.md`.
 
-Source reconciliation at `7e91655ed` confirms whole-input preflight and reservation
-precede rotation effects. Builtin chapter skills still prescribe name-only retry,
-mandatory Flow and backlog cancellation; their remaining replacement must agree
-with the exact-ID API before delivery. Release's child memory reinforces testing
-recovery through each entry point. Integrated #1450 makes Session IDs the control
-input; remaining rotation proofs must preserve those IDs and capture history.
+October 5 Desktop activation now runs only on explicit opening/retry, separate
+from status polling and Session reads. Cached plans remain visible; keyed state
+and generation checks reject obsolete completions. Realignment previews retained
+input and applies the same bytes through shared transport, preserving retry after
+partial effects. Ordinary presentation uses Project. Chapter skills now require
+KRs before exact-ID creation, retain backlog and admit candidate Tasks separately.
+Eleven headless preparation/presentation tests prove local behavior, not mounted
+Desktop, skill-driven provider outcomes or configured Intelligence acceptance.
+Release's child memory still requires recovery proof through actual entry points;
+gate retains CLI/crash and configured acceptance. Earlier reconciliation remains
+at `3a149bb7105a307bbe1feda293f4d92a59434afb`.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 

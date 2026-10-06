@@ -2,7 +2,7 @@
 requires: one Wave, a chapter name and Project ID where known, or a dated baseline
 produces: one evidence-backed Wave chapter report
 ---
-Review this Wave's chapter directly. Its current plan is one In Progress Linear
+Review this Wave's chapter directly. Its shared local binding selects the current
 Project; Planned and Completed Projects retain future and historical plans.
 There is no Project review tier. Review is read-only: never rotate, check KRs,
 cancel Tasks, edit Projects or change Work state.

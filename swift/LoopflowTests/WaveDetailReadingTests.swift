@@ -116,12 +116,12 @@ struct WaveDetailReadingTests {
         #expect(presentation.holdingCount == 1)
         #expect(presentation.requiresWorkCount == 2)
         #expect(presentation.contractIssueCount == 5)
-        #expect(presentation.headline == "Chapter targets unavailable.")
+        #expect(presentation.headline == "Project targets unavailable.")
         #expect(!presentation.targetUnavailable(for: try #require(portfolio.metrics.first)))
         let known = WaveMetricPortfolioPresentation(portfolio: MetricPortfolio(
             metrics: portfolio.metrics, contractIssues: []
         ))
-        #expect(known.headline == "1 of 3 chapter targets currently hold.")
+        #expect(known.headline == "1 of 3 Project targets currently hold.")
     }
 
     @Test("an unset chapter target preserves the reading without failing the measure")
@@ -130,12 +130,12 @@ struct WaveDetailReadingTests {
         let metric = try #require(portfolio.metrics.first { $0.target == nil })
         let row = WaveMetricRowPresentation(metric: metric, owner: "Wave", targetUnavailable: false)
         #expect(row.state == "No target")
-        #expect(row.target == "unset for this chapter")
+        #expect(row.target == "unset for this Project")
         #expect(row.value != "—")
         let presentation = WaveMetricPortfolioPresentation(portfolio: MetricPortfolio(metrics: [metric], contractIssues: []))
         #expect(presentation.requiresWorkCount == 0)
         #expect(presentation.holdingCount == 0)
-        #expect(presentation.headline == "No targets set for this chapter.")
+        #expect(presentation.headline == "No targets set for this Project.")
     }
 
     @Test("unavailable chapter planning retains the reading and never claims no target")
@@ -146,13 +146,13 @@ struct WaveDetailReadingTests {
             let presentation = WaveMetricPortfolioPresentation(portfolio: MetricPortfolio(
                 metrics: metrics, contractIssues: [.chapterUnavailable(waveId: "wave-unavailable", reason: "PM snapshot unavailable")]
             ))
-            #expect(presentation.headline == "Chapter targets unavailable.")
+            #expect(presentation.headline == "Project targets unavailable.")
             #expect(presentation.requiresWorkCount == 0)
             let row = WaveMetricRowPresentation(metric: metric, owner: "Wave", targetUnavailable: presentation.targetUnavailable(for: metric))
-            #expect(row.target == "unavailable for this chapter")
+            #expect(row.target == "unavailable for this Project")
             #expect(row.state == "Unknown")
             #expect(row.value == "100%")
-            #expect(row.reason == "Chapter target planning is unavailable.")
+            #expect(row.reason == "Project target planning is unavailable.")
         }
     }
 

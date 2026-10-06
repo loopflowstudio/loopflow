@@ -70,7 +70,7 @@ Operation routing, metrics and Project editing now select the shared ID through
 planning; Rust/Swift summaries carry required `current` selection rather than
 Desktop inferring it from Started status. Retained Task navigation uses the latest
 Wave even during a selection switch. SQLite admission now validates the binding. Exact-ID ensure and creation recovery are
-implemented below; exact-ID rotation is now implemented and Desktop activation is unfinished;
+implemented below; exact-ID rotation and Desktop activation are implemented;
 Intelligence has not been bound or activated on the installed Home.
 
 ## Intelligence repair — Jack Heart's October 5 steer
@@ -167,14 +167,25 @@ participating Wave before `apply_rotation` begins. Existing compression edits
 retain those boundaries and their reported focused passes; no test rerun is
 needed for this prose reconciliation.
 
-The next cut remains steps 6–7. `RegistryQuery` has no Project-ensure operation;
-`WaveDetailPane` still renders `WaveChapterView` and Chapter target labels.
-Builtin `ops/skill/start-chapter.md` and `wave/skill/wave_start-chapter.md` still
-assert no plan-file/Wave-scoped rotation, require Flow, and cancel untouched
-backlog. Their replacement must use retained exact-ID plans and preserve backlog,
-with candidate admission separate from creation. Existing CLI reference and
-planning/Wave guides already document the implemented operations; `docs/lf.md`
-and the skill composition remain unfinished.
+Steps 6–7 now add explicit Desktop opening/retry ensure, independently of polling
+and Session reads. The keyed pane preserves cached planning while preparation
+runs; generation checks discard obsolete completions. Ordinary Project names and
+metric labels replace Chapter presentation. Realign Projects previews retained
+JSON, sends those exact bytes through shared stdin transport on Apply, and keeps
+failures retryable. No opening action rotates Projects.
+
+Builtin chapter skills now compose KR planning, retained exact-ID creation and
+separate candidate admission. Candidates live in the existing scratch planning
+artifact, grouped by destination UUID with local keys and recovered issue IDs.
+Backlog remains unretired. Ongoing repository/Wave procedures retain their
+started-Task follow-through and observational refresh. CLI guide and Desktop
+README describe the new entry points. Exported installed skills await normal
+published installation; no branch binary wrote the installed Home.
+
+Focused headless preparation and presentation tests pass; they do not prove the
+full mounted opening/reset experience or skill-driven provider outcomes. Gate
+retains those acceptance cases, cross-process/crash proofs, configured acceptance,
+output-handle leak investigation and CI-repair entry coverage.
 
 Integrated #1450 (`1af81fe03`) makes Session identity the conversation-control
 input while capture keys retain history selection. Remaining CLI/Desktop proofs
@@ -460,7 +471,8 @@ Merge `c4373492c` integrated #1447's cached-workspace rendering changes.
 `PodiumModel` restores the saved workspace and retains last-good planning on read
 failure; its planning and Session refresh loops run independently. `WavesView`
 now creates its window model lazily. `WaveDetailPane` separately polls status
-and renders `reading.plan(cached: plan)`. None of these paths ensures a Project.
+and renders `reading.plan(cached: plan)`. The new opening task separately ensures
+the Project; polling remains observational.
 
 Keep activation at the explicit Wave-opening/retry boundary through the shared
 transport, outside model construction, cache restoration and both periodic read
@@ -710,18 +722,13 @@ cases below own requirements; this list identifies each next cut:
 5. Exact-ID input, transition membership, Wave-scoped KR-first rotation and
    repository composition are implemented. Preserve their operation fixtures;
    gate owns cross-checkout CLI and crash verification.
-6. Add Desktop activation and explicit reset preview/apply/retry per **Outcome and
-   demo**. Rename ordinary Chapter labels to Project; keep metrics with Project.
-   Change Rust/Swift DTO fields and fixtures together, without defaults.
-7. Update `docs/lf.md`, command reference, planning architecture, repo guide and
-   builtin `review-chapter`, `wave/review-chapter`, `start-chapter`,
-   `wave/start-chapter`, `repo/session`, `wave/session` at their owners. Implement
-   the separate KR planning → chapter creation → Task admission sequence, retaining
-   candidate output. Upstream #1446 composes `repo/operate` and `wave/operate`
-   into their ongoing conversations; preserve those procedures and started-Task
-   follow-through. Explicit begin-work/activation may ensure; fresh status reads
-   in those procedures remain observational. Reconcile LOO-367's call site
-   without its lifecycle changes.
+6. Desktop opening/retry ensure and explicit reset preview/apply/retry are implemented.
+   Ordinary presentation uses Project; existing metric wire names are unchanged.
+   Gate retains mounted-view and configured acceptance.
+7. Skills and documentation now specify KR planning → exact-ID creation → separate
+   Task admission with retained candidates. Ongoing procedures preserve #1446's
+   follow-through; explicit begin-work may ensure, periodic reads remain observational.
+   Gate retains operation-backed skill acceptance and LOO-367 integration proof.
 
 ## Delete — do not maintain
 
@@ -864,4 +871,5 @@ Release's operation-entry recovery lesson still applies; its publication and
 installation evidence establishes no Project-readiness acceptance. Registration
 compression and prior check evidence remain at `eb80d7198178a418cf44b3074f9b666f3e11cd40`.
 
-Checks: realignment `git diff --check` passed and `lf context --skill realign` reports both sources within budget; reused prior `cargo build -p loopflow --bin lf`, network-isolated `cargo test -p loopflow --lib ops::chapter::tests::rotation -- --test-threads=1` (11/11), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and website `portable_architecture or readme_index_sync` (2/2) passed; prior migration/archived-identity evidence remains at `dbd4d0a775befe6f9be4927191b9a0c4ecbe0707:scratch/keep-every-wave-ready-for.md`; gate retains configured/CLI/Desktop acceptance, the prior output-handle leak and CI repair.
+Checks: `scripts/test_desktop.sh -Xswiftc -gnone --filter 'ProjectPreparationTests|WaveDetailReadingTests'` passed 11/11; `cargo build -p loopflow --bin lf`, Swift boundary check, skill alignment (4/4),
+`git diff --check` and `lf context --skill implement` passed (both sources within budget). Gate retains mounted Desktop/skill, configured/CLI/crash acceptance, the output-handle leak and CI repair; prior rotation/Clippy evidence remains at `3a149bb7105a307bbe1feda293f4d92a59434afb`.

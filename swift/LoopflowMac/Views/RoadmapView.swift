@@ -255,7 +255,7 @@ struct RoadmapView: View {
             ContentUnavailableView(
                 repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
                 systemImage: "map",
-                description: Text("Waves without readable chapters remain in the Waves sidebar.")
+                description: Text("Waves without readable Projects remain in the Waves sidebar.")
             )
             .accessibilityIdentifier("podium-work-empty")
         } else {
@@ -283,7 +283,7 @@ struct RoadmapView: View {
             }
         case .project:
             if let roadmap = selectedWaveRoadmap { focusedScroll { waveCard(roadmap) } }
-            else { missingFocus("Chapter unavailable") }
+            else { missingFocus("Project unavailable") }
         case .task:
             if let selectedTask {
                 focusedScroll {
@@ -542,12 +542,12 @@ private struct RoadmapWaveCard: View {
                     .textSelection(.enabled)
             }
 
-            if let chapter = roadmap.currentProject { WaveChapterView(chapter: chapter) }
+            if let chapter = roadmap.currentProject { WaveProjectView(project: chapter) }
             switch roadmap.tasks {
             case .unavailable(let reason):
                 Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(Color.statusWarning)
             case .available(let tasks, let truncated):
-                if tasks.isEmpty { Text("No Tasks in this chapter.").foregroundStyle(palette.textSecondary) }
+                if tasks.isEmpty { Text("No Tasks in this Project.").foregroundStyle(palette.textSecondary) }
                 ForEach(tasks) { task in
                     RoadmapTaskRow(task: task, isSelected: selection == .task(id: task.id),
                         activeControlId: activeControlId, onSelect: { onSelect(.task(id: task.id)) },

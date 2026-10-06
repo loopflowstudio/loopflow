@@ -1349,7 +1349,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         cwd: task.task.worktree.clone(),
         message: None,
         model: None,
-        current_attempt: None,
+        selected_capture: None,
         pending_session_id: None,
         ready_summary: None,
         worker_generation: 0,
@@ -1684,7 +1684,7 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
     repo.create_branch(branch);
     let task = register_task(home.path(), repo.path(), branch, &base);
 
-    let result = task_complete(repo.path(), "INF-123", "done".to_string());
+    let result = task_complete(repo.path(), "INF-123", "done".to_string(), &[]);
     let message = result
         .expect_err("an unpublished working PR must block completion")
         .to_string();

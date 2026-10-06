@@ -256,7 +256,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                         cwd: checkout.clone(),
                         message: None,
                         model: None,
-                        current_attempt: None,
+                        selected_capture: None,
                         pending_session_id: None,
                         ready_summary: None,
                         worker_generation: 0,
@@ -401,7 +401,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
             worker.invocation = QueuedInvocation::load(&checkout, "adoption").unwrap();
             worker.cursor = Default::default();
             worker.version = 0;
-            worker.current_attempt = None;
+            worker.selected_capture = None;
             worker.pending_session_id = None;
             worker.ready_summary = None;
             let worker = runtime
@@ -445,7 +445,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
             assert_eq!(stopped.invocation, worker.invocation);
             assert_eq!(stopped.cursor, worker.cursor);
             assert_eq!(stopped.pending_session_id, worker.pending_session_id);
-            assert_eq!(stopped.current_attempt, worker.current_attempt);
+            assert_eq!(stopped.selected_capture, worker.selected_capture);
             assert_eq!(stopped.failure, worker.failure);
             // Independent execution keeps working after the planning Task is gone.
             let output = run(&checkout, &["flow", "adoption"]);

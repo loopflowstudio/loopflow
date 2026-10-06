@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use time::OffsetDateTime;
 
 use crate::durable::{
-    FlowAttempt, FlowSession, FlowTurnSelection, TaskFlowBlocker, TaskId, TaskWorkerClaim,
+    FlowSession, FlowTurnSelection, SelectedCapture, TaskFlowBlocker, TaskId, TaskWorkerClaim,
     TaskWorkerClaimOutcome, TaskWorkerOwner, WorkRef,
 };
 use crate::engine::invocation::QueuedInvocation;
@@ -147,11 +147,11 @@ fn read_flow(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<FlowSessio
             cwd: cwd.into(),
             message,
             model,
-            current_attempt: current_capture
+            selected_capture: current_capture
                 .map(|captured| {
-                    Ok::<_, StoreError>(FlowAttempt {
+                    Ok::<_, StoreError>(SelectedCapture {
                         captured,
-                        run_id: row.get(20)?,
+                        artifact_key: row.get(20)?,
                         published: published.unwrap_or(false),
                         outcome,
                     })
@@ -195,9 +195,9 @@ fn project_output(conn: &Connection, mut flow: FlowSession) -> StoreResult<FlowS
     }
     if !flow.finished
         && flow
-            .current_attempt
+            .selected_capture
             .as_ref()
-            .is_some_and(FlowAttempt::completed)
+            .is_some_and(SelectedCapture::completed)
     {
         match selected_output_in(conn, &flow)? {
             Ok(crate::engine::SkillOutcome::Decided(verdict)) => {
@@ -387,8 +387,8 @@ fn clear_candidate(cursor: &mut ExecutionCursor) {
     leaf.route = None;
 }
 
-/// Block the Flow at its position with `failure`; the failed attempt's Run is
-/// named on it. A Task's own Flow records the failure on the Task.
+/// Block the Flow at its position with `failure`, retaining its published capture.
+/// A Task's own Flow records the failure on the Task.
 fn fail_flow_in(
     tx: &Transaction<'_>,
     flow: &FlowSession,
@@ -399,7 +399,7 @@ fn fail_flow_in(
     let mut failure = failure.clone();
     if failure.captured.is_none() {
         failure.captured = flow
-            .current_attempt
+            .selected_capture
             .as_ref()
             .filter(|attempt| attempt.published)
             .map(|attempt| attempt.captured);
@@ -484,7 +484,7 @@ fn end_flow_in(
     Ok(())
 }
 
-/// Store the step's Run before anything launches it. An attempt already at
+/// Reserve the step's captured input before launch. An input already at
 /// this position is kept: a reservation the launcher has not published, or a
 /// completed candidate the driver is about to settle.
 fn reserve_attempt_in(
@@ -492,7 +492,7 @@ fn reserve_attempt_in(
     flow: &FlowSession,
     exec: Option<&crate::id::ExecId>,
 ) -> StoreResult<()> {
-    if let (Some(attempt), Some(exec)) = (&flow.current_attempt, exec) {
+    if let (Some(attempt), Some(exec)) = (&flow.selected_capture, exec) {
         let owner: Option<String> = tx.query_row(
             "SELECT exec_id FROM session_events WHERE seq=?1",
             [attempt.captured],
@@ -504,7 +504,7 @@ fn reserve_attempt_in(
             ));
         }
     }
-    if flow.current_attempt.is_some()
+    if flow.selected_capture.is_some()
         || matches!(flow.current_step(), Some(ConcreteStep::Command(_)))
     {
         return Ok(());
@@ -636,7 +636,7 @@ fn consume_selected_in(tx: &Transaction<'_>, flow: &FlowSession) -> StoreResult<
 }
 
 /// Recover mechanical results from Flow history and agent results from the
-/// selected native turn (or the transitional Run when no turn was selected).
+/// selected native turn.
 /// Missing mechanical completion is unknown, never an invented interruption.
 fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowSession) -> StoreResult<FlowSession> {
     let id = flow.invocation.id.clone();
@@ -655,29 +655,26 @@ fn settle_attempt_in(tx: &Transaction<'_>, flow: FlowSession) -> StoreResult<Flo
         fail_flow_in(tx, &flow, flow.version, flow.claim.as_ref(), &failure)?;
         return current_flow_in(tx, &id);
     }
-    let Some(attempt) = &flow.current_attempt else {
+    let Some(capture) = &flow.selected_capture else {
         return Ok(flow);
     };
-    if !attempt.published {
+    if !capture.published {
         return Ok(flow);
     }
-    let outcome = match attempt.outcome.as_deref() {
-        Some(outcome) => outcome.to_owned(),
-        None => {
-            return Err(StoreError::InvalidAuthority(format!(
-                "Flow {id} is waiting for Run {}; its completion is not recorded",
-                attempt.run_id
-            )))
-        }
-    };
+    let outcome = capture.outcome.as_deref().ok_or_else(|| {
+        StoreError::InvalidAuthority(format!(
+            "Flow {id} is waiting for capture {}; its completion is not recorded",
+            capture.artifact_key
+        ))
+    })?;
     if outcome == "completed" {
         return Ok(flow);
     }
     let mut failure = TaskFlowBlocker::now(format!(
-        "{} Run {outcome}",
+        "{} capture {outcome}",
         flow.step_name().unwrap_or_default()
     ));
-    failure.captured = Some(attempt.captured);
+    failure.captured = Some(capture.captured);
     fail_flow_in(tx, &flow, flow.version, flow.claim.as_ref(), &failure)?;
     current_flow_in(tx, &id)
 }
@@ -751,8 +748,8 @@ fn claim_task_worker_in(
         return Err(stale_task_worker(task_id));
     }
     if replacing.is_some() {
-        match &flow.current_attempt {
-            // A reservation the dead worker never launched is nobody's Run.
+        match &flow.selected_capture {
+            // The dead worker never launched this reserved input.
             Some(attempt) if !attempt.published => {
                 tx.execute(
                     "UPDATE flow_sessions SET current_capture=NULL WHERE id=?1",
@@ -1024,7 +1021,7 @@ impl SqliteStore {
         Ok(flow)
     }
 
-    /// Store the step's Run for the driver about to launch it.
+    /// Reserve the step's captured input for the driver about to launch it.
     pub fn reserve_attempt(
         &self,
         id: &str,
@@ -1764,7 +1761,7 @@ mod tests {
         let flow = store
             .reserve_attempt(invocation, flow.version, None, None)
             .unwrap();
-        let run = flow.current_attempt.unwrap().run_id;
+        let run = flow.selected_capture.unwrap().artifact_key;
         store
             .publish_attempt(
                 invocation,
@@ -1792,7 +1789,7 @@ mod tests {
                 cwd: "/repo".into(),
                 message: None,
                 model: None,
-                current_attempt: None,
+                selected_capture: None,
                 pending_session_id: None,
                 ready_summary: None,
                 worker_generation: 0,
@@ -1917,7 +1914,7 @@ mod tests {
         let flow = store
             .reserve_attempt(flow.id(), flow.version, None, None)
             .unwrap();
-        let run = &flow.current_attempt.as_ref().unwrap().run_id;
+        let run = &flow.selected_capture.as_ref().unwrap().artifact_key;
         let session = store.session_for_artifact(run).unwrap().unwrap();
         store
             .publish_attempt(
@@ -2078,7 +2075,7 @@ mod tests {
         let retry = store
             .reserve_attempt(flow.id(), retry.version, None, None)
             .unwrap();
-        let retry_run = &retry.current_attempt.as_ref().unwrap().run_id;
+        let retry_run = &retry.selected_capture.as_ref().unwrap().artifact_key;
         assert_eq!(
             store.session_for_artifact(retry_run).unwrap().unwrap().id,
             session.id
@@ -2169,7 +2166,7 @@ mod tests {
                 .is_err(),
             "successful selection cannot be replaced"
         );
-        assert!(recovered.current_attempt.as_ref().unwrap().completed());
+        assert!(recovered.selected_capture.as_ref().unwrap().completed());
         let mut next = recovered.cursor.clone();
         next.index += 1;
         assert!(store
@@ -2219,9 +2216,9 @@ mod tests {
         let reserved = store
             .reserve_attempt(flow.id(), flow.version, None, None)
             .unwrap();
-        let first = reserved.current_attempt.as_ref().unwrap();
+        let first = reserved.selected_capture.as_ref().unwrap();
         let session = store
-            .session_for_artifact(&first.run_id)
+            .session_for_artifact(&first.artifact_key)
             .unwrap()
             .expect("agent admission reserves its conversation before provider launch");
         let run = session.clone();
@@ -2235,7 +2232,6 @@ mod tests {
         store
             .rename_session(
                 &session.id,
-                run.captured,
                 "Investigation",
                 crate::session::TitleSource::Human,
             )
@@ -2257,8 +2253,11 @@ mod tests {
         let retry = store
             .reserve_attempt(flow.id(), retry.version, None, None)
             .unwrap();
-        let second = retry.current_attempt.unwrap();
-        let same = store.session_for_artifact(&second.run_id).unwrap().unwrap();
+        let second = retry.selected_capture.unwrap();
+        let same = store
+            .session_for_artifact(&second.artifact_key)
+            .unwrap()
+            .unwrap();
         let replacement = same.clone();
         assert_eq!(same.id, session.id);
         assert_eq!(same.title, "Investigation");
@@ -2294,7 +2293,7 @@ mod tests {
         let reserved = store
             .reserve_attempt(op.id(), op.version, None, None)
             .unwrap();
-        assert!(reserved.current_attempt.is_none());
+        assert!(reserved.selected_capture.is_none());
         assert_eq!(
             store
                 .conn
@@ -2332,7 +2331,7 @@ mod tests {
                 cwd: "/repo".into(),
                 message: None,
                 model: None,
-                current_attempt: None,
+                selected_capture: None,
                 pending_session_id: None,
                 ready_summary: None,
                 worker_generation: 0,
@@ -2347,7 +2346,7 @@ mod tests {
         assert!(store
             .recover_flow(&id, None)
             .unwrap()
-            .current_attempt
+            .selected_capture
             .is_none());
 
         // Navigation consumes the selected native turn's recorded output.
@@ -2384,11 +2383,11 @@ mod tests {
             .failure
             .unwrap()
             .reason
-            .contains("loop-decide Run failed"));
+            .contains("loop-decide capture failed"));
         assert!(blocked.cursor.progress.verdict.is_none());
         assert!(store.flow_output(&id).is_err());
         let retried = store.retry_flow(&id, None).unwrap();
-        assert!(retried.failure.is_none() && retried.current_attempt.is_none());
+        assert!(retried.failure.is_none() && retried.selected_capture.is_none());
         assert!(
             store.retry_flow(&id, None).is_err(),
             "nothing left to retry"
@@ -2403,7 +2402,7 @@ mod tests {
         let settled = store.recover_flow(&id, None).unwrap();
         assert_eq!(settled.cursor.progress.verdict, Some(iterate));
         assert_eq!(
-            settled.current_attempt.unwrap().outcome.as_deref(),
+            settled.selected_capture.unwrap().outcome.as_deref(),
             Some("completed")
         );
         let mut next = settled.cursor.clone();
@@ -2417,7 +2416,7 @@ mod tests {
         assert_eq!(moved.cursor, next);
         assert_eq!(store.flow(&id).unwrap().unwrap().cursor.index, 0);
         assert!(
-            moved.current_attempt.is_none(),
+            moved.selected_capture.is_none(),
             "a new position has no attempt"
         );
         assert!(store
@@ -2475,7 +2474,7 @@ mod tests {
                 .correct_flow_output(flow.id(), flow.version, None)
                 .unwrap();
             assert!(
-                corrected.current_attempt.is_none(),
+                corrected.selected_capture.is_none(),
                 "correction does not capture in the driver"
             );
             assert_eq!(corrected.invocation, flow.invocation);

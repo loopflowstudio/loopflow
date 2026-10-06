@@ -24,7 +24,7 @@ pub fn run(
     parent: Option<&str>,
 ) -> Result<()> {
     let days = if parent.is_some() { 0 } else { days };
-    let runs = crate::lf::commands::runs::collect_history(
+    let runs = crate::lf::commands::session_history::collect_history(
         WorkFilter {
             wave,
             project,

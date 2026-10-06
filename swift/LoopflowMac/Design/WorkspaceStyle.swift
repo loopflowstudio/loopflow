@@ -190,7 +190,7 @@ struct WorkspaceOutlineButtonStyle: ButtonStyle {
     }
 }
 
-/// Collapsed heading for a demand-read Task section (Comments, Recent runs):
+/// Collapsed heading for a demand-read Task section (Comments, Session history):
 /// chevron, caps title, optional count, and the read's progress or failure.
 struct WorkspaceDisclosureHeading: View {
     let title: String

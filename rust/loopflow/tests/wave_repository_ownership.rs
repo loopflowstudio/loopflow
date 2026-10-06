@@ -127,7 +127,7 @@ fn lf_command(home: &Path, repo: &Path, args: &[&str]) -> std::process::Output {
         .args(args)
         .current_dir(repo)
         .env("LF_HOME", home)
-        .env_remove("LF_RUN_ID")
+        .env_remove("LF_CAPTURE_KEY")
         .env_remove("LF_ACCOUNT_LEASE")
         .output()
         .unwrap()

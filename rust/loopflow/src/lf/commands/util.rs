@@ -223,16 +223,14 @@ pub(crate) fn resume_session(
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
-    run_id: &String,
-    run_dir: &Path,
+    artifact_key: &String,
     provider_session: &crate::session_record::ProviderSessionRef,
 ) -> Result<()> {
     resume_session_with_env(
         harness,
         model,
         worktree,
-        run_id,
-        run_dir,
+        artifact_key,
         provider_session,
         &BTreeMap::new(),
         None,
@@ -245,8 +243,7 @@ pub(crate) fn resume_session_with_env(
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
-    run_id: &String,
-    run_dir: &Path,
+    artifact_key: &String,
     provider_session: &crate::session_record::ProviderSessionRef,
     extra_environment: &BTreeMap<String, String>,
     launch_lock: Option<File>,
@@ -268,13 +265,10 @@ pub(crate) fn resume_session_with_env(
             ["--remote".into(), format!("unix://{}", remote.display())],
         );
     }
-    let mut environment = BTreeMap::from([
-        (crate::durable::RUN_ID_ENV.to_string(), run_id.to_string()),
-        (
-            crate::session_record::RUN_DIR_ENV.to_string(),
-            run_dir.display().to_string(),
-        ),
-    ]);
+    let mut environment = BTreeMap::from([(
+        crate::session_record::CAPTURE_KEY_ENV.to_string(),
+        artifact_key.to_string(),
+    )]);
     environment.extend(extra_environment.clone());
     environment.insert(
         crate::engine::config::USER_NAME_ENV.to_string(),
@@ -286,10 +280,14 @@ pub(crate) fn resume_session_with_env(
         if let Some(exec) = crate::journal::current_exec_id() {
             let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
             let session = store
-                .session_for_artifact(run_id)?
-                .ok_or_else(|| anyhow!("Session input {run_id} is not recorded"))?;
+                .session_for_artifact(artifact_key)?
+                .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
             let expected = store.session_driver(&session.id)?;
             let driver = store.claim_session_driver(&session.id, expected.as_ref(), &exec, true)?;
+            environment.insert(
+                crate::exec::AGENT_CALLER_ENV.into(),
+                serde_json::to_string(&driver.caller(session.id.clone()))?,
+            );
             crate::session_record::register_session_driver_interrupt(
                 &store,
                 session.id.clone(),
@@ -655,7 +653,7 @@ struct SessionCommandOutcome {
 }
 
 fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<()> {
-    let Some(input) = environment.get(crate::durable::RUN_ID_ENV) else {
+    let Some(input) = environment.get(crate::session_record::CAPTURE_KEY_ENV) else {
         return Ok(());
     };
     let Some(exec) = crate::journal::current_exec_id() else {
@@ -689,10 +687,13 @@ fn session_command_status_with_env(
 ) -> Result<SessionCommandOutcome> {
     // Keep admission and client publication on the same side of Session stop.
     // Release before waiting for the child, so stop can settle that client.
-    let launch = environment
-        .get(crate::session_record::RUN_DIR_ENV)
+    let capture_dir = environment
+        .get(crate::session_record::CAPTURE_KEY_ENV)
+        .map(|key| crate::session_record::capture_dir(key))
+        .transpose()?;
+    let launch = capture_dir
+        .as_deref()
         .map(|dir| -> Result<File> {
-            let dir = Path::new(dir);
             let launch = lock_provider_clients(dir)?;
             require_provider_session_exec(dir)?;
             Ok(launch)
@@ -723,18 +724,14 @@ fn session_command_status_with_env(
     if let Some(route) = &account_route {
         process.args(route.provider_args());
     }
-    if command.program == "codex"
-        && provider_session_id.is_none()
-        && environment.contains_key(crate::session_record::RUN_DIR_ENV)
-    {
+    if command.program == "codex" && provider_session_id.is_none() && capture_dir.is_some() {
         let hook = codex_session_start_hook()?;
         process.args(["--dangerously-bypass-hook-trust", "-c", &hook]);
     }
-    let observed_run = environment
-        .get(crate::session_record::RUN_DIR_ENV)
-        .filter(|_| command.program == "opencode" && provider_session_id.is_none())
-        .map(PathBuf::from);
-    if observed_run.is_some() {
+    let observed_capture = capture_dir
+        .clone()
+        .filter(|_| command.program == "opencode" && provider_session_id.is_none());
+    if observed_capture.is_some() {
         process.args(["--print-logs", "--log-level", "INFO"]);
         process.stderr(Stdio::piped());
     }
@@ -756,12 +753,11 @@ fn session_command_status_with_env(
         );
         route.record_exec_blocking(provider_session_id.map(str::to_string), None)?;
     }
-    if let (Some(run_dir), Some(provider_session_id)) = (
-        environment.get(crate::session_record::RUN_DIR_ENV),
-        provider_session_id,
-    ) {
+    if let (Some(capture_dir), Some(provider_session_id)) =
+        (capture_dir.as_deref(), provider_session_id)
+    {
         crate::session_record::write_provider_session(
-            Path::new(run_dir),
+            capture_dir,
             provider_session_id,
             account_route
                 .as_ref()
@@ -770,7 +766,7 @@ fn session_command_status_with_env(
     }
     let mut child = process.spawn()?;
     drop(activation);
-    let client = match ProviderClientGuard::publish(environment, child.id()) {
+    let client = match ProviderClientGuard::publish(capture_dir.as_deref(), child.id()) {
         Ok(client) => client,
         Err(error) => {
             let _ = child.kill();
@@ -786,12 +782,12 @@ fn session_command_status_with_env(
     // Completion and another Open can proceed once exact client ownership is visible.
     drop(launch_lock);
     drop(launch);
-    let observer = observed_run.map(|run_dir| {
+    let observer = observed_capture.map(|capture_dir| {
         let stderr = child
             .stderr
             .take()
             .expect("piped OpenCode stderr is available");
-        std::thread::spawn(move || observe_opencode_session(&run_dir, stderr))
+        std::thread::spawn(move || observe_opencode_session(&capture_dir, stderr))
     });
     let status = child.wait()?;
     if let Some(observer) = observer {
@@ -800,12 +796,8 @@ fn session_command_status_with_env(
             .map_err(|_| anyhow!("OpenCode session observer panicked"))??;
     }
     // Record which home this conversation lives in, so reopening returns there.
-    if let (Some(route), Some(run_dir)) = (
-        &account_route,
-        environment.get(crate::session_record::RUN_DIR_ENV),
-    ) {
-        if let Ok(Some(session)) = crate::session_record::read_provider_session(Path::new(run_dir))
-        {
+    if let (Some(route), Some(capture_dir)) = (&account_route, capture_dir.as_deref()) {
+        if let Ok(Some(session)) = crate::session_record::read_provider_session(capture_dir) {
             if let Err(error) = route.record_exec_blocking(Some(session.provider_session_id), None)
             {
                 tracing::warn!(%error, "failed to record the provider session's account home");
@@ -825,25 +817,25 @@ fn session_command_status_with_env(
 
 #[derive(Debug)]
 struct ProviderClientGuard {
-    run_dir: PathBuf,
+    capture_dir: PathBuf,
     pid: u32,
 }
 
 impl ProviderClientGuard {
-    fn publish(environment: &BTreeMap<String, String>, pid: u32) -> Result<Option<Self>> {
-        let Some(run_dir) = environment.get(crate::session_record::RUN_DIR_ENV) else {
+    fn publish(capture_dir: Option<&Path>, pid: u32) -> Result<Option<Self>> {
+        let Some(capture_dir) = capture_dir else {
             return Ok(None);
         };
-        let run_dir = PathBuf::from(run_dir);
-        crate::session_record::write_provider_client(&run_dir, pid)
+        let capture_dir = capture_dir.to_path_buf();
+        crate::session_record::write_provider_client(&capture_dir, pid)
             .map_err(|error| anyhow!("cannot record active provider client: {error}"))?;
-        Ok(Some(Self { run_dir, pid }))
+        Ok(Some(Self { capture_dir, pid }))
     }
 
     fn take_stop_reason(&self) -> Result<Option<ProviderClientStopReason>> {
-        let reason = crate::session_record::read_provider_client_stop(&self.run_dir, self.pid)?;
+        let reason = crate::session_record::read_provider_client_stop(&self.capture_dir, self.pid)?;
         if reason.is_some() {
-            crate::session_record::remove_provider_client_stop(&self.run_dir, self.pid)?;
+            crate::session_record::remove_provider_client_stop(&self.capture_dir, self.pid)?;
         }
         Ok(reason)
     }
@@ -851,11 +843,13 @@ impl ProviderClientGuard {
 
 impl Drop for ProviderClientGuard {
     fn drop(&mut self) {
-        if let Err(error) = crate::session_record::remove_provider_client(&self.run_dir, self.pid) {
+        if let Err(error) =
+            crate::session_record::remove_provider_client(&self.capture_dir, self.pid)
+        {
             tracing::warn!(pid = self.pid, %error, "failed to clear provider client receipt");
         }
         if let Err(error) =
-            crate::session_record::remove_provider_client_stop(&self.run_dir, self.pid)
+            crate::session_record::remove_provider_client_stop(&self.capture_dir, self.pid)
         {
             tracing::warn!(pid = self.pid, %error, "failed to clear provider client stop");
         }
@@ -879,7 +873,7 @@ fn codex_session_start_hook_for(executable: &Path) -> String {
     )
 }
 
-fn observe_opencode_session(run_dir: &Path, stderr: impl Read) -> std::io::Result<()> {
+fn observe_opencode_session(capture_dir: &Path, stderr: impl Read) -> std::io::Result<()> {
     let mut write_error = None;
     let mut observed = false;
     for line in BufReader::new(stderr).lines() {
@@ -888,7 +882,7 @@ fn observe_opencode_session(run_dir: &Path, stderr: impl Read) -> std::io::Resul
             if let Some(provider_session_id) = parse_opencode_session_id(&line) {
                 observed = true;
                 if let Err(error) = crate::session_record::write_provider_session(
-                    run_dir,
+                    capture_dir,
                     provider_session_id,
                     None,
                 ) {
@@ -1402,7 +1396,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(history.provider_session_id, "retained-history");
-        // Deliberate historical resumption remains supported for unrelated Runs.
+        // Deliberate historical resumption remains supported for unrelated Sessions.
         let provider = fake_provider(&fixture.temp, "touch resumed");
         let command = SessionCommand {
             program: provider.display().to_string(),
@@ -1444,8 +1438,8 @@ mod tests {
             },
         )
         .unwrap();
-        let run_dir = capture.artifact_dir();
-        let stop_dir = run_dir.clone();
+        let capture_dir = capture.artifact_dir();
+        let stop_dir = capture_dir.clone();
         let lock_path = temp.path().join("launch.lock");
         let launch_lock = File::create(&lock_path).unwrap();
         fs2::FileExt::lock_exclusive(&launch_lock).unwrap();
@@ -1494,7 +1488,7 @@ mod tests {
             "Session completed elsewhere."
         );
         assert_eq!(
-            crate::session_record::read_provider_client_stop(&run_dir, pid).unwrap(),
+            crate::session_record::read_provider_client_stop(&capture_dir, pid).unwrap(),
             None
         );
     }
@@ -1722,9 +1716,9 @@ mod tests {
             },
         )
         .unwrap();
-        let run_dir = capture.artifact_dir();
-        crate::session_record::write_provider_session(&run_dir, "ses_original", None).unwrap();
-        let session = crate::session_record::read_provider_session(&run_dir)
+        let capture_dir = capture.artifact_dir();
+        crate::session_record::write_provider_session(&capture_dir, "ses_original", None).unwrap();
+        let session = crate::session_record::read_provider_session(&capture_dir)
             .unwrap()
             .unwrap();
         for (saved, forwarded, expected) in [
@@ -1747,7 +1741,6 @@ mod tests {
                 None,
                 temp.path(),
                 &capture.artifact_key(),
-                &run_dir,
                 &session,
                 &BTreeMap::new(),
                 None,
@@ -1761,7 +1754,7 @@ mod tests {
             assert!(!arguments.contains(&"--prompt"));
             assert!(!received.contains("<lf:user>"));
             assert_eq!(
-                crate::session_record::read_provider_session(&run_dir)
+                crate::session_record::read_provider_session(&capture_dir)
                     .unwrap()
                     .unwrap(),
                 session

@@ -10,13 +10,13 @@ const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_
 
 #[test]
 fn active_sessions_preserve_identity_waiting_clients_and_incomplete_evidence() {
-    use loopflow::lf::commands::runs::ActiveSessionsSnapshot;
+    use loopflow::lf::commands::session_history::ActiveSessionsSnapshot;
     use loopflow::lf::commands::top::ActivityState;
     let json = include_str!("../../../tests/fixtures/dto/active_runs.json");
     let snapshot: ActiveSessionsSnapshot = serde_json::from_str(json).unwrap();
     assert_eq!(
         snapshot.discovery,
-        loopflow::lf::commands::runs::DiscoveryState::Ready
+        loopflow::lf::commands::session_history::DiscoveryState::Ready
     );
     assert_eq!(snapshot.sessions[0].work, snapshot.task);
     assert_eq!(
@@ -101,7 +101,7 @@ fn pm_show_requires_team_identity_even_without_project_ownership() {
 #[test]
 fn wave_detail_preserves_flow_and_requires_home() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
-    let Evidence::Ok { items: runs, .. } = &snapshot.runs else {
+    let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
     };
     assert_eq!(runs[0].first_provider_attempt_at, Some(1784052010));
@@ -324,9 +324,9 @@ fn exec_page_retains_outcomes_unknowns_and_continuation() {
 
 #[test]
 fn session_input_history_retains_distinct_native_results_and_unknown_exec() {
-    let value: loopflow::lf::commands::runs::SessionHistory = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/session_history_summary.json"
-    ))
+    let value: loopflow::lf::commands::session_history::SessionHistory = serde_json::from_str(
+        include_str!("../../../tests/fixtures/dto/session_history_summary.json"),
+    )
     .unwrap();
     assert_eq!(value.providers.len(), 2);
     assert_eq!(value.providers[0].outcome.as_deref(), Some("failed"));
@@ -338,7 +338,8 @@ fn session_input_history_retains_distinct_native_results_and_unknown_exec() {
     assert!(encoded.get("subjects").is_none());
     assert!(encoded.get("outcome").is_none());
     assert_eq!(
-        serde_json::from_value::<loopflow::lf::commands::runs::SessionHistory>(encoded).unwrap(),
+        serde_json::from_value::<loopflow::lf::commands::session_history::SessionHistory>(encoded)
+            .unwrap(),
         value
     );
 }

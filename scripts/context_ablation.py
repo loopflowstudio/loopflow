@@ -36,8 +36,8 @@ def _block(tag: str) -> re.Pattern[str]:
 _SCRATCH_FILE = re.compile(r'^<lf:file path="(scratch/[^"]+)">\n(.*?)^</lf:file>\n?', re.M | re.S)
 
 
-def _record(runs: Path, run: str) -> Path:
-    return runs / run.removeprefix("run_")[:2] / run
+def _record(captures: Path, capture: str) -> Path:
+    return captures / capture.removeprefix("run_")[:2] / capture
 
 
 def _events(directory: Path) -> list[dict[str, Any]]:
@@ -152,9 +152,9 @@ def source_tokens(directory: Path, manifest: dict[str, Any]) -> dict[str, int] |
     return dict(weights)
 
 
-def replayable(runs: Path) -> list[tuple[Path, dict[str, Any]]]:
+def replayable(captures: Path) -> list[tuple[Path, dict[str, Any]]]:
     records = []
-    for path in sorted(runs.glob("*/*/manifest.json")):
+    for path in sorted(captures.glob("*/*/manifest.json")):
         manifest = json.loads(path.read_text())
         if manifest.get("skill") in STEPS and _request_key(manifest):
             records.append((path.parent, manifest))
@@ -170,10 +170,10 @@ def _spread(values: list[float]) -> dict[str, float]:
     }
 
 
-def census(runs: Path, since: str | None = None) -> dict[str, Any]:
+def census(captures: Path, since: str | None = None) -> dict[str, Any]:
     steps: dict[str, dict[str, Any]] = {}
     grouped: dict[str, list[tuple[Path, dict[str, Any]]]] = defaultdict(list)
-    for directory, manifest in replayable(runs):
+    for directory, manifest in replayable(captures):
         if since and _timestamp(manifest["created_at"]) < _timestamp(since):
             continue
         grouped[manifest["skill"]].append((directory, manifest))
@@ -366,8 +366,8 @@ def _admit_account(lf: str, environment: dict[str, str], home: Path, source: dic
 
 
 def replay(
-    runs: Path,
-    run: str,
+    captures: Path,
+    capture: str,
     arm: str,
     repo: Path,
     out: Path,
@@ -375,12 +375,12 @@ def replay(
     minutes: float,
     commit: str | None,
 ) -> dict[str, Any]:
-    directory = _record(runs, run)
+    directory = _record(captures, capture)
     source = json.loads((directory / "manifest.json").read_text())
     commit = commit or launch_commit(source)
     if commit is None:
-        raise SystemExit(f"{run}: launch commit is not recoverable; pass --commit")
-    out = out / run / arm
+        raise SystemExit(f"{capture}: launch commit is not recoverable; pass --commit")
+    out = out / capture / arm
     request = source[_request_key(source)]
     variant = ARMS[arm](request["task_prompt"], source)
     checkout, home, identity, start = _stage(source, variant, repo, commit, out)
@@ -414,7 +414,7 @@ def replay(
         added, removed, path = line.split("\t")
         changed[path] = [int(added) if added != "-" else 0, int(removed) if removed != "-" else 0]
     result = {
-        "run": run,
+        "capture": capture,
         "arm": arm,
         "skill": source["skill"],
         "agent": request["agent"],
@@ -439,7 +439,7 @@ def _overlap(left: dict[str, Any], right: dict[str, Any]) -> float | None:
 
 
 def _replayed_turn(out: Path) -> dict[str, Any] | None:
-    """The child Run `lf replay` created beside the staged (still prepared) record."""
+    """The capture `lf replay` created beside the staged (still prepared) record."""
     children = [
         path.parent
         for path in (out / "home" / "runs").glob("*/*/manifest.json")
@@ -448,8 +448,8 @@ def _replayed_turn(out: Path) -> dict[str, Any] | None:
     return observe(children[0]) if len(children) == 1 else None
 
 
-def report(runs: Path, out: Path, repeat: Path | None = None) -> dict[str, Any]:
-    """Compare arms per record; a repeat baseline measures run-to-run noise."""
+def report(captures: Path, out: Path, repeat: Path | None = None) -> dict[str, Any]:
+    """Compare arms per record; a repeat baseline measures replay-to-replay noise."""
     steps = []
     for directory in sorted(path for path in out.iterdir() if path.is_dir()):
         arm_dirs = {path.parent.name: path.parent for path in directory.glob("*/result.json")}
@@ -460,7 +460,7 @@ def report(runs: Path, out: Path, repeat: Path | None = None) -> dict[str, Any]:
             for arm, path in sorted(arm_dirs.items())
         }
         baseline = arms.get("baseline")
-        original = observe(_record(runs, directory.name))
+        original = observe(_record(captures, directory.name))
         rows = {}
         for arm, result in arms.items():
             # Read the record again: a saved result holds what an older reader saw.
@@ -484,7 +484,7 @@ def report(runs: Path, out: Path, repeat: Path | None = None) -> dict[str, Any]:
             }
         steps.append(
             {
-                "run": directory.name,
+                "capture": directory.name,
                 "skill": next(iter(arms.values()))["skill"] if arms else None,
                 "original": {**original, "checks": len(original["checks"])},
                 "arms": rows,
@@ -495,18 +495,18 @@ def report(runs: Path, out: Path, repeat: Path | None = None) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runs", type=Path, default=Path.home() / ".lf" / "runs")
+    parser.add_argument("--captures", type=Path, default=Path.home() / ".lf" / "runs")
     commands = parser.add_subparsers(dest="command", required=True)
     weigh = commands.add_parser(
         "census", help="weigh each source across recorded launches; no spend"
     )
     weigh.add_argument("--since", help="ISO timestamp with UTC offset")
     arms = commands.add_parser("arms", help="list the arms a record's prompt supports")
-    arms.add_argument("run")
+    arms.add_argument("capture")
     launch = commands.add_parser(
         "replay", help="replay one record under one arm; spends provider usage"
     )
-    launch.add_argument("run")
+    launch.add_argument("capture")
     launch.add_argument("arm", choices=sorted(ARMS))
     launch.add_argument("--out", type=Path, required=True, help="directory for disposable Homes")
     launch.add_argument("--repo", type=Path, default=Path.cwd(), help="repository to clone")
@@ -522,16 +522,23 @@ def main() -> None:
     compare.add_argument("--repeat", type=Path, help="second baseline replays of the same records")
     args = parser.parse_args()
     if args.command == "census":
-        result = census(args.runs, args.since)
+        result = census(args.captures, args.since)
     elif args.command == "arms":
-        manifest = json.loads((_record(args.runs, args.run) / "manifest.json").read_text())
+        manifest = json.loads((_record(args.captures, args.capture) / "manifest.json").read_text())
         result = {"arms": applicable_arms(manifest), "commit": launch_commit(manifest)}
     elif args.command == "replay":
         result = replay(
-            args.runs, args.run, args.arm, args.repo, args.out, args.lf, args.minutes, args.commit
+            args.captures,
+            args.capture,
+            args.arm,
+            args.repo,
+            args.out,
+            args.lf,
+            args.minutes,
+            args.commit,
         )
     else:
-        result = report(args.runs, args.out, args.repeat)
+        result = report(args.captures, args.out, args.repeat)
     print(json.dumps(result, indent=2))
 
 

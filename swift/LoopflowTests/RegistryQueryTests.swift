@@ -150,7 +150,7 @@ struct RegistryQueryTests {
       "observed_at": "1970-01-01T00:00:00Z"
     }
   },
-  "runs": {
+  "history": {
     "state": "ok",
     "truncated": false,
     "items": [
@@ -295,8 +295,8 @@ struct RegistryQueryTests {
         #expect(result.workMap.tasks.items[0].reference.workspace?.slug == "wire-it")
         #expect(result.workMap.tasks.items[0].reference.workspace?.worktree == "/task-wt")
         #expect(result.workMap.tasks.items[0].reference.workspace?.branch == "jack/inf-123")
-        #expect(result.runs.items[0].skill == "task/pursue")
-        #expect(result.runs.items[0].usage.inputTokens == 1000)
+        #expect(result.history.items[0].skill == "task/pursue")
+        #expect(result.history.items[0].usage.inputTokens == 1000)
         #expect(result.workMap.tasks.items[0].condition.state == .clear)
         #expect(result.workMap.tasks.items[0].actions.recommended == .resume)
     }
@@ -369,7 +369,7 @@ struct RegistryQueryTests {
               "observed_at": "1970-01-01T00:00:00Z"
             }
           },
-          "runs": {
+          "history": {
             "state": "unavailable",
             "reason": "Session history unavailable: disk is gone"
           },
@@ -392,8 +392,8 @@ struct RegistryQueryTests {
         let query = RegistryQuery { _, _ in json }
 
         let result = try await query.status(wave: "goals", cwd: nil)
-        #expect(result.runs.unavailableReason == "Session history unavailable: disk is gone")
-        #expect(result.runs.items.isEmpty)
+        #expect(result.history.unavailableReason == "Session history unavailable: disk is gone")
+        #expect(result.history.items.isEmpty)
     }
 
     @Test("Task workspace queries preserve paths and binary/truncation evidence")

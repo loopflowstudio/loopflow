@@ -704,7 +704,7 @@ impl SqliteStore {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    pub fn reserve_review_run(
+    pub fn reserve_review_capture(
         &self,
         expected: &FlowSession,
     ) -> StoreResult<(FlowSession, AgentSession)> {
@@ -756,7 +756,7 @@ impl SqliteStore {
             WHERE state='current' AND pending_session_id=?1 AND position_version=?3
             AND claim_json IS NULL AND EXISTS(SELECT 1 FROM agent_sessions s WHERE s.id=?1 AND s.current_capture=?2 AND s.input_published=0 AND s.completed_at IS NULL)",
             params![session_id, captured, i64::try_from(version).map_err(invalid)?])? != 1 {
-            return Err(StoreError::InvalidAuthority("review Run reservation is stale".into()));
+            return Err(StoreError::InvalidAuthority("review input reservation is stale".into()));
         }
         tx.execute(
             "UPDATE agent_sessions SET input_published=1, provider=?2, model=?3 WHERE current_capture=?1",
@@ -794,11 +794,11 @@ impl SqliteStore {
             .optional()?)
     }
 
-    pub fn session_for_artifact(&self, run_id: &str) -> StoreResult<Option<AgentSession>> {
+    pub fn session_for_artifact(&self, artifact_key: &str) -> StoreResult<Option<AgentSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             &format!("{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1)"),
-            [run_id],
+            [artifact_key],
             read_session,
         )
         .optional()?
@@ -999,33 +999,18 @@ impl SqliteStore {
         Ok(session)
     }
 
-    /// A review Run stored before providers were: take it from launch evidence.
-    pub fn fill_run_provider(
-        &self,
-        run: &str,
-        provider: &str,
-        model: Option<&str>,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE agent_sessions SET provider=?2, model=?3 WHERE current_capture=?1 AND provider IS NULL",
-            params![capture_seq_in(&conn,run)?, provider, model],
-        )?;
-        Ok(())
-    }
-
-    /// Choose the agent of a Run that has not launched. A published Run keeps
+    /// Choose the agent of an unpublished capture. A published capture keeps
     /// the provider it launched with.
-    pub fn retarget_unpublished_run(
+    pub fn retarget_unpublished_capture(
         &self,
-        run: &str,
+        artifact_key: &str,
         provider: &str,
         model: Option<&str>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "UPDATE agent_sessions SET provider=?2, model=?3 WHERE current_capture=?1 AND input_published=0",
-            params![capture_seq_in(&conn,run)?, provider, model],
+            params![capture_seq_in(&conn,artifact_key)?, provider, model],
         )?;
         Ok(())
     }
@@ -1146,12 +1131,19 @@ impl SqliteStore {
         .transpose()
     }
 
-    /// Completion closes the Session; its Runs and provider history remain.
+    pub(crate) fn require_current_session_actor(&self, id: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        require_current_actor_in(&conn, id)
+    }
+
+    /// Completion closes the Session; its captures and provider history remain.
     /// A review closes only with the feedback its caller waits for.
     /// A Task review closes inside its invocation's transaction instead.
     pub fn complete_session(&self, id: &str, expected_capture: Option<i64>) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        if conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_current_actor_in(&tx, id)?;
+        if tx.execute(
             "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_capture=?2
              AND completed_at IS NULL AND (kind='conversation' OR ready_summary IS NOT NULL)
              AND NOT EXISTS(SELECT 1 FROM tasks m WHERE m.id=agent_sessions.task_id
@@ -1163,6 +1155,7 @@ impl SqliteStore {
                 "Session changed before completion".into(),
             ));
         }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1176,24 +1169,14 @@ impl SqliteStore {
             .collect()
     }
 
-    pub fn rename_session(
-        &self,
-        id: &str,
-        expected_capture: Option<i64>,
-        title: &str,
-        source: TitleSource,
-    ) -> StoreResult<()> {
+    pub fn rename_session(&self, id: &str, title: &str, source: TitleSource) -> StoreResult<()> {
         if title.trim().is_empty() {
             return Err(invalid("Session title cannot be empty"));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        if expected_capture.is_some_and(|event| Some(event) != session.captured) {
-            return Err(StoreError::InvalidAuthority(
-                "Session changed before rename".into(),
-            ));
-        }
+        require_current_actor_in(&tx, id)?;
+        session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.execute(
             "UPDATE agent_sessions SET title=?2, title_source=?3
              WHERE id=?1 AND (title_source='generated' OR ?3='human')",
@@ -1214,6 +1197,12 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if crate::journal::agent_caller().is_some_and(|caller| caller.session_id != id) {
+            return Err(StoreError::InvalidAuthority(
+                "Session caller does not own readiness".into(),
+            ));
+        }
+        require_current_actor_in(&tx, id)?;
         if tx.execute(
             "UPDATE agent_sessions SET ready_summary=?3 WHERE id=?1 AND current_capture=?2
              AND completed_at IS NULL AND (EXISTS(SELECT 1 FROM flow_sessions f WHERE f.id=agent_sessions.flow_session_id
@@ -1289,7 +1278,7 @@ pub(super) fn review_id(flow: &FlowSession) -> StoreResult<String> {
     ))
 }
 
-/// Store the review Session a Task's Flow parks at, with its first Run
+/// Store the review Session a Task's Flow parks at, with its first capture
 /// reserved. Parking at the same review again finds the Session it left.
 pub(super) fn reserve_task_review_in(
     conn: &Transaction<'_>,
@@ -1368,19 +1357,20 @@ pub(super) fn reserve_flow_conversation_in(
 
 pub(super) fn complete_review_in(conn: &Connection, expected: &FlowSession) -> StoreResult<()> {
     let id = review_id(expected)?;
+    require_current_actor_in(conn, &id)?;
     let summary = expected
         .ready_summary
         .as_deref()
         .filter(|summary| !summary.trim().is_empty())
         .ok_or_else(|| StoreError::InvalidAuthority("review is not ready".into()))?;
-    let run_id = expected
+    let artifact_key = expected
         .review_artifact_key()
         .ok_or_else(|| StoreError::InvalidAuthority("review has no published input".into()))?;
     if conn.execute(
         "UPDATE agent_sessions SET completed_at=?3 WHERE id=?1 AND current_capture=?2
         AND completed_at IS NULL AND ready_summary IS ?4
         AND EXISTS(SELECT 1 FROM flow_sessions WHERE id=?5 AND current_capture=?2 AND state='current')",
-        params![id, capture_seq_in(conn,run_id)?, crate::store::rows::now_unix(), summary, expected.id()],
+        params![id, capture_seq_in(conn,artifact_key)?, crate::store::rows::now_unix(), summary, expected.id()],
     )? != 1
     {
         return Err(StoreError::InvalidAuthority(
@@ -1443,6 +1433,50 @@ fn resolve_ancestry_in(conn: &Connection, session: &mut AgentSession) -> StoreRe
             })
             .transpose()
             .map_err(invalid)?;
+    }
+    Ok(())
+}
+
+/// A replaced provider keeps causal history, but cannot mutate its conversation.
+fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
+    if let Some(caller) = crate::journal::agent_caller().filter(|caller| caller.session_id == id) {
+        let current: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1
+                AND provider_generation=?2 AND provider_exec_id=?3
+                AND driver_exec_id IS NOT NULL)",
+            params![id, caller.provider_generation, caller.origin_exec_id],
+            |row| row.get(0),
+        )?;
+        if !current {
+            return Err(StoreError::InvalidAuthority(
+                "Session provider was replaced".into(),
+            ));
+        }
+    }
+    if let Some(key) = std::env::var_os(crate::session_record::CAPTURE_KEY_ENV) {
+        let key = key
+            .into_string()
+            .map_err(|_| invalid("capture key is not valid UTF-8"))?;
+        crate::session_record::parse_artifact_key(&key).map_err(invalid)?;
+        let (owner, current): (String, bool) = conn
+            .query_row(
+                "SELECT s.id,e.seq IS s.current_capture FROM session_events e
+                JOIN agent_sessions s ON s.id=e.session_id
+                WHERE e.kind='captured' AND e.receipt_key=?1",
+                [&key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| invalid("capture does not belong to a recorded Session in this Home"))?;
+        if crate::journal::agent_caller().is_some_and(|caller| caller.session_id != owner) {
+            return Err(invalid("capture belongs to another Session"));
+        }
+        let stale = owner == id && !current;
+        if stale {
+            return Err(StoreError::InvalidAuthority(
+                "Session input was replaced".into(),
+            ));
+        }
     }
     Ok(())
 }

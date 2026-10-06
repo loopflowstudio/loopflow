@@ -1,4 +1,5 @@
 #if os(macOS)
+import Darwin
 import Foundation
 import Testing
 @testable import Loopflow
@@ -9,6 +10,10 @@ import Testing
 struct DesktopNativeSessionFixture: Decodable, Sendable {
     let cli: String
     let home: String
+    let checkout: String
+    let repo: String
+    let taskId: String
+    let issue: String
     let environment: [String: String]
     let sessionId: String
     let nativeId: String
@@ -23,9 +28,24 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
     }
 
     var query: RegistryQuery {
-        RegistryQuery { args, _ in
-            try await Task.detached { try capture([cli] + args) }.value
+        RegistryQuery { args, _ in try await read(args) }
+    }
+
+    func read(_ args: [String]) async throws -> String {
+        if args.prefix(2) == ["session", "connect"] {
+            guard args.count == 4, args[2] == sessionId, args[3] == "--json" else {
+                throw RegistryQueryError("Only the owned Session may connect")
+            }
+            let output = try await Task.detached { try capture([cli] + args) }.value
+            var record = try #require(JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: Any])
+            let argv = try #require(record["open_argv"] as? [String])
+            record["open_argv"] = isolatedCommand(argv)
+            return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
         }
+        guard args.first == "roadmap" || ["wave list", "home id", "session list", "task files", "task file", "task diff"].contains(args.prefix(2).joined(separator: " ")) else {
+            throw RegistryQueryError("Fixture does not execute this command")
+        }
+        return try await Task.detached { try capture([cli] + args) }.value
     }
 
     func records() async throws -> [SessionRecord] {
@@ -49,9 +69,9 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
 
     private func capture(_ argv: [String]) throws -> String {
         let output = URL(fileURLWithPath: home).appendingPathComponent("query-\(UUID().uuidString)")
-        _ = FileManager.default.createFile(atPath: output.path, contents: nil)
+        try Data().write(to: output)
         let errors = output.appendingPathExtension("stderr")
-        _ = FileManager.default.createFile(atPath: errors.path, contents: nil)
+        try Data().write(to: errors)
         let errorHandle = try FileHandle(forWritingTo: errors)
         let handle = try FileHandle(forWritingTo: output)
         defer {
@@ -63,7 +83,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = argv
         process.environment = environment
-        process.currentDirectoryURL = URL(fileURLWithPath: home)
+        process.currentDirectoryURL = URL(fileURLWithPath: checkout)
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = handle
         process.standardError = errorHandle
@@ -81,7 +101,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
         }
         guard process.terminationStatus == 0 else {
             let detail = try String(contentsOf: errors, encoding: .utf8)
-            throw RegistryQueryError("Native fixture CLI failed (\(process.terminationStatus)): \(detail)")
+            throw RegistryQueryError("Native fixture CLI \(argv.dropFirst().joined(separator: " ")) failed (\(process.terminationStatus)): \(detail)")
         }
         return try String(contentsOf: output, encoding: .utf8)
     }
@@ -89,6 +109,98 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
 @Suite("Native Session reopen fixture", .serialized)
 @MainActor
 struct DesktopNativeSessionTests {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_TEST_CANARY"] != nil))
+    func inheritedSandboxRejectsExternalEffects() throws {
+        let canary = try #require(ProcessInfo.processInfo.environment["LOOPFLOW_TEST_CANARY"])
+        for script in ["IFS= read -r line < \"$1\"", ": > \"$1\"", "exec \"$1\"", "exec /bin/launchctl list"] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", script, "probe", canary]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus != 0)
+        }
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        if descriptor >= 0 {
+            defer { close(descriptor) }
+            var address = sockaddr_in()
+            address.sin_family = sa_family_t(AF_INET)
+            address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            address.sin_addr.s_addr = inet_addr("127.0.0.1")
+            let result = withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+            }
+            #expect(result == -1 && errno == EPERM)
+        } else { #expect(errno == EPERM) }
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LF_DESKTOP_TASK_SNAPSHOT"] != nil))
+    func combinedWorkspacePreservesTaskMembershipAndRejectsCopiedClients() async throws {
+        let fixture = try DesktopNativeSessionFixture.load()
+        let snapshot = try #require(ProcessInfo.processInfo.environment["LF_DESKTOP_TASK_SNAPSHOT"])
+        let reads = SnapshotReads()
+        let query = RegistryQuery { args, _ in
+            try await reads.read(binary: fixture.cli, home: snapshot, args: args, cwd: fixture.repo, fixture: fixture).get()
+        }
+        let copied = try await reads.read(binary: fixture.cli, home: snapshot,
+            args: ["session", "list", "--all", "--history", "--json"], cwd: fixture.repo).get()
+        let copiedRecords = try JSONDecoder().decode([SessionRecord].self, from: Data(copied.utf8))
+        let copiedRecord = try #require(copiedRecords.first)
+        await #expect(throws: (any Error).self) { try await query.openSession(id: copiedRecord.id) }
+        let model = PodiumModel(query: query, repoPath: fixture.repo)
+        await model.refresh()
+        let originalIDs = Set(model.workspace.waves.flatMap { $0.tasks.map { $0.task.id } })
+        #expect(originalIDs.contains(fixture.taskId))
+        // Closed copied conversations belong to explicit history, not the
+        // current working set. The unfiltered transport retains them unchanged.
+        let history = try await reads.read(binary: fixture.cli, home: snapshot,
+            args: ["session", "list", "--all", "--history", "--json"], cwd: fixture.repo, fixture: fixture).get()
+        #expect(try JSONDecoder().decode([SessionRecord].self, from: Data(history.utf8)).count == copiedRecords.count + 1)
+        let owned = try #require(try await fixture.records().first)
+        let registry = SessionsWorkspaceRegistry(localHomeId: try await query.localHomeId())
+        let workspace = registry.workspace(for: try #require(owned.workspace).identity)
+        let store = workspace.sessionStore(repoPath: fixture.repo, query: query)
+        workspace.multiplexer.load(sessionId: fixture.sessionId)
+        workspace.multiplexer.newShell()
+        let layout = workspace.multiplexer.layout
+        let files = workspace.files(taskId: fixture.taskId, issue: fixture.issue, cwd: fixture.checkout, query: query)
+        files.autosave = false
+        files.selection = "notes.txt"
+        await files.loadFile()
+        let document = try #require(files.selectedDocument)
+        #expect(document.snapshot != nil)
+        document.editor.insertText("Preserved draft", replacementRange: NSRange(location: 0, length: document.editor.string.utf16.count))
+        document.editor.setSelectedRange(NSRange(location: 2, length: 3))
+        var link = URLComponents()
+        link.scheme = "loopflow"; link.host = "task"; link.path = "/" + fixture.issue
+        link.queryItems = [URLQueryItem(name: "repo", value: fixture.repo), URLQueryItem(name: "session", value: fixture.sessionId)]
+        for _ in 0..<3 {
+            await model.openTaskLink(try #require(link.url))
+            #expect(model.selection?.id == fixture.taskId)
+            #expect(model.linkedSession?.taskIds.contains(fixture.taskId) == true)
+            store.reconcile(try await fixture.records())
+            await store.select(fixture.sessionId)
+            let prepared = try #require(store.sessions.first?.surface)
+            #expect(try await fixture.resume(prepared).contains("native:\(fixture.nativeId):retained-history"))
+            store.recordPaneLive(fixture.sessionId)
+            store.noteSurfaceClosed(.session(fixture.sessionId))
+            await model.refresh()
+            await files.refresh()
+            await files.loadFile()
+            #expect(document.text == "Preserved draft")
+            #expect(document.editor.selectedRange() == NSRange(location: 2, length: 3))
+            #expect(workspace.multiplexer.layout == layout)
+            #expect(Set(model.workspace.waves.flatMap { $0.tasks.map { $0.task.id } }) == originalIDs)
+            #expect(try fixture.historyIsPreserved())
+        }
+        let after = try await reads.read(binary: fixture.cli, home: snapshot,
+            args: ["session", "list", "--all", "--history", "--json"], cwd: fixture.repo).get()
+        #expect(try JSONDecoder().decode([SessionRecord].self, from: Data(after.utf8)) == copiedRecords)
+        await reads.finish()
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_TEST_NATIVE_FIXTURE"] != nil))
     func reopenPreservesSessionAndNativeHistory() async throws {
         let fixture = try DesktopNativeSessionFixture.load()
@@ -98,6 +210,7 @@ struct DesktopNativeSessionTests {
             await store.select(fixture.sessionId)
             let prepared = try #require(store.sessions.first?.surface)
             #expect(prepared.id == fixture.sessionId)
+            #expect(prepared.taskIds.contains(fixture.taskId))
             let result = try await fixture.resume(prepared)
             #expect(result.contains("native:\(fixture.nativeId):retained-history"))
             store.recordPaneLive(fixture.sessionId)

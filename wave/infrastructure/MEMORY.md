@@ -771,19 +771,24 @@ refresh. Copied SQLite alone cannot isolate retained checkout/process references
 or external effects. Release's installed filtering proof above supplies none of
 these performance measurements.
 
-Harness completion and execution need separate evidence. LOO-304's `2176cac20`
-counts CLI processes and main-store SQLite statements/rows without SQL or values;
-interrupted receipts remain partial. Three headless owned-provider reopens retain
-one Session and native history; post-exit inventory requires `--history`.
-The mounted scenario remains unrendered. Fixture preparation owns both receipt
-directories; real-CLI isolation confirms separate setup counts. Partial counts
-remain visible; older combined receipts remain unscoped. Production refresh still
-uses fixture data; native reopening runs separately before the soak. Published snapshot transport provides real CLI reads and Task links, but refuses
-Session connection. Combined soak integration still needs an owned Task-bound
-native fixture: copied checkout, process and account references grant no execution
-authority. Setup/scenario counts remain separate; an unexecuted requested soak
-reports incomplete. Release's retired publisher UI receipt does
-not waive this Task's rendered proof.
+LOO-304's CLI counters retain partial receipts without SQL or values; setup and
+scenario scopes stay separate. Its combined source harness now keeps snapshot refresh and an owned
+Task-bound native fixture in the same Podium/window, preserving draft/selection,
+panes, transcript and identity across reopening. The standalone mounted reopen
+window is deleted. Public bind and Rust membership supply Task ownership; the
+test transport merges observations from separate Homes without rewriting copied
+identities. Only the owned Session can connect. One inherited OS sandbox covers app, shells and CLI children, isolating writes,
+credentials, providers and scheduling. macOS
+rejected nested sandbox application, so the runner owns one boundary. Use kernel
+canonical paths for policy and pin Git to avoid xcrun's ambient cache writes.
+
+The headless integration proof uses a small synthetic snapshot and real CLI
+reads with WindowServer denied. It checks preservation, copied-client refusal
+and external file/execute/network denial. It does not establish realistic-density
+latency, rendered native readiness, real providers, compositor presentation or
+an hour-long soak. Additive fixture and sandbox overhead require a fresh matched
+baseline/candidate pair. Release's retired publisher UI receipt does not waive
+LOO-304's rendered proof; capable gate/CI still owns that execution.
 
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)

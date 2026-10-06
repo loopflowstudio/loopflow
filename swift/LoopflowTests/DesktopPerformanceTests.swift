@@ -24,7 +24,7 @@ struct DesktopPerformanceTests {
         let journal = try PerformanceJournal(url: output)
         let soakSeconds = Double(environment["LF_DESKTOP_PERF_SOAK_SECONDS"] ?? "0") ?? 0
         let scenarios = ["full", "fold", "expand", "compact", "sessions", "filter", "scroll_refresh",
-                         "monitor_active", "monitor_empty", "session_return", "combined_zoom", "combined_restore", "task_details", "task_flow", "task_history", "file_edit_refresh", "new_pty", "native_session_reopen"]
+                         "monitor_active", "monitor_empty", "session_return", "combined_zoom", "combined_restore", "task_details", "task_flow", "task_history", "file_edit_refresh", "new_pty"]
         try journal.write(["event": "plan", "population_version": "desktop-v3",
                            "populations": ["small": 8, "large": 256], "samples": samples,
                            "scenarios": scenarios, "endpoint": "native_capture_ocr_and_pty_reply",
@@ -322,7 +322,6 @@ struct DesktopPerformanceTests {
                 throw PerformanceFailure("failed", "Retained terminal identity or companion changed")
             }
         }
-        try await measureNativeReopening(population: population, samples: samples, journal: journal)
         if soakSeconds > 0 {
             // One owner keeps the real refresh cadences running for the whole soak.
             let refresh = Task { await model.keepWorkspaceCurrent() }
@@ -376,58 +375,113 @@ struct DesktopPerformanceTests {
         await model.stopActiveSessions()
     }
 
-    private func measureNativeReopening(population: String, samples: Int, journal: PerformanceJournal) async throws {
-        let fixture = try DesktopNativeSessionFixture.load()
-        let store = SessionsStore(repoPath: fixture.home, query: fixture.query)
-        let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 900, height: 500),
-                                       styleMask: [.titled], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        defer {
-            window.contentView = nil
-            store.surfaces.release(.session(fixture.sessionId))
-            window.close()
-        }
+    private func measureOwnedSoak(view: SessionsView, window: PerformanceWindow,
+                                  fixture: DesktopNativeSessionFixture, query: RegistryQuery,
+                                  samples: Int, seconds: Double, journal: PerformanceJournal) async throws {
+        let model = view.model
+        let registry = view.workspaces
+        let record = try #require(try await fixture.records().first)
+        try #require(record.taskIds.contains(fixture.taskId))
         let identity = TerminalIdentity.session(fixture.sessionId)
-        for attempt in 0..<samples {
-            let records = try await fixture.records()
-            try #require(records.count == 1 && records[0].id == fixture.sessionId)
-            store.reconcile(records)
-            var terminal: GhosttyMetalView?
-            try await sample("native_session_reopen", population, attempt, journal, window, action: {
-                await store.select(fixture.sessionId)
-                let record = try #require(store.sessions.first?.surface)
-                try #require(record.id == fixture.sessionId)
-                let view = GhosttyTerminalView(workingDirectory: fixture.home,
-                    argv: fixture.isolatedCommand(record.openArgv), terminal: identity,
-                    surfacePool: store.surfaces, isFocused: true,
-                    onSurfaceCreated: { store.recordPaneLive(fixture.sessionId) })
-                window.contentView = NSHostingView(rootView: view)
-                window.orderFront(nil)
-                terminal = store.surfaces.view(for: identity)
+        let workspace = registry.workspace(for: try #require(record.workspace).identity)
+        let store = workspace.sessionStore(repoPath: fixture.repo, query: query)
+        let multiplexer = workspace.multiplexer
+        multiplexer.load(sessionId: fixture.sessionId)
+        let sessionPane = multiplexer.focusedPaneId
+        multiplexer.newShell()
+        let companion = multiplexer.focusedPaneId
+        let companionIdentity = TerminalIdentity.shell(companion)
+        let companionView = registry.surfaces.view(for: companionIdentity)
+        companionView.workingDirectory = fixture.checkout
+        companionView.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
+        companionView.createSurface(manager: GhosttyManager.shared)
+        let companionSurface = try #require(companionView.surface)
+        multiplexer.setFocusedPane(sessionPane)
+        let layout = multiplexer.layout
+        defer {
+            registry.surfaces.release(identity)
+            registry.surfaces.release(companionIdentity)
+        }
+        let files = workspace.files(taskId: fixture.taskId, issue: fixture.issue, cwd: fixture.checkout, query: query)
+        files.autosave = false
+        files.selection = "notes.txt"
+        await files.loadFile()
+        let document = try #require(files.selectedDocument)
+        try #require(document.snapshot != nil)
+        document.editor.insertText("Preserved draft", replacementRange: NSRange(location: 0, length: document.editor.string.utf16.count))
+        document.editor.setSelectedRange(NSRange(location: 2, length: 3))
+        var link = URLComponents()
+        link.scheme = "loopflow"; link.host = "task"; link.path = "/" + fixture.issue
+        link.queryItems = [URLQueryItem(name: "repo", value: fixture.repo), URLQueryItem(name: "session", value: fixture.sessionId)]
+        let url = try #require(link.url)
+        // PodiumView already owns keepWorkspaceCurrent. Starting another poller
+        // here would invalidate the very idle measurement this test collects.
+        let start = ContinuousClock.now
+        var round = 0
+        if seconds > 0 {
+            try journal.write(["event": "soak_begin", "pid": ProcessInfo.processInfo.processIdentifier,
+                               "seconds": seconds, "time": Date().timeIntervalSince1970])
+        }
+        repeat {
+            if seconds > 0 {
+                try journal.write(["event": "soak_phase", "phase": "navigation_typing", "round": round,
+                                   "time": Date().timeIntervalSince1970])
+            }
+            try await sample("native_session_reopen", "snapshot", round, journal, window, soaking: round >= samples, action: {
+                await model.openTaskLink(url)
             }, ready: {
-                guard let terminal, let surface = terminal.surface else { return false }
-                return window.firstResponder === terminal
+                guard let surface = registry.surfaces.view(for: identity).surface else { return false }
+                return model.selection?.id == fixture.taskId
+                    && window.firstResponder === registry.surfaces.view(for: identity)
                     && terminalText(surface).contains("native:\(fixture.nativeId):retained-history")
             }, observation: {
-                ["session_id": fixture.sessionId, "native_id": fixture.nativeId,
+                ["session_id": fixture.sessionId, "task_id": fixture.taskId, "native_id": fixture.nativeId,
                  "provider": "owned Codex stub", "history_preserved": (try? fixture.historyIsPreserved()) == true]
             }, input: {
-                let surface = try #require(terminal?.surface)
-                let message = "reopened-\(population)-\(attempt)"
+                let surface = try #require(registry.surfaces.view(for: identity).surface)
+                let message = "reopened-\(round)"
                 try send(window, message + "\n")
                 try await wait(window) { terminalText(surface).contains("reply:\(fixture.nativeId):\(message)") }
-                try #require(try fixture.historyIsPreserved())
             })
-            // Native client exits naturally; explicit select must relaunch the same
-            // conversation, not mint another Session or complete its durable owner.
-            try send(window, "quit\n")
-            try await wait(window) { !store.surfaces.hasSurface(identity) }
-            window.contentView = nil
-            store.surfaces.release(identity)
-            store.noteSurfaceClosed(identity)
-            let reopened = try await fixture.records()
-            try #require(reopened.count == 1 && reopened[0].id == fixture.sessionId)
+            // Navigate away and back while the client is still live, retaining
+            // both surfaces. The Task link selects the same recorded conversation.
+            model.select(nil)
+            await model.openTaskLink(url)
+            try await wait(window) { window.firstResponder === registry.surfaces.view(for: identity) }
+            await files.refresh()
+            await files.loadFile()
+            try #require(document.text == "Preserved draft")
+            try #require(document.editor.selectedRange() == NSRange(location: 2, length: 3))
+            try #require(multiplexer.layout == layout)
+            try #require(companionView.surface == companionSurface)
             try #require(try fixture.historyIsPreserved())
+            try send(window, "quit\n")
+            try await wait(window) { !registry.surfaces.hasSurface(identity) }
+            registry.surfaces.release(identity)
+            store.noteSurfaceClosed(identity)
+            let retained = try await fixture.records()
+            try #require(retained.map(\.id) == [fixture.sessionId])
+            try #require(retained[0].taskIds.contains(fixture.taskId))
+            if seconds > 0 {
+                try journal.write(["event": "soak_round", "round": round, "preserved": true,
+                    "time": Date().timeIntervalSince1970, "windows": NSApp.windows.filter(\.isVisible).count,
+                    "key_window": NSApp.keyWindow?.windowNumber ?? -1, "focused_session": fixture.sessionId])
+                try journal.write(["event": "soak_phase", "phase": "idle", "round": round,
+                                   "time": Date().timeIntervalSince1970])
+                let remaining = seconds - Double(start.duration(to: .now).components.seconds)
+                if remaining > 0 { try await Task.sleep(for: .seconds(min(30, remaining))) }
+            }
+            round += 1
+        } while round < samples || start.duration(to: .now) < .seconds(seconds)
+        if seconds > 0 {
+            try journal.write(["event": "soak_end", "elapsed_seconds": Double(start.duration(to: .now).components.seconds),
+                               "rounds": round, "preserved": true, "time": Date().timeIntervalSince1970])
+            let finished = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["LF_DESKTOP_PERF_OUTPUT"]))
+                .deletingLastPathComponent().appendingPathComponent("resources-finished")
+            let deadline = ContinuousClock.now + .seconds(60)
+            while !FileManager.default.fileExists(atPath: finished.path), ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(100))
+            }
         }
     }
 
@@ -445,13 +499,13 @@ struct DesktopPerformanceTests {
 
     private func sample(_ scenario: String, _ population: String, _ attempt: Int,
                         _ journal: PerformanceJournal, _ window: PerformanceWindow,
-                        action: () async throws -> Void, ready: () -> Bool,
+                        soaking: Bool = false, action: () async throws -> Void, ready: () -> Bool,
                         observation: () -> [String: Any] = { [:] },
                         input: () async throws -> Void = {}) async throws {
         let metric = scenario == "new_pty" ? "new_pty_capture_and_echo_ms"
             : ["full", "fold", "expand", "compact", "sessions", "filter", "scroll_refresh"].contains(scenario)
                 ? "hierarchy_interaction_ms" : "task_workspace_ready_ms"
-        var record: [String: Any] = ["event": "begin", "id": "\(population)-\(scenario)-\(attempt)",
+        var record: [String: Any] = ["event": soaking ? "soak_sample_begin" : "begin", "id": "\(population)-\(scenario)-\(attempt)",
             "metric": metric, "scenario": scenario, "population": population, "attempt": attempt,
             "state": attempt == 0 ? "first_interaction" : "warm"]
         record["windows_before"] = NSApp.windows.filter(\.isVisible).count
@@ -473,13 +527,13 @@ struct DesktopPerformanceTests {
         } catch {
             record["outcome"] = (error as? PerformanceFailure)?.outcome ?? "failed"
             record["reason"] = String(describing: error)
-            record["event"] = "end"
+            record["event"] = soaking ? "soak_sample_end" : "end"
             record["duration_ms"] = milliseconds(start)
             record["observation"] = observation()
             try journal.write(record)
             throw error
         }
-        record["event"] = "end"
+        record["event"] = soaking ? "soak_sample_end" : "end"
         record["duration_ms"] = milliseconds(start)
         record["observation"] = observation()
         record["windows_after"] = NSApp.windows.filter(\.isVisible).count
@@ -797,13 +851,15 @@ extension DesktopPerformanceTests {
         let samples = Int(env["LF_DESKTOP_PERF_SAMPLES"] ?? "21") ?? 21
         let journal = try PerformanceJournal(url: URL(fileURLWithPath: try #require(env["LF_DESKTOP_PERF_OUTPUT"])))
         let scenarios = ["cold_workspace", "warm_task", "reopen_task"]
+        let fixture = try DesktopNativeSessionFixture.load()
+        let soakSeconds = Double(env["LF_DESKTOP_PERF_SOAK_SECONDS"] ?? "0") ?? 0
         try journal.write(["event": "plan", "population_version": "home-snapshot-v2",
                            "populations": ["snapshot": 1], "samples": samples,
-                           "scenarios": scenarios,
-                           "endpoint": "native_capture_ocr", "poll_interval_ms": 5,
+                           "scenarios": scenarios + ["native_session_reopen"], "soak_seconds": soakSeconds,
+                           "endpoint": "native_capture_ocr_and_pty_reply", "poll_interval_ms": 5,
                            "gaps": ["A new Podium and native window measure cold workspace construction, not OS application launch.",
                                     "Bitmap capture is not compositor presentation; OCR adds observer cost.",
-                                    "Copied providers cannot be connected. Session usability/provider startup are unmeasured."]])
+                                    "Copied providers cannot connect; native usability uses an owned Task and synthetic provider."]])
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
         NSApp.finishLaunching()
@@ -811,6 +867,10 @@ extension DesktopPerformanceTests {
             try journal.write(["event": "setup", "outcome": "unavailable", "reason": "No native screen"])
             throw PerformanceFailure("unavailable", "No native screen")
         }
+#if canImport(GhosttyKit)
+        GhosttyManager.shared.initialize()
+        try #require(GhosttyManager.shared.state == .ready)
+#endif
         var components = URLComponents()
         components.scheme = "loopflow"
         components.host = "task"
@@ -821,7 +881,7 @@ extension DesktopPerformanceTests {
             let reads = SnapshotReads()
             let query = RegistryQuery { args, cwd in
                 let start = DispatchTime.now().uptimeNanoseconds
-                let result = await reads.read(binary: binary, home: snapshot, args: args, cwd: cwd ?? repo)
+                let result = await reads.read(binary: binary, home: snapshot, args: args, cwd: cwd ?? repo, fixture: fixture)
                 try await MainActor.run {
                     try journal.write(["event": "read", "sample": attempt, "args": args,
                                        "duration_ms": Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000,
@@ -905,6 +965,15 @@ extension DesktopPerformanceTests {
                                          "session_usable_ms": NSNull()]
                 try journal.write(record)
             }
+#if canImport(GhosttyKit)
+            if attempt == samples - 1 {
+                let sessions = try view.inspect().find(SessionsView.self).actualView()
+                try await measureOwnedSoak(view: sessions, window: window, fixture: fixture, query: query,
+                                           samples: samples, seconds: soakSeconds, journal: journal)
+            }
+#else
+            throw PerformanceFailure("unavailable", "GhosttyKit is absent")
+#endif
             window.contentView = nil
             window.close()
             // Disappearing SwiftUI views cancel their pollers, but detached CLI
@@ -914,17 +983,47 @@ extension DesktopPerformanceTests {
     }
 }
 
-private actor SnapshotReads {
+actor SnapshotReads {
     private var active = 0
     private var closed = false
 
-    func read(binary: String, home: String, args: [String], cwd: String) async -> Result<String, Error> {
+    func read(binary: String, home: String, args: [String], cwd: String, fixture: DesktopNativeSessionFixture? = nil) async -> Result<String, Error> {
         guard !closed else { return .failure(CancellationError()) }
         active += 1
         defer { active -= 1 }
-        return await Task.detached {
-            Result { try snapshotRead(binary: binary, home: home, args: args, cwd: cwd) }
-        }.value
+        do {
+            let verb = args.prefix(2).joined(separator: " ")
+            if let fixture, verb == "session connect" || verb == "home id"
+                || args.contains(fixture.issue) || args.contains(fixture.taskId) {
+                return .success(try await fixture.read(args))
+            }
+            let output = try await Task.detached {
+                try snapshotRead(binary: binary, home: home, args: args, cwd: cwd)
+            }.value
+            guard let fixture else { return .success(output) }
+            var value = try JSONSerialization.jsonObject(with: Data(output.utf8))
+            if args.first == "roadmap", !args.contains("--task") {
+                let owned = try await fixture.read(["roadmap", "--all", "--json"])
+                var page = try #require(value as? [String: Any])
+                let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [String: Any])
+                page["waves"] = (try #require(page["waves"] as? [Any])) + (try #require(extra["waves"] as? [Any]))
+                value = page
+            } else if verb == "wave list" {
+                let owned = try await fixture.read(args)
+                value = (try #require(value as? [Any])) + (try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [Any]))
+            } else if verb == "session list" {
+                // The synthetic conversation remains explicitly discoverable after
+                // client exit. Copied entries and their paging cursor stay intact.
+                if let page = value as? [String: Any], !(page["next"] is NSNull) { return .success(output) }
+                let owned = try await fixture.read(["session", "list", "--all", "--history", "--json"])
+                let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [Any])
+                if var page = value as? [String: Any] {
+                    if page["next"] is NSNull { page["entries"] = (try #require(page["entries"] as? [Any])) + extra }
+                    value = page
+                } else { value = (try #require(value as? [Any])) + extra }
+            }
+            return .success(String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self))
+        } catch { return .failure(error) }
     }
 
     func finish() async {
@@ -944,14 +1043,15 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     process.executableURL = URL(fileURLWithPath: binary)
     process.arguments = args
     process.currentDirectoryURL = URL(fileURLWithPath: cwd)
-    var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("LF_") }
+    let git = ProcessInfo.processInfo.environment["LOOPFLOW_TEST_GIT"] ?? "/usr/bin/git"
+    var environment = ["HOME": home, "PATH": URL(fileURLWithPath: git).deletingLastPathComponent().path + ":/usr/bin:/bin", "TMPDIR": home, "RUST_LOG": "off"]
     environment["LF_HOME"] = home
     environment["LF_PERF_OUTPUT"] = ProcessInfo.processInfo.environment["LF_PERF_OUTPUT"]
     environment["GIT_OPTIONAL_LOCKS"] = "0"
     process.environment = environment
     let output = Pipe()
     process.standardOutput = output
-    process.standardError = FileHandle.nullDevice
+    process.standardError = FileHandle.standardError
     try process.run()
     let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
     DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: timeout)

@@ -1,0 +1,30 @@
+(version 1)
+(allow default)
+(if (equal? (param "DISPLAY") "deny")
+    (deny mach-lookup (global-name-regex ".*[Ww]indow[Ss]erver.*")))
+; Only owned Unix sockets may connect. No provider/API/SSH traffic.
+(deny network*)
+(allow network* (local unix-socket (subpath (param "HOME")))
+                (remote unix-socket (subpath (param "HOME"))))
+(deny signal)
+(deny file-read-data)
+(allow file-read-data
+    (vnode-type DIRECTORY)
+    (subpath "/System") (subpath "/usr") (subpath "/bin")
+    (subpath "/sbin") (subpath "/Library/Apple") (subpath "/Library/Developer")
+    (subpath "/Applications/Xcode.app") (subpath "/private/etc") (subpath "/dev")
+    (subpath (param "HOME")) (subpath (param "RECEIPTS"))
+    (subpath (param "REPO")) (subpath (param "CODE"))
+    (literal (param "CLI")) (literal (param "HELPER")))
+(deny file-write*)
+(allow file-write* (subpath (param "HOME")) (subpath (param "RECEIPTS"))
+    (literal "/dev/null") (regex #"^/dev/(ttys|pty)"))
+; Shells inherit these restrictions. Copied providers and scheduling tools
+; cannot execute, even if a copied record or shell startup file names them.
+(deny process-exec)
+(allow process-exec
+    (literal (param "CLI")) (literal (param "PROVIDER"))
+    (literal (param "HELPER")) (literal (param "GIT"))
+    (literal "/usr/bin/env") (literal "/usr/bin/sandbox-exec")
+    (literal "/bin/sh") (literal "/bin/bash") (literal "/bin/zsh")
+    (literal "/bin/cat") (literal "/usr/bin/grep"))

@@ -307,6 +307,20 @@ def test_soak_cannot_pass_without_duration_and_preservation(tmp_path: Path, fail
     assert result["soak"]["status"] == "incomplete"
 
 
+@pytest.mark.parametrize("outcome", ["passed", "failed", "interrupted"])
+def test_soak_reopens_after_planned_samples_keep_their_outcome(
+    tmp_path: Path, outcome: str
+) -> None:
+    events = _soak_events()
+    events.append({"event": "soak_sample_begin", "id": "reopen-21"})
+    if outcome != "interrupted":
+        events.append({"event": "soak_sample_end", "id": "reopen-21", "outcome": outcome})
+    result = _report(tmp_path, events)
+    assert result["journal_errors"] == []
+    assert result["soak"]["reopen_observations"]
+    assert result["status"] == ("complete" if outcome == "passed" else "incomplete")
+
+
 def test_four_round_memory_uses_the_round_boundary(tmp_path: Path) -> None:
     directory = tmp_path / "soak-resources"
     directory.mkdir()
@@ -385,25 +399,27 @@ def test_changed_cli_binary_invalidates_completed_journey(tmp_path: Path) -> Non
     assert performance._report(tmp_path, None)["status"] == "incomplete"
 
 
-def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path) -> None:
+def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path, monkeypatch) -> None:
     cli = tmp_path / "lf"
     cli.write_text(
         f"#!{sys.executable}\n"
-        "import json, os, pathlib\n"
+        "import json, os, pathlib, sys\n"
         "directory = pathlib.Path(os.environ['LF_PERF_OUTPUT'])\n"
         "start = dict(event='start', pid=os.getpid(), time=10, elapsed_ms=0, "
         "connections=0, statements=0, rows=0)\n"
         "end = dict(start, event='end', elapsed_ms=1, statements=12)\n"
         "(directory / f'lf-{os.getpid()}.jsonl').write_text("
         "json.dumps(start) + '\\n' + json.dumps(end))\n"
-        'print(\'[{"id":"retained-session"}]\')\n'
+        'print(json.dumps({"task_ids":["owned-task"]} if sys.argv[1:3] == ["session", "bind"] '
+        'else [{"id":"retained-session"}]))\n'
     )
     cli.chmod(0o755)
+    monkeypatch.setattr(performance, "_seed_native_task", lambda *_: ("owned-task", "PERF-304"))
     fixture = json.loads(performance._prepare_native_fixture(tmp_path, cli).read_text())
     assert fixture["environment"]["LF_PERF_OUTPUT"] == str(tmp_path / "cli-volume")
     report = _report(tmp_path, _events())
-    assert report["fixture_setup_cli_volume"]["processes_started"] == 2
-    assert report["fixture_setup_cli_volume"]["observed_totals"]["statements"] == 24
+    assert report["fixture_setup_cli_volume"]["processes_started"] == 3
+    assert report["fixture_setup_cli_volume"]["observed_totals"]["statements"] == 36
     assert report["cli_volume"]["status"] == "unmeasured"
     assert report["cli_volume"]["observed_totals"]["statements"] is None
 
@@ -431,10 +447,12 @@ time.sleep(60)
     executable.chmod(0o755)
     monkeypatch.setattr(performance, "BUILD_COMMAND", [sys.executable, "-c", "pass"])
     monkeypatch.setattr(
-        performance, "_native_command", lambda *_: [sys.executable, "-u", str(executable)]
+        performance,
+        "_native_command",
+        lambda *_: [sys.executable, "-u", str(executable), "--test-bundle-path", str(executable)],
     )
     monkeypatch.setattr(
-        performance, "_prepare_native_fixture", lambda output, cli: output / "fixture"
+        performance, "_prepare_native_fixture", lambda output, cli, repo: output / "fixture"
     )
 
     with pytest.raises(KeyError, match="pid"):
@@ -452,3 +470,35 @@ def test_requested_snapshot_soak_cannot_pass_as_task_open_measurements(tmp_path:
     assert result["status"] == "incomplete"
     assert result["soak"]["status"] == "incomplete"
     assert result["soak"]["requested_seconds"] == 3600
+
+
+def test_sandbox_paths_do_not_change_test_binary_hash_or_comparison_command(
+    tmp_path: Path, monkeypatch
+) -> None:
+    executable = tmp_path / "native-test"
+    executable.write_text("pass\n")
+    monkeypatch.setattr(performance, "BUILD_COMMAND", [sys.executable, "-c", "pass"])
+    monkeypatch.setattr(
+        performance, "_prepare_native_fixture", lambda output, *_: output / "fixture"
+    )
+    monkeypatch.setattr(
+        performance,
+        "_native_command",
+        lambda _, env: [
+            "/usr/bin/env",
+            f"HOME={env['HOME']}",
+            sys.executable,
+            str(executable),
+            "--test-bundle-path",
+            str(executable),
+        ],
+    )
+    receipts = []
+    for name in ("before", "after"):
+        output = tmp_path / name
+        output.mkdir()
+        receipts.append(performance._run_native(output, 1, 0, tmp_path / "unused-cli"))
+    assert all(receipt["exit_code"] == 0 for receipt in receipts)
+    assert receipts[0]["command"] == receipts[1]["command"]
+    assert receipts[0]["sandbox_command"] != receipts[1]["sandbox_command"]
+    assert receipts[0]["test_binary_sha256"] == hashlib.sha256(executable.read_bytes()).hexdigest()

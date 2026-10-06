@@ -19,6 +19,7 @@ import sqlite3
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from collections import Counter, defaultdict
@@ -54,6 +55,7 @@ def _sources() -> str:
             "swift",
             "tests/fixtures/dto",
             "scripts/desktop_performance.py",
+            "scripts/desktop-performance.sb",
             "scripts/benchmarks/desktop-performance/record_live.py",
         ],
         cwd=REPO,
@@ -167,8 +169,12 @@ def _soak(events: list[dict], plan: dict | None) -> dict:
         if event["event"].startswith("soak_"):
             by_kind[event["event"]].append(event)
     starts, ends, rounds = (by_kind[kind] for kind in ("soak_begin", "soak_end", "soak_round"))
+    repeated_starts, repeated_ends = by_kind["soak_sample_begin"], by_kind["soak_sample_end"]
     complete = (
-        len(starts) == len(ends) == 1
+        len(repeated_starts) == len(repeated_ends)
+        and {event["id"] for event in repeated_starts} == {event["id"] for event in repeated_ends}
+        and all(event["outcome"] == "passed" for event in repeated_ends)
+        and len(starts) == len(ends) == 1
         and ends[0]["elapsed_seconds"] >= seconds
         and ends[0]["preserved"]
         and len(rounds) >= 4
@@ -179,11 +185,12 @@ def _soak(events: list[dict], plan: dict | None) -> dict:
         "requested_seconds": seconds,
         "status": "not_requested" if not seconds else "complete" if complete else "incomplete",
         "rounds": rounds,
+        "reopen_observations": repeated_starts + repeated_ends,
         "phases": by_kind["soak_phase"],
         "end": ends[0] if len(ends) == 1 else None,
         "limits": [
-            "Fixture reads, not CLI processes or SQLite query volume",
-            "Soak retains cat PTYs; the separate reopen scenario uses synthetic native history",
+            "Fixture mode uses synthetic planning; snapshot mode includes real CLI/SQLite volume",
+            "Snapshot soak reopens an owned Task-bound stub alongside observational copied records",
             "Bitmap/OCR and PTY echo, not key-to-glyph presentation",
         ],
     }
@@ -368,15 +375,15 @@ def _markdown(summary: dict, *, scoped: bool) -> str:
         f"# Desktop measurements: {summary['status']}",
         "",
         "Endpoint: in-process native bitmap capture with text verification."
-        + ("" if snapshot_run else " Session return also waits for owned PTY replies."),
+        + " Session return also waits for owned PTY replies.",
         "**Not compositor paint time. Soak trace evidence is reported separately.**",
         "",
         "Fixture data excludes CLI/registry discovery, network and provider startup. "
-        "Three retained cat PTYs per population; "
-        "separate native Session reopen uses a real CLI and owned provider stub."
+        "Three retained cat PTYs per population."
         if not snapshot_run
         else "Snapshot mode uses real CLI reads and Task links; "
-        "copied Session connections are disabled.",
+        "copied Session connections are disabled; the same workspace reopens one owned "
+        "Task-bound Session with a synthetic provider.",
         f"Attempts: {len(summary['attempts'])}/{summary['expected_attempts']}; "
         f"not started: {summary['not_started']}.",
         "First interaction and warm samples are separate. "
@@ -464,17 +471,26 @@ def _stop(process: subprocess.Popen) -> None:
     process.wait()
 
 
-def _prepare_native_fixture(output: Path, cli: Path) -> Path:
+def _benchmark_git() -> Path:
+    if sys.platform == "darwin":
+        return Path(subprocess.check_output(["xcrun", "--find", "git"], text=True).strip())
+    return Path(shutil.which("git") or "/usr/bin/git")
+
+
+def _prepare_native_fixture(output: Path, cli: Path, repo: Path | None = None) -> Path:
     for directory in ("fixture-setup-cli-volume", "cli-volume"):
         (output / directory).mkdir()
     home = output / "native-home"
+    checkout = home / "checkout"
+    checkout.mkdir(parents=True)
+    (checkout / "notes.txt").write_text("Original notes")
     native = home / "codex"
     bin_dir = home / "bin"
     bin_dir.mkdir(parents=True)
     native_id = str(uuid.uuid4())
     transcript = native / "sessions/2026/10/05" / f"rollout-time-{native_id}.jsonl"
     transcript.parent.mkdir(parents=True)
-    history = json.dumps({"cwd": str(home), "message": "retained-history"}) + "\n"
+    history = json.dumps({"cwd": str(checkout), "message": "retained-history"}) + "\n"
     transcript.write_text(history)
     provider = bin_dir / "codex"
     provider.write_text(
@@ -489,23 +505,26 @@ def _prepare_native_fixture(output: Path, cli: Path) -> Path:
         "done\n"
     )
     provider.chmod(0o755)
+    git = _benchmark_git()
     environment = {
         "HOME": str(home),
         "LF_HOME": str(home),
         "LF_BIN": str(cli),
         "CODEX_HOME": str(native),
         "CLAUDE_CONFIG_DIR": str(home / "claude"),
-        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "PATH": f"{bin_dir}:{git.parent}:/usr/bin:/bin",
         "TMPDIR": str(home),
         "PERF_NATIVE_ID": native_id,
         "PERF_TRANSCRIPT": str(transcript),
         "LF_PERF_OUTPUT": str(output / "fixture-setup-cli-volume"),
         "RUST_LOG": "off",
     }
+    for args in (["init", "--quiet", str(checkout)], ["-C", str(checkout), "add", "notes.txt"]):
+        subprocess.run([str(git), *args], env=environment, check=True, capture_output=True)
     for args in (["resume", native_id], ["session", "list", "--all", "--history", "--json"]):
         process = subprocess.Popen(
             [str(cli), *args],
-            cwd=home,
+            cwd=checkout,
             env=environment,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
@@ -522,6 +541,20 @@ def _prepare_native_fixture(output: Path, cli: Path) -> Path:
     records = json.loads(stdout)
     if len(records) != 1:
         raise RuntimeError("Native fixture did not retain exactly one Session")
+    task_id, issue = _seed_native_task(home, checkout, repo or checkout, records[0]["id"])
+    bound = subprocess.run(
+        [str(cli), "session", "bind", records[0]["id"], "--task", task_id, "--json"],
+        cwd=checkout,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if bound.returncode:
+        raise RuntimeError(f"Native fixture binding failed: {bound.stderr}")
+    record = json.loads(bound.stdout)
+    if task_id not in record["task_ids"]:
+        raise RuntimeError("Rust membership omitted the owned fixture Task")
     # Setup processes have exited before publishing the scenario environment.
     # Separate destinations retain partial setup receipts without subtracting
     # cumulative counters or attributing setup work to the measured journey.
@@ -532,6 +565,10 @@ def _prepare_native_fixture(output: Path, cli: Path) -> Path:
         {
             "cli": str(cli),
             "home": str(home),
+            "checkout": str(checkout),
+            "repo": str(repo or checkout),
+            "task_id": task_id,
+            "issue": issue,
             "environment": environment,
             "session_id": records[0]["id"],
             "native_id": native_id,
@@ -540,6 +577,94 @@ def _prepare_native_fixture(output: Path, cli: Path) -> Path:
         },
     )
     return fixture
+
+
+def _seed_native_task(home: Path, checkout: Path, repo: Path, session: str) -> tuple[str, str]:
+    """Seed owned planning facts; the public bind and shared Rust reader own membership."""
+    project, task = (prefix + uuid.uuid4().hex for prefix in ("proj_", "task_"))
+    wave = str(uuid.uuid4())
+    issue = f"PERF-{int(task[-8:], 16)}"
+    now = int(time.time())
+    plan = dict(
+        id=project,
+        slug="desktop-performance",
+        name="Owned performance fixture",
+        summary="",
+        metric_targets=[],
+        flow="",
+        status="started",
+        krs=[],
+        initiative_ids=[wave],
+        team_ids=[wave],
+    )
+    item = dict(
+        id=task,
+        identifier=issue,
+        url=f"https://example.invalid/{issue}",
+        name="Owned native Session",
+        description="Synthetic performance fixture",
+        rank=1,
+        completed=False,
+        project_id=project,
+        project=plan["slug"],
+        team_id=wave,
+        assignee=None,
+    )
+    with sqlite3.connect(home / "loopflow.db") as db:
+        db.execute("PRAGMA foreign_keys=ON")
+        db.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?,?,?,?)",
+            (wave, "desktop-performance", str(repo), now),
+        )
+        db.execute(
+            """INSERT INTO projects(id,wave_id,external_project_id,created_at,
+            project_slug,project_name,project_prompt_context,pm_snapshot_synced_at,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?)""",
+            (project, wave, project, now, plan["slug"], plan["name"], "", now, now),
+        )
+        db.execute(
+            """INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,
+            issue_title,issue_description,pm_snapshot_synced_at,pm_writeback_json,worktree,workspace_slug,updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                task,
+                project,
+                task,
+                issue,
+                now,
+                item["name"],
+                item["description"],
+                now,
+                '{"state":"current"}',
+                str(checkout),
+                "desktop-performance",
+                now,
+            ),
+        )
+        db.execute(
+            "INSERT INTO pm_projects(repo,provider,id,observed_at,body) VALUES(?,?,?,?,?)",
+            (str(repo), "linear", project, now, json.dumps(plan)),
+        )
+        db.execute(
+            "INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (str(repo), "linear", task, issue, project, now, json.dumps(item)),
+        )
+        db.execute(
+            "INSERT INTO work_placements(wave_id,home_id,placed_at) "
+            "SELECT ?,id,? FROM homes WHERE route='local'",
+            (wave, now),
+        )
+        for column, identity in (("project_id", project), ("task_id", task)):
+            db.execute(
+                f"INSERT INTO work_placements({column},home_id,placed_at) "
+                "SELECT ?,id,? FROM homes WHERE route='local'",
+                (identity, now),
+            )
+        db.execute("INSERT INTO pm_wave_sync VALUES(?,?,?,?)", (wave, "linear", wave, now))
+        db.execute("INSERT INTO pm_wave_projects VALUES(?,?,?)", (wave, project, 0))
+        db.execute("UPDATE agent_sessions SET repo=? WHERE id=?", (str(repo), session))
+    return task, issue
 
 
 def _snapshot(source: Path, output: Path) -> None:
@@ -570,6 +695,7 @@ def _snapshot(source: Path, output: Path) -> None:
 
 
 def _native_command(test_filter: str, environment: dict[str, str]) -> list[str]:
+    environment["LOOPFLOW_TEST_GIT"] = str(_benchmark_git())
     swift = Path(subprocess.check_output(["xcrun", "--find", "swift"], text=True).strip())
     platform_path = Path(
         subprocess.check_output(
@@ -581,7 +707,7 @@ def _native_command(test_filter: str, environment: dict[str, str]) -> list[str]:
         str(developer / "Library" / name) for name in ["Frameworks", "PrivateFrameworks"]
     )
     environment["DYLD_LIBRARY_PATH"] = str(developer / "usr/lib")
-    return [
+    command = [
         str(swift.parent.parent / "libexec/swift/pm/swiftpm-testing-helper"),
         "--test-bundle-path",
         str(
@@ -593,6 +719,40 @@ def _native_command(test_filter: str, environment: dict[str, str]) -> list[str]:
         "swift-testing",
         "--filter",
         test_filter,
+    ]
+    if "LOOPFLOW_TEST_NATIVE_FIXTURE" not in environment:
+        return command
+    fixture_path = Path(environment["LOOPFLOW_TEST_NATIVE_FIXTURE"])
+    fixture = json.loads(fixture_path.read_text())
+    output = fixture_path.parent.resolve()
+    app_home = output / "app-home"
+    app_home.mkdir(exist_ok=True)
+    environment.update(HOME=str(app_home), TMPDIR=str(app_home))
+    parameters = {
+        "HOME": str(output),
+        "RECEIPTS": str(output),
+        "REPO": fixture["repo"],
+        "CODE": str(REPO),
+        "CLI": fixture["cli"],
+        "HELPER": command[0],
+        "DISPLAY": "deny" if test_filter == "DesktopNativeSessionTests" else "allow",
+        "GIT": environment["LOOPFLOW_TEST_GIT"],
+        "PROVIDER": str(Path(fixture["home"]) / "bin/codex"),
+    }
+    sandbox = ["/usr/bin/sandbox-exec"]
+    for name, value in sorted(parameters.items()):
+        sandbox += ["-D", f"{name}={value if name == 'DISPLAY' else Path(value).resolve()}"]
+    # sandbox-exec is SIP-protected and strips DYLD_* from its environment.
+    # Set only the test framework paths after crossing that boundary.
+    loader = [
+        f"{name}={environment[name]}" for name in ("DYLD_FRAMEWORK_PATH", "DYLD_LIBRARY_PATH")
+    ]
+    return sandbox + [
+        "-f",
+        str(REPO / "scripts/desktop-performance.sb"),
+        "/usr/bin/env",
+        *loader,
+        *command,
     ]
 
 
@@ -662,12 +822,7 @@ def _run_native(
     isolated = output / "home"
     isolated.mkdir(mode=0o700)
     environment.update(LF_HOME=str(isolated), HOME=str(isolated))
-    fixture = None
-    if not snapshot:
-        fixture = _prepare_native_fixture(output, cli)
-    else:
-        for directory in ("fixture-setup-cli-volume", "cli-volume"):
-            (output / directory).mkdir()
+    fixture = _prepare_native_fixture(output, cli, repo)
     test_filter = "DesktopPerformanceTests.measureExperiences"
     if snapshot:
         manifest = json.loads((snapshot / "snapshot.json").read_text())
@@ -733,9 +888,11 @@ def _run_native(
             if code != 0 or outcome:
                 return {"outcome": outcome or "failed", "exit_code": code}
             command = _native_command(test_filter, environment)
-            metadata["command"] = command
+            bundle_index = command.index("--test-bundle-path") + 1
+            metadata["command"] = command[bundle_index - 2 :]
+            metadata["sandbox_command"] = command
             metadata["test_binary_sha256"] = hashlib.sha256(
-                Path(command[2]).read_bytes()
+                Path(command[bundle_index]).read_bytes()
             ).hexdigest()
             code, outcome = _run_process(
                 command,
@@ -793,6 +950,7 @@ def _run(
                     "tests/fixtures/dto/context_report.json",
                     "tests/fixtures/dto/flow_catalog.json",
                     "scripts/desktop_performance.py",
+                    "scripts/desktop-performance.sb",
                     "rust/loopflow/src/performance.rs",
                     "scripts/benchmarks/desktop-performance/record_live.py",
                 ]
@@ -823,6 +981,39 @@ def _run(
     summary = _report(output, baseline)
     print(f"{summary['status']}: {output / 'report.md'}")
     return 0 if summary["status"] == "complete" else 1
+
+
+def _verify_native_fixture(output: Path, cli: Path) -> int:
+    output.mkdir(parents=True, exist_ok=False)
+    with (output / "native.log").open("w") as log:
+        result, failure = _run_process(BUILD_COMMAND, os.environ.copy(), log, timeout=600)
+        if result or failure:
+            return 1
+        source = output / "copied-source"
+        source.mkdir()
+        _prepare_native_fixture(source, cli)
+        _snapshot(source / "native-home/loopflow.db", output / "snapshot")
+        fixture = _prepare_native_fixture(output, cli, source / "native-home/checkout")
+        environment = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+        environment.update(
+            LOOPFLOW_TEST_NATIVE_FIXTURE=str(fixture),
+            LF_DESKTOP_TASK_SNAPSHOT=str(output / "snapshot"),
+            LF_PERF_OUTPUT=str(output / "cli-volume"),
+        )
+        with tempfile.TemporaryDirectory(prefix="desktop-external-canary-") as directory:
+            canary = Path(directory) / "provider"
+            content = "#!/bin/sh\nexit 0\n"
+            canary.write_text(content)
+            canary.chmod(0o755)
+            environment["LOOPFLOW_TEST_CANARY"] = str(canary)
+            command = _native_command("DesktopNativeSessionTests", environment)
+            result, failure = _run_process(command, environment, log, timeout=120)
+            if canary.read_text() != content:
+                raise RuntimeError("Benchmark escaped its filesystem boundary")
+        for directory in ("fixture-setup-cli-volume", "cli-volume"):
+            _write(output / f"{directory}.json", _cli_volume(output / directory))
+    print(output / "native.log")
+    return 1 if result or failure else 0
 
 
 def main() -> int:
@@ -859,6 +1050,11 @@ def main() -> int:
     run.add_argument("--snapshot", type=Path)
     run.add_argument("--repo", type=Path)
     run.add_argument("--issue")
+    verify = commands.add_parser(
+        "verify-fixture", help="Headless combined snapshot/native isolation proof"
+    )
+    verify.add_argument("--lf", type=Path, required=True)
+    verify.add_argument("--output", type=Path, required=True)
     snapshot_command = commands.add_parser("snapshot", help="Consistent private SQLite backup")
     snapshot_command.add_argument("--database", type=Path, required=True)
     snapshot_command.add_argument("--output", type=Path, required=True)
@@ -872,6 +1068,8 @@ def main() -> int:
     )
     volume.add_argument("directory", type=Path)
     args = parser.parse_args()
+    if args.command == "verify-fixture":
+        return _verify_native_fixture(args.output.resolve(), args.lf.resolve())
     if args.command == "snapshot":
         _snapshot(args.database, args.output)
         print(args.output / "snapshot.json")

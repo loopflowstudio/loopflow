@@ -21,8 +21,8 @@ then appear without changing the settled viewport, selection or Session identiti
 The normal 800-point viewport is restored before the workspace scenarios.
 
 `task_workspace_ready_ms` covers active/empty Monitor, retained Session return,
-combined-pane zoom/restore, Task details/Flow/history, file editing and native
-Session reopening. `new_pty_capture_and_echo_ms` covers fresh `cat` PTYs.
+combined-pane zoom/restore, Task details/Flow/history and file editing. Snapshot
+mode adds Task-bound native Session reopening in that same workspace. `new_pty_capture_and_echo_ms` covers fresh `cat` PTYs.
 The endpoint is native
 bitmap capture with text verification; Session return additionally requires
 actual first responder, retained surfaces, draft submission and PTY replies.

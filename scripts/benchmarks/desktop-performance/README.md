@@ -149,8 +149,8 @@ The [workspace journeys](../../../performance/README.md) use mounted controls,
 an owned temporary checkout and three retained `cat` PTYs. Synthetic planning
 and active-Session DTOs supply 8 Tasks/4 Sessions or 256 Tasks/128 Sessions, with
 one explicit history record per Task. A fresh `cat` PTY is created each round;
-its startup is not provider startup. Native reopening uses the separate fixture
-below.
+its startup is not provider startup. Snapshot mode adds native reopening in
+the combined workspace described below.
 
 After the large-population journeys, the soak alternates thirty seconds idle
 with Session switching, typing/echo and split focus/restore for the requested
@@ -172,14 +172,42 @@ requires matching soak duration. Bitmap/OCR and PTY echo do not establish
 key-to-glyph latency. The September 24 receipt remains on disk but is incompatible
 with the expanded harness.
 
-LOO-371's published snapshot runner is integrated here. Snapshot mode measures
-real CLI reads and native Task links; fixture mode retains the broader journeys
-and soak. These are not yet a combined acceptance journey. The snapshot transport
-refuses Session connections; the owned native fixture has no Task binding.
-A requested snapshot soak without soak events reports incomplete. Combining real
-refresh and owned Task-bound reopening in one workspace remains implementation
-work before rendered acceptance. Copied checkout/process/account references must
-remain observational; a copied database alone does not isolate provider execution.
+```bash
+uv run python scripts/desktop_performance.py verify-fixture --lf target/debug/lf --output /tmp/desktop-fixture-proof
+uv run python scripts/desktop_performance.py run --snapshot /tmp/task-snapshot --lf target/debug/lf --repo /path/to/repo --issue LOO-368 --samples 21 --soak-seconds 3600 --output /tmp/desktop-soak
+```
+
+Snapshot mode uses LOO-371's real CLI transport and Task links. Its final mounted
+workspace also contains a Task-bound native fixture from a fresh Home. The test
+transport joins read results without changing copied identities, histories or
+paging cursors. Only the owned Session can connect; its Task membership comes
+from the public bind command and shared Rust reader. Both Homes' CLI work appears
+in scenario volume. The added fixture and sandbox are measurement overhead, so
+baseline and candidate must use this same harness.
+
+The combined soak reopens that Session through its Task link, types and checks a
+reply, navigates away/back, refreshes a dirty file, and retains the companion pane,
+selection, transcript and native identity. Podium's existing refresh owner keeps
+snapshot reads running during idle. Fixture mode still covers the broader
+synthetic catalogue; it no longer opens a separate native-session window.
+
+`verify-fixture` builds the Swift tests and exercises real snapshot reads, Task
+routing, repeated native reopening and draft/pane preservation with WindowServer
+access denied. It also probes external file reads/writes, provider execution,
+scheduling-tool execution and network binding. This is a small synthetic snapshot
+proof, not a density, rendering, real-provider or hour-long acceptance receipt.
+
+One OS sandbox, inherited by the native runner and every child, permits writes
+only beneath the output directory, local sockets there and a fixed executable
+set including the owned stub. Selected repository/source reads remain available; external credential files,
+network access, signals and copied providers remain denied. Other copied checkout
+paths can report unavailable reads; retain and resolve those failures before
+scoring realistic-snapshot budgets. Denied work is not a performance improvement.
+CLI environments select their own Homes explicitly. The app's Home is private;
+copied workspaces remain observational. `desktop-performance.sb` is part of the
+measurement-source hash. macOS rejects nested sandbox application; the runner
+owns this single boundary. Invoke the proof through this script, not by running
+the opted-in Swift tests directly.
 
 ### CLI volume and native reopening
 
@@ -202,13 +230,12 @@ selects a Home or grants execution authority.
 
 The native runner collects these receipts under `cli-volume/` and uses `--cli`
 for a fresh synthetic native Session fixture. `native_session_reopen` exercises
-Desktop's Session store, public connect command and mounted returned launch
-command across client exit/relaunch. The owned provider checks its resume ID and
+the Task link, Desktop Session store, public connect command and mounted
+returned launch command across client exit/relaunch in the snapshot workspace. The owned provider checks its resume ID and
 reads only its owned transcript; input replies establish readiness. The test
 verifies one stable Loopflow Session and byte-identical native history on every
-reopen. Headless `DesktopNativeSessionTests` exercises the same fixture and public
-API without Ghostty when `LOOPFLOW_TEST_NATIVE_FIXTURE` names the runner's
-`native-fixture.json`. No live conversation or credentials are used.
+reopen. The headless proof exercises the same fixture and public API without Ghostty.
+No live conversation or credentials are used.
 
 Scenario receipts in `cli-volume/` cover native reopening; setup receipts stay
 separate in `fixture-setup-cli-volume/` and `fixture_setup_cli_volume` in the report.

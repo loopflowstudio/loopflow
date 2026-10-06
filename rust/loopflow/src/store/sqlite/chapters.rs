@@ -50,7 +50,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// A Task is started by its first Run, the worker claim's unpublished
+    /// A Task is started by its first capture, the worker claim's unpublished
     /// reservation included.
     pub fn task_started(&self, task: &TaskId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");

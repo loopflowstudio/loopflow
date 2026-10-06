@@ -260,15 +260,8 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
     assert_eq!(listed[0]["provider"], "opencode");
     assert_eq!(listed[0]["work"], Value::Null);
 
-    // The agent names its own Session by `$LF_RUN_ID`; a person then renames it.
-    let suggested = fixture.json(&[
-        "session",
-        "rename",
-        &first_run,
-        "Parser",
-        "--suggest",
-        "--json",
-    ]);
+    // The agent and person name the same durable Session.
+    let suggested = fixture.json(&["session", "rename", &id, "Parser", "--suggest", "--json"]);
     assert_eq!(suggested["id"], id.as_str());
     assert_eq!(suggested["title"], "Parser");
     assert_eq!(suggested["title_source"], "generated");
@@ -673,6 +666,10 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     assert_eq!(started(task.task.id.as_str()), None);
     assert!(task_runs("INF-123").is_empty());
 
+    let wrong_identity = fixture.run(&["session", "bind", &orphan, "--task", "INF-123", "--json"]);
+    assert!(!wrong_identity.status.success(), "{wrong_identity:?}");
+    assert!(String::from_utf8_lossy(&wrong_identity.stderr).contains("was not found"));
+
     let preview = fixture.json(&[
         "session",
         "bind",
@@ -963,7 +960,7 @@ fn declared_agent_can_start_another_tasks_flow() {
                 cwd: y.clone(),
                 message: None,
                 model: None,
-                current_attempt: None,
+                selected_capture: None,
                 pending_session_id: None,
                 ready_summary: None,
                 worker_generation: 0,
@@ -1297,7 +1294,7 @@ fn review_feedback_survives_replacement_and_resumes_the_flow() {
     let inside = |run_id: &str, args: &[&str]| -> Output {
         fixture
             .command(args)
-            .env("LF_RUN_ID", run_id)
+            .env("LF_CAPTURE_KEY", run_id)
             .env(
                 "LF_HUMAN_SESSION",
                 serde_json::json!({"kind": "standalone_flow", "id": id}).to_string(),
@@ -1375,6 +1372,47 @@ fn review_feedback_survives_replacement_and_resumes_the_flow() {
     );
     let stale = inside(&first_run, &["session", "ready", "Late feedback"]);
     assert!(!stale.status.success(), "{stale:?}");
+    for args in [
+        vec!["session", "rename", &id, "Late rename"],
+        vec!["session", "complete", &id],
+    ] {
+        let stale = inside(&first_run, &args);
+        assert!(!stale.status.success(), "{stale:?}");
+    }
+    let (generation, origin): (i64, String) = fixture
+        .db()
+        .query_row(
+            "SELECT provider_generation, provider_exec_id FROM agent_sessions WHERE id=?1",
+            [&id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    let replaced = serde_json::json!({"session_id": id,
+        "provider_generation": generation - 1, "origin_exec_id": origin})
+    .to_string();
+    for args in [
+        vec!["session", "ready", "Late provider feedback"],
+        vec!["session", "rename", &id, "Late provider rename"],
+        vec!["session", "complete", &id],
+    ] {
+        let stale = fixture
+            .command(&args)
+            .env("LF_CAPTURE_KEY", &second_run)
+            .env("LF_AGENT_CALLER", &replaced)
+            .env(
+                "LF_HUMAN_SESSION",
+                serde_json::json!({"kind": "standalone_flow", "id": id}).to_string(),
+            )
+            .output()
+            .unwrap();
+        assert!(!stale.status.success(), "{stale:?}");
+        assert!(
+            String::from_utf8_lossy(&stale.stderr).contains("provider was replaced"),
+            "{stale:?}"
+        );
+    }
+    assert_eq!(fixture.feedback(&id).2.as_deref(), Some("Ship the parser"));
+    assert!(!fixture.feedback(&id).4);
     fixture.release(opened);
 
     let completed = fixture.run(&["session", "complete", &id]);
@@ -1530,7 +1568,7 @@ if "--version" in sys.argv:
 sys.stdin.readline()
 home = Path(__file__).resolve().parent.parent
 with (home / "launched").open("a") as output:
-    output.write(os.environ["LF_RUN_ID"] + "\n")
+    output.write(os.environ["LF_CAPTURE_KEY"] + "\n")
 print(json.dumps({"type": "system", "subtype": "init", "session_id": "fixture-conversation"}))
 failure = home / "fail-once"
 failed = failure.exists()
@@ -1714,7 +1752,7 @@ raise SystemExit(1 if failed else 0)
 
     let ready = fixture
         .command(&["session", "ready", "Ship the parser"])
-        .env("LF_RUN_ID", &review)
+        .env("LF_CAPTURE_KEY", &review)
         .env(
             "LF_HUMAN_SESSION",
             serde_json::json!({"kind": "standalone_flow", "id": id}).to_string(),
@@ -1843,8 +1881,11 @@ fn failure_without_ask_stops_taskless_decision_until_explicit_retry() {
     assert!(fixture.sessions().is_empty());
     let launches = fixture.launches();
     assert_eq!(launches.len(), 2);
-    let input = failed.current_attempt.as_ref().unwrap();
-    let session = store.session_for_artifact(&input.run_id).unwrap().unwrap();
+    let input = failed.selected_capture.as_ref().unwrap();
+    let session = store
+        .session_for_artifact(&input.artifact_key)
+        .unwrap()
+        .unwrap();
     let history = fixture.json(&["session", "history", &session.id, "--json"]);
     assert!(
         history.to_string().contains("Release target is missing"),

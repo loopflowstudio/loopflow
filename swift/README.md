@@ -146,9 +146,9 @@ Hover or focus the name for **Stop & restart…**, which confirms before replaci
 the Flow. Controls are disabled with Rust's reason when they cannot be used.
 A pinned Flow without a live worker reads **Stopped** and offers **Resume**;
 there is no Pause until Loopflow can hold a Flow at a boundary.
-**Recent runs** under the Flow reads nothing until expanded; it then lists that
-Task's newest 50 Runs from the last seven days (`lf usage --days 0 --task ID --json`) with each recorded
-outcome. Session rows show the provider recorded on their Run and a ready summary
+**Session history** under the Flow reads nothing until expanded; it then lists that
+Task's complete recorded input history (`lf usage --days 0 --task ID --json`) with each recorded
+outcome. Session rows show their recorded provider and a ready summary
 only when the Session recorded one.
 Below the Description, **Comments (n)** is collapsed and counts the Task's Linear
 thread (`lf task comment ID --json`, read when the Task is shown and

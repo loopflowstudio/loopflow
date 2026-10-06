@@ -23,7 +23,6 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
-use crate::durable::RUN_ID_ENV;
 use crate::engine::stream::{ResultSubtype, StreamEvent};
 use crate::store::{StoreError, StoreResult};
 
@@ -39,7 +38,7 @@ pub(crate) fn parse_artifact_key(value: &str) -> Result<String, crate::durable::
     Ok(value.to_owned())
 }
 
-pub const RUN_DIR_ENV: &str = "LF_RUN_DIR";
+pub const CAPTURE_KEY_ENV: &str = "LF_CAPTURE_KEY";
 pub(crate) const PROVIDER_ACCOUNT_ID_ENV: &str = "LF_PROVIDER_ACCOUNT_ID";
 const SCHEMA_VERSION: u32 = 1;
 
@@ -1972,14 +1971,7 @@ impl CaptureHandle {
     ) -> StoreResult<Self> {
         let context =
             crate::trace::PreparedTurnContext::from_prompts(&exec.system_prompt, &exec.task_prompt);
-        Self::begin_with_key_and_caller(
-            spec,
-            new_artifact_key(),
-            None,
-            true,
-            Some(exec),
-            Some(&context),
-        )
+        Self::begin_with_context(spec, &context, Some(exec))
     }
 
     pub(crate) fn begin_with_context(
@@ -1987,7 +1979,22 @@ impl CaptureHandle {
         context: &crate::trace::PreparedTurnContext,
         exec: Option<AgentExecRequest>,
     ) -> StoreResult<Self> {
-        Self::begin_with_key_and_caller(spec, new_artifact_key(), None, true, exec, Some(context))
+        #[cfg(test)]
+        let home = std::env::var_os("LF_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::temp_dir().join(format!("loopflow-test-run-home-{}", std::process::id()))
+            });
+        #[cfg(not(test))]
+        let home = crate::store::lf_home_dir();
+        Self::begin_at_with_id(
+            &home,
+            spec,
+            new_artifact_key(),
+            inherited_capture_key()?,
+            exec,
+            Some(context),
+        )
     }
 
     pub(crate) fn begin_reserved_with_context(
@@ -1998,7 +2005,7 @@ impl CaptureHandle {
         publish: impl FnOnce(&String) -> StoreResult<()>,
     ) -> StoreResult<Self> {
         let home = crate::store::lf_home_dir();
-        let caller = inherited_caller().and_then(|id| verified_caller(&home, id));
+        let caller = inherited_capture_key()?;
         Self::begin_reserved_at(&home, spec, artifact_key, caller, exec, context, publish)
     }
 
@@ -2023,53 +2030,22 @@ impl CaptureHandle {
         )))))
     }
 
+    /// Retain the source key already resolved by the replay reader.
     pub(crate) fn begin_replay_at(
         lf_home: &Path,
         spec: SessionCaptureSpec,
         exec: AgentExecRequest,
         caller_artifact_key: String,
     ) -> StoreResult<Self> {
-        let caller_artifact_key = verified_caller(lf_home, caller_artifact_key);
         let context =
             crate::trace::PreparedTurnContext::from_prompts(&exec.system_prompt, &exec.task_prompt);
         Self::begin_at_with_id(
             lf_home,
             spec,
             new_artifact_key(),
-            caller_artifact_key,
+            Some(caller_artifact_key),
             Some(exec),
             Some(&context),
-        )
-    }
-
-    fn begin_with_key_and_caller(
-        spec: SessionCaptureSpec,
-        artifact_key: String,
-        caller_artifact_key: Option<String>,
-        inherit_caller: bool,
-        exec: Option<AgentExecRequest>,
-        context: Option<&crate::trace::PreparedTurnContext>,
-    ) -> StoreResult<Self> {
-        #[cfg(test)]
-        let home = std::env::var_os("LF_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                std::env::temp_dir().join(format!("loopflow-test-run-home-{}", std::process::id()))
-            });
-        #[cfg(not(test))]
-        let home = crate::store::lf_home_dir();
-        let caller_artifact_key = if inherit_caller {
-            inherited_caller()
-        } else {
-            caller_artifact_key.and_then(|candidate| verified_caller(&home, candidate))
-        };
-        Self::begin_at_with_id(
-            &home,
-            spec,
-            artifact_key,
-            caller_artifact_key,
-            exec,
-            context,
         )
     }
 
@@ -2079,7 +2055,7 @@ impl CaptureHandle {
             lf_home,
             spec,
             new_artifact_key(),
-            inherited_caller(),
+            inherited_capture_key()?,
             None,
             None,
         )
@@ -2097,7 +2073,7 @@ impl CaptureHandle {
             lf_home,
             spec,
             new_artifact_key(),
-            inherited_caller(),
+            inherited_capture_key()?,
             Some(exec),
             Some(&context),
         )
@@ -2257,13 +2233,10 @@ impl CaptureHandle {
 
     pub(crate) fn environment(&self) -> BTreeMap<String, String> {
         let capture = self.0.lock().expect("Session capture mutex poisoned");
-        let mut environment = BTreeMap::from([
-            (
-                RUN_ID_ENV.to_string(),
-                capture.manifest.artifact_key.to_string(),
-            ),
-            (RUN_DIR_ENV.to_string(), capture.dir.display().to_string()),
-        ]);
+        let mut environment = BTreeMap::from([(
+            CAPTURE_KEY_ENV.to_string(),
+            capture.manifest.artifact_key.to_string(),
+        )]);
         if let Ok(declaration) = std::env::var(crate::lf::WORK_DECLARATION_ENV) {
             environment.insert(crate::lf::WORK_DECLARATION_ENV.to_string(), declaration);
         }
@@ -2805,19 +2778,50 @@ fn database_in(home: &Path) -> StoreResult<PathBuf> {
     }
 }
 
-pub(crate) fn inherited_caller() -> Option<String> {
-    let artifact_key = std::env::var(RUN_ID_ENV).ok()?;
-    let run_dir = PathBuf::from(std::env::var_os(RUN_DIR_ENV)?);
-    let manifest = fs::read(run_dir.join("manifest.json")).ok()?;
-    let manifest = serde_json::from_slice::<SessionCaptureManifest>(&manifest).ok()?;
-    (manifest.artifact_key.as_str() == artifact_key).then_some(manifest.artifact_key)
+pub(crate) fn inherited_capture_key() -> StoreResult<Option<String>> {
+    let Some(value) = std::env::var_os(CAPTURE_KEY_ENV) else {
+        return Ok(None);
+    };
+    let key = value
+        .into_string()
+        .map_err(|_| record_error(std::io::Error::other("capture key is not valid UTF-8")))?;
+    let (_, owner) = resolve_capture(&key)?;
+    if let Some(caller) = crate::journal::agent_caller() {
+        if owner.id != caller.session_id {
+            return Err(record_error(std::io::Error::other(
+                "capture belongs to another Session",
+            )));
+        }
+    }
+    Ok(Some(key))
 }
 
-fn verified_caller(lf_home: &Path, artifact_key: String) -> Option<String> {
-    let dir = record_dir(lf_home, &artifact_key)?;
-    let manifest = fs::read(dir.join("manifest.json")).ok()?;
-    let manifest = serde_json::from_slice::<SessionCaptureManifest>(&manifest).ok()?;
-    (manifest.artifact_key == artifact_key).then_some(artifact_key)
+/// A capture is subordinate to its recorded Session in the selected Home.
+pub(crate) fn capture_dir(key: &str) -> StoreResult<PathBuf> {
+    resolve_capture(key).map(|(dir, _)| dir)
+}
+
+fn resolve_capture(key: &str) -> StoreResult<(PathBuf, crate::session::AgentSession)> {
+    let home = crate::store::lf_home_dir();
+    let dir = record_dir(&home, key)
+        .ok_or_else(|| record_error(std::io::Error::other("invalid capture key")))?;
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database_in(&home)?)?;
+    let owner = store.session_for_artifact(key)?.ok_or_else(|| {
+        record_error(std::io::Error::other(
+            "capture does not belong to a recorded Session in this Home",
+        ))
+    })?;
+    match read_manifest(&dir) {
+        Ok(manifest) if manifest.artifact_key != key => {
+            return Err(record_error(std::io::Error::other(
+                "capture manifest key does not match",
+            )));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(record_error(error)),
+    }
+    Ok((dir, owner))
 }
 
 // Session captures retain their published on-disk layout; the directory name
@@ -3209,6 +3213,33 @@ mod tests {
     }
 
     #[test]
+    fn inherited_capture_requires_a_recorded_owner_and_matching_payload() {
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _home = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        std::env::set_var("LF_HOME", home.path());
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let key = capture.artifact_key();
+        std::env::set_var(super::CAPTURE_KEY_ENV, &key);
+        assert_eq!(super::inherited_capture_key().unwrap(), Some(key.clone()));
+        std::env::set_var(super::CAPTURE_KEY_ENV, super::new_artifact_key());
+        assert!(super::inherited_capture_key().is_err());
+        std::env::set_var(super::CAPTURE_KEY_ENV, "../another-home");
+        assert!(super::inherited_capture_key().is_err());
+        std::env::set_var(super::CAPTURE_KEY_ENV, &key);
+        let path = capture.artifact_dir().join("manifest.json");
+        let mut manifest = super::read_manifest(&capture.artifact_dir()).unwrap();
+        manifest.artifact_key = super::new_artifact_key();
+        fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        assert!(super::inherited_capture_key().is_err());
+        fs::write(&path, b"invalid manifest").unwrap();
+        assert!(super::inherited_capture_key().is_err());
+        fs::remove_file(path).unwrap();
+        assert_eq!(super::inherited_capture_key().unwrap(), Some(key));
+    }
+
+    #[test]
     fn prepared_run_projects_its_first_provider_attempt_separately_from_creation() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
@@ -3382,7 +3413,7 @@ mod tests {
                 super::publish_manifest(home.path(), &manifest, bytes.as_deref()).unwrap();
             }
             // Interrupt after artifacts, before SQL publication. There must be
-            // no capture Drop receipt falsely settling the prepared Run.
+            // no capture Drop receipt falsely settling the prepared capture.
             let denied = || {
                 Err(crate::store::StoreError::InvalidAuthority(
                     "interrupted publication".into(),
@@ -3679,7 +3710,7 @@ mod tests {
             },
             final_receipt: false,
         });
-        capture.finish("completed").expect("settle Run");
+        capture.finish("completed").expect("settle capture");
 
         let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
         assert!(events.contains("\"type\":\"usage\""));
@@ -4016,7 +4047,7 @@ mod tests {
             output_tokens: Some(5),
             cache_read_tokens: None,
         });
-        capture.finish("completed").expect("settle Run");
+        capture.finish("completed").expect("settle capture");
 
         let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
         assert!(events.contains("\"account_id\":\"fallback-account\""));

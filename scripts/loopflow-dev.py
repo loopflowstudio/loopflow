@@ -296,7 +296,7 @@ def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
     print("Logs: ~/Library/Logs/Loopflow/")
     print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
     # The app resolves `lf` from its own bundle before PATH, so the dashboard
-    # reads this branch's ledger surfaces (`lf runs/trace/doctor --json`) rather
+    # reads this branch's ledger surfaces (`lf session list/trace/doctor --json`) rather
     # than whatever `lf` happens to be installed.
     print(f"Bundled lf: {DEV_APP}/Contents/MacOS/lf")
     print("Telemetry dashboard: Go → Telemetry (⌘1)")

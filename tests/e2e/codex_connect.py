@@ -1214,7 +1214,7 @@ def _flow_blocked_contract(
                 assert json.loads(current)["index"] == json.loads(cursor)["index"]
             answer_env = {
                 **env,
-                "LF_RUN_ID": question[1],
+                "LF_CAPTURE_KEY": question[1],
                 "LF_HUMAN_SESSION": json.dumps({"kind": "ask", "id": question[0]}),
             }
             ready = _command(

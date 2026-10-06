@@ -10,30 +10,15 @@ use crate::session_record::{AttributionSource, CaptureHandle, SessionCaptureSpec
 
 pub fn run(selector: &str) -> Result<()> {
     let home = crate::store::lf_home_dir();
-    let run_id = replay_at(&home, selector)?;
-    println!("replayed {selector} as {run_id}");
+    let artifact_key = replay_at(&home, selector)?;
+    println!("replayed {selector} as {artifact_key}");
     Ok(())
 }
 
 fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
-    let database = crate::store::database_path_from_env()?;
-    let artifact = if database.is_file() {
-        let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
-        match store.resolve_history_input(selector) {
-            Ok(selected) => store
-                .session(&selected)?
-                .map(|session| session.artifact_key)
-                .unwrap_or(selected),
-            Err(crate::store::StoreError::NotFound) => selector.to_owned(),
-            Err(error) => return Err(error.into()),
-        }
-    } else {
-        // Retained pre-import artifacts remain replayable without a catalog.
-        selector.to_owned()
-    };
-    let (_, source) = crate::session_record::resolve_manifest(home, &artifact)
+    let (_, source) = crate::session_record::resolve_manifest(home, selector)
         .with_context(|| format!("cannot read capture {selector}"))?;
-    let request = source.exec.clone().ok_or_else(|| {
+    let mut request = source.exec.ok_or_else(|| {
         anyhow!(
             "capture {} did not record a replayable headless request",
             source.artifact_key
@@ -70,8 +55,10 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     };
     crate::engine::agent::pin_provider_account_id_blocking(&mut config)
         .map_err(anyhow::Error::from)?;
-    let mut replay_request = request;
-    replay_request.account_id = config.provider_account_id.clone();
+    request.account_id = config.provider_account_id.clone();
+    let capabilities = AgentCapabilities {
+        chrome: request.chrome,
+    };
     let spec = SessionCaptureSpec {
         harness,
         model,
@@ -92,19 +79,16 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         flow: crate::session_record::SessionFlowMembership::Independent,
         work: None,
     };
-    let capture =
-        CaptureHandle::begin_replay_at(home, spec, replay_request.clone(), source.artifact_key)
-            .map_err(|error| {
-                anyhow!("failed to publish replay capture before execution: {error}")
-            })?;
-    capture.record_input("replay", &replay_request.task_prompt);
-    let run_id = capture.artifact_key();
-    let mut context_file = if replay_request.system_prompt.trim().is_empty() {
+    let capture = CaptureHandle::begin_replay_at(home, spec, request, source.artifact_key)
+        .map_err(|error| anyhow!("failed to publish replay capture before execution: {error}"))?;
+    capture.record_input("replay", &config.task_prompt);
+    let artifact_key = capture.artifact_key();
+    let context_file = if config.system_prompt.trim().is_empty() {
         None
     } else {
         let mut file =
             tempfile::NamedTempFile::new().context("create private replay system-prompt file")?;
-        file.write_all(replay_request.system_prompt.as_bytes())
+        file.write_all(config.system_prompt.as_bytes())
             .context("write replay system-prompt file")?;
         Some(file)
     };
@@ -113,16 +97,10 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         stream: true,
         stream_format: StreamFormat::Human(false),
         capture: Some(capture.clone().into()),
-        context_file: context_file.as_mut().map(|file| file.path().to_path_buf()),
+        context_file: context_file.as_ref().map(|file| file.path().to_path_buf()),
         ..ProcessConfig::default()
     };
-    let result = exec_agent(
-        &config,
-        &process,
-        &AgentCapabilities {
-            chrome: replay_request.chrome,
-        },
-    );
+    let result = exec_agent(&config, &process, &capabilities);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",
@@ -137,7 +115,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
             result.exit_code
         ));
     }
-    Ok(run_id)
+    Ok(artifact_key)
 }
 
 #[cfg(all(test, unix))]
@@ -146,29 +124,6 @@ mod tests {
 
     use super::replay_at;
     use crate::session_record::{AgentExecRequest, CaptureHandle, SessionCaptureSpec};
-
-    struct EnvironmentRestore(Vec<(&'static str, Option<std::ffi::OsString>)>);
-
-    impl EnvironmentRestore {
-        fn capture(keys: &[&'static str]) -> Self {
-            Self(
-                keys.iter()
-                    .map(|key| (*key, std::env::var_os(key)))
-                    .collect(),
-            )
-        }
-    }
-
-    impl Drop for EnvironmentRestore {
-        fn drop(&mut self) {
-            for (key, value) in self.0.drain(..).rev() {
-                match value {
-                    Some(value) => std::env::set_var(key, value),
-                    None => std::env::remove_var(key),
-                }
-            }
-        }
-    }
 
     #[test]
     fn replay_uses_recorded_request_without_the_planning_store() {
@@ -185,16 +140,13 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
 
+        let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )))
+        .unwrap();
         let keys = ["PATH", "LF_BIN", "LF_HOME", "LF_TEST_REPLAY_EVIDENCE"];
-        let _environment = EnvironmentRestore::capture(&keys);
-        std::env::set_var(
-            "PATH",
-            format!(
-                "{}:{}",
-                bin.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        );
+        let _environment = crate::test_ambient::EnvGuard::clear(&keys);
+        std::env::set_var("PATH", path);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", home.path());
         std::env::set_var("LF_TEST_REPLAY_EVIDENCE", &evidence);

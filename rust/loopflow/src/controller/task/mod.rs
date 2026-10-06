@@ -82,7 +82,7 @@ pub(crate) async fn complete_human_flow_step(
     if !crate::ops::human_session::token_is_current(store, token).await? {
         anyhow::bail!("review session is stale");
     }
-    crate::ops::human_session::require_current_review_actor(store, expected).await?;
+    crate::ops::human_session::require_current_review_actor(store, expected)?;
     let text = expected
         .ready_summary
         .as_deref()
@@ -183,7 +183,7 @@ fn start_task_flow(task: &Task, selected_flow: &str) -> Result<FlowSession> {
         cwd: task.worktree.clone(),
         message: None,
         model: None,
-        current_attempt: None,
+        selected_capture: None,
         pending_session_id: None,
         ready_summary: None,
         worker_generation: 0,
@@ -291,9 +291,9 @@ mod planning_tests {
             .reserve_attempt(flow.id(), flow.version, flow.claim.as_ref(), None)
             .await
             .unwrap()
-            .current_attempt
+            .selected_capture
             .unwrap()
-            .run_id
+            .artifact_key
     }
 
     /// Start `flow` as the Task's Flow and park it when its first step is a review.
@@ -715,7 +715,7 @@ mod planning_tests {
         store.update_task(&task).await.unwrap();
         let resumed = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(resumed.agent.as_deref(), Some("claude:sonnet"));
-        // Parking at the review reserves its Run; the choice lands on that row.
+        // Parking at the review reserves its capture; the choice lands on that row.
         let mut flow = store.start_task_flow(&task.id, flow.clone()).await.unwrap();
         flow = store
             .reserve_task_review(flow.id(), flow.version)
@@ -964,204 +964,167 @@ mod planning_tests {
     }
 
     #[tokio::test]
-    async fn review_actions_preserve_selected_attempt_across_replacement() {
+    async fn review_actions_preserve_selected_capture_across_replacement() {
         use crate::ops::human_session::action_test::{LookupPause, NativeClients};
 
         let _lf_bin = super::TestLfBinGuard::pin();
         for action in ["complete", "rename", "open"] {
-            for selector_kind in ["run", "prefix", "session"] {
-                let (store, task, flow) = human_task_fixture().await;
-                let position = parked(&store, &task, flow).await;
-                let id = human_session::flow_id(&position).unwrap();
-                let (position, first) = store.reserve_review_run(&position).await.unwrap();
-                let capture = crate::session_record::CaptureHandle::begin_reserved_with_context(
-                    crate::session_record::SessionCaptureSpec {
-                        harness: "codex".into(),
-                        model: None,
-                        surface: "tui".into(),
-                        cwd: task.worktree.clone(),
-                        repo: None,
-                        worktree: None,
-                        skill: None,
-                        subjects: Vec::new(),
-                        flow: crate::session_record::SessionFlowMembership::Step(
-                            crate::session_record::SessionFlowStep::of(&position).unwrap(),
-                        ),
-                        work: None,
-                    },
-                    first.artifact_key.clone(),
-                    None,
-                    &crate::trace::PreparedTurnContext::from_prompts("system", "review"),
-                    |run| {
-                        store.sqlite.publish_review_capture(
-                            &id,
-                            store.sqlite.captured_sequence(run).unwrap().unwrap(),
-                            position.version,
-                            "codex",
-                            None,
-                        )
-                    },
-                )
-                .unwrap();
-                store
-                    .ready_session(&id, first.captured, "Retain this feedback")
-                    .await
-                    .unwrap();
-                let before = store.task_flow(&task.id).await.unwrap().unwrap();
-                let original = store.session(&id).await.unwrap().unwrap();
-                let selector = match selector_kind {
-                    "run" => first.artifact_key.to_string(),
-                    "prefix" => first.artifact_key.as_str()[..20].to_string(),
-                    _ => id.clone(),
-                };
-                let clients = NativeClients::new(&id, std::slice::from_ref(&first.artifact_key));
-                let pause = LookupPause::at(action, &selector);
-                // Rename starts acquiring this lock after its initial lookup.
-                // Replacement owns it until B and retained feedback are published.
-                let replacement_lock = human_session::lock_session_exec(&id).unwrap();
-                let request = async {
-                    match action {
-                        "complete" => human_session::complete(&store, &selector).await,
-                        "rename" => {
-                            human_session::rename(
-                                &store,
-                                &selector,
-                                "Chosen conversation",
-                                SessionTitleSource::Human,
-                            )
-                            .await
-                        }
-                        _ => {
-                            human_session::open(
-                                &store,
-                                &selector,
-                                human_session::OpenMode::Refuse,
-                                true,
-                            )
-                            .await
-                        }
-                    }
-                };
-                let replace = async {
-                    pause.reached.notified().await;
-                    let (reserved, replacement) = store.reserve_review_run(&before).await.unwrap();
-                    store
-                        .sqlite
-                        .publish_review_capture(
-                            &id,
-                            store
-                                .sqlite
-                                .captured_sequence(&replacement.artifact_key)
-                                .unwrap()
-                                .unwrap(),
-                            reserved.version,
-                            "codex",
-                            None,
-                        )
-                        .unwrap();
-                    clients.add(&id, &replacement.artifact_key);
-                    let position = store.task_flow(&task.id).await.unwrap().unwrap();
-                    drop(replacement_lock);
-                    pause.proceed.notify_one();
-                    (position, replacement)
-                };
-                let (result, (expected, replacement)) =
-                    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-                        tokio::join!(request, replace)
-                    })
-                    .await
-                    .unwrap();
-                if action == "rename" && selector_kind == "session" {
-                    assert_eq!(result.unwrap().title, "Chosen conversation");
-                } else {
-                    assert!(
-                        result.is_err(),
-                        "{action} via {selector_kind} selected a replacement"
-                    );
-                    assert_eq!(
-                        store.session(&id).await.unwrap().unwrap().title,
-                        original.title
-                    );
-                }
-                assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), expected);
-                let session = store.session(&id).await.unwrap().unwrap();
-                let current = session.clone();
-                assert_eq!(current.artifact_key, replacement.artifact_key);
-                assert_eq!(
-                    session.ready_summary.as_deref(),
-                    Some("Retain this feedback")
-                );
-                assert!(session.completed_at.is_none());
-                assert_eq!(
-                    clients.active(),
-                    [first.artifact_key.clone(), replacement.artifact_key.clone()].into()
-                );
-                assert!(store
-                    .rename_session(
+            let (store, task, flow) = human_task_fixture().await;
+            let position = parked(&store, &task, flow).await;
+            let id = human_session::flow_id(&position).unwrap();
+            let (position, first) = store.reserve_review_capture(&position).await.unwrap();
+            let capture = crate::session_record::CaptureHandle::begin_reserved_with_context(
+                crate::session_record::SessionCaptureSpec {
+                    harness: "codex".into(),
+                    model: None,
+                    surface: "tui".into(),
+                    cwd: task.worktree.clone(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: Vec::new(),
+                    flow: crate::session_record::SessionFlowMembership::Step(
+                        crate::session_record::SessionFlowStep::of(&position).unwrap(),
+                    ),
+                    work: None,
+                },
+                first.artifact_key.clone(),
+                None,
+                &crate::trace::PreparedTurnContext::from_prompts("system", "review"),
+                |run| {
+                    store.sqlite.publish_review_capture(
                         &id,
-                        first.captured,
-                        "Stale direct write",
-                        crate::session::TitleSource::Human,
+                        store.sqlite.captured_sequence(run).unwrap().unwrap(),
+                        position.version,
+                        "codex",
+                        None,
                     )
-                    .await
-                    .is_err());
-
-                // Native resume must hold the same lock through handoff, then release
-                // it so Complete can settle and stop exactly B. A remains untouched.
-                let opened = human_session::open(
-                    &store,
-                    replacement.artifact_key.as_str(),
-                    human_session::OpenMode::Refuse,
-                    true,
-                )
+                },
+            )
+            .unwrap();
+            store
+                .ready_session(&id, first.captured, "Retain this feedback")
                 .await
                 .unwrap();
-                assert_eq!(opened.id, replacement.id);
-                let completed = human_session::complete(&store, replacement.artifact_key.as_str())
-                    .await
+            let before = store.task_flow(&task.id).await.unwrap().unwrap();
+            let original = store.session(&id).await.unwrap().unwrap();
+            let clients = NativeClients::new(&id, std::slice::from_ref(&first.artifact_key));
+            let pause = LookupPause::at(action, &id);
+            // Rename starts acquiring this lock after its initial lookup.
+            // Replacement owns it until B and retained feedback are published.
+            let replacement_lock = human_session::lock_session_exec(&id).unwrap();
+            let request = async {
+                match action {
+                    "complete" => human_session::complete(&store, &id).await,
+                    "rename" => {
+                        human_session::rename(
+                            &store,
+                            &id,
+                            "Chosen conversation",
+                            SessionTitleSource::Human,
+                        )
+                        .await
+                    }
+                    _ => {
+                        human_session::open(&store, &id, human_session::OpenMode::Refuse, true)
+                            .await
+                    }
+                }
+            };
+            let replace = async {
+                pause.reached.notified().await;
+                let (reserved, replacement) = store.reserve_review_capture(&before).await.unwrap();
+                store
+                    .sqlite
+                    .publish_review_capture(
+                        &id,
+                        store
+                            .sqlite
+                            .captured_sequence(&replacement.artifact_key)
+                            .unwrap()
+                            .unwrap(),
+                        reserved.version,
+                        "codex",
+                        None,
+                    )
                     .unwrap();
-                assert_eq!(completed.id, replacement.id);
-                assert_eq!(clients.active(), [first.artifact_key.clone()].into());
-                assert!(store.task_flow(&task.id).await.unwrap().is_none());
-                let closed = store.session(&id).await.unwrap().unwrap();
-                assert!(closed.completed_at.is_some());
+                clients.add(&id, &replacement.artifact_key);
+                let position = store.task_flow(&task.id).await.unwrap().unwrap();
+                drop(replacement_lock);
+                pause.proceed.notify_one();
+                (position, replacement)
+            };
+            let (result, (expected, replacement)) =
+                tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                    tokio::join!(request, replace)
+                })
+                .await
+                .unwrap();
+            if action == "rename" {
+                assert_eq!(result.unwrap().title, "Chosen conversation");
+            } else {
+                assert!(result.is_err(), "{action} selected a replacement");
                 assert_eq!(
-                    closed.ready_summary.as_deref(),
-                    Some("Retain this feedback")
+                    store.session(&id).await.unwrap().unwrap().title,
+                    original.title
                 );
-                assert!(human_session::complete(&store, &id).await.is_err());
-                let events = store.recent_task_events(&task.id, 20).await.unwrap();
-                assert_eq!(
-                    events
-                        .iter()
-                        .filter(|event| matches!(
-                            &event.kind, TaskEventKind::FlowFinished { summary, .. }
-                                if summary == "Retain this feedback"
-                        ))
-                        .count(),
-                    1
-                );
-                assert_eq!(store.session_inputs(&id).await.unwrap().len(), 2);
-                drop(capture);
             }
+            assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), expected);
+            let session = store.session(&id).await.unwrap().unwrap();
+            assert_eq!(session.artifact_key, replacement.artifact_key);
+            assert_eq!(
+                session.ready_summary.as_deref(),
+                Some("Retain this feedback")
+            );
+            assert!(session.completed_at.is_none());
+            assert_eq!(
+                clients.active(),
+                [first.artifact_key.clone(), replacement.artifact_key.clone()].into()
+            );
+
+            // Native resume must hold the same lock through handoff, then release
+            // it so Complete can settle and stop exactly B. A remains untouched.
+            let opened = human_session::open(&store, &id, human_session::OpenMode::Refuse, true)
+                .await
+                .unwrap();
+            assert_eq!(opened.id, replacement.id);
+            let completed = human_session::complete(&store, &id).await.unwrap();
+            assert_eq!(completed.id, replacement.id);
+            assert_eq!(clients.active(), [first.artifact_key.clone()].into());
+            assert!(store.task_flow(&task.id).await.unwrap().is_none());
+            let closed = store.session(&id).await.unwrap().unwrap();
+            assert!(closed.completed_at.is_some());
+            assert_eq!(
+                closed.ready_summary.as_deref(),
+                Some("Retain this feedback")
+            );
+            assert!(human_session::complete(&store, &id).await.is_err());
+            let events = store.recent_task_events(&task.id, 20).await.unwrap();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(
+                        &event.kind, TaskEventKind::FlowFinished { summary, .. }
+                            if summary == "Retain this feedback"
+                    ))
+                    .count(),
+                1
+            );
+            assert_eq!(store.session_inputs(&id).await.unwrap().len(), 2);
+            drop(capture);
         }
     }
 
     #[tokio::test]
-    async fn flow_session_name_and_membership_survive_sql_run_replacement() {
+    async fn flow_session_name_and_membership_survive_capture_replacement() {
         let _lf_bin = super::TestLfBinGuard::pin();
         let (store, task, flow) = human_task_fixture().await;
         let position = parked(&store, &task, flow).await;
         let id = human_session::flow_id(&position).unwrap();
         let first = store.session(&id).await.unwrap().unwrap();
-        let named = human_session::rename(
-            &store,
-            first.artifact_key.as_str(),
-            "Parser review",
-            SessionTitleSource::Human,
-        )
-        .await
-        .unwrap();
+        let named = human_session::rename(&store, &id, "Parser review", SessionTitleSource::Human)
+            .await
+            .unwrap();
         assert_eq!(named.id, id);
         assert_eq!(
             store.session(&id).await.unwrap().unwrap().captured,
@@ -1207,10 +1170,10 @@ mod planning_tests {
         .unwrap();
         ready_review(&store, &task, "Keep this answer").await;
         let position = store.task_flow(&task.id).await.unwrap().unwrap();
-        let (_, replacement) = store.reserve_review_run(&position).await.unwrap();
+        let (_, replacement) = store.reserve_review_capture(&position).await.unwrap();
         let retained = human_session::rename(
             &store,
-            replacement.artifact_key.as_str(),
+            &id,
             "Generated suggestion",
             SessionTitleSource::Generated,
         )
@@ -1245,9 +1208,7 @@ mod planning_tests {
         )
         .await
         .unwrap_err();
-        assert!(historical
-            .to_string()
-            .contains(&format!("historical attempt of Session {id}")));
+        assert!(historical.to_string().contains("was not found"));
         assert!(!first_dir.join("session-name.json").exists());
         let prefix = &first.artifact_key.as_str()[..16];
         assert!(
@@ -1255,7 +1216,7 @@ mod planning_tests {
                 .await
                 .unwrap_err()
                 .to_string()
-                .contains("historical attempt of Session")
+                .contains("was not found")
         );
         assert!(human_session::open(
             &store,
@@ -1271,7 +1232,7 @@ mod planning_tests {
 
         ready_review(&store, &task, "Keep this answer").await;
         let position = store.task_flow(&task.id).await.unwrap().unwrap();
-        let (_, third) = store.reserve_review_run(&position).await.unwrap();
+        let (_, third) = store.reserve_review_capture(&position).await.unwrap();
         ready_review(&store, &task, "Keep this answer").await;
         let position = store.task_flow(&task.id).await.unwrap().unwrap();
         assert_eq!(position.review_artifact_key(), Some(&third.artifact_key));
@@ -1279,12 +1240,12 @@ mod planning_tests {
             .ready_session(&id, first.captured, "stale answer")
             .await
             .is_err());
-        let previous_actor = std::env::var_os("LF_RUN_ID");
-        std::env::set_var("LF_RUN_ID", first.artifact_key.as_str());
-        let stale_actor = human_session::require_current_review_actor(&store, &position).await;
+        let previous_actor = std::env::var_os("LF_CAPTURE_KEY");
+        std::env::set_var("LF_CAPTURE_KEY", first.artifact_key.as_str());
+        let stale_actor = human_session::require_current_review_actor(&store, &position);
         match previous_actor {
-            Some(value) => std::env::set_var("LF_RUN_ID", value),
-            None => std::env::remove_var("LF_RUN_ID"),
+            Some(value) => std::env::set_var("LF_CAPTURE_KEY", value),
+            None => std::env::remove_var("LF_CAPTURE_KEY"),
         }
         assert!(stale_actor.is_err());
         store
@@ -1303,26 +1264,20 @@ mod planning_tests {
         )
         .await
         .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains(&format!("historical attempt of Session {id}")));
+        assert!(error.to_string().contains("was not found"));
         assert!(!first_dir.join("session-name.json").exists());
-        assert!(human_session::rename(
-            &store,
-            third.artifact_key.as_str(),
-            "Closed actor",
-            SessionTitleSource::Human
-        )
-        .await
-        .unwrap_err()
-        .to_string()
-        .contains("already complete"));
+        assert!(
+            human_session::rename(&store, &id, "Closed actor", SessionTitleSource::Human)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("already complete")
+        );
         let closed = store.session(&id).await.unwrap().unwrap();
-        let current = closed.clone();
         assert!(closed.completed_at.is_some());
         assert_eq!(closed.title, "Parser review");
         assert_eq!(closed.ready_summary.as_deref(), Some("Keep this answer"));
-        assert_eq!(current.artifact_key, third.artifact_key);
+        assert_eq!(closed.artifact_key, third.artifact_key);
         assert_eq!(store.session_inputs(&id).await.unwrap().len(), 3);
     }
 
@@ -1332,7 +1287,7 @@ mod planning_tests {
         let (store, task, flow) = human_task_fixture().await;
         let position = parked(&store, &task, flow).await;
         let session_id = human_session::flow_id(&position).unwrap();
-        let (reserved, run) = store.reserve_review_run(&position).await.unwrap();
+        let (reserved, run) = store.reserve_review_capture(&position).await.unwrap();
         let spec = crate::session_record::SessionCaptureSpec {
             harness: "codex".into(),
             model: None,
@@ -1365,7 +1320,7 @@ mod planning_tests {
                 .unwrap();
         let original = std::fs::read(dir.join("manifest.json")).unwrap();
         assert!(!dir.join("terminal.json").exists());
-        let (retry, same_run) = store.reserve_review_run(&reserved).await.unwrap();
+        let (retry, same_run) = store.reserve_review_capture(&reserved).await.unwrap();
         assert_eq!(same_run, run);
         assert_eq!(retry, reserved);
         let capture = crate::session_record::CaptureHandle::begin_reserved_with_context(
@@ -1469,7 +1424,7 @@ mod planning_tests {
                 human,
             );
             broken.version = 0;
-            broken.current_attempt = None;
+            broken.selected_capture = None;
             broken.pending_session_id = None;
             broken.ready_summary = None;
             let broken = store.start_task_flow(&broken_id, broken).await.unwrap();
@@ -1561,7 +1516,7 @@ mod planning_tests {
             .await
             .unwrap();
         replacement.version = 0;
-        replacement.current_attempt = None;
+        replacement.selected_capture = None;
         replacement.pending_session_id = None;
         replacement.ready_summary = None;
         let replacement = parked(&store, &task, replacement).await;
@@ -1682,7 +1637,7 @@ mod planning_tests {
     async fn ready_review(store: &SharedStore, task: &Task, feedback: &str) {
         let position = store.task_flow(&task.id).await.unwrap().unwrap();
         let id = crate::ops::human_session::flow_id(&position).unwrap();
-        let (position, run) = store.reserve_review_run(&position).await.unwrap();
+        let (position, run) = store.reserve_review_capture(&position).await.unwrap();
         store
             .sqlite
             .publish_review_capture(&id, run.captured.unwrap(), position.version, "codex", None)
@@ -1702,7 +1657,7 @@ mod planning_tests {
             .reserve_attempt(flow.id(), flow.version, None, None)
             .await
             .unwrap();
-        let input = &saved.current_attempt.as_ref().unwrap().run_id;
+        let input = &saved.selected_capture.as_ref().unwrap().artifact_key;
         store
             .sqlite
             .publish_attempt(

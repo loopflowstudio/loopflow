@@ -870,6 +870,9 @@ pub enum TaskCommand {
         issue: String,
         #[arg(long)]
         summary: String,
+        /// Accept one historical Exec's unknown outcome for completion only; retain its checkout
+        #[arg(long, value_name = "EXEC_ID")]
+        accept_unknown_exec: Vec<crate::id::ExecId>,
         #[arg(long)]
         json: bool,
     },
@@ -2344,7 +2347,7 @@ mod tests {
         ])
         .unwrap();
         assert!(
-            matches!(cli.command, Some(Commands::Task { cmd: TaskCommand::Complete { issue, summary, json: true } }) if issue == "LOO-42" && summary == "Delivered")
+            matches!(cli.command, Some(Commands::Task { cmd: TaskCommand::Complete { issue, summary, json: true, .. } }) if issue == "LOO-42" && summary == "Delivered")
         );
         assert!(matches!(
             Cli::try_parse_from(["lf", "pm", "task", "done", "--id", "LOO-42"])
@@ -2352,6 +2355,26 @@ mod tests {
                 .command,
             Some(Commands::External(_))
         ));
+    }
+
+    #[test]
+    fn task_complete_accepts_exact_historical_execs() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "complete",
+            "LOO-42",
+            "--summary",
+            "Delivery verified",
+            "--accept-unknown-exec",
+            "00000000-0000-0000-0000-000000000001",
+            "--accept-unknown-exec",
+            "00000000-0000-0000-0000-000000000002",
+        ])
+        .unwrap();
+        assert!(matches!(cli.command,
+            Some(Commands::Task { cmd: TaskCommand::Complete { accept_unknown_exec, .. } })
+                if accept_unknown_exec.iter().map(|id| id.as_str()).collect::<Vec<_>>() == ["00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"]));
     }
 
     #[test]

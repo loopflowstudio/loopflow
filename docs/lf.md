@@ -152,6 +152,17 @@ without publishing, rotating the branch, or completing the Task. Multiple PRs
 for the recorded branch remain unresolved. `lf ci watch`
 starts a ci-fix when a recorded landing fails its required checks.
 
+```bash
+lf task complete EXP-12 --accept-unknown-exec EXEC_ID --summary 'Accepted historical uncertainty; delivery verified'
+```
+
+Explicit acceptance records the named Exec's unknown outcome in Task history
+without changing that outcome. Repeat the flag for multiple Execs. Completion
+still requires settled PRs and protects current Session/Flow owners and observed
+processes. Acceptance applies only to completion; the checkout remains retained
+while execution is unresolved. A refused completion may retain the acceptance
+for retry. Ordinary completion never infers acceptance.
+
 ## Keep Tasks progressing in the background
 
 ```bash

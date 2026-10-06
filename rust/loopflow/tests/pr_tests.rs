@@ -1682,7 +1682,7 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
     repo.create_branch(branch);
     let task = register_task(home.path(), repo.path(), branch, &base);
 
-    let result = task_complete(repo.path(), "INF-123", "done".to_string());
+    let result = task_complete(repo.path(), "INF-123", "done".to_string(), &[]);
     let message = result
         .expect_err("an unpublished working PR must block completion")
         .to_string();

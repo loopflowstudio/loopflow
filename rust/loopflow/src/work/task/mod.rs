@@ -663,6 +663,10 @@ pub enum TaskEventKind {
     Progress {
         summary: String,
     },
+    HistoricalUncertaintyAccepted {
+        exec_ids: Vec<crate::id::ExecId>,
+        reason: String,
+    },
     FlowFinished {
         invocation_id: String,
         flow: String,
@@ -715,6 +719,7 @@ impl TaskEventKind {
             Self::WorktreeInitializing { .. }
                 | Self::Started
                 | Self::Progress { .. }
+                | Self::HistoricalUncertaintyAccepted { .. }
                 | Self::FlowFinished { .. }
                 | Self::Steer { .. }
                 | Self::Interrupt

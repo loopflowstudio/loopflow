@@ -193,10 +193,11 @@ October 5 source inspection found public installer smoke used fake HOME/LF_HOME
 although promotion resolves the OS account Home, then hashed the entry gate as
 if it were the executable. The follow-up isolates promotion in a disposable
 container and verifies selected CLI bytes; native macOS smoke stays separate.
-Docker was unavailable locally; real container and public acceptance remain open.
-Candidate preflight now uses the packaged Linux CLI in a fresh container for
-preparation, cached reuse and publication. Real container acceptance remains open;
-simulated checks do not establish macOS installation or automatic settlement.
+Candidate preflight uses the packaged Linux CLI in a fresh network-disabled
+container for preparation, cached reuse and publication; cached receipts cannot
+bypass it. Service or cleanup failure prevents success. Docker was unavailable
+locally: real container/public acceptance remains open, and simulated checks
+establish neither macOS installation nor automatic settlement.
 
 Release's September 28 incident proves entry points need operation-level recovery:
 an agent reported failure successfully, producing a misleading green cron receipt.

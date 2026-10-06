@@ -1,6 +1,6 @@
 //! Automation selection belongs to Task; repair admission belongs to its CI incident.
 use std::fs::{File, OpenOptions};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use fs2::FileExt;
 use rusqlite::{params, OptionalExtension};
@@ -29,7 +29,49 @@ impl SqliteStore {
             "SELECT repair_conclusion IS NOT NULL OR (responded_at IS NOT NULL AND repair_exec_id IS NULL) FROM ci_incidents WHERE identity=?1", [identity], |row| row.get(0))?)
     }
 
-    pub(crate) fn lock_checkout(&self, cwd: &Path) -> StoreResult<File> {
+    pub(crate) fn lock_checkout(&self, cwd: &Path) -> StoreResult<Vec<File>> {
+        self.lock_task_checkouts(&[cwd], None)
+    }
+
+    pub(crate) fn lock_task_checkouts(
+        &self,
+        workspaces: &[&Path],
+        task: Option<&TaskId>,
+    ) -> StoreResult<Vec<File>> {
+        let canonical = |path: &Path| {
+            crate::store::canonicalize_with_missing_tail(path)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))
+        };
+        let workspaces = workspaces
+            .iter()
+            .map(|path| canonical(path))
+            .collect::<StoreResult<Vec<_>>>()?;
+        let mut paths = Vec::<PathBuf>::new();
+        for checkout in self.task_checkouts()? {
+            if checkout.worktree.as_os_str().is_empty() {
+                continue;
+            }
+            let path = canonical(&checkout.worktree)?;
+            if workspaces.iter().any(|cwd| cwd.starts_with(&path))
+                || task == Some(&checkout.task_id)
+            {
+                paths.push(path);
+            }
+        }
+        for cwd in workspaces {
+            paths.push(canonical(
+                &crate::engine::git::worktree_root(&cwd).unwrap_or(cwd),
+            )?);
+        }
+        paths.sort();
+        paths.dedup();
+        paths
+            .iter()
+            .map(|path| self.lock_checkout_path(path))
+            .collect()
+    }
+
+    fn lock_checkout_path(&self, cwd: &Path) -> StoreResult<File> {
         let database = self
             .conn
             .lock()
@@ -40,7 +82,6 @@ impl SqliteStore {
             .with_extension("admission");
         std::fs::create_dir_all(&root)
             .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        let cwd = crate::engine::git::worktree_root(cwd).unwrap_or_else(|_| cwd.to_path_buf());
         let name = hex::encode(Sha256::digest(cwd.as_os_str().as_encoded_bytes()));
         let file = OpenOptions::new()
             .create(true)

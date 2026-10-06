@@ -327,20 +327,21 @@ finds a separate Started-count selector in `insert_initial_task`, which inserts
 caller-supplied planning without rereading accepted issue ownership. Removing the
 duplicate placement-time Task insertion preserves identity, not registration
 freshness or rotation exclusion. Shared selection must replace this check too.
-Store proofs retain historical binding, transfer and registration bytes; population
-fencing, missing-path admission, both start orderings and failed-reset re-entry
-remain unproved. Historical binding stays allowed; pending receipts cannot deny
-starts indefinitely. Release's operation-entry recovery lesson applies; published
-installation proves no Project readiness.
+Store proofs retain historical binding, transfer and registration bytes. October 5
+admission now locks execution/Flow workspaces and explicit or inherited Task
+checkouts in canonical order, including missing paths. Six focused proofs retain
+bytes during exclusion and succeed after release; completed-history binding stays
+allowed. Population fencing, both rotation/start orderings and failed-reset re-entry
+remain unproved. Pending receipts cannot deny starts indefinitely; Release's
+operation-entry recovery lesson still applies. Installation proves no readiness.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 
 Jack Heart selected one editable draft per Task and one client on September 30.
-Released SQL stays immutable; disposable custom Homes retain exact-schema validation.
-The draft receipt ledger is removed. Mechanics live in
-[MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md); earlier name/ID/checksum
-diagnostics are historical. Implementation evidence and the superseded draft headers
-remain at `b4bf3b3e5:wave/infrastructure/MEMORY.md` under this heading. Not shipped.
+Released SQL stays immutable; custom Homes retain exact-schema validation.
+[MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md) owns mechanics;
+`4ef2486a2:wave/infrastructure/MEMORY.md` retains implementation evidence.
+Not shipped.
 
 ## One main Home (LOO-342, curated 2026-10-04)
 

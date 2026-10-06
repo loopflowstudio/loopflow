@@ -810,7 +810,24 @@ impl SqliteStore {
         review: Option<&FlowSession>,
         caller_exec: Option<&crate::id::ExecId>,
     ) -> StoreResult<AgentSession> {
-        let _admission = self.lock_checkout(&session.cwd)?;
+        let flow = match session.flow_session_id.as_deref() {
+            Some(id) => match review.filter(|flow| flow.id() == id) {
+                Some(flow) => Some(flow.clone()),
+                None => self.flow(id)?,
+            },
+            None => None,
+        };
+        let mut workspaces = vec![session.cwd.as_path()];
+        if let Some(flow) = &flow {
+            workspaces.push(&flow.cwd);
+        }
+        let _admission = self.lock_task_checkouts(
+            &workspaces,
+            session
+                .task_id
+                .as_ref()
+                .or_else(|| flow.as_ref().and_then(|flow| flow.task_id.as_ref())),
+        )?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(existing) = session_in(&tx, &session.id)? {
@@ -1010,9 +1027,16 @@ impl SqliteStore {
         expected_capture: Option<i64>,
         task: &TaskId,
     ) -> StoreResult<AgentSession> {
+        let before = self.session(id)?.ok_or(StoreError::NotFound)?;
+        let _admission = self.lock_task_checkouts(&[&before.cwd], Some(task))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if session.cwd != before.cwd {
+            return Err(StoreError::InvalidAuthority(
+                "Session workspace changed before binding".into(),
+            ));
+        }
         if session.captured != expected_capture {
             return Err(StoreError::InvalidAuthority(
                 "Session changed before binding".into(),

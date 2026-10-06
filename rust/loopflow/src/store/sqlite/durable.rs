@@ -1376,6 +1376,78 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn checkout_exclusion_follows_session_flow_membership() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        for bound in [true, false] {
+            let mut flow = autonomous_position(&task_id);
+            flow.cwd = task.worktree.clone();
+            if !bound {
+                flow.task_id = None;
+            }
+            store.create_flow(&flow).unwrap();
+            let mut session = conversation(Some(flow.id().to_string()), None, None);
+            session.cwd = dir.path().join("elsewhere");
+            let exclusion = store.lock_checkout(&task.worktree).unwrap();
+            assert!(store.create_session(session.clone(), None, None).is_err());
+            assert!(store.session(&session.id).unwrap().is_none());
+            drop(exclusion);
+            let admitted = store.create_session(session, None, None).unwrap();
+            assert_eq!(admitted.task_id, bound.then(|| task_id.clone()));
+            assert!(store
+                .task_work(&task_id)
+                .unwrap()
+                .sessions
+                .iter()
+                .any(|member| member.id == admitted.id));
+        }
+    }
+
+    #[test]
+    fn checkout_exclusion_preserves_unbound_history_until_binding_retries() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = dir.path().join("elsewhere");
+        let session = store.create_session(conversation, None, None).unwrap();
+        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        assert!(store
+            .bind_session(&session.id, session.captured, &task_id)
+            .is_err());
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+        assert!(!store.task_started(&task_id).unwrap());
+        drop(exclusion);
+        let bound = store
+            .bind_session(&session.id, session.captured, &task_id)
+            .unwrap();
+        assert_eq!(bound.task_id.as_ref(), Some(&task_id));
+        assert!(store.task_started(&task_id).unwrap());
+    }
+
+    #[test]
+    fn checkout_exclusion_covers_missing_subdirectories_and_explicit_tasks() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = task.worktree.join("missing/subdirectory");
+        assert!(store
+            .create_session(conversation.clone(), None, None)
+            .is_err());
+        assert!(store.session(&conversation.id).unwrap().is_none());
+        conversation.cwd = dir.path().join("elsewhere");
+        conversation.task_id = Some(task_id.clone());
+        assert!(store
+            .create_session(conversation.clone(), None, None)
+            .is_err());
+        assert!(!store.task_started(&task_id).unwrap());
+        drop(exclusion);
+        let created = store.create_session(conversation, None, None).unwrap();
+        assert_eq!(created.task_id.as_ref(), Some(&task_id));
+        assert!(store.task_started(&task_id).unwrap());
+    }
+
+    #[test]
     fn session_binding_retains_a_task_in_completed_project_history() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();

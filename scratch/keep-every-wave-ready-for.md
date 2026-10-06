@@ -167,20 +167,12 @@ Created-successor recovery stays with shared binding and exact-ID transitions. A
 listed Projects still needs explicit ownership resolution, never reattachment to
 the requested collection. These source changes do not establish configured recovery.
 
-The table retains the five store counterexamples; operation recovery remains
-unproved. The first four reproductions and source findings remain at
-`a3eee25bee8ba189cbd1b68f56e763b3447a9b94:scratch/keep-every-wave-ready-for.md`.
-The later reteam evidence is retained below and its regression now uses full readbacks; the full
-pre-compression notes are also saved locally at `/tmp/loo366-before-compression.md`
-because `lf commit` excludes scratch.
-
-| Regression | Original failure and current coverage |
-| --- | --- |
-| `delayed_project_projection_preserves_a_newer_task_transfer` | A delayed replay reversed an accepted transfer. **Replay deleted; delayed-response rejection passes.** |
-| `interrupted_rotation_transfer_survives_a_late_planning_response` | A pre-transfer response reversed a durable-only transfer. **Confirmed readback ingestion replaces the writer; preservation passes.** |
-| `delayed_restart_project_projection_preserves_completed_provider_status` | Restart restored Started after accepted Completed. **Captured-plan writer deleted; restart preservation passes.** |
-| `project_projection_retains_accepted_entity_age` | Projection replaced retained acquisition 10 with a later clock. **Ingestion retains 10; partial acceptance preserves full-refresh age and rejects conflicting Wave association.** |
-| `interrupted_reteam_preserves_confirmed_identifier_on_detail_refresh` | Identifier-only `NEXT-8` reverted to `INF-123` after delayed detail; other Task/PR fields survived. **Identifier-only writer deleted; confirmed-readback preservation passes.** |
+The five store counterexamples and their exact regression names remain at
+`f2b127d87bc0bb99654ba66118fb91a77099b73f:scratch/keep-every-wave-ready-for.md`:
+delayed transfer, interrupted rotation transfer, restart restoring old status,
+entity acquisition age and reteam identifier rollback. Keep their coverage;
+operation recovery remains distinct. Full readbacks now replace identifier-only
+writes, and accepted observations replace snapshot replay.
 
 Accepted observations and durable projection share one SQLite transaction.
 At `b3d8a6366`, full and partial Wave ingestion validate the accepted Initiative
@@ -284,13 +276,15 @@ proposals and full interleavings are retained at
 Three source-derived counterexamples determine the remaining cut; none is an
 executed provider-rotation proof:
 
-- **First starts bypass chapter admission.** `sessions.rs::create_session` and
-  `bind_session` bypass the admission checks. Released
-  `0.12.29.001_release.sql` triggers `task_first_conversation_insert` and
-  `task_first_conversation_bind` set Started; `flows.rs::begin_flow_operation`
-  also writes it. These writers do not share the Wave rotation lock. Binding
-  after classification but before the configuration switch can strand started
-  work in the predecessor. Historical binding must nevertheless stay allowed.
+- **First starts now share checkout exclusion, not rotation exclusion.**
+  `create_session` locks its execution and associated Flow workspaces plus its
+  explicit/inherited Task checkout; `bind_session` locks its stored workspace and
+  destination Task; `begin_flow_operation` locks before its Started write.
+  Canonical, sorted, deduplicated lock paths include retained Task roots even
+  when a checkout or subdirectory is missing. Lock acquisition precedes SQLite.
+  Released conversation triggers still own Started, and historical binding stays
+  allowed. Rotation does not yet hold these locks through classification/switch;
+  membership-changing registration still needs population stability.
 - **Started is not complete work evidence.** The earlier `chapter_task_evidence`
   read only Started and the managed worker claim. An unbound, non-primary conversation
   under a Task checkout can have neither, even without concurrency.
@@ -321,6 +315,13 @@ and uses it in the new capture. Primary workspace admission keeps its separate
 writer and excludes bound Tasks. The regression covers exclusion, retry and retained
 unbound membership. This is a Session-store proof, not rotation/start acceptance.
 
+October 5 admission proofs cover unchanged Session/Flow bytes while excluded and
+successful retry after release, missing checkout subdirectories, explicit binding
+from elsewhere, and Session membership through both bound and taskless Flows.
+The historical completed-Project binding proof still passes. These exercise store
+entry points, not rotation. Registration can still change the population between
+path discovery and the transaction; the lock set alone does not close that race.
+
 The proposed exclusion has one order: Wave planning locks, stable Task/checkout
 population, checkout admission locks in canonical-path order, then SQLite writes.
 Stabilize registration and membership-changing relocation through classification,
@@ -333,9 +334,9 @@ for Wave planning locks. Cover direct Session creation, review reservation,
 mechanical Flow starts, taskless starts through cwd, and binding from elsewhere.
 Include the execution and explicitly bound Task checkouts, deduplicated in the
 same order. Resolve omitted ancestry before locking and revalidate afterward.
-Missing checkout paths and their subdirectories must resolve the retained Task
-checkout identity; the current literal-cwd fallback and Git-root discovery are
-insufficient. Acquire no planning or checkout lock inside a store mutex or writer
+Missing checkout paths and subdirectories now resolve retained Task roots alongside
+execution and Flow workspaces. Population changes still require revalidation after
+locking. Acquire no planning or checkout lock inside a store mutex or writer
 transaction.
 
 Final classification combines complete Task-work membership with Started,
@@ -886,7 +887,6 @@ created-successor failure remains an explicit replacement target. Membership
 fencing, shared binding/ensure, KR-first rotation, Desktop and configured acceptance
 remain unfinished. No installed Home or designated Intelligence Project was mutated.
 
-Prior checks remain at `f2b127d87bc0bb99654ba66118fb91a77099b73f:scratch/keep-every-wave-ready-for.md`.
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b task_creation_records_placement_without_synthetic_direction task_registration_retains_earlier_checkout_conversations_without_binding repository_team_reteam --test-threads=4` passed (7); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed; rotation/start and configured acceptance remain with implementation/gate.
-
-Realign check: `git diff --check` passed; source audit confirms registration’s separate status/count selector; prior focused checks reused, with no code changes or behavioral rerun.
+Prior acquisition/registration/reteam checks remain at
+`f2b127d87bc0bb99654ba66118fb91a77099b73f:scratch/keep-every-wave-ready-for.md`.
+Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b checkout_exclusion session_binding_retains_a_task_in_completed_project_history an_interrupted_operation_blocks_for_inspection_instead_of_replaying input_replacement_retains_workspace_and_task_membership --test-threads=4` passed (6); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed; rotation/start and configured acceptance remain with implementation/gate.

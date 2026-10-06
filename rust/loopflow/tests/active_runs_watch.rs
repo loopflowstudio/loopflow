@@ -7,7 +7,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
-use loopflow::lf::commands::runs::{ActiveSessionsSnapshot, DiscoveryState};
+use loopflow::lf::commands::session_history::{ActiveSessionsSnapshot, DiscoveryState};
 
 struct Owned(Child);
 impl Drop for Owned {
@@ -31,7 +31,7 @@ fn command(home: &Path, args: &[&str]) -> Command {
         .current_dir(home)
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("LF_HOME", home)
-        .env_remove("LF_RUN_ID")
+        .env_remove("LF_CAPTURE_KEY")
         .env_remove("LF_RUN_DIR")
         .env_remove("LF_WAVE_ID")
         .stdin(Stdio::piped())

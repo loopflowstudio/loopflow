@@ -290,7 +290,7 @@ mod tests {
     fn nonresumable_execution_blocker_names_the_user_as_next_owner() {
         let mut evidence = evidence(PrPhase::Working, None, None);
         evidence.launch_refusal = Some(
-            "Task execution boundary is blocked: linked Git index.lock is not writable; correct the filesystem capability before starting a new Run",
+            "Task execution boundary is blocked: linked Git index.lock is not writable; correct the filesystem capability before starting a new Session",
         );
 
         let model = derive_task_actions(&evidence);
@@ -298,7 +298,7 @@ mod tests {
         assert_eq!(model.recommended, Some(TaskAction::NoAction));
         assert_eq!(
             model.reason,
-            "Task execution boundary is blocked: linked Git index.lock is not writable; correct the filesystem capability before starting a new Run"
+            "Task execution boundary is blocked: linked Git index.lock is not writable; correct the filesystem capability before starting a new Session"
         );
     }
 

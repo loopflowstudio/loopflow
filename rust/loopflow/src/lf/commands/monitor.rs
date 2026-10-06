@@ -156,7 +156,7 @@ fn parse_cursor(value: &str) -> Result<ExecCursor, String> {
 pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
     match command {
         MonitorCommand::Active { json, watch, task } => {
-            super::runs::list_active(*json, *watch, task.as_deref())
+            super::session_history::list_active(*json, *watch, task.as_deref())
         }
         MonitorCommand::Workspace { watch, .. } => super::workspace_watch::run(*watch),
         MonitorCommand::Ps { json } => super::top::run_ps(*json),
@@ -362,7 +362,13 @@ fn show(
             }
             Ok(())
         }
-        None => super::runs::inspect(input.unwrap_or(id), events, final_answer, context, json),
+        None => super::session_history::inspect(
+            input.unwrap_or(id),
+            events,
+            final_answer,
+            context,
+            json,
+        ),
     }
 }
 

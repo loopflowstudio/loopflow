@@ -68,10 +68,10 @@ pub(crate) async fn task_execution_and_flow(
     if snapshot.state == TaskExecutionState::Running {
         if let Some(attempt) = position
             .as_ref()
-            .and_then(|flow| flow.current_attempt.as_ref())
+            .and_then(|flow| flow.selected_capture.as_ref())
         {
             let captured = attempt.captured;
-            match activity::read(&crate::store::lf_home_dir(), &attempt.run_id).await {
+            match activity::read(&crate::store::lf_home_dir(), &attempt.artifact_key).await {
                 Activity::Stalled => {
                     snapshot.state = TaskExecutionState::Stalled;
                     snapshot.reason = format!("Session event {captured} is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.");
@@ -153,7 +153,7 @@ fn project_execution(
         };
     };
     let captured = position
-        .current_attempt
+        .selected_capture
         .as_ref()
         .map(|attempt| attempt.captured)
         .or_else(|| {
@@ -220,7 +220,8 @@ fn project_execution(
 mod tests {
     use super::{project_execution, TaskExecutionSnapshot, TaskExecutionState};
     use crate::durable::{
-        test_flow_invocation, FlowAttempt, FlowSession, TaskId, TaskWorkerClaim, TaskWorkerOwner,
+        test_flow_invocation, FlowSession, SelectedCapture, TaskId, TaskWorkerClaim,
+        TaskWorkerOwner,
     };
     use crate::id::{ExecId, TraceId};
     use crate::journal::ProcessIdentityEvidence;
@@ -240,7 +241,7 @@ mod tests {
             cwd: "/repo".into(),
             message: None,
             model: None,
-            current_attempt: None,
+            selected_capture: None,
             pending_session_id: None,
             ready_summary: None,
             worker_generation: 0,
@@ -288,9 +289,9 @@ mod tests {
             },
             claimed_at: OffsetDateTime::now_utc(),
         });
-        position.current_attempt = Some(FlowAttempt {
+        position.selected_capture = Some(SelectedCapture {
             captured: 1,
-            run_id: crate::session_record::new_artifact_key(),
+            artifact_key: crate::session_record::new_artifact_key(),
             published: true,
             outcome: None,
         });

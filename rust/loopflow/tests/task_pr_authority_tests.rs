@@ -128,7 +128,7 @@ fn missing_registry_and_ambient_input_leave_checkout_unmanaged() {
     let home = tempfile::TempDir::new().unwrap();
     let repo = TestRepo::new();
     let _env = EnvGuard::with_lf_home(&[], home.path());
-    let _ambient = AmbientVarGuard::set(loopflow::durable::RUN_ID_ENV, "unrelated-input");
+    let _ambient = AmbientVarGuard::set("LF_CAPTURE_KEY", "unrelated-input");
     assert!(task_stack(repo.path()).unwrap().is_none());
 }
 

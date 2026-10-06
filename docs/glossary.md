@@ -27,7 +27,7 @@ first, then the engineering words it borrows.
 | **Harness**, **provider** | The AI coding tool Loopflow drives: Claude Code, Codex, or OpenCode. |
 | **Scratch** | The `scratch/` folder, for working notes. It is cleared when the work lands. |
 
-Historical `Run` names remain on transitional CLI/wire surfaces; see
+Historical capture paths and immutable receipts retain their encoding; see
 [cutover status](architecture-reference.md#cutover-status). They are not a fourth
 execution owner in the accepted model.
 

@@ -484,7 +484,7 @@ fn ambient_wave_id_resolves_the_wave_it_names() {
 
     assert_eq!(status["wave"]["id"], wave.id().as_str());
     assert_eq!(status["wave"]["name"], "audit-b");
-    assert_eq!(status["runs"]["state"], "ok");
+    assert_eq!(status["history"]["state"], "ok");
 }
 
 #[test]
@@ -701,9 +701,9 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
     let status = status_json(home.path(), &["audit-c"], None);
 
     assert_eq!(status["wave"]["status"], "ready");
-    assert_eq!(status["runs"]["state"], "ok");
-    assert_eq!(status["runs"]["items"], serde_json::json!([]));
-    assert_eq!(status["runs"]["truncated"], false);
+    assert_eq!(status["history"]["state"], "ok");
+    assert_eq!(status["history"]["items"], serde_json::json!([]));
+    assert_eq!(status["history"]["truncated"], false);
 }
 
 #[test]
@@ -891,7 +891,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
             .args(["roadmap", "--task", identifier, "--all", "--json"])
             .env("LF_HOME", home.path())
             .env("LF_WAVE_ID", "must-not-narrow-exact-lookup")
-            .env_remove("LF_RUN_ID")
+            .env_remove("LF_CAPTURE_KEY")
             .current_dir(home.path().join("repo"));
         prepend_test_bin(&mut command, home.path());
         let output = command.output().unwrap();
@@ -971,7 +971,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
         }
         command
             .env("LF_HOME", home.path())
-            .env_remove("LF_RUN_ID")
+            .env_remove("LF_CAPTURE_KEY")
             .env("LF_WAVE_ID", original.id().to_string())
             .current_dir(&other_repo);
         prepend_test_bin(&mut command, home.path());

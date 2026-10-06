@@ -7,7 +7,7 @@
 // This runs `lf wave list`, `lf wave status`, and the roadmap, ps, and activity
 // readers with `--json` as subprocesses and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
-// `lf/commands/runs.rs`) into the app models the stores hold. The subprocess
+// `lf/commands/session_history.rs`) into the app models the stores hold. The subprocess
 // runner is injected: on macOS it execs the `lf` shipped inside the app. There is no
 // HTTP fallback for reads; remote reads need to become proxied `lf` queries.
 
@@ -23,7 +23,7 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// Runs an `lf` argv (already including the subcommand, e.g. `["wave", "list","--json"]`)
 /// and returns captured stdout. Throws on a non-zero exit or spawn failure.
 /// `cwd` seeds ambient resolution for verbs that want it (`lf wave status` with no
-/// wave); the machine-wide reads (`lf wave list`, `lf runs`) ignore it.
+/// wave); the machine-wide reads (`lf wave list`, `lf usage --days 0 --task ID --json`) ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
 /// Entry emitted by `lf list --json`.
@@ -229,7 +229,7 @@ public struct RegistryQuery: Sendable {
 
     /// Complete Task-attributed Session input/provider history. Read-only; querying
     /// an unstarted Task neither prepares nor starts it.
-    public func taskRuns(task: String, cwd: String?) async throws -> [SessionHistory] {
+    public func taskHistory(task: String, cwd: String?) async throws -> [SessionHistory] {
         let stdout = try await run(["usage", "--days", "0", "--task", task, "--json"], cwd)
         return try Self.decode([SessionHistory].self, from: stdout)
     }
@@ -317,7 +317,7 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Give one Session a human-assigned name and return the authoritative
-    /// record. A Run ID reaches the conversation or Flow boundary that owns it.
+    /// record. The durable Session ID selects the conversation or Flow boundary.
     public func renameSession(
         id: String,
         name: String,
@@ -528,14 +528,14 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     public let tasks: WorkEvidence<WaveTaskWork>
     public let metricPortfolio: MetricPortfolio
     public let unavailableTasks: [UnavailableTaskEvidence]
-    public let runs: WorkEvidence<SessionHistory>
+    public let history: WorkEvidence<SessionHistory>
 
     public var workMap: WaveWorkMap {
         WaveWorkMap(objective: wave.goal, projects: projects, tasks: tasks)
     }
 
     enum CodingKeys: String, CodingKey {
-        case wave, projects, tasks, runs
+        case wave, projects, tasks, history
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
     }

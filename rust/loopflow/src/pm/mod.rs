@@ -409,7 +409,6 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
     enum Section {
         None,
         Targets,
-        Flows,
         Krs,
     }
 
@@ -446,13 +445,6 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
                 section = Section::Krs;
                 continue;
             }
-            "## Flows" => {
-                if let Some(kr) = current_kr.take() {
-                    krs.push(kr);
-                }
-                section = Section::Flows;
-                continue;
-            }
             _ => {}
         }
 
@@ -468,14 +460,6 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
             Section::Targets => {
                 if !trimmed.starts_with("```") {
                     targets.push(line);
-                }
-            }
-            Section::Flows => {
-                let Some((name, value)) = trimmed.split_once(':') else {
-                    continue;
-                };
-                if name.trim() == "flow" {
-                    authored_as_flow = value.trim().to_string();
                 }
             }
             Section::Krs => {
@@ -762,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_flow_is_visible_without_changing_existing_project_content() {
+    fn missing_workflow_is_visible_without_changing_existing_project_content() {
         let content = parse_project_content("## KRs\n- [ ] Keep this proof\n").unwrap();
         assert!(content.workflow.is_empty());
         assert_eq!(content.krs[0].text, "Keep this proof");

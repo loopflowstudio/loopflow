@@ -432,9 +432,9 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 /// Place the Task and fill what a run leaves unsaid: `agent` as the Task's
 /// agent, `reason` as a steer, and the Flow. A Task on a workflow sets out on
 /// the outgoing edge that runs the named Flow, or on its only one; otherwise
-/// the Task takes up the workflow named, else its Project's. The caller then runs the
-/// returned Flow like any `lf --task ISSUE run FLOW`; `None` is an edge that
-/// runs nothing.
+/// the Task takes up the workflow named, else its Project's. The caller then
+/// runs the returned Flow like any `lf --task ISSUE run FLOW`; `None` is an
+/// edge that runs nothing.
 pub fn task_place(
     repo: &Path,
     issue: &str,

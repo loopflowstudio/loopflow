@@ -189,8 +189,8 @@ website as rendered.
     arrives once with three Flow execs under one Task run). Not renamed
     yet: surfaces still say "Flow run"; slice 10's renaming owns it. Demo
     item: a real provider failure retried.
-10. **Nodes and edges; Projects have workflows.** — **built, not yet
-    compressed or realigned.** Jack, October 6: "it is ok for now to require
+10. **Nodes and edges; Projects have workflows.** — **built and compressed, not
+    yet realigned.** Jack, October 6: "it is ok for now to require
     that each edge is a unique step (flow/skill)"; "lets use Edge and node
     instead of Stage and Way OUt"; "Then projects have workflows instead of
     default" (both under "Name" and "Projects" in
@@ -205,6 +205,7 @@ website as rendered.
     one kept; a Project naming a plain Flow refused); `--lib store::
     pm:: ops::chapter` and `--test dto_fixtures` pass; Swift
     `DesktopHeadlessTests|DTOFixtureTests|PodiumModelTests` 48 passed.
+    Compression: `--lib pm::` 108 and `ops::chapter` 17 passed, Clippy clean.
     Choices: [questions.md](questions.md). Demo items: the Wave page's
     Workflow section on screen; a live Project's `flow:` line read and
     rewritten.

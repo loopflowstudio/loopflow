@@ -1250,7 +1250,9 @@ impl LinearClient {
         self.project_node(project_id).await?.into_pm_project()
     }
 
-    // Only migration-marked Projects reach this path. Ordinary parsing     // workflow: and the earlier flow: line; no provider mutation occurs during read projection.
+    // Only migration-marked Projects reach this path. Ordinary parsing reads
+    // workflow: and the earlier flow: line; no provider mutation occurs during
+    // read projection.
     pub(crate) async fn adopt_project(
         &self,
         project_id: &str,

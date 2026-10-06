@@ -144,6 +144,9 @@ the stored directory and the shifted frames, the patch's Zig tests for the
 directory surviving reflow, and Jack comparing a Desktop shell with this
 screenshot.
 
+Background on what people say they value in Warp, Ghostty and other
+terminals: [terminal-ux-research.md](terminal-ux-research.md).
+
 ## Unresolved
 
 - Whether one blank row is the right amount between blocks, and whether the

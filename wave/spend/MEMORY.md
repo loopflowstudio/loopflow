@@ -34,6 +34,12 @@ identities, shared-account relationships, permissions or costs. In particular,
 AWS-named keys may address S3-compatible services; a billing config or admin-key
 name is not evidence of read-only authority. No secret values were requested.
 
+Unresolved account identities remain explicit discovery gaps and do not block
+local inventory/report implementation. Missing integration is distinct from a
+provider-unsupported capability; only provider evidence establishes the latter.
+LOO-389's October 6 reconciliation found planning changes only, with billing,
+access and isolation acceptance still outstanding.
+
 Restricted reporting must not inherit the general SSH credential bundle.
 Environment scrubbing alone does not isolate host credential files. Prefer
 isolated report tools without provider/Doppler access. Doppler service tokens

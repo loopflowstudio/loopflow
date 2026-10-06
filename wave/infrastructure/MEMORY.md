@@ -26,11 +26,17 @@ establishes readiness. Earlier detail remains at
 `c4373492cfc0c77fc27a7887045f74c48b381e72:wave/infrastructure/MEMORY.md`.
 
 The Infrastructure Project recommends `code` after Jack's accepted review and
-v0.13.3 installation; KRs/targets and captured reviews remain. LOO-326's exact
-unknown Exec and subsequent acceptance are retained under Transient recovery.
-LOO-367's native-thread mismatch remains unresolved; preserve its conversation.
-LOO-370's opaque-root decision above supersedes conversion. October 5 detail:
+v0.13.3 installation; KRs/targets and captured reviews remain. October 5 detail:
 `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
+
+LOO-326 completed on October 6 through installed v0.13.5's exact historical-Exec
+acceptance; its unknown outcome and checkout remain intact. Exact evidence is
+retained under Transient recovery. LOO-370 also completed under the opaque-root
+decision, without a physical capture migration.
+LOO-367's installed retry recorded a recovery boot witness (Session event 819671)
+but stopped again on the same boot. A later authorized restart can establish
+old-provider death; no restart or successful Flow continuation is claimed.
+Preserve its conversation and saved Flow rather than replaying unchanged evidence.
 
 ## Release follow-through (reconciled 2026-10-05)
 
@@ -43,11 +49,12 @@ exact publication evidence, and surface any unresolved blocker and next action
 without requiring Jack to rediscover the gap. Keep progress updates in the
 ongoing conversation while recovery is active.
 
-Release memory records v0.13.3 publication and installation, including #1441's
-retired UI-receipt removal and CLI smoke repair. Manual public read-back matched
-assets, DMGs, website and crate identity; it establishes neither a scheduled
-verified receipt nor two unattended settlements. Exact recovery evidence belongs
-in [Release memory](release/MEMORY.md).
+Release memory records v0.13.5 publication and installation on October 6,
+including historical-Exec acceptance, boot-witness recovery and PR-base repair.
+The normal installed release controller completed publication, then installation
+recognized the existing database without migration. Manual release success
+establishes neither a scheduled receipt nor two unattended settlements. Exact
+release evidence belongs in [Release memory](release/MEMORY.md).
 
 ## Capture cutover (LOO-370, reconciled 2026-10-05)
 
@@ -77,7 +84,8 @@ remains separate from source fixtures and delivery.
 Jack Heart authorized LOO-377's autonomous repair; PR #1429 merged as c5dc238b0afb
 with hosted CI passing. Restart serializes review launch, fences writers and
 retains exact stop evidence for retry. Independent reviews remain protected.
-LOO-370's replacement Flow finished after recovery; its Task remains open.
+LOO-370's replacement Flow finished after recovery; its Task completed October 6
+under the opaque-root decision above.
 Installed acceptance remains unproved;
 LOO-373 owns the retained landing-placement reconciliation error.
 
@@ -107,19 +115,14 @@ The Swift cleanup finding stays in release memory (shipped in v0.12.24).
 PR #1413 merged these as acd6654f9 after hosted CI passed, including Swift under
 combined headless and external-network restrictions. Merge is not installation.
 
-Jack Heart's October 5 steer records #1413/#1435 installed in v0.13.3,
-both stopped recovery Flows ended and the headless Session completed. Installed
-0.13.3 readback still shows Exec `5f239ead-89f9-49c4-92c4-4c2f8b97ca94`
-without terminal fields. Its exact process receipt is absent; it started after
-the current boot. The shared trace's terminal events lack Exec IDs and cannot
-settle it. Session closure does not prove child exit. Preserve the unknown
-outcome until exact exit evidence or a subsequent boot establishes death;
-Jack Heart's October 5 steer subsequently authorized explicit acceptance of
-this exact historical uncertainty for completion. Unknown outcomes and history
-must remain intact; acceptance grants no process control or checkout cleanup.
-The branch records exact Exec acceptance in Task history and rechecks eligibility
-at completion. Any process receipt or current owner disqualifies it. Admission
-and cleanup retain execution protection; installed completion remains unproved.
+Jack Heart accepted the historical uncertainty of read-only Exec
+`5f239ead-89f9-49c4-92c4-4c2f8b97ca94` rather than blocking delivered work.
+PRs #1413/#1435/#1445/#1455 merged and shipped through v0.13.5. On October 6,
+`lf task complete LOO-326 --accept-unknown-exec` with that exact ID succeeded;
+fresh Task status confirmed `done` and current planning writeback. The command
+retained the unknown outcome and checkout. Acceptance grants neither process
+control nor cleanup authority. Missing receipts and unattributed terminal trace
+events still cannot establish exit; Session closure does not prove child exit.
 
 Branch prevention now keys process receipts by Exec ID and removes them only
 after a successful terminal write. Interrupt cleanup follows the same rule;
@@ -128,11 +131,10 @@ writes, PID reuse and pruning must preserve unfinished identity without inventin
 an outcome. These loss paths are not proved causes of the original incident.
 Release's October 4 retained-landing evidence remains the counterexample: its
 receipt proved death while separate leases established re-entry authority.
-The receipt-preservation repair cannot recover the missing identity or complete LOO-326;
-October 5 gate passed architecture, formatting, Clippy and 78 website tests.
-Rust reached 1,903 passes before host security pressure interrupted four tests
-and left 333 unrun (17 skipped). Receipt regressions passed; CI owns unfinished
-verification. Installed behavior remains unproved.
+The receipt-preservation repair cannot reconstruct the missing identity.
+Hosted CI passed before delivery; completion uses explicit accepted uncertainty,
+not a fabricated terminal receipt. Earlier interrupted local gate evidence remains
+in git history at `fc60c17c2a931f121d6672fea5c037352cc0e9b1`.
 
 Release's October 5 recovery shows retries cannot fix a deadline that kills
 healthy transfers: 76 MB near 200 KiB/s exceeded five minutes but finished within
@@ -145,8 +147,13 @@ Exec receipt can precede closure of inherited checkout descriptors. A delayed
 launcher reproduces the retained second checkout; cleanup and repair re-entry now
 wait up to five seconds for an independently acquired lease and preserve ownership
 if it stays held.
-The existing cleanup assertion stays intact. This is branch evidence, not an
-installed repair or Task settlement.
+The existing cleanup assertion stays intact; this repair shipped with #1435.
+
+Syncing a Task's own remote branch must not make its remote tip the PR's base.
+That mistake stranded PR #1456 despite passing CI. PR #1459, installed in
+v0.13.5, repaired the retained base using exact remote-tracking reflog evidence;
+PR #1456 merged October 6 at 13:53 UTC without rewriting feature history.
+Foreign sibling ancestry and missing evidence still refuse.
 
 ## Scheduled release accounting (LOO-285, source reconciliation October 2)
 
@@ -441,7 +448,11 @@ identity is unchanged. [Method and verification](https://github.com/loopflowstud
 ## Worktree listing and fenced dispatch (LOO-375, 2026-10-05)
 
 Jack Heart reported `lf wt list` at 44 s, 17 s after a deadlocked writer was
-killed. PR 1 shipped in v0.13.3 and PR 2 in v0.13.4. Numbers and method:
+killed. PR 1 shipped in v0.13.3; PR #1456 merged October 6, after v0.13.5,
+and shipped in v0.13.6 on October 6. Installed validation on 54 worktrees returned
+20/20 successful samples per surface: external text median/p95 1.465/1.511 s,
+JSON 1.387/1.443 s. Both miss the one-second aim. Production timing is installed;
+local Git is the larger phase, with no measured hard lower bound. Numbers and method:
 [report](../../scripts/benchmarks/wt-list/README.md).
 
 - **Process count, not Git work, was the listing cost** (PR 1): about 370 serial

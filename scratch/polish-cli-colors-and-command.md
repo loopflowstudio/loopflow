@@ -254,6 +254,57 @@ from output text.
   launch environment Desktop computes; the Codex footer has not been looked at inside Desktop.
 - `swift/project.yml` (Xcode build) still links Ghostty-disabled stubs: LOO-280.
 
+## Recommended further polish
+
+Jack Heart asked on 2026-10-05 for the terminal research
+([terminal-ux-research.md](terminal-ux-research.md)) to be turned into
+recommendations. These are proposals drawn from it; Jack has not chosen among
+them. The research is Hacker News-heavy and not from Loopflow users.
+
+Build in this Task, in this order:
+
+1. **Right-click keeps the selection it is over.** The most concrete Warp
+   complaint is a right-click replacing a text selection with the whole block.
+   `rightMouseDown` forwards the press to Ghostty, whose default right-click
+   can make its own word selection. Right-click inside the current text
+   selection or the selected block changes nothing and opens the menu; Copy in
+   that menu copies what is highlighted. Add the case to the display suite and,
+   for whatever is decidable without a display, to the headless tests.
+2. **A selected block never holds on to the keyboard.** "Click to focus on
+   blocks becomes a hindrance." Typing after a block click already reaches the
+   shell; the block highlight should also clear on the first key that reaches
+   the shell and on Escape, so a stale highlight never sits above a new
+   command. This settles `questions.md` 5.
+3. **Move between commands from the keyboard.** Block navigation is one of the
+   few block features people report using. Bind Command-Up and Command-Down in
+   `embeddedConfig` to Ghostty's `jump_to_prompt:-1` and `jump_to_prompt:1` for
+   shell panes. No selection change, no new state.
+4. **Text stays readable on the failure tint.** `minimum-contrast` is praised by
+   name. Check dim ANSI colors (palette 8, the header grey) against the red
+   failed fill and the burgundy selected fill; if any falls below about 3:1,
+   lighten the fill's alpha before reaching for `minimum-contrast`, which would
+   also alter provider TUIs.
+5. **Line editing matches a standalone terminal.** Embedded terminals lose
+   people on keys that behave differently. Confirm in a Desktop zsh pane that
+   Option-Backspace, Option-arrows, Control-A/E/U/W, Control-X Control-E and
+   Command-Backspace do what they do in Ghostty with the same shell, and fix
+   any the view intercepts. Record the result per key.
+
+Leave out, with the reason:
+
+- **Sharing, filtering, collapse, bookmarks, sticky headers.** Marketed, not
+  cited; no first-hand praise was found.
+- **A Loopflow input editor.** Warp's losses came from replacing the shell's
+  line editor (completions, readline bindings, tmux). The shell keeps its own.
+- **More header content.** Jack asked for the directory only.
+- **Per-part copy (command only, output only).** Plausibly useful, and Ghostty's
+  triple-click already selects a command's output; revisit after acceptance.
+
+Proof: items 1–3 extend the display suite's click sequence and the headless
+config and key-routing tests; item 4 is a computed contrast table in this file;
+item 5 is a per-key table from a real Desktop pane. Jack's demo decides whether
+any of it feels right.
+
 ## Done when
 
 - A Codex Session opened in a Desktop launched from an agent shell shows the

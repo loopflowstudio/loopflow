@@ -1,5 +1,23 @@
 # Release memory
 
+## Published recovery runtime (2026-10-06)
+
+The normal installed `lf release run patch` completed v0.13.5 at
+2026-10-06 13:28:48 UTC, from `4da5b8220a417677d0b6e4e3f9c3ec17fe850d65`.
+[Release PR #1461](https://github.com/loopflowstudio/loopflow/pull/1461) and
+[candidate 37468833549](https://github.com/loopflowstudio/loopflow/actions/runs/37468833549)
+passed before signed preparation and public publication. `lf install` exited
+successfully and `lf --version` confirmed 0.13.5; promotion recognized the
+existing database exactly and applied no migration. An already-running Desktop
+was not restarted as part of this installation.
+
+This release includes #1457's contained publisher verification, #1455's explicit
+historical-Exec acceptance, #1458's boot witness and #1459's PR-base recovery.
+Docker's disposable ARM64 Ubuntu container ran successfully on this host before
+the release. Publication succeeded through the configured publisher, without a
+branch binary touching the installed Home. These manual results do not satisfy
+LOO-285's two unattended scheduled settlements.
+
 ## Installed schedule repair (2026-10-05)
 
 Infrastructure's installed release and telemetry jobs still referenced an old
@@ -185,5 +203,6 @@ Incorrect earlier preparation commits may remain in history; a corrected commit
 must retain and publish the same pending version. This supersedes recovery's
 previous automatic patch-successor policy. The sourced causal analysis and
 prevention live in `release/v0.13.1/RECOVERY.md`. Existing published artifacts,
-tags and migration bytes remain immutable. The historical gap is not repaired
-by this source change; installed activation requires a later published release.
+tags and migration bytes remain immutable. Prevention PR #1451 shipped in
+v0.13.4 and remains installed in v0.13.5. The historical v0.13.1 publication gap
+was not backfilled; activation of prevention does not erase that gap.

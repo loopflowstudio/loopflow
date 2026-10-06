@@ -807,15 +807,8 @@ and a live containment is not proof of an advancing provider turn.
 - **There is no agent messaging substrate.** Radio commands, channel identity,
   bus tables, cursors, retention, and subscriptions are gone. Durable Steers and
   Work state replace message delivery as product truth.
-- **Company Discord is the canonical Wave Chat backing when configured
-  (settled 2026-07-21).** An inbound user message becomes one durable Wave
-  Steer and the Wave reply returns to the same channel. Restart catch-up,
-  deduplication, self-echo rejection, and outbound receipts preserve one
-  conversation. The active backing and conversation epoch are explicit: local
-  and Discord compose never operate simultaneously, and product surfaces must
-  not persist a second transcript. This listener is not generalized into
-  Project/Task communication and Discord history does not become ambient prompt
-  context.
+- July's retired Discord contract: [history](https://github.com/loopflowstudio/loopflow/blob/102c160e6/wave/product/MEMORY.md).
+  October 1 notes above govern replacement and missing proof.
 - **Remote execution runs the target Home's `lf`.** SSH is transport; `lfd`
   keeps Home services and receives webhooks. Neither a remote presenter nor a
   telemetry row acquires execution authority from observing the target.

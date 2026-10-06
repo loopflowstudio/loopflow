@@ -382,6 +382,12 @@ killed. PR 1 shipped in v0.13.3; PR 2 is branch evidence. Numbers and method:
 - **Jack Heart's delivery contract:** land after autonomous checks and honest
   benchmarks; installed timing is post-merge validation, so the Task stays
   open. One installed sample is not a p95; ≤1 s warm p95 online is unmet.
+- **A sync target is not always the PR's upstream.** `lf sync origin/<own
+  branch>` recorded that branch's tip as PR #1456's base, so land refused the
+  PR's own commits as foreign. Only a default-branch target pins the range now;
+  a base that was a tip of the PR's own remote branch (remote-tracking reflog)
+  heals to the fork point. No installed 0.13.4 command repairs the stored base:
+  #1456 lands after a release carrying this fix is installed.
 - **Install preflight/promote read the OS account's Home whatever `LF_HOME`
   says.** Tests running them are container-only installation proofs.
 - **A closed Session with a confirmed-dead provider no longer blocks Task

@@ -160,6 +160,29 @@ Step 5 now implements retained exact-ID input, selected issue membership, settle
 lookup, whole-input preflight/reservation and the shared-binding switch. Desktop
 activation/reset UI and skills remain next. The branch is not releasable.
 
+October 5 reconciliation at `7e91655ed`: the preceding iteration's “rotation remains
+unimplemented” direction is superseded by `dbd4d0a77` and the operation fixtures
+below. Source inspection confirms preflight and reservation finish for every
+participating Wave before `apply_rotation` begins. Existing compression edits
+retain those boundaries and their reported focused passes; no test rerun is
+needed for this prose reconciliation.
+
+The next cut remains steps 6–7. `RegistryQuery` has no Project-ensure operation;
+`WaveDetailPane` still renders `WaveChapterView` and Chapter target labels.
+Builtin `ops/skill/start-chapter.md` and `wave/skill/wave_start-chapter.md` still
+assert no plan-file/Wave-scoped rotation, require Flow, and cancel untouched
+backlog. Their replacement must use retained exact-ID plans and preserve backlog,
+with candidate admission separate from creation. Existing CLI reference and
+planning/Wave guides already document the implemented operations; `docs/lf.md`
+and the skill composition remain unfinished.
+
+Integrated #1450 (`1af81fe03`) makes Session identity the conversation-control
+input while capture keys retain history selection. Remaining CLI/Desktop proofs
+must retain Session IDs, native identity and historical capture bytes across
+rotation; they must not restore capture-based control. Release is the only
+immediate child Wave with Markdown here; its goal and full memory were read.
+Its entry-point recovery lesson remains applicable, with no new readiness proof.
+
 ### Exact-ID rotation — October 5 implementation
 
 `ChapterPlan` contains `name` and per-Wave `wave_id`, `successor_id`, `create`,
@@ -261,9 +284,8 @@ SQLite; acquisition time does not order provider revisions.
   Project, associates its confirmed Wave and projects it atomically without
   claiming a complete Wave refresh. Acquisition time is captured before each read;
   `find_project` now requests the previously omitted provider revision.
-  Existing-successor interruption/re-entry preserves Task/PR/Flow identity. Created
-  successor recovery still fails under the old name selector; see the sequencing
-  correction below. Automatic backlog cancellation is deleted.
+  Existing and created successor recovery preserve Task/PR/Flow identity through
+  retained UUIDs. Automatic backlog cancellation is deleted.
 - Reteam accepts full exact issue readbacks after both moves and identifier
   reconciliation. Its SQL Team reconciler preserves independent entity revisions
   and timestamps and never authorizes Initiative replacement. Expansion and
@@ -631,7 +653,7 @@ Project for a new chapter for a particular Wave. Jack also raised cross-Wave
 historical chapter inspection as a capability to design. These facilities compose
 the explicit Project operations; they do not add discovery heuristics to ensure.
 
-Proposed interface shape (command spelling is not settled):
+Implemented creation interfaces and proposed history extension:
 
 - Wave-scoped chapter rotation is `lf wave new-chapter <wave> <name> --plan <path>`.
   It consumes the same retained input and implementation as repository rotation.
@@ -724,6 +746,13 @@ successor-name selection, name-derived `successor_id`, and unused
 coverage on exact-ID input; obsolete second-Home/name-discovery expectations are
 removed. Released-data adoption stays in its existing owner and acquires its Wave
 guard for writes. Ordinary consumers remain independent of chapter orchestration.
+
+Compression consolidates rotation Project readbacks in `read_project`: observation
+time precedes the request, and acceptance checks ownership before and after SQLite
+projection. `matches_plan` compares only authored KRs, Flow and targets at every
+rotation boundary. The unused post-switch flag assignment is removed; the shared
+binding remains the persisted selection. Provider reads and recovery boundaries
+are unchanged.
 
 Move reusable functions rather than copy them. Retain migration-marked conversion
 only for released-data preservation, removing its Flow refusal. Add no candidate
@@ -835,4 +864,4 @@ Release's operation-entry recovery lesson still applies; its publication and
 installation evidence establishes no Project-readiness acceptance. Registration
 compression and prior check evidence remain at `eb80d7198178a418cf44b3074f9b666f3e11cd40`.
 
-Checks: isolated rotation filter 11/11, migration 1/1 and corrected archived-identity fixture 1/1 passed (earlier chapter filter 30/31); `cargo build -p loopflow --bin lf`, `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. Gate retains configured/CLI/Desktop acceptance, the prior output-handle leak and CI repair.
+Checks: realignment `git diff --check` passed and `lf context --skill realign` reports both sources within budget; reused prior `cargo build -p loopflow --bin lf`, network-isolated `cargo test -p loopflow --lib ops::chapter::tests::rotation -- --test-threads=1` (11/11), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and website `portable_architecture or readme_index_sync` (2/2) passed; prior migration/archived-identity evidence remains at `dbd4d0a775befe6f9be4927191b9a0c4ecbe0707:scratch/keep-every-wave-ready-for.md`; gate retains configured/CLI/Desktop acceptance, the prior output-handle leak and CI repair.

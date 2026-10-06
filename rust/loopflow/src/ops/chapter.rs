@@ -295,9 +295,7 @@ pub(crate) async fn rotate(
             }
             if switched
                 && (project.status != ProjectStatus::Started
-                    || project.krs != input.content.krs
-                    || project.flow != input.content.flow
-                    || project.metric_targets != input.content.metric_targets)
+                    || !matches_plan(project, &input.content))
             {
                 return Err(error(
                     "selected destination changed after the Project switch",
@@ -360,9 +358,7 @@ pub(crate) async fn rotate(
                 ProjectStatus::Backlog | ProjectStatus::Planned | ProjectStatus::Started
             ) || (entry.switched
                 && (project.status != ProjectStatus::Started
-                    || project.krs != entry.input.content.krs
-                    || project.flow != entry.input.content.flow
-                    || project.metric_targets != entry.input.content.metric_targets))
+                    || !matches_plan(&project, &entry.input.content)))
             {
                 return Err(error("accepted successor facts prevent rotation"));
             }
@@ -528,6 +524,23 @@ async fn accept_project(
     Ok(accepted)
 }
 
+async fn read_project(store: &Store, entry: &PreparedRotation, id: &str) -> OpsResult<PmProject> {
+    let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+    let project = entry
+        .ctx
+        .client
+        .project_ownership(id)
+        .await
+        .map_err(error)?;
+    accept_project(store, entry, project, observed_at).await
+}
+
+fn matches_plan(project: &PmProject, content: &ProjectContent) -> bool {
+    project.krs == content.krs
+        && project.flow == content.flow
+        && project.metric_targets == content.metric_targets
+}
+
 async fn apply_rotation(store: &Store, entry: &mut PreparedRotation) -> OpsResult<()> {
     for id in &entry.conversions {
         entry
@@ -593,30 +606,16 @@ async fn apply_rotation(store: &Store, entry: &mut PreparedRotation) -> OpsResul
     ) {
         return Err(error("accepted successor status prevents plan changes"));
     }
-    if !entry.switched
-        && (successor.krs != entry.input.content.krs
-            || successor.flow != entry.input.content.flow
-            || successor.metric_targets != entry.input.content.metric_targets)
-    {
+    if !entry.switched && !matches_plan(&successor, &entry.input.content) {
         entry
             .ctx
             .client
             .apply_project_plan(&id, &entry.input.content)
             .await
             .map_err(error)?;
-        observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-        successor = entry
-            .ctx
-            .client
-            .project_ownership(&id)
-            .await
-            .map_err(error)?;
-        successor = accept_project(store, entry, successor, observed_at).await?;
+        successor = read_project(store, entry, &id).await?;
     }
-    if successor.krs != entry.input.content.krs
-        || successor.flow != entry.input.content.flow
-        || successor.metric_targets != entry.input.content.metric_targets
-    {
+    if !matches_plan(&successor, &entry.input.content) {
         return Err(error("destination content changed during rotation"));
     }
     if !matches!(
@@ -632,14 +631,7 @@ async fn apply_rotation(store: &Store, entry: &mut PreparedRotation) -> OpsResul
             .set_project_status(&id, ProjectStatus::Started)
             .await
             .map_err(error)?;
-        observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-        successor = entry
-            .ctx
-            .client
-            .project_ownership(&id)
-            .await
-            .map_err(error)?;
-        successor = accept_project(store, entry, successor, observed_at).await?;
+        successor = read_project(store, entry, &id).await?;
         if successor.status != ProjectStatus::Started {
             return Err(error("successor activation is not confirmed"));
         }
@@ -723,30 +715,12 @@ async fn apply_rotation(store: &Store, entry: &mut PreparedRotation) -> OpsResul
     {
         return Err(error("predecessor still has unfinished selected work"));
     }
-    let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    let current = entry
-        .ctx
-        .client
-        .project_ownership(&id)
-        .await
-        .map_err(error)?;
-    let current = accept_project(store, entry, current, observed_at).await?;
-    if current.status != ProjectStatus::Started
-        || current.krs != entry.input.content.krs
-        || current.flow != entry.input.content.flow
-        || current.metric_targets != entry.input.content.metric_targets
-    {
+    let current = read_project(store, entry, &id).await?;
+    if current.status != ProjectStatus::Started || !matches_plan(&current, &entry.input.content) {
         return Err(error("successor changed before the Project switch"));
     }
     if let Some(previous) = &entry.transition.predecessor_id {
-        let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-        let current = entry
-            .ctx
-            .client
-            .project_ownership(previous)
-            .await
-            .map_err(error)?;
-        let current = accept_project(store, entry, current, observed_at).await?;
+        let current = read_project(store, entry, previous).await?;
         if !matches!(
             current.status,
             ProjectStatus::Backlog
@@ -767,16 +741,8 @@ async fn apply_rotation(store: &Store, entry: &mut PreparedRotation) -> OpsResul
     };
     write_project_binding(&home, entry.wave.id(), expected, &id, &entry.acquisition)
         .map_err(error)?;
-    entry.switched = true;
     if let Some(previous) = &entry.transition.predecessor_id {
-        let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-        let project = entry
-            .ctx
-            .client
-            .project_ownership(previous)
-            .await
-            .map_err(error)?;
-        let mut project = accept_project(store, entry, project, observed_at).await?;
+        let mut project = read_project(store, entry, previous).await?;
         if !matches!(
             project.status,
             ProjectStatus::Backlog
@@ -793,14 +759,7 @@ async fn apply_rotation(store: &Store, entry: &mut PreparedRotation) -> OpsResul
                 .set_project_status(previous, ProjectStatus::Completed)
                 .await
                 .map_err(error)?;
-            let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-            project = entry
-                .ctx
-                .client
-                .project_ownership(previous)
-                .await
-                .map_err(error)?;
-            project = accept_project(store, entry, project, observed_at).await?;
+            project = read_project(store, entry, previous).await?;
             if project.status != ProjectStatus::Completed {
                 return Err(error("predecessor completion is not confirmed"));
             }

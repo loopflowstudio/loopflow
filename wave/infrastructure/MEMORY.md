@@ -11,8 +11,9 @@ and the decision delivered in comment `3829b49e-2ade-4bee-8850-2ae2297399a8`
 on [LOO-370](https://linear.app/loopflow/issue/LOO-370/finish-removing-the-retired-run-model-from-runtime-and-tooling).
 Preserve populated history and one storage owner, remove unnecessary offline
 conversion machinery, and retain the alias/recovery counterevidence in history.
-Only source delivery is authorized; installed migration, live interruption and
-release remain unauthorized.
+PR #1450 (`1af81fe03`) is now integrated here: Session identity controls
+conversations while capture keys select history. Installed migration, live
+interruption and release remain unauthorized by this source-delivery decision.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -72,7 +73,8 @@ supplies authority. Missing payload cannot erase resumable SQLite identity.
 Keep historical paths, payloads, feedback, native identity and usage unchanged.
 Checksum-pinned v0.13.3 capture preservation passed with stub providers, including
 native resume, independent replay, review feedback and nested Exec ancestry.
-Final affected gate remains open; fixtures prove neither installation nor conversion.
+Those fixtures prove neither installation nor conversion; #1450's source merge
+does not establish either installed outcome.
 
 The abandoned permission probes demonstrated writable hard-link aliases and a
 recovery check/write race that altered unrelated replacement metadata. Those
@@ -378,6 +380,13 @@ summaries and unrelated text. Queued membership/conversion writers retain guards
 Operation fixtures cover partial settlement and both sides of the switch;
 CLI crashes, Desktop and configured Intelligence acceptance remain open.
 Earlier counterexamples: `fc6df439424bd341ec3cd8182c19b13ed45cffd7:wave/infrastructure/MEMORY.md`.
+
+Source reconciliation at `7e91655ed` confirms whole-input preflight and reservation
+precede rotation effects. Builtin chapter skills still prescribe name-only retry,
+mandatory Flow and backlog cancellation; their remaining replacement must agree
+with the exact-ID API before delivery. Release's child memory reinforces testing
+recovery through each entry point. Integrated #1450 makes Session IDs the control
+input; remaining rotation proofs must preserve those IDs and capture history.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 

@@ -152,7 +152,6 @@ and transfer readbacks through the same owner. A single Project observation does
 not advance the Wave's full-refresh timestamp. Reteam accepts complete issue
 readbacks through that same owner and reconciles confirmed Team relationships
 without changing Initiative ownership or independently newer Project facts.
-Rotation's name-based recovery still requires replacement.
 
 Full and partial Wave ingestion validate the accepted Project's Initiative before
 recording membership or freshness. Detail refresh resolves that Initiative through

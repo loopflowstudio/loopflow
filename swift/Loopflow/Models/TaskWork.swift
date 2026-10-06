@@ -107,12 +107,6 @@ public struct Workflow: Codable, Sendable, Equatable {
     /// Edges `lf task run` can choose now, by their place among `edges`.
     public let outgoing: [Int]
     public let history: [Move]
-
-    /// The edge the Task is on, and whether its Flow still runs.
-    public var onEdge: (index: Int, edge: Edge, running: Bool)? {
-        guard case .edge(let index, _, let running) = position, edges.indices.contains(index) else { return nil }
-        return (index, edges[index], running)
-    }
 }
 
 public struct TaskSession: Codable, Sendable, Equatable, Identifiable {

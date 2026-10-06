@@ -121,13 +121,10 @@ resume are not built.
 ## Slices — one looping Flow builds these in order
 
 Jack Heart, October 5: "i want you to manage a looping lf flow that implemetns
-(and compresses, and realigns, etc.) all the slices". One `pursue` run loops:
-each pass builds the first slice not marked done, compresses, syncs and
-realigns; realign marks the slice **done** here with its commit and one-line
-check result; the deciding step iterates while any slice is not done and
-advances to publish only when all are; the list is the authority on how many there are. A proof that needs a person, a display
-or a live provider is listed under the slice as a demo item and never keeps a
-slice open. A pass that cannot finish its slice records why and stops blocked.
+(and compresses, and realigns, etc.) all the slices". One `pursue` run built
+them in order; the loop's rules are at
+`efd4200ff:scratch/focus-on-your-own-work.md`. Demo items need a person, a
+display or a live provider and never kept a slice open.
 
 Flow history below means FlowExec rows joined to their Execs.
 
@@ -206,9 +203,6 @@ runs nothing ends a Task over uncommitted changes and keeps its checkout) —
       or sidebar buttons;
     - on the toolbar's Flow chip ("task wait NOPE-1 --timeout 1"): "this is
       replaced with the much bigger flow graph";
-    - on the worktree chip reading `.tmp5q776G`: "this .tmp is weird ?" It is
-      the checkout's directory name, odd only because the fixture lives in a
-      temporary directory; no change.
     **Done** at `975d9f727`, marked by the managing conversation after
     rerunning nine suites and looking at the render. What was built, removed
     and proved is at `f8fe8aff0:scratch/focus-on-your-own-work.md` under
@@ -242,7 +236,9 @@ runs nothing ends a Task over uncommitted changes and keeps its checkout) —
     and #1471, release scripts only, merged without conflict):
     `cargo test -p loopflow --test dto_fixtures --test flow_tests --test
     task_flow_launch_tests` 20, 27 and 13 passed. Demo item: the pass
-    wording on screen.
+    wording on screen. The landing compress then searched Swift: one unused
+    accessor (`Workflow.onEdge`) and a demo script's `session complete`
+    branch removed; `swift build` passed.
 
 Every slice in this list is done.
 

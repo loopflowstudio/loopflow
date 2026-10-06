@@ -126,19 +126,11 @@ saying there is no separate "Task workflow" concept), is at
 `29b586dba:scratch/questions.md` under this heading. No Task owned
 TaskWorkflow before this one.
 
-Resolution, centered on that table (the names TaskWorkflow, from Jack, and
-FlowExec, the agent's, postdate it): the outer thing is TaskWorkflow and
-is not built in this PR; one `lf` flow run gets an append-only driver record
-named FlowExec.
-
-The consolidated model is in [the design](focus-on-your-own-work.md)
-under "Flow model".
-Takeover and resume are not built: Jack's request for the FlowExec pass
-excluded them along with TaskWorkflow.
-
-The rule: Flow bookkeeping belongs to the driver process. It may record what
-it started and where it is (journal events, rows or files it writes itself).
-A step is told nothing and writes nothing about the Flow.
+Resolution: one `lf` flow run gets an append-only driver record, FlowExec
+(the agent's name, accepted in point 13); the outer thing is the Task's
+Workflow, which Jack's later request to build every slice brought into this
+PR. Takeover and resume are not built. The consolidated model is in
+[the design](focus-on-your-own-work.md) under "Flow model".
 
 The agent's readings of these points, since built, are at
 `b30b193a0:scratch/questions.md`.
@@ -352,8 +344,5 @@ the operate skills say a Task at a node waits on a person.
 - Main's `lf flow end` (#1435, LOO-326) is dropped: a stopped Flow blocks
   nothing. Open: whether Infrastructure wants a mark on stopped history.
 - The per-Task automation on/off field is kept for CI repair only.
-- Implementation defaults for unbuilt slices: 120-second Waiting fallback,
-  most-recent interactive Task primary, optional occurrence names,
-  backward-target loops, source-only workflow YAML.
 - Global `-w` and `lf session open`, also removed by #1356, are left alone as
   outside this Task.

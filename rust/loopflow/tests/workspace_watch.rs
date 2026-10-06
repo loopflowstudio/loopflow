@@ -11,10 +11,13 @@ use std::time::{Duration, Instant};
 use loopflow::id::WaveId;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot};
 use loopflow::lf::commands::workspace_watch::{WorkspaceContent, WorkspaceFrame};
+#[cfg(target_os = "macos")]
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::PmSnapshotRow;
+#[cfg(target_os = "macos")]
 use loopflow::work::project::{Project, ProjectId};
+#[cfg(target_os = "macos")]
 use loopflow::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
 

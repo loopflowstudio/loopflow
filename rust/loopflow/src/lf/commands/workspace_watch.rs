@@ -6,6 +6,8 @@
 //! the one-shot `--json` reads print. The reader commits nothing, so it never
 //! wakes itself, and it records one Exec for its whole lifetime.
 
+mod checkouts;
+
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -35,8 +37,8 @@ const HEARTBEAT: Duration = Duration::from_secs(2);
 const CHECK: Duration = Duration::from_secs(1);
 /// A part that keeps failing is read again after 1 s, 2 s, 4 s… up to this.
 const RETRY_CAP: Duration = Duration::from_secs(60);
-/// Git and filesystem facts in planning are not store commits. Checkout
-/// contents are re-read at most once a minute, so this is their worst case.
+/// Git and filesystem facts in planning are not store commits. A watched
+/// checkout is asked about when it changes; this covers what no watch saw.
 const PLANNING_CLOCK: Duration = Duration::from_secs(300);
 /// Process liveness is observed, never committed.
 const ACTIVITY_CLOCK: Duration = Duration::from_secs(2);
@@ -217,6 +219,8 @@ struct PartState {
     read_on: Option<Instant>,
     sent: Option<[u8; 32]>,
     force: bool,
+    /// Something it reads outside the store changed.
+    stale: bool,
     /// Consecutive failed readings.
     failures: u32,
 }
@@ -335,6 +339,9 @@ struct Reader {
     refused: Option<String>,
     scope: Scope,
     parts: BTreeMap<Part, PartState>,
+    checkouts: checkouts::Checkouts,
+    /// The planning revision whose checkouts are watched.
+    watched_at: Option<i64>,
     runtime: tokio::runtime::Runtime,
 }
 
@@ -367,6 +374,40 @@ impl Reader {
         self.store
             .as_ref()
             .and_then(|store| store.sqlite.revisions().ok())
+    }
+
+    /// Follow the checkouts of the Tasks registered now, and ask Git again
+    /// about those that changed on disk. The parts showing Git facts are read
+    /// again only when an answer differs.
+    fn observe_checkouts(&mut self, revisions: Option<StoreRevisions>, shared: &Shared) {
+        let (Some(store), Some(revisions)) = (&self.store, revisions) else {
+            return;
+        };
+        if self.watched_at != Some(revisions.planning) {
+            let Ok(checkouts) = store.sqlite.task_checkouts() else {
+                return;
+            };
+            let wake = shared.clone();
+            self.checkouts.watch(
+                checkouts.into_iter().map(|row| row.worktree).collect(),
+                move || {
+                    lock(&wake).look = true;
+                    wake.1.notify_all();
+                },
+            );
+            self.watched_at = Some(revisions.planning);
+        }
+        let changed = self.checkouts.take(Instant::now());
+        // Every one is asked: `any` would stop at the first that differs.
+        let differs = changed
+            .iter()
+            .map(|worktree| crate::engine::git::reread_retained(worktree))
+            .fold(false, |any, differs| any || differs);
+        if differs {
+            for part in [Part::Planning, Part::Wave] {
+                self.parts.entry(part).or_default().stale = true;
+            }
+        }
     }
 
     fn accept(&mut self, request: Request) -> u64 {
@@ -413,6 +454,7 @@ impl Reader {
             return true;
         };
         state.force
+            || state.stale
             || state.retry_due(read_on, now)
             || match (state.read_at, revisions) {
                 (Some(old), Some(new)) => part.changed(old, new),
@@ -569,6 +611,8 @@ pub(super) fn run(watch: bool) -> Result<()> {
         refused: None,
         scope: Scope::default(),
         parts: BTreeMap::new(),
+        checkouts: Default::default(),
+        watched_at: None,
         runtime: tokio::runtime::Runtime::new()?,
     };
 
@@ -704,6 +748,9 @@ pub(super) fn run(watch: bool) -> Result<()> {
                 revisions = reader.revisions();
             }
             seen = revisions;
+            if watch {
+                reader.observe_checkouts(revisions, &shared);
+            }
             {
                 let mut mailbox = lock(&shared);
                 mailbox.revisions = revisions;
@@ -726,6 +773,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
                 state.read_at = revisions;
                 state.read_on = Some(now);
                 state.force = false;
+                state.stale = false;
                 state.failures = if reason.is_some() {
                     state.failures.saturating_add(1)
                 } else {

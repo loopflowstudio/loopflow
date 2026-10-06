@@ -11,6 +11,8 @@ pub mod execution;
 pub mod flow;
 pub mod flow_graph;
 pub mod flow_output;
+#[cfg(target_os = "macos")]
+pub(crate) mod fs_events;
 pub mod git;
 pub mod identity;
 pub mod naming;

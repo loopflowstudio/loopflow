@@ -11,8 +11,11 @@ use std::time::{Duration, Instant};
 use loopflow::id::WaveId;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot};
 use loopflow::lf::commands::workspace_watch::{WorkspaceContent, WorkspaceFrame};
+use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::PmSnapshotRow;
+use loopflow::work::project::{Project, ProjectId};
+use loopflow::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
 
 const PROJECT: &str = "95159066-9098-4d0b-8903-01459dc7ec14";
@@ -110,6 +113,72 @@ impl Home {
             .unwrap();
     }
 
+    /// Start FIX-1 in a real Git checkout with one commit, and return it.
+    fn checkout(&self) -> std::path::PathBuf {
+        let worktree = repository(&self.path().join("checkout"));
+        let head = git(&worktree, &["rev-parse", "HEAD"]);
+        let now = time::OffsetDateTime::now_utc();
+        let project = Project {
+            id: ProjectId::new(),
+            plan: ProjectPlan {
+                flow: "feature".into(),
+                status: loopflow::pm::ProjectStatus::Started,
+                id: LinearProjectId::new(PROJECT).unwrap(),
+                slug: "reactive".into(),
+                name: "Reactive".into(),
+                prompt_context: String::new(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            wave_id: self.wave.id().clone(),
+            iteration: 0,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+        };
+        self.store.insert_project(&project).unwrap();
+        let task = Task {
+            id: TaskId::new(),
+            plan: TaskPlan {
+                id: LinearIssueId::new("issue-1").unwrap(),
+                identifier: "FIX-1".into(),
+                title: "Task 1".into(),
+                description: String::new(),
+                pm_snapshot_synced_at: now.unix_timestamp(),
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id: self.wave.id().clone(),
+            project_id: project.id.clone(),
+            worktree: worktree.clone(),
+            workspace_slug: "fix-one".into(),
+            agent: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: Observation::NotRequired,
+        };
+        let pr = TaskPr {
+            id: TaskPrId::new(),
+            task_id: task.id.clone(),
+            sequence: 1,
+            slug: task.workspace_slug.clone(),
+            branch: "fix-one".into(),
+            base_commit: head,
+            parent_pr_id: None,
+            publication: None,
+            merge_commit: None,
+            abandoned_at: None,
+            ci_observation: None,
+            github_observation: None,
+            linear_attachment_id: None,
+            linear_comment_id: None,
+            linear_link_error: None,
+            created_at: now,
+            updated_at: now,
+        };
+        self.store.insert_task(&task, &pr).unwrap();
+        worktree
+    }
+
     fn raw(&self) -> rusqlite::Connection {
         let conn = rusqlite::Connection::open(self.path().join("loopflow.db")).unwrap();
         conn.busy_timeout(Duration::from_secs(5)).unwrap();
@@ -142,6 +211,27 @@ impl Home {
     fn watch(&self) -> Watch {
         Watch::open(self.path())
     }
+}
+
+fn git(repo: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {args:?} failed");
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+/// A new repository at `path` holding one commit.
+fn repository(path: &Path) -> std::path::PathBuf {
+    std::fs::create_dir_all(path).unwrap();
+    let repo = path.canonicalize().unwrap();
+    git(&repo, &["init", "--quiet", "--initial-branch=fix-one"]);
+    git(&repo, &["commit", "--quiet", "--allow-empty", "-m", "base"]);
+    repo
 }
 
 /// One uninteresting transcript line, as a provider's output is recorded.
@@ -221,6 +311,27 @@ impl Watch {
                 if accept(&tasks) {
                     return tasks;
                 }
+            }
+        }
+    }
+
+    /// The next planning frame in which FIX-1's observed checkout is
+    /// `(dirty, has commits past its PR base)`.
+    fn checkout(&self, expected: (bool, bool)) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let frame = self
+                .next(deadline.saturating_duration_since(Instant::now()))
+                .unwrap_or_else(|| panic!("no planning frame showing {expected:?} in time"));
+            let WorkspaceContent::Planning(Some(part)) = frame.content else {
+                continue;
+            };
+            let Evidence::Ok { items, .. } = &part.roadmap.waves[0].tasks else {
+                continue;
+            };
+            let progress = &items[0].condition.local_progress;
+            if (progress.dirty, progress.authored_commits) == (Some(expected.0), Some(expected.1)) {
+                return;
             }
         }
     }
@@ -630,4 +741,23 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
         assert!(Instant::now() < deadline, "reader outlived its stdin");
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// Nothing here commits to the store: the reader sees the files and Git
+/// metadata change.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_checkout_changed_on_disk_is_shown() {
+    let home = Home::at(tempfile::tempdir().unwrap());
+    let worktree = home.checkout();
+    home.plan(1);
+    let watch = home.watch();
+    watch.checkout((false, false));
+
+    std::fs::write(worktree.join("note.txt"), "draft").unwrap();
+    watch.checkout((true, false));
+
+    git(&worktree, &["add", "note.txt"]);
+    git(&worktree, &["commit", "--quiet", "-m", "note"]);
+    watch.checkout((false, true));
 }

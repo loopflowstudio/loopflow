@@ -54,6 +54,21 @@ commit, not on-glass presentation; CPU, memory and main-thread stalls are
 
 Snapshot runs preserve every database row and use a fresh private copy for each
 invocation. Keep snapshots outside Git: they contain private history and credentials.
+If a retained snapshot differs only in indexes, build a separate fixture using
+an existing fresh candidate-schema database produced by `verify-fixture`:
+
+```sh
+uv run python scripts/desktop_performance.py prepare-snapshot --snapshot /tmp/task-snapshot --schema-database /tmp/ghostty-launch-proof/native-home/loopflow.db --output /tmp/task-compatible
+```
+
+Preparation opens both inputs read-only and creates a new database. It copies
+every table row, SQLite row identity and sequence counter before restoring
+triggers, then proves typed content equivalence and exact candidate schema.
+Only indexes may differ; no table/history conversion or validation bypass is
+supported. The private manifest retains source hashes and per-table digests;
+it contains no row payloads. Use the same prepared fixture for both variants.
+This is fixture preparation, not an in-place migration or runtime authority.
+
 Only local read commands run against copied records; provider connection and
 execution are refused. Repository files and placement metadata still come from
 the supplied repository, so preserve those inputs across comparisons too.
@@ -329,16 +344,76 @@ available identifiers, snapshot CLI warnings remain in `native.log`, and failed
 read receipts retain their reason. The real read adapter also supports the
 workspace's `activity` query; the contained proof verifies copied Work activity.
 
-The realistic October 5 snapshot still cannot open with the candidate CLI.
-The same-policy warning is `development store is incompatible: schema does not
-match this experiment`; a read-only schema comparison with the fresh fixture
-finds only the candidate's `execs_unfinished` index absent. The preserved database
-still matches SHA-256 `2d4ec12d2103f3200d3675ec419f97a6b06b782c697f63f0ab9d80c583901725`.
-No copied/live store was migrated, no index installed, and no schema check bypassed.
-A schema-compatible representative population or an explicitly authorized isolated
-conversion is needed before this source candidate can enter matched acceptance.
-The full same-snapshot replay in `/tmp/loo304-snapshot-schema-replay-20261006/`
-retains all three Task-link timeouts and the schema warnings. The lf3 dependency publication is verified separately from performance acceptance.
+The original October 5 snapshot lacks `execs_unfinished` and remains unchanged at
+SHA-256 `2d4ec12d2103f3200d3675ec419f97a6b06b782c697f63f0ab9d80c583901725`.
+`prepare-snapshot` produced `/tmp/loo304-compatible-snapshot-20261006-02/` from
+all 39 source tables (342 Tasks, 604 Sessions, 218,637 Execs). Its private manifest
+proves every source row/identity/payload/counter matches; only the index differs.
+No live Home or retained copy was migrated. The initial URI-open failure is kept
+in `/tmp/loo304-prepare-snapshot.log`; the corrected preparation passed.
+
+`/tmp/loo304-compatible-replay-20261006/` passes one cold/warm/reopen Task capture
+(1,341/308/229 ms); native reopening fails. These single observations cannot
+establish p95, usable combined-workspace acceptance or improvement. The preceding
+schema-refusal replay remains `/tmp/loo304-snapshot-schema-replay-20261006/`.
+
+The database population spans 36 repository paths. The initial policy denied
+other repositories' `.lf/config.yaml` and Wave goals. A config-only diagnostic
+restored all 45 current Waves without unavailable Task collections. The runner
+now grants read access only to those exact authored configuration files, records
+their hashes and rejects changes during or between comparisons. Missing files
+stay missing. It does not grant repository-directory access, credentials,
+provider/network access, filesystem mutations or host signaling.
+
+The owned fixture now follows the repository's configured Team and uses its
+repository for exact Task queries; native execution retains its owned checkout.
+The configured-repository containment proof exercises both differences. Local
+Task status, Flow/history and owned activity reads now use the existing CLI;
+provider-backed comments remain unavailable and appear in report.md/report.json.
+After these repairs `/tmp/loo304-detail-replay-20261006/` passes four journeys
+once. Earlier compatible/configured/team replays remain failed evidence.
+
+The first replay preserved every historical row and appended seven inspection
+Execs to its disposable runtime copy. Fixture equivalence does not mean a copied
+Session has local execution authority. Original snapshots and installed Homes
+remain untouched.
+
+The 21-sample/3,600-second candidate attempt at
+`/tmp/loo304-candidate-soak-20261006/` failed on disk exhaustion after seven
+preserved rounds. Source and CLI hashes remained stable. Partial observations:
+
+| Scenario / signal | Successful n | Median | p95 / result |
+| --- | ---: | ---: | ---: |
+| Warm cohort, cold workspace construction | 20 | 1,024 ms | 1,048 ms |
+| Warm Task capture | 20 | 276 ms | 282 ms |
+| Reopen Task capture | 20 | 202 ms | 208 ms |
+| Native reopen, warm cohort | 6 of 7 | 1,770 ms | insufficient n; then timeout |
+| RSS growth after four rounds | — | — | 52.7 MiB (budget <32 MiB) |
+| Process CPU, partial 240 seconds | 229 | 0.1% | 74.0% |
+
+First interactions remain separate in the raw report. RSS rose from 256.6 to
+369.4 MiB across the partial recording. CPU excludes children. There were 478/478
+CLI starts/ends, 2,606 SQLite connections, 239,598 statements and 2,875,164 rows.
+Thirteen planned observations never started. The bitmap/OCR endpoint includes
+observer cost and proves neither cold application launch nor compositor latency.
+The failed source receipt has no matched baseline or completed trace clocks;
+it cannot establish either hour soak, idle hangs/hitches or an improvement.
+
+An Instruments temporary `.ktrace` reached 78.6 GiB with timestamps matching the
+recording; no exact path-ownership receipt survived. It remains intact, with no
+open handle at inspection. The run's output is 1.3 GiB and the filesystem has
+about 10 GiB free. All failed probes and raw data remain private on this host.
+A later permission error also obscured the outer receipt's native metadata;
+the runner now keeps that metadata as it proceeds, including across later
+exceptions. The original failed receipt was not rewritten.
+
+Do not retry the full recorder on the same capacity. A capable isolated storage
+path, or a verified lower-volume capture retaining the same full interval and
+clocks, is the next prerequisite. Shortening the soak or retaining only a final
+time window would not satisfy it. The prepared `501073137` baseline source
+archive has identical CLI instrumentation and fixture schema; current Swift
+would stay constant, so that pair isolates Rust changes only. Compilation and
+baseline recording were not started after the capacity failure.
 
 A matched realistic pair (21 samples and 3,600 seconds each), all original
 budgets, and complete journey coverage remain required. Neither these focused

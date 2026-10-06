@@ -28,6 +28,8 @@ from pathlib import Path
 from types import FrameType
 from typing import Callable, TextIO
 
+import yaml
+
 REPO = Path(__file__).resolve().parent.parent
 RECORDER = REPO / "scripts/benchmarks/desktop-performance/record_live.py"
 BUILD_COMMAND = [
@@ -156,6 +158,11 @@ def _summarize(events: list[dict]) -> dict:
         "not_started": len(planned - observed) if plan else None,
         "journal_errors": errors,
         "soak": _soak(events, plan),
+        "read_failures": [
+            event
+            for event in events
+            if event["event"] == "read" and event.get("outcome") != "passed"
+        ],
         "journey_errors": [
             event for event in events if event["event"] in {"setup", "setup_or_journey"}
         ],
@@ -265,11 +272,13 @@ def _has_complete_observations(summary: dict) -> bool:
     metadata = summary["metadata"]
     return (
         metadata.get("exit_code") == 0
+        and metadata.get("outcome") not in {"failed", "timeout", "interrupted"}
         and metadata.get("source_before") == metadata.get("source_after")
         and metadata.get("cli_sha256") == metadata.get("cli_sha256_after")
         and summary["expected_attempts"] is not None
         and summary["not_started"] == 0
         and summary["soak"]["status"] != "incomplete"
+        and metadata.get("repository_configs_unchanged", True)
         and not summary["journey_errors"]
         and not summary["journal_errors"]
         and all(attempt["outcome"] != "interrupted" for attempt in summary["attempts"])
@@ -279,7 +288,16 @@ def _has_complete_observations(summary: dict) -> bool:
 def _comparison(current: dict, baseline: dict) -> dict:
     # Different source builds are the purpose of comparison; different measurement
     # contracts, host or population would make the latency delta misleading.
-    for key in ["host", "build_mode", "command", "measurement_source", "snapshot", "repo", "issue"]:
+    for key in [
+        "host",
+        "build_mode",
+        "command",
+        "measurement_source",
+        "snapshot",
+        "repo",
+        "issue",
+        "repository_configs",
+    ]:
         if current["metadata"].get(key) != baseline["metadata"].get(key):
             return {"available": False, "reason": f"Different {key}"}
     for key in [
@@ -395,6 +413,15 @@ def _markdown(summary: dict, *, scoped: bool) -> str:
             f"| {group['population']} | {group['scenario']} | {group['state']} | "
             f"{group['passed']}/{group['attempted']} | {p50} | {p95} |"
         )
+    if failures := summary.get("read_failures"):
+        lines += [
+            "",
+            f"Unavailable read observations: {len(failures)}. These remain acceptance gaps.",
+        ]
+        for reason, count in Counter(
+            failure.get("reason", "unknown") for failure in failures
+        ).items():
+            lines.append(f"- {count} × {reason}")
     if comparison := summary.get("comparison"):
         lines += ["", "## Comparison", ""]
         if not comparison["available"]:
@@ -590,6 +617,9 @@ def _seed_native_task(home: Path, checkout: Path, repo: Path, session: str) -> t
     wave = str(uuid.uuid4())
     issue = f"PERF-{int(task[-8:], 16)}"
     now = int(time.time())
+    config_path = repo / ".lf/config.yaml"
+    config = yaml.safe_load(config_path.read_text()) if config_path.is_file() else {}
+    team = ((config or {}).get("pm") or {}).get("linear_team") or wave
     plan = dict(
         id=project,
         slug="desktop-performance",
@@ -600,7 +630,7 @@ def _seed_native_task(home: Path, checkout: Path, repo: Path, session: str) -> t
         status="started",
         krs=[],
         initiative_ids=[wave],
-        team_ids=[wave],
+        team_ids=[team],
     )
     item = dict(
         id=task,
@@ -612,7 +642,7 @@ def _seed_native_task(home: Path, checkout: Path, repo: Path, session: str) -> t
         completed=False,
         project_id=project,
         project=plan["slug"],
-        team_id=wave,
+        team_id=team,
         assignee=None,
     )
     with sqlite3.connect(home / "loopflow.db") as db:
@@ -694,6 +724,120 @@ def _snapshot(source: Path, output: Path) -> None:
     )
 
 
+def _table_facts(db: sqlite3.Connection, table: str) -> dict:
+    quoted = '"' + table.replace('"', '""') + '"'
+    digest = hashlib.sha256()
+    count = 0
+    # Include SQLite row identity, storage types, payloads and duplicate rows.
+    for row in db.execute(f"SELECT _rowid_, * FROM {quoted} ORDER BY _rowid_"):
+        encoded = repr(row).encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+        count += 1
+    return {"rows": count, "sha256": digest.hexdigest()}
+
+
+def _prepare_snapshot(snapshot: Path, schema_database: Path, output: Path) -> None:
+    """Populate a fresh fixture schema with every retained row; never open source writable."""
+    source = (snapshot / "loopflow.db").resolve()
+    manifest = json.loads((snapshot / "snapshot.json").read_text())
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    if source_hash != manifest["sha256"]:
+        raise ValueError("Snapshot changed since capture")
+    schema_database = schema_database.resolve()
+    schema_hash = hashlib.sha256(schema_database.read_bytes()).hexdigest()
+    with (
+        sqlite3.connect(source.as_uri() + "?mode=ro", uri=True) as original,
+        sqlite3.connect(schema_database.as_uri() + "?mode=ro", uri=True) as schema,
+    ):
+        query = "SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type,name"
+        original_schema = original.execute(query).fetchall()
+        target_schema = schema.execute(query).fetchall()
+        if [r for r in original_schema if r[0] != "index"] != [
+            r for r in target_schema if r[0] != "index"
+        ]:
+            raise ValueError("Fixture preparation supports index-only schema differences")
+        tables = [name for kind, name, _ in target_schema if kind == "table"]
+        for table in tables:
+            quoted = '"' + table.replace('"', '""') + '"'
+            if any(
+                row[1].lower() == "_rowid_"
+                for row in original.execute(f"PRAGMA table_info({quoted})")
+            ):
+                raise ValueError("Fixture table shadows SQLite row identity")
+            original.execute(f"SELECT _rowid_ FROM {quoted} LIMIT 0")
+        output.mkdir(parents=True, exist_ok=False, mode=0o700)
+        database = output / "loopflow.db"
+        with sqlite3.connect(database, uri=True) as target:
+            target.execute("ATTACH DATABASE ? AS retained", (source.as_uri() + "?mode=ro",))
+            # Load before installing triggers, so importing facts cannot mint new facts.
+            for kind, name, sql in target_schema:
+                if kind == "table" and name != "sqlite_sequence":
+                    target.execute(sql)
+            for table in sorted(tables, key=lambda name: name == "sqlite_sequence"):
+                quoted = '"' + table.replace('"', '""') + '"'
+                if table == "sqlite_sequence":
+                    target.execute(f"DELETE FROM {quoted}")
+                target.execute(
+                    f"INSERT INTO {quoted}(_rowid_, "
+                    + ",".join(
+                        '"' + row[1].replace('"', '""') + '"'
+                        for row in original.execute(f"PRAGMA table_info({quoted})")
+                    )
+                    + f") SELECT _rowid_, * FROM retained.{quoted}"
+                )
+            for kind, _, sql in target_schema:
+                if kind != "table":
+                    target.execute(sql)
+            facts = {table: _table_facts(original, table) for table in tables}
+            if facts != {table: _table_facts(target, table) for table in tables}:
+                raise RuntimeError("Prepared fixture changed historical content")
+            if target.execute(query).fetchall() != target_schema:
+                raise RuntimeError("Prepared fixture does not match candidate schema")
+        database.chmod(0o600)
+    if source_hash != hashlib.sha256(source.read_bytes()).hexdigest():
+        raise RuntimeError("Retained snapshot changed during fixture preparation")
+    if schema_hash != hashlib.sha256(schema_database.read_bytes()).hexdigest():
+        raise RuntimeError("Schema fixture changed during preparation")
+    _write(
+        output / "snapshot.json",
+        {
+            "captured_at": manifest["captured_at"],
+            "sha256": hashlib.sha256(database.read_bytes()).hexdigest(),
+            "counts": {table: fact["rows"] for table, fact in facts.items()},
+            "preparation": {
+                "source": manifest,
+                "schema_sha256": schema_hash,
+                "tables": facts,
+                "index_changes": {
+                    "removed": [r[1] for r in original_schema if r not in target_schema],
+                    "added": [r[1] for r in target_schema if r not in original_schema],
+                },
+            },
+        },
+    )
+
+
+def _repository_configs(database: Path) -> list[dict]:
+    with sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True) as db:
+        paths = sorted(
+            {
+                str(path.resolve())
+                for repo, wave in db.execute("SELECT repo,name FROM waves")
+                for path in [Path(repo) / ".lf/config.yaml", Path(repo) / "wave" / wave / "GOAL.md"]
+            }
+        )
+    return [
+        {
+            "path": path,
+            "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()
+            if Path(path).is_file()
+            else None,
+        }
+        for path in paths
+    ]
+
+
 def _native_command(test_filter: str, environment: dict[str, str]) -> list[str]:
     environment["LOOPFLOW_TEST_GIT"] = str(_benchmark_git())
     swift = Path(subprocess.check_output(["xcrun", "--find", "swift"], text=True).strip())
@@ -737,6 +881,17 @@ def _native_command(test_filter: str, environment: dict[str, str]) -> list[str]:
         "GIT": environment["LOOPFLOW_TEST_GIT"],
         "PROVIDER": str(Path(fixture["home"]) / "bin/codex"),
     }
+    policy = REPO / "scripts/desktop-performance.sb"
+    if snapshot := environment.get("LF_DESKTOP_TASK_SNAPSHOT"):
+        configs = _repository_configs(Path(snapshot) / "loopflow.db")
+        policy_text = (
+            policy.read_text()
+            + "\n(allow file-read-data\n"
+            + "".join("    (literal " + json.dumps(config["path"]) + ")\n" for config in configs)
+            + ")\n"
+        )
+        policy = output / "snapshot-policy.sb"
+        policy.write_text(policy_text)
     sandbox = ["/usr/bin/sandbox-exec"]
     for name, value in sorted(parameters.items()):
         sandbox += ["-D", f"{name}={value if name == 'DISPLAY' else Path(value).resolve()}"]
@@ -747,7 +902,7 @@ def _native_command(test_filter: str, environment: dict[str, str]) -> list[str]:
     ]
     return sandbox + [
         "-f",
-        str(REPO / "scripts/desktop-performance.sb"),
+        str(policy),
         "/usr/bin/env",
         *loader,
         *command,
@@ -808,14 +963,14 @@ def _run_process(
 
 def _run_native(
     output: Path,
+    metadata: dict,
     samples: int,
     soak_seconds: int,
     cli: Path,
     snapshot: Path | None = None,
     repo: Path | None = None,
     issue: str | None = None,
-) -> dict:
-    metadata: dict = {}
+) -> None:
     environment = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
     isolated = output / "home"
     isolated.mkdir(mode=0o700)
@@ -827,6 +982,7 @@ def _run_native(
         database = snapshot / "loopflow.db"
         if hashlib.sha256(database.read_bytes()).hexdigest() != manifest["sha256"]:
             raise ValueError("Snapshot changed since capture; create a new consistent snapshot")
+        metadata["repository_configs"] = _repository_configs(database)
         shutil.copyfile(database, isolated / "loopflow.db")
         (isolated / "loopflow.db").chmod(0o600)
         environment.update(
@@ -883,7 +1039,8 @@ def _run_native(
         try:
             code, outcome = _run_process(BUILD_COMMAND, environment, log, timeout=600)
             if code != 0 or outcome:
-                return {"outcome": outcome or "failed", "exit_code": code}
+                metadata.update(outcome=outcome or "failed", exit_code=code)
+                return
             command = _native_command(test_filter, environment)
             bundle_index = command.index("--test-bundle-path") + 1
             metadata["command"] = command[bundle_index - 2 :]
@@ -908,7 +1065,12 @@ def _run_native(
             if recorder is not None:
                 _stop(recorder)
                 metadata["recorder_exit_code"] = recorder.returncode
-    return metadata
+    if snapshot:
+        metadata["repository_configs_unchanged"] = metadata[
+            "repository_configs"
+        ] == _repository_configs(snapshot / "loopflow.db")
+        if not metadata["repository_configs_unchanged"]:
+            metadata["outcome"] = "repository configuration changed during measurement"
 
 
 def _run(
@@ -969,9 +1131,10 @@ def _run(
         )
     else:
         try:
-            metadata.update(_run_native(output, samples, soak_seconds, cli, snapshot, repo, issue))
+            _run_native(output, metadata, samples, soak_seconds, cli, snapshot, repo, issue)
         except (OSError, RuntimeError, ValueError) as error:
-            metadata.update(outcome="failed", reason=str(error), exit_code=None)
+            metadata.update(outcome="failed", reason=str(error))
+            metadata.setdefault("exit_code", None)
     metadata["source_after"] = _sources()
     metadata["cli_sha256_after"] = hashlib.sha256(cli.read_bytes()).hexdigest()
     _write(output / "run.json", metadata)
@@ -988,9 +1151,15 @@ def _verify_native_fixture(output: Path, cli: Path, *, mounted: bool = False) ->
             return 1
         source = output / "copied-source"
         source.mkdir()
-        _prepare_native_fixture(source, cli)
+        repo = output / "repository"
+        (repo / ".lf").mkdir(parents=True)
+        (repo / ".lf/config.yaml").write_text("pm:\n  linear_team: " + str(uuid.uuid4()) + "\n")
+        subprocess.run(
+            [str(_benchmark_git()), "init", "--quiet", str(repo)], check=True, capture_output=True
+        )
+        _prepare_native_fixture(source, cli, repo)
         _snapshot(source / "native-home/loopflow.db", output / "snapshot")
-        fixture = _prepare_native_fixture(output, cli, source / "native-home/checkout")
+        fixture = _prepare_native_fixture(output, cli, repo)
         environment = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
         environment.update(
             LOOPFLOW_TEST_NATIVE_FIXTURE=str(fixture),
@@ -1066,6 +1235,12 @@ def main() -> int:
     snapshot_command = commands.add_parser("snapshot", help="Consistent private SQLite backup")
     snapshot_command.add_argument("--database", type=Path, required=True)
     snapshot_command.add_argument("--output", type=Path, required=True)
+    prepare = commands.add_parser(
+        "prepare-snapshot", help="Copy all retained facts into a fresh fixture schema"
+    )
+    prepare.add_argument("--snapshot", type=Path, required=True)
+    prepare.add_argument("--schema-database", type=Path, required=True)
+    prepare.add_argument("--output", type=Path, required=True)
     report = commands.add_parser(
         "report", help="Rebuild reports, including interrupted invocation evidence"
     )
@@ -1080,6 +1255,10 @@ def main() -> int:
         return _verify_native_fixture(
             args.output.resolve(), args.lf.resolve(), mounted=args.mounted
         )
+    if args.command == "prepare-snapshot":
+        _prepare_snapshot(args.snapshot, args.schema_database, args.output)
+        print(args.output / "snapshot.json")
+        return 0
     if args.command == "snapshot":
         _snapshot(args.database, args.output)
         print(args.output / "snapshot.json")

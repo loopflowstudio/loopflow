@@ -773,19 +773,21 @@ failure evidence, not binding policy: current Session rows own attribution and
 write-once bind permits done/landed Tasks. Preserve current ownership through the
 one-machine conversion; discarded historical attribution needs no importer.
 
-LOO-304 retains Jack Heart's budgets, snapshots and observational/owned Home
-separation. Local lf3 passes contained launch/history proofs; same-sandbox teardown
-is allowed, host effects denied. Jack Heart authorized verified GhosttyKit publications, including future updates.
-Infrastructure published lf3 and verified its public checksum; this branch now
-selects it. Publication does not establish installed or performance acceptance.
-October 6 repairs select bundled bold/serif faces and preserve toolbar child IDs;
-all 34 catalogue scenarios pass once. Copied-registry reads fail exact-schema
-validation: only `execs_unfinished` differs. The original snapshot and live Home remain unchanged. A separate fixture with
-all source facts preserved is authorized for investigation; runtime validation
-and read-only observation remain required. Matched p95 and both soaks are open.
-Shared font/launch/OCR prerequisites change comparability. Failures, including a
-Swift metadata crash, and launch semantics remain in the benchmark guide, plan
-and `86430e589:wave/infrastructure/MEMORY.md`. Denial is not speedup.
+LOO-304 retains Jack Heart's budgets and observational/owned Home separation.
+Jack authorized future verified GhosttyKit publications; Infrastructure published
+lf3 with public checksum proof, now selected here. The original snapshot stays
+unchanged; separate fixture construction proves all 39 tables equivalent with
+only the candidate index added. Exact authored configs are read-only inputs;
+copied Sessions acquire no execution authority. Configured-repository fixtures
+must honor Team identity and resolve Task links from the Wave repository.
+
+October 6 candidate repetition retained twenty warm Task-opening samples, but
+the requested hour soak failed after seven preserved rounds on disk exhaustion.
+A 78.6 GiB Instruments temporary trace has matching timestamps, not an exact
+ownership receipt; it remains intact. Fourth-round RSS grew 52.7 MiB; full trace
+metrics, matched baseline and both hour soaks remain unproved. The benchmark
+guide and plan retain counts, failures and source limits. Source fixtures and
+published lf3 establish neither performance acceptance nor Task completion.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

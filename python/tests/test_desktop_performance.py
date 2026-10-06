@@ -122,6 +122,91 @@ def test_snapshot_preserves_committed_wal_history_without_mutating_source(tmp_pa
     assert (output.stat().st_mode & 0o777) == 0o700
 
 
+def test_prepared_snapshot_preserves_rows_triggers_and_sequence(tmp_path: Path) -> None:
+    original = tmp_path / "original.db"
+    template = tmp_path / "schema.db"
+    for path in (original, template):
+        with sqlite3.connect(path) as db:
+            db.executescript("""
+                CREATE TABLE history(id INTEGER PRIMARY KEY AUTOINCREMENT, payload BLOB, value);
+                CREATE TABLE events(message TEXT);
+                CREATE TRIGGER record_insert AFTER INSERT ON history BEGIN
+                    INSERT INTO events VALUES ('inserted');
+                END;
+                CREATE VIEW history_view AS SELECT * FROM history;
+            """)
+    with sqlite3.connect(original) as db:
+        db.executemany(
+            "INSERT INTO history VALUES (?, ?, ?)",
+            [(3, b"\x00\xff", None), (8, b"large" * 10000, 1.5), (20, b"deleted", "text")],
+        )
+        db.execute("DELETE FROM history WHERE id=20")
+        db.execute("INSERT INTO events(rowid,message) VALUES (100,'retained')")
+    with sqlite3.connect(template) as db:
+        db.execute("CREATE INDEX history_payload ON history(payload)")
+        db.execute("INSERT INTO history(payload) VALUES ('must not survive')")
+    retained = tmp_path / "retained"
+    performance._snapshot(original, retained)
+    before = (retained / "loopflow.db").read_bytes()
+    template_before = template.read_bytes()
+    prepared = tmp_path / "prepared"
+    performance._prepare_snapshot(retained, template, prepared)
+    assert (retained / "loopflow.db").read_bytes() == before
+    assert template.read_bytes() == template_before
+    with sqlite3.connect(prepared / "loopflow.db") as db:
+        assert db.execute("SELECT id,value FROM history").fetchall() == [(3, None), (8, 1.5)]
+        assert db.execute("SELECT count(*) FROM events").fetchone() == (4,)
+        assert db.execute("SELECT rowid FROM events WHERE message='retained'").fetchone() == (100,)
+        assert db.execute("SELECT seq FROM sqlite_sequence WHERE name='history'").fetchone() == (
+            20,
+        )
+        db.execute("INSERT INTO history(payload) VALUES ('next')")
+        assert db.execute("SELECT max(id) FROM history_view").fetchone() == (21,)
+        assert db.execute("SELECT count(*) FROM events").fetchone() == (5,)
+    manifest = json.loads((prepared / "snapshot.json").read_text())
+    assert manifest["preparation"]["index_changes"] == {"removed": [], "added": ["history_payload"]}
+    assert manifest["counts"]["history"] == 2
+    with sqlite3.connect(template) as db:
+        db.execute("ALTER TABLE history ADD COLUMN invented TEXT")
+    with pytest.raises(ValueError, match="index-only"):
+        performance._prepare_snapshot(retained, template, tmp_path / "incompatible")
+    assert not (tmp_path / "incompatible").exists()
+
+
+def test_repository_inputs_keep_exact_authored_files_and_missing_evidence(tmp_path: Path) -> None:
+    repo = tmp_path / "repository"
+    (repo / ".lf").mkdir(parents=True)
+    (repo / ".lf/config.yaml").write_text("pm: {}\n")
+    (repo / "wave/current").mkdir(parents=True)
+    (repo / "wave/current/GOAL.md").write_text("Current goal")
+    database = tmp_path / "schema.db"
+    with sqlite3.connect(database) as db:
+        db.execute("CREATE TABLE waves(repo TEXT, name TEXT)")
+        db.executemany(
+            "INSERT INTO waves VALUES (?,?)", [(str(repo), "current"), (str(repo), "missing")]
+        )
+    inputs = performance._repository_configs(database)
+    assert len(inputs) == 3
+    assert {entry["path"]: entry["sha256"] for entry in inputs}[
+        str(repo / "wave/missing/GOAL.md")
+    ] is None
+    assert all(entry["sha256"] for entry in inputs if "missing" not in entry["path"])
+
+
+def test_failed_reads_remain_visible_when_rendered_endpoints_pass() -> None:
+    events = _events()
+    events.append(
+        {
+            "event": "read",
+            "outcome": "unavailable",
+            "args": ["task", "comment"],
+            "reason": "Offline provider",
+        }
+    )
+    summary = performance._summarize(events)
+    assert summary["read_failures"] == [events[-1]]
+
+
 def test_snapshot_comparison_rejects_different_population(tmp_path: Path) -> None:
     baseline = _report(tmp_path, _events())
     current = _report(tmp_path, _events())
@@ -456,7 +541,9 @@ time.sleep(60)
     )
 
     with pytest.raises(KeyError, match="pid"):
-        performance._run_native(tmp_path, samples=1, soak_seconds=1, cli=tmp_path / "unused-cli")
+        performance._run_native(
+            tmp_path, {}, samples=1, soak_seconds=1, cli=tmp_path / "unused-cli"
+        )
 
     assert (tmp_path / "attempts.stopped").exists()
 
@@ -497,8 +584,16 @@ def test_sandbox_paths_do_not_change_test_binary_hash_or_comparison_command(
     for name in ("before", "after"):
         output = tmp_path / name
         output.mkdir()
-        receipts.append(performance._run_native(output, 1, 0, tmp_path / "unused-cli"))
+        receipt = {}
+        performance._run_native(output, receipt, 1, 0, tmp_path / "unused-cli")
+        receipts.append(receipt)
     assert all(receipt["exit_code"] == 0 for receipt in receipts)
     assert receipts[0]["command"] == receipts[1]["command"]
     assert receipts[0]["sandbox_command"] != receipts[1]["sandbox_command"]
     assert receipts[0]["test_binary_sha256"] == hashlib.sha256(executable.read_bytes()).hexdigest()
+
+
+def test_failed_teardown_cannot_complete_successful_rendered_endpoints(tmp_path: Path) -> None:
+    summary = _report(tmp_path, _events())
+    summary["metadata"].update(outcome="failed", reason="teardown failed")
+    assert not performance._has_complete_observations(summary)

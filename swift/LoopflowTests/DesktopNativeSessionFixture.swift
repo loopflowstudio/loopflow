@@ -42,7 +42,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
             record["open_argv"] = isolatedCommand(argv)
             return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
         }
-        guard args.first == "roadmap" || ["wave list", "home id", "session list", "task files", "task file", "task diff"].contains(args.prefix(2).joined(separator: " ")) else {
+        guard ["roadmap", "activity"].contains(args.first ?? "") || ["wave list", "home id", "session list", "session history", "task status", "task files", "task file", "task diff", "flow list"].contains(args.prefix(2).joined(separator: " ")) else {
             throw RegistryQueryError("Fixture does not execute this command")
         }
         return try await Task.detached { try capture([cli] + args) }.value
@@ -83,7 +83,10 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = argv
         process.environment = environment
-        process.currentDirectoryURL = URL(fileURLWithPath: checkout)
+        // Exact Task destinations resolve within the Wave's repository. The
+        // owned checkout remains the cwd for native execution. File commands use
+        // the Task’s recorded checkout through the shared CLI reader.
+        process.currentDirectoryURL = URL(fileURLWithPath: ["roadmap", "activity", "task", "flow", "wave"].contains(argv.dropFirst().first ?? "") ? repo : checkout)
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = handle
         process.standardError = errorHandle
@@ -183,6 +186,8 @@ struct DesktopNativeSessionTests {
         let query = RegistryQuery { args, _ in
             try await reads.read(binary: fixture.cli, home: snapshot, args: args, cwd: fixture.repo, fixture: fixture).get()
         }
+        let destination = try await query.taskDestination(issue: fixture.issue, repo: fixture.repo)
+        #expect(destination.waves.flatMap { $0.tasks.items }.contains { $0.runtime?.workId == fixture.taskId })
         let copied = try await reads.read(binary: fixture.cli, home: snapshot,
             args: ["session", "list", "--all", "--history", "--json"], cwd: fixture.repo).get()
         let copiedRecords = try JSONDecoder().decode([SessionRecord].self, from: Data(copied.utf8))

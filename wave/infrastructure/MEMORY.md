@@ -347,13 +347,15 @@ and remain visible. Malformed bodies stay errors. Earlier reader/store evidence
 and the unresolved output-handle leak remain at
 `1825a5a45c743833f625e8c8144949ed139b97f9:wave/infrastructure/MEMORY.md`.
 
-`lf wave ensure` now reserves a creation UUID before provider effects and settles
-after binding confirmation. Six operation tests cover concurrency, uncertain
-create/attach/activation, binding failures and Backlog content/Task preservation
-without Flow. Accepting facts before activation prevents delayed Backlog from
-reopening newer completed history. These are source proofs. Exact-ID rotation,
-configuration-switch recovery, KRs, Desktop and configured Intelligence acceptance
-remain unfinished; no installed-Home write is authorized.
+`lf wave ensure` reserves one UUID before creation and settles after binding
+confirmation. Six operation fixtures cover same-process concurrency, uncertain mutations,
+binding recovery and Backlog without Flow; the seventh test covers migration.
+Post-binding recovery is seeded, not a process interruption. Accepted facts precede activation,
+so delayed Backlog cannot reopen newer completed history. Rotation still neither
+consumes these receipts nor switches the binding. Exact-ID/KR-first rotation,
+cross-process crashes, Desktop and configured Intelligence acceptance remain open;
+no installed-Home write is authorized. Release's operation-entry lesson applies:
+ensure proofs cannot establish rotation recovery.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 

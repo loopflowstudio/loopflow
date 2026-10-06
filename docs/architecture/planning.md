@@ -15,8 +15,8 @@ Project owns Tasks, KRs, targets and an optional default Flow. A Chapter is the 
 name of those current Projects across the repository. The rotation below describes
 the current implementation. LOO-366 replaces status/name selection with an explicit
 shared Project binding and preserves unreviewed backlog. Binding setup, operation
-routing, reader selection and SQLite admission exist; ensure and rotation recovery
-remain unfinished. [Cutover status](../architecture-reference.md#cutover-status) records
+routing, reader selection, SQLite admission and ensure recovery exist; rotation
+recovery remains unfinished. [Cutover status](../architecture-reference.md#cutover-status) records
 other implementation and proof gaps.
 
 ```bash
@@ -58,13 +58,14 @@ stays in its existing Project until explicit disposition; completed Tasks stay
 historical. Missing local or provider evidence remains unresolved. Linear keeps the Projects
 and their Tasks.
 
-Rotation reads fresh provider state after each interruption. A partial transition
-to the requested name is recoverable using stable Project identities and one
-unambiguous predecessor group. Unrelated competing current plans remain unresolved;
-newest-looking names never win. Status mutations do not form a distributed
-transaction. Another Home observes the new plan through normal synchronization.
-There is no Chapter row, packet or local switch. See [Waves](../waves.md#the-planning-model)
-for adoption, default Flow and disposition details.
+Rotation still infers predecessors and successors from names and does not consume
+`project_transitions` or switch the shared binding. Created-successor retry can
+fail on the provider's preserved names; successful provider rotation alone does
+not advance configured selection. This is an unfinished cutover, not a supported
+recovery path for the new binding. The replacement must reserve exact endpoints,
+validate authored KRs before creation, transfer started work, switch the binding,
+and confirm predecessor completion. No Chapter row is required. See
+[Waves](../waves.md#the-planning-model) for the preservation contract.
 
 ## Inspect planning before starting execution
 

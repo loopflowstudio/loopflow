@@ -101,9 +101,10 @@ in source. No installed repair is established, and a branch binary must not writ
 the installed Home. Delivery must report the actual supported binding/activation
 commands once implemented and available in a published installation.
 
-Add the Backlog/empty-Flow case through the operation entry point: explicitly bind
-an existing Project, activate that UUID, preserve original content/KRs, Tasks and
-execution identity, and repeat without creating a Project. Configured acceptance
+The Backlog/empty-Flow operation fixture now binds and activates the exact UUID,
+preserving provider content/KRs and issue bodies on repeat without creation. It
+does not seed local Task/PR/Session/Flow execution; that identity proof remains
+with the CLI/rotation acceptance. Configured acceptance
 for Intelligence has this explicit destination and repair authority; other fixture
 Waves still need designated destinations. No global reset is authorized.
 
@@ -161,7 +162,8 @@ then writes/reads the shared binding and settles the receipt. Ordinary ensure ha
 no KR or Flow prerequisite and no candidate scan. It leaves pending reset recovery
 to rotation. Explicit binding cannot strand another pending reservation.
 
-Six stateful operation tests pass: concurrent callers; response loss after each
+Six stateful operation tests pass (the `project_ensure` filter also includes one
+migration test): concurrent callers; response loss after each
 of create/attach/activation; failed binding replacement and post-binding settlement;
 archived reservation and unavailable reads; existing Backlog with empty Flow,
 authored content and Tasks; delayed Backlog after accepted completion. Review
@@ -169,8 +171,15 @@ caught activation preceding accepted-fact ingestion: ensure now accepts the read
 before deciding whether to activate, preserving newer completed history. A separate
 released-frontier migration test checks pending uniqueness and settled history.
 These are synthetic operation proofs, not configured Intelligence acceptance.
+Concurrency uses two futures in one process. The post-binding recovery case seeds
+the complete binding after a failed write; it does not interrupt a real process
+between binding and settlement. Cross-process/cross-checkout and crash proofs remain
+with gate. Existing check results cover the local `accept_project` consolidation;
+realignment adds no runtime change.
 
-Step 5 is next: replace `chapter::select_current`, `plan_rotation`'s name inference
+Step 5 is next: rotation currently neither consumes `project_transitions` nor
+writes the shared binding, so even a successful provider rotation leaves readers
+on the predecessor. Replace `chapter::select_current`, `plan_rotation`'s name inference
 and name-derived UUIDs with exact transitions. Created-successor and before/after-
 configuration-switch rotation proofs remain open. KR-first Wave/repository
 rotation, Desktop activation and configured readiness (steps 5–7) are unfinished.
@@ -386,7 +395,7 @@ and created-successor recovery remain unproved; explicit selection is unchanged.
 Every Wave has one explicitly configured current Project, normally In Progress.
 Opening a Wave in Desktop ensures that Project independently of any chapter. Existing
 names, content, Tasks, checkout, PR, Session and Flow identities survive. CLI and
-agents can do the same with proposed `lf wave ensure <wave> --json`. Status,
+agents use the implemented `lf wave ensure <wave> --json`. Status,
 roadmap, background refresh and Project inspection never initiate provisioning.
 An unavailable sibling Wave or global reset does not prevent ordinary work here.
 
@@ -713,10 +722,13 @@ Apply the remaining cuts with their replacement consumers under the selected
 shared local configuration owner. Empty-Flow, names and reader selection are implemented
 locally; rotation remains. Keep this one delivery boundary.
 
+- Deleted: repeated ownership/acceptance blocks in binding and ensure. One
+  `accept_project` validates response and accepted body while retaining the Wave
+  guard; activation still judges accepted facts. Creation owns one optional receipt.
 - Deleted: `ops/chapter.rs::update_plan`; ordinary Project editing now lives in
   `ops/project.rs` and shares one store across validation, selection and refresh.
   Selection borrows the matching Project; summary rendering copies only its ID.
-- `ops/chapter.rs::select_current`: remaining rotation-only status selection awaits
+- `ops/chapter.rs::select_current`: remaining rotation/legacy-adoption status selection awaits
   exact transitions. Ordinary selection moved to `ops/project.rs`; status Task
   filtering and Desktop status inference are deleted. `sync_projects` and
   `record_project` are deleted.
@@ -876,4 +888,4 @@ Release's operation-entry recovery lesson still applies; its publication and
 installation evidence establishes no Project-readiness acceptance. Registration
 compression and prior check evidence remain at `eb80d7198178a418cf44b3074f9b666f3e11cd40`.
 
-Checks: six `project_ensure` operation tests passed under `scripts/test_network.py`; released-frontier receipt migration check passed; `cargo check -p loopflow --all-targets`, formatting and all-target Clippy passed. Gate owns configured/CLI/Desktop acceptance, the prior output-handle leak and CI repair.
+Checks: `cargo test -p loopflow --lib --no-run` passed; compiled lib filters `project_ensure` (7) and `project_binding` (5) passed under `scripts/test_network.py`; `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` passed. Realignment: `git diff --check` passed; no runtime changes or test rerun. Gate retains configured/CLI/Desktop acceptance, the prior output-handle leak and CI repair.

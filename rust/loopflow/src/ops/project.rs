@@ -1,9 +1,10 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::ops::{OpsError, OpsResult};
 use crate::pm::{PmProject, ProjectContent, ProjectStatus};
 use crate::store::project_transitions::ProjectTransition;
-use crate::store::Store;
+use crate::store::{PlanningLocks, Store};
 use crate::work::project::Project;
 use crate::work::wave::project_binding::{read_project_binding, write_project_binding};
 use crate::work::wave::Wave;
@@ -19,7 +20,7 @@ pub(crate) fn select_project<'a>(
     projects: &'a [PmProject],
 ) -> OpsResult<&'a PmProject> {
     let home = store.sqlite.home_dir().map_err(project_error)?;
-    let selected = crate::work::wave::project_binding::read_project_binding(&home, wave.id())
+    let selected = read_project_binding(&home, wave.id())
         .map_err(project_error)?
         .ok_or_else(|| project_error(format!("Wave {} has no configured Project", wave.slug())))?;
     let project = projects
@@ -32,7 +33,7 @@ pub(crate) fn select_project<'a>(
         })?;
     if matches!(
         project.status,
-        crate::pm::ProjectStatus::Completed | crate::pm::ProjectStatus::Canceled
+        ProjectStatus::Completed | ProjectStatus::Canceled
     ) {
         return Err(project_error(format!(
             "configured Project {selected} is terminal; its history is unchanged"
@@ -41,7 +42,7 @@ pub(crate) fn select_project<'a>(
     Ok(project)
 }
 
-pub(crate) async fn current_project(store: &Store, wave: &Wave) -> OpsResult<crate::pm::PmProject> {
+pub(crate) async fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmProject> {
     let snapshot = store
         .pm_snapshot(wave.id())
         .await
@@ -70,11 +71,7 @@ pub(crate) async fn resolve_project_for_task(
 
 /// Explicitly seed a Wave's shared selection with an existing Project UUID.
 /// Switching an established binding belongs to Project rotation.
-pub async fn bind_project(
-    repo: &Path,
-    name: &str,
-    project_id: &str,
-) -> OpsResult<crate::pm::PmProject> {
+pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResult<PmProject> {
     uuid::Uuid::parse_str(project_id).map_err(project_error)?;
     let store = super::pm::pm_store().await?;
     let wave = crate::work::wave::context::resolve_managed_wave(
@@ -87,8 +84,7 @@ pub async fn bind_project(
     .map_err(project_error)?;
     let acquisition = super::chapter::rotation_lock(&wave).await?;
     let home = store.sqlite.home_dir().map_err(project_error)?;
-    let selected = crate::work::wave::project_binding::read_project_binding(&home, wave.id())
-        .map_err(project_error)?;
+    let selected = read_project_binding(&home, wave.id()).map_err(project_error)?;
     if selected.as_deref().is_some_and(|id| id != project_id) {
         return Err(project_error(
             "Wave already has a different configured Project; its binding is unchanged",
@@ -110,46 +106,17 @@ pub async fn bind_project(
     }
     let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    let project = ctx
-        .client
-        .find_project(project_id)
-        .await
-        .map_err(project_error)?
-        .ok_or_else(|| project_error(format!("Project {project_id} is unavailable")))?;
-    crate::pm::validate_project_ownership(
-        wave.slug(),
-        &ctx.initiative,
-        Some(&ctx.team_id),
-        &project,
-    )
-    .map_err(project_error)?;
-    let project = store
-        .put_pm_project(
-            wave.id(),
-            "linear",
-            &ctx.initiative,
-            project,
-            observed_at,
-            Some(acquisition.clone()),
-        )
-        .await
-        .map_err(project_error)?;
-    crate::pm::validate_project_ownership(
-        wave.slug(),
-        &ctx.initiative,
-        Some(&ctx.team_id),
-        &project,
-    )
-    .map_err(project_error)?;
+    let project = require_project(&ctx, project_id).await?;
+    let project = accept_project(&store, &wave, &ctx, project, observed_at, &acquisition).await?;
     if matches!(
         project.status,
-        crate::pm::ProjectStatus::Completed | crate::pm::ProjectStatus::Canceled
+        ProjectStatus::Completed | ProjectStatus::Canceled
     ) {
         return Err(project_error(
             "completed Project history cannot become the Wave's current Project",
         ));
     }
-    crate::work::wave::project_binding::write_project_binding(
+    write_project_binding(
         &home,
         wave.id(),
         selected.as_deref(),
@@ -179,10 +146,20 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
         .pending_project_transition(wave.id())
         .await
         .map_err(project_error)?;
-    let creation = pending.as_ref().filter(|transition| {
-        transition.predecessor_id.is_none() && transition.reset_name.is_none()
-    });
-    if let Some(creation) = creation {
+    let mut creation = match pending {
+        Some(transition)
+            if transition.predecessor_id.is_none() && transition.reset_name.is_none() =>
+        {
+            Some(transition)
+        }
+        Some(_) if selected.is_none() => {
+            return Err(project_error(
+                "Project rotation is unfinished; resume the explicit reset",
+            ));
+        }
+        _ => None,
+    };
+    if let Some(creation) = &creation {
         if selected
             .as_deref()
             .is_some_and(|id| id != creation.successor_id)
@@ -192,19 +169,13 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
             ));
         }
     }
-    if selected.is_none() && pending.is_some() && creation.is_none() {
-        return Err(project_error(
-            "Project rotation is unfinished; resume the explicit reset",
-        ));
-    }
     let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
-    let reserved;
-    let creation = if selected.is_none() && pending.is_none() {
+    if selected.is_none() && creation.is_none() {
         ctx.client
             .require_initiative(&ctx.initiative)
             .await
             .map_err(project_error)?;
-        reserved = ProjectTransition {
+        let reserved = ProjectTransition {
             wave_id: wave.id().clone(),
             successor_id: uuid::Uuid::new_v4().to_string(),
             predecessor_id: None,
@@ -216,13 +187,11 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
             .reserve_project_transition(reserved.clone(), acquisition.clone())
             .await
             .map_err(project_error)?;
-        Some(&reserved)
-    } else {
-        creation
-    };
+        creation = Some(reserved);
+    }
     let id = selected
         .as_deref()
-        .or_else(|| creation.map(|t| t.successor_id.as_str()))
+        .or_else(|| creation.as_ref().map(|t| t.successor_id.as_str()))
         .expect("selection or creation reservation exists");
     let mut observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let mut project = match ctx.client.find_project(id).await.map_err(project_error)? {
@@ -269,19 +238,7 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
         observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
         project = require_project(&ctx, id).await?;
     }
-    validate_project(&wave, &ctx, &project)?;
-    project = store
-        .put_pm_project(
-            wave.id(),
-            ctx.provider.as_str(),
-            &ctx.initiative,
-            project,
-            observed_at,
-            Some(acquisition.clone()),
-        )
-        .await
-        .map_err(project_error)?;
-    validate_project(&wave, &ctx, &project)?;
+    project = accept_project(&store, &wave, &ctx, project, observed_at, &acquisition).await?;
     require_active_candidate(&project)?;
     if project.status != ProjectStatus::Started {
         ctx.client
@@ -290,19 +247,7 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
             .map_err(project_error)?;
         observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
         project = require_project(&ctx, id).await?;
-        validate_project(&wave, &ctx, &project)?;
-        project = store
-            .put_pm_project(
-                wave.id(),
-                ctx.provider.as_str(),
-                &ctx.initiative,
-                project,
-                observed_at,
-                Some(acquisition.clone()),
-            )
-            .await
-            .map_err(project_error)?;
-        validate_project(&wave, &ctx, &project)?;
+        project = accept_project(&store, &wave, &ctx, project, observed_at, &acquisition).await?;
         if project.status != ProjectStatus::Started {
             return Err(project_error(
                 "accepted Project evidence does not confirm activation",
@@ -351,9 +296,39 @@ fn require_active_candidate(project: &PmProject) -> OpsResult<()> {
     Ok(())
 }
 
-fn validate_project(wave: &Wave, ctx: &super::pm::PmContext, project: &PmProject) -> OpsResult<()> {
-    crate::pm::validate_project_ownership(wave.slug(), &ctx.initiative, Some(&ctx.team_id), project)
+// Validate both the response and the accepted body: a delayed response may lose
+// to newer stored facts, and only those accepted facts may authorize activation.
+async fn accept_project(
+    store: &Store,
+    wave: &Wave,
+    ctx: &super::pm::PmContext,
+    project: PmProject,
+    observed_at: i64,
+    acquisition: &Arc<PlanningLocks>,
+) -> OpsResult<PmProject> {
+    let validate = |project: &PmProject| {
+        crate::pm::validate_project_ownership(
+            wave.slug(),
+            &ctx.initiative,
+            Some(&ctx.team_id),
+            project,
+        )
         .map_err(project_error)
+    };
+    validate(&project)?;
+    let project = store
+        .put_pm_project(
+            wave.id(),
+            ctx.provider.as_str(),
+            &ctx.initiative,
+            project,
+            observed_at,
+            Some(acquisition.clone()),
+        )
+        .await
+        .map_err(project_error)?;
+    validate(&project)?;
+    Ok(project)
 }
 
 pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) -> OpsResult<()> {

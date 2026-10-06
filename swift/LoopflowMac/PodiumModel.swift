@@ -284,9 +284,10 @@ final class PodiumModel {
     }
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
+    /// The shown Task's work, from the workspace reader's `task` part.
     private(set) var taskWork = TaskReadings<TaskWork>()
-    /// Flow execs keyed by driver Exec, read when their row is opened.
-    private(set) var flowRuns = TaskReadings<FlowDetail>()
+    /// That Task's Flow execs keyed by driver Exec, from the same part.
+    private(set) var flowRuns: [String: FlowDetail] = [:]
     /// Conversation history, read only on disclosure.
     private(set) var sessionHistory = TaskReadings<[SessionHistory]>()
     private(set) var taskContext = TaskReadings<ContextReport>()
@@ -343,6 +344,7 @@ final class PodiumModel {
     @ObservationIgnored private var planningFloor = 0
     @ObservationIgnored private var sessionsFloor = 0
     @ObservationIgnored private var scopeFloor = 0
+    @ObservationIgnored private var taskFloor = 0
     @ObservationIgnored private var planningWaiters: [(id: Int, resume: CheckedContinuation<Void, Never>)] = []
     private var processActivityRefreshInFlight = false
     private var workActivityGeneration = 0
@@ -548,7 +550,7 @@ final class PodiumModel {
                 workspaceObservation = opened
                 workspaceOpened = .now
                 appliedSequence = [:]
-                (planningFloor, sessionsFloor, scopeFloor, sentScope) = (0, 0, 0, nil)
+                (planningFloor, sessionsFloor, scopeFloor, taskFloor, sentScope) = (0, 0, 0, 0, nil)
                 syncWorkspaceScope()
                 for try await frame in opened.frames {
                     guard !Task.isCancelled else { break }
@@ -659,7 +661,7 @@ final class PodiumModel {
                 cache?.saveSessions([page], repo: repoPath)
             }
         case .task(let body):
-            guard answers >= scopeFloor, let shown = selection, shown.kind == .task,
+            guard answers >= max(taskFloor, scopeFloor), let shown = selection, shown.kind == .task,
                   let task = task(id: shown.id)?.task else { return }
             guard let body else {
                 taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value, reason: reason)
@@ -668,6 +670,8 @@ final class PodiumModel {
             guard body.task == task.task.identifier else { return }
             let next = PodiumReading.available(body.work)
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
+            let runs = Dictionary(body.flowRuns.map { ($0.entry.id, $0) }) { _, newer in newer }
+            if flowRuns != runs { flowRuns = runs }
         case .wave(let body):
             guard answers >= scopeFloor, let detailWaveId else { return }
             guard body == nil || body?.wave == detailWaveId else { return }
@@ -741,6 +745,7 @@ final class PodiumModel {
         savedSessionRepos = []
         waveDetail = nil
         taskWork = TaskReadings<TaskWork>()
+        flowRuns = [:]
     }
 
     /// One explicit read of everything, for a change the cadence should not wait on.
@@ -748,7 +753,7 @@ final class PodiumModel {
         if workspaceObservation != nil {
             // Frames read before this request may predate the caller's write.
             let id = send { .refresh(id: $0) }
-            (planningFloor, sessionsFloor) = (id, id)
+            (planningFloor, sessionsFloor, taskFloor) = (id, id, id)
             await withCheckedContinuation { planningWaiters.append((id, $0)) }
             return
         }
@@ -1116,30 +1121,6 @@ final class PodiumModel {
         }
     }
 
-    func loadTaskWork(task: RoadmapTask, wave: WaveSnapshot) async {
-        await loadTaskReading(\.taskWork, task: task.id) { [query] in
-            try await query.taskWork(task: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
-        }
-    }
-
-    /// The shown Task's work and its opened, unfinished Flow execs follow the
-    /// planning cadence, so progress moves without a view owning a loop.
-    func refreshShownTaskWork() async {
-        guard !usesFixedFixture, let selection, selection.kind == .task,
-              let found = task(id: selection.id) else { return }
-        await loadTaskWork(task: found.task, wave: found.wave.wave)
-        for flow in taskWork[found.task.id].value?.flows ?? []
-        where flow.state == .current && navigation.expandedFlowRuns.contains(flow.id) {
-            await loadFlowRun(flow.id, wave: found.wave.wave)
-        }
-    }
-
-    func loadFlowRun(_ id: String, wave: WaveSnapshot) async {
-        await loadTaskReading(\.flowRuns, task: id) { [query] in
-            try await query.flowRun(id: id, cwd: WaveOrigin.resolve(wave.repo))
-        }
-    }
-
     func loadSessionHistory(task: RoadmapTask, wave: WaveSnapshot) async {
         await loadTaskReading(\.sessionHistory, task: task.id) { [query] in
             try await query.taskHistory(task: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
@@ -1168,8 +1149,16 @@ final class PodiumModel {
         self[keyPath: readings].values[taskId] = reading(from: result, lastGood: self[keyPath: readings][taskId].value)
     }
 
-    /// Read the Flow catalogue for the current repository the first time a
-    /// Task needs it, or again when the picker is opened (`force`).
+    /// Definitions are files, which no store revision follows. Coming back
+    /// from an editor, read the catalogue this window already shows again, so
+    /// a saved mistake shows as invalid.
+    func rereadDefinitions() async {
+        guard flowCatalogReadings[repoPath ?? ""] != nil else { return }
+        await loadFlowCatalog(force: true)
+    }
+
+    /// Read the Flow catalogue for the current repository the first time it
+    /// is needed, or again after its definitions may have changed (`force`).
     func loadFlowCatalog(force: Bool = false) async {
         let key = repoPath ?? ""
         if !force, flowCatalogReadings[key]?.value != nil { return }
@@ -1222,7 +1211,6 @@ final class PodiumModel {
         do {
             try await query.runTaskFlow(issue: issue, flow: flow, cwd: cwd)
             owner.flowDrafts[taskId] = nil
-            await loadTaskWork(task: task, wave: wave)
             await refresh()
         } catch {
             owner.flowDrafts[taskId]?.acting = false
@@ -1242,7 +1230,7 @@ final class PodiumModel {
             try await query.moveTask(
                 issue: task.task.identifier, node: node, force: force, cwd: WaveOrigin.resolve(wave.repo))
             owner.flowDrafts[taskId] = nil
-            await loadTaskWork(task: task, wave: wave)
+            await refresh()
         } catch {
             owner.flowDrafts[taskId]?.acting = false
             owner.flowDrafts[taskId]?.error = error.localizedDescription

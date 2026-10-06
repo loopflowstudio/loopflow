@@ -55,5 +55,18 @@
     "revisions": {"planning": 911, "sessions": 403, "flows": 88, "execs": 5120, "usage": 77},
     "unavailable": null,
     "body": {"projections": {"planning": 3, "sessions": 2}}
+  },
+  {
+    "part": "task",
+    "sequence": 7,
+    "answers": 8,
+    "home": "/Users/fixture/.lf",
+    "revisions": {"planning": 912, "sessions": 403, "flows": 89, "execs": 5121, "usage": 77},
+    "unavailable": null,
+    "body": {
+      "task": "LOO-1",
+      "work": {"sessions": [], "flows": [], "execs": [], "workflow": null},
+      "flow_runs": []
+    }
   }
 ]

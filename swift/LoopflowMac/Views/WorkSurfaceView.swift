@@ -148,10 +148,6 @@ struct WorkSurfaceView: View {
                 if let name = roadmap.currentProject?.workflow {
                     section { WaveWorkflowView(model: model, wave: roadmap.wave, name: name) }
                         .task { await model.loadFlowCatalog() }
-                        // Coming back from the editor: reread, so a saved mistake shows as invalid.
-                        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                            Task { await model.loadFlowCatalog(force: true) }
-                        }
                 }
 
                 switch roadmap.tasks {
@@ -275,9 +271,9 @@ struct WorkSurfaceView: View {
                     if let workflow = model.taskWork[task.id].value?.workflow {
                         WorkflowView(model: model, task: task, wave: found.wave.wave, workflow: workflow)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        FlowRunLog(model: model, task: task, wave: found.wave.wave).frame(width: 340)
+                        FlowRunLog(model: model, task: task).frame(width: 340)
                     } else {
-                        FlowRunLog(model: model, task: task, wave: found.wave.wave)
+                        FlowRunLog(model: model, task: task)
                     }
                 }
                 if let unavailable = found.wave.unavailableTasks.first(where: { $0.taskId == task.id }) {
@@ -288,7 +284,7 @@ struct WorkSurfaceView: View {
                 } else {
                     TaskFlowView(model: model, task: task, wave: found.wave.wave).id(task.id)
                 }
-                TaskWorkView(model: model, task: task, wave: found.wave.wave)
+                TaskWorkView(model: model, task: task)
                 TaskHistoryView(model: model, task: task, wave: found.wave.wave)
                     .id(task.id)
                 if let sessions, !sessions.isEmpty {

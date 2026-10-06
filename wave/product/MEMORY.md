@@ -94,8 +94,9 @@ state"): graph fixed when taken up, position stored, moves appended, `lf task
 move` sets a node, edges named by what they run. Jack's words: run is the
 Workflow API's verb, exec the Flow's record. Built unreviewed in PR #1439,
 with one Task run retrying a failed Flow exec (three attempts, the agent's
-number), Project workflows, state read from position and the graph drawn
-beside a log of every Flow run; LOO-382 alignment remains. Lesson: the first build derived
+number), Project workflows, state read from position, the graph drawn
+beside a log of every Flow run, and a Task page fed only by the workspace
+stream. Lesson: the first build derived
 position from append-only rows and Jack sent it back; settle the model, store,
 CLI and Desktop contract before building a record.
 Built so: operations run through
@@ -115,7 +116,8 @@ Every slice has headless tests only.
 
 Desktop (October 6, unreviewed by Jack) draws the Workflow and every Flow
 run from FlowExec, lists Waiting first, and matches no conversation to a Flow
-step. Lessons: `lf` allows a second `lf task run` while an edge runs, so only
+step. `INSERT OR REPLACE` fires no update trigger: a revision rule comparing
+old and new rows needs an upsert. Lessons: `lf` allows a second `lf task run` while an edge runs, so only
 Desktop's disabled Start keeps two drivers out of a checkout; a killed driver
 has no exit record and its run reads as running forever. `lf flow list` now
 lists workflows, so an unstarted Task previews its default. `lf wave
@@ -536,11 +538,8 @@ Wave → Task UI is a scope limit, not a prohibition on a Chapter object.
 The [scope handoff](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/deferred-work.md)
 records the split. Local proof does not establish merger or Jack's acceptance.
 
-Deleting the colored pane borders also made the six-color allocator, per-pane
-dictionary and color fields in close-undo snapshots unused. Compression removed
-them, preserving layout, focus, zoom and shell-command replay ownership; its
-15-test MultiplexerStore proof covers those behaviors. Trace removed visual
-features through their state and undo model so unused bookkeeping disappears too.
+Deleting the colored pane borders left their allocator and undo color fields
+unused: trace removed visual features through their state and undo model.
 See [the reduction receipt](https://github.com/loopflowstudio/loopflow/blob/536b0fd56/scratch/compress-pane-state.md).
 
 ## Task files beside the conversation (2026-09-28)

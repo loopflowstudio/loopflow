@@ -443,7 +443,6 @@ struct TaskFlowView: View {
         next.search = ""
         draft = next
         focus = .search
-        Task { await model.loadFlowCatalog(force: true) }
     }
 
     private func choose(_ name: String) {

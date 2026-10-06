@@ -500,8 +500,8 @@ struct DTOFixtureTests {
         let lines = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         let frames = try lines.map { try WorkspaceFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
 
-        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat"])
-        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6])
+        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task"])
+        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7])
         #expect(frames[0].answers == nil)
         #expect(frames[1].answers == 7)
         #expect(frames[0].revisions?.planning == 911)
@@ -511,6 +511,12 @@ struct DTOFixtureTests {
             return
         }
         #expect(frames[2].unavailable == "Task LOO-1 is not registered")
+        guard case .task(let read?) = frames[6].content else {
+            Issue.record("a read Task part carries its work and Flow runs")
+            return
+        }
+        #expect(read.task == "LOO-1")
+        #expect(read.flowRuns.isEmpty)
         guard case .sessions(let sessions?) = frames[1].content,
               case .workActivity(let activity?) = frames[3].content,
               case .heartbeat(let heartbeat) = frames[5].content else {

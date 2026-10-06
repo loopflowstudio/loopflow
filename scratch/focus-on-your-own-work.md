@@ -170,51 +170,40 @@ dropped — `7f2c384c7`, rerun October 6: `task_flow_launch_tests` 13 passed,
 `dto_fixtures` 20 passed. Demo items: Complete anyway on screen; a real
 Linear completion against an active Task.
 
-11. **Desktop draws the Workflow as a graph.** Jack, October 6, on the
-    diagram in [pr-review.html](pr-review.html) ("The experience"): "this
-    looks good, lets try to replicate this as a rough structural outline of
-    what the loopflow desktop workflow viewer shows". Today Desktop lists
-    stages with text rows ("→ pursue → demo"). Draw it: `start` and `end` as
-    circles; each stage a box with its name and one line saying what the
-    person does there; one labelled arrow per way out, a loop back drawn as
-    an arc over its stage; the current stage or running edge marked; the ways
-    out of the current stage are the buttons. Reuse the existing Flow graph
-    renderer's drawing code. Agent's addition: a stage's one-line description
-    is an optional field in the definition, else its skill's description.
-    **Layout.** Jack: "we should put the graph side by side with a flow run
-    log. that log should incldue anything run, regardless of what theworkflow
-    was. it is *NOT* a workflow log". The graph sits beside a log of every
-    Flow run in the Task, newest first, each opening to its steps from
-    FlowExec. A run started ad hoc and a run that carried an edge are the
-    same kind of row. The log is not the Workflow's move history and is not
-    filtered or grouped by it. Open: whether a single headless skill Run
-    with no Flow also belongs in that log.
-    **Done** — `ade9146a5`, compressed `0d5da8058`. `WorkflowGraph` replaces
-    the text row on the Task page, the Wave page, the Flow preview and the
-    catalogue inspector; **Flow runs** sits beside it. A node is `name: skill`
-    or `name: {skill, description}`. Rerun October 6: `swift test --filter
-    "DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests"` 36 passed,
-    drawing `feature` and no-PR `research` from the shared fixtures with the
-    position marked. Choices: [questions.md](questions.md). Demo item: how it
-    looks, in particular label widths, which are estimated from character
-    counts.
+11. **Desktop draws the Workflow as a graph** beside a log of every Flow
+    run is **done**; its text, Jack's two quoted requests and its choices are
+    at `f9488a51d:scratch/focus-on-your-own-work.md`. Built `ade9146a5`,
+    compressed `0d5da8058`; `swift test --filter
+    "DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests"` 36 passed.
+    Jack's open question: whether a single headless skill Run with no Flow
+    belongs in the Flow run log (default: no). Demo item: how it looks, in
+    particular label widths, which are estimated from character counts.
 
 12. **Align Desktop and the store with LOO-382.** Layer 4 of the contract in
-    [task-workflow.md](task-workflow.md). #1452 merged October 6 as
-    `c787c7530` and is merged into this branch, so this PR lands second and
-    owns the whole reconciliation. *Not done.* Exists from the sync: the one
-    draft bumps `flows` for `flow_execs` and `flow_exec_steps`, `planning`
-    for `task_workflows` and `task_workflow_moves`, and has triggers on
-    `session_activity`. Remains: confirm `session_activity` bumps `sessions`
-    only when Waiting could change, with quiet-time Waiting on the watch's
-    clock; the store test listing every table this PR adds; Desktop's
-    Workflow and Flow run log fed by the stream's `task` part; each write
-    followed by `refresh`; no per-view `lf task status`, `lf flow show` or
-    catalog re-read on activation (`RegistryQuery` still has `taskStatus`
-    and a `flow show --sessions` read). Done when the store test names the
-    new tables and a headless Desktop test shows a Workflow move and a new
-    Flow run arriving from a stream frame with no `lf task status` or
-    `lf flow show` call.
+    [task-workflow.md](task-workflow.md); #1452 merged first (`c787c7530`),
+    so this PR owns the reconciliation. **Built, not yet realigned.**
+    - *Store.* The one draft moves `flows` for `flow_execs` and
+      `flow_exec_steps`, `planning` for `task_workflows` and
+      `task_workflow_moves`, and `sessions` for `session_activity`; a store
+      test names all five. A replaced reading moves `sessions` only when
+      Waiting could change. Quiet arriving writes nothing: the reader asks
+      the store when the next Session crosses 120 seconds and reads Sessions
+      again then.
+    - *Stream.* The `task` part carries the Task's work and, for each of its
+      Flows, the `lf flow show --sessions` body.
+    - *Desktop.* The Task page reads only that part. `lf task run`,
+      `lf task move` and the Project workflow change are each followed by
+      `refresh`, and a Task frame read before it is ignored. The
+      `lf task status` and `lf flow show` readers are deleted; the catalogue
+      is re-read by the window when the app becomes active, not by a view.
+    - Check, October 6: `cargo test -p loopflow --lib store::sqlite::revisions`
+      5 passed; `--test dto_fixtures` 20 passed; `swift test --filter
+      "DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests"` 36 passed,
+      one showing a move and a new Flow run arriving from a frame with
+      `lf task move` the only `lf` call.
+    - Choices: [questions.md](questions.md). Demo items: the window on
+      screen following a Flow started in a terminal; a Session turning
+      Waiting after two quiet minutes.
 
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task
@@ -239,7 +228,8 @@ Clear inherited `LF_*`/`LOOPFLOW_*` before Rust tests. Gate owns the full run.
 | `cargo test -p loopflow --lib store::` | Released frontier converts through the one draft; the record is append-only; a step must be its driver's child. |
 | `cargo test -p loopflow --test dto_fixtures` | Wire shapes are unchanged. |
 | `cargo test -p loopflow --lib harness::attention` | Recorded Claude, Codex and OpenCode streams under an injected clock: questions, open tools, hand-back, 120 seconds of quiet, a released driver, choice before paging. |
-| `swift test --filter "DesktopHeadlessTests\|DTOFixtureTests"` (in `swift/`) | The workflow's position and edge Start, a Flow run's graph and steps, Waiting-first order and the Task primary, from the shared fixtures. |
+| `swift test --filter "DesktopHeadlessTests\|DTOFixtureTests"` (in `swift/`) | The workflow's position and edge Start, Waiting-first order and the Task primary, from the shared fixtures; a Task's work, a move and a new Flow run arriving from stream frames. |
+| `cargo test -p loopflow --lib store::sqlite::revisions` | Every table has a revision domain; the tables this PR adds name theirs; a Session reading moves `sessions` only when Waiting could change. |
 | `git grep -nE "__flow-step\|FlowStep::\|execute_flow_command"` | No executable path. |
 
 Configured demo, still separate: in a private Home, `lf -b task run INF-123

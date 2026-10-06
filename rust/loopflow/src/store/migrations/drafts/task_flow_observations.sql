@@ -252,7 +252,17 @@ CREATE TRIGGER store_revision_session_activity_insert AFTER INSERT ON session_ac
 BEGIN
     UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
 END;
+-- A reading is replaced every few seconds while a provider streams. Only one
+-- that can change Waiting is displayed: a question asked or answered, the
+-- last open tool call, a turn handed back, another driver, or activity after
+-- 120 quiet seconds (`WAITING_QUIET_SECONDS`). Quiet arriving writes nothing;
+-- the workspace reader keeps that clock.
 CREATE TRIGGER store_revision_session_activity_update AFTER UPDATE ON session_activity
+WHEN NEW.driver_generation IS NOT OLD.driver_generation
+    OR (NEW.pending_input > 0) IS NOT (OLD.pending_input > 0)
+    OR (NEW.open_tools = 0) IS NOT (OLD.open_tools = 0)
+    OR NEW.yielded IS NOT OLD.yielded
+    OR (OLD.open_tools = 0 AND NEW.observed_at - OLD.observed_at >= 120)
 BEGIN
     UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
 END;

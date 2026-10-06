@@ -117,7 +117,8 @@ at call sites. For the Workflow:
   run `lf task run` or the set command, then `refresh`.
 - #1452 merged first (`c787c7530`, October 6); its triggers on
   `flow_sessions`, `flow_events` and dropped `agent_sessions` columns are
-  reconciled in this PR's one draft. The rest of this layer is slice 12.
+  reconciled in this PR's one draft. The rest of this layer is built as
+  slice 12; the Flow exec log rides in the `task` part beside `TaskWork`.
 
 Jack, October 6, on `lf task run` taking the only way out, erroring at a
 stage with several until one is named, erroring on a name that is not a way

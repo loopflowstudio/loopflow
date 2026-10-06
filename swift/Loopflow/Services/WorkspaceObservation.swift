@@ -115,9 +115,16 @@ public struct WorkspaceFrame: Decodable, Sendable {
         }
     }
 
+    /// A Task's work and each of its Flow runs, in the order of `work.flows`.
     public struct TaskPart: Decodable, Sendable {
         public let task: String
         public let work: TaskWork
+        public let flowRuns: [FlowDetail]
+
+        enum CodingKeys: String, CodingKey {
+            case task, work
+            case flowRuns = "flow_runs"
+        }
     }
 
     public struct WavePart: Decodable, Sendable {

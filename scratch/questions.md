@@ -208,28 +208,37 @@ flagged until someone forces it.
 
 ## Choices the Workflow graph pass made without Jack
 
-The agent's, October 6, slice 11. None is confirmed by Jack Heart.
+The agent's, October 6, slice 11; none is confirmed by Jack Heart. The list
+is at `f9488a51d:scratch/questions.md` under this heading. Most likely to
+matter: a node's description falls back to its skill's first line of prose;
+nodes sit on one row and extra edges take lanes below it; each choosable
+edge's label is its button and **Move to** stays a menu; a single headless
+skill Run with no Flow is not in the Flow run log.
 
-- **Description.** A node is `name: skill` or `name: {skill, description}`.
-  With none authored, the skill's first line of prose stands in (a skill's
-  frontmatter is not read). It is resolved when the definition loads and
-  kept in the Task's stored graph; a Workflow taken up before this pass has
-  none and Desktop shows the skill name. Builtins say "you review the
-  plan", "you try the change", "you read the findings".
-- **Routing.** Nodes sit on one row in authored order. The first edge into
-  the next column runs straight; an edge back to its own node arcs over it;
-  every other edge (backward, passing over a node, or a second edge between
-  the same two) takes its own lane below the row.
-- **Buttons.** The label of each edge Rust lists as choosable is the button,
-  named by what it runs; an edge that runs nothing reads "finish". The
-  separate "Run pursue" buttons are gone. **Move to** stays a menu.
-- **Flow runs** is 340 points wide beside the graph and full width for a
-  Task with no Workflow. Newest first is Rust's order reversed. The Work
-  list below keeps conversations and Execs and no longer lists Flows.
-- **Jack's open question, default taken:** a single headless skill Run with
-  no Flow is not in the Flow run log; it stays in Work.
-- **Fixtures.** `task_work.json` now carries the whole builtin `feature`
-  (five edges); `flow_catalog.json` gains builtin `research`.
+## Choices the stream alignment pass made without Jack
+
+The agent's, October 6, slice 12. None is confirmed by Jack Heart.
+
+- **Flow runs ride in the `task` part** as `flow_runs`, one
+  `lf flow show --sessions` body per Flow in `work.flows`, read again
+  whenever the part is. Every run of the shown Task is read, opened or not.
+- **Which readings count.** A replaced `session_activity` row moves
+  `sessions` when its driver, question state, open-tool state or hand-back
+  changes, or when it arrives 120 seconds or more after the last one with
+  no tool open. The 120 is written in the trigger and in
+  `WAITING_QUIET_SECONDS`; changing one means changing both.
+- **Quiet.** The reader asks the store for the earliest moment a Session
+  becomes Waiting by quiet and reads Sessions again then. A Session still
+  streaming makes that reading find nothing new, at most once per Session
+  every two minutes.
+- **Without a reader the Task page shows no work.** The one-shot
+  `lf task status` and `lf flow show` reads are deleted from Desktop; only
+  tests run without a reader.
+- **Definitions are files,** so no revision follows them. The window re-reads
+  the catalogue it already shows when the app becomes active; opening the
+  workflow picker no longer re-reads. A `definitions` part in the stream
+  would remove this last read.
+- **Refresh and Retry** on the Task page ask the reader again.
 
 ## Choices the Workflow live-state pass made without Jack
 

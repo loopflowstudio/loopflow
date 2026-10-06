@@ -17,37 +17,90 @@ private actor Recorder {
     func add(_ args: [String]) { calls.append(args) }
 }
 
+/// A scripted workspace reader: the test decides which frames arrive.
+@MainActor
+private final class Feed {
+    private var continuation: AsyncThrowingStream<WorkspaceFrame, any Error>.Continuation?
+    private(set) var requests: [WorkspaceRequest] = []
+    var isOpen: Bool { continuation != nil }
+
+    func open() -> WorkspaceObservation {
+        let (stream, continuation) = AsyncThrowingStream<WorkspaceFrame, any Error>.makeStream()
+        self.continuation = continuation
+        return WorkspaceObservation(frames: stream, request: { request in
+            Task { @MainActor in self.requests.append(request) }
+        }, cancel: { continuation.finish() })
+    }
+
+    func send(_ frame: WorkspaceFrame) { continuation?.yield(frame) }
+}
+
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
-    @Test("Task work renders checkout conversations and mechanical Execs; every Flow run is in the log")
-    func taskWorkInventory() async throws {
-        let data = try Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))
-        let work = try JSONDecoder().decode(TaskWork.self, from: data)
-        let payload = "{\"execution\":{\"work\":\(String(decoding: data, as: UTF8.self))}}"
-        let run = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("flow_detail.json")), as: UTF8.self)
-        let query = RegistryQuery { args, _ in args.first == "flow" ? run : payload }
-        let model = PodiumModel(query: query)
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
-        let wave = try #require(roadmap.waves.first)
-        let task = try #require(wave.tasks.items.first)
-        await model.loadTaskWork(task: task, wave: wave.wave)
-        let view = TaskWorkView(model: model, task: task, wave: wave.wave)
-        for id in work.sessions.map(\.id) + work.execs.map(\.id) {
+    @Test("A Task's work, a Workflow move and a new Flow run arrive from the stream, with no lf read")
+    func taskWorkFollowsTheStream() async throws {
+        func object(_ name: String) throws -> [String: Any] {
+            try #require(JSONSerialization.jsonObject(
+                with: Data(contentsOf: fixtures.appendingPathComponent(name))) as? [String: Any])
+        }
+        func frame(_ part: String, sequence: Int, answers: Int, body: [String: Any]) throws -> WorkspaceFrame {
+            let line: [String: Any] = [
+                "part": part, "sequence": sequence, "answers": answers, "home": "/home",
+                "revisions": NSNull(), "unavailable": NSNull(), "body": body,
+            ]
+            return try WorkspaceFrame.decode(line: JSONSerialization.data(withJSONObject: line))
+        }
+        let roadmap = try object("roadmap_snapshot.json")
+        let waves = try #require(roadmap["waves"] as? [[String: Any]]).map { try #require($0["wave"]) }
+        var work = try object("task_work.json")
+        let run = try object("flow_detail.json")
+        let planning: [String: Any] = ["roadmap": roadmap, "waves": waves]
+
+        let calls = Recorder()
+        let feed = Feed()
+        let model = PodiumModel(query: RegistryQuery(watchWorkspace: { await feed.open() }) { args, _ in
+            await calls.add(args)
+            return ""
+        })
+        let keeping = Task { await model.keepWorkspaceCurrent() }
+        defer { keeping.cancel() }
+        func eventually(_ condition: @MainActor () -> Bool) async throws {
+            for _ in 0..<600 where !condition() { try await Task.sleep(for: .milliseconds(5)) }
+            try #require(condition())
+        }
+
+        try await eventually { feed.isOpen }
+        feed.send(try frame("planning", sequence: 1, answers: 0, body: planning))
+        try await eventually { model.task(id: "issue-now") != nil }
+        let found = try #require(model.task(id: "issue-now"))
+        let (task, wave) = (found.task, found.wave.wave)
+        model.select(.task(id: task.id))
+        model.syncWorkspaceScope()
+        try await eventually { feed.requests.last?.id == 2 }
+        guard case .scope(_, let scope) = try #require(feed.requests.last) else {
+            Issue.record("selecting a Task scopes the reader to it")
+            return
+        }
+        #expect(scope.task == task.task.identifier)
+
+        feed.send(try frame("task", sequence: 2, answers: 2,
+                            body: ["task": task.task.identifier, "work": work, "flow_runs": [run]]))
+        try await eventually { model.taskWork[task.id].value != nil }
+        let shown = try #require(model.taskWork[task.id].value)
+        let view = TaskWorkView(model: model, task: task)
+        for id in shown.sessions.map(\.id) + shown.execs.map(\.id) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
         }
-        // Flow runs have their own log, beside the Workflow.
-        let log = FlowRunLog(model: model, task: task, wave: wave.wave)
 
         // Any Flow exec opens to its launched graph, where it stands and every step it started.
-        let flow = try #require(work.flows.first)
+        let log = FlowRunLog(model: model, task: task)
+        let flow = try #require(shown.flows.first)
         #expect(throws: (any Error).self) {
             try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-status-\(flow.id)")
         }
         model.navigation.expandedFlowRuns.insert(flow.id)
-        await model.loadFlowRun(flow.id, wave: wave.wave)
-        let detail = try #require(model.flowRuns[flow.id].value)
+        let detail = try #require(model.flowRuns[flow.id])
         let status = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-status-\(flow.id)").text().string()
         #expect(status == "Running implement · iteration (1, 0)")
         for step in detail.steps {
@@ -55,6 +108,35 @@ struct DesktopHeadlessTests {
         }
         #expect(detail.progress.execution == .running)
         #expect(detail.progress.current == 1)
+
+        // Desktop's own write asks the reader again and shows what it answers.
+        let moving = Task { await model.moveTask(to: "demo", task: task, wave: wave) }
+        try await eventually { feed.requests.last == .refresh(id: 3) }
+        var workflow = try #require(work["workflow"] as? [String: Any])
+        workflow["position"] = ["kind": "node", "node": "demo"]
+        work["workflow"] = workflow
+        var second = try #require((work["flows"] as? [[String: Any]])?.first)
+        second["id"] = "44444444-4444-4444-8444-444444444444"
+        second["name"] = "pursue"
+        var secondRun = run
+        secondRun["entry"] = second
+        let moved: [String: Any] = [
+            "task": task.task.identifier,
+            "work": work.merging(["flows": [try #require((work["flows"] as? [[String: Any]])?.first), second]]) { $1 },
+            "flow_runs": [run, secondRun],
+        ]
+        // A frame read before the write cannot stand for it.
+        feed.send(try frame("task", sequence: 3, answers: 2, body: moved))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(model.taskWork[task.id].value?.flows.count == 1)
+        feed.send(try frame("task", sequence: 4, answers: 3, body: moved))
+        feed.send(try frame("planning", sequence: 5, answers: 3, body: planning))
+        await moving.value
+        try await eventually { model.taskWork[task.id].value?.flows.count == 2 }
+        #expect(model.taskWork[task.id].value?.workflow?.position == .node("demo"))
+        _ = try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-44444444-4444-4444-8444-444444444444")
+        #expect(model.flowRuns["44444444-4444-4444-8444-444444444444"]?.entry.name == "pursue")
+        #expect(await calls.calls == [["task", "move", task.task.identifier, "demo"]])
     }
 
     @Test("A Project's workflow is drawn, is set through lf, and keeps an invalid file visible")

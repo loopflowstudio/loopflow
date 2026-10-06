@@ -103,12 +103,31 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT OR REPLACE INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded)
-             VALUES(?1,?2,?3,?4,?5,?6)",
+            "INSERT INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded)
+             VALUES(?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(session_id) DO UPDATE SET driver_generation=excluded.driver_generation,
+                observed_at=excluded.observed_at,open_tools=excluded.open_tools,
+                pending_input=excluded.pending_input,yielded=excluded.yielded",
             params![session, driver.generation, activity.observed_at,
                 activity.open_tools as i64, activity.pending_input as i64, activity.yielded],
         )?;
         Ok(())
+    }
+
+    /// When the next open Session becomes Waiting through quiet alone, which
+    /// no write announces. `None` when no reading is counting toward it.
+    pub(crate) fn next_quiet_waiting(&self, now: i64) -> StoreResult<Option<i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let quiet = crate::session::WAITING_QUIET_SECONDS;
+        Ok(conn.query_row(
+            "SELECT MIN(act.observed_at)+?2 FROM session_activity act
+             JOIN agent_sessions s ON s.id=act.session_id
+             WHERE s.completed_at IS NULL AND act.driver_generation=s.driver_generation
+             AND act.pending_input=0 AND act.open_tools=0
+             AND NOT (s.interactive=1 AND act.yielded=1) AND ?1-act.observed_at<?2",
+            params![now, quiet],
+            |row| row.get(0),
+        )?)
     }
 
     /// Retain a provider observation even when its conversational driver has

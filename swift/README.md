@@ -156,7 +156,7 @@ Start disabled.
 Beside the graph, **Flow runs** lists every Flow exec in the Task's checkout,
 newest first, whether an edge or a person started it; it is not the Workflow's
 history. Each row opens to its graph, steps and output
-(`lf flow show ID --sessions --json`); **Detailed Flow** exposes the captured
+(the shape of `lf flow show ID --sessions --json`); **Detailed Flow** exposes the captured
 branches and repeats. A run whose driver exited early reads **Stopped**. A run
 whose driver was killed has no exit record and keeps reading as running.
 Sessions list **Waiting** first and working ones in a compact group.
@@ -484,12 +484,16 @@ lf monitor workspace --watch --json    # what a window shows, as it changes
 ```
 
 Each window keeps one such reader open through `RegistryQuery.watchWorkspace()`.
-Its frames carry planning, the repository's Sessions, the shown Task's work, the
-shown Wave's detail and activity. A part arrives again only when a commit
+Its frames carry planning, the repository's Sessions, the shown Task's work
+with its Workflow and every Flow run, the shown Wave's detail and activity.
+The Task page reads nothing else: after `lf task run` or `lf task move` the
+window asks the reader again and shows the frame that answers. A part arrives again only when a commit
 changed what it shows, so a Task created by `lf`, a worker or another window
 appears without a refresh. A file written or a commit made in a Task checkout
-shows within a few seconds, and token totals within about ten. Nothing in the
-window reads on a timer. Each request
+shows within a few seconds, and token totals within about ten. A Session
+turns **Waiting** after two quiet minutes on the reader's clock, with no write.
+Nothing in the window reads on a timer. Workflow definitions are files: the
+catalogue is read once per repository and again when the app becomes active. Each request
 the window sends carries an id and each frame names the newest one it answers;
 a frame read before a local write is ignored. If the reader ends, the last
 reading stays on screen marked unavailable until a new reader answers.

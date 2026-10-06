@@ -21,6 +21,7 @@ use sha2::{Digest, Sha256};
 use super::activity::WorkActivitySnapshot;
 use super::top::ActivitySnapshot;
 use super::waves::{RoadmapSnapshot, WaveDetailSnapshot, WaveSnapshot};
+use crate::durable::FlowDetail;
 use crate::ops::human_session::SessionRecord;
 use crate::repository::CanonicalRepo;
 use crate::store::changes::StoreChanges;
@@ -93,10 +94,13 @@ pub struct SessionsPart {
     pub entries: Vec<SessionRecord>,
 }
 
+/// `lf task status` work and `lf flow show --sessions` for each of its Flows,
+/// in the same order.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskPart {
     pub task: String,
     pub work: TaskWork,
+    pub flow_runs: Vec<FlowDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -359,6 +363,8 @@ struct Reader {
     checkouts: checkouts::Checkouts,
     /// The planning revision whose checkouts are watched.
     watched_at: Option<i64>,
+    /// The sessions revision a quiet deadline was read at, and that deadline.
+    quiet: Option<(i64, Option<i64>)>,
     runtime: tokio::runtime::Runtime,
 }
 
@@ -424,6 +430,31 @@ impl Reader {
             for part in [Part::Planning, Part::Wave] {
                 self.parts.entry(part).or_default().stale = true;
             }
+        }
+    }
+
+    /// A Session becomes Waiting after quiet without any commit. Read the
+    /// Sessions again when the earliest such moment passes; the loop looks
+    /// at least every `CHECK`.
+    fn observe_quiet(&mut self, revisions: Option<StoreRevisions>) {
+        let (Some(store), Some(revisions)) = (&self.store, revisions) else {
+            return;
+        };
+        if !Part::Sessions.selected(&self.scope) {
+            self.quiet = None;
+            return;
+        }
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let passed = matches!(self.quiet, Some((_, Some(due))) if now >= due);
+        if passed {
+            self.parts.entry(Part::Sessions).or_default().stale = true;
+        }
+        if passed || self.quiet.map(|(read_at, _)| read_at) != Some(revisions.sessions) {
+            self.quiet = store
+                .sqlite
+                .next_quiet_waiting(now)
+                .ok()
+                .map(|due| (revisions.sessions, due));
         }
     }
 
@@ -539,9 +570,20 @@ impl Reader {
                         .sqlite
                         .resolve_task_id(&selector, None)?
                         .ok_or_else(|| anyhow!("Task {selector} is not registered"))?;
+                    let work = store.sqlite.task_work(&task)?;
+                    let mut flow_runs = Vec::with_capacity(work.flows.len());
+                    for flow in &work.flows {
+                        let id = flow.summary.id.as_str();
+                        let (exec, entry) = store
+                            .sqlite
+                            .flow_exec(id)?
+                            .ok_or_else(|| anyhow!("Flow {id} has no driver record"))?;
+                        flow_runs.push(exec.detail(entry));
+                    }
                     WorkspaceContent::Task(Some(TaskPart {
                         task: selector,
-                        work: store.sqlite.task_work(&task)?,
+                        work,
+                        flow_runs,
                     }))
                 }
                 Part::Wave => {
@@ -704,6 +746,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
         parts: BTreeMap::new(),
         checkouts: Default::default(),
         watched_at: None,
+        quiet: None,
         runtime: tokio::runtime::Runtime::new()?,
     };
 
@@ -774,6 +817,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
             seen = revisions;
             if watch {
                 reader.observe_checkouts(revisions, &shared);
+                reader.observe_quiet(revisions);
             }
             {
                 let mut mailbox = lock(&shared);

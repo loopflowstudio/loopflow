@@ -183,11 +183,6 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["task", "automate", issue, enabled ? "on" : "off"], cwd)
     }
 
-    public func taskStatus(issue: String, cwd: String?) async throws -> TaskStatus {
-        let stdout = try await run(["task", "status", issue, "--json"], cwd)
-        return try Self.decode(TaskStatus.self, from: stdout)
-    }
-
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
     public func taskChanges(issue: String, base: String = "parent", cwd: String?) async throws -> TaskChangesSnapshot {
@@ -237,31 +232,11 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["task", "move", issue, node] + (force ? ["--force"] : []), cwd)
     }
 
-    /// One Flow exec from its driver's record, by driver Exec.
-    public func flowRun(id: String, cwd: String?) async throws -> FlowDetail {
-        let stdout = try await run(["flow", "show", id, "--sessions", "--json"], cwd)
-        return try Self.decode(FlowDetail.self, from: stdout)
-    }
-
     /// One planning Task's complete comment thread. Read-only; works before
     /// the Task is prepared or started.
     public func taskComments(id: String, wave: String, cwd: String) async throws -> TaskComments {
         let stdout = try await run(["task", "comment", id, "--wave", wave, "--json"], cwd)
         return try Self.decode(TaskComments.self, from: stdout)
-    }
-
-    /// All associated Sessions, Flows and Execs, including closed history.
-    /// A Task that was never placed has no execution record to read.
-    public func taskWork(task: String, cwd: String?) async throws -> TaskWork {
-        struct Status: Decodable {
-            struct Execution: Decodable { let work: TaskWork }
-            let execution: Execution?
-        }
-        let stdout = try await run(["task", "status", task, "--json"], cwd)
-        guard let execution = try Self.decode(Status.self, from: stdout).execution else {
-            throw RegistryQueryError("Task has no placed work yet")
-        }
-        return execution.work
     }
 
     /// Complete Task-attributed Session input/provider history. Read-only; querying

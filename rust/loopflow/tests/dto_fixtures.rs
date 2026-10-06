@@ -532,6 +532,10 @@ fn workspace_frames_keep_each_part_and_require_every_envelope_field() {
         panic!("last fixture frame is a heartbeat");
     };
     assert_eq!(heartbeat.projections["planning"], 3);
+    let WorkspaceContent::Task(Some(task)) = &frames[6].content else {
+        panic!("the read Task part carries its work and Flow runs");
+    };
+    assert_eq!(task.work.flows.len(), task.flow_runs.len());
     for field in ["sequence", "home", "part"] {
         let mut missing = source[0].clone();
         missing.as_object_mut().unwrap().remove(field);

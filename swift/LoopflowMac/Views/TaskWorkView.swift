@@ -101,7 +101,6 @@ struct WorkflowView: View {
 struct FlowRunLog: View {
     let model: PodiumModel
     let task: RoadmapTask
-    let wave: WaveSnapshot
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -110,7 +109,7 @@ struct FlowRunLog: View {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 if let flows = model.taskWork[task.id].value?.flows {
                     ForEach(flows.reversed()) { flow in
-                        FlowRunView(model: model, flow: flow, wave: wave)
+                        FlowRunView(model: model, flow: flow)
                     }
                     if flows.isEmpty {
                         Text("No Flow has run.").accessibilityIdentifier("task-flow-runs-empty")
@@ -134,14 +133,12 @@ struct FlowRunLog: View {
 struct TaskWorkView: View {
     let model: PodiumModel
     let task: RoadmapTask
-    let wave: WaveSnapshot
     @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             WorkspaceSectionHeading(title: "Work") {
-                Button("Refresh") { Task { await model.refreshShownTaskWork() } }
-                    .disabled(model.taskWork.inFlight.contains(task.id))
+                Button("Refresh") { Task { await model.refresh() } }
             }
             if let work = model.taskWork[task.id].value {
                 ForEach(work.sessions) { session in
@@ -158,13 +155,12 @@ struct TaskWorkView: View {
             }
             if let error = model.taskWork[task.id].errorMessage {
                 Text("Work could not be read: \(error)")
-                Button("Retry") { Task { await model.loadTaskWork(task: task, wave: wave) } }
+                Button("Retry") { Task { await model.refresh() } }
             }
         }
         .font(Typography.body(12))
         .foregroundStyle(palette.textSecondary)
         .textSelection(.enabled)
-        .task(id: task.id) { await model.loadTaskWork(task: task, wave: wave) }
         .accessibilityIdentifier("task-work")
     }
 
@@ -185,7 +181,6 @@ struct TaskWorkView: View {
 struct FlowRunView: View {
     let model: PodiumModel
     let flow: TaskFlowMember
-    let wave: WaveSnapshot
     @State private var inspected: UInt32?
     @Environment(\.palette) private var palette
 
@@ -198,7 +193,6 @@ struct FlowRunView: View {
                     model.navigation.expandedFlowRuns.remove(flow.id)
                 } else {
                     model.navigation.expandedFlowRuns.insert(flow.id)
-                    Task { await model.loadFlowRun(flow.id, wave: wave) }
                 }
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
@@ -223,8 +217,7 @@ struct FlowRunView: View {
 
     @ViewBuilder
     private var detail: some View {
-        let reading = model.flowRuns[flow.id]
-        if let run = reading.value {
+        if let run = model.flowRuns[flow.id] {
             let progress = run.progress
             FlowDiagram(graph: run.graph, latest: progress, inspected: $inspected)
             Text([progress.reason, flowIterationLabel(run.iterations).map { "iteration \($0)" }]
@@ -240,10 +233,7 @@ struct FlowRunView: View {
                 }
                 .accessibilityIdentifier("flow-run-step-\(step.execId)")
             }
-        }
-        if let error = reading.errorMessage {
-            Text("Flow could not be read: \(error)")
-        } else if reading.value == nil {
+        } else {
             Text("Reading Flow…")
         }
     }

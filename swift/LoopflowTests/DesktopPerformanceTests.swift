@@ -68,6 +68,57 @@ struct DesktopPerformanceTests {
     }
 
 #if canImport(GhosttyKit)
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_REOPEN_PROOF"] == "1"))
+    func repeatedNativeReopen() async throws {
+        let env = ProcessInfo.processInfo.environment
+        let fixture = try DesktopNativeSessionFixture.load()
+        let journal = try PerformanceJournal(url: URL(fileURLWithPath: try #require(env["LF_DESKTOP_PERF_OUTPUT"])))
+        let reads = SnapshotReads()
+        let query = RegistryQuery { args, cwd in
+            let result = await reads.read(binary: fixture.cli, home: try #require(env["LF_DESKTOP_TASK_SNAPSHOT"]),
+                                          args: args, cwd: cwd ?? fixture.repo, fixture: fixture)
+            try await MainActor.run {
+                var receipt: [String: Any] = ["event": "read", "args": args,
+                    "outcome": result.isSuccess ? "passed" : "unavailable"]
+                if case .failure(let error) = result { receipt["reason"] = String(describing: error) }
+                try journal.write(receipt)
+            }
+            return try result.get()
+        }
+        bootstrapLoopflowApp()
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.finishLaunching()
+        GhosttyManager.shared.initialize()
+        try #require(GhosttyManager.shared.state == .ready)
+        let router = WorkspaceLinkRouter()
+        var link = URLComponents()
+        link.scheme = "loopflow"; link.host = "task"; link.path = "/" + fixture.issue
+        link.queryItems = [URLQueryItem(name: "repo", value: fixture.repo)]
+        router.deliver(try #require(link.url))
+        let view = PodiumView(portfolioService: PortfolioService(), initialRepoPath: fixture.repo, query: query, taskLinks: router)
+        let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 800),
+                                       styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: view)
+        window.makeKeyAndOrderFront(nil)
+        defer { window.contentView = nil; window.close() }
+        var failure: Error?
+        do {
+            let deadline = ContinuousClock.now + .seconds(45)
+            while (try? view.inspect().find(SessionsView.self)) == nil, ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            try await measureOwnedSoak(view: view.inspect().find(SessionsView.self).actualView(), window: window,
+                                       fixture: fixture, query: query, samples: 21, seconds: 0, journal: journal)
+        } catch {
+            failure = error
+        }
+        window.contentView = nil
+        await reads.finish()
+        if let failure { throw failure }
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_MEMORY_PHASES"] == "1"))
     func terminalMemoryPhases() async throws {
         let environment = ProcessInfo.processInfo.environment
@@ -513,7 +564,8 @@ struct DesktopPerformanceTests {
         try #require(record.taskIds.contains(fixture.taskId))
         let identity = TerminalIdentity.session(fixture.sessionId)
         let workspace = registry.workspace(for: try #require(record.workspace).identity)
-        let store = workspace.sessionStore(repoPath: fixture.repo, query: query)
+        let store = registry.workspace(for: WorkspaceIdentity(homeId: try #require(record.workspace).homeId, worktree: fixture.repo))
+            .sessionStore(repoPath: fixture.repo, query: query)
         let multiplexer = workspace.multiplexer
         multiplexer.load(sessionId: fixture.sessionId)
         let sessionPane = multiplexer.focusedPaneId
@@ -560,11 +612,23 @@ struct DesktopPerformanceTests {
             }
             try await sample("native_session_reopen", "snapshot", round, journal, window, soaking: round >= samples, action: {
                 await model.openTaskLink(url)
+                try journal.write(["event": "reopen_request", "round": round,
+                                   "linked": model.linkedSession?.id as Any? ?? NSNull(),
+                                   "state": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.state),
+                                   "actions": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.record.actions)])
             }, ready: {
-                guard let surface = registry.surfaces.view(for: identity).surface else { return false }
-                return model.selection?.id == fixture.taskId
-                    && window.firstResponder === registry.surfaces.view(for: identity)
-                    && terminalText(surface).contains("native:\(fixture.nativeId):retained-history")
+                let terminal = registry.surfaces.view(for: identity)
+                let hasHistory = terminal.surface.map {
+                    terminalText($0).contains("native:\(fixture.nativeId):retained-history")
+                } ?? false
+                let focused = window.firstResponder === terminal
+                let selected = model.selection?.id == fixture.taskId
+                try? journal.write(["event": "reopen_state", "round": round,
+                                    "linked": model.linkedSession?.id as Any? ?? NSNull(),
+                                    "has_surface": terminal.surface != nil, "has_history": hasHistory,
+                                    "focused": focused, "selected": selected,
+                                    "state": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.state)])
+                return selected && focused && hasHistory
             }, observation: {
                 ["session_id": fixture.sessionId, "task_id": fixture.taskId, "native_id": fixture.nativeId,
                  "provider": "owned Codex stub", "history_preserved": (try? fixture.historyIsPreserved()) == true]
@@ -587,6 +651,12 @@ struct DesktopPerformanceTests {
             try #require(multiplexer.layout == layout)
             try #require(companionView.surface == companionSurface)
             try #require(try fixture.historyIsPreserved())
+            if ProcessInfo.processInfo.environment["LOOPFLOW_REOPEN_PROOF"] == "1" {
+                // Exercise an actual refresh while this terminal still exists.
+                await model.refreshSessions()
+                let live = try #require(model.sessions.value?.first { $0.id == fixture.sessionId })
+                store.reconcile([live])
+            }
             try journal.write(["event": "memory_phase", "phase": "navigation_files_complete", "round": round])
             try send(window, "quit\n")
             try await wait(window) { !registry.surfaces.hasSurface(identity) }

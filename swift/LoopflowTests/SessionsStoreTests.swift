@@ -67,6 +67,29 @@ struct SessionsStoreTests {
         #expect(item(store, "native")?.surface != nil)
     }
 
+    @Test("Explicit reopen revalidates a cached observation failure", arguments: ["available", "refused", "unavailable"])
+    func reopenRevalidatesCachedFailure(result: String) async throws {
+        let reason = "Session client observation unavailable"
+        let record = session(id: "native", state: "closed", kind: "conversation")
+        let blocked = record.replacingOccurrences(of: "\"unavailable_reason\":null", with: "\"unavailable_reason\":\"\(reason)\"")
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
+            if result == "refused" { throw RegistryQueryError(reason) }
+            return result == "unavailable" ? blocked : record
+        })
+        store.reconcile(try records([blocked]))
+        #expect(item(store, "native")?.record.action(.open)?.unavailableReason == reason)
+
+        await store.select("native")
+
+        if result == "available" {
+            #expect(item(store, "native")?.state == .prepared)
+            #expect(item(store, "native")?.surface?.openArgv == ["lf", "session", "connect", "native"])
+        } else {
+            #expect(item(store, "native")?.surface == nil)
+            #expect(item(store, "native")?.error?.contains(reason) == true)
+        }
+    }
+
     @Test("Polling preserves the prepared interactive launch command", arguments: [false, true])
     func reconcilePreservesPreparedLaunch(replacing: Bool) async throws {
         let store = SessionsStore(

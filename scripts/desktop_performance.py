@@ -1186,6 +1186,15 @@ def _verify_native_fixture(output: Path, cli: Path, *, mounted: bool = False) ->
                     "DesktopPerformanceTests.embeddedLaunchContract", environment
                 )
                 result, failure = _run_process(command, environment, log, timeout=60)
+            if mounted and not result and not failure:
+                environment.update(
+                    LOOPFLOW_REOPEN_PROOF="1",
+                    LF_DESKTOP_PERF_OUTPUT=str(output / "reopen.jsonl"),
+                )
+                command = _native_command(
+                    "DesktopPerformanceTests.repeatedNativeReopen", environment
+                )
+                result, failure = _run_process(command, environment, log, timeout=180)
             if canary.read_text() != content:
                 raise RuntimeError("Benchmark escaped its filesystem boundary")
         for directory in ("fixture-setup-cli-volume", "cli-volume"):

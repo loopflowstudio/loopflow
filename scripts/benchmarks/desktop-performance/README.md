@@ -219,6 +219,14 @@ draft/pane preservation with WindowServer access denied. It also probes external
 scheduling-tool execution and network binding. This is a small synthetic snapshot
 proof, not a density, rendering, real-provider or hour-long acceptance receipt.
 
+Add `--mounted` to check the production shell contract and 21 native Task-link
+reopens. The reopen regression refreshes Session observations before each client
+exits, then selects it again with the cached observation still present. It uses
+the same transcript, input, companion pane, draft, selection and identity checks
+as the combined soak, with its unchanged five-second endpoint. `reopen.jsonl`
+records requests and observed states. This focused regression takes no Instruments
+trace and does not supply a matched performance distribution or hour coverage.
+
 One OS sandbox, inherited by the native runner and every child, permits writes
 only beneath the output directory, local sockets there and a fixed executable
 set including the owned stub. Selected repository/source reads remain available; external credential files,

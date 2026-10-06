@@ -790,10 +790,9 @@ passed 84/84 endpoints per side, twenty warm samples each, with Swift/harness/lf
 constant. Session-list median fell 2335→705 ms; roadmap 5140→3759 ms. Debug reads
 still miss 300 ms; native reopen p95 worsened 1704→1854 ms. Growth failed both
 (+58.9/+45.8 MiB). Faster refreshes increased CLI counts; quietness is unproved.
-Bitmap/OCR is not compositor paint. Load, coverage gaps and unavailable comments remain explicit. Release/Swift attribution and both hours
-remain open; storage cannot hold ~94 GiB/hour traces. Capture attribution and
-read/refresh profiling have actionable paths. No speculative memory patch, budget
-revision, merge or Task completion follows.
+Bitmap/OCR is not compositor paint. Load, unavailable comments and coverage gaps
+remain explicit. Swift attribution and both hours remain open; storage cannot
+hold ~94 GiB/hour traces. No budget revision or memory patch was selected.
 
 Jack Heart's subsequent release-profile pair passed 84/84 endpoints each with
 unchanged fixture/Swift/lf3. Bundled SQLite 3.53.2 chose a full Exec primary-key
@@ -804,14 +803,19 @@ Alternating release reads (twenty warm each) reduced roadmap median 4334→1910 
 Session reads stayed 309→315 ms. Both miss 300 ms. Remaining roadmap samples
 identify Flow Exec membership and repeated repository discovery.
 
-The repaired rendered run passed 83/84, failing its final native reopen before
-any new connect read. Retain its pixels/journal and investigate cached readiness
-versus surface closure; no native p95 from nineteen warm successes. New growth
-results (+60.9/+53.5/+47.6 MiB) all fail. Variable concurrent load limits causal
-latency claims; exact distributions and remaining acceptance belong in the same
-[report](../../scripts/benchmarks/desktop-performance/20261006-matched-rust/README.md#release-profile-follow-through-and-query-repair--october-6).
-Publication only is authorized; Swift attribution, native repair and both full
-hours remain open. No high-volume trace or installed-Home operation occurred.
+The repaired rendered run remains 83/84: nineteen warm native successes, no
+native p95. Growth (+60.9/+53.5/+47.6 MiB) failed. Jack Heart requested the focused
+reopen repair. Refresh-before-exit reproduced a cached unavailable-client reason
+that silently suppressed connect after exit; the later poll did not resume the
+click. Selection now revalidates through connect, preserving fresh refusal and
+explicit takeover. The mounted fixture passes 21 reopens with transcript/pane/
+draft/selection/identity checks. Realistic repaired runs failed their five-second
+endpoints (5/21, 20/21); the latter connected and created a surface. Retain both
+beside the original pending failure; post-connect readiness remains open.
+[The report](../../scripts/benchmarks/desktop-performance/20261006-matched-rust/README.md#native-reopen-diagnosis--october-6)
+owns receipts and limits. Publication only is authorized; Swift attribution,
+latency/growth budgets and both full hours remain open. No trace or installed-Home
+operation occurred.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

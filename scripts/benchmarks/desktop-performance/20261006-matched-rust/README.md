@@ -243,3 +243,69 @@ Checks: release builds PASS; Task-membership suite PASS 4; cargo fmt and all-tar
 Clippy PASS after fixing a test-only clone warning; original release pair PASS
 84/84 each; repaired journey FAIL 83/84; alternating reads PASS 84/84. Publication
 is authorized with these limits; neither merge nor Task completion is requested.
+
+## Native reopen diagnosis — October 6
+
+Jack Heart requested a focused repair of the final failed reopen, with publication
+only. The original `repair/` receipt remains **83/84**, with **nineteen successful
+warm native observations and no native p95**. Its pixels and failed memory result
+are unchanged.
+
+The contained reproduction refreshes Session records while the owned client is
+running, lets that client exit, then opens its Task link before the next poll.
+The sandbox prevents inspecting the running provider client, so the list reader
+returns a closed record with `Session client observation unavailable` and disabled
+actions. Desktop cached that reason. `SessionsStore.recover` silently returned
+before calling connect, even though the client had since exited. A later poll
+cleared the reason without resuming the selection: “Not running here.”
+
+`/tmp/loo304-reopen-refresh-before-20261006/` reproduces this on the first warm
+reopen, with one successful initial endpoint. Request/state receipts show the link
+was consumed, the state stayed pending and no second connect read ran. This rules
+out a lost link notification in that reproduction. The prior stale-*active*
+hypothesis was contradicted by the fixture's actual closed/unknown observation.
+An ordinary focused run without the ordered refresh passed 21 endpoints;
+`/tmp/loo304-reopen-before3-20261006/` preserves it. Two earlier focus-only setup
+attempts and the rejected active-state assertion remain in adjacent private
+`loo304-reopen-*` directories.
+
+Explicit selection now revalidates a cached observation failure through the
+existing `session connect --json` operation. A fresh failure remains visible;
+a returned unavailable action cannot prepare a surface. Opening/prepared/live
+states still coalesce, active-elsewhere selection still requires explicit Move
+here, and no `--replace`, `--try`, provider retry or deadline was added. Rust,
+public lf3, snapshot contents and the containment policy are unchanged.
+
+The regression uses the combined soak's existing native transcript/input,
+companion pane, layout, file draft/selection and identity checks. Its explicit
+close notification previously addressed an unused checkout-level Session store;
+it now addresses the same repository-level store as the UI. No assertion or
+measured endpoint was removed. The focused test additionally orders a real
+refresh before each exit and is available through `verify-fixture --mounted`.
+
+The first repaired realistic replay (`/tmp/loo304-reopen-refresh-after-20261006/`)
+passed five endpoints, then timed out in **Opening session**, rather than the
+original pending state. The failing capture took 3,086 and 1,874 ms in OCR while
+host load was above 50. The original five-second endpoint remains intact. A
+teardown broken pipe is retained in its log; this is failed evidence, not a
+successful 21-round receipt. These diagnostic runs use SwiftPM debug builds and
+supply no causal latency comparison or replacement performance distribution.
+
+A second realistic focused replay (`/tmp/loo304-reopen-realistic-final-20261006/`)
+passed **20/21** endpoints. The final request completed connect and reached live
+surface state, then missed the native readiness endpoint. This supplies nineteen
+warm successes, not a native p95. That receipt did not distinguish focus, selected
+Task and visible native history; the regression now records those predicates
+separately. Its failure cleanup also drains outstanding reads before exiting.
+The remaining investigation is post-connect readiness and observer/main-actor
+competition under load, not the now-reproduced stale-action gate. These failed
+realistic runs remain part of acceptance; a small contained pass cannot erase them.
+
+Final source checks: `swift test --package-path swift --jobs 4 --filter
+SessionsStoreTests` passed 11 tests (including three cached/fresh-result cases).
+`verify-fixture --mounted` passed five contained tests, three production shell
+launches and **21/21 native reopens**, including all final-round preservation
+assertions, at `/tmp/loo304-reopen-contained-final-20261006/`. Runner pytest passed
+42 tests; Ruff and diff checks passed. The prepared realistic snapshot's SHA-256
+still matches its manifest. No matched p95, 32 MiB growth, full-hour, hitch/hang or
+compositor acceptance follows; publication remains separate from merge/completion.

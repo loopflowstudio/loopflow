@@ -140,3 +140,22 @@ Added 2026-10-05 building the planning-read slices. Nobody has confirmed these.
 28. **The outline's "has open Sessions" and "started" tests stay in Swift.**
     Slice 5 moved only the finished-Task rule. Moving the rest means Rust
     joining Sessions into the planning part.
+
+Decided by Jack Heart, 2026-10-05, after the first five slices.
+
+29. **Question 22 resolved:** a Task that has not started stays out of the
+    outline for now. LOO-382's first acceptance line is not met as written
+    and is not being met.
+30. **Question 15 resolved:** no follow-up Task is needed. The same answer
+    covered the unscheduled Linear sync in question 3.
+31. **Questions 5, 9, 12, 13, 17, 18 and 26 become work**: the plan's second
+    round, slices 6 to 11.
+32. **Question 23, unconfirmed reading:** Jack said SQLite reads should not
+    be a major problem and that the question confused him. Taken as: nothing
+    derived needs storing while reads meet their budget. Not confirmed in
+    those words.
+33. **Question 25 left alone**, by the rule Jack gave for optimizing: about
+    40 ms is not a clear, meaningful win against the risk. Jack did not
+    follow the question as asked; not confirmed.
+34. **Stale above:** question 19's 2 s wait and the 2 s readings in 12 and 13
+    are about 200 ms since slice 1.

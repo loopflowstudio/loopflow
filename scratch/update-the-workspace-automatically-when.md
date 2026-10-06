@@ -103,6 +103,41 @@ Numbers are from the copy with a release `lf`; load is the one-minute average.
    the Task and its condition. Whether a Task has open Sessions, and
    "started", stay in Swift: they join Session rows the window holds.
 
+### Second round (Jack Heart, 2026-10-05, after the first five slices)
+
+Jack decided: keep optimizing while clear, meaningful wins remain; remove the
+obvious performance taboos now; fix both lags nobody chose; the outline keeps
+started Tasks only; no follow-up Tasks are needed. Each slice below is
+implemented, compressed and realigned in turn, measured with the recipe
+above, and dropped with its evidence if it turns out not to be a clear win.
+
+6. **Cold reading.** Git is about 3.2 s of a 6.7 s first reading at load 20
+   (flame chart: `scratch/cold-reading-flame.html`, made by
+   `scratch/measure/cold-sample.py` and `flame.py`): five commands per
+   existing checkout, one after another. Ask about the checkouts
+   concurrently. Then re-profile and take the next clear win; check whether
+   an installed build pays the 0.75 s store-open check and the 1.4 s
+   admission before touching either.
+7. **Git-only changes show promptly.** A dirty or newly committed checkout
+   shows within seconds, not one to five minutes: watch the existing
+   checkouts for changes and re-read only what changed. No tighter clock.
+8. **Token totals follow usage.** Usage moves its own revision that
+   invalidates only the part showing totals, coalesced so agents writing
+   usage do not re-read it continuously.
+9. **The Task-files comparison stops polling.** Its 10 s `lf` loop goes;
+   it follows the same checkout changes as slice 7.
+10. **One reader per window.** `active` becomes a part of the workspace
+    stream and the separate `monitor active --watch` process is deleted;
+    its native-receipt reader, bounded frames and explicit retry survive.
+11. **A one-shot read does not re-run planning.** An Exec that planning
+    cannot read (finished at once, outside any Task checkout) does not move
+    a revision planning follows, so a file click or comment load in Desktop
+    costs nothing in the reader.
+
+Not in this round: reading the completion gate's remaining per-Task
+statements in bulk (about 40 ms of a 200 ms reading, in the code that
+decides `lf task complete`; not a clear win), and stored derived rows.
+
 ## Remaining work
 
 Built on the branch: the `store_revisions` migration and coverage test, the

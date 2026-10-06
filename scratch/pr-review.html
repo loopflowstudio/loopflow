@@ -55,223 +55,228 @@ ol.dec li{margin-bottom:14px}
 <body>
 <main>
 <h1>The open workspace follows the store</h1>
-<p class="meta"><a href="https://github.com/loopflowstudio/loopflow/pull/1452">PR #1452</a> · LOO-382 · base <code>bee8dcc49</code> → head <code>2b96c6f0d</code> · published head equals the local branch; no unpublished changes · 38 files, +4,601 −270</p>
+<p class="meta"><a href="https://github.com/loopflowstudio/loopflow/pull/1452">PR #1452</a> · LOO-382 · base <code>c41895363</code> (main) → published head <code>b81180102</code> · the local branch is one commit ahead (<code>a2db1a8ba</code>), which changes only the plan and Product memory · 56 files, +5,813 −420; 49 files, +4,462 −420 outside <code>scratch/</code></p>
 
 <p>Jack Heart asked that a Task created anywhere appear in the open Desktop window without a refresh, and that the same hold for renames, completion, Session changes and Flow progress. Before this branch Desktop learned about changes by starting <code>lf</code> every 2 to 30 seconds. On this branch each window keeps one <code>lf</code> process open; the store counts displayed changes, and that process re-reads and sends only the parts a commit could have changed.</p>
-<p>Delivered: the store counters, the reader, and Desktop's cutover with five timer loops deleted. Not delivered: the 1 s and 500 ms targets (measured 2.3 s and 0.56 s), and the Task's first acceptance line, which collides with an earlier decision. Both are in <a href="#decisions">Open decisions</a>.</p>
+<p>Delivered: the store counters, the reader, Desktop's cutover with five timer loops deleted, and a planning reading that went from seconds to about a quarter of a second. Not delivered: a re-measurement of the window after that speed-up, and the Task's first acceptance line, which collides with an earlier decision. Both are in <a href="#decisions">Open decisions</a>, with Jack's stated wish for derived state in the database, which the branch does not build.</p>
 
-<nav aria-label="Sections"><a href="#map">Map</a><a href="#s1">1 · A commit reaches the window</a><a href="#s2">2 · What counts as a change</a><a href="#s3">3 · Desktop applies a frame</a><a href="#s4">4 · Failure and recovery</a><a href="#s5">5 · The read made cheaper</a><a href="#decisions">Open decisions</a><a href="#evidence">Evidence</a></nav>
+<nav aria-label="Sections"><a href="#map">Map</a><a href="#s1">1 · A commit reaches the window</a><a href="#s2">2 · What counts as a change</a><a href="#s3">3 · Desktop applies a frame</a><a href="#s4">4 · Failure and recovery</a><a href="#s5">5 · The planning read</a><a href="#s6">6 · Which finished Tasks stay</a><a href="#decisions">Open decisions</a><a href="#evidence">Evidence</a></nav>
 
 <h2 id="map">Map</h2>
 <table class="map">
 <thead><tr><th>When you…</th><th>What happens</th><th>Where the code controls this</th></tr></thead>
 <tbody>
-<tr><td data-l="When you…">Create, rename or complete a Task from a terminal, a worker, or another window</td><td data-l="What happens">The open window's Task rows change in place within a few seconds. Selection, drafts, panes and scroll are not touched. A Task with no started work shows in its Wave's Task list but not in the left outline.</td><td data-l="Where the code controls this">Schema triggers count the write; the reader's loop notices the count moved and re-reads planning. <a href="#s1">Stop 1</a>, <a href="#s2">Stop 2</a></td></tr>
+<tr><td data-l="When you…">Create, rename or complete a Task from a terminal, a worker, or another window</td><td data-l="What happens">The open window's Task rows change in place. The reader sends the new reading about 0.3 s after the commit; how long the window then takes to draw it has not been re-measured. Selection, drafts, panes and scroll are not touched.</td><td data-l="Where the code controls this">Schema triggers count the write; the reader's loop notices the count moved and re-reads planning. <a href="#s1">Stop 1</a>, <a href="#s2">Stop 2</a>, <a href="#s5">Stop 5</a></td></tr>
 <tr><td data-l="When you…">Let an agent work for hours, writing thousands of transcript lines</td><td data-l="What happens">Nothing is re-read. Session rows change only when a Session starts, finishes a turn, is renamed, bound or completed. Token totals wait for the next such change.</td><td data-l="Where the code controls this">One trigger's <code>WHEN</code> clause decides which Session events count. <a href="#s2">Stop 2</a></td></tr>
-<tr><td data-l="When you…">Rename or complete a Session inside Desktop</td><td data-l="What happens">The row changes at once and cannot flicker back to its old state from a reading taken before your action.</td><td data-l="Where the code controls this">Desktop sends a numbered <code>refresh</code> and ignores frames that do not answer it. <a href="#s3">Stop 3</a></td></tr>
-<tr><td data-l="When you…">Switch repository, select another Task, or wake the Mac</td><td data-l="What happens">The window tells the reader what it now shows; rows for the previous repository are discarded, never mixed in.</td><td data-l="Where the code controls this">A <code>scope</code> request, and the repository check in <code>PodiumModel.apply</code>. <a href="#s3">Stop 3</a></td></tr>
-<tr><td data-l="When you…">Lose the reader, or point it at a store it cannot open</td><td data-l="What happens">The last good rows stay on screen marked unavailable with the reason. The window never shows an empty workspace for a store that exists.</td><td data-l="Where the code controls this">The reopen loop in <code>keepWorkspaceCurrent</code>; the refusal branch in <code>Reader::project</code>. <a href="#s4">Stop 4</a></td></tr>
+<tr><td data-l="When you…">Rename or complete a Session inside Desktop</td><td data-l="What happens">The row changes at once and cannot flicker back to its old state from a reading taken before your action.</td><td data-l="Where the code controls this">Desktop sends a numbered refresh and ignores frames that do not answer it. <a href="#s3">Stop 3</a></td></tr>
+<tr><td data-l="When you…">Switch repository, select another Task, or wake the Mac</td><td data-l="What happens">The window tells the reader what it now shows; rows for the previous repository are discarded, never mixed in.</td><td data-l="Where the code controls this">A scope request, and the repository check in <code>PodiumModel.apply</code>. <a href="#s3">Stop 3</a></td></tr>
+<tr><td data-l="When you…">Lose the reader, or point it at a store it cannot open</td><td data-l="What happens">The last good rows stay on screen marked unavailable with the reason. The window never shows an empty workspace for a store that exists. The reader tries again after 1 s, then 2 s, 4 s, up to a minute.</td><td data-l="Where the code controls this">The reopen loop in <code>keepWorkspaceCurrent</code>; the refusal branch in <code>Reader::project</code>; <code>PartState::retry_due</code>. <a href="#s4">Stop 4</a></td></tr>
+<tr><td data-l="When you…">Finish a Task whose checkout still holds uncommitted work, or create one and start nothing</td><td data-l="What happens">The finished Task stays in the left outline until its work is settled. The new Task shows in its Wave's Task list and not in the outline, which lists started Tasks only.</td><td data-l="Where the code controls this">Rust decides “finished but unsettled” and sends it as one field; Swift decides “started” and “has open Sessions”. <a href="#s6">Stop 6</a></td></tr>
 </tbody>
 </table>
 
 <h2 id="s1">1 · A commit elsewhere reaches the window</h2>
-<p>The command Desktop runs can be run by hand. This is a captured run of the branch's debug binary in an empty throwaway Home, with stdin held open. A second shell commits one row with <code>sqlite3</code>, then the first sends a <code>refresh</code>.</p>
+<p>The command Desktop runs can be run by hand. This is a captured run in an empty throwaway Home, with stdin held open. A second process commits one row with <code>sqlite3</code>; nine seconds later the first sends a refresh. The left column is seconds since start.</p>
 <figure><pre class="term"><code><span class="p">$</span> lf monitor workspace --watch --json
-{"sequence":1,"answers":null,"home":"<i>&lt;Home&gt;</i>","revisions":{"planning":0,"sessions":0,"flows":0,"execs":3},"unavailable":null,"part":"planning","body":{"roadmap":{…,"waves":[]},"waves":[]}}
-{"sequence":2,…,"part":"activity","body":{…}}
-{"sequence":3,…,"part":"heartbeat","body":{"projections":{"activity":1,"planning":1}}}
-<span class="c">                                  # other shell: sqlite3 loopflow.db "INSERT INTO waves(id,name,repo,created_at) VALUES(…)"</span>
-{"sequence":4,"answers":null,…,"revisions":{"planning":1,"sessions":0,"flows":0,"execs":3},"unavailable":"failed to read Wave Home placement: invalid data: wave 25ed785c-… has no Home placement","part":"planning","body":null}
-{"sequence":5,…,"part":"heartbeat","body":{"projections":{"activity":2,"planning":2}}}
-{"sequence":6,…,"part":"heartbeat","body":{"projections":{"activity":3,"planning":5}}}
-<span class="p">&gt;</span> {"action":"refresh","id":7}
-{"sequence":8,"answers":7,…,"unavailable":"failed to read Wave Home placement: …","part":"planning","body":null}
-{"sequence":9,"answers":7,…,"part":"activity","body":{…}}</code></pre>
-<figcaption>Observed 2026-10-05 on <code>target/debug/lf</code> (built 14:55, after the last non-test Rust change <code>24b05ed5e</code>). Home path shortened, bodies elided with …, three lines omitted. The hand-inserted Wave row is deliberately incomplete, so the reading fails; a well-formed write produces a body instead.</figcaption></figure>
-<p>Three things are visible. The insert moved <code>planning</code> from 0 to 1 and one planning frame followed. The failed reading arrived as <code>unavailable</code> with a null body, not as an empty list. And frame 8 carries <code>answers: 7</code>: it was read after the request was handled. The heartbeat counts are discussed in <a href="#s4">Stop 4</a>.</p>
+<span class="c"> 0.55</span> {"sequence":1,"answers":null,"home":"<i>&lt;Home&gt;</i>","revisions":{"planning":0,"sessions":0,"flows":0,"execs":1},"unavailable":null,"part":"planning","body":{"roadmap":{…,"waves":[]},"waves":[]}}
+<span class="c"> 0.66</span> {"sequence":2,…,"part":"activity","body":{…}}
+<span class="c"> 4.55</span> {"sequence":5,…,"part":"heartbeat","body":{"projections":{"activity":2,"planning":1}}}
+<span class="c"> 5.00                             # other process: sqlite3 loopflow.db "INSERT INTO waves(id,name,repo,created_at) VALUES(…)"</span>
+<span class="c"> 5.11</span> {"sequence":7,"answers":null,…,"revisions":{"planning":1,"sessions":0,"flows":0,"execs":1},"unavailable":"failed to read Wave Home placement: invalid data: wave 062bea8a-… has no Home placement","part":"planning","body":null}
+<span class="c"> 6.56</span> {"sequence":8,…,"part":"heartbeat","body":{"projections":{"activity":3,"planning":2}}}
+<span class="c"> 8.56</span> {"sequence":9,…,"part":"heartbeat","body":{"projections":{"activity":4,"planning":4}}}
+<span class="c">10.57</span> {"sequence":10,…,"part":"heartbeat","body":{"projections":{"activity":5,"planning":4}}}
+<span class="c">12.57</span> {"sequence":11,…,"part":"heartbeat","body":{"projections":{"activity":6,"planning":4}}}
+<span class="c">14.02</span> <span class="p">&gt;</span> {"action":"refresh","id":7}
+<span class="c">14.03</span> {"sequence":12,"answers":7,…,"unavailable":"failed to read Wave Home placement: …","part":"planning","body":null}
+<span class="c">14.58</span> {"sequence":13,"answers":7,…,"part":"heartbeat","body":{"projections":{"activity":7,"planning":6}}}</code></pre>
+<figcaption>Observed 2026-10-05 21:34 on <code>target/release/lf</code>, built 21:27 from <code>56eadfff9</code>: it has every change to the reader, and predates only the later <code>git.rs</code> cleanup and the merge of main. Load average 20. Home path shortened, bodies elided with …, three frames omitted (one heartbeat, two activity). The hand-inserted Wave row is deliberately incomplete, so the reading fails; a well-formed write produces a body instead.</figcaption></figure>
+<p>Three things are visible. The insert moved <code>planning</code> from 0 to 1 and a planning frame followed 0.11 s later. The failed reading arrived as <code>unavailable</code> with a null body, not as an empty list. And frame 12 carries <code>answers: 7</code>: it was read after the request was handled. The heartbeat counts show the retry slowing down, discussed in <a href="#s4">Stop 4</a>.</p>
 
 <h3>The line on the wire</h3>
-<figure><pre><code><span class="ln">  46</span>  /// One line of the stream. `sequence` orders every frame of one process;
-<span class="ln">  47</span>  /// `answers` is the newest request handled before this frame&#x27;s reading began.
-<span class="ln">  48</span>  #[derive(Debug, Clone, Serialize, Deserialize)]
-<span class="ln">  49</span>  pub struct WorkspaceFrame {
-<span class="ln">  50</span>      pub sequence: u64,
-<span class="ln">  51</span>      pub answers: Option&lt;u64&gt;,
-<span class="ln">  52</span>      pub home: String,
-<span class="ln">  53</span>      /// The store revisions this frame was read at; `null` before a store exists.
-<span class="ln">  54</span>      pub revisions: Option&lt;StoreRevisions&gt;,
-<span class="ln">  55</span>      /// Why this part could not be read. Its body is then `null`.
-<span class="ln">  56</span>      pub unavailable: Option&lt;String&gt;,
-<span class="ln">  57</span>      #[serde(flatten)]
-<span class="ln">  58</span>      pub content: WorkspaceContent,
-<span class="ln">  59</span>  }
-<span class="ln">  60</span>  
-<span class="ln">  61</span>  #[derive(Debug, Clone, Serialize, Deserialize)]
-<span class="ln">  62</span>  #[serde(tag = &quot;part&quot;, content = &quot;body&quot;, rename_all = &quot;snake_case&quot;)]
-<span class="ln">  63</span>  #[non_exhaustive]
-<span class="ln">  64</span>  pub enum WorkspaceContent {
-<span class="ln">  65</span>      Planning(Option&lt;Box&lt;PlanningPart&gt;&gt;),
-<span class="ln">  66</span>      Sessions(Option&lt;SessionsPart&gt;),
-<span class="ln">  67</span>      Task(Option&lt;TaskPart&gt;),
-<span class="ln">  68</span>      Wave(Option&lt;Box&lt;WavePart&gt;&gt;),
-<span class="ln">  69</span>      WorkActivity(Option&lt;WorkActivityPart&gt;),
-<span class="ln">  70</span>      Activity(Option&lt;ActivitySnapshot&gt;),
-<span class="ln">  71</span>      Heartbeat(Heartbeat),
-<span class="ln">  72</span>  }
-<span class="om">    ⋮  lines 73–114 omitted</span>
-<span class="ln"> 115</span>  /// Sent on a clock so a silent stream is distinguishable from a stalled one.
-<span class="ln"> 116</span>  /// `projections` counts readings per part, including those that sent nothing.
-<span class="ln"> 117</span>  #[derive(Debug, Clone, Serialize, Deserialize)]
-<span class="ln"> 118</span>  pub struct Heartbeat {
-<span class="ln"> 119</span>      pub projections: BTreeMap&lt;String, u64&gt;,
-<span class="ln"> 120</span>  }
-<span class="ln"> 121</span>  
-<span class="ln"> 122</span>  #[derive(Debug, Clone, Deserialize)]
-<span class="ln"> 123</span>  #[serde(tag = &quot;action&quot;, rename_all = &quot;snake_case&quot;, deny_unknown_fields)]
-<span class="ln"> 124</span>  enum Request {
-<span class="ln"> 125</span>      /// What this window shows. Replaces the previous scope.
-<span class="ln"> 126</span>      Scope {
-<span class="ln"> 127</span>          id: u64,
-<span class="ln"> 128</span>          repo: Option&lt;String&gt;,
-<span class="ln"> 129</span>          headless: bool,
-<span class="ln"> 130</span>          task: Option&lt;String&gt;,
-<span class="ln"> 131</span>          wave: Option&lt;String&gt;,
-<span class="ln"> 132</span>          activity: Option&lt;WorkActivityScope&gt;,
-<span class="ln"> 133</span>      },
-<span class="ln"> 134</span>      /// Read every part again and answer, changed or not: after a local
-<span class="ln"> 135</span>      /// write, sleep, or any other gap in observation.
-<span class="ln"> 136</span>      Refresh { id: u64 },
-<span class="ln"> 137</span>  }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/2b96c6f0d4bdf0a46de774f479ba88c4047c8bec/rust/loopflow/src/lf/commands/workspace_watch.rs#L46-L137"><code>rust/loopflow/src/lf/commands/workspace_watch.rs</code></a> · <code>WorkspaceFrame, WorkspaceContent, Heartbeat, Request</code> · 2b96c6f0d · lines 46–72, 115–137 · new in this PR</figcaption></figure>
+<figure><pre><code><span class="ln">  48</span>  /// One line of the stream. `sequence` orders every frame of one process;
+<span class="ln">  49</span>  /// `answers` is the newest request handled before this frame's reading began.
+<span class="ln">  50</span>  #[derive(Debug, Clone, Serialize, Deserialize)]
+<span class="ln">  51</span>  pub struct WorkspaceFrame {
+<span class="ln">  52</span>      pub sequence: u64,
+<span class="ln">  53</span>      pub answers: Option&lt;u64&gt;,
+<span class="ln">  54</span>      pub home: String,
+<span class="ln">  55</span>      /// The store revisions this frame was read at; `null` before a store exists.
+<span class="ln">  56</span>      pub revisions: Option&lt;StoreRevisions&gt;,
+<span class="ln">  57</span>      /// Why this part could not be read. Its body is then `null`.
+<span class="ln">  58</span>      pub unavailable: Option&lt;String&gt;,
+<span class="ln">  59</span>      #[serde(flatten)]
+<span class="ln">  60</span>      pub content: WorkspaceContent,
+<span class="ln">  61</span>  }
+<span class="ln">  62</span>  
+<span class="ln">  63</span>  #[derive(Debug, Clone, Serialize, Deserialize)]
+<span class="ln">  64</span>  #[serde(tag = "part", content = "body", rename_all = "snake_case")]
+<span class="ln">  65</span>  #[non_exhaustive]
+<span class="ln">  66</span>  pub enum WorkspaceContent {
+<span class="ln">  67</span>      Planning(Option&lt;Box&lt;PlanningPart&gt;&gt;),
+<span class="ln">  68</span>      Sessions(Option&lt;SessionsPart&gt;),
+<span class="ln">  69</span>      Task(Option&lt;TaskPart&gt;),
+<span class="ln">  70</span>      Wave(Option&lt;Box&lt;WavePart&gt;&gt;),
+<span class="ln">  71</span>      WorkActivity(Option&lt;WorkActivityPart&gt;),
+<span class="ln">  72</span>      Activity(Option&lt;ActivitySnapshot&gt;),
+<span class="ln">  73</span>      Heartbeat(Heartbeat),
+<span class="ln">  74</span>  }
+<span class="om">       … lines 75–117 omitted …</span>
+<span class="ln"> 118</span>  /// `projections` counts readings per part, including those that sent nothing.
+<span class="ln"> 119</span>  #[derive(Debug, Clone, Serialize, Deserialize)]
+<span class="ln"> 120</span>  pub struct Heartbeat {
+<span class="ln"> 121</span>      pub projections: BTreeMap&lt;String, u64&gt;,
+<span class="ln"> 122</span>  }
+<span class="ln"> 123</span>  
+<span class="ln"> 124</span>  #[derive(Debug, Clone, Deserialize)]
+<span class="ln"> 125</span>  #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+<span class="ln"> 126</span>  enum Request {
+<span class="ln"> 127</span>      /// What this window shows. Replaces the previous scope.
+<span class="ln"> 128</span>      Scope {
+<span class="ln"> 129</span>          id: u64,
+<span class="ln"> 130</span>          repo: Option&lt;String&gt;,
+<span class="ln"> 131</span>          headless: bool,
+<span class="ln"> 132</span>          task: Option&lt;String&gt;,
+<span class="ln"> 133</span>          wave: Option&lt;String&gt;,
+<span class="ln"> 134</span>          activity: Option&lt;WorkActivityScope&gt;,
+<span class="ln"> 135</span>      },
+<span class="ln"> 136</span>      /// Read every part again and answer, changed or not: after a local
+<span class="ln"> 137</span>      /// write, sleep, or any other gap in observation.
+<span class="ln"> 138</span>      Refresh { id: u64 },
+<span class="ln"> 139</span>  }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b8118010265b2f47213f0503e94f4d379549e02f/rust/loopflow/src/lf/commands/workspace_watch.rs#L48-L139"><code>rust/loopflow/src/lf/commands/workspace_watch.rs</code></a> · <code>WorkspaceFrame, WorkspaceContent, Heartbeat, Request</code> · b81180102 · lines 48–74, 118–139 · new in this PR</figcaption></figure>
 <p>Each body is the type the matching one-shot command already prints (<code>lf roadmap --all --json</code>, <code>lf session list --json</code>, and so on), so Swift keeps its decoders and the saved launch workspace from LOO-376 keeps working.</p>
 
 <h3>The loop that produces it</h3>
-<figure><pre><code><span class="ln"> 653</span>      let result = (|| -&gt; Result&lt;()&gt; {
-<span class="ln"> 654</span>          let mut seen = None;
-<span class="ln"> 655</span>          loop {
-<span class="ln"> 656</span>              let requests = {
-<span class="ln"> 657</span>                  let mut mailbox = lock(&amp;shared);
-<span class="ln"> 658</span>                  if let Some(error) = mailbox.error.take() {
-<span class="ln"> 659</span>                      anyhow::bail!(error);
-<span class="ln"> 660</span>                  }
-<span class="ln"> 661</span>                  if mailbox.closed {
-<span class="ln"> 662</span>                      return Ok(());
-<span class="ln"> 663</span>                  }
-<span class="ln"> 664</span>                  mailbox.look = false;
-<span class="ln"> 665</span>                  std::mem::take(&amp;mut mailbox.requests)
-<span class="ln"> 666</span>              };
-<span class="ln"> 667</span>              let mut answers = None;
-<span class="ln"> 668</span>              for request in requests {
-<span class="ln"> 669</span>                  answers = Some(reader.accept(request));
-<span class="ln"> 670</span>              }
-<span class="ln"> 671</span>              reader.open();
-<span class="ln"> 672</span>              let mut revisions = reader.revisions();
-<span class="ln"> 673</span>              if seen != revisions &amp;&amp; seen.is_some() {
-<span class="ln"> 674</span>                  // Let a burst of related commits land before reading any of it.
-<span class="ln"> 675</span>                  let first = Instant::now();
-<span class="ln"> 676</span>                  loop {
-<span class="ln"> 677</span>                      let mailbox = lock(&amp;shared);
-<span class="ln"> 678</span>                      let (mut mailbox, _) = shared
-<span class="ln"> 679</span>                          .1
-<span class="ln"> 680</span>                          .wait_timeout_while(mailbox, QUIET, |mailbox| {
-<span class="ln"> 681</span>                              !mailbox.look &amp;&amp; !mailbox.closed
-<span class="ln"> 682</span>                          })
-<span class="ln"> 683</span>                          .expect(&quot;workspace reader mailbox poisoned&quot;);
-<span class="ln"> 684</span>                      let again = std::mem::take(&amp;mut mailbox.look);
-<span class="ln"> 685</span>                      if !again || first.elapsed() &gt;= BURST {
-<span class="ln"> 686</span>                          break;
-<span class="ln"> 687</span>                      }
-<span class="ln"> 688</span>                  }
-<span class="ln"> 689</span>                  revisions = reader.revisions();
-<span class="ln"> 690</span>              }
-<span class="ln"> 691</span>              seen = revisions;
-<span class="ln"> 692</span>              {
-<span class="ln"> 693</span>                  let mut mailbox = lock(&amp;shared);
-<span class="ln"> 694</span>                  mailbox.revisions = revisions;
-<span class="ln"> 695</span>                  if answers.is_some() {
-<span class="ln"> 696</span>                      mailbox.answers = answers;
-<span class="ln"> 697</span>                  }
-<span class="ln"> 698</span>              }
-<span class="ln"> 699</span>              for part in Part::ALL {
-<span class="ln"> 700</span>                  let now = Instant::now();
-<span class="ln"> 701</span>                  if !reader.due(part, revisions, now) {
-<span class="ln"> 702</span>                      continue;
+<figure><pre><code><span class="ln"> 668</span>      let result = (|| -&gt; Result&lt;()&gt; {
+<span class="ln"> 669</span>          let mut seen = None;
+<span class="ln"> 670</span>          loop {
+<span class="ln"> 671</span>              let requests = {
+<span class="ln"> 672</span>                  let mut mailbox = lock(&amp;shared);
+<span class="ln"> 673</span>                  if let Some(error) = mailbox.error.take() {
+<span class="ln"> 674</span>                      anyhow::bail!(error);
+<span class="ln"> 675</span>                  }
+<span class="ln"> 676</span>                  if mailbox.closed {
+<span class="ln"> 677</span>                      return Ok(());
+<span class="ln"> 678</span>                  }
+<span class="ln"> 679</span>                  mailbox.look = false;
+<span class="ln"> 680</span>                  std::mem::take(&amp;mut mailbox.requests)
+<span class="ln"> 681</span>              };
+<span class="ln"> 682</span>              let mut answers = None;
+<span class="ln"> 683</span>              for request in requests {
+<span class="ln"> 684</span>                  answers = Some(reader.accept(request));
+<span class="ln"> 685</span>              }
+<span class="ln"> 686</span>              reader.open();
+<span class="ln"> 687</span>              let mut revisions = reader.revisions();
+<span class="ln"> 688</span>              if seen != revisions &amp;&amp; seen.is_some() {
+<span class="ln"> 689</span>                  // Let a burst of related commits land before reading any of it.
+<span class="ln"> 690</span>                  let first = Instant::now();
+<span class="ln"> 691</span>                  loop {
+<span class="ln"> 692</span>                      let mailbox = lock(&amp;shared);
+<span class="ln"> 693</span>                      let (mut mailbox, _) = shared
+<span class="ln"> 694</span>                          .1
+<span class="ln"> 695</span>                          .wait_timeout_while(mailbox, QUIET, |mailbox| {
+<span class="ln"> 696</span>                              !mailbox.look &amp;&amp; !mailbox.closed
+<span class="ln"> 697</span>                          })
+<span class="ln"> 698</span>                          .expect("workspace reader mailbox poisoned");
+<span class="ln"> 699</span>                      let again = std::mem::take(&amp;mut mailbox.look);
+<span class="ln"> 700</span>                      if !again || first.elapsed() &gt;= BURST {
+<span class="ln"> 701</span>                          break;
+<span class="ln"> 702</span>                      }
 <span class="ln"> 703</span>                  }
-<span class="ln"> 704</span>                  let (reason, content) = match reader.project(part) {
-<span class="ln"> 705</span>                      Ok(content) =&gt; (None, content),
-<span class="ln"> 706</span>                      Err(error) =&gt; (Some(format!(&quot;{error:#}&quot;)), unavailable(part)),
-<span class="ln"> 707</span>                  };
-<span class="ln"> 708</span>                  let identity = fingerprint(&amp;reason, &amp;content)?;
-<span class="ln"> 709</span>                  let state = reader.parts.entry(part).or_default();
-<span class="ln"> 710</span>                  let send = state.force || state.sent != Some(identity);
-<span class="ln"> 711</span>                  state.read_at = revisions;
-<span class="ln"> 712</span>                  state.read_on = Some(now);
-<span class="ln"> 713</span>                  state.force = false;
-<span class="ln"> 714</span>                  // A failed reading is retried on the next look, not held.
-<span class="ln"> 715</span>                  state.stale = reason.is_some();
-<span class="ln"> 716</span>                  state.sent = Some(identity);
-<span class="ln"> 717</span>                  let mut mailbox = lock(&amp;shared);
-<span class="ln"> 718</span>                  *mailbox.projections.entry(part.name().into()).or_default() += 1;
-<span class="ln"> 719</span>                  if send {
-<span class="ln"> 720</span>                      enqueue(&amp;mut mailbox, part.name(), &amp;home, reason, content);
-<span class="ln"> 721</span>                      shared.1.notify_all();
-<span class="ln"> 722</span>                  }
-<span class="ln"> 723</span>                  if mailbox.closed {
-<span class="ln"> 724</span>                      return Ok(());
-<span class="ln"> 725</span>                  }
-<span class="ln"> 726</span>              }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/2b96c6f0d4bdf0a46de774f479ba88c4047c8bec/rust/loopflow/src/lf/commands/workspace_watch.rs#L653-L726"><code>rust/loopflow/src/lf/commands/workspace_watch.rs</code></a> · <code>run — the reader&#x27;s one loop</code> · 2b96c6f0d · lines 653–726 · new in this PR</figcaption></figure>
-<div class="note"><p><b>One loop reads the parts in turn.</b> Sessions come first in <code>Part::ALL</code>, but a Session commit that lands while planning is being read waits for it: about 2 s on a copy of Jack's store. That is the difference between the 0.2 s and 2.1–2.3 s Session samples in the plan.</p></div>
+<span class="ln"> 704</span>                  revisions = reader.revisions();
+<span class="ln"> 705</span>              }
+<span class="ln"> 706</span>              seen = revisions;
+<span class="ln"> 707</span>              {
+<span class="ln"> 708</span>                  let mut mailbox = lock(&amp;shared);
+<span class="ln"> 709</span>                  mailbox.revisions = revisions;
+<span class="ln"> 710</span>                  if answers.is_some() {
+<span class="ln"> 711</span>                      mailbox.answers = answers;
+<span class="ln"> 712</span>                  }
+<span class="ln"> 713</span>              }
+<span class="ln"> 714</span>              for part in Part::ALL {
+<span class="ln"> 715</span>                  let now = Instant::now();
+<span class="ln"> 716</span>                  if !reader.due(part, revisions, now) {
+<span class="ln"> 717</span>                      continue;
+<span class="ln"> 718</span>                  }
+<span class="ln"> 719</span>                  let (reason, content) = match reader.project(part) {
+<span class="ln"> 720</span>                      Ok(content) =&gt; (None, content),
+<span class="ln"> 721</span>                      Err(error) =&gt; (Some(format!("{error:#}")), unavailable(part)),
+<span class="ln"> 722</span>                  };
+<span class="ln"> 723</span>                  let identity = fingerprint(&amp;reason, &amp;content)?;
+<span class="ln"> 724</span>                  let state = reader.parts.entry(part).or_default();
+<span class="ln"> 725</span>                  let send = state.force || state.sent != Some(identity);
+<span class="ln"> 726</span>                  state.read_at = revisions;
+<span class="ln"> 727</span>                  state.read_on = Some(now);
+<span class="ln"> 728</span>                  state.force = false;
+<span class="ln"> 729</span>                  state.failures = if reason.is_some() {
+<span class="ln"> 730</span>                      state.failures.saturating_add(1)
+<span class="ln"> 731</span>                  } else {
+<span class="ln"> 732</span>                      0
+<span class="ln"> 733</span>                  };
+<span class="ln"> 734</span>                  state.sent = Some(identity);
+<span class="ln"> 735</span>                  let mut mailbox = lock(&amp;shared);
+<span class="ln"> 736</span>                  *mailbox.projections.entry(part.name().into()).or_default() += 1;
+<span class="ln"> 737</span>                  if send {
+<span class="ln"> 738</span>                      enqueue(&amp;mut mailbox, part.name(), &amp;home, reason, content);
+<span class="ln"> 739</span>                      shared.1.notify_all();
+<span class="ln"> 740</span>                  }
+<span class="ln"> 741</span>                  if mailbox.closed {
+<span class="ln"> 742</span>                      return Ok(());
+<span class="ln"> 743</span>                  }
+<span class="ln"> 744</span>              }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b8118010265b2f47213f0503e94f4d379549e02f/rust/loopflow/src/lf/commands/workspace_watch.rs#L668-L744"><code>rust/loopflow/src/lf/commands/workspace_watch.rs</code></a> · <code>run — the reader&#x27;s one loop</code> · b81180102 · lines 668–744 · new in this PR</figcaption></figure>
+<div class="note"><p><b>One loop reads the parts in turn.</b> A Session commit that lands while planning is being read waits for it. That wait was about 2 s when this page was first written and is about 0.2 s now, because the planning reading itself got faster (<a href="#s5">Stop 5</a>). The loop is unchanged; the wait grows again if the reading does.</p></div>
 
 <h2 id="s2">2 · What counts as a change</h2>
 <p>The store keeps four counters. A trigger on each displayed table adds one inside the writer's own transaction, so every writer is counted, including older installed <code>lf</code> binaries and <code>sqlite3</code>, and a rolled-back write counts nothing.</p>
 <figure><pre><code><span class="ln">   1</span>  -- Change revisions for displayed data. Every committed write to a table a
-<span class="ln">   2</span>  -- workspace surface reads bumps its domain here, inside the writer&#x27;s own
-<span class="ln">   3</span>  -- transaction, so any reader can ask &quot;what changed&quot; without scanning history.
+<span class="ln">   2</span>  -- workspace surface reads bumps its domain here, inside the writer's own
+<span class="ln">   3</span>  -- transaction, so any reader can ask "what changed" without scanning history.
 <span class="ln">   4</span>  -- A domain follows what a write can change on screen, not which table it
 <span class="ln">   5</span>  -- lands in: provider transcript lines and usage events bump nothing.
 <span class="ln">   6</span>  CREATE TABLE store_revisions (
-<span class="ln">   7</span>      domain TEXT PRIMARY KEY NOT NULL CHECK (domain IN (&#x27;planning&#x27;, &#x27;sessions&#x27;, &#x27;flows&#x27;, &#x27;execs&#x27;)),
+<span class="ln">   7</span>      domain TEXT PRIMARY KEY NOT NULL CHECK (domain IN ('planning', 'sessions', 'flows', 'execs')),
 <span class="ln">   8</span>      revision INTEGER NOT NULL
 <span class="ln">   9</span>  ) WITHOUT ROWID;
 <span class="ln">  10</span>  INSERT INTO store_revisions(domain, revision)
-<span class="ln">  11</span>  VALUES (&#x27;planning&#x27;, 0), (&#x27;sessions&#x27;, 0), (&#x27;flows&#x27;, 0), (&#x27;execs&#x27;, 0);
-<span class="om">    ⋮  lines 12–315 omitted</span>
-<span class="ln"> 316</span>  -- sessions: every Session event except usage and transcript lines. A transcript
-<span class="ln"> 317</span>  -- line is an `events.jsonl` observation of a type no summary reader selects;
-<span class="ln"> 318</span>  -- provider attempts and identities share that receipt key and are displayed.
-<span class="ln"> 319</span>  -- Token totals therefore follow the next displayed change, not each usage row.
-<span class="ln"> 320</span>  CREATE TRIGGER store_revision_session_events_insert AFTER INSERT ON session_events
-<span class="ln"> 321</span>  WHEN NOT (NEW.kind = &#x27;usage&#x27; OR (NEW.kind = &#x27;observed&#x27; AND instr(NEW.receipt_key, &#x27;:events.jsonl:&#x27;) &gt; 0
-<span class="ln"> 322</span>      AND CASE WHEN json_valid(NEW.payload) THEN COALESCE(json_extract(NEW.payload, &#x27;$.evidence.schema_version&#x27;), 0) = 1
-<span class="ln"> 323</span>          AND COALESCE(json_extract(NEW.payload, &#x27;$.evidence.type&#x27;), &#x27;&#x27;) IN
-<span class="ln"> 324</span>              (&#x27;activity&#x27;, &#x27;handoff&#x27;, &#x27;user_input&#x27;, &#x27;conversation&#x27;, &#x27;text&#x27;, &#x27;tool_use&#x27;, &#x27;result&#x27;, &#x27;provider_output&#x27;, &#x27;usage&#x27;)
-<span class="ln"> 325</span>          ELSE 0 END))
-<span class="ln"> 326</span>  BEGIN
-<span class="ln"> 327</span>      UPDATE store_revisions SET revision = revision + 1 WHERE domain = &#x27;sessions&#x27;;
-<span class="ln"> 328</span>  END;</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/2b96c6f0d4bdf0a46de774f479ba88c4047c8bec/rust/loopflow/src/store/migrations/drafts/store_revisions.sql#L1-L328"><code>rust/loopflow/src/store/migrations/drafts/store_revisions.sql</code></a> · <code>store_revisions and the session_events insert trigger</code> · 2b96c6f0d · lines 1–11, 316–328 · new draft migration; 25 tables get three triggers each</figcaption></figure>
+<span class="ln">  11</span>  VALUES ('planning', 0), ('sessions', 0), ('flows', 0), ('execs', 0);
+<span class="om">       … lines 12–316 omitted …</span>
+<span class="ln"> 317</span>  -- sessions: every Session event except usage and transcript lines. A transcript
+<span class="ln"> 318</span>  -- line is an `events.jsonl` observation of a type no summary reader selects;
+<span class="ln"> 319</span>  -- provider attempts and identities share that receipt key and are displayed.
+<span class="ln"> 320</span>  -- Token totals therefore follow the next displayed change, not each usage row.
+<span class="ln"> 321</span>  CREATE TRIGGER store_revision_session_events_insert AFTER INSERT ON session_events
+<span class="ln"> 322</span>  WHEN NOT (NEW.kind = 'usage' OR (NEW.kind = 'observed' AND instr(NEW.receipt_key, ':events.jsonl:') &gt; 0
+<span class="ln"> 323</span>      AND CASE WHEN json_valid(NEW.payload) THEN COALESCE(json_extract(NEW.payload, '$.evidence.schema_version'), 0) = 1
+<span class="ln"> 324</span>          AND COALESCE(json_extract(NEW.payload, '$.evidence.type'), '') IN
+<span class="ln"> 325</span>              ('activity', 'handoff', 'user_input', 'conversation', 'text', 'tool_use', 'result', 'provider_output', 'usage')
+<span class="ln"> 326</span>          ELSE 0 END))
+<span class="ln"> 327</span>  BEGIN
+<span class="ln"> 328</span>      UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
+<span class="ln"> 329</span>  END;</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b8118010265b2f47213f0503e94f4d379549e02f/rust/loopflow/src/store/migrations/drafts/store_revisions.sql#L1-L329"><code>rust/loopflow/src/store/migrations/drafts/store_revisions.sql</code></a> · <code>store_revisions and the session_events insert trigger</code> · b81180102 · lines 1–11, 317–329 · new draft migration; 25 tables get three triggers each</figcaption></figure>
 <p>Transcript lines were 164,192 of 168,336 Session events in a day on Jack's Home. Counting them would re-read every part for ten hours a day, so the trigger skips the evidence types no summary reader selects, plus usage.</p>
-<figure><pre><code><span class="ln"> 180</span>      /// Whether a commit that moved revisions from `old` to `new` can change
-<span class="ln"> 181</span>      /// this part. Planning conditions read Sessions, Flows and unfinished Execs.
-<span class="ln"> 182</span>      fn changed(self, old: StoreRevisions, new: StoreRevisions) -&gt; bool {
-<span class="ln"> 183</span>          match self {
-<span class="ln"> 184</span>              Part::Sessions =&gt; {
-<span class="ln"> 185</span>                  StoreRevisions { execs: 0, ..old } != StoreRevisions { execs: 0, ..new }
-<span class="ln"> 186</span>              }
-<span class="ln"> 187</span>              Part::Activity =&gt; old.execs != new.execs,
-<span class="ln"> 188</span>              Part::Planning | Part::Task | Part::Wave | Part::WorkActivity =&gt; old != new,
-<span class="ln"> 189</span>          }
-<span class="ln"> 190</span>      }
-<span class="ln"> 191</span>  
-<span class="ln"> 192</span>      fn clock(self) -&gt; Option&lt;Duration&gt; {
-<span class="ln"> 193</span>          match self {
-<span class="ln"> 194</span>              Part::Planning | Part::Wave =&gt; Some(PLANNING_CLOCK),
-<span class="ln"> 195</span>              Part::Activity =&gt; Some(ACTIVITY_CLOCK),
-<span class="ln"> 196</span>              _ =&gt; None,
-<span class="ln"> 197</span>          }
-<span class="ln"> 198</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/2b96c6f0d4bdf0a46de774f479ba88c4047c8bec/rust/loopflow/src/lf/commands/workspace_watch.rs#L180-L198"><code>rust/loopflow/src/lf/commands/workspace_watch.rs</code></a> · <code>Part::changed, Part::clock</code> · 2b96c6f0d · lines 180–198 · new in this PR</figcaption></figure>
+<figure><pre><code><span class="ln"> 182</span>      /// Whether a commit that moved revisions from `old` to `new` can change
+<span class="ln"> 183</span>      /// this part. Planning conditions read Sessions, Flows and unfinished Execs.
+<span class="ln"> 184</span>      fn changed(self, old: StoreRevisions, new: StoreRevisions) -&gt; bool {
+<span class="ln"> 185</span>          match self {
+<span class="ln"> 186</span>              Part::Sessions =&gt; {
+<span class="ln"> 187</span>                  StoreRevisions { execs: 0, ..old } != StoreRevisions { execs: 0, ..new }
+<span class="ln"> 188</span>              }
+<span class="ln"> 189</span>              Part::Activity =&gt; old.execs != new.execs,
+<span class="ln"> 190</span>              Part::Planning | Part::Task | Part::Wave | Part::WorkActivity =&gt; old != new,
+<span class="ln"> 191</span>          }
+<span class="ln"> 192</span>      }
+<span class="ln"> 193</span>  
+<span class="ln"> 194</span>      fn clock(self) -&gt; Option&lt;Duration&gt; {
+<span class="ln"> 195</span>          match self {
+<span class="ln"> 196</span>              Part::Planning | Part::Wave =&gt; Some(PLANNING_CLOCK),
+<span class="ln"> 197</span>              Part::Activity =&gt; Some(ACTIVITY_CLOCK),
+<span class="ln"> 198</span>              _ =&gt; None,
+<span class="ln"> 199</span>          }
+<span class="ln"> 200</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b8118010265b2f47213f0503e94f4d379549e02f/rust/loopflow/src/lf/commands/workspace_watch.rs#L182-L200"><code>rust/loopflow/src/lf/commands/workspace_watch.rs</code></a> · <code>Part::changed, Part::clock</code> · b81180102 · lines 182–200 · new in this PR</figcaption></figure>
 <div class="note"><p><b>The predicate has already been wrong once.</b> Its first version skipped every <code>:events.jsonl:</code> row and silenced about 1,270 displayed rows a day. If it skips too much, a row stops updating and the 1 s re-check cannot catch it, because it reads the same counters. A test walks each fact <code>session list</code> shows; Work activity and a Wave's Session history have no such test.</p>
 <p><b>Token totals lag by design of the predicate, not by decision.</b> Usage rows move nothing, so totals refresh at the next displayed change or the five-minute clock.</p></div>
 <details><summary>How a new table is kept from being forgotten</summary>
-<p>A store test lists every table and fails unless it has all three triggers or appears in <code>NEVER_DISPLAYED</code> (<a href="https://github.com/loopflowstudio/loopflow/blob/2b96c6f0d4bdf0a46de774f479ba88c4047c8bec/rust/loopflow/src/store/sqlite/revisions.rs#L53-L129"><code>revisions.rs</code> lines 53–129</a>). It checks that triggers exist, not that each is assigned the right counter.</p></details>
+<p>A store test lists every table and fails unless it has all three triggers or appears in <code>NEVER_DISPLAYED</code> (<code>rust/loopflow/src/store/sqlite/revisions.rs</code>). It checks that triggers exist, not that each is assigned the right counter.</p></details>
 
 <h2 id="s3">3 · Desktop applies a frame</h2>
 <p><code>PodiumModel</code> remains the window's single owner of what is shown. Every frame passes the same four questions before it changes anything: is it newer, is it from this Home, does it answer the last local write, and is it for what the window shows now.</p>
@@ -285,7 +290,7 @@ ol.dec li{margin-bottom:14px}
 <span class="ln"> 637</span>          }
 <span class="ln"> 638</span>          workspaceHome = frame.home
 <span class="ln"> 639</span>          let answers = frame.answers ?? 0
-<span class="ln"> 640</span>          let reason = frame.unavailable ?? &quot;Workspace reader returned no \(part) reading&quot;
+<span class="ln"> 640</span>          let reason = frame.unavailable ?? "Workspace reader returned no \(part) reading"
 <span class="ln"> 641</span>          switch frame.content {
 <span class="ln"> 642</span>          case .planning(let body):
 <span class="ln"> 643</span>              guard answers &gt;= planningFloor else { return }
@@ -303,7 +308,7 @@ ol.dec li{margin-bottom:14px}
 <span class="ln"> 655</span>              let next = PodiumReading.available(body.entries)
 <span class="ln"> 656</span>              if sessions != next { sessions = next }
 <span class="ln"> 657</span>              if savedSessionRepos.remove(repoPath) != nil {
-<span class="ln"> 658</span>                  LaunchJournal.home.refreshed(&quot;sessions&quot;, ms: workspaceOpened.elapsedMs, ok: true)
+<span class="ln"> 658</span>                  LaunchJournal.home.refreshed("sessions", ms: workspaceOpened.elapsedMs, ok: true)
 <span class="ln"> 659</span>              }
 <span class="ln"> 660</span>              endLaunchWhenCurrent()
 <span class="ln"> 661</span>              // Explicit history is read on request, never restored at launch.
@@ -347,7 +352,7 @@ ol.dec li{margin-bottom:14px}
 <span class="ln"> 699</span>              break
 <span class="ln"> 700</span>          }
 <span class="ln"> 701</span>          appliedSequence[part] = frame.sequence
-<span class="ln"> 702</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/2b96c6f0d4bdf0a46de774f479ba88c4047c8bec/swift/LoopflowMac/PodiumModel.swift#L630-L702"><code>swift/LoopflowMac/PodiumModel.swift</code></a> · <code>PodiumModel.apply(_:)</code> · 2b96c6f0d · lines 630–702 · new in this PR</figcaption></figure>
+<span class="ln"> 702</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b8118010265b2f47213f0503e94f4d379549e02f/swift/LoopflowMac/PodiumModel.swift#L630-L702"><code>swift/LoopflowMac/PodiumModel.swift</code></a> · <code>PodiumModel.apply(_:)</code> · b81180102 · lines 630–702 · new in this PR</figcaption></figure>
 <p>A local write and an explicit refresh use the same request. The number it returns becomes a floor; frames below it were read before the write.</p>
 <figure><pre><code><span class="ln"> 609</span>      /// A local write changed Session rows; a frame read before it is stale.
 <span class="ln"> 610</span>      private func supersedeSessions() {
@@ -355,11 +360,11 @@ ol.dec li{margin-bottom:14px}
 <span class="ln"> 612</span>          guard workspaceObservation != nil else { return }
 <span class="ln"> 613</span>          sessionsFloor = send { .refresh(id: $0) }
 <span class="ln"> 614</span>      }
-<span class="om">    ⋮  lines 615–749 omitted</span>
+<span class="om">       … lines 615–749 omitted …</span>
 <span class="ln"> 750</span>      /// One explicit read of everything, for a change the cadence should not wait on.
 <span class="ln"> 751</span>      func refresh() async {
 <span class="ln"> 752</span>          if workspaceObservation != nil {
-<span class="ln"> 753</span>              // Frames read before this request may predate the caller&#x27;s write.
+<span class="ln"> 753</span>              // Frames read before this request may predate the caller's write.
 <span class="ln"> 754</span>              let id = send { .refresh(id: $0) }
 <span class="ln"> 755</span>              (planningFloor, sessionsFloor) = (id, id)
 <span class="ln"> 756</span>              await withCheckedContinuation { planningWaiters.append((id, $0)) }
@@ -368,13 +373,13 @@ ol.dec li{margin-bottom:14px}
 <span class="ln"> 759</span>          async let sessions: Void = refreshSessions()
 <span class="ln"> 760</span>          await refreshPlanning()
 <span class="ln"> 761</span>          await sessions
-<span class="ln"> 762</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/2b96c6f0d4bdf0a46de774f479ba88c4047c8bec/swift/LoopflowMac/PodiumModel.swift#L609-L762"><code>swift/LoopflowMac/PodiumModel.swift</code></a> · <code>supersedeSessions, refresh</code> · 2b96c6f0d · lines 609–614, 750–762 · new branch at the top of an existing function</figcaption></figure>
+<span class="ln"> 762</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b8118010265b2f47213f0503e94f4d379549e02f/swift/LoopflowMac/PodiumModel.swift#L609-L762"><code>swift/LoopflowMac/PodiumModel.swift</code></a> · <code>supersedeSessions, refresh</code> · b81180102 · lines 609–614, 750–762 · new branch at the top of an existing function</figcaption></figure>
 <div class="note"><p><b>Two guards now protect the same reads.</b> <code>sessionsGeneration</code> and <code>roadmapGeneration</code> still guard the one-shot paths, which run when no reader is open: session fixtures and about sixty call sites in four test suites. With a reader open, the floors do the work. The plan lists the one-shot bodies as still to delete.</p>
 <p><b>A frame from another Home is applied after dropping the old Home's content</b>, where the design said it would be ignored. The reader exits when the Home changes, so one reader never sends two Homes.</p></div>
 
 <h2 id="s4">4 · Failure and recovery</h2>
 <p>The reader is a foreground child of the window. When it ends, the window keeps its rows, marks them unavailable, and reopens the reader after 1 s, doubling to 30 s. A new reader numbers frames from one and reads the store as it is, so every floor resets.</p>
-<figure><pre><code><span class="ln"> 530</span>      /// The window&#x27;s one refresh owner: one reader process whose frames say
+<figure><pre><code><span class="ln"> 530</span>      /// The window's one refresh owner: one reader process whose frames say
 <span class="ln"> 531</span>      /// what changed. Runs until cancelled, reopening the reader when it ends.
 <span class="ln"> 532</span>      func keepWorkspaceCurrent() async {
 <span class="ln"> 533</span>          if usesFixedFixture {
@@ -404,9 +409,9 @@ ol.dec li{margin-bottom:14px}
 <span class="ln"> 557</span>                  for try await frame in opened.frames {
 <span class="ln"> 558</span>                      guard !Task.isCancelled else { break }
 <span class="ln"> 559</span>                      await apply(frame)
-<span class="ln"> 560</span>                      if frame.content.part != &quot;heartbeat&quot; { delay = .seconds(1) }
+<span class="ln"> 560</span>                      if frame.content.part != "heartbeat" { delay = .seconds(1) }
 <span class="ln"> 561</span>                  }
-<span class="ln"> 562</span>                  if !Task.isCancelled { throw RegistryQueryError(&quot;Workspace observation ended&quot;) }
+<span class="ln"> 562</span>                  if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
 <span class="ln"> 563</span>              } catch ActiveSessionsObservationError.configurationChanged {
 <span class="ln"> 564</span>                  // The installed `lf` or its Home selection was replaced.
 <span class="ln"> 565</span>                  delay = .milliseconds(100)
@@ -420,85 +425,197 @@ ol.dec li{margin-bottom:14px}
 <span class="ln"> 573</span>              delay = min(delay * 2, .seconds(30))
 <span class="ln"> 574</span>          }
 <span class="ln"> 575</span>      }
-<span class="om">    ⋮  lines 576–621 omitted</span>
+<span class="om">       … lines 576–621 omitted …</span>
 <span class="ln"> 622</span>      /// The reader ended. What is shown stays, marked as no longer current.
 <span class="ln"> 623</span>      private func workspaceUnavailable(_ reason: String) {
 <span class="ln"> 624</span>          if let value = roadmap.value { roadmap = .unavailable(lastGood: value, reason: reason) }
 <span class="ln"> 625</span>          if let value = waves.value { waves = .unavailable(lastGood: value, reason: reason) }
 <span class="ln"> 626</span>          if repoPath != nil, let value = sessions.value { sessions = .unavailable(lastGood: value, reason: reason) }
 <span class="ln"> 627</span>          if let value = processActivity.value { processActivity = .unavailable(lastGood: value, reason: reason) }
-<span class="ln"> 628</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/2b96c6f0d4bdf0a46de774f479ba88c4047c8bec/swift/LoopflowMac/PodiumModel.swift#L530-L628"><code>swift/LoopflowMac/PodiumModel.swift</code></a> · <code>keepWorkspaceCurrent, workspaceUnavailable</code> · 2b96c6f0d · lines 530–575, 622–628 · replaces keepPlanningCurrent and keepSessionsCurrent</figcaption></figure>
-<p>Inside the reader, a store file that exists and cannot be opened is reported, not treated as absent. This was found on a Home copy at another schema, which read as an empty workspace.</p>
-<figure><pre><code><span class="ln"> 425</span>      fn project(&amp;self, part: Part) -&gt; Result&lt;WorkspaceContent&gt; {
-<span class="ln"> 426</span>          let Some(store) = &amp;self.store else {
-<span class="ln"> 427</span>              // A store that cannot be opened is not an empty one.
-<span class="ln"> 428</span>              return match &amp;self.refused {
-<span class="ln"> 429</span>                  Some(reason) if part != Part::Activity =&gt; {
-<span class="ln"> 430</span>                      Err(anyhow!(&quot;Loopflow store cannot be read: {reason}&quot;))
-<span class="ln"> 431</span>                  }
-<span class="ln"> 432</span>                  _ =&gt; self.absent(part),
-<span class="ln"> 433</span>              };
-<span class="ln"> 434</span>          };
-<span class="om">    ⋮  lines 435–698 omitted</span>
-<span class="ln"> 699</span>              for part in Part::ALL {
-<span class="ln"> 700</span>                  let now = Instant::now();
-<span class="ln"> 701</span>                  if !reader.due(part, revisions, now) {
-<span class="ln"> 702</span>                      continue;
-<span class="ln"> 703</span>                  }
-<span class="ln"> 704</span>                  let (reason, content) = match reader.project(part) {
-<span class="ln"> 705</span>                      Ok(content) =&gt; (None, content),
-<span class="ln"> 706</span>                      Err(error) =&gt; (Some(format!(&quot;{error:#}&quot;)), unavailable(part)),
-<span class="ln"> 707</span>                  };
-<span class="ln"> 708</span>                  let identity = fingerprint(&amp;reason, &amp;content)?;
-<span class="ln"> 709</span>                  let state = reader.parts.entry(part).or_default();
-<span class="ln"> 710</span>                  let send = state.force || state.sent != Some(identity);
-<span class="ln"> 711</span>                  state.read_at = revisions;
-<span class="ln"> 712</span>                  state.read_on = Some(now);
-<span class="ln"> 713</span>                  state.force = false;
-<span class="ln"> 714</span>                  // A failed reading is retried on the next look, not held.
-<span class="ln"> 715</span>                  state.stale = reason.is_some();
-<span class="ln"> 716</span>                  state.sent = Some(identity);</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/2b96c6f0d4bdf0a46de774f479ba88c4047c8bec/rust/loopflow/src/lf/commands/workspace_watch.rs#L425-L716"><code>rust/loopflow/src/lf/commands/workspace_watch.rs</code></a> · <code>Reader::project and the retry flag</code> · 2b96c6f0d · lines 425–434, 699–716 · new in this PR</figcaption></figure>
-<div class="note"><p><b>A failing part is re-read about every second with no backoff.</b> In the captured run the planning count went from 2 to 5 in the two seconds between heartbeats while the reading kept failing. No frames are sent, because the failure text is unchanged. On a small store that is free. On Jack's store a planning reading takes about 2 s on the one loop, so a persistent failure would likely keep the loop busy and delay Session rows; that consequence is inferred from source and not measured.</p></div>
+<span class="ln"> 628</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b8118010265b2f47213f0503e94f4d379549e02f/swift/LoopflowMac/PodiumModel.swift#L530-L628"><code>swift/LoopflowMac/PodiumModel.swift</code></a> · <code>keepWorkspaceCurrent, workspaceUnavailable</code> · b81180102 · lines 530–575, 622–628 · replaces keepPlanningCurrent and keepSessionsCurrent</figcaption></figure>
+<p>Inside the reader, a store file that exists and cannot be opened is reported, not treated as absent. This was found on a Home copy at another schema, which read as an empty workspace. A part whose reading fails is read again without waiting for a change, each time after twice the wait.</p>
+<figure><pre><code><span class="ln"> 213</span>  /// What was last read for one part, and what was last sent.
+<span class="ln"> 214</span>  #[derive(Debug, Default)]
+<span class="ln"> 215</span>  struct PartState {
+<span class="ln"> 216</span>      read_at: Option&lt;StoreRevisions&gt;,
+<span class="ln"> 217</span>      read_on: Option&lt;Instant&gt;,
+<span class="ln"> 218</span>      sent: Option&lt;[u8; 32]&gt;,
+<span class="ln"> 219</span>      force: bool,
+<span class="ln"> 220</span>      /// Consecutive failed readings.
+<span class="ln"> 221</span>      failures: u32,
+<span class="ln"> 222</span>  }
+<span class="ln"> 223</span>  
+<span class="ln"> 224</span>  impl PartState {
+<span class="ln"> 225</span>      /// A failed reading is retried without a change, each time after twice
+<span class="ln"> 226</span>      /// the wait, so a part that cannot be read does not hold the one loop.
+<span class="ln"> 227</span>      fn retry_due(&amp;self, read_on: Instant, now: Instant) -&gt; bool {
+<span class="ln"> 228</span>          self.failures &gt; 0
+<span class="ln"> 229</span>              &amp;&amp; now - read_on
+<span class="ln"> 230</span>                  &gt;= CHECK
+<span class="ln"> 231</span>                      .saturating_mul(1 &lt;&lt; (self.failures - 1).min(16))
+<span class="ln"> 232</span>                      .min(RETRY_CAP)
+<span class="ln"> 233</span>      }
+<span class="ln"> 234</span>  }
+<span class="om">       … lines 235–404 omitted …</span>
+<span class="ln"> 405</span>      fn due(&amp;self, part: Part, revisions: Option&lt;StoreRevisions&gt;, now: Instant) -&gt; bool {
+<span class="ln"> 406</span>          if !part.selected(&amp;self.scope) {
+<span class="ln"> 407</span>              return false;
+<span class="ln"> 408</span>          }
+<span class="ln"> 409</span>          let Some(state) = self.parts.get(&amp;part) else {
+<span class="ln"> 410</span>              return true;
+<span class="ln"> 411</span>          };
+<span class="ln"> 412</span>          let Some(read_on) = state.read_on else {
+<span class="ln"> 413</span>              return true;
+<span class="ln"> 414</span>          };
+<span class="ln"> 415</span>          state.force
+<span class="ln"> 416</span>              || state.retry_due(read_on, now)
+<span class="ln"> 417</span>              || match (state.read_at, revisions) {
+<span class="ln"> 418</span>                  (Some(old), Some(new)) =&gt; part.changed(old, new),
+<span class="ln"> 419</span>                  (None, None) =&gt; false,
+<span class="ln"> 420</span>                  _ =&gt; true,
+<span class="ln"> 421</span>              }
+<span class="ln"> 422</span>              || part.clock().is_some_and(|clock| now - read_on &gt;= clock)
+<span class="ln"> 423</span>      }
+<span class="om">       … lines 424–439 omitted …</span>
+<span class="ln"> 440</span>      fn project(&amp;self, part: Part) -&gt; Result&lt;WorkspaceContent&gt; {
+<span class="ln"> 441</span>          let Some(store) = &amp;self.store else {
+<span class="ln"> 442</span>              // A store that cannot be opened is not an empty one.
+<span class="ln"> 443</span>              return match &amp;self.refused {
+<span class="ln"> 444</span>                  Some(reason) if part != Part::Activity =&gt; {
+<span class="ln"> 445</span>                      Err(anyhow!("Loopflow store cannot be read: {reason}"))
+<span class="ln"> 446</span>                  }
+<span class="ln"> 447</span>                  _ =&gt; self.absent(part),
+<span class="ln"> 448</span>              };
+<span class="ln"> 449</span>          };</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b8118010265b2f47213f0503e94f4d379549e02f/rust/loopflow/src/lf/commands/workspace_watch.rs#L213-L449"><code>rust/loopflow/src/lf/commands/workspace_watch.rs</code></a> · <code>PartState::retry_due, Reader::due, Reader::project</code> · b81180102 · lines 213–234, 405–423, 440–449 · new in this PR; the backoff replaces a retry every second</figcaption></figure>
+<div class="note"><p><b>The transcript in Stop 1 shows the backoff.</b> After the failed reading at 5.1 s the planning count reaches 4 by 8.6 s and stays there through 12.6 s: retries after about 1, 2 and 4 seconds, each rounded up to the loop's one-second check. No frames are sent for them, because the failure text is unchanged.</p>
+<p><b>Backoff applies only to the idle retry.</b> In <code>due</code>, a changed counter or a request still reads the part at once. A part that fails while agents commit is read as often as a healthy one. The 60 s cap is a guess, and none of this was run against a failing copy of Jack's store.</p></div>
 <details><summary>What else catches up</summary>
-<p>A missed filesystem event is covered by re-reading the four counters every second. Waking the Mac sends <code>refresh</code> (<code>PodiumView</code>, <code>rescanWorkspace</code>). SQLite removing and recreating its log file is handled by re-arming the watch (<a href="https://github.com/loopflowstudio/loopflow/blob/2b96c6f0d4bdf0a46de774f479ba88c4047c8bec/rust/loopflow/src/store/changes.rs#L27-L44"><code>StoreChanges::wait</code></a>); that case is tested on the waiter, not through the binary, because a running reader holds the log open.</p></details>
+<p>A missed filesystem event is covered by re-reading the four counters every second. Waking the Mac sends <code>refresh</code>. SQLite removing and recreating its log file is handled by re-arming the watch (<code>StoreChanges::wait</code>); that case is tested on the waiter, not through the binary, because a running reader holds the log open.</p></details>
 
-<h2 id="s5">5 · The read made cheap enough to run on change</h2>
-<p>A stream that delivered a 20 s old answer would not help. Most of <code>roadmap --all</code>'s time went to loading every Exec a checkout ever ran, per Task, to answer a question that only concerns unfinished execution. The completion gate now starts from the unfinished Execs (109 on Jack's store) and asks which belong to the Task.</p>
-<figure><pre><code><span class="ln">  65</span>  /// The same membership as `exec_ids`, reached from the unfinished Execs: each
-<span class="ln">  66</span>  /// one&#x27;s few Sessions and Flows are tested against the Task, instead of first
-<span class="ln">  67</span>  /// listing every Session the Task has.
-<span class="ln">  68</span>  fn unfinished_exec_filter(selector: &amp;str) -&gt; String {
-<span class="ln">  69</span>      let tasks = tasks(selector);
-<span class="ln">  70</span>      let session = session_membership(&quot;a&quot;);
-<span class="ln">  71</span>      format!(
-<span class="ln">  72</span>          &quot;e.completed_at IS NULL AND (EXISTS(SELECT 1 FROM ({tasks}) tw WHERE {})
-<span class="ln">  73</span>          OR EXISTS(SELECT 1 FROM session_events se JOIN agent_sessions a ON a.id=se.session_id
-<span class="ln">  74</span>              JOIN ({tasks}) tw ON ({session}) WHERE se.exec_id=e.id)
-<span class="ln">  75</span>          OR EXISTS(SELECT 1 FROM agent_sessions a JOIN ({tasks}) tw ON ({session})
-<span class="ln">  76</span>              WHERE a.driver_exec_id=e.id)
-<span class="ln">  77</span>          OR EXISTS(SELECT 1 FROM flow_events fe JOIN flow_sessions af ON af.id=fe.flow_id
-<span class="ln">  78</span>              JOIN ({tasks}) tw ON af.task_id=tw.id OR ({}) WHERE fe.exec_id=e.id))&quot;,
-<span class="ln">  79</span>          checkout(&quot;e.cwd&quot;),
-<span class="ln">  80</span>          checkout(FLOW_CWD)
-<span class="ln">  81</span>      )
-<span class="ln">  82</span>  }
-<span class="om">    ⋮  lines 83–98 omitted</span>
-<span class="ln">  99</span>      /// Read all three owners in one SQLite snapshot, including closed history.
-<span class="ln"> 100</span>      pub fn task_work(&amp;self, task: &amp;TaskId) -&gt; StoreResult&lt;TaskWork&gt; {
-<span class="ln"> 101</span>          self.read_task_work(task, &amp;format!(&quot;e.id IN ({})&quot;, exec_ids(&quot;?1&quot;)))
-<span class="ln"> 102</span>      }
-<span class="ln"> 103</span>  
-<span class="ln"> 104</span>      /// Sessions and Flows in full, with only the Execs still unfinished.
-<span class="ln"> 105</span>      /// Completion and recovery ask nothing of finished execution, and a
-<span class="ln"> 106</span>      /// checkout&#x27;s Exec history grows without bound.
-<span class="ln"> 107</span>      pub(crate) fn task_open_work(&amp;self, task: &amp;TaskId) -&gt; StoreResult&lt;TaskWork&gt; {
-<span class="ln"> 108</span>          self.read_task_work(task, &amp;unfinished_exec_filter(&quot;?1&quot;))
-<span class="ln"> 109</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/2b96c6f0d4bdf0a46de774f479ba88c4047c8bec/rust/loopflow/src/store/sqlite/task_work.rs#L65-L109"><code>rust/loopflow/src/store/sqlite/task_work.rs</code></a> · <code>unfinished_exec_filter, task_open_work</code> · 2b96c6f0d · lines 65–82, 99–109 · task_work is unchanged; the completion gate now calls task_open_work</figcaption></figure>
-<p>With Git answers reused inside the watch process (layout for ten minutes, checkout contents for one), a planning reading on a copy of Jack's store went from about 7.5 s to about 2 s. The target was 300 ms.</p>
+<h2 id="s5">5 · The planning read made cheap enough to run on change</h2>
+<p>A stream that delivered a 20 s old answer would not help. Sampling the reader on a copy of Jack's store put 83% of a planning reading in one statement: which unfinished Execs belong to this Task, asked once per unfinished Task. It is now asked once per reading, for all Tasks.</p>
+<figure><pre><code><span class="ln">  69</span>  /// Every unfinished Exec paired with each Task it belongs to: the same
+<span class="ln">  70</span>  /// membership as `exec_ids`, reached from the few unfinished Execs instead of
+<span class="ln">  71</span>  /// from every Session a Task has, and for all Tasks in one statement. The
+<span class="ln">  72</span>  /// index and join order are pinned: left to itself the planner scans every
+<span class="ln">  73</span>  /// Exec and every event that names one.
+<span class="ln">  74</span>  fn open_exec_tasks() -&gt; String {
+<span class="ln">  75</span>      let session = session_membership("a");
+<span class="ln">  76</span>      format!(
+<span class="ln">  77</span>          "WITH open AS MATERIALIZED (SELECT id,cwd FROM execs INDEXED BY execs_unfinished
+<span class="ln">  78</span>              WHERE completed_at IS NULL),
+<span class="ln">  79</span>          sessions AS (SELECT DISTINCT se.exec_id AS exec,se.session_id AS session
+<span class="ln">  80</span>              FROM open CROSS JOIN session_events se ON se.exec_id=open.id
+<span class="ln">  81</span>              UNION SELECT a.driver_exec_id,a.id FROM open CROSS JOIN agent_sessions a ON a.driver_exec_id=open.id),
+<span class="ln">  82</span>          flows AS (SELECT DISTINCT fe.exec_id AS exec,fe.flow_id AS flow
+<span class="ln">  83</span>              FROM open CROSS JOIN flow_events fe ON fe.exec_id=open.id)
+<span class="ln">  84</span>          SELECT open.id,tw.id FROM open JOIN tasks tw ON {}
+<span class="ln">  85</span>          UNION SELECT s.exec,tw.id FROM sessions s JOIN agent_sessions a ON a.id=s.session
+<span class="ln">  86</span>              JOIN tasks tw ON ({session})
+<span class="ln">  87</span>          UNION SELECT f.exec,tw.id FROM flows f JOIN flow_sessions af ON af.id=f.flow
+<span class="ln">  88</span>              JOIN tasks tw ON af.task_id=tw.id OR ({})",
+<span class="ln">  89</span>          checkout("open.cwd"),
+<span class="ln">  90</span>          checkout(FLOW_CWD)
+<span class="ln">  91</span>      )
+<span class="ln">  92</span>  }
+<span class="ln">  93</span>  
+<span class="ln">  94</span>  /// The unfinished Execs of every Task, read once for a reading of many Tasks.
+<span class="ln">  95</span>  /// Unfinished Execs are few; a checkout's Exec history grows without bound.
+<span class="ln">  96</span>  #[derive(Debug)]
+<span class="ln">  97</span>  pub(crate) struct OpenExecs {
+<span class="ln">  98</span>      by_task: HashMap&lt;String, Vec&lt;Exec&gt;&gt;,
+<span class="ln">  99</span>  }
+<span class="om">       … lines 100–175 omitted …</span>
+<span class="ln"> 176</span>      pub(crate) fn open_execs(&amp;self) -&gt; StoreResult&lt;OpenExecs&gt; {
+<span class="ln"> 177</span>          let mut conn = self.conn.lock().expect("store mutex poisoned");
+<span class="ln"> 178</span>          let tx = conn.transaction()?;
+<span class="ln"> 179</span>          let execs = tx
+<span class="ln"> 180</span>              .prepare(&amp;format!(
+<span class="ln"> 181</span>                  "{} INDEXED BY execs_unfinished WHERE e.completed_at IS NULL
+<span class="ln"> 182</span>                  ORDER BY e.started_at DESC,e.id",
+<span class="ln"> 183</span>                  super::execs::EXEC_SELECT
+<span class="ln"> 184</span>              ))?
+<span class="ln"> 185</span>              .query_map([], super::execs::read_exec)?
+<span class="ln"> 186</span>              .collect::&lt;rusqlite::Result&lt;Vec&lt;_&gt;&gt;&gt;()?;
+<span class="ln"> 187</span>          let mut tasks: HashMap&lt;ExecId, Vec&lt;String&gt;&gt; = HashMap::new();
+<span class="ln"> 188</span>          let mut query = tx.prepare(&amp;open_exec_tasks())?;
+<span class="ln"> 189</span>          let mut rows = query.query([])?;
+<span class="ln"> 190</span>          while let Some(row) = rows.next()? {
+<span class="ln"> 191</span>              tasks.entry(row.get(0)?).or_default().push(row.get(1)?);
+<span class="ln"> 192</span>          }
+<span class="ln"> 193</span>          drop(rows);
+<span class="ln"> 194</span>          drop(query);
+<span class="ln"> 195</span>          tx.commit()?;
+<span class="ln"> 196</span>          let mut by_task: HashMap&lt;String, Vec&lt;Exec&gt;&gt; = HashMap::new();
+<span class="ln"> 197</span>          // Each Task's Execs keep the newest-first order they were read in.
+<span class="ln"> 198</span>          for exec in execs {
+<span class="ln"> 199</span>              for task in tasks.remove(&amp;exec.id).unwrap_or_default() {
+<span class="ln"> 200</span>                  by_task.entry(task).or_default().push(exec.clone());
+<span class="ln"> 201</span>              }
+<span class="ln"> 202</span>          }
+<span class="ln"> 203</span>          Ok(OpenExecs { by_task })
+<span class="ln"> 204</span>      }
+<span class="ln"> 205</span>  
+<span class="ln"> 206</span>      /// Sessions and Flows in full, with only the Execs still unfinished.
+<span class="ln"> 207</span>      /// Completion and recovery ask nothing of finished execution.
+<span class="ln"> 208</span>      pub(crate) fn task_open_work(&amp;self, task: &amp;TaskId, open: &amp;OpenExecs) -&gt; StoreResult&lt;TaskWork&gt; {
+<span class="ln"> 209</span>          let mut conn = self.conn.lock().expect("store mutex poisoned");
+<span class="ln"> 210</span>          let tx = conn.transaction()?;
+<span class="ln"> 211</span>          let (sessions, flows) = members(&amp;tx, task)?;
+<span class="ln"> 212</span>          tx.commit()?;
+<span class="ln"> 213</span>          Ok(TaskWork {
+<span class="ln"> 214</span>              sessions,
+<span class="ln"> 215</span>              flows,
+<span class="ln"> 216</span>              execs: open.by_task.get(task.as_str()).cloned().unwrap_or_default(),
+<span class="ln"> 217</span>          })
+<span class="ln"> 218</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b8118010265b2f47213f0503e94f4d379549e02f/rust/loopflow/src/store/sqlite/task_work.rs#L69-L218"><code>rust/loopflow/src/store/sqlite/task_work.rs</code></a> · <code>open_exec_tasks, OpenExecs, open_execs, task_open_work</code> · b81180102 · lines 69–99, 176–218 · task_work is unchanged; the roadmap list reads one OpenExecs and passes it to the completion gate for every Task</figcaption></figure>
+<table>
+<thead><tr><th>On a copy of Jack's store, release build</th><th>Before these slices</th><th>Now</th><th>Target</th></tr></thead>
+<tbody>
+<tr><td>Refresh request to answering planning frame (6 refreshes, load 20)</td><td>2.8–6.6 s</td><td>0.25–0.28 s</td><td>—</td></tr>
+<tr><td>Planning projection alone, timed inside the reader once</td><td>—</td><td>190–200 ms</td><td>300 ms</td></tr>
+<tr><td>Renamed Task, writer's exit to frame (5 samples, load 15–19)</td><td>—</td><td>301–327 ms</td><td>1 s to the rendered row</td></tr>
+<tr><td>Renamed Session, writer's exit to frame</td><td>—</td><td>121–131 ms</td><td>500 ms to the rendered row</td></tr>
+<tr><td>First reading after the reader starts (5 starts, load 17–30)</td><td>6.5–7.1 s</td><td>4.2–4.6 s, one at 7.0 s</td><td>—</td></tr>
+</tbody>
+</table>
+<p class="meta">Numbers are the plan's recorded measurements (<code>scratch/measure/</code>), not rerun for this page. Each commit-to-frame time includes the loop's 100 ms quiet wait. They time the reader; the window is not in them.</p>
+<div class="note"><p><b>The index and join order are pinned by hand.</b> <code>INDEXED BY</code> and <code>CROSS JOIN</code> are there because the bundled SQLite otherwise scans every Exec: 350 ms against 23 ms. The statement fails outright if the <code>execs_unfinished</code> index is ever dropped or renamed.</p>
+<p><b>The plan's rule is met for Exec membership only.</b> The rule was a fixed number of statements per reading, never one per Task. <code>task_open_work</code> still calls <code>members</code> per Task, which walks that Task's Sessions including finished ones, and the gate then reads each Session's driver, row and pending turn. That is about 30 ms of a reading on 140 Tasks. It was left because the reading fits its budget and the remaining reads are the same completion rule <code>lf task complete</code> uses. Nothing bounds it as Tasks grow.</p></div>
 
-<h2 id="decisions">Open decisions</h2>
-<ol class="dec">
-<li><b>A Task with no started work does not reach the left outline.</b> LOO-382 asks that a new Task appear in the left pane “without an execution-start prerequisite”. On 2026-09-25 Jack Heart accepted an outline of started Tasks only. The stream delivers the Task; the outline filters it. Nothing was changed. Jack has not chosen.
+<h2 id="s6">6 · Which finished Tasks stay in the outline</h2>
+<p>A finished Task stays visible while it still has started work nobody settled. Rust now decides that and sends it as a required field on the Task's condition; Swift's copy of the rule is deleted.</p>
+<figure><pre><code><span class="ln"> 202</span>  /// A Task's shared condition and the evidence that proves it.
+<span class="ln"> 203</span>  #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+<span class="ln"> 204</span>  pub struct TaskConditionSnapshot {
+<span class="ln"> 205</span>      pub state: TaskConditionState,
+<span class="ln"> 206</span>      pub reason: String,
+<span class="ln"> 207</span>      /// RFC3339 time local workspace evidence was sampled.
+<span class="ln"> 208</span>      pub observed_at: String,
+<span class="ln"> 209</span>      /// Age of the durable Work evidence at that sample, if Work exists.
+<span class="ln"> 210</span>      pub evidence_age_secs: Option&lt;i64&gt;,
+<span class="ln"> 211</span>      pub local_progress: LocalProgressEvidence,
+<span class="ln"> 212</span>      /// Started work a finished plan has not settled: the Task is still ready,
+<span class="ln"> 213</span>      /// its Flow is not idle, or its checkout holds observed unsettled work.
+<span class="ln"> 214</span>      /// Keeps a terminal Task in the working set.
+<span class="ln"> 215</span>      pub unresolved_execution: bool,
+<span class="ln"> 216</span>  }
+<span class="om">       … lines 217–1425 omitted …</span>
+<span class="ln">1426</span>  fn derive_task_condition(
+<span class="ln">1427</span>      runtime: Option&lt;&amp;TaskRuntimeSnapshot&gt;,
+<span class="ln">1428</span>      next_move: &amp;NextMove,
+<span class="ln">1429</span>      local_progress: LocalProgressEvidence,
+<span class="ln">1430</span>      action_evidence: Option&lt;&amp;TaskActionEvidence&gt;,
+<span class="ln">1431</span>      flow: &amp;TaskFlowRecord,
+<span class="ln">1432</span>      observed_at: time::OffsetDateTime,
+<span class="ln">1433</span>  ) -&gt; TaskConditionSnapshot {
+<span class="ln">1434</span>      // A removed historical checkout does not reopen settled work.
+<span class="ln">1435</span>      let unresolved_execution = runtime.is_some_and(|runtime| {
+<span class="ln">1436</span>          runtime.status == WorkStatus::Ready
+<span class="ln">1437</span>              || matches!(flow, TaskFlowRecord::Pinned(flow) if flow.execution != TaskExecutionState::Idle)
+<span class="ln">1438</span>              || (local_progress.state == LocalProgressEvidenceState::Observed
+<span class="ln">1439</span>                  &amp;&amp; local_progress.unsettled == Some(true))
+<span class="ln">1440</span>      });</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b8118010265b2f47213f0503e94f4d379549e02f/rust/loopflow/src/lf/commands/waves.rs#L202-L1440"><code>rust/loopflow/src/lf/commands/waves.rs</code></a> · <code>TaskConditionSnapshot, derive_task_condition</code> · b81180102 · lines 202–216, 1426–1440 · the field and its derivation are new; the rule moved here from Swift's TaskHistoryFilter.hasUnresolvedExecution</figcaption></figure>
 <figure><pre><code><span class="ln">  16</span>      /// Shared durable evidence that work began. Inspection, a prepared
 <span class="ln">  17</span>      /// checkout, or a live process in the checkout never supplies it.
 <span class="ln">  18</span>      var started: Bool { task.runtime?.started == true }
@@ -508,32 +625,40 @@ ol.dec li{margin-bottom:14px}
 <span class="ln">  22</span>      var inWorkingSet: Bool {
 <span class="ln">  23</span>          if !sessions.isEmpty { return true }
 <span class="ln">  24</span>          guard started else { return false }
-<span class="ln">  25</span>          return !task.task.isTerminal || TaskHistoryFilter.hasUnresolvedExecution(
-<span class="ln">  26</span>              runtime: task.runtime, condition: task.condition, flow: task.flow
-<span class="ln">  27</span>          )
-<span class="ln">  28</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/2b96c6f0d4bdf0a46de774f479ba88c4047c8bec/swift/LoopflowMac/WorkspaceProjection.swift#L16-L28"><code>swift/LoopflowMac/WorkspaceProjection.swift</code></a> · <code>WorkspaceTask.inWorkingSet</code> · 2b96c6f0d · lines 16–28 · unchanged by this PR</figcaption></figure>
-Counterexample: <code>lf task create --wave product --title "Reactive demo"</code> with no <code>--run</code>. The row appears in Product's Task list and not in the outline until a Run or Session exists.</li>
-<li><b>The latency targets are missed.</b> Rendered, on a copy of Jack's store, debug builds, 3 samples: a Task change 2.3 s warm against 1 s; a Session row 0.55–0.6 s against 0.5 s. Jack decided a miss ships with numbers and a follow-up Task. The follow-up Task is not filed.</li>
-<li><b>Failed readings retry every second</b> (<a href="#s4">Stop 4</a>). New in this walkthrough; not in the plan.</li>
+<span class="ln">  25</span>          return !task.task.isTerminal || task.condition.unresolvedExecution
+<span class="ln">  26</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b8118010265b2f47213f0503e94f4d379549e02f/swift/LoopflowMac/WorkspaceProjection.swift#L16-L26"><code>swift/LoopflowMac/WorkspaceProjection.swift</code></a> · <code>WorkspaceTask.inWorkingSet</code> · b81180102 · lines 16–26 · last line changed to read the field</figcaption></figure>
+<div class="note"><p><b>Half the rule moved.</b> “Has open Sessions” and “started” stay in Swift, because they join Session rows the window already holds. Moving them means Rust joining Sessions into the planning part.</p>
+<p><b>This function is also where the Task's first acceptance line fails.</b> <code>guard started else { return false }</code> keeps a Task with no Run out of the outline. See <a href="#decisions">Open decisions</a>, 1.</p>
+<p><b>The field is required, with no default.</b> Workspace text saved by an earlier build lacks it, so the first launch after upgrading should show no saved planning until the reader answers. That follows from LOO-376's rule that saved text goes through the live decoder; it was not exercised.</p></div>
+
+<h2 id="decisions">Open decisions</h2>
+<ol class="dec">
+<li><b>A Task with no started work does not reach the left outline.</b> LOO-382 asks that a new Task appear in the left pane “without an execution-start prerequisite”. On 2026-09-25 Jack Heart accepted an outline of started Tasks only. The stream delivers the Task; the outline filters it (<a href="#s6">Stop 6</a>). Counterexample: <code>lf task create --wave product --title "Reactive demo"</code> with no <code>--run</code> appears in Product's Task list and not in the outline until a Run or Session exists. Nothing was changed. Jack has not chosen.</li>
+<li><b>No derived state is stored.</b> After the first walkthrough Jack said which Waves and Tasks are current should be very simple and fast, that “i think we want it in the db”, and that “this db's only purpose really is to serve this UX.” The branch instead keeps the wire and Swift types, reads in bulk, and stores nothing derived, on the measurement that one per-Task statement was the cost. That choice was made without Jack's confirmation. Stored display rows remain the next step when a bulk reading stops fitting; how they would relate to the execution authority the store also holds is not worked out.</li>
+<li><b>The window has not been re-measured.</b> The last rendered run predates Stop 5: debug builds, 3 samples, a Task change 2.3 s against 1 s and a Session row 0.55–0.6 s against 0.5 s. The reader alone now answers in 0.3 s and 0.13 s. Whether the targets are met on screen is unknown until the benchmark is rerun; the 20-sample release run is still owed. Jack decided a miss ships with numbers and a follow-up Task. None is filed, and it is not yet known whether one is needed.</li>
+<li><b>A first reading still takes 4.2–4.6 s.</b> About 1.7 s is Git asked about 32 existing checkouts one after another. A launch shows saved text first, so this is the wait for the first refresh, not the first frame. Asking Git about the checkouts at once was not built.</li>
 <li><b>Git-only changes show later than before.</b> A dirty checkout used to show within the 15 s poll. Now checkout contents are re-read at most once a minute and only when planning is read, which without a commit is every five minutes. Nobody chose this.</li>
 <li><b>Polling is not entirely gone.</b> A window runs two readers, because <code>monitor active --watch</code> was not folded in. The Task-files comparison still starts <code>lf</code> every 10 s while shown; each start writes an Exec, which moves <code>execs</code> and re-runs planning in the watch.</li>
-<li><b>The shared store changed without Infrastructure's review.</b> One table, three triggers on each of 25 displayed tables (75 in all), and three indexes. The <code>session_events</code> trigger parses each inserted payload as JSON; its cost on large transcript lines is unmeasured.</li>
+<li><b>The shared store changed without Infrastructure's review.</b> One table, three triggers on each of 25 displayed tables (75 in all), and three indexes, two of them widened in the later slices to cover the bulk read. The <code>session_events</code> trigger parses each inserted payload as JSON; its cost on large transcript lines is unmeasured.</li>
 </ol>
 
 <h2 id="evidence">Evidence</h2>
 <table>
 <thead><tr><th>Claim</th><th>Support</th><th>Kind</th></tr></thead>
 <tbody>
-<tr><td>A commit from another process produces one planning frame; a failed reading is unavailable, not empty; a refresh is answered</td><td>The transcript in Stop 1</td><td>Run for this walkthrough, throwaway Home, hand-written row</td></tr>
-<tr><td>A Task committed elsewhere appears once within 2 s; 20 transactions give at most 5 frames ending equal to a fresh read; 2,000 transcript lines read nothing; scope change; idle sends nothing</td><td><code>cargo test -p loopflow --test workspace_watch</code> 8/8</td><td>Recorded pass, not rerun here. The transcript test writes its lines in about one second, not ten.</td></tr>
-<tr><td>Every table is covered or exempt; rollback counts nothing; transcript and usage rows count nothing</td><td><code>--lib -- store_revisions store::changes</code> 6/6</td><td>Recorded pass; test source inspected</td></tr>
-<tr><td>Frames update in place; older and pre-write frames ignored; other repository's rows ignored; refresh waits for its answer; reader end then recovery; completed Task stays under Completed</td><td><code>swift test --filter PodiumModelStreamTests</code> 6/6, scripted feed</td><td>Recorded pass after merging main; one test inspected</td></tr>
-<tr><td>Write-to-visible timings</td><td><code>desktop_performance.py write-visible --samples 3</code>, 15/15</td><td>Recorded. Rows written with <code>sqlite3</code>, so <code>lf</code>'s own write path is not measured. 3 samples, not the 20 the plan requires.</td></tr>
+<tr><td>A commit from another process produces a planning frame; a failed reading is unavailable, not empty; idle retries slow down; a refresh is answered</td><td>The transcript in Stop 1</td><td>Run for this walkthrough, throwaway Home, hand-written row</td></tr>
+<tr><td>A Task committed elsewhere appears once within 2 s; 20 transactions give at most 5 frames ending equal to a fresh read; 2,000 transcript lines read nothing; scope change; idle sends nothing</td><td><code>cargo test -p loopflow --test workspace_watch</code> 8/8</td><td>Recorded pass after the slices, not rerun here. The transcript test writes its lines in about one second, not ten.</td></tr>
+<tr><td>The retry wait doubles; an Exec alone does not re-read Sessions; the time of a reading is not a change</td><td><code>--lib -- workspace_watch</code> 3/3</td><td>Recorded pass; unit tests on the reader's rules, no failing store</td></tr>
+<tr><td>Every table is covered or exempt; rollback counts nothing; transcript and usage rows count nothing</td><td><code>--lib -- store_revisions store::changes</code> 6/6</td><td>Recorded pass from before the slices; the two widened indexes came later</td></tr>
+<tr><td>The new condition field round-trips in Rust and Swift</td><td><code>--test dto_fixtures</code> 19/19; <code>swift test</code> on eight affected suites 88/88</td><td>Recorded pass</td></tr>
+<tr><td>Frames update in place; older and pre-write frames ignored; other repository's rows ignored; refresh waits for its answer; reader end then recovery; completed Task stays under Completed</td><td><code>swift test --filter PodiumModelStreamTests</code> 6/6, scripted feed</td><td>Recorded pass after merging main</td></tr>
+<tr><td>Reader timings in Stop 5</td><td><code>scratch/measure/warm.py</code>, <code>cold.py</code>, <code>commit.py</code> on a copy of Jack's store</td><td>Recorded in the plan. Rows written with <code>sqlite3</code>, so <code>lf</code>'s own write path is not measured. The machine was at load 15–30 throughout.</td></tr>
+<tr><td>Write-to-visible on screen</td><td><code>desktop_performance.py write-visible --samples 3</code>, 15/15</td><td>Stale: run before Stop 5, debug builds, 3 samples of the 20 required</td></tr>
 <tr><td>Selection, drafts, pane layout and scroll survive on the real app; the create → rename → bind → complete demo</td><td>None</td><td>Unverified. No UI test was run; the installed-app demo has not happened.</td></tr>
 <tr><td>Idle reader CPU under 1% of a core</td><td>None</td><td>Unmeasured. The activity part reads every provider process each 2 s.</td></tr>
 </tbody>
 </table>
-<p class="meta">Excerpts are copied from the files at <code>2b96c6f0d</code> with their line numbers. Links open the pinned revision on GitHub; the page reads offline without them.</p>
+<p class="meta">Excerpts are copied from the files at <code>b81180102</code> with their line numbers. Links open the pinned revision on GitHub; the page reads offline without them.</p>
 </main>
 </body>
 </html>

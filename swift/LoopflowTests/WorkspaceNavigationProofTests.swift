@@ -508,30 +508,6 @@ struct WorkspaceNavigationProofTests {
         #expect(model.navigation.selectedSessionId == "first")
         #expect(workspace.multiplexer.layout == layout)
 
-        // A repeated skill name and a nested occurrence both locate the exact
-        // captured node; navigation preserves the original unfinished draft.
-        // Captured preorder: root decision 5; XOR 6; its patch child 7.
-        for node in [UInt32(5), UInt32(7)] {
-            try await named.membership(.step(flow: "feature", invocationId: invocation,
-                                            step: "recorded skill", node: node,
-                                            iterations: [[2, 0]], occurrence: .earlier), for: "first")
-            await model.refresh()
-            try await settle(window)
-            try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership").button().tap()
-            try await settle(window)
-            #expect(model.navigation.content == .details)
-            #expect(model.navigation.selectedSessionId == nil)
-            #expect(model.navigation.flowDrafts["issue-review"]?.selectedNode
-                == FlowNodeSelection(invocationId: invocation, node: node))
-            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "flow-node-detail-\(node)")
-            #expect(window.firstResponder !== terminals[0])
-            #expect(workspace.multiplexer.layout == layout)
-            try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-first").button().tap()
-            try await settle(window)
-            #expect(window.firstResponder === terminals[0])
-            #expect(terminals[0].surface == surfaces[0])
-        }
-
         // Ancestor return shows the Task; the Session row drills back into the
         // same terminal rather than opening another client.
         try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").button().tap()

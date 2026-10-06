@@ -1,8 +1,7 @@
 // RegistryQuery — typed `lf` reads over the machine registry.
 //
 // History and explicit lookups are one-shot queries. What a window shows is kept
-// current by one foreground workspace reader per window; active Sessions use a
-// second so native receipt discovery survives between samples.
+// current by one foreground workspace reader per window.
 //
 // This runs `lf wave list`, `lf wave status`, and the roadmap, ps, and activity
 // readers with `--json` as subprocesses and decodes the wire
@@ -44,7 +43,6 @@ public struct DiscoveryEntry: Codable, Equatable, Sendable, Identifiable {
 public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
     private let runWithInput: @Sendable ([String], String?, String) async throws -> String
-    private let observe: @Sendable () async throws -> ActiveSessionsObservation
     private let start: RegistryStarter?
     private let observeWorkspace: (@Sendable () async throws -> WorkspaceObservation)?
 
@@ -52,16 +50,12 @@ public struct RegistryQuery: Sendable {
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
-        watchActiveSessions: @escaping @Sendable () async throws -> ActiveSessionsObservation = {
-            throw RegistryQueryError("Active Session observation is unavailable on this transport")
-        },
         watchWorkspace: (@Sendable () async throws -> WorkspaceObservation)? = nil,
         start: RegistryStarter? = nil,
         run: @escaping RegistryRunner
     ) {
         self.runWithInput = runWithInput
         self.run = run
-        self.observe = watchActiveSessions
         self.start = start
         self.observeWorkspace = watchWorkspace
     }
@@ -69,8 +63,7 @@ public struct RegistryQuery: Sendable {
     /// A copy that also reports each successful read's wire text, so a caller
     /// can retain exactly what it decoded.
     public func recording(_ record: @escaping @Sendable (_ stdout: String) -> Void) -> RegistryQuery {
-        RegistryQuery(runWithInput: runWithInput, watchActiveSessions: observe,
-                      watchWorkspace: observeWorkspace, start: start) { [run] args, cwd in
+        RegistryQuery(runWithInput: runWithInput, watchWorkspace: observeWorkspace, start: start) { [run] args, cwd in
             let stdout = try await run(args, cwd)
             record(stdout)
             return stdout
@@ -134,10 +127,6 @@ public struct RegistryQuery: Sendable {
     public func userName() async throws -> String? {
         let stdout = try await run(["home", "user", "--json"], nil)
         return try Self.decode(String?.self, from: stdout)
-    }
-
-    public func watchActiveSessions() async throws -> ActiveSessionsObservation {
-        try await observe()
     }
 
     /// Whether this transport keeps a workspace current by itself. Without one,

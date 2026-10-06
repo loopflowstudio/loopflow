@@ -711,7 +711,7 @@ struct WorkspaceNavigationTests {
         #expect(crumb.siblings.map(\.id) == ["first", "second"])
         #expect(model.workspace.subject(for: "first") == work)
         #expect(model.workspace.orphanSessions(search: "").isEmpty)
-        let bar = WorkspaceBreadcrumbBar(model: model, crumb: crumb, onOpenSession: { _ in }, onMonitor: { _ in })
+        let bar = WorkspaceBreadcrumbBar(model: model, crumb: crumb, onOpenSession: { _ in })
         #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").text().string() == "Task \(work.id)")
         for presentation in WorkspacePresentation.allCases {
             let rows = model.workspace.outline(presentation: presentation, collapsed: [], search: work.id, planningReadable: false)

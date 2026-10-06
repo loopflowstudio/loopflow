@@ -408,9 +408,6 @@ struct SessionsContentView: View {
         guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return nil }
         return store.sessions.first { $0.id == navigation.selectedSessionId }?.record.workspace
     }
-    private var fileTaskId: String? {
-        fileTask?.task.runtime?.workId ?? selectedWorkspace?.taskId ?? fileTask?.task.task.identifier
-    }
     private var availablePaths: [WorkspaceIdentity] {
         worktreeLayout.knownPaths.union(store.sessions.compactMap { $0.record.workspace?.identity }).sorted { ($0.homeId, $0.worktree) < ($1.homeId, $1.worktree) }
     }
@@ -479,7 +476,7 @@ struct SessionsContentView: View {
                         }
                         if terminalsVisible, !navigation.showsRetainedTerminals, let task = fileTask,
                            let wave = model.task(id: task.task.id)?.wave.wave {
-                            TaskWorkflowHeader(model: model, task: task.task, wave: wave)
+                            TaskWorkflowHeader(model: model, task: task.task, wave: wave, work: model.taskWork[task.task.id])
                             if taskPath != nil { missingCheckout }
                         }
                         ZStack {
@@ -507,7 +504,9 @@ struct SessionsContentView: View {
                             .disabled(!terminalsVisible)
                             .allowsHitTesting(terminalsVisible)
                             .accessibilityHidden(!terminalsVisible)
-                            VStack(spacing: 0) {
+                            // Mounted only when shown: its readers ask `lf` and each
+                            // `lf` process records an Exec.
+                            if !terminalsVisible {
                                 HSplitView {
                                     WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask,
                                                     onNewSession: newTaskSession)
@@ -517,11 +516,8 @@ struct SessionsContentView: View {
                                             .frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
                                     }
                                 }
+                                .background(palette.background)
                             }
-                            .background(palette.background)
-                            .opacity(terminalsVisible ? 0 : 1)
-                            .allowsHitTesting(!terminalsVisible)
-                            .accessibilityHidden(terminalsVisible)
                         }
                         .frame(maxWidth: .infinity)
                         .clipped()

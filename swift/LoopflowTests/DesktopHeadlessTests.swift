@@ -93,13 +93,16 @@ struct DesktopHeadlessTests {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
         }
 
-        // Any Flow exec opens to its launched graph, where it stands and every step it started.
-        let log = FlowRunLog(model: model, task: task)
+        // Any Flow exec is one line that opens to its id, its launched graph,
+        // where it stands and every step it started.
+        let log = FlowExecLog(model: model, taskId: task.id)
         let flow = try #require(shown.flows.first)
         #expect(throws: (any Error).self) {
             try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-status-\(flow.id)")
         }
+        #expect(throws: (any Error).self) { try log.inspect().find(text: flow.id) }
         model.navigation.expandedFlowRuns.insert(flow.id)
+        _ = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-id-\(flow.id)")
         let detail = try #require(model.flowRuns[flow.id])
         let status = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-status-\(flow.id)").text().string()
         #expect(status == "Running implement · iteration (1, 0)")
@@ -195,21 +198,17 @@ struct DesktopHeadlessTests {
                 if args.prefix(2) == ["task", "move"] { await started.add(args) }
                 return "{}"
             }))
-        func view(position: [String: Any]? = nil, outgoing: [Int] = []) throws -> WorkflowView {
+        func view(position: [String: Any]? = nil, outgoing: [Int] = []) throws -> TaskWorkflowHeader {
             var workflow = try #require(wire["workflow"] as? [String: Any])
             if let position { workflow["position"] = position }
             workflow["outgoing"] = outgoing
             wire["workflow"] = workflow
             let work = try JSONDecoder().decode(TaskWork.self, from: JSONSerialization.data(withJSONObject: wire))
-            return WorkflowView(model: model, task: task, wave: wave.wave, workflow: try #require(work.workflow))
-        }
-        func position(_ view: WorkflowView) throws -> String {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string()
+            return TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .available(work))
         }
 
         // The fixture's `pursue` edge is running: Rust lists no edge to choose beside it.
         let running = try view()
-        #expect(try position(running) == "Running pursue · design to demo")
         #expect(try running.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-2")
             .accessibilityValue().string() == "Running")
         #expect(throws: (any Error).self) {
@@ -220,7 +219,6 @@ struct DesktopHeadlessTests {
         let exec = "11111111-1111-4111-8111-111111111111"
         let stopped = try view(
             position: ["kind": "edge", "edge": 2, "exec_id": exec, "running": false], outgoing: [1, 2])
-        #expect(try position(stopped) == "Stopped on pursue · design to demo")
         let again = try stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run-2")
         #expect(try again.accessibilityValue().string() == "Stopped")
         #expect(try !again.button().isDisabled())
@@ -228,7 +226,9 @@ struct DesktopHeadlessTests {
 
         // At `demo` the edges leaving it are the buttons, named by what they run.
         let waiting = try view(position: ["kind": "node", "node": "demo"], outgoing: [3, 4])
-        #expect(try position(waiting) == "Waiting on you at demo · demo")
+        #expect(throws: (any Error).self) {
+            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position")
+        }
         #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
             .accessibilityValue().string() == "Current")
         let ship = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run-4").button()
@@ -236,6 +236,14 @@ struct DesktopHeadlessTests {
         try ship.tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "ship"]])
+
+        // A Task that has taken up no workflow starts on its Project's.
+        wire["workflow"] = NSNull()
+        let unstarted = TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .available(
+            try JSONDecoder().decode(TaskWork.self, from: JSONSerialization.data(withJSONObject: wire))))
+        try unstarted.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button().tap()
+        for _ in 0..<200 where await started.calls.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await started.calls.last == ["-b", "task", "run", task.task.identifier])
 
         // Going back is the same command a person would type.
         await model.moveTask(to: "design", task: task, wave: wave.wave)
@@ -256,12 +264,14 @@ struct DesktopHeadlessTests {
         let model = PodiumModel(query: RegistryQuery(start: { args, _ in await started.add(args) }, run: { _, _ in "{}" }))
         var wire = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
-        func view(_ change: (inout [String: Any]) -> Void) throws -> WorkflowView {
+        var drawnWorkflow: Workflow?
+        func view(_ change: (inout [String: Any]) -> Void) throws -> TaskWorkflowHeader {
             var workflow = try #require(wire["workflow"] as? [String: Any])
             change(&workflow)
             wire["workflow"] = workflow
             let work = try JSONDecoder().decode(TaskWork.self, from: JSONSerialization.data(withJSONObject: wire))
-            return WorkflowView(model: model, task: task, wave: wave.wave, workflow: try #require(work.workflow))
+            drawnWorkflow = work.workflow
+            return TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .available(work))
         }
 
         // `feature`, with the Task waiting at `design`.
@@ -276,7 +286,8 @@ struct DesktopHeadlessTests {
         _ = try feature.inspect().find(text: "you review the plan")
         _ = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-0")
         _ = try feature.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-edge-3")
-        let drawn = WorkflowGraphLayout(nodes: feature.workflow.nodes, edges: feature.workflow.edges)
+        let workflow = try #require(drawnWorkflow)
+        let drawn = WorkflowGraphLayout(nodes: workflow.nodes, edges: workflow.edges)
         #expect(drawn.arrows.map(\.route) == [.straight, .loop(level: 0), .straight, .loop(level: 0), .straight])
         #expect(drawn.boxes.map(\.terminal) == [true, false, false, true])
         // Each revise loop arcs over its own node, above the row.

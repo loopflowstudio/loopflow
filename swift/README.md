@@ -67,15 +67,15 @@ colors however Desktop was opened.
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 
-Choose **Show Files** in a Task or Session toolbar to browse its checkout beside
-the retained terminal. Expand folders to read one page of up to 500 entries;
+**+ → Files** in a Task's toolbar opens its checkout as a pane beside the
+retained terminal. Expand folders to read one page of up to 500 entries;
 **Load more** continues the directory and **Show ignored** includes ignored paths.
 Tracked, unchanged and untracked files remain available without an active PR.
 **Changes** optionally compares the worktree with the Task PR's
 recorded base; **HEAD** compares with its current commit. The displayed SHA pins
 the file list and selected diff. A recorded PR links above the file navigator.
 Use ↑/↓ in the navigator to select files; hover a row for its full path.
-**Show Files** / **Hide Files** remembers the browser visibility across relaunches.
+Closing the pane keeps its drafts in this window.
 
 **File** retains editable UTF-8 drafts and selection in this window; **Diff**
 shows the draft comparison read-only. Task headers show the recorded checkout;
@@ -142,23 +142,27 @@ below the outline. Sessions without a Task association are also available under
 **Debug → Sessions → Orphan Sessions** in the repository menu, or `lf session list --orphan`.
 There is no creation opt-out from checkout association. **Task details** opens the description, comments and Run history.
 
-A Task on a workflow draws it as a graph: `start` and `end` as circles, each
-node a box saying what you do there, one labelled arrow per edge, a loop back
-as an arc over its node. The current node or running edge is marked. At a node
-the page reads **Waiting on you** and the labels of the edges leaving it are
-buttons; each runs `lf -b task run` as a child of the app. No edge is offered while one runs. An edge whose Flow stopped holds the
-Task, reads **Stopped on**, and is offered again with the others leaving its
+A Task's workspace is its Workflow in the header and a multiplexer below.
+Opening a Task opens its one Session (`lf session ensure --task`); there is no
+Sessions list. The header draws the Workflow as a graph scaled to the window:
+`start` and `end` as circles, each node a box saying what you do there, one
+labelled arrow per edge, a loop back as an arc over its node. The current node
+or running edge is marked. The labels of the edges leaving the current node
+are buttons; each runs `lf -b task run` as a child of the app. No edge is offered while one runs. An edge whose Flow stopped holds the
+Task, is drawn stopped, and is offered again with the others leaving its
 node. **Move to** puts the Task at any node through `lf task move`; `end` completes it.
-When Linear calls an active Task complete, the page shows that as an error with
-**Complete anyway**, which runs the move with `--force`. An unstarted Task previews its
-Project's workflow. One that names no workflow reads invalid, with
-Start disabled.
-Beside the graph, **Flow runs** lists every Flow exec in the Task's checkout,
-newest first, whether an edge or a person started it; it is not the Workflow's
-history. Each row opens to its graph, steps and output
-(the shape of `lf flow show ID --sessions --json`); **Detailed Flow** exposes the captured
-branches and repeats. A run whose driver exited early reads **Stopped**. A run
-whose driver was killed has no exit record and keeps reading as running.
+When Linear calls an active Task complete, the header shows that as an error with
+**Complete anyway**, which runs the move with `--force`. A Task that has taken
+up no workflow offers **Start**, which runs `lf -b task run ISSUE`.
+
+The toolbar's **+** changes what the multiplexer shows: **New shell**,
+**Files** or **Flow execs**. The Flow exec log lists every Flow exec in the
+Task's checkout, newest first, whether an edge or a person started it; it is
+not the Workflow's history. One line each: Flow, state, when it started and
+how long it ran. A row opens to its id, graph and steps (the shape of
+`lf flow show ID --sessions --json`). An exec whose driver exited early reads
+**stopped**. One whose driver was killed has no exit record and keeps reading
+as running. **Task details → Debug** lists the Task's raw Sessions and Execs.
 Sessions list **Waiting** first and working ones in a compact group.
 The Wave page's **Workflow** sets the Project's workflow from the catalogue
 (`lf flow list`); **Customize** or **Edit** opens its source in
@@ -182,7 +186,7 @@ rename`; the shown name is the shared readback, and a rejected name stays in the
 field with its error. A remote Flow Session's name lives on its Home and is not
 renamed here. Beside the name, the Session shows its Flow step and iteration as
 quiet mono text, **Independent**, or why membership is unknown. On the right sit
-the Task's read-only worktree location and the Activity and Monitor glyphs.
+the Task's read-only worktree location and the Activity glyph.
 
 A single pane has no header. With two or more, each pane carries a 24pt strip:
 a state dot and the conversation's name (or the shell's title). Hovering the
@@ -190,19 +194,13 @@ focused pane's strip reveals split right, split down and close; the strip's
 context menu and the keybinds above offer the same plus zoom. Unfocused panes
 dim slightly; nothing draws a focus border.
 
-**Monitor** opens beside retained Sessions and shells in the same multiplexer.
-Split, resize, zoom, close and Undo work for all pane content. Monitor shows the
-selected Task's active Sessions and updates automatically. **Refresh** requests an
-observation from the same reader. Recovery and read failures retain the last
-observation with a visible reason; **Retry** restarts a failed reader. Incomplete
-ownership evidence cannot report confirmed emptiness. Closing a Monitor preserves
-the window's shared reader and terminals. **Sessions** selects an exact conversation and
-returns keyboard focus to its terminal with unfinished input retained.
+Files and the Flow exec log open beside retained Sessions and shells in the
+same multiplexer. Split, resize, zoom, close and Undo work for all pane content.
 
 Press **⌘K** to search Waves, all planned Tasks, named Sessions and Flows in the
 selected repository. Empty search shows recent destinations first; arrows select,
 Return opens and Escape returns focus to the previous terminal. Flow entries
-inspect the template. **Choose Flow for ISSUE** opens the Task's existing picker.
+inspect the template. **Flow execs of ISSUE** opens the Task's log pane.
 The sidebar search remains a filter. Each repository retains up to 20 recent
 destinations for the window. Visited historical Tasks remain in recents after
 leaving their pages; opening one reads its exact identity again. This does not
@@ -294,13 +292,7 @@ creating a Task or running an autonomous operating pass. **New shell** opens
 an ordinary shell in the active checkout. A conversation launched here returns
 to a shell when it exits or hands off to an external app.
 
-In a Task workspace, one existing Session starts with the Sessions sidebar hidden;
-multiple Sessions show a collapsible sidebar. Use the toolbar to toggle it. Clicking
-a Session focuses its visible pane or opens it in the active Session pane, preserving
-other splits. **⌘-click** toggles a pane without ending the Session; **Option-click**
-or **Open alongside** reveals its saved split or opens it to the right. Visible rows
-are highlighted, and the focused row has an accent marker. New arrivals preserve
-the current layout and sidebar preference. Running shells stay intact.
+Running shells stay intact when a Task's Session or another pane opens.
 
 Selecting a Session in another checkout restores that worktree's conversation,
 companion terminals, split layout, and focus. Outside Task context, the toolbar's
@@ -485,7 +477,7 @@ lf monitor workspace --watch --json    # what a window shows, as it changes
 
 Each window keeps one such reader open through `RegistryQuery.watchWorkspace()`.
 Its frames carry planning, the repository's Sessions, the shown Task's work
-with its Workflow and every Flow run, the shown Wave's detail and activity.
+with its Workflow and every Flow exec, the shown Wave's detail and activity.
 The Task page reads nothing else: after `lf task run` or `lf task move` the
 window asks the reader again and shows the frame that answers. A part arrives again only when a commit
 changed what it shows, so a Task created by `lf`, a worker or another window
@@ -498,19 +490,9 @@ the window sends carries an id and each frame names the newest one it answers;
 a frame read before a local write is ignored. If the reader ends, the last
 reading stays on screen marked unavailable until a new reader answers.
 
-Task Monitor's shared reader is `RegistryQuery.watchActiveSessions()`, backed by
-`lf monitor active --watch --json`. Its `sessions` rows retain stable AgentSession IDs, titles and current typed Work.
-Verified Exec/process and native-client receipts establish activity independently
-of command outcomes. Input replacement keeps the same row; unresolved engine
-ownership stays a gap. SQL ownership is reread on every tick, even outside Home. Confirm emptiness
-only when `discovery` is `ready` and `gaps` is empty. Keep scanning, unavailable,
-and incomplete evidence visible. Podium starts one reader on first demand and
-retains it across pane and repository navigation until window teardown. Wake
-requests a rescan. Helper/Home configuration replacement drains the old reader
-and clears its evidence before starting the new one. Pipes drain off the main
-actor, frames are limited to 16 MiB, and pending delivery retains only the latest
-snapshot. Ten seconds without a frame pauses updates until Retry. Cancellation
-closes stdin, then terminates and reaps only the owned reader if necessary.
+The reader's pipes drain off the main actor. Ten seconds without a frame ends
+the reading; cancellation closes stdin, then terminates and reaps only the
+owned reader if necessary.
 
 ## Headless checks
 

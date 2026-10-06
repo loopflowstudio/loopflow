@@ -39,24 +39,16 @@ The agent's rehearsal left the Task at `end` of `notes`;
 `uv run python scripts/loopflow-dev.py run` from the Task worktree builds and
 opens the app (the build succeeded on October 6). Not rehearsed: the agent has
 no display, and the branch's `lf` cannot open the live Home until the draft
-migration is applied to it. What to look at: a Task page drawing its workflow
-with the current stage; one row per Flow run opening to its steps; Waiting
-conversations first; the Wave page's Task default menu.
+migration is applied to it. What to look at since slice 14: a Task opening on its
+one Session with its Workflow in the header; **+ → Flow execs** and **Files**
+as panes; the Wave page's Workflow menu.
 
 ## What the agent saw (rehearsal, not Jack's observation)
 
-Every command above behaved as its comment says; the transcripts are in the
-walkthrough.
-
-Checks at `ac91bf9e1`: seven Rust integration suites (129 tests), Clippy,
-format, architecture check, 42 headless Desktop tests and the app build pass.
-The library suite has one failure in a full parallel run that passes alone.
-PR CI ran one job and skipped 14.
-
-## Not shown
-
-Any real provider step; a driver killed during an agent step; the migration
-on a populated Home; the September 30 workspace proof items.
+Every command above behaved as its comment says; transcripts are in the
+walkthrough. Not shown: any real provider step; a driver killed during an
+agent step; the migration on a populated Home; the September 30 workspace
+proof items.
 
 ## Jack's review
 

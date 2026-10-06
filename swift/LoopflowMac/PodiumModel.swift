@@ -264,13 +264,6 @@ final class PodiumModel {
     }
     private(set) var waves: PodiumReading<[Wave]> = .loading
     private(set) var processActivity: PodiumReading<ActivitySnapshot> = .loading
-    private(set) var activeSessions: PodiumReading<ActiveSessionsSnapshot> = .loading
-    private(set) var isRefreshingActiveSessions = false
-    private(set) var activeSessionsNeedsRetry = false
-    @ObservationIgnored private var activeSessionsObservation: ActiveSessionsObservation?
-    @ObservationIgnored private var activeSessionsTask: Task<Void, Never>?
-    private var activeSessionsGeneration = 0
-    private var activeSessionsDemanded = false
     private var sessionReadings: [String: PodiumReading<[SessionRecord]>] = [:]
     private(set) var sessions: PodiumReading<[SessionRecord]> {
         get { sessionReadings[repoPath ?? ""] ?? .loading }
@@ -558,7 +551,7 @@ final class PodiumModel {
                     if frame.content.part != "heartbeat" { delay = .seconds(1) }
                 }
                 if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
-            } catch ActiveSessionsObservationError.configurationChanged {
+            } catch WorkspaceObservationError.configurationChanged {
                 // The installed `lf` or its Home selection was replaced.
                 delay = .milliseconds(100)
             } catch {
@@ -804,124 +797,6 @@ final class PodiumModel {
         if previous == nil { processActivity = .loading }
         let next = reading(from: await readProcessActivity(), lastGood: previous)
         if processActivity != next { processActivity = next }
-    }
-
-    /// First demand starts a window-owned reader; navigation never restarts it.
-    func observeActiveSessions() {
-        guard !activeSessionsDemanded else { return }
-        activeSessionsDemanded = true
-        startActiveSessions()
-    }
-
-    func refreshActiveSessions() async {
-        activeSessionsDemanded = true
-        if activeSessionsNeedsRetry || activeSessionsTask == nil {
-            await stopActiveSessions()
-            startActiveSessions()
-        } else {
-            await activeSessionsObservation?.request(.refresh)
-        }
-    }
-
-    func rescanActiveSessions() async {
-        guard let observation = activeSessionsObservation, !activeSessionsNeedsRetry else { return }
-        activeSessions = .unavailable(lastGood: activeSessions.value, reason: "Rediscovering active Sessions after wake")
-        isRefreshingActiveSessions = true
-        await observation.request(.rescan)
-    }
-
-    /// Attached once to the window root, independently of repository or pane visibility.
-    func activeSessionsLifetime() async {
-        do {
-            while !Task.isCancelled { try await Task.sleep(for: .seconds(3600)) }
-        } catch { }
-        await stopActiveSessions()
-        activeSessionsDemanded = false
-    }
-
-    func stopActiveSessions() async {
-        activeSessionsGeneration += 1
-        let generation = activeSessionsGeneration
-        let task = activeSessionsTask
-        task?.cancel()
-        await task?.value
-        guard activeSessionsGeneration == generation else { return }
-        activeSessionsTask = nil
-        activeSessionsObservation = nil
-        isRefreshingActiveSessions = false
-    }
-
-    deinit { activeSessionsTask?.cancel() }
-
-    private func startActiveSessions() {
-        guard activeSessionsTask == nil else { return }
-        activeSessionsGeneration += 1
-        let generation = activeSessionsGeneration
-        isRefreshingActiveSessions = true
-        activeSessionsNeedsRetry = false
-        let query = query
-        activeSessionsTask = Task { [weak self] in
-            // Only configuration replacement retries automatically. Transport failures
-            // retain evidence and wait for the explicit Retry action.
-            while !Task.isCancelled {
-                var observation: ActiveSessionsObservation?
-                var replace = false
-                var discoveryFailed = false
-                do {
-                    let opened = try await query.watchActiveSessions()
-                    observation = opened
-                    guard !Task.isCancelled, self?.activeSessionsGeneration == generation else {
-                        await opened.cancel()
-                        return
-                    }
-                    self?.activeSessionsObservation = opened
-                    for try await snapshot in opened.snapshots {
-                        guard !Task.isCancelled, self?.activeSessionsGeneration == generation else { break }
-                        self?.receiveActiveSessions(snapshot)
-                        if snapshot.discovery == .unavailable {
-                            discoveryFailed = true
-                            break
-                        }
-                    }
-                    if !Task.isCancelled && !discoveryFailed {
-                        throw RegistryQueryError("Active Session observation ended")
-                    }
-                } catch ActiveSessionsObservationError.configurationChanged {
-                    replace = true
-                    if self?.activeSessionsGeneration == generation {
-                        self?.activeSessions = .loading
-                    }
-                } catch {
-                    if !Task.isCancelled, let self, self.activeSessionsGeneration == generation {
-                        self.activeSessions = .unavailable(lastGood: self.activeSessions.value, reason: error.localizedDescription)
-                        self.activeSessionsNeedsRetry = true
-                    }
-                }
-                await observation?.cancel()
-                guard !Task.isCancelled, let self, self.activeSessionsGeneration == generation else { return }
-                self.activeSessionsObservation = nil
-                if replace {
-                    self.activeSessions = .loading
-                    self.isRefreshingActiveSessions = true
-                    continue
-                }
-                self.activeSessionsTask = nil
-                self.isRefreshingActiveSessions = false
-                return
-            }
-        }
-    }
-
-    private func receiveActiveSessions(_ snapshot: ActiveSessionsSnapshot) {
-        isRefreshingActiveSessions = snapshot.discovery == .scanning
-        activeSessionsNeedsRetry = snapshot.discovery == .unavailable
-        switch snapshot.discovery {
-        case .ready:
-            activeSessions = .available(snapshot)
-        case .scanning, .unavailable:
-            let reason = snapshot.discovery == .scanning ? "Discovering active Sessions…" : "Active Session discovery unavailable"
-            activeSessions = .unavailable(lastGood: activeSessions.value, reason: ([reason] + snapshot.gaps).joined(separator: "; "))
-        }
     }
 
     func refreshPortfolio(

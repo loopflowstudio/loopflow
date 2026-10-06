@@ -179,48 +179,13 @@ Linear completion against an active Task.
     belongs in the Flow run log (default: no). Demo item: how it looks, in
     particular label widths, which are estimated from character counts.
 
-12. **Align Desktop and the store with LOO-382** is **done**. Layer 4 of the
-    contract in [task-workflow.md](task-workflow.md); #1452 merged first
-    (`c787c7530`), so this PR owned the reconciliation. Built `c60fbf4f3`,
-    compressed `a1b4ca012` (Desktop's unused `TaskStatus` mirror and its
-    fixture test deleted; `task_status.json` stays as the CLI contract Rust
-    round-trips).
-    - *Store.* The one draft moves `flows` for `flow_execs` and
-      `flow_exec_steps`, `planning` for `task_workflows` and
-      `task_workflow_moves`, and `sessions` for `session_activity`; a store
-      test names all five. A replaced reading moves `sessions` only when
-      Waiting could change. Quiet arriving writes nothing: the reader asks
-      the store when the next Session crosses 120 seconds and reads Sessions
-      again then.
-    - *Stream.* The `task` part carries the Task's work and, for each of its
-      Flows, the `lf flow show --sessions` body.
-    - *Desktop.* The Task page reads only that part. `lf task run`,
-      `lf task move` and the Project workflow change are each followed by
-      `refresh`, and a Task frame read before it is ignored. The
-      `lf task status` and `lf flow show` readers are deleted; the catalogue
-      is re-read by the window when the app becomes active, not by a view.
-    - Check, October 6 at `a1b4ca012`: `cargo test -p loopflow --lib
-      store::sqlite::revisions` 5 passed; `swift test --filter
-      "DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests"` 35 passed,
-      one showing a move and a new Flow run arriving from a frame with
-      `lf task move` the only `lf` call.
-    - Choices: [questions.md](questions.md). Demo items: the window on
-      screen following a Flow started in a terminal; a Session turning
-      Waiting after two quiet minutes.
-
-13. **Repair three failing tests** is **done**, `29b586dba`. Found October 6
-    by rerunning whole suites at `76f176fac`; each slice had run only its
-    focused tests. An edge that runs nothing now ends the Task over
-    uncommitted changes and keeps the checkout (a Flow leaves `.gitignore`
-    uncommitted); PR refusals are unchanged. The other two were stale tests:
-    exit 3 from a Flow stopped at a watched landing (slice 9a) and the
-    dropped `tasks.work_state` (slice 10a, also in `exec_ownership_tests`).
-    Check, October 6: `cargo test -p loopflow --no-fail-fast --test
-    flow_tests --test land_tests --test pr_tests --test
-    task_flow_launch_tests --test session_lifecycle_tests --test
-    session_cli_tests --test dto_fixtures --test cli_discovery --test
-    exec_ownership_tests` 173 passed, 0 failed; Clippy and format clean.
-    Choices: [questions.md](questions.md).
+Slices 12 and 13 are **done**; their text, checks and demo items are at
+`7108dd3fb:scratch/focus-on-your-own-work.md`. 12. Align Desktop and the
+store with LOO-382 (every new table has a revision domain; the Task page
+reads only the stream's `task` part) — `c60fbf4f3`, compressed `a1b4ca012`.
+13. Repair three failing tests found by running whole suites (an edge that
+runs nothing ends a Task over uncommitted changes and keeps its checkout) —
+`29b586dba`; nine Rust suites, 173 passed.
 
 14. **Task view: the Workflow in the header, a multiplexer below.** Jack
     Heart, October 6, looking at the dev app at `4f2860658` (INF-123 at
@@ -241,7 +206,8 @@ Linear completion against an active Task.
       of chrome for changing whats in the multipleer";
     - on the toolbar's Monitor button and its pane ("No active Sessions in
       this observation"): "this monitor button seems like its an older
-      attempt at the runlog?" It is: the Flow exec log pane replaces Monitor;
+      attempt at the runlog?" It is: the Flow exec log pane replaces Monitor. Jack: "Delete this
+      then": the Monitor pane, its button and its reader are deleted;
     - on the sidebar toggle: "session hider goes away. merge the + button
       with the file and then whatever for run log": one **+** menu adds a
       shell, the file viewer or the Flow exec log; no separate file, Monitor
@@ -265,10 +231,23 @@ Linear completion against an active Task.
     "Start → pursue → End End", Start); the failure shown twice; the "Work"
     list of raw Execs (to Debug); Desktop reads that write Execs (`lf flow
     list --json`, a failing `lf task comment`).
-    **Proof.** Render the workspace header and an opened exec-log pane to a
-    PNG from the shared fixture in a headless test (the capture hook in
-    `TaskFlowProofTests`), look at the image and fix what it shows; commit
-    no image. *Not done.*
+    **Built, not yet compressed or realigned.** The header, the one **+**
+    menu and the two panes are in; the Sessions list, sidebar toggle, file
+    toggle, Monitor (pane, button, palette action and its second reader),
+    toolbar Flow chip, old Flow card with its picker, position text and the
+    Task sheet's graph, Flow runs and Work list are deleted. Work is under
+    **Task details → Debug**. The details surface mounts only when shown, so
+    opening a Task no longer runs `lf flow list` or `lf task comment`.
+    **Proof.** `TaskFlowTests taskWorkspace` hosts the real workspace on the
+    shared fixtures with a scripted reader, checks the ensure call, header,
+    menu and panes, and writes a PNG when `LOOPFLOW_FLOW_CAPTURE_DIR` is set.
+    The agent looked at the image: graph, marked node, edge buttons, **Move
+    to**, Session beside an opened exec log. Fixture times are near zero, so
+    its dates read 1969. No image committed.
+    **Delete — do not maintain:** nothing left from this slice.
+    Choices: [questions.md](questions.md). Demo items: the window on screen;
+    a real `lf session ensure` starting a provider; label widths at small
+    window sizes (the graph stops shrinking at 60% and scrolls).
 
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task
@@ -293,7 +272,7 @@ Clear inherited `LF_*`/`LOOPFLOW_*` before Rust tests. Gate owns the full run.
 | `cargo test -p loopflow --lib store::` | Released frontier converts through the one draft; the record is append-only; a step must be its driver's child. |
 | `cargo test -p loopflow --test dto_fixtures` | Wire shapes are unchanged. |
 | `cargo test -p loopflow --lib harness::attention` | Recorded Claude, Codex and OpenCode streams under an injected clock: questions, open tools, hand-back, 120 seconds of quiet, a released driver, choice before paging. |
-| `swift test --filter "DesktopHeadlessTests\|DTOFixtureTests"` (in `swift/`) | The workflow's position and edge Start, Waiting-first order and the Task primary, from the shared fixtures; a Task's work, a move and a new Flow run arriving from stream frames. |
+| `swift test --filter "DesktopHeadlessTests\|DTOFixtureTests\|TaskFlowTests"` (in `swift/`) | The workflow's position and edge Start, Waiting-first order and the Task primary, from the shared fixtures; a Task's work, a move and a new Flow run arriving from stream frames; the Task workspace opening on its ensured Session with the Workflow header and the exec log and files as panes. |
 | `cargo test -p loopflow --lib store::sqlite::revisions` | Every table has a revision domain; the tables this PR adds name theirs; a Session reading moves `sessions` only when Waiting could change. |
 | `git grep -nE "__flow-step\|FlowStep::\|execute_flow_command"` | No executable path. |
 

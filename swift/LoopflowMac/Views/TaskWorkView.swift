@@ -9,6 +9,8 @@ struct TaskWorkflowHeader: View {
     let model: PodiumModel
     let task: RoadmapTask
     let wave: WaveSnapshot
+    /// The Task part of the workspace stream, as last read.
+    let work: PodiumReading<TaskWork>
     @Environment(\.palette) private var palette
 
     private var draft: TaskFlowDraft? { model.navigation.flowDrafts[task.id] }
@@ -17,7 +19,7 @@ struct TaskWorkflowHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: Spacing.md) {
-                if let workflow = model.taskWork[task.id].value?.workflow {
+                if let workflow = work.value?.workflow {
                     WorkflowGraph(
                         nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
                         choices: workflow.outgoing, unavailable: unavailable, fits: true,
@@ -35,7 +37,7 @@ struct TaskWorkflowHeader: View {
                     .disabled(acting)
                     .help("lf task move \(task.task.identifier) <node>")
                     .accessibilityIdentifier("task-workflow-move")
-                } else if model.taskWork[task.id].value != nil {
+                } else if work.value != nil {
                     // A Task takes up its Project's workflow on its first run.
                     Text("No workflow yet").foregroundStyle(palette.textSecondary)
                     Button("Start") { Task { await model.startFlow(nil, task: task, wave: wave) } }
@@ -45,7 +47,7 @@ struct TaskWorkflowHeader: View {
                         .accessibilityIdentifier("task-workflow-start")
                     Spacer()
                 } else {
-                    Text(model.taskWork[task.id].errorMessage.map { "Workflow could not be read: \($0)" }
+                    Text(work.errorMessage.map { "Workflow could not be read: \($0)" }
                          ?? "Reading workflow…")
                         .foregroundStyle(palette.textSecondary)
                     Spacer()

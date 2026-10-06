@@ -116,17 +116,8 @@ struct WorkspaceDestinationTests {
         #expect(throws: Never.self) {
             try retained.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
         }
-        try retained.inspect().find(viewWithAccessibilityIdentifier: "workspace-toggle-materials").button().tap()
-        #expect(!workspace.showsMaterials)
-        #expect(throws: (any Error).self) {
-            try retained.inspect().find(viewWithAccessibilityIdentifier: "workspace-materials")
-        }
         #expect(workspace.multiplexer.layout == layout)
         #expect(document.editor.string == "unsaved draft")
-        try retained.inspect().find(viewWithAccessibilityIdentifier: "workspace-toggle-materials").button().tap()
-        #expect(throws: Never.self) {
-            try retained.inspect().find(viewWithAccessibilityIdentifier: "workspace-materials")
-        }
         #expect(throws: Never.self) {
             try WorkSurfaceView(model: destination).inspect().find(viewWithAccessibilityIdentifier: "podium-detail-task")
         }
@@ -237,8 +228,7 @@ struct WorkspaceDestinationTests {
         let model = PodiumModel(query: RegistryQuery { _, _ in exact })
         await model.openTaskLink(try #require(URL(string: "loopflow://task/PRD-52")))
         #expect(model.selection == .task(id: "issue-available"))
-        #expect(!model.paletteRows.contains { $0.id == .chooseFlow("issue-available") })
-        #expect(model.paletteRows.contains { $0.id == .monitor("issue-available") })
+        #expect(model.paletteRows.contains { $0.id == .flowLog("issue-available") })
     }
 
     @Test func ambiguousAndUnavailableLinksPreserveTheWorkspace() async throws {

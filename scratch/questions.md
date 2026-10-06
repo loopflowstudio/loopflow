@@ -225,6 +225,33 @@ The agent's, October 6, slice 13. None is confirmed by Jack Heart.
   before `end`. Left with 0-PR completion to LOO-385.
 - **Tests changed, not code,** for the other two; the plan names them.
 
+## Choices the Task view pass made without Jack
+
+The agent's, October 6, slice 14. None is confirmed by Jack Heart.
+
+- **Ensure is asked once.** Opening a Task opens the Session the store
+  already marks primary. Only when none is marked does Desktop run
+  `lf session ensure --task ISSUE`, once per Task per window, and only into
+  an empty workspace. A refusal shows in the header.
+- **The + menu has no "New conversation".** A second conversation is opened
+  from Task details (**New session**) or a shell.
+- **No Flow picker.** The card that chose any Flow and started it is gone
+  with its palette action. A Task with no workflow gets **Start**
+  (`lf task run ISSUE`); ad hoc Flows run from the conversation or a shell.
+- **Monitor is deleted whole,** with Desktop's `lf monitor active --watch`
+  reader; the CLI command stays. The benchmark runner's two Monitor
+  scenarios now open the exec log, so they do not compare with the
+  September baseline.
+- **Files is a pane,** so its width and visibility are the layout's, not a
+  remembered preference; nothing persists across relaunch.
+- **Raw Sessions and Execs** sit in a collapsed **Debug** group at the
+  bottom of Task details, not in the repository's Debug menu.
+- **The log and files panes are light** inside the dark multiplexer.
+- **The Session breadcrumb's Flow step text no longer navigates;** it had
+  pointed at the deleted card.
+- **Exec start time** is its first step's start, else its last update; a
+  running exec shows no length.
+
 ## Choices the stream alignment pass made without Jack
 
 The agent's, October 6, slice 12; none is confirmed by Jack Heart. The list

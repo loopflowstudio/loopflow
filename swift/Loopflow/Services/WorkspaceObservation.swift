@@ -20,6 +20,11 @@ public struct WorkspaceObservation: Sendable {
     }
 }
 
+public enum WorkspaceObservationError: Error, Sendable {
+    /// Replace the reader only after draining its previous launch authority.
+    case configurationChanged
+}
+
 /// The Work whose activity is shown. Mirrors Rust `WorkActivityScope`.
 public struct WorkActivityScope: Decodable, Equatable, Sendable {
     public let wave: String?

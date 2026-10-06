@@ -23,7 +23,7 @@ struct DesktopPerformanceTests {
         let samples = try #require(Int(environment["LF_DESKTOP_PERF_SAMPLES"] ?? "20"))
         let journal = try PerformanceJournal(url: output)
         let scenarios = ["full", "fold", "expand", "compact", "sessions", "filter", "scroll_refresh",
-                         "monitor_active", "monitor_empty", "session_return", "combined_zoom", "combined_restore"]
+                         "flow_log_active", "flow_log_empty", "session_return", "combined_zoom", "combined_restore"]
         try journal.write(["event": "plan", "population_version": "desktop-v1",
                            "populations": ["small": 8, "large": 256], "samples": samples,
                            "scenarios": scenarios, "endpoint": "native_capture_ocr_and_pty_reply",
@@ -32,7 +32,7 @@ struct DesktopPerformanceTests {
                                               "refresh_release": "after_captured_scroll", "updated_title_prefix": "Updated"],
                            "gaps": ["Compositor presentation and frame hitches are not measured.",
                                     "A Task created without a Run is not in the outline; task_created ends at its Wave's Task list.",
-                                    "Fixture transport excludes CLI, retained-registry discovery and provider readiness.",
+                                    "A fixture reader answers each request at once; CLI, store and provider readiness are excluded.",
                                     "Actions use SwiftUI controls; OS event delivery latency is excluded.",
                                     "Forced bitmap capture and OCR are intrusive observer costs, recorded separately."]])
 #if canImport(GhosttyKit)
@@ -230,7 +230,13 @@ struct DesktopPerformanceTests {
     private func measure(population: String, taskCount: Int, samples: Int, journal: PerformanceJournal) async throws {
         let (query, planning) = try populationQuery(taskCount: taskCount)
         let model = PodiumModel(query: query, repoPath: "/src/loopflow")
-        await model.refresh()
+        let keeping = Task { await model.keepWorkspaceCurrent() }
+        defer { keeping.cancel() }
+        let loaded = ContinuousClock.now + .seconds(30)
+        while model.roadmap.value == nil || model.sessions.value == nil {
+            try #require(ContinuousClock.now < loaded)
+            try await Task.sleep(for: .milliseconds(5))
+        }
         try #require(model.workspace.waves.first?.tasks.count == taskCount)
         try #require(model.sessions.value?.count == taskCount / 2)
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
@@ -308,6 +314,7 @@ struct DesktopPerformanceTests {
             let destination = document.bounds.height - scroll.contentView.bounds.height
             try #require(destination > 0)
             planning.holdNextRead = true
+            let held = model.planningSequence
             let refresh = Task { await model.refresh() }
             defer { planning.release() }
             try await wait(window) { planning.pending != nil }
@@ -325,10 +332,10 @@ struct DesktopPerformanceTests {
                 scrolledOffset = scroll.contentView.bounds.minY
                 labelsBeforeRefresh = window.outlineText
                 initialVerificationMS = milliseconds(window.observedAt)
-                try #require(scrolledOffset > 0 && model.isRefreshing)
+                try #require(scrolledOffset > 0 && planning.pending != nil)
                 planning.release()
             }, ready: {
-                !model.isRefreshing && abs(scroll.contentView.bounds.minY - scrolledOffset) < 1
+                model.planningSequence > held && abs(scroll.contentView.bounds.minY - scrolledOffset) < 1
                     && model.selection == .task(id: "perf-task-0")
                     && model.sessions.value == records
                     && model.workspace.waves.first?.tasks.last?.task.task.id == "perf-task-\(taskCount - 1)"
@@ -336,7 +343,7 @@ struct DesktopPerformanceTests {
                     && !window.outlineText.contains { $0.contains("Updated 000") }
             }, observation: {
                 ["offset_after_scroll": scrolledOffset, "offset_after_refresh": scroll.contentView.bounds.minY,
-                 "refresh_complete": !model.isRefreshing, "visible_labels": window.outlineText,
+                 "refresh_complete": model.planningSequence > held, "visible_labels": window.outlineText,
                  "visible_labels_before_refresh": labelsBeforeRefresh,
                  "initial_capture_verification_ms": initialVerificationMS,
                  "expected_task_id": "perf-task-\(taskCount - 1)"]
@@ -356,27 +363,24 @@ struct DesktopPerformanceTests {
             try await wait(window) { window.firstResponder === terminals[2] && multiplexer.focusedPaneId == otherPane }
             openTask(.task(id: "perf-task-0"))
             try await wait(window) { window.firstResponder === terminals[0] }
-            let monitorButton = try view.inspect().find(ViewType.Button.self, where: {
-                try $0.accessibilityIdentifier() == "task-show-monitor-perf-task-0"
-            })
-            try await sample("monitor_active", population, attempt, journal, window, action: {
-                // This Task already has a retained Session choice; the explicit
-                // Monitor control reveals observation alongside it.
-                try monitorButton.tap()
+            // SessionsView is hosted alone; its window root is what scopes the reader.
+            model.syncWorkspaceScope()
+            try await sample("flow_log_active", population, attempt, journal, window, action: {
+                // This Task already has a retained Session choice; the Flow
+                // exec log opens alongside it.
+                multiplexer.show(.flowLog(taskId: "perf-task-0"))
             }, ready: {
-                !model.isRefreshingActiveSessions && hasRendered(window, "monitor-session-perf-session-0")
-                    && !hasRendered(window, "monitor-session-perf-session-2")
+                hasRendered(window, "task-work-perf-flow-0")
                     && !terminals.contains { window.firstResponder === $0 }
-                    && multiplexer.focusedPane.content == .monitor(taskId: "perf-task-0")
+                    && multiplexer.focusedPane.content == .flowLog(taskId: "perf-task-0")
             })
-            let monitorPane = multiplexer.focusedPaneId
-            try await sample("monitor_empty", population, attempt, journal, window, action: {
-                // A Task without Sessions opens its overview; Monitor is explicit.
+            let logPane = multiplexer.focusedPaneId
+            try await sample("flow_log_empty", population, attempt, journal, window, action: {
+                // A Task no Flow has run for: scoping the reader to it is part of the wait.
                 openTask(.task(id: "perf-task-1"))
-                try view.inspect().find(ViewType.Button.self, where: {
-                    try $0.accessibilityIdentifier() == "task-show-monitor-perf-task-1"
-                }).tap()
-            }, ready: { !model.isRefreshingActiveSessions && hasRendered(window, "monitor-empty-perf-task-1") })
+                model.syncWorkspaceScope()
+                multiplexer.show(.flowLog(taskId: "perf-task-1"))
+            }, ready: { hasRendered(window, "task-flow-runs-empty") })
             try await sample("session_return", population, attempt, journal, window, action: {
                 navigator.onOpenSession(first)
             }, ready: {
@@ -395,18 +399,18 @@ struct DesktopPerformanceTests {
                 text.withCString { ghostty_surface_text(surfaces[1], $0, UInt(text.utf8.count)) }
                 try await wait(window) { terminalText(surfaces[1]).components(separatedBy: reply).count >= 3 }
             })
-            multiplexer.updateRatio(between: sessionPane, and: monitorPane, ratio: 0.5)
+            multiplexer.updateRatio(between: sessionPane, and: logPane, ratio: 0.5)
             try await sample("combined_zoom", population, attempt, journal, window, action: {
-                multiplexer.setFocusedPane(monitorPane)
-                multiplexer.toggleZoom(monitorPane)
-            }, ready: { hasRendered(window, "monitor-session-perf-session-0") && terminals[0].window == nil })
+                multiplexer.setFocusedPane(logPane)
+                multiplexer.toggleZoom(logPane)
+            }, ready: { hasRendered(window, "task-work-perf-flow-0") && terminals[0].window == nil })
             try await sample("combined_restore", population, attempt, journal, window, action: {
-                multiplexer.toggleZoom(monitorPane)
-                multiplexer.updateRatio(between: sessionPane, and: monitorPane, ratio: 0.6)
+                multiplexer.toggleZoom(logPane)
+                multiplexer.updateRatio(between: sessionPane, and: logPane, ratio: 0.6)
                 navigator.onOpenSession(first)
             }, ready: {
                 window.firstResponder === terminals[0] && terminals.allSatisfy { $0.window === window }
-                    && hasRendered(window, "monitor-session-perf-session-0")
+                    && hasRendered(window, "task-work-perf-flow-0")
             })
             guard terminals.enumerated().allSatisfy({ $0.element.surface == surfaces[$0.offset] }),
                   multiplexer.layout.pane(for: companionPane)?.content == .shell,
@@ -492,11 +496,10 @@ struct DesktopPerformanceTests {
         if let index = Int(id.replacingOccurrences(of: "session-row-perf-session-", with: "")) {
             return window.outlineText.contains { $0.contains(String(format: "Conversation %03d", index)) }
         }
-        if id.hasPrefix("monitor-session-") {
-            return window.contentText.contains { $0.contains(String(id.dropFirst("monitor-session-".count))) }
-        }
-        if id.hasPrefix("monitor-empty-") {
-            return window.contentText.joined(separator: " ").contains("No active Sessions in this observation")
+        // A Flow exec's row shows its Flow's name.
+        if id == "task-work-perf-flow-0" { return window.contentText.contains { $0.contains("benchflow") } }
+        if id == "task-flow-runs-empty" {
+            return window.contentText.joined(separator: " ").contains("No Flow has run")
         }
         return false
     }
@@ -562,31 +565,67 @@ struct DesktopPerformanceTests {
              "actions": sessionActionFixture(state: "active"),
              "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
-        let active = try JSONSerialization.data(withJSONObject: [
-            "discovery": "ready", "home": "benchmark-fixture", "observed_at": 1790270400, "task": NSNull(), "gaps": [],
-            "sessions": [0, 2].map { index in
-                ["id": "perf-session-\(index)", "work": ["kind": "task", "id": "perf-work-\(index)"],
-                 "title": "Fixture Session \(index)", "processes": [["pid": index + 1, "provider": "fixture", "state": "waiting"]]] as [String: Any]
-            }
-        ])
         let sessionJSON = String(decoding: sessions, as: UTF8.self)
-        let activeJSON = String(decoding: active, as: UTF8.self)
-        let feed = ActiveSessionsTestFeed()
-        let query = RegistryQuery(watchActiveSessions: { try await feed.open(initial: activeJSON) }) { args, _ in
-            switch args.first {
-            case "roadmap": return await planning.read()
-            case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
-            case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-            default: throw RegistryQueryError("Benchmark does not launch providers or mutate planning")
-            }
+        let reader = PerformanceReader(planning: planning, sessions: sessionJSON)
+        let query = RegistryQuery(watchWorkspace: { await reader.open() }) { _, _ in
+            // The window reads through its one reader.
+            throw RegistryQueryError("Benchmark does not launch providers or mutate planning")
         }
         return (query, planning)
     }
 }
 
-/// Hold the fixture's transport response to exercise scrolling while the real
-/// Podium reader is refreshing. No product state is changed outside that reader.
+/// The fixture's workspace reader. Like `lf monitor workspace --watch`, it
+/// answers each request with planning, Sessions and the scoped Task's work.
+@MainActor
+private final class PerformanceReader {
+    private let planning: PerformancePlanning
+    private let sessions: String
+    private var continuation: AsyncThrowingStream<WorkspaceFrame, any Error>.Continuation?
+    private var scope: WorkspaceScope?
+    private var sequence = 0
+
+    init(planning: PerformancePlanning, sessions: String) {
+        self.planning = planning
+        self.sessions = sessions
+    }
+
+    func open() -> WorkspaceObservation {
+        let (stream, continuation) = AsyncThrowingStream<WorkspaceFrame, any Error>.makeStream()
+        self.continuation = continuation
+        return WorkspaceObservation(frames: stream, request: { request in
+            Task { @MainActor in await self.answer(request) }
+        }, cancel: { continuation.finish() })
+    }
+
+    private func answer(_ request: WorkspaceRequest) async {
+        if case .scope(_, let scope) = request { self.scope = scope }
+        let roadmap = await planning.read()
+        send("planning", request.id, #"{"roadmap":\#(roadmap),"waves":[]}"#)
+        guard let scope, let repo = scope.repo else { return }
+        send("sessions", request.id,
+             #"{"repo":"\#(repo)","includes_headless":\#(scope.headless),"entries":\#(sessions)}"#)
+        guard let task = scope.task else { return }
+        // Only the first Task has a Flow exec.
+        let flows = task == "PERF-0" ? #"""
+            [{"id":"perf-flow-0","name":"benchflow","state":"completed","task_id":null,"wave_id":null,
+              "updated_at":1790270400,"repo":"/src/loopflow","ended_at":1790270460}]
+            """# : "[]"
+        send("task", request.id, #"""
+            {"task":"\#(task)","work":{"sessions":[],"flows":\#(flows),"execs":[],"workflow":null},"flow_runs":[]}
+            """#)
+    }
+
+    private func send(_ part: String, _ answers: Int, _ body: String) {
+        sequence += 1
+        let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"benchmark-fixture","revisions":null,"unavailable":null,"body":\#(body)}"#
+        // A frame this file wrote; one that does not decode fails the wait on it.
+        if let frame = try? WorkspaceFrame.decode(line: Data(line.utf8)) { continuation?.yield(frame) }
+    }
+}
+
+/// Hold the fixture's planning read to exercise scrolling while the window
+/// waits on a refresh. No product state is changed outside its reader.
 @MainActor
 private final class PerformancePlanning {
     let roadmap: String

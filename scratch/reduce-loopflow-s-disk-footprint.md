@@ -44,4 +44,4 @@ validation for pending migrations, and backup reuse by history fingerprint.
 - Proposals 1–9 in the review need sponsorship; retention (2) and the system of
   record (1) are decisions about what history is worth, not implementation gaps.
 
-Check: `env -u LF_HOME … cargo test -p loopflow --lib -- session_record store::sqlite::wal store::migrations commands::install` — 149 passed; clippy `-D warnings` clean.
+Check: all `LF_*` unset, `cargo test -p loopflow --lib -- session_record` — 49 passed after compress; clippy `-D warnings` clean. Other suites unchanged since the 149-pass run; gate owns them.

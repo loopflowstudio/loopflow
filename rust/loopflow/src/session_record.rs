@@ -485,7 +485,8 @@ struct StreamedHistory {
 }
 
 impl StreamedHistory {
-    /// The events history keeps now that `event` has arrived, in capture order.
+    /// The events history keeps now that `event` has arrived. Readers order
+    /// history by capture position, so a held event may be kept late.
     fn admit(&mut self, event: EventEnvelope) -> Vec<EventEnvelope> {
         let conversation = match &event.event {
             CaptureEvent::ProviderOutput { stream, line }
@@ -498,12 +499,12 @@ impl StreamedHistory {
         };
         match conversation {
             Some(ConversationEvent::DiffUpdated { turn_id, .. }) => {
-                let superseded = self.diff.take().filter(|held| {
-                    !matches!(&held.event, CaptureEvent::Conversation { event }
-                        if matches!(&**event, ConversationEvent::DiffUpdated { turn_id: held, .. } if held == turn_id))
-                });
+                let earlier_turn = self
+                    .diff
+                    .take()
+                    .filter(|held| diff_turn(held) != Some(turn_id));
                 self.diff = Some(event);
-                superseded.into_iter().collect()
+                earlier_turn.into_iter().collect()
             }
             Some(
                 increment @ (ConversationEvent::TextDelta { .. }
@@ -528,16 +529,23 @@ impl StreamedHistory {
         }
     }
 
-    /// Everything still held, in capture order.
+    /// Everything still held.
     fn settle(&mut self) -> Vec<EventEnvelope> {
-        let mut held: Vec<_> = self
-            .run
+        self.run
             .take()
             .into_iter()
             .chain(self.diff.take())
-            .collect();
-        held.sort_by_key(|event| event.seq);
-        held
+            .collect()
+    }
+}
+
+fn diff_turn(held: &EventEnvelope) -> Option<&String> {
+    match &held.event {
+        CaptureEvent::Conversation { event } => match &**event {
+            ConversationEvent::DiffUpdated { turn_id, .. } => Some(turn_id),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -583,7 +591,8 @@ fn extend_run(run: &mut EventEnvelope, increment: &ConversationEvent) -> bool {
     true
 }
 
-/// A provider notification that only adds to, or restates, a later complete one.
+/// A provider notification that only adds to, or restates, a later complete one:
+/// `…/delta`, `…Delta`, `…_delta` and the cumulative Turn diff.
 fn is_provider_increment(line: &str) -> bool {
     #[derive(Deserialize)]
     struct Notification {
@@ -649,13 +658,7 @@ impl SessionRecorder {
                     })
                 };
                 let mut streamed = StreamedHistory::default();
-                loop {
-                    let Ok(message) = receiver.recv() else {
-                        if let Err(error) = retain(streamed.settle()) {
-                            tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
-                        }
-                        break;
-                    };
+                while let Ok(message) = receiver.recv() {
                     let result = match message {
                         RecorderMessage::Event(event) => {
                             let result = append_json_line(&writer_dir.join("events.jsonl"), &event);
@@ -679,6 +682,9 @@ impl SessionRecorder {
                             tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
                         }
                     }
+                }
+                if let Err(error) = retain(streamed.settle()) {
+                    tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
                 }
             });
         match thread {

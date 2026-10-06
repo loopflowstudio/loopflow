@@ -245,7 +245,7 @@ automatic shared failover. Isolated agents retain their own account/fallback.
 The updated Linear brief owns the current scope; stop-bundling's branch evidence
 does not yet establish shipment.
 
-Renamed from `systems` in the 2026-07-08 wave/project/task restructure. Owns dependable self-hosting, verified releases, and architecture minimalism. The configured release schedule and accepted proof obligations govern current work; older nightly/weekly notes below are historical.
+Renamed from `systems` on 2026-07-08. Current schedules and accepted proof obligations supersede historical cadence notes.
 
 Release-specific findings live in [release memory](release/MEMORY.md).
 
@@ -775,12 +775,14 @@ one-machine conversion; discarded historical attribution needs no importer.
 
 LOO-304 retains Jack Heart's budgets, snapshots and observational/owned Home
 separation. Local lf3 passes contained launch/history proofs; same-sandbox teardown
-is allowed, host effects denied. Published lf2 remains selected; R2 publication
-and promotion await separate authorization. The ready archive is unchanged.
+is allowed, host effects denied. Jack Heart authorized verified GhosttyKit publications, including future updates.
+Infrastructure published lf3 and verified its public checksum; this branch now
+selects it. Publication does not establish installed or performance acceptance.
 October 6 repairs select bundled bold/serif faces and preserve toolbar child IDs;
 all 34 catalogue scenarios pass once. Copied-registry reads fail exact-schema
-validation: only `execs_unfinished` differs. No migration or bypass is authorized.
-Compatible representative data, matched p95 and both hour soaks remain outstanding.
+validation: only `execs_unfinished` differs. The original snapshot and live Home remain unchanged. A separate fixture with
+all source facts preserved is authorized for investigation; runtime validation
+and read-only observation remain required. Matched p95 and both soaks are open.
 Shared font/launch/OCR prerequisites change comparability. Failures, including a
 Swift metadata crash, and launch semantics remain in the benchmark guide, plan
 and `86430e589:wave/infrastructure/MEMORY.md`. Denial is not speedup.
@@ -849,9 +851,10 @@ current-state cutover's explicitly accepted scope governs disposition, not a
 retroactive claim that those proofs passed. Finite Project Runs and generic
 Wave/Project execution symmetry are superseded, not future implementation mandates.
 
-The deleted lease/liveness stacks (a7044e2b5, 5f7f66833) and repeated prompt-fallback
-add/delete/restore cycle show why failure must be repaired in the operation.
-The full operational cause of run_liveness removal remains unknown. UI projects
+The historical lease/liveness and fallback incidents remain at
+`bb8884229:wave/infrastructure/MEMORY.md`; their full operational causes remain
+unknown. Repair failures in their owning operation.
+UI projects
 shared evidence and triggers operations; it is not another scheduler or synthetic
 controller. Historical automatic-trigger/default-wait proposals need current
 selection, not automatic resurrection. Current delivery mechanics live in

@@ -284,13 +284,13 @@ wraps both shell and direct modes in login. A `direct:` prefix in the surface
 string would not select config direct mode; even config direct mode retains
 login. Loopflow's command-block patch does not change this path.
 
-The local production repair now lives in
+The production repair now lives in
 [GhosttyKitPatches](../../../swift/GhosttyKitPatches/README.md). The lf3 framework
 passes pinned Zig launch/block tests and the contained mounted shell contract:
 login startup files, inherited environment/cwd, PTY input, production companion
 shell after command exit, terminal markers and surface retention. The published
-SwiftPM dependency remains lf2; no archive was uploaded. Local-path overrides
-are temporary proof inputs, not dependency publication.
+SwiftPM dependency now selects lf3 after Infrastructure verified the full public
+download. Local-path overrides remain temporary proof inputs.
 
 ```sh
 uv run python scripts/desktop_performance.py verify-fixture --mounted --lf target/debug/lf --output /tmp/ghostty-launch-proof
@@ -338,15 +338,14 @@ No copied/live store was migrated, no index installed, and no schema check bypas
 A schema-compatible representative population or an explicitly authorized isolated
 conversion is needed before this source candidate can enter matched acceptance.
 The full same-snapshot replay in `/tmp/loo304-snapshot-schema-replay-20261006/`
-retains all three Task-link timeouts and the schema warnings. The existing
-dependency-publication decision remains with Infrastructure.
+retains all three Task-link timeouts and the schema warnings. The lf3 dependency publication is verified separately from performance acceptance.
 
 A matched realistic pair (21 samples and 3,600 seconds each), all original
 budgets, and complete journey coverage remain required. Neither these focused
 launch proofs nor the partial replay establish p95 or soak acceptance. No remote
 performance host/job is configured; `ci.yml` headless/compile checks do not supply
-that evidence. Jack Heart authorized source preparation, not artifact upload,
-merge or Task completion on partial measurements.
+that evidence. Jack Heart authorized source publication and verified GhosttyKit artifact updates;
+merge and Task completion remain unauthorized on partial measurements.
 
 Source gate on October 6: the affected runner passed 2,250 Rust tests (20 skipped),
 370 Python, 78 website (three skipped), 377 headless Swift tests, formatting,

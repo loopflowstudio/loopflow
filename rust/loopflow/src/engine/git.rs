@@ -357,39 +357,66 @@ pub fn checkout_new_branch_from(
 pub fn cherry_pick_range(repo: &Path, from: &str, to: &str) -> Result<(), GitError> {
     let range = format!("{from}..{to}");
     // Follow the settled branch's history, not commits brought in by a sync.
-    // Replay each merge relative to that branch so its resolutions survive;
-    // changes already present on the new base need no additional commit.
+    // Keep merge resolutions while avoiding changes already on the new base.
     let commits = git_stdout(repo, &["rev-list", "--reverse", "--first-parent", &range])?;
     if commits.trim().is_empty() {
         return Ok(());
     }
-    let mut args = vec![
-        "cherry-pick",
-        "--mainline",
-        "1",
-        "--allow-empty",
-        "--empty=drop",
-    ];
-    args.extend(commits.lines());
-    let output = run_git(repo, &args)?;
-    if output.status.success() {
-        return Ok(());
+    let original = rev_parse(repo, "HEAD")?;
+    let result = (|| {
+        for commit in commits.lines() {
+            let parents = git_stdout(repo, &["rev-list", "--parents", "-n", "1", commit])?;
+            let parents: Vec<_> = parents.split_whitespace().skip(1).collect();
+            // Main may have advanced since this sync. Its incoming changes are
+            // already on the target; only branch edits and resolutions remain.
+            let mainline = if parents.len() == 2 && is_ancestor(repo, parents[1], &original)? {
+                if rev_parse(repo, &format!("{commit}^{{tree}}"))?
+                    == rev_parse(repo, &format!("{}^{{tree}}", parents[1]))?
+                {
+                    continue;
+                }
+                "2"
+            } else {
+                "1"
+            };
+            let output = run_git(
+                repo,
+                &[
+                    "cherry-pick",
+                    "--mainline",
+                    mainline,
+                    "--allow-empty",
+                    "--empty=drop",
+                    commit,
+                ],
+            )?;
+            if output.status.success() {
+                continue;
+            }
+            let conflicts = list_conflicts(repo)?;
+            let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            if !conflicts.is_empty() {
+                let names = conflicts
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                stderr.push_str(&format!(" (conflicts: {names})"));
+            }
+            return Err(GitError::CommandFailed {
+                command: format!("git cherry-pick {range}"),
+                stderr,
+            });
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = run_git(repo, &["cherry-pick", "--abort"]);
+        // Each merge may use a different parent. Restore earlier successful
+        // picks too, including when a later Git read or process launch fails.
+        git_stdout(repo, &["reset", "--hard", &original])?;
     }
-    let conflicts = list_conflicts(repo)?;
-    let _ = run_git(repo, &["cherry-pick", "--abort"]);
-    let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    if !conflicts.is_empty() {
-        let names = conflicts
-            .iter()
-            .map(|path| path.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        stderr.push_str(&format!(" (conflicts: {names})"));
-    }
-    Err(GitError::CommandFailed {
-        command: format!("git cherry-pick {range}"),
-        stderr,
-    })
+    result
 }
 
 /// Stash the working tree including untracked files. Returns `true` when
@@ -1639,8 +1666,6 @@ mod tests {
             git_stdout(repo, &["merge", "--squash", "follow-up"]).unwrap();
             git_stdout(repo, &["commit", "-m", "land feature"]).unwrap();
             commit_file(repo, "upstream", "new main content");
-            let base = rev_parse(repo, "HEAD").unwrap();
-
             checkout(repo, "follow-up").unwrap();
             git_stdout(repo, &["merge", "--no-ff", "--no-commit", "main"]).unwrap();
             if merge_edit {
@@ -1655,6 +1680,9 @@ mod tests {
             )
             .unwrap();
             let original = rev_parse(repo, "HEAD").unwrap();
+            checkout(repo, "main").unwrap();
+            commit_file(repo, "upstream", "later main content");
+            let base = rev_parse(repo, "HEAD").unwrap();
             checkout_new_branch_from(repo, "next", "main").unwrap();
 
             cherry_pick_range(repo, &cut, "follow-up").unwrap();
@@ -1665,7 +1693,7 @@ mod tests {
             );
             assert_eq!(
                 fs::read_to_string(repo.join("upstream")).unwrap(),
-                "new main content"
+                "later main content"
             );
             assert_eq!(
                 fs::read_to_string(repo.join("repair")).unwrap(),

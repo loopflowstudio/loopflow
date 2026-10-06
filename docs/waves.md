@@ -117,13 +117,12 @@ Every Wave participates, including Waves with no Tasks. A new Wave with no
 Projects has no default Flow, unless its explicitly Planned successor supplies one.
 
 The preview lists every successor and Task disposition. Started unfinished Tasks
-keep identity, checkout, PR and captured execution when moved. Proven untouched
-backlog is canceled; its issues and local history remain. Completed Tasks stay
-with the predecessor. Missing checkout, provider or execution evidence remains
-unresolved and prevents automatic retirement.
+keep identity, checkout, PR and captured execution when moved. Unreviewed backlog
+stays with the predecessor until explicit disposition, alongside completed Tasks.
+Missing checkout, provider or execution evidence remains unresolved.
 
 Retry the same command after interruption. Rotation reads fresh provider state,
-activates each successor, moves or cancels Tasks, then completes its predecessor.
+activates each successor, moves started Tasks, then completes its predecessor.
 During that sequence both Projects can be In Progress. A mix of the requested
 name and one shared predecessor name is recoverable; competing predecessor
 names are reported for resolution in Linear. Nothing wins because its name is

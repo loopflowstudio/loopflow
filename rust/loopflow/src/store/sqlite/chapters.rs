@@ -1,4 +1,4 @@
-use rusqlite::{params, TransactionBehavior};
+use rusqlite::params;
 
 use crate::durable::TaskId;
 use crate::id::WaveId;
@@ -78,33 +78,5 @@ impl SqliteStore {
             abandoned,
             completed,
         })
-    }
-
-    /// Retire backlog under the same write lock as worker claims. Return whether
-    /// it is retired, preserving the original terminal time on retries. If
-    /// execution won the race, the caller reclassifies it and transfers it.
-    pub fn retire_chapter_backlog(&self, task: &TaskId) -> StoreResult<bool> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(
-            &format!(
-                "UPDATE tasks SET work_state='abandoned',work_terminal_at=?2 WHERE id=?1 AND work_state='ready'
-                 AND NOT EXISTS(SELECT 1 FROM flow_sessions WHERE {} AND claim_json IS NOT NULL)
-                 AND started_at IS NULL
-                 AND NOT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1
-                    AND (publication_requested_at IS NOT NULL OR merge_commit IS NOT NULL))
-                 AND NOT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
-                    AND json_extract(kind_json,'$.kind')='started')",
-                super::flows::TASK_INVOCATION
-            ),
-            params![task.as_str(), super::super::rows::now_unix()],
-        )?;
-        let retired = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND work_state='abandoned')",
-            [task.as_str()],
-            |row| row.get(0),
-        )?;
-        tx.commit()?;
-        Ok(retired)
     }
 }

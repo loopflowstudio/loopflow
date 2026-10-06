@@ -37,12 +37,4 @@ impl Store {
         })
         .await
     }
-
-    pub async fn retire_chapter_backlog(&self, task: &TaskId) -> StoreResult<bool> {
-        let task = task.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.retire_chapter_backlog(&task)
-        })
-        .await
-    }
 }

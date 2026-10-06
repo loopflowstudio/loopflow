@@ -6,7 +6,6 @@
 //! (see `load_show_snapshot`).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::File;
 use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
@@ -883,7 +882,7 @@ pub(crate) async fn refresh_pm_snapshot_locked(
     wave: &Wave,
     ctx: &PmContext,
     store: &Store,
-    acquisition: Arc<File>,
+    acquisition: Arc<crate::store::PlanningLocks>,
 ) -> OpsResult<PmSnapshot> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let snapshot = fetch_pm_snapshot_with_store(repo, wave.slug(), ctx, store).await?;
@@ -1984,7 +1983,7 @@ async fn accept_reteam_project(
     resolved: &ResolvedReteamContext,
     wave: &crate::work::wave::Wave,
     project: &PmProject,
-    acquisition: Arc<File>,
+    acquisition: Arc<crate::store::PlanningLocks>,
     expected_teams: &[String],
 ) -> OpsResult<()> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -2024,7 +2023,7 @@ async fn accept_reteam_task(
     resolved: &ResolvedReteamContext,
     wave: &crate::work::wave::Wave,
     issue: &str,
-    acquisition: Arc<File>,
+    acquisition: Arc<crate::store::PlanningLocks>,
 ) -> OpsResult<(String, bool)> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let (item, project) = resolved

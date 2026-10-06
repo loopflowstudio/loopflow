@@ -22,6 +22,22 @@ impl SqliteStore {
         workspaces: &[&Path],
         task: Option<&TaskId>,
     ) -> StoreResult<Vec<File>> {
+        let roots = task
+            .map(|id| self.task(id))
+            .transpose()?
+            .flatten()
+            .filter(|task| !task.worktree.as_os_str().is_empty())
+            .map(|task| task.worktree)
+            .into_iter()
+            .collect::<Vec<_>>();
+        self.lock_checkout_roots(workspaces, &roots)
+    }
+
+    pub(crate) fn lock_checkout_roots(
+        &self,
+        workspaces: &[&Path],
+        roots: &[PathBuf],
+    ) -> StoreResult<Vec<File>> {
         let canonical = |path: &Path| {
             crate::store::canonicalize_with_missing_tail(path)
                 .map_err(|error| StoreError::InvalidData(error.to_string()))
@@ -36,12 +52,8 @@ impl SqliteStore {
             }
             locks.insert(path, true);
         };
-        if let Some(task) = task {
-            if let Some(task) = self.task(task)? {
-                if !task.worktree.as_os_str().is_empty() {
-                    include(canonical(&task.worktree)?);
-                }
-            }
+        for root in roots {
+            include(canonical(root)?);
         }
         for cwd in workspaces {
             let cwd = canonical(cwd)?;

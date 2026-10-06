@@ -27,9 +27,9 @@ lf refresh product
 
 A Planned Project expresses the next plan. Rotation reuses the explicitly named
 successor or creates one with the predecessor's Flow when present. Started unfinished Tasks
-move with identity, checkout, PR and captured execution intact. Proven untouched
-backlog is canceled; completed Tasks stay historical. Missing local or provider
-evidence cannot establish that work should be retired. Linear keeps the Projects
+move with identity, checkout, PR and captured execution intact. Unreviewed backlog
+stays in its existing Project until explicit disposition; completed Tasks stay
+historical. Missing local or provider evidence remains unresolved. Linear keeps the Projects
 and their Tasks.
 
 Rotation reads fresh provider state after each interruption. A partial transition

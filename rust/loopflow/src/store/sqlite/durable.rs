@@ -2150,7 +2150,6 @@ mod durable_store_tests {
         // The review's reserved Run starts the Task before anything launches.
         assert!(store.task_started(&task_id).unwrap());
         assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
-        assert!(!store.retire_chapter_backlog(&task_id).unwrap());
 
         // Activation may precede transfer. A reserved Task is already started
         // and must retain execution while its Project is still the predecessor.
@@ -2423,7 +2422,6 @@ mod durable_store_tests {
             (ended(&original), "replaced".into())
         );
         assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
-        assert!(!store.retire_chapter_backlog(&task_id).unwrap());
     }
 
     #[test]

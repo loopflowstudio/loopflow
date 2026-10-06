@@ -12,8 +12,9 @@ status and evidence; earlier review notes remain at
   hierarchical checkout admission now excludes registration at an unregistered
   missing ancestor, preserving sibling progress. Its Task-population scan is gone.
   Registration now retains its Wave guard through commit, including cancellation.
-  Accepted registration facts remain next; rotation
-  still holds no checkout exclusion. The rejected global guard remains in history.
+  Registration now returns transactional accepted facts to downstream consumers.
+  Rotation holds checkout exclusion through classification and queued writes;
+  unreviewed backlog remains in place. The rejected global guard remains in history.
   Configuration-switch and created-successor recovery proofs depend on the later
   binding/transition replacement; name selection cannot recover preserved names.
 - Chapter metadata representation and projection. Cross-Wave historical inspection

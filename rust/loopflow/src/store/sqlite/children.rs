@@ -54,20 +54,20 @@ impl SqliteStore {
     // Durable Tasks: Linear identity, immutable placement, commands,
     // and lifecycle events share one sqlite transaction boundary.
 
-    pub fn insert_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
+    pub fn insert_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<Task> {
         let _admission = self.lock_checkout(&task.worktree)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert_initial_task(&transaction, task, pr)?;
+        let task = insert_initial_task(&transaction, task, pr)?;
         transaction.commit()?;
-        Ok(())
+        Ok(task)
     }
 
-    pub fn insert_task_with_worktree(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
+    pub fn insert_task_with_worktree(&self, task: &Task, pr: &TaskPr) -> StoreResult<Task> {
         let _admission = self.lock_checkout(&task.worktree)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert_initial_task(&transaction, task, pr)?;
+        let task = insert_initial_task(&transaction, task, pr)?;
         insert_task_event_in(
             &transaction,
             &task.id,
@@ -80,7 +80,7 @@ impl SqliteStore {
             },
         )?;
         transaction.commit()?;
-        Ok(())
+        Ok(task)
     }
 
     pub fn update_task_pm_writeback(
@@ -975,11 +975,69 @@ fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreResult<()> {
     Ok(())
 }
 
+fn accepted_registration_task(conn: &Connection, task: &Task) -> StoreResult<Task> {
+    let repo: String = conn.query_row(
+        "SELECT repo FROM waves WHERE id=?1",
+        [&task.wave_id],
+        |row| row.get(0),
+    )?;
+    let observation =
+        super::planning::pm_task_observation_in(conn, &repo, "linear", task.plan.id.as_str())?;
+    if matches!(
+        observation.state,
+        crate::store::PlanningState::Invalid | crate::store::PlanningState::Removed
+    ) {
+        return Err(StoreError::InvalidData(format!(
+            "Task {} planning is invalid or removed; refresh the Wave",
+            task.plan.identifier
+        )));
+    }
+    let Some(record) = observation.record else {
+        return Ok(task.clone());
+    };
+    let project: String = conn.query_row(
+        "SELECT external_project_id FROM projects WHERE id=?1 AND wave_id=?2",
+        params![task.project_id.as_str(), task.wave_id.as_str()],
+        |row| row.get(0),
+    )?;
+    if record.item.project_id.as_deref() != Some(project.as_str()) {
+        return Err(StoreError::InvalidData(format!(
+            "Task {} changed Project before registration; refresh the Wave",
+            record.item.identifier
+        )));
+    }
+    let owned: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pm_wave_projects WHERE wave_id=?1 AND project_id=?2)",
+        params![task.wave_id.as_str(), project],
+        |row| row.get(0),
+    )?;
+    if !owned || record.project.is_none() {
+        return Err(StoreError::InvalidData(format!(
+            "Task {} Project ownership is unresolved; refresh the Wave",
+            record.item.identifier
+        )));
+    }
+    if let Some(reason) = record.item.terminal_reason() {
+        return Err(StoreError::InvalidData(reason.into()));
+    }
+    let mut accepted = task.clone();
+    accepted.plan = TaskPlan {
+        id: task.plan.id.clone(),
+        identifier: record.item.identifier,
+        title: record.item.name,
+        description: record.item.description,
+        pm_snapshot_synced_at: record.observed_at,
+    };
+    Ok(accepted)
+}
+
 fn insert_initial_task(
     conn: &rusqlite::Transaction<'_>,
     task: &Task,
     pr: &TaskPr,
-) -> StoreResult<()> {
+) -> StoreResult<Task> {
+    let task = accepted_registration_task(conn, task)?;
+    let task = &task;
     validate_task(task)?;
     validate_initial_task_pr(task, pr)?;
     validate_task_project(conn, task)?;
@@ -1023,7 +1081,9 @@ fn insert_initial_task(
     )?;
     inherit_task_placement(conn, task)?;
     insert_task_pr(conn, pr)?;
-    seed_task_linear_observation(conn, task)
+    seed_task_linear_observation(conn, task)?;
+    task_on(conn, &task.id)?
+        .ok_or_else(|| StoreError::InvalidData("inserted Task is missing".into()))
 }
 
 /// Seed the Linear observation cursor from the planning directive, in the Task's

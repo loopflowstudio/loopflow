@@ -2,7 +2,7 @@
 //! No local record owns the chapter or remembers a partially applied operation.
 
 use std::collections::BTreeSet;
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,7 +26,6 @@ use super::pm::{
 #[serde(rename_all = "snake_case")]
 pub enum TaskDisposition {
     Move,
-    Abandon,
     Historical,
     Unresolved,
 }
@@ -269,6 +268,22 @@ pub(crate) async fn rotate(repo: &Path, name: &str, dry_run: bool) -> OpsResult<
         for (wave, _) in &contexts {
             locks.push(rotation_lock(wave).await?);
         }
+        let mut roots = Vec::new();
+        for (wave, _) in &contexts {
+            roots.extend(
+                store
+                    .list_tasks(Some(wave.id()))
+                    .await
+                    .map_err(error)?
+                    .into_iter()
+                    .map(|task| task.worktree)
+                    .filter(|path| !path.as_os_str().is_empty()),
+            );
+        }
+        let checkouts = store.lock_checkout_roots(roots).await.map_err(error)?;
+        for acquisition in &mut locks {
+            *acquisition = Arc::new(acquisition.with_checkouts(&checkouts));
+        }
     }
     for (wave, ctx) in &contexts {
         let projects = checked_projects(repo, ctx, wave.slug()).await?;
@@ -490,7 +505,7 @@ async fn apply_rotation(
     ctx: &PmContext,
     name: &str,
     entry: &mut WaveRotation,
-    acquisition: &Arc<File>,
+    acquisition: &Arc<crate::store::PlanningLocks>,
 ) -> OpsResult<()> {
     let linear_name = linear_project_name(repo, wave.slug(), name).await?;
     let mut project_observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -637,7 +652,6 @@ async fn apply_rotation(
             .await
             .map_err(error)?
             .ok_or_else(|| error("Task planning is unavailable during chapter rotation"))?;
-        let task = store.get_task_by_issue(&item.id).await.map_err(error)?;
         if item.project_id.as_deref() == Some(entry.successor_id.as_str()) {
             store
                 .put_pm_task(
@@ -661,18 +675,7 @@ async fn apply_rotation(
                 item.identifier
             )));
         }
-        let mut decision = disposition(store, item).await?;
-        if decision.disposition == TaskDisposition::Abandon {
-            if let Some(task) = &task {
-                if !store
-                    .retire_chapter_backlog(&task.id)
-                    .await
-                    .map_err(error)?
-                {
-                    decision = disposition(store, decision.task).await?;
-                }
-            }
-        }
+        let decision = disposition(store, item).await?;
         match decision.disposition {
             TaskDisposition::Move => {
                 ctx.client
@@ -703,23 +706,6 @@ async fn apply_rotation(
                     )
                     .await
                     .map_err(error)?;
-            }
-            TaskDisposition::Abandon => {
-                ctx.client
-                    .cancel_item(&decision.task.id)
-                    .await
-                    .map_err(error)?;
-                let (confirmed, _) = ctx
-                    .client
-                    .issue_ownership(&decision.task.id)
-                    .await
-                    .map_err(error)?
-                    .ok_or_else(|| error("Task planning is unavailable during chapter rotation"))?;
-                if confirmed.project_id.as_deref() != Some(predecessor.id.as_str())
-                    || confirmed.state.as_deref() != Some("canceled")
-                {
-                    return Err(error("Task cancellation is not confirmed"));
-                }
             }
             TaskDisposition::Historical => {}
             TaskDisposition::Unresolved => {
@@ -816,7 +802,7 @@ pub(crate) async fn require_chapter_home(store: &Store, wave: &Wave) -> OpsResul
     Ok(())
 }
 
-pub(crate) async fn rotation_lock(wave: &Wave) -> OpsResult<Arc<File>> {
+pub(crate) async fn rotation_lock(wave: &Wave) -> OpsResult<Arc<crate::store::PlanningLocks>> {
     let path = crate::store::lf_home_dir().join("chapter-locks");
     #[cfg(test)]
     let path = super::pm::PM_TEST_CONTEXT
@@ -833,7 +819,7 @@ pub(crate) async fn rotation_lock(wave: &Wave) -> OpsResult<Arc<File>> {
     // OS ownership releases on crash; provider state makes the next holder a resumer.
     for _ in 0..300 {
         match fs2::FileExt::try_lock_exclusive(&file) {
-            Ok(()) => return Ok(Arc::new(file)),
+            Ok(()) => return Ok(Arc::new(crate::store::PlanningLocks::new(file))),
             Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
@@ -915,8 +901,8 @@ pub fn classify_task(task: &PmItem, evidence: &TaskStartEvidence) -> (TaskDispos
     }
     if evidence.abandoned && !terminal && !evidence.completed {
         return (
-            TaskDisposition::Abandon,
-            "finish confirmed local backlog retirement".into(),
+            TaskDisposition::Unresolved,
+            "local abandonment awaits explicit provider settlement".into(),
         );
     }
     if terminal || evidence.completed {
@@ -945,13 +931,13 @@ pub fn classify_task(task: &PmItem, evidence: &TaskStartEvidence) -> (TaskDispos
     if evidence.authored == Some(false) && matches!(state, Some("backlog" | "unstarted" | "triage"))
     {
         return (
-            TaskDisposition::Abandon,
-            "unstarted backlog expires at the chapter boundary".into(),
+            TaskDisposition::Historical,
+            "unreviewed backlog remains in its existing Project".into(),
         );
     }
     (
         TaskDisposition::Unresolved,
-        "start evidence is unavailable; refresh before retiring this Task".into(),
+        "start evidence is unavailable; refresh before rotating this Task".into(),
     )
 }
 

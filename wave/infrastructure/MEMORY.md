@@ -331,18 +331,19 @@ conversations, Task/PR atomicity and unset Started. The rejected Home-wide guard
 remains at `2d96630b3:wave/infrastructure/MEMORY.md`; both missing-root failures
 remain at `be36cde18:wave/infrastructure/MEMORY.md`. Git leases remain separate.
 
-Registration still inserts supplied planning under a Started-count selector;
-rotation still lacks checkout exclusion. October 5 source inspection also finds
-registration returns `()` while its caller uses the earlier Task for publication,
-checkout finishing and execution. Transactional acceptance must return the accepted
-Task to those consumers, retaining reserved identity and each entity's observation
-age. A correct stored row alone cannot prove the operation used accepted facts.
-Release's entry-point recovery lesson applies; publication proves no Project readiness.
+October 5 source now returns the inserted Task from registration and uses it for
+publication, checkout finishing and execution. Existing accepted issue facts win
+transactionally, preserving their own acquisition age and reserved placement.
+Initial supplied facts remain usable without an accepted observation; the old
+Started-count Project selector still awaits shared configured identity.
 
-`b06e17d3c:wave/infrastructure/MEMORY.md` retains the prior build/13-test/Clippy
-record and acquisition details. CI repair, both rotation/start orderings and
-failed-reset recovery remain unproved. Release's entry-point recovery lesson
-applies; publication and installation establish no Project readiness.
+Rotation now gathers exact Task roots under ordered Wave locks and acquires one
+checkout lock set. Queued planning writers retain both scopes after cancellation;
+a caller-owned lock alone would release exclusion before a queued commit. Automatic
+backlog cancellation and its standalone retirement writer are deleted. Unreviewed
+backlog stays with its Project; unresolved abandonment keeps its separate settlement.
+Shared binding, transition recovery, CI repair acceptance and configured readiness
+remain open. Focused operation proofs pass; publication proves no readiness.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 

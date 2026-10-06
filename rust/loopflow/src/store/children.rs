@@ -1,6 +1,5 @@
 //! Durable Project and Task rows and their events.
 
-use std::fs::File;
 use std::sync::Arc;
 
 use crate::id::WaveId;
@@ -17,12 +16,24 @@ impl Store {
     pub(crate) async fn task_checkouts(&self) -> StoreResult<Vec<super::sqlite::TaskCheckout>> {
         run_sqlite(&self.sqlite, |store| store.task_checkouts()).await
     }
+    pub(crate) async fn lock_checkout_roots(
+        &self,
+        roots: Vec<std::path::PathBuf>,
+    ) -> StoreResult<Vec<Arc<std::fs::File>>> {
+        run_sqlite(&self.sqlite, move |store| {
+            store
+                .lock_checkout_roots(&[], &roots)
+                .map(|locks| locks.into_iter().map(Arc::new).collect())
+        })
+        .await
+    }
+
     pub async fn create_task(
         &self,
         task: &Task,
         pr: &TaskPr,
-        acquisition: Option<Arc<File>>,
-    ) -> StoreResult<()> {
+        acquisition: Option<Arc<super::PlanningLocks>>,
+    ) -> StoreResult<Task> {
         let task = task.clone();
         let pr = pr.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
@@ -35,8 +46,8 @@ impl Store {
         &self,
         task: &Task,
         pr: &TaskPr,
-        acquisition: Option<Arc<File>>,
-    ) -> StoreResult<()> {
+        acquisition: Option<Arc<super::PlanningLocks>>,
+    ) -> StoreResult<Task> {
         let task = task.clone();
         let pr = pr.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {

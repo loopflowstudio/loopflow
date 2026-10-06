@@ -1006,7 +1006,8 @@ fn create_prepared_task(
             .await;
         drop(acquisition);
         match registration {
-            Ok(()) => {
+            Ok(accepted) => {
+                task = accepted;
                 if let Some(direction) = directive.as_deref() {
                     let mut publication_task = task.clone();
                     publication_task.worktree = main_repo.clone();
@@ -5393,6 +5394,108 @@ mod tests {
             std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
                 .unwrap();
         task_fixture_at(identifier, repository).await
+    }
+
+    #[test]
+    fn prepared_registration_consumes_accepted_facts_before_checkout_or_execution() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        for moved in [false, true] {
+            let repo = loopflow_test_support::TestRepo::new();
+            let fixture = runtime.block_on(task_fixture_at("EXISTING", repo.path().to_path_buf()));
+            std::env::set_var("LF_HOME", fixture._database.path());
+            std::fs::create_dir_all(repo.path().join("wave/task-recovery")).unwrap();
+            std::fs::write(
+                repo.path().join("wave/task-recovery/GOAL.md"),
+                "Recover work.",
+            )
+            .unwrap();
+            let mut snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+                "../../../../tests/fixtures/dto/task_history_planning.json"
+            ))
+            .unwrap();
+            snapshot.projects.truncate(1);
+            snapshot.items.truncate(1);
+            snapshot.projects[0].id = "task-recovery-project".into();
+            snapshot.projects[0].status = crate::pm::ProjectStatus::Started;
+            snapshot.items[0].id = "new-issue".into();
+            snapshot.items[0].completed = false;
+            snapshot.items[0].completed_at = None;
+            snapshot.items[0].state = Some("unstarted".into());
+            snapshot.items[0].project_id = Some("task-recovery-project".into());
+            snapshot.items[0].revision = Some("2026-10-05T12:00:00Z".into());
+            let resolved = crate::ops::task_pm::ResolvedTask {
+                wave: "task-recovery".into(),
+                observed_at: 1,
+                project: snapshot.projects[0].clone(),
+                item: snapshot.items[0].clone(),
+            };
+            snapshot.items[0].name = "Accepted after resolution".into();
+            snapshot.items[0].description = "Preserve this direction".into();
+            snapshot.items[0].revision = Some("2026-10-05T13:00:00Z".into());
+            if moved {
+                snapshot.items[0].project_id = Some("foreign-project".into());
+            }
+            runtime
+                .block_on(fixture.store.put_pm_snapshot(
+                    crate::store::PmSnapshotRow {
+                        wave_id: fixture.task.wave_id.clone(),
+                        provider: "linear".into(),
+                        initiative: snapshot.projects[0].initiative_ids[0].clone(),
+                        synced_at: 7,
+                        snapshot,
+                    },
+                    None,
+                ))
+                .unwrap();
+            let checkout = fixture._database.path().join("reserved-checkout");
+            if !moved {
+                std::fs::create_dir(&checkout).unwrap();
+            }
+            let prepared = super::PreparedTask {
+                plan: crate::engine::worktrees::PlacementPlan {
+                    base_ref: "retained-base".into(),
+                    branch: "retained-branch".into(),
+                    worktree_path: checkout.clone(),
+                    strategy: crate::engine::worktrees::PlacementStrategy::UseExistingWorktree,
+                },
+                workspace_slug: "reserved-checkout".into(),
+                stack_parent: None,
+                github: None,
+                selected_flow: moved.then(|| "must-not-launch".into()),
+                requested_agent: None,
+                directive: None,
+            };
+            let result = super::create_prepared_task(repo.path().to_path_buf(), resolved, prepared);
+            if moved {
+                assert!(result.unwrap_err().to_string().contains("changed Project"));
+                assert!(runtime
+                    .block_on(fixture.store.get_task_by_issue("new-issue"))
+                    .unwrap()
+                    .is_none());
+                assert!(!checkout.exists());
+            } else {
+                let task = result.unwrap();
+                assert_eq!(task.plan.title, "Accepted after resolution");
+                assert_eq!(task.plan.description, "Preserve this direction");
+                assert_eq!(task.plan.pm_snapshot_synced_at, 7);
+                assert_eq!(task.worktree, checkout);
+                assert_eq!(
+                    runtime.block_on(fixture.store.get_task(&task.id)).unwrap(),
+                    Some(task.clone())
+                );
+                let pr = runtime
+                    .block_on(fixture.store.active_task_pr(&task.id))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(pr.branch, "retained-branch");
+                assert_eq!(pr.base_commit, "retained-base");
+            }
+            assert!(runtime
+                .block_on(fixture.store.get_task(&fixture.task.id))
+                .unwrap()
+                .is_some());
+        }
     }
 
     #[test]

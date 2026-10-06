@@ -231,69 +231,7 @@ impl SqliteStore {
         selector: &str,
     ) -> StoreResult<PmTaskObservation> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT i.body,p.body,i.observed_at,i.needs_refresh OR COALESCE(p.membership_unresolved,0) OR COALESCE(p.archived,0),
-             EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
-                    WHERE w.repo=i.repo AND d.issue_id=i.id)
-             OR EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id
-                       AND i.provider='linear' AND c.removed=1)
-             FROM pm_items i LEFT JOIN pm_projects p
-             ON p.repo=i.repo AND p.provider=i.provider AND p.id=i.project_id
-             WHERE i.repo=?1 AND i.provider=?2 AND (i.id=?3 OR i.identifier=?3)",
-        )?;
-        let rows = query
-            .query_map(params![repo, provider, selector], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, bool>(3)?,
-                    row.get::<_, bool>(4)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        if rows.len() > 1 {
-            return Err(StoreError::InvalidData(format!(
-                "ambiguous planning selector {selector:?}; use a Task UUID"
-            )));
-        }
-        let Some((item, project, observed_at, invalid, removed)) = rows.into_iter().next() else {
-            let removed = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND removed=1 AND ?2='linear')
-                 OR EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
-                           WHERE w.repo=?3 AND (d.issue_id=?1 OR d.identifier=?1 COLLATE NOCASE))",
-                params![selector, provider, repo], |row| row.get::<_, bool>(0),
-            )?;
-            return Ok(PmTaskObservation {
-                record: None,
-                state: if removed {
-                    PlanningState::Removed
-                } else {
-                    PlanningState::Unavailable
-                },
-            });
-        };
-        let mut item: PmItem = serde_json::from_str(&item)?;
-        let project: Option<PmProject> = project
-            .map(|body| serde_json::from_str(&body))
-            .transpose()?;
-        if let Some(project) = &project {
-            item.project = Some(project.slug.clone());
-        }
-        Ok(PmTaskObservation {
-            record: Some(PmTaskRecord {
-                item,
-                project,
-                observed_at,
-            }),
-            state: if removed {
-                PlanningState::Removed
-            } else if invalid {
-                PlanningState::Invalid
-            } else {
-                PlanningState::Available
-            },
-        })
+        pm_task_observation_in(&conn, repo, provider, selector)
     }
 
     pub fn put_pm_snapshot(&self, snapshot: &PmSnapshotRow) -> StoreResult<()> {
@@ -435,6 +373,77 @@ impl SqliteStore {
             snapshot: PmSnapshot { projects, items },
         }))
     }
+}
+
+pub(super) fn pm_task_observation_in(
+    conn: &Connection,
+    repo: &str,
+    provider: &str,
+    selector: &str,
+) -> StoreResult<PmTaskObservation> {
+    let mut query = conn.prepare(
+            "SELECT i.body,p.body,i.observed_at,i.needs_refresh OR COALESCE(p.membership_unresolved,0) OR COALESCE(p.archived,0),
+             EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
+                    WHERE w.repo=i.repo AND d.issue_id=i.id)
+             OR EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id
+                       AND i.provider='linear' AND c.removed=1)
+             FROM pm_items i LEFT JOIN pm_projects p
+             ON p.repo=i.repo AND p.provider=i.provider AND p.id=i.project_id
+             WHERE i.repo=?1 AND i.provider=?2 AND (i.id=?3 OR i.identifier=?3)",
+        )?;
+    let rows = query
+        .query_map(params![repo, provider, selector], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, bool>(3)?,
+                row.get::<_, bool>(4)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    if rows.len() > 1 {
+        return Err(StoreError::InvalidData(format!(
+            "ambiguous planning selector {selector:?}; use a Task UUID"
+        )));
+    }
+    let Some((item, project, observed_at, invalid, removed)) = rows.into_iter().next() else {
+        let removed = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND removed=1 AND ?2='linear')
+                 OR EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
+                           WHERE w.repo=?3 AND (d.issue_id=?1 OR d.identifier=?1 COLLATE NOCASE))",
+                params![selector, provider, repo], |row| row.get::<_, bool>(0),
+            )?;
+        return Ok(PmTaskObservation {
+            record: None,
+            state: if removed {
+                PlanningState::Removed
+            } else {
+                PlanningState::Unavailable
+            },
+        });
+    };
+    let mut item: PmItem = serde_json::from_str(&item)?;
+    let project: Option<PmProject> = project
+        .map(|body| serde_json::from_str(&body))
+        .transpose()?;
+    if let Some(project) = &project {
+        item.project = Some(project.slug.clone());
+    }
+    Ok(PmTaskObservation {
+        record: Some(PmTaskRecord {
+            item,
+            project,
+            observed_at,
+        }),
+        state: if removed {
+            PlanningState::Removed
+        } else if invalid {
+            PlanningState::Invalid
+        } else {
+            PlanningState::Available
+        },
+    })
 }
 
 // Both durable projections require the same confirmed Initiative/Wave association.

@@ -265,6 +265,26 @@ pub fn storage_config_from_env() -> Result<StorageConfig, std::io::Error> {
     Ok(StorageConfig::sqlite(database_path_from_env()?))
 }
 
+/// Planning and checkout locks retained by every queued writer using this acquisition.
+#[derive(Debug, Clone)]
+pub struct PlanningLocks {
+    locks: Vec<Arc<std::fs::File>>,
+}
+
+impl PlanningLocks {
+    pub(crate) fn new(wave: std::fs::File) -> Self {
+        Self {
+            locks: vec![Arc::new(wave)],
+        }
+    }
+
+    pub(crate) fn with_checkouts(&self, checkouts: &[Arc<std::fs::File>]) -> Self {
+        let mut locks = self.locks.clone();
+        locks.extend_from_slice(checkouts);
+        Self { locks }
+    }
+}
+
 #[derive(Debug)]
 pub struct Store {
     pub(crate) sqlite: sqlite::SqliteStore,
@@ -287,11 +307,11 @@ tokio::task_local! {
 }
 
 // The blocking worker owns acquisition through commit, even if its async caller is canceled.
-async fn run_planning_write(
+async fn run_planning_write<T: Send + 'static>(
     store: &sqlite::SqliteStore,
-    acquisition: Option<Arc<std::fs::File>>,
-    write: impl FnOnce(sqlite::SqliteStore) -> StoreResult<()> + Send + 'static,
-) -> StoreResult<()> {
+    acquisition: Option<Arc<PlanningLocks>>,
+    write: impl FnOnce(sqlite::SqliteStore) -> StoreResult<T> + Send + 'static,
+) -> StoreResult<T> {
     #[cfg(test)]
     let gate = PLANNING_ACCEPTANCE_GATE.try_with(Clone::clone).ok();
     run_sqlite(store, move |store| {
@@ -320,7 +340,7 @@ impl Store {
     pub async fn put_pm_snapshot(
         &self,
         snapshot: PmSnapshotRow,
-        acquisition: Option<Arc<std::fs::File>>,
+        acquisition: Option<Arc<PlanningLocks>>,
     ) -> StoreResult<()> {
         run_planning_write(&self.sqlite, acquisition, move |store| {
             store.put_pm_snapshot(&snapshot)
@@ -335,7 +355,7 @@ impl Store {
         initiative: &str,
         project: crate::pm::PmProject,
         observed_at: i64,
-        acquisition: Option<Arc<std::fs::File>>,
+        acquisition: Option<Arc<PlanningLocks>>,
     ) -> StoreResult<()> {
         let wave = wave.clone();
         let provider = provider.to_string();
@@ -353,7 +373,7 @@ impl Store {
         initiative: &str,
         project: crate::pm::PmProject,
         observed_at: i64,
-        acquisition: Arc<std::fs::File>,
+        acquisition: Arc<PlanningLocks>,
     ) -> StoreResult<()> {
         let wave = wave.clone();
         let provider = provider.to_string();
@@ -370,7 +390,7 @@ impl Store {
         provider: &str,
         record: PmTaskRecord,
         confirmed_wave: Option<(WaveId, String)>,
-        acquisition: Option<Arc<std::fs::File>>,
+        acquisition: Option<Arc<PlanningLocks>>,
     ) -> StoreResult<()> {
         let repo = repo.to_string();
         let provider = provider.to_string();
@@ -436,7 +456,7 @@ impl Store {
         repo: &str,
         provider: &str,
         expected: PmTaskRecord,
-        acquisition: Option<Arc<std::fs::File>>,
+        acquisition: Option<Arc<PlanningLocks>>,
     ) -> StoreResult<()> {
         let repo = repo.to_string();
         let provider = provider.to_string();
@@ -1341,6 +1361,7 @@ mod tests {
     use crate::work::wave::Wave;
     use std::env;
     use std::path::PathBuf;
+    use std::sync::Arc;
     use time::OffsetDateTime;
 
     #[test]
@@ -1596,6 +1617,130 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn registration_returns_accepted_planning_and_preserves_reserved_identity() {
+        for initializing in [false, true] {
+            let (directory, store, wave) = planning_store().await;
+            let project = make_project(&wave);
+            store.create_project(&project).await.unwrap();
+            let mut task = make_task(&wave, &project);
+            task.worktree = directory.path().join("checkout");
+            let pr = make_task_pr(&task);
+            let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+            snapshot.synced_at = 17;
+            snapshot.snapshot.items[0].completed = false;
+            snapshot.snapshot.items[0].completed_at = None;
+            snapshot.snapshot.items[0].state = Some("unstarted".into());
+            snapshot.snapshot.items[0].identifier = "NEXT-9".into();
+            snapshot.snapshot.items[0].name = "Accepted title".into();
+            snapshot.snapshot.items[0].description = "Accepted direction".into();
+            store.put_pm_snapshot(snapshot, None).await.unwrap();
+            let accepted = if initializing {
+                store
+                    .create_task_with_worktree(&task, &pr, None)
+                    .await
+                    .unwrap()
+            } else {
+                store.create_task(&task, &pr, None).await.unwrap()
+            };
+            let mut expected = task.clone();
+            expected.plan.identifier = "NEXT-9".into();
+            expected.plan.title = "Accepted title".into();
+            expected.plan.description = "Accepted direction".into();
+            expected.plan.pm_snapshot_synced_at = 17;
+            assert_eq!(accepted, expected);
+            assert_eq!(store.get_task(&task.id).await.unwrap(), Some(expected));
+            assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+            assert!(!store.task_started(&task.id).await.unwrap());
+        }
+    }
+
+    #[tokio::test]
+    async fn registration_rejects_changed_issue_ownership_without_reserving_work() {
+        for initializing in [false, true] {
+            for destination in [Some("other-project"), None] {
+                let (directory, store, wave) = planning_store().await;
+                let project = make_project(&wave);
+                store.create_project(&project).await.unwrap();
+                let mut task = make_task(&wave, &project);
+                task.worktree = directory.path().join("checkout");
+                let pr = make_task_pr(&task);
+                let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+                snapshot.snapshot.items[0].project_id = destination.map(str::to_string);
+                store.put_pm_snapshot(snapshot, None).await.unwrap();
+                let result = if initializing {
+                    store.create_task_with_worktree(&task, &pr, None).await
+                } else {
+                    store.create_task(&task, &pr, None).await
+                };
+                assert!(result.unwrap_err().to_string().contains("changed Project"));
+                assert!(store.get_task(&task.id).await.unwrap().is_none());
+                assert!(store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!task.worktree.exists());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_projection_retains_rotation_checkout_exclusion_through_commit() {
+        let (directory, store, wave) = planning_store().await;
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        let mut task = make_task(&wave, &project);
+        task.worktree = directory.path().join("checkout");
+        store
+            .create_task(&task, &make_task_pr(&task), None)
+            .await
+            .unwrap();
+        let snapshot = task_planning_snapshot(&wave, &project, &task);
+        let checkouts = store
+            .lock_checkout_roots(vec![task.worktree.clone()])
+            .await
+            .unwrap();
+        let wave_lock = std::fs::File::create(directory.path().join("wave.lock")).unwrap();
+        fs2::FileExt::try_lock_exclusive(&wave_lock).unwrap();
+        let acquisition = Arc::new(super::PlanningLocks::new(wave_lock).with_checkouts(&checkouts));
+        drop(checkouts);
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let (release, blocked) = std::sync::mpsc::channel();
+        let gate = (entered.clone(), Arc::new(std::sync::Mutex::new(blocked)));
+        let writer_store = super::Store::from_sqlite_for_test(store.sqlite.clone());
+        let writer = tokio::spawn(super::PLANNING_ACCEPTANCE_GATE.scope(gate, async move {
+            writer_store
+                .put_pm_snapshot(snapshot, Some(acquisition))
+                .await
+        }));
+        tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+            .await
+            .unwrap();
+        writer.abort();
+        assert!(writer.await.unwrap_err().is_cancelled());
+        let excluded = store
+            .lock_checkout_roots(vec![task.worktree.clone()])
+            .await
+            .is_err();
+        release.send(()).unwrap();
+        let admitted = store
+            .lock_checkout_roots(vec![task.worktree.clone()])
+            .await
+            .unwrap();
+        assert!(
+            excluded,
+            "caller cancellation released checkout exclusion before commit"
+        );
+        assert_eq!(
+            store
+                .get_task(&task.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .plan
+                .pm_snapshot_synced_at,
+            1
+        );
+        drop(admitted);
+    }
+
+    #[tokio::test]
     async fn cancelled_registration_retains_planning_exclusion_through_commit() {
         for initializing in [false, true] {
             let (directory, store, wave) = planning_store().await;
@@ -1618,7 +1763,7 @@ mod tests {
             let input = task.clone();
             let input_pr = pr.clone();
             let writer = tokio::spawn(super::PLANNING_ACCEPTANCE_GATE.scope(gate, async move {
-                let acquisition = Some(std::sync::Arc::new(acquisition));
+                let acquisition = Some(std::sync::Arc::new(super::PlanningLocks::new(acquisition)));
                 if initializing {
                     writer_store
                         .create_task_with_worktree(&input, &input_pr, acquisition)
@@ -2220,7 +2365,6 @@ mod tests {
             .await
             .unwrap();
         assert!(store.chapter_task_evidence(&task.id).await.unwrap().begun);
-        assert!(!store.retire_chapter_backlog(&task.id).await.unwrap());
         let mut successor = make_project(&wave);
         successor.plan.id = LinearProjectId::new("next-chapter").unwrap();
         store.create_project(&successor).await.unwrap();
@@ -2246,91 +2390,6 @@ mod tests {
         assert!(events
             .iter()
             .any(|event| matches!(event.kind, TaskEventKind::Failed { .. })));
-    }
-
-    #[tokio::test]
-    async fn chapter_retirement_fences_a_prepared_task_before_its_first_claim() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            directory.path().join("registry.db"),
-        ))
-        .await
-        .unwrap();
-        let wave = make_wave("/repo");
-        store.create_wave(&wave).await.unwrap();
-        let project = make_project(&wave);
-        store.create_project(&project).await.unwrap();
-        let task = make_task(&wave, &project);
-        store
-            .create_task(&task, &make_task_pr(&task), None)
-            .await
-            .unwrap();
-        let position = store
-            .start_task_flow(
-                &task.id,
-                task_flow(
-                    &task,
-                    crate::durable::test_flow_invocation("code", 3, "review", None, false),
-                    crate::engine::ExecutionCursor {
-                        index: 0,
-                        iteration: 1,
-                        ..Default::default()
-                    },
-                ),
-            )
-            .await
-            .unwrap();
-        assert!(!store.chapter_task_evidence(&task.id).await.unwrap().begun);
-        assert!(store.retire_chapter_backlog(&task.id).await.unwrap());
-        let connection = rusqlite::Connection::open(directory.path().join("registry.db")).unwrap();
-        connection
-            .execute(
-                "UPDATE tasks SET work_terminal_at=1700000000 WHERE id=?1",
-                [task.id.as_str()],
-            )
-            .unwrap();
-        let events = store.task_events_after(&task.id, 0).await.unwrap();
-        assert!(store.retire_chapter_backlog(&task.id).await.unwrap());
-        let terminal_at: i64 = connection
-            .query_row(
-                "SELECT work_terminal_at FROM tasks WHERE id=?1",
-                [task.id.as_str()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(terminal_at, 1_700_000_000);
-        assert_eq!(store.task_events_after(&task.id, 0).await.unwrap(), events);
-        assert_eq!(
-            store.task_flow(&task.id).await.unwrap(),
-            Some(position.clone())
-        );
-        let owner = TaskWorkerOwner {
-            trace_id: TraceId::new(),
-            exec_id: ExecId::new(),
-            pid: 502,
-            started_at: 1_700_000_000,
-        };
-        assert!(store
-            .claim_task_worker(
-                &task.id,
-                &position.invocation.id,
-                position.version,
-                &owner,
-                OffsetDateTime::now_utc()
-            )
-            .await
-            .is_err());
-        assert_eq!(
-            store
-                .work_status(&WorkRef::Task(task.id.clone()))
-                .await
-                .unwrap(),
-            crate::durable::WorkStatus::Abandoned
-        );
-        assert_eq!(
-            store.get_task(&task.id).await.unwrap().unwrap().worktree,
-            task.worktree
-        );
     }
 
     #[tokio::test]

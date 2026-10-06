@@ -395,7 +395,7 @@ impl SqliteStore {
     /// Revalidate a connection after a child executable may have upgraded it.
     pub(crate) fn validate_current_schema(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        super::migrations::validate_experimental_sqlite(
+        super::migrations::validate_experimental_schema(
             &conn,
             crate::build_info::migration_draft_manifest(),
         )
@@ -499,7 +499,7 @@ impl SqliteStore {
             // the store has not applied. An ordinary open must not hand back a store
             // whose schema is older than this binary's code, which may query the
             // columns that pending migration adds.
-            super::migrations::validate_sqlite(&conn)?;
+            super::migrations::validate_sqlite_schema(&conn)?;
             if let Some(pending) = super::migrations::pending_shared_migration(&conn)? {
                 return Err(StoreError::InvalidData(format!(
                     "shared store {} is at an older frontier than this lf (pending {pending}); \
@@ -2415,6 +2415,27 @@ mod frontier_tests {
         assert_eq!(current_wave(&path), "Current");
         open(&path, Published, &shared.home, Forbidden)
             .expect("ordinary current binary opens after promotion");
+    }
+
+    /// Opening the shared store reads its schema, never its rows: a dangling
+    /// reference is installation preflight's and `lf home doctor`'s to report.
+    #[test]
+    fn an_ordinary_open_of_the_shared_store_does_not_scan_stored_rows() {
+        let shared = SharedHome::new();
+        let path = shared.shared_db();
+        open(&path, Published, &shared.home, Authorized).expect("boundary initializes");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO projects(id, wave_id, external_project_id, created_at)
+             VALUES ('orphan', 'absent-wave', 'external', 100);",
+        )
+        .unwrap();
+
+        open(&path, Published, &shared.home, Forbidden)
+            .expect("an ordinary open validates ledger and schema only");
+        crate::store::migrations::validate_sqlite(&conn)
+            .expect_err("full diagnosis still reports the dangling reference");
     }
 
     /// A validation-only build never advances the shared store even at the

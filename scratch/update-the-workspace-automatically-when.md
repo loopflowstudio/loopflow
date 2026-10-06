@@ -54,6 +54,10 @@ python3 scratch/measure/warm.py <home> <lf> [sample.txt]   # six refreshes, requ
 python3 scratch/measure/cold.py <home> <lf> sample.txt     # first reading, sampled
 python3 scratch/measure/hot.py sample.txt 40 80           # hot frames by sample count
 python3 scratch/measure/commit.py <home> <lf> 5            # sqlite3 renames a Task, then a Session; writer's exit to the frame
+python3 scratch/measure/checkout.py <home> <lf> <clean Task checkout> 5   # a file written, then removed, to the frame
+python3 scratch/measure/usage.py <home> <lf> 30            # usage rows every 0.2 s; readings per part
+python3 scratch/measure/idle.py <home> <lf> 30 workspace   # or active: CPU and memory left alone
+python3 scratch/measure/oneshot.py <home> <lf> <cwd> 10    # planning readings per one-shot read
 ```
 
 Always record `uptime` beside a number; this machine is rarely quiet.

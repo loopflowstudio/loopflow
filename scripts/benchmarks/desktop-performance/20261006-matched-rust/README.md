@@ -816,3 +816,45 @@ compositor/input, trace coverage/capacity and both full hours remain open.
 Check: both contained phase probes PASS; free-history attribution INCOMPLETE;
 receipt hash/summary verification PASS. No implementation change, matched rerun,
 publication, merge or Task completion.
+
+### Direct bitmap drawing rejected — October 6
+
+Jack Heart requested a bounded same-pixel comparison before another matched
+workload. From checkpoint `923339b70`, a temporary probe replaced only the capture
+call with `NSView.displayIgnoringOpacity(_:in:)`, drawing into the same AppKit
+bitmap representation with its full backing-scale transform. The existing
+contained `terminalMemoryPhases` setup, owned cat PTY, input and both unchanged
+recognizers remained. This tests bypassing the `cacheDisplay` wrapper; it does
+not substitute a layer snapshot into acceptance. The original capture ran
+immediately before and after the candidate, without intervening terminal input.
+
+All three images were **2800×1600**. The two original RGBA buffers were exactly
+identical. The candidate differed at **4,642 of 4,480,000 pixels** and omitted
+terminal glyphs: both recognizers returned empty results, while each original
+capture returned the same two rows per recognizer. The fast recognizer retained
+the exact `owned-terminal-memory` input marker; the accurate recognizer's
+imperfect transcription was identical across the original captures. Candidate
+image inspection confirmed missing text, not a mere OCR mismatch. Full resolution
+and a mostly matching background are insufficient evidence of native fidelity.
+
+**Candidate rejected before memory comparison or full workload.** Single capture
+times were 39.3/40.8/37.1 ms (original/direct/original); sequential RSS includes
+previous captures and OCR and supplies no memory-saving claim. The harness passed
+execution in 10.7 seconds, but the pixel/semantic comparison failed. No p95,
+production repair, observer replacement or acceptance follows. The temporary
+Swift edit was preserved privately, then restored byte-for-byte; ordinary
+capture, warmup, recognizers, deadlines and all original workloads are unchanged.
+
+The existing [stack summary](capture-stacks-summary.json) now retains comparison
+counts, events, source/probe/build/executable hashes and private receipts under
+`/tmp/loo304-capture-compare-20261006/`. Original allocation and failure evidence
+remains intact. Review rejected treating the successful test-process exit or
+99.9% matching background as equivalence. A subsequent alternative needs faithful
+native/composited glyph capture first; repeating this direct-drawing path cannot
+supply it. Realistic-workspace allocation attribution remains a useful independent
+check. Latency, four-round <32 MiB growth, independent Swift attribution,
+compositor/input proof, recorder readiness/capacity and both full hours remain open.
+No installed Home, historical Exec, release or publication operation occurred.
+
+Check: fresh Swift test build PASS; contained probe execution PASS; full-resolution
+pixel/OCR equivalence FAIL (candidate discarded); source restoration/diff PASS.

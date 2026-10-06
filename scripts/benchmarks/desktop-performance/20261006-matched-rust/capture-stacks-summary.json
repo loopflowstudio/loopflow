@@ -214,5 +214,247 @@
       "bytes": 56538840,
       "sha256": "38afba05e92aba57d1c3bd85b02210e584cf54a1b3515504b66c4ad70416a378"
     }
-  ]
+  ],
+  "direct_capture_comparison": {
+    "source_head": "923339b7047085ce2538884994fd951acc4a45a6",
+    "date": "2026-10-06",
+    "candidate": "NSView.displayIgnoringOpacity(_:in:) into a full-resolution NSBitmapImageRep context",
+    "outcome": "rejected: terminal glyphs absent; both recognizers returned no text",
+    "protocol": "Existing contained terminalMemoryPhases setup, owned cat PTY and input, then cache-before/direct/cache-after without intervening input; original observers unchanged.",
+    "pixels": {
+      "images": {
+        "cache-before": {
+          "size": [
+            2800,
+            1600
+          ],
+          "rgba_sha256": "aed8ba630242764e0fe1e6371bf45c32783f5af16cfc3fcbf2e5d90ac50c90a7"
+        },
+        "direct": {
+          "size": [
+            2800,
+            1600
+          ],
+          "rgba_sha256": "98bd1a768bc92e200ccb0f5498121657711d366bca931f06ae39be213b7fae07"
+        },
+        "cache-after": {
+          "size": [
+            2800,
+            1600
+          ],
+          "rgba_sha256": "aed8ba630242764e0fe1e6371bf45c32783f5af16cfc3fcbf2e5d90ac50c90a7"
+        }
+      },
+      "comparisons": {
+        "cache-before/direct": {
+          "different_pixels": 4642,
+          "total_pixels": 4480000,
+          "max_channel_delta": 201
+        },
+        "cache-before/cache-after": {
+          "different_pixels": 0,
+          "total_pixels": 4480000,
+          "max_channel_delta": 0
+        },
+        "direct/cache-after": {
+          "different_pixels": 4642,
+          "total_pixels": 4480000,
+          "max_channel_delta": 201
+        }
+      }
+    },
+    "events": [
+      {
+        "event": "allocation_phase",
+        "phase": "blank",
+        "pid": 87789,
+        "rss_bytes": 87588864,
+        "uptime_ns": 177899890115125
+      },
+      {
+        "event": "allocation_phase",
+        "phase": "blank_captured",
+        "pid": 87789,
+        "rss_bytes": 148324352,
+        "uptime_ns": 177903312140958
+      },
+      {
+        "event": "allocation_phase",
+        "phase": "terminal_rendered",
+        "pid": 87789,
+        "rss_bytes": 136937472,
+        "uptime_ns": 177906611934083
+      },
+      {
+        "event": "capture",
+        "height": 1600,
+        "method": "cache-before",
+        "ms": 39.32925,
+        "rss_bytes": 217300992,
+        "uptime_ns": 177909759688250,
+        "width": 2800
+      },
+      {
+        "event": "recognition",
+        "level": "fast",
+        "method": "cache-before",
+        "rss_bytes": 238174208,
+        "text": [
+          "owned-terminal-memory",
+          "owned-tepminal-memopy"
+        ],
+        "uptime_ns": 177909862644000
+      },
+      {
+        "event": "recognition",
+        "level": "accurate",
+        "method": "cache-before",
+        "rss_bytes": 252542976,
+        "text": [
+          "vne\u2022-Terminal-memo",
+          "Vned-Terminal -memo"
+        ],
+        "uptime_ns": 177909988964166
+      },
+      {
+        "event": "capture",
+        "height": 1600,
+        "method": "direct",
+        "ms": 40.773125,
+        "rss_bytes": 279478272,
+        "uptime_ns": 177910029953916,
+        "width": 2800
+      },
+      {
+        "event": "recognition",
+        "level": "fast",
+        "method": "direct",
+        "rss_bytes": 297795584,
+        "text": [],
+        "uptime_ns": 177910126295791
+      },
+      {
+        "event": "recognition",
+        "level": "accurate",
+        "method": "direct",
+        "rss_bytes": 316899328,
+        "text": [],
+        "uptime_ns": 177910153348125
+      },
+      {
+        "event": "capture",
+        "height": 1600,
+        "method": "cache-after",
+        "ms": 37.108958,
+        "rss_bytes": 352796672,
+        "uptime_ns": 177910190719416,
+        "width": 2800
+      },
+      {
+        "event": "recognition",
+        "level": "fast",
+        "method": "cache-after",
+        "rss_bytes": 352845824,
+        "text": [
+          "owned-terminal-memory",
+          "owned-tepminal-memopy"
+        ],
+        "uptime_ns": 177910289687416
+      },
+      {
+        "event": "recognition",
+        "level": "accurate",
+        "method": "cache-after",
+        "rss_bytes": 355352576,
+        "text": [
+          "vne\u2022-Terminal-memo",
+          "Vned-Terminal -memo"
+        ],
+        "uptime_ns": 177910413014666
+      }
+    ],
+    "limits": [
+      "One bounded standalone probe, not realistic workspace or matched acceptance.",
+      "Sequential RSS includes earlier captures and OCR; no memory saving or product attribution established.",
+      "Test harness exit 0 records execution only; explicit pixel/OCR comparison fails equivalence.",
+      "No candidate adopted, no full workload launched. Original source restored byte-for-byte."
+    ],
+    "receipts": [
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/original.swift",
+        "bytes": 82474,
+        "sha256": "70ea8b24df849f1472e4bff403f720366c1e7789a4ce4cc0c26ab67bbac946a1"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/probe.swift",
+        "bytes": 84650,
+        "sha256": "e6d9f87ee69bc3f4eaf47a86cba9cbf27a94af97910962cb0e40c2e0b15cb703"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/probe.patch",
+        "bytes": 2961,
+        "sha256": "341518ec041b64ada721c0c7c22f89457be4e793409eaa00d1b3f7df32fa7b49"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/insert.py",
+        "bytes": 2419,
+        "sha256": "54d3a0f761273e78fd473407bae78e82005637d15a4b62046ac319643a4887d1"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/run.py",
+        "bytes": 1114,
+        "sha256": "053eb44c8048608bb33c95f1165144f58cb479067c96b164c5bd1458b6379203"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/pixels.py",
+        "bytes": 920,
+        "sha256": "6a393d83aba8eca6e599ba9c64b76ffeceb35fa04f2b5142bc9f03649bc8bb1c"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/build.log",
+        "bytes": 163194,
+        "sha256": "dbc7faf6f7e88910ffcfd21d6f6c71dcb8927daa5e2044766903330e830feebd"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/command.json",
+        "bytes": 1621,
+        "sha256": "b190fa641cda635b0e8806e46107e0115815d327b07ab017091fe856db744dbf"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/native.log",
+        "bytes": 417,
+        "sha256": "42d6c52b8b0485fdfdf2ca5100cfd7e13f2d924c98cf50e6af8af51b8d36b0c6"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/phases.jsonl",
+        "bytes": 1678,
+        "sha256": "e0785f70d9048ad989aa45eb6159465533df5474a32d74b2134c5e6280ff607f"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/pixels.json",
+        "bytes": 933,
+        "sha256": "7e7b4453f23e666f6649d6b3b4ba924ecf9a859488f2436f8c26b44b59405c11"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/cache-before.png",
+        "bytes": 97146,
+        "sha256": "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/direct.png",
+        "bytes": 85241,
+        "sha256": "f0636e6ff1ef89282a40e437aaa5b2de801cf86d512d6d8f3f5ee85262761752"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/cache-after.png",
+        "bytes": 97146,
+        "sha256": "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9"
+      },
+      {
+        "path": "/Users/jack/src/loopflow.make-the-current-desktop-workspace/swift/.build/arm64-apple-macosx/debug/LoopflowSwiftPackageTests.xctest/Contents/MacOS/LoopflowSwiftPackageTests",
+        "bytes": 62749864,
+        "sha256": "d820151db5fb73b85afcfdcef2452471888c43843e4de0d371019f9cd3796942"
+      }
+    ]
+  }
 }

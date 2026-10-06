@@ -817,10 +817,11 @@ trace-enabled completion with missing tables or endpoint gaps. Starting recordin
 after `soak_begin` still needs a readiness barrier. Faithful lower-volume recording,
 compositor/input proof and both hours remain unresolved. Receipts remain in the report; the installed Home was untouched.
 
-October 6 stacks attribute two ~17 MiB VM regions to CoreGraphics copying under
-AppKit capture; Ghostty targets stayed unchanged. Free-history collection failed,
-so lifetime/live-byte ownership remains unproved. The matched report records the retained executable hash, evidence limits and
-next realistic-workspace/equivalent-pixel investigation; no acceptance follows.
+October 6: AppKit/CoreGraphics allocated two ~17 MiB regions; Ghostty targets
+stayed fixed. Free lifetimes remain unknown. Direct bitmap drawing lost terminal
+glyphs (4,642 pixels), failing both recognizers; original captures matched exactly.
+Candidate discarded. Hashes retained. Faithful capture, realistic attribution
+and all acceptance remain open.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

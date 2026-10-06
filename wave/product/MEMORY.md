@@ -2,8 +2,43 @@
 
 Renamed from `concerto` in the 2026-07-08 wave/project/task restructure. The wave's
 scope widened past the Mac app: product now owns the shared API and every surface
-(CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
-they mean the Mac surface.
+(CLI, Mac, iOS, agent turns, workers). Older “Concerto” notes mean the Mac surface.
+
+## Reactive workspace (2026-10-05)
+
+Jack Heart requested that the open workspace show committed changes without a
+refresh (LOO-382). In design review he decided: one landing; Desktop reacts to
+the store only, with Linear arriving through sync (he prefers webhooks for
+scheduling it, unowned); latency budgets are targets pursued for about an hour,
+and a miss ships with numbers. Later that day: no follow-up Tasks.
+
+- Polling was the largest writer in the store: about 63,000 of 65,043 daily
+  Exec rows were Desktop's own reads, and that volume made the reads slow.
+- A domain follows what a write changes on screen, not its table. Transcript
+  lines were 164,192 of 168,336 daily Session events; counting them would
+  re-read everything for ten hours a day.
+- A reading restates when it was taken in several fields. Comparing bytes
+  without removing them sends a frame for every reading.
+- Git facts are not commits. Jack (2026-10-05): show them within seconds,
+  by watching, not a tighter clock. A linked worktree commits without
+  touching a file in its checkout: watch its Git metadata directory too.
+- A receipt key does not say what a row is. Provider attempts share
+  `:events.jsonl:` with transcript lines; exempting the key silenced about
+  1,270 displayed rows a day. Exempt the types readers skip. Usage moves
+  its own revision, which only Wave detail reads, at most every 10 s.
+- An unreadable store must not read empty.
+- On the branch, unshipped: one `lf monitor workspace --watch` per window
+  replaces every timer loop. Reader on a copy of Jack's store: commit to
+  frame 0.3 s for a Task, 0.13 s for a Session; a file written in a
+  checkout about 2 s. The window was not re-measured.
+- Measure before merging readers: the second reader per window, listed as
+  a taboo, used 0.2% of a core and 25 MB. It stayed.
+- Jack (2026-10-05): which Waves and Tasks are current must be simple and
+  fast, and he wants derived state in the database. None is stored: sampling
+  put 83% of the read in one per-Task statement, and reading it in bulk met
+  300 ms. Sample first.
+- The outline lists started Tasks only (2026-09-25). LOO-382 asked that a
+  new Task appear there; Jack kept the rule for now (2026-10-05).
 
 ## Session and operate pairs (2026-10-05)
 
@@ -173,17 +208,11 @@ checkpoint final writes after confirmed stop. Crossing repeat intervals and an
 already-claimed decider need explicit resolution, not an invented inner boundary.
 These are required implementation mechanics, not delivered behavior.
 
-Earlier planning accepted automatic Wave wakes for operational blockers and
-reading existing Task/Session output. The Ask removal decision above supersedes
-this escalation plan and its direct-Ask caller contract. A repo-associated Session may request repo attention with
-original evidence and a reason. These asynchronous requests never release direct
-Asks and do not introduce a messaging UI. Upstream `3dc89bc9a` already removed
-the resident/listener, external chat bridge and turn claims. The outbox survives
-without a production dispatcher. Establish primary-owned claims and receipts;
-do not restore that service or assume its journal still provides recovery.
-Prove structured wakes and interactive draft input through one native execution
-owner before primary cutover. A second Harness or terminal keystroke injection
-does not prove that integration.
+The October 1 Ask removal supersedes automatic Wave wakes and direct-Ask
+caller release. The removed resident/listener must not return. Primary Session
+integration still needs structured input through one native execution owner;
+a second Harness or terminal keystroke injection is not proof. The superseded
+outbox plan remains in [git history](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/product/MEMORY.md).
 
 The Task workspace implements Rust-derived checkout association
 and a paged directory browser independent of Project hydration and PR diff bases.
@@ -553,8 +582,7 @@ conversation context. Outstanding rename and delayed New-session feedback retain
 the originating identity. Neither navigation nor a matching cwd authorizes client
 transfer. Task/Session completion and closing a view remain different actions.
 
-Chapter ownership and active-Run streaming are implemented in this branch;
-Sessions still poll. The September 25 signed promotion reused the retained
+The September 25 signed promotion reused the retained
 chapter-bearing Home and preserved all six chapter receipts. Installed-app reads
 and a native capture showed real Loopflow/Etude planning; Kata's missing chapter
 remained explicit. See [the configured receipt](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/demo-ready-evidence/README.md).
@@ -565,13 +593,10 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
 
 ### Identity, retention, and counterexamples
 
-- `SessionRecord.run_id` is required for Interactive, Ask, and FlowStep. Prepare
-  a resolvable Run before publishing a human boundary; launch consumes it and native
-  resume retains it. Ask's caller Run is separate. Boundary IDs still target actions.
-  Preparation proves identity, never liveness. Legacy unbound boundaries require
-  explicit JSON open; listing stays read-only and reports that recovery instead
-  of silently dropping them. Release the preparation lock before waiting on a
-  resumed provider, or another metadata open waits for the conversation to end.
+- Prepare resolvable execution identity before publishing a review boundary;
+  preparation never proves liveness. Release metadata locks before waiting on
+  resumed providers. The former Run/Ask/FlowStep identity contract is retired;
+  see the October 1 Session decisions above and git history.
 - `lf runs --active [--task …]` joins exact capture intervals and existing native
   client receipts to one verified process observation, then resolves typed Work.
   A new marker requirement hid live clients from older launchers; native discovery
@@ -750,8 +775,7 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
 
 ### Earlier runtime findings (July–August evidence)
 
-Retired 2026-10-05: resident-era retry, containment-liveness and Home-server
-notes live at [commit 2e1074903](https://github.com/loopflowstudio/loopflow/blob/2e1074903/wave/product/MEMORY.md).
+Retired 2026-10-05; resident-era notes live at [commit 2e1074903](https://github.com/loopflowstudio/loopflow/blob/2e1074903/wave/product/MEMORY.md).
 Still applicable: a missing Flow settles as one blocker instead of retrying,
 and a live containment is not proof of an advancing provider turn.
 
@@ -794,25 +818,10 @@ and a live containment is not proof of an advancing provider turn.
 
 ### The `lf` / Home spine
 
-- **`lf` is the single command implementation.** Local reads query the durable
-  registry directly; CLI and app actions call the same Work operations.
-- **There is no agent messaging substrate.** Radio commands, channel identity,
-  bus tables, cursors, retention, and subscriptions are gone. Durable Steers and
-  Work state replace message delivery as product truth.
-- **Company Discord is the canonical Wave Chat backing when configured
-  (settled 2026-07-21).** An inbound user message becomes one durable Wave
-  Steer and the Wave reply returns to the same channel. Restart catch-up,
-  deduplication, self-echo rejection, and outbound receipts preserve one
-  conversation. The active backing and conversation epoch are explicit: local
-  and Discord compose never operate simultaneously, and product surfaces must
-  not persist a second transcript. This listener is not generalized into
-  Project/Task communication and Discord history does not become ambient prompt
-  context.
-- **Remote execution runs the target Home's `lf`.** SSH is transport; `lfd`
-  keeps Home services and receives webhooks. Neither a remote presenter nor a
-  telemetry row acquires execution authority from observing the target.
-- Resident crons evaluate in **UTC**, so the product `wave` flow at `0 0 8 …`
-  fires 08:00 UTC regardless of host timezone.
+`lf` owns commands and durable reads. Remote execution uses the target Home's
+`lf` over SSH; observation grants no execution authority. The retired Discord,
+lfd and resident-cron contracts remain in
+[git history](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/product/MEMORY.md).
 
 ## Shared planning and runtime vocabulary
 
@@ -830,10 +839,9 @@ substitute for another merely because identifiers coincide.
   and recent Runs. The
   HTTP-to-lfd-as-API path is **deleted**: `LocalWaveService` (~1500 lines) and
   `WaveServiceProtocol` are gone; ~22 consumers rerouted onto RegistryQuery.
-- **`RunStatus` biases to `lf`** — align to `lf`'s lowercase tokens (`running`,
-  `ok`, `waiting`, `failed`, `pending`), not the lfd int enum. No invented
-  `cancelled`. An unknown status must be **loud** (surface it), never a silent
-  `?? .pending`. When `lf` and lfd disagree, `lf` wins.
+- Unknown wire status must surface explicitly, never silently become pending.
+  The former lfd integer-enum comparison is retired with that API.
+
 ## Performance — launch renders before any read (2026-10-04)
 
 Jack Heart requested Desktop open on a usable workspace with one loading
@@ -1076,22 +1084,12 @@ to close during this reconciliation.
   fresh `RepoSidebarWindow` re-derived the burgundy sidebar / create sheet /
   terminal panes and got each subtly wrong; the proven components already encode
   the right style + behavior — adapt them.
-- **`loopflow-dev.py` builds from the worktree it runs in.** Run it from the
-  branch checkout. Repository discovery collapses linked worktrees to the
-  canonical main checkout through the Git common directory; Task Work remains
-  the only surface that presents its worktree.
-- **Interactive provider clients resume natively.** Reuse `SessionRecord` and
-  `lf session open`; do not restore lfd terminal attachment, a tmux presentation
-  path, or Ask-specific Swift plumbing.
-- The high-value review move was catching invented fields that duplicate existing
-  ones (e.g. `RunStatus`), not re-litigating the approach.
+- **`loopflow-dev.py` builds from the worktree it runs in.** Repository
+  discovery collapses linked worktrees to the canonical main checkout.
 - `cargo test -p loopflow dto_fixtures` filters by test name; use
   `--test dto_fixtures` to run that integration file. Headless runs set
   `LF_RUN_ID`; Rust tests asserting generated journal ids / branch-derived ingest
   must clear it or full `cargo test -p loopflow` fails only under agent runs.
-- **Historical migrations demonstrated the shared-store blast radius.** Product
-  and Intelligence collided on `061`; editing an already-applied migration left
-  existing databases without a required column. Preserve released migrations and
-  test upgrades from the released frontier. The incident detail and June's
-  superseded remote-client recipes are in the
-  [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md). AGENTS.md owns the current one-draft-per-Task rule.
+- **Preserve released migrations** and test upgrades from the released
+  frontier; two Waves once collided on `061`. See
+  [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md).

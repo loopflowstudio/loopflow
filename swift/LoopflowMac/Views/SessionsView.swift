@@ -579,7 +579,8 @@ struct SessionsContentView: View {
                         TaskFilesView(
                             store: workspace.files(
                                 taskId: taskId, issue: taskId, cwd: taskPath, query: query),
-                            prURL: fileTask?.task.activePr?.publication?.github?.url
+                            prURL: fileTask?.task.activePr?.publication?.github?.url,
+                            prBase: fileTask?.task.activePr?.baseCommit
                         )
                         .id(taskIdentity)
                         .frame(minWidth: 480, idealWidth: workspace.fileWidth)

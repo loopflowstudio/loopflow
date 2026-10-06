@@ -22,9 +22,7 @@ struct WorkspaceTask: Identifiable {
     var inWorkingSet: Bool {
         if !sessions.isEmpty { return true }
         guard started else { return false }
-        return !task.task.isTerminal || TaskHistoryFilter.hasUnresolvedExecution(
-            runtime: task.runtime, condition: task.condition, flow: task.flow
-        )
+        return !task.task.isTerminal || task.condition.unresolvedExecution
     }
 }
 

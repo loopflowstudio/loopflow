@@ -9,6 +9,7 @@ use crate::profile::{
 };
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
+pub(crate) mod changes;
 mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
@@ -1266,6 +1267,17 @@ pub async fn open_store(cfg: &StorageConfig) -> StoreResult<Store> {
     let StorageConfig::Sqlite { path } = cfg;
     Ok(Store {
         sqlite: sqlite::SqliteStore::new(path)?,
+    })
+}
+
+/// Open for reading only. The ordinary open runs first so an incompatible
+/// schema is reported the same way; the returned connection cannot write, so a
+/// long-lived reader never commits and never wakes itself.
+pub(crate) async fn open_read_only_store(cfg: &StorageConfig) -> StoreResult<Store> {
+    let StorageConfig::Sqlite { path } = cfg;
+    drop(sqlite::SqliteStore::new(path)?);
+    Ok(Store {
+        sqlite: sqlite::SqliteStore::open_read_only(path)?,
     })
 }
 

@@ -31,9 +31,13 @@ mod metrics;
 mod planning;
 mod pr_landings;
 mod project_transitions;
+mod revisions;
 mod session_events;
 pub(crate) mod sessions;
 mod task_work;
+
+pub use revisions::StoreRevisions;
+pub(crate) use task_work::OpenExecs;
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable

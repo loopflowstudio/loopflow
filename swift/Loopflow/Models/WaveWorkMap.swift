@@ -256,12 +256,15 @@ public struct TaskConditionSnapshot: Decodable, Sendable, Hashable {
     public let observedAt: String
     public let evidenceAgeSeconds: Int?
     public let localProgress: LocalProgressEvidence
+    /// Started work a finished plan has not settled; keeps a terminal Task current.
+    public let unresolvedExecution: Bool
 
     enum CodingKeys: String, CodingKey {
         case state, reason
         case observedAt = "observed_at"
         case evidenceAgeSeconds = "evidence_age_secs"
         case localProgress = "local_progress"
+        case unresolvedExecution = "unresolved_execution"
     }
 }
 

@@ -216,6 +216,13 @@ interval. Old clients may display events but cannot start/steer turns or write
 Session state. Passive connection acquires no claim. Dispatch fences include
 queued native RPCs and approval replies, not only database claim updates.
 
+Headless admission records a provider-generation reservation in Session history.
+A launch records its spawn request under the exact driver fence before starting
+any provider process. An unconsumed reservation permits retry after pre-spawn
+failure; it is not engine-exit evidence. Once spawn is requested, a missing PID
+remains unknown. Saved native thread identity is loaded before account selection.
+Historical generations without this evidence retain their liveness protections.
+
 Native dispatch and driver claim, release, and exit share a Session-scoped OS
 lock beside the canonical database path. Driver validation releases the SQLite
 mutex before provider I/O; history and other Sessions keep using the database.
@@ -227,6 +234,13 @@ Connect transfers the driver while retaining the live conversation. Client
 replacement claims the driver before stopping the exact old clients; it leaves the engine and sibling
 conversations running. Flow retry can resume the recorded native conversation on
 a new engine after confirmed engine exit. Missing process evidence remains unknown.
+For a released driver without a process identity or connection, failed admission
+records the current machine and boot identity against that exact generation and
+its originating host. A later admission after a restart of the same machine may
+replace the engine while preserving its unknown outcome and native thread. The
+observation must precede the restart; wall-clock age, a failed Exec and a missing
+PID are insufficient. A changed driver invalidates the observation. This fallback
+does not restart the host, complete a turn, or settle a Flow.
 PID/start identity and native endpoint are operational evidence; conversation
 identity, causality and elapsed time grant no signal authority.
 
@@ -424,6 +438,7 @@ provider, and literal subprocess edge must appear exactly once.
 | **Provider account / route** — credential authority and ordered provider selection on one Home | Provider token/account rows and Access Profiles own routing; credentials stay in provider homes, encrypted storage, Doppler, or forwarded foreground leases. | [`Provider`](../rust/loopflow/src/provider_auth/mod.rs), [`AccessProfile`](../rust/loopflow/src/profile.rs), [`ProviderRoute`](../rust/loopflow/src/profile.rs), [`ProviderAccount`](../rust/loopflow/src/store/mod.rs) | `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_account_switches`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | The foreground auth command owns provider login process groups and passive browser handoff; durable processes use credentials installed on their Home | `lf account` | `provider:claude`, `provider:codex`, `provider:doppler`, `provider:opencodezen`, `exec:claude`, `exec:codex`, `exec:doppler`, `exec:opencode`, `exec:security`, `exec:secret-tool` |
 | **Context budgets** — limits and usage for assembled launch input | Existing personal/repo config and Wave frontmatter resolve each limit; the shared prompt assembler measures and enforces it. | [`ContextBudgets`](../rust/loopflow/src/engine/context_budget.rs), [`ContextBudgetReport`](../rust/loopflow/src/engine/context_budget.rs) | Authored config and source files; complete excerpt sources under `.lf/tmp/context/`; no measurement store | Foreground preview and launch assembly | `lf context` | — |
 | **Code-size measurement** — repository blobs measured in model tokens | Git blob identity owns content; token counts are deterministic memoized measurements, not Run usage. | [`CodeNode`](../rust/loopflow/src/lf/commands/tokens.rs), [`CodeSnapshot`](../rust/loopflow/src/lf/commands/tokens.rs) | `blob_tokens` | Foreground command only | `lf tokens` | — |
+| **Store change revision** — which displayed domain a commit changed | Derived inside the writer's transaction by schema triggers, never authored and never bumped at a call site. Transcript lines move nothing; usage moves only its own revision, which Wave detail follows at most every 10 s. A reader compares revisions to decide what to read again; events only say when to look. | [`StoreRevisions`](../rust/loopflow/src/store/sqlite/revisions.rs), [`WorkspaceFrame`](../rust/loopflow/src/lf/commands/workspace_watch.rs) | `store_revisions` | Store transaction | `lf monitor workspace` | — |
 | **Schema frontier** — ordered definition of durable control storage | Released migration bytes are immutable authority; drafts join only through deterministic release materialization. | [`Migration`](../rust/loopflow/src/store/migration_catalog.rs), [`MigrationId`](../rust/loopflow/src/store/migration_catalog.rs) | `schema_migrations`; canonical and draft migration files | Store open validates/applies; release cut publishes | `lf release` | `exec:sh` (release hooks) |
 <!-- architecture-map:end -->
 
@@ -461,6 +476,7 @@ kernel locks                 live local exclusion authority
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head delivery intent, claims, and repair admission |
 | Home and provider authority | `homes`, `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_account_switches`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | Machine routes, credentials, selection, limits, shared-home account switches, delivery receipts |
 | Local observation/cache | `blob_tokens` | Deterministic Git-blob token counts |
+| Change observation | `store_revisions` | One counter per displayed domain (`planning`, `sessions`, `flows`, `execs`, `usage`), bumped by schema triggers inside each writer's transaction. Derived, never authored: transcript lines (the `events.jsonl` observation types no summary reader selects) move nothing and usage moves only `usage`; provider attempts under the same receipt key move `sessions`. `lf monitor workspace --watch` reads it to decide which parts to project again |
 | Schema | `schema_migrations` | Applied migration identity and checksum frontier |
 
 Released migration files remain immutable. Three direct draft groups establish

@@ -469,6 +469,47 @@ struct DTOFixtureTests {
         #expect(decoded == session)
     }
 
+    @Test("Workspace frames decode every part and keep the wire text a saved workspace needs")
+    func workspaceFramesDecode() throws {
+        let data = try loadFixtureData("workspace_frame.json")
+        let lines = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let frames = try lines.map { try WorkspaceFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
+
+        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat"])
+        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6])
+        #expect(frames[0].answers == nil)
+        #expect(frames[1].answers == 7)
+        #expect(frames[0].revisions?.planning == 911)
+        #expect(frames[4].revisions == nil)
+        guard case .task(nil) = frames[2].content else {
+            Issue.record("a failed reading has no body")
+            return
+        }
+        #expect(frames[2].unavailable == "Task LOO-1 is not registered")
+        guard case .sessions(let sessions?) = frames[1].content,
+              case .workActivity(let activity?) = frames[3].content,
+              case .heartbeat(let heartbeat) = frames[5].content else {
+            Issue.record("fixture parts changed shape")
+            return
+        }
+        #expect(sessions.repo == "/src/loopflow")
+        #expect(!sessions.includesHeadless)
+        #expect(activity.scope.task == "LOO-1")
+        #expect(heartbeat.projections["planning"] == 3)
+
+        // Saved text restores through the decoders one-shot reads use.
+        let roadmap = try #require(frames[0].wire?.roadmap)
+        #expect(try RegistryQuery.decode(RoadmapSnapshot.self, from: roadmap).waves.isEmpty)
+        let page = try #require(frames[1].wire?.sessionPage)
+        #expect(try RegistryQuery.decode(SessionPage.self, from: page).next == nil)
+
+        var missing = lines[0]
+        missing.removeValue(forKey: "answers")
+        #expect(throws: (any Error).self) {
+            try WorkspaceFrame.decode(line: JSONSerialization.data(withJSONObject: missing))
+        }
+    }
+
     @Test("Work status fixture preserves every status")
     func workStatusFixtureRoundTrips() throws {
         let data = try loadFixtureData("work_statuses.json")

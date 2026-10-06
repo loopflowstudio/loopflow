@@ -1212,6 +1212,13 @@ pub fn exec_agent(
 ) -> Result<AgentExecResult, CoreError> {
     let mut launch = launch.clone();
     launch.chrome = capabilities.chrome;
+    if launch.resume_token.is_none() {
+        if let Some(capture) = &process.capture {
+            launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
+                CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))
+            })?;
+        }
+    }
     pin_provider_account_id_blocking(&mut launch)?;
     let (harness, model) = parse_agent(launch.agent());
     let implicit_capture = if process.capture.is_none() {
@@ -2022,6 +2029,11 @@ fn spawn_agent_child(
     capture: Option<&CaptureHandle>,
     activation: Option<std::fs::File>,
 ) -> Result<Child, CoreError> {
+    if let Some(capture) = capture {
+        capture
+            .begin_provider_spawn()
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    }
     let mut child = cmd.spawn()?;
     drop(activation);
     if let Some(capture) = capture {

@@ -446,7 +446,7 @@ pub fn running_workspace_paths() -> HashSet<PathBuf> {
         .collect()
 }
 
-fn load_snapshot() -> Result<ActivitySnapshot> {
+pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let lf_home = crate::store::lf_home_dir();
     let path = crate::store::database_path_from_env()?;

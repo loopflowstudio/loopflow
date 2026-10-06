@@ -3,7 +3,7 @@
 October 5, 2026. LOO-353, Product, PR #1439. Written after Jack Heart's
 delivery review of `e10e2add4`; the pass he then requested is built. The
 reviewed evidence and Jack's exact words are in
-[demo-task-flows.md](demo-task-flows.md); open choices are in
+`42c31408a:scratch/demo-task-flows.md`; open choices are in
 [questions.md](questions.md); the code walkthrough of the reviewed revision
 (before this pass) is [pr-review.html](pr-review.html). The pass's step-by-step
 plan is at `67cd68157:scratch/focus-on-your-own-work.md`; the FlowSession
@@ -159,44 +159,68 @@ has not reviewed them. TaskWorkflow, takeover and resume are not built.
   `session_cli_tests resume_selects_human_input_in_the_physical_worktree_and_records_opening`
   and `status_tests previous_release_merge_request_migrates_into_readable_status_and_roadmap`.
 
-## Later slices (approved October 4, unbuilt)
+## Slices — one looping Flow builds these in order
 
-Flow history in these means FlowExec rows joined to their Execs.
+Jack Heart, October 5: "i want you to manage a looping lf flow that implemetns
+(and compresses, and realigns, etc.) all the slices". One `pursue` run loops:
+each pass builds the first slice not marked done, compresses, syncs and
+realigns; realign marks the slice **done** here with its commit and one-line
+check result; the deciding step iterates while any slice is not done and
+advances to publish only when all are. A proof that needs a person, a display
+or a live provider is listed under the slice as a demo item and never keeps a
+slice open. A pass that cannot finish its slice records why and stops blocked.
 
-- **Workflows.** Superseded by the TaskWorkflow draft in
-  [task-workflow.md](task-workflow.md), which Jack has not reviewed. Still
-  approved from October 4: stages are where a person takes part in the Task
-  conversation, edges are operational Flows, the conversation launches the
-  next edge with ordinary `lf`, and questions, holds and ambiguous replies
-  launch nothing. The October 4 "source guidance only, no runtime row" form is
-  at `8535598ef:scratch/focus-on-your-own-work.md`.
-- **Loops.** One form: a deciding node last, `loop: <target>` with optional
-  `step` defaulting to `loop-or-next`, replacing `loop-decide` and
-  `repeat.from` in catalog, skills, templates, docs and tests with no alias.
-  Unique skill names resolve the target; one optional occurrence name
-  disambiguates. Advance, Iterate or Blocked; malformed output never advances.
-  Shared and overlapping return edges are preserved.
-- **Task primary.** `PrimaryScope::Task(TaskId)` under the existing scope
-  lock. Explicit choice wins; else the sole unfinished interactive Task
-  conversation; else the most recent by `latest_interactive_session`'s ranking
-  (native human input, interactive opening, creation), restricted to
-  unfinished Task members. Read-only inventory creates nothing.
-- **Waiting.** Rust-owned. Immediate on explicit pending input or a successful
-  interactive yield with no outstanding tools; otherwise after 120 seconds
-  without provider activity and zero unresolved tool calls. No event yet is
-  opening/unknown; disconnection is unknown. New activity clears it.
-  `session list --waiting` filters before paging. Evidence per provider:
-  [harness-attention.md](harness-attention.md).
-- **Desktop.** Every Flow of the Task gets the same graph/progress/output
-  view; Waiting first, working Sessions in a compact group; no completion
-  controls.
-- **Workspace proof and scope retained from September 30:** real provider
-  continuation, owning-Home remote association, cross-Task focus/input and
-  process retention, same-byte symlink/read-only transitions (private Home
-  copy only); twenty comparable retained-layout actions against p95 <100 ms
-  with idle CPU/process counts; Project Default Flow in Wave settings; Edit
-  Flow opening real source with explicit builtin customization; website
-  alignment. Details: [workspace review](../docs/reviews/task-workspace.md).
+Flow history below means FlowExec rows joined to their Execs.
+
+1. **TaskWorkflow.** Build order, defaults and tests are in
+   [task-workflow.md](task-workflow.md). Done when its six tests pass and
+   `task status --json` carries the workflow graph, position and running
+   edge. *Not done.*
+2. **Loops.** One form: a deciding node last, `loop: <target>` with optional
+   `step` defaulting to `loop-or-next`, replacing `loop-decide` and
+   `repeat.from` in catalog, skills, templates, docs and tests with no alias.
+   Unique skill names resolve the target; one optional occurrence name
+   disambiguates. Advance, Iterate or Blocked; malformed output never
+   advances; shared and overlapping return edges are preserved. Done when
+   `git grep -E "loop-decide|repeat:"` matches only released migrations and
+   dated reviews, and `flow_tests` covers three nested loops. *Not done.*
+3. **Task primary.** `PrimaryScope::Task(TaskId)` under the existing scope
+   lock. Explicit choice wins; else the sole unfinished interactive Task
+   conversation; else the most recent by `latest_interactive_session`'s
+   ranking, restricted to unfinished Task members. Read-only inventory creates
+   nothing. Done when `session_lifecycle_tests` covers each rule. *Not done.*
+4. **Waiting.** Rust-owned; replaces Review/Reply attention,
+   `SessionKind::FlowReview` and `--needs-me` with one Waiting value and
+   `--waiting`. Immediate on explicit pending input or a successful
+   interactive yield with no outstanding tools; otherwise after 120 seconds
+   without provider activity and zero unresolved tool calls. No event yet is
+   opening/unknown; disconnection is unknown; new activity clears it;
+   filtering happens before paging. Provider evidence:
+   [harness-attention.md](harness-attention.md). Done when the injected-clock
+   and recorded-trace tests pass for Claude, Codex and OpenCode. *Not done.*
+5. **Desktop.** The Task page draws its TaskWorkflow with the current stage
+   or running edge, and every Flow run of the Task gets the same
+   graph/progress/output view from FlowExec. Waiting first, working Sessions
+   in a compact group, no completion controls; Start runs `lf -b task run` as
+   an app-owned child. Done when `swift build --build-tests` and the headless
+   Desktop tests pass with shared DTO fixtures. Demo items: native rendering
+   and interaction. *Not done.*
+6. **Defaults and editing.** The Project's default names a workflow, shown and
+   set in Wave settings; Edit opens the real workflow or Flow source, with
+   builtin customization creating the `.lf/` file explicitly; an invalid file
+   stays saved and visibly invalid. Done when its headless tests pass.
+   *Not done.*
+7. **Docs and website.** README, `docs/`, AGENTS.md, the architecture
+   reference, builtin skills and the website describe TaskWorkflow, FlowExec,
+   Sessions and Runs, Waiting and `lf task run`; no resident, review-handshake
+   or worker text remains. Done when the website checks and
+   `scripts/check_architecture.py` pass. *Not done.*
+
+Demo items carried from September 30, for Jack's review and not for the loop:
+real provider continuation, owning-Home remote association, cross-Task
+focus/input and process retention, same-byte symlink/read-only transitions,
+twenty retained-layout actions against p95 <100 ms with idle CPU/process
+counts. Details: [workspace review](../docs/reviews/task-workspace.md).
 
 Exclusions: general messaging, automatic recovery, a Run entity, Project
 reset (LOO-366), completion-policy redesign (LOO-367), Claude hooks/SDK,

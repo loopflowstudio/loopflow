@@ -628,6 +628,8 @@ After editing embedded skills, directions, surfaces, or prompt assembly, run
 the Rust golden prompt check even for Markdown-only changes. If the mismatch
 reflects the intended prompt change, regenerate the snapshots, review their
 diff, and rerun the check before gate.
+Terminology-only replacements count as prompt changes; include the golden
+check in their focused verification even when no prompt assembly code changed.
 
 ```bash
 cargo test -p loopflow --test golden_prompt
@@ -869,6 +871,29 @@ It exercises the real CLI, verified shell installer, store creation, repeat
 installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
+
+### Released capture-history preservation
+
+```bash
+uv run python tests/e2e/capture_history.py \
+  --released-archive /tmp/lf-aarch64-apple-darwin.tar.gz \
+  --candidate target/debug/lf
+```
+
+Supply the matching v0.13.3 CLI archive from its published release. The fixture
+checks its pinned SHA256 before extraction, creates a temporary Home with stub
+providers, and exercises ordinary public commands with both binaries. It preserves
+capture paths/bytes, native identity, usage and released review feedback through
+candidate reads, replay, resume, review settlement and nested Exec ancestry.
+`runs/` remains the one opaque capture root; no migration or installation runs.
+Provider and terminal transport are simulated, so this is not installed acceptance.
+
+Pair this with `session_lifecycle_tests`' interruption, nested Task attribution and
+review replacement cases and `session_cli_tests`' stale actor/identity cases.
+Full affected verification belongs to gate. Do not run installation preflight or
+promotion fixtures on a host account merely by overriding HOME/LF_HOME: installation
+uses getpwuid. The three tests named in LOO-370's current isolation steer remain
+isolated-CI owned until PR #1444's disposable-account runner is integrated.
 
 ## Nightly Package Tests
 

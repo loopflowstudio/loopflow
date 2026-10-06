@@ -555,7 +555,7 @@ fn execute_target(
                         None => loopflow::lf::commands::run::run(Some(name), message, cli)?,
                     }
                     // Shared contributions leave checkpoint composition to the caller.
-                    if !shared && std::env::var_os(loopflow::durable::RUN_ID_ENV).is_none() {
+                    if !shared && !loopflow::journal::has_caller() {
                         let options = loopflow::ops::CommitOptions {
                             add: true,
                             message: Some(format!("lf commit: {name}")),
@@ -1119,8 +1119,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
         TaskCommand::Complete {
             issue,
             summary,
+            accept_unknown_exec,
             json,
-        } => match loopflow::ops::task::task_complete(repo, issue, summary.clone())? {
+        } => match loopflow::ops::task::task_complete(
+            repo,
+            issue,
+            summary.clone(),
+            accept_unknown_exec,
+        )? {
             Some(task) => print_task(&task, *json),
             None => {
                 let resolved = loopflow::ops::pm::pm_resolve_task(repo, issue)?;
@@ -1366,7 +1372,7 @@ fn run() -> anyhow::Result<()> {
         journal::observe_process(&args);
     }
 
-    // Screenshot capture owns no Home, repository, account, or Run state. Its
+    // Screenshot capture owns no Home, repository, account, or Session state. Its
     // hidden supervisor must also be able to clean up after its public parent
     // dies, so both forms dispatch before those unrelated boundaries.
     match &cli.command {
@@ -1615,7 +1621,9 @@ fn execute_command(
         Some(Commands::Home {
             cmd: loopflow::lf::HomeCommand::Desktop,
         }) => loopflow::lf::commands::desktop::run(),
-        Some(Commands::ProviderSession) => loopflow::lf::commands::runs::observe_provider_session(),
+        Some(Commands::ProviderSession) => {
+            loopflow::lf::commands::session_history::observe_provider_session()
+        }
         Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),
         Some(Commands::Account {
             cmd,
@@ -1730,7 +1738,7 @@ fn execute_command(
             tokio::runtime::Runtime::new()?
                 .block_on(loopflow::controller::task::run_worker(task_id.clone()))
         }),
-        // Local document access owns no Run lifecycle. Placement and the recorded
+        // Local document access owns no Session lifecycle. Placement and the recorded
         // Git base come from the Task registry inside these operations.
         Some(Commands::Task {
             cmd:

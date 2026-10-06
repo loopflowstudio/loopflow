@@ -746,13 +746,13 @@ mod tests {
             let previous = [
                 "LF_HOME",
                 "LF_RUN_DIR",
-                "LF_RUN_ID",
+                "LF_CAPTURE_KEY",
                 crate::lf::WORK_DECLARATION_ENV,
             ]
             .map(|name| (name, std::env::var_os(name)));
             std::env::set_var("LF_HOME", directory.path());
             std::env::set_var("LF_RUN_DIR", capture.artifact_dir());
-            std::env::set_var("LF_RUN_ID", capture.artifact_key().as_str());
+            std::env::set_var("LF_CAPTURE_KEY", capture.artifact_key().as_str());
             std::env::set_var(crate::lf::WORK_DECLARATION_ENV, format!("task:{selector}"));
             crate::session_record::write_provider_session(
                 &capture.artifact_dir(),
@@ -768,7 +768,6 @@ mod tests {
                 None,
                 repo.path(),
                 &capture.artifact_key(),
-                &capture.artifact_dir(),
                 &history,
             );
             assert!(resumed.unwrap_err().to_string().contains("was deleted"));

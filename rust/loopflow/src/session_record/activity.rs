@@ -149,7 +149,7 @@ fn project(
     }
 }
 
-// Bound status reads independently of a Run's transcript size. Ignore only the
+// Bound status reads independently of a capture's transcript size. Ignore only the
 // incomplete first/last records; a malformed complete record stays unknown.
 fn latest_event(path: &Path) -> std::io::Result<EventEnvelope> {
     let mut file = File::open(path)?;
@@ -342,7 +342,7 @@ mod tests {
             assert_eq!(
                 project(&observation, now, now, Some(&reused)),
                 Activity::Unknown,
-                "a reused PID is not this Run's body, even after repeated samples"
+                "a reused PID is not this Session's provider, even after repeated samples"
             );
         }
     }

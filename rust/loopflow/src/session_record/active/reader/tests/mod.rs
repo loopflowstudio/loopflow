@@ -238,7 +238,6 @@ async fn periodic_read_observes_sql_only_membership_and_rename_outside_home() {
         .sqlite
         .rename_session(
             "sql-only-conversation",
-            None,
             "After rename",
             crate::session::TitleSource::Human,
         )

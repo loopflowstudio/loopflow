@@ -44,7 +44,7 @@ final class PortfolioRepoState {
         self.registryQuery = registryQuery
     }
 
-    /// Author a Wave before its first Run. Planning sync registers the
+    /// Author a Wave before its first Session. Planning sync registers the
     /// coordination row; GOAL.md and MEMORY.md remain the authored objective
     /// and durable learning.
     ///

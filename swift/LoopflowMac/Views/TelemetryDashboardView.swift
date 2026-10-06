@@ -2,11 +2,11 @@ import Charts
 import Loopflow
 import SwiftUI
 
-/// Direct Run usage evidence beside codebase size and local ledger health.
+/// Session usage evidence beside codebase size and local ledger health.
 struct TelemetryDashboardView: View {
     @Environment(\.palette) private var palette
 
-    /// The codebase moves on a slower clock than a day's runs: a year shows the
+    /// The codebase moves on a slower clock than a day's Sessions: a year shows the
     /// shape of the thing (a rewrite, a vendored tree), where a month shows noise.
     private static let codebaseDays = 365
 
@@ -22,7 +22,7 @@ struct TelemetryDashboardView: View {
     @State private var codebaseError: String?
     @State private var isLoading = true
 
-    /// Repos recent Run manifests name, by absolute path.
+    /// Repos recent capture manifests name, by absolute path.
     private var repos: [String] {
         Array(Set(usage.compactMap(\.repo))).sorted()
     }
@@ -36,10 +36,10 @@ struct TelemetryDashboardView: View {
                     ledgerHealth
 
                     chartCard(
-                        "Direct Run usage · 30 days",
+                        "Session usage · 30 days",
                         subtitle: "Provider-authored cumulative counters. Dashes are unknown; final receipts and evidence gaps remain explicit."
                     ) {
-                        DirectSessionUsageList(runs: usage, repo: selectedRepo)
+                        DirectSessionUsageList(history: usage, repo: selectedRepo)
                     }
 
                     chartCard(
@@ -182,7 +182,7 @@ struct TelemetryDashboardView: View {
 
     private var totalLabel: String {
         let gaps = usage.reduce(0) { $0 + $1.evidenceGaps }
-        return "\(usage.count) Runs · \(gaps) evidence gaps"
+        return "\(usage.count) Sessions · \(gaps) evidence gaps"
     }
 
     @ViewBuilder
@@ -299,11 +299,11 @@ struct TelemetryDashboardView: View {
 
 private struct DirectSessionUsageList: View {
     @Environment(\.palette) private var palette
-    let runs: [SessionHistory]
+    let history: [SessionHistory]
     let repo: String?
 
     private var visible: [SessionHistory] {
-        runs.filter { repo == nil || $0.repo == repo }.prefix(30).map { $0 }
+        history.filter { repo == nil || $0.repo == repo }.prefix(30).map { $0 }
     }
 
     var body: some View {

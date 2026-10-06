@@ -125,7 +125,7 @@ async fn graphql(
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // isolates publication provenance in LF_RUN_ID
+#[allow(clippy::await_holding_lock)] // isolates capture provenance
 async fn task_comments_read_and_publish_without_placement() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
@@ -278,7 +278,19 @@ async fn task_comments_read_and_publish_without_placement() {
             let confirmed = task_comment_async(&repo, None, "FIX-7", None, false).await.unwrap();
             assert_eq!(confirmed.comments.len(), 2);
             assert_eq!(provider.lock().await.posted.len(), 2);
-            std::env::set_var(crate::durable::RUN_ID_ENV, crate::session_record::new_artifact_key());
+            let home = directory.path().join("home");
+            let _capture_home = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+            std::env::set_var("LF_HOME", &home);
+            let capture = crate::session_record::CaptureHandle::begin_at(
+                &home,
+                crate::session_record::SessionCaptureSpec {
+                    harness: "fixture".into(), model: None, surface: "headless".into(),
+                    cwd: repo.clone(), repo: Some(repo.clone()), worktree: Some(repo.clone()),
+                    skill: None, subjects: vec![],
+                    flow: crate::session_record::SessionFlowMembership::Independent, work: None,
+                },
+            ).unwrap();
+            std::env::set_var(crate::session_record::CAPTURE_KEY_ENV, capture.artifact_key());
             let progress = task_comment_async(&repo, None, "FIX-7", Some("Focused checks passed"), false).await.unwrap();
             let body = &progress.comments.last().unwrap().body;
             assert!(body.contains("<!-- loopflow-progress:"));

@@ -147,25 +147,25 @@
       "p95": null,
       "maximum": null
     },
-    "run_cost_usd": {
+    "session_cost_usd": {
       "unit": "usd",
       "p50": null,
       "p95": null,
       "maximum": null
     },
-    "run_elapsed_seconds": {
+    "session_elapsed_seconds": {
       "unit": "seconds",
       "p50": null,
       "p95": null,
       "maximum": null
     },
-    "run_output_tokens": {
+    "session_output_tokens": {
       "unit": "tokens",
       "p50": null,
       "p95": null,
       "maximum": null
     },
-    "run_total_input_tokens": {
+    "session_total_input_tokens": {
       "unit": "tokens",
       "p50": null,
       "p95": null,

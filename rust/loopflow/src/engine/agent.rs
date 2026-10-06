@@ -179,12 +179,13 @@ pub(crate) fn probe_execution_boundary(boundary: &AgentExecutionBoundary) -> any
     Ok(())
 }
 
-pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 5] = [
+pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 6] = [
     crate::exec::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
-    crate::durable::RUN_ID_ENV,
-    crate::session_record::RUN_DIR_ENV,
+    crate::session_record::CAPTURE_KEY_ENV,
+    "LF_RUN_ID",
+    "LF_RUN_DIR",
 ];
 
 #[derive(Clone, Default)]
@@ -277,7 +278,7 @@ impl std::fmt::Debug for AgentConfig {
     }
 }
 
-/// Select and pin a managed Claude/Codex account before publishing a Run.
+/// Select and pin a managed Claude/Codex account before publishing a capture.
 pub(crate) fn pin_provider_account_id_blocking(launch: &mut AgentConfig) -> Result<(), CoreError> {
     let (harness, _) = parse_agent(launch.agent());
     let provider = match harness.as_str() {

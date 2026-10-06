@@ -58,6 +58,28 @@ struct WorkDestinationTests {
         #expect(model.containsTaskDestination(try #require(url.url)))
     }
 
+    @Test func refreshedPlanningDoesNotReuseAnOldLinkResult() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let exact = try oneTask(data, taskId: task.id)
+        let empty = try oneTask(data, taskId: "absent")
+        let removed = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(empty.utf8))
+        let reads = DestinationReadCounter()
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            await reads.next() == 1 ? exact : empty
+        }, repoPath: wave.wave.repo)
+        var url = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
+        url.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)]
+        await model.openTaskLink(try #require(url.url))
+        model.applyFixture(roadmap: .available(removed), waves: .available([]),
+                           processActivity: .loading, workActivity: .loading, repos: [])
+        await model.openTaskLink(try #require(url.url))
+        #expect(model.showsTaskLink)
+        #expect(model.taskLinkReading.value?.waves.flatMap { $0.tasks.items }.isEmpty == true)
+    }
+
     @Test func taskLinkRetainsLaterPagesAndReusesTheConversation() async throws {
         let data = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
@@ -479,3 +501,8 @@ private actor LinkedDestinationBarrier {
 }
 
 #endif
+
+private actor DestinationReadCounter {
+    private var count = 0
+    func next() -> Int { count += 1; return count }
+}

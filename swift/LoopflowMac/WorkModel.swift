@@ -161,13 +161,11 @@ final class WorkModel {
     /// The one Task a repository-qualified link names in planning this window holds.
     private func loadedTask(_ link: TaskLink) -> (wave: WaveRoadmap, task: RoadmapTask)? {
         guard let repo = link.repo?.normalizedFilePath else { return nil }
-        for snapshot in [roadmap.value, taskLinkReading.value].compactMap({ $0 }) {
-            let matches = snapshot.waves.filter { $0.wave.repo.normalizedFilePath == repo }.flatMap { wave in
-                wave.tasks.items.filter { $0.task.identifier == link.issue }.map { (wave, $0) }
-            }
-            if matches.count == 1 { return matches[0] }
+        guard case .available(let snapshot) = roadmap else { return nil }
+        let matches = snapshot.waves.filter { $0.wave.repo.normalizedFilePath == repo }.flatMap { wave in
+            wave.tasks.items.filter { $0.task.identifier == link.issue }.map { (wave, $0) }
         }
-        return nil
+        return matches.count == 1 ? matches[0] : nil
     }
 
     func containsTaskDestination(_ url: URL) -> Bool {

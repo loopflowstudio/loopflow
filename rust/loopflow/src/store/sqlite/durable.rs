@@ -1400,6 +1400,19 @@ mod durable_store_tests {
                 .sessions
                 .iter()
                 .any(|member| member.id == admitted.id));
+            let mut next = admitted.clone();
+            next.artifact_key = crate::session_record::new_artifact_key();
+            let exclusion = store.lock_checkout(&task.worktree).unwrap();
+            assert!(store
+                .replace_session_input(admitted.captured, next.clone())
+                .is_err());
+            assert_eq!(store.session(&admitted.id).unwrap().unwrap(), admitted);
+            drop(exclusion);
+            let replaced = store
+                .replace_session_input(admitted.captured, next)
+                .unwrap();
+            assert_eq!(replaced.flow_session_id, admitted.flow_session_id);
+            assert_ne!(replaced.captured, admitted.captured);
         }
     }
 
@@ -1422,6 +1435,29 @@ mod durable_store_tests {
             .unwrap();
         assert_eq!(bound.task_id.as_ref(), Some(&task_id));
         assert!(store.task_started(&task_id).unwrap());
+    }
+
+    #[test]
+    fn checkout_exclusion_preserves_bound_session_input_until_retry() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut input = unpublished_conversation(Some(task_id.clone()), None, 1);
+        input.cwd = dir.path().join("elsewhere");
+        let session = store.create_session(input, None, None).unwrap();
+        let mut next = session.clone();
+        next.artifact_key = crate::session_record::new_artifact_key();
+        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        let result = store.replace_session_input(session.captured, next.clone());
+        assert!(
+            result.is_err(),
+            "input changed while its Task checkout was excluded"
+        );
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+        drop(exclusion);
+        let replaced = store.replace_session_input(session.captured, next).unwrap();
+        assert_eq!(replaced.task_id.as_ref(), Some(&task_id));
+        assert_eq!(replaced.cwd, session.cwd);
+        assert_ne!(replaced.captured, session.captured);
     }
 
     #[test]

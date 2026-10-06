@@ -312,11 +312,19 @@ October 5 admission proofs cover unchanged Session/Flow bytes while excluded,
 retry, missing paths, binding from elsewhere and bound/taskless Flow membership.
 Historical completed-Project binding still passes. These are store proofs, not
 rotation. Registration can still change the population after path discovery.
-Source audit at `530513d4d` also retains `reserve_task_review`, `claim_task_worker`
-and CI repair in the admission inventory: they lock by cwd; separately bound Task
-roots need coverage. `admit_ci_fix` holds its checkout lock through `reserve_repair`;
-adding another acquisition inside that reservation would reacquire the same lock.
-No operation-level race was executed in this reconciliation.
+October 5's admission audit corrects the Flow concern: `insert_flow_in` omits
+cwd for Task-bound Flows, and `FLOW_SELECT` resolves the Task checkout. Claims,
+agent-step reservations and review reservations therefore already exclude that
+checkout. A temporary four-case probe passed; no production Flow repair was needed.
+
+The separate bound-Session regression failed: input replacement changed a capture
+while the Task checkout was excluded. Replacement now uses stored Session and Flow
+workspaces plus its bound Task root. Tests retain unchanged captures while excluded
+and successful retry for explicit Task binding, Task-bound Flows and taskless Flows
+whose workspace associates them with a Task. CI repair's outer admission now also
+includes its explicitly bound Task root; `reserve_repair` does not reacquire it.
+The CI operation-entry proof remains with gate. These repairs do not stabilize
+registration/population or establish either rotation/start ordering.
 
 The proposed exclusion has one order: Wave planning locks, stable Task/checkout
 population, checkout admission locks in canonical-path order, then SQLite writes.
@@ -860,34 +868,13 @@ Release's October 5 publication/install evidence belongs in its memory and prove
 no Project readiness. Keep the materialized name-cutover fixture's same-batch
 boundary with #1451's pending-version behavior; no release-tree gate ran here.
 
-### Acquisition ownership through cancellation — October 5 implementation
+### Retained acquisition evidence
 
-The experiment at `f2b127d87bc0bb99654ba66118fb91a77099b73f:scratch/planning-cancellation.rs`
-disproved an async-scope guard: canceling the waiter released exclusion while its SQLite worker later
-accepted old facts. Production acceptance now moves an `Arc<File>` guard into
-the queued worker, retaining ownership through commit. Snapshot refresh, detail,
-reteam and rotation use this lifetime; held-lock callers reuse it. No lock is
-acquired inside SQLite. The operation tests pause real acceptance workers,
-cancel their callers, and show competing reteam preview blocked until release,
-then able to read the accepted result. Separate apply/re-entry fixtures cover
-cached membership and response loss during Team expansion, issue moves and
-narrowing. Earlier reteam detail remains at
-`719226ef4:scratch/keep-every-wave-ready-for.md` under “Reteam relationship acceptance”.
-These do not yet prove rotation/start exclusion.
+Cancellation-safe SQLite ownership, cold-detail re-reading, delayed-absence
+invalidation and full reteam readback proofs remain at
+`9bfc5077d:scratch/keep-every-wave-ready-for.md` under
+“Acquisition ownership through cancellation”. Those repairs remain implemented;
+they establish neither rotation/start exclusion nor installed readiness. The new
+input-replacement regression failed before the admission fix and passes afterward.
 
-Cold detail discovers its Wave, locks, then reads provider ownership again.
-Changed ownership reports retry without acquiring another Wave out of order.
-The audit also found unguarded null-detail invalidation: it now retains the known
-Wave guard and compares the original cached revision/acquisition before invalidating.
-A newly accepted record survives delayed absence, and final inspection follows its
-UUID across an identifier change. Projectless discovery cannot invent a Wave.
-
-Review: exact Team readbacks protect expansion/narrowing, Task-update counts still
-count registered Tasks, and reteam/rotation share lock ordering. The old name-based
-created-successor failure remains an explicit replacement target. Membership
-fencing, shared binding/ensure, KR-first rotation, Desktop and configured acceptance
-remain unfinished. No installed Home or designated Intelligence Project was mutated.
-
-Prior acquisition/registration/reteam checks remain at
-`f2b127d87bc0bb99654ba66118fb91a77099b73f:scratch/keep-every-wave-ready-for.md`.
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b repository_team_reteam cancelled_detail_acceptance cancelled_snapshot_acceptance checkout_exclusion session_binding_retains_a_task_in_completed_project_history an_interrupted_operation_blocks_for_inspection_instead_of_replaying input_replacement_retains_workspace_and_task_membership --test-threads=4` passed (13); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed; realign: `git diff --check` passed, prior behavioral results retained without rerun; rotation/start and configured acceptance remain with implementation/gate.
+Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b checkout_exclusion input_replacement_retains_workspace_and_task_membership --test-threads=4` passed (5); `cargo fmt --all`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed; CI repair operation-entry, rotation/start and configured acceptance remain with implementation/gate.

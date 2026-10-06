@@ -302,12 +302,14 @@ must preserve #1447's cached plans and independent Session reads, outside pollin
 #1446's ongoing procedures retain started-Task follow-through; reads never provision.
 Installed and configured acceptance remain unproved.
 
-Input replacement also affected membership: its generic `cwd` writer could
-remove an unbound Session while the source checkout lock was held. October 5's
-regression reproduced that loss. Source now retains the stored workspace in both
-Session and capture; primary workspace admission keeps its separate authority.
-This deletes an unused relocation path, not a binding or historical-association
-rule. Rotation exclusion and configured readiness remain unproved.
+Input replacement exposed two admission gaps on October 5: generic `cwd` updates
+removed unbound Task membership, and a Session elsewhere could replace input while
+its bound Task checkout was excluded. Source retains the stored workspace and locks
+its Flow workspace and bound Task root too. Exclusion/retry regressions pass. CI
+repair acquires its explicit Task root at its outer boundary, without reacquiring
+inside reservation; its operation-entry proof remains open. Task-bound Flow cwd
+already derives from the Task, so claims and review reservation need no second
+path owner. Rotation exclusion and configured readiness remain unproved.
 
 Collection preserves issue-reported ownership; listing Project IDs cannot override
 it. October 5’s failing loopback regression prompted removal; installed acceptance
@@ -321,18 +323,16 @@ This explicit ID supplies bootstrap selection, not a candidate heuristic.
 The active-Project adoption test proves no Backlog activation or installed repair.
 
 Preservation includes unbound checkout Sessions and Flow associations, excluding
-primary scopes. At `530513d4d`, registration still changes membership without a
-Session write: `insert_initial_task` inserts supplied planning under a Started-count
+primary scopes. Registration still inserts supplied planning under a Started-count
 selector without rereading accepted ownership. Session creation/binding and mechanical
-starts lock execution/Flow workspaces and explicit/inherited Task roots in canonical
-order, including missing paths. Six focused proofs preserve bytes under exclusion
-and retry; historical binding stays allowed. Rotation still holds only Wave locks.
-Population stability, both rotation/start orderings and failed-reset re-entry remain
-unproved. Audit admission at its operation boundary: CI repair already holds checkout
-exclusion outside its Session reservation; reacquiring it internally would conflict.
-Resolve lock storage before checkout acquisition; retain Store and Wave guard
-through refresh acceptance. Pending receipts cannot indefinitely deny
-starts; Release's operation-entry recovery lesson applies. Installation proves no readiness.
+starts exclude execution/Flow workspaces and explicit/inherited Task roots in
+canonical order, including missing paths; historical binding stays allowed.
+Rotation holds only Wave locks. Population stability, both rotation/start orderings
+and failed-reset re-entry remain unproved. Resolve lock storage before checkout
+acquisition and retain Store/Wave guards through acceptance. Pending receipts cannot
+indefinitely deny starts; Release's operation-entry recovery lesson applies.
+Earlier admission evidence remains at `9bfc5077d:wave/infrastructure/MEMORY.md`.
+Installation proves no readiness.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 

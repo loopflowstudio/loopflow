@@ -962,8 +962,18 @@ impl SqliteStore {
         expected_input: Option<i64>,
         mut session: AgentSession,
     ) -> StoreResult<AgentSession> {
-        let cwd = self.session(&session.id)?.ok_or(StoreError::NotFound)?.cwd;
-        let _admission = self.lock_checkout(&cwd)?;
+        let stored = self.session(&session.id)?.ok_or(StoreError::NotFound)?;
+        let flow = stored
+            .flow_session_id
+            .as_deref()
+            .map(|id| self.flow(id))
+            .transpose()?
+            .flatten();
+        let mut workspaces = vec![stored.cwd.as_path()];
+        if let Some(flow) = &flow {
+            workspaces.push(&flow.cwd);
+        }
+        let _admission = self.lock_task_checkouts(&workspaces, stored.task_id.as_ref())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;

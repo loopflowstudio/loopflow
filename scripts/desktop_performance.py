@@ -261,6 +261,21 @@ def _cli_volume(directory: Path) -> dict:
     }
 
 
+def _has_complete_observations(summary: dict) -> bool:
+    metadata = summary["metadata"]
+    return (
+        metadata.get("exit_code") == 0
+        and metadata.get("source_before") == metadata.get("source_after")
+        and metadata.get("cli_sha256") == metadata.get("cli_sha256_after")
+        and summary["expected_attempts"] is not None
+        and summary["not_started"] == 0
+        and summary["soak"]["status"] != "incomplete"
+        and not summary["journey_errors"]
+        and not summary["journal_errors"]
+        and all(attempt["outcome"] != "interrupted" for attempt in summary["attempts"])
+    )
+
+
 def _comparison(current: dict, baseline: dict) -> dict:
     # Different source builds are the purpose of comparison; different measurement
     # contracts, host or population would make the latency delta misleading.
@@ -277,22 +292,11 @@ def _comparison(current: dict, baseline: dict) -> dict:
     ]:
         if (current.get("plan") or {}).get(key) != (baseline.get("plan") or {}).get(key):
             return {"available": False, "reason": f"Different {key}"}
-    for run in [current, baseline]:
-        metadata = run["metadata"]
-        if (
-            metadata.get("exit_code") != 0
-            or metadata["source_before"] != metadata["source_after"]
-            or metadata.get("cli_sha256") != metadata.get("cli_sha256_after")
-            or run["soak"]["status"] == "incomplete"
-            or run["journey_errors"]
-            or run["not_started"] != 0
-            or run["journal_errors"]
-            or any(attempt["outcome"] == "interrupted" for attempt in run["attempts"])
-        ):
-            return {
-                "available": False,
-                "reason": "Both runs need complete, source-stable observations",
-            }
+    if not all(_has_complete_observations(run) for run in (current, baseline)):
+        return {
+            "available": False,
+            "reason": "Both runs need complete, source-stable observations",
+        }
     previous = {
         (g["metric"], g["scenario"], g["population"], g["state"]): g for g in baseline["groups"]
     }
@@ -329,20 +333,12 @@ def _report(output: Path, baseline: Path | None) -> dict:
     errors.extend(summary["journal_errors"])
     if metadata.get("soak_seconds", 0):
         summary["soak"] = _soak(events, {"soak_seconds": metadata["soak_seconds"]})
-    complete = (
-        metadata.get("exit_code") == 0
-        and metadata.get("source_before") == metadata.get("source_after")
-        and metadata.get("cli_sha256") == metadata.get("cli_sha256_after")
-        and summary["expected_attempts"] is not None
-        and summary["not_started"] == 0
-        and summary["soak"]["status"] != "incomplete"
-        and not summary["journey_errors"]
-        and not errors
-        and all(attempt["outcome"] == "passed" for attempt in summary["attempts"])
+    summary.update(metadata=metadata, journal_errors=errors)
+    # Observed failures remain comparable, but cannot complete the journey.
+    complete = _has_complete_observations(summary) and all(
+        attempt["outcome"] == "passed" for attempt in summary["attempts"]
     )
-    summary.update(
-        metadata=metadata, status="complete" if complete else "incomplete", journal_errors=errors
-    )
+    summary["status"] = "complete" if complete else "incomplete"
     summary["cli_volume"] = _cli_volume(output / "cli-volume")
     summary["fixture_setup_cli_volume"] = _cli_volume(output / "fixture-setup-cli-volume")
     recording = output / "soak-resources" / "report.json"
@@ -477,6 +473,30 @@ def _benchmark_git() -> Path:
     return Path(shutil.which("git") or "/usr/bin/git")
 
 
+def _fixture_cli(cli: Path, args: list[str], checkout: Path, environment: dict[str, str]) -> str:
+    process = subprocess.Popen(
+        [str(cli), *args],
+        cwd=checkout,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=60)
+    except BaseException as error:
+        # Binding and discovery own their descendants just as resume does.
+        _stop(process)
+        if isinstance(error, subprocess.TimeoutExpired):
+            raise RuntimeError(f"Native fixture {args[0]} timed out") from error
+        raise
+    if process.returncode:
+        raise RuntimeError(f"Native fixture {args[0]} failed: {stderr}")
+    return stdout
+
+
 def _prepare_native_fixture(output: Path, cli: Path, repo: Path | None = None) -> Path:
     for directory in ("fixture-setup-cli-volume", "cli-volume"):
         (output / directory).mkdir()
@@ -521,38 +541,23 @@ def _prepare_native_fixture(output: Path, cli: Path, repo: Path | None = None) -
     }
     for args in (["init", "--quiet", str(checkout)], ["-C", str(checkout), "add", "notes.txt"]):
         subprocess.run([str(git), *args], env=environment, check=True, capture_output=True)
-    for args in (["resume", native_id], ["session", "list", "--all", "--history", "--json"]):
-        process = subprocess.Popen(
-            [str(cli), *args],
-            cwd=checkout,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
+    _fixture_cli(cli, ["resume", native_id], checkout, environment)
+    records = json.loads(
+        _fixture_cli(
+            cli, ["session", "list", "--all", "--history", "--json"], checkout, environment
         )
-        try:
-            stdout, stderr = process.communicate(timeout=60)
-        except subprocess.TimeoutExpired:
-            _stop(process)
-            raise RuntimeError("Native fixture setup timed out") from None
-        if process.returncode:
-            raise RuntimeError(f"Native fixture setup failed: {stderr.decode(errors='replace')}")
-    records = json.loads(stdout)
+    )
     if len(records) != 1:
         raise RuntimeError("Native fixture did not retain exactly one Session")
     task_id, issue = _seed_native_task(home, checkout, repo or checkout, records[0]["id"])
-    bound = subprocess.run(
-        [str(cli), "session", "bind", records[0]["id"], "--task", task_id, "--json"],
-        cwd=checkout,
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=60,
+    record = json.loads(
+        _fixture_cli(
+            cli,
+            ["session", "bind", records[0]["id"], "--task", task_id, "--json"],
+            checkout,
+            environment,
+        )
     )
-    if bound.returncode:
-        raise RuntimeError(f"Native fixture binding failed: {bound.stderr}")
-    record = json.loads(bound.stdout)
     if task_id not in record["task_ids"]:
         raise RuntimeError("Rust membership omitted the owned fixture Task")
     # Setup processes have exited before publishing the scenario environment.
@@ -846,8 +851,7 @@ def _run_native(
         LF_DESKTOP_PERF_SOAK_SECONDS=str(soak_seconds),
         LF_PERF_OUTPUT=str(output / "cli-volume"),
     )
-    if fixture is not None:
-        environment["LOOPFLOW_TEST_NATIVE_FIXTURE"] = str(fixture)
+    environment["LOOPFLOW_TEST_NATIVE_FIXTURE"] = str(fixture)
     recorder = None
     recorder_attempted = False
     with (output / "native.log").open("w") as log:

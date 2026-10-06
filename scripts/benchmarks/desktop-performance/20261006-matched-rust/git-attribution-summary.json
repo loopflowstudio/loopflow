@@ -1,0 +1,1314 @@
+{
+  "source_head": "5f696f1588fb25e2f18085f4302a5d57f790da5c",
+  "receipt_root": "/tmp/loo304-git-attribution-20261006",
+  "binary_sha256": "d884a2bc6a8033545310154b066cf0b4a3a60f89859ea2e3148303fe358b2b76",
+  "files": {
+    "measure.py": "95d6cb66bbabbdf135e0d38800f71a4b1b920eb59cc4ed21fef6b97adbbc56c6",
+    "checkouts.py": "c8ebc1ed682295445124542738a40b85c26f03fb9b8891c73c1ceeb6468e3adf",
+    "metadata-policy.sb": "6a2e0ed82eb306ce5deaf9ebbd310e3b1e5329bcfd79cd7e9df4b3cb37efa517",
+    "git-events.json": "1c25640fc42f2d2cdf57078babe10afae19d45d0f320fd9f0810a6f0f149d0c7",
+    "checkout-timings.json": "26aaf32cbb81572786216ed3ca8f35e5ddc7b651da75b7c6f554166f4fa4dcd4",
+    "matched/reads.jsonl": "410189a5f358548792f01c6f8e54f333dedf7ab21102f64cda12bba1798ab034",
+    "matched/verification.json": "c39010f7871310b4f9e721340d2f16c9352843f95a5cc895806fe778e92dc8fd"
+  },
+  "reads": [
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 0,
+      "ms": 1868.7975830107462,
+      "exit": 0,
+      "load": [
+        25.1513671875,
+        25.1708984375,
+        25.43017578125
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 552.608,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 1,
+      "ms": 476.64141599670984,
+      "exit": 0,
+      "load": [
+        25.1513671875,
+        25.1708984375,
+        25.43017578125
+      ],
+      "bytes": 263923,
+      "child_cpu_ms": 448.47100000000006,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 2,
+      "ms": 471.8500830058474,
+      "exit": 0,
+      "load": [
+        25.1513671875,
+        25.1708984375,
+        25.43017578125
+      ],
+      "bytes": 263926,
+      "child_cpu_ms": 451.25299999999993,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 0,
+      "ms": 254.21216699760407,
+      "exit": 0,
+      "load": [
+        25.1513671875,
+        25.1708984375,
+        25.43017578125
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 231.4620000000001,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 1,
+      "ms": 234.79200000292622,
+      "exit": 0,
+      "load": [
+        25.1513671875,
+        25.1708984375,
+        25.43017578125
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 229.54999999999987,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 2,
+      "ms": 235.9130420081783,
+      "exit": 0,
+      "load": [
+        25.1513671875,
+        25.1708984375,
+        25.43017578125
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 226.25899999999976,
+      "git_processes": 3,
+      "git_common_dir": 1
+    }
+  ],
+  "first_roadmap_git": [
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": "/Users/jack/src/loopflow",
+      "ms": 1.5659999999999998,
+      "exit": 0
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--show-toplevel"
+      ],
+      "worktree": "/Users/jack/src/loopflow",
+      "ms": 0.972,
+      "exit": 0
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/loopflow",
+        "rev-parse",
+        "--git-path",
+        "info/exclude"
+      ],
+      "worktree": "/Users/jack/src/loopflow",
+      "ms": 1.2910000000000001,
+      "exit": 0
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--show-toplevel"
+      ],
+      "worktree": "/Users/jack/src/loopflow",
+      "ms": 1.445,
+      "exit": 0
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": "/Users/jack/src/loopflow",
+      "ms": 1.137,
+      "exit": 0
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.848,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 1.088,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.6920000000000001,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.648,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.758,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+        "status",
+        "--porcelain"
+      ],
+      "worktree": null,
+      "ms": 0.546,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.687,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/etude.train-a-frozen-policy-belief",
+        "status",
+        "--porcelain"
+      ],
+      "worktree": null,
+      "ms": 0.565,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.737,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+        "status",
+        "--porcelain"
+      ],
+      "worktree": null,
+      "ms": 1.053,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.554,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/etude.train-and-compare-complete-compound",
+        "status",
+        "--porcelain"
+      ],
+      "worktree": null,
+      "ms": 0.521,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.838,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+        "status",
+        "--porcelain"
+      ],
+      "worktree": null,
+      "ms": 0.7,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.536,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+        "status",
+        "--porcelain"
+      ],
+      "worktree": null,
+      "ms": 0.5640000000000001,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.5519999999999999,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+        "status",
+        "--porcelain"
+      ],
+      "worktree": null,
+      "ms": 0.419,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+        "rev-parse",
+        "jack-heart/challenge-an-identified-trained-bot"
+      ],
+      "worktree": null,
+      "ms": 0.5770000000000001,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.6489999999999999,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+        "status",
+        "--porcelain"
+      ],
+      "worktree": null,
+      "ms": 0.481,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+        "rev-parse",
+        "jack/loo-382-update-the-workspace-automatically-when-loopflow-data"
+      ],
+      "worktree": null,
+      "ms": 0.636,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.675,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+        "status",
+        "--porcelain"
+      ],
+      "worktree": null,
+      "ms": 0.617,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.612,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+        "status",
+        "--porcelain"
+      ],
+      "worktree": null,
+      "ms": 0.642,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.646,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+        "status",
+        "--porcelain"
+      ],
+      "worktree": null,
+      "ms": 0.605,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ],
+      "worktree": null,
+      "ms": 0.7380000000000001,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+        "status",
+        "--porcelain"
+      ],
+      "worktree": null,
+      "ms": 0.61,
+      "exit": 128
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+        "rev-parse",
+        "jack-heart/start-and-finish-tasks-without"
+      ],
+      "worktree": null,
+      "ms": 0.67,
+      "exit": 128
+    }
+  ],
+  "checkout_discovery": [
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+      "policy": "original",
+      "ms": 20.00970800872892,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+      "policy": "metadata-read",
+      "ms": 20.51254198886454,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+      "policy": "original",
+      "ms": 16.26441700500436,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+      "policy": "metadata-read",
+      "ms": 16.918874986004084,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+      "policy": "original",
+      "ms": 15.843000001041219,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+      "policy": "metadata-read",
+      "ms": 16.2612920103129,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+      "policy": "original",
+      "ms": 14.660166023531929,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+      "policy": "metadata-read",
+      "ms": 20.922208001138642,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+      "policy": "original",
+      "ms": 14.428958005737513,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+      "policy": "metadata-read",
+      "ms": 16.700541018508375,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+      "policy": "original",
+      "ms": 15.210707992082462,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+      "policy": "metadata-read",
+      "ms": 14.583792013581842,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.train-and-compare-complete-compound",
+      "policy": "original",
+      "ms": 12.90641599916853,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/etude.train-and-compare-complete-compound",
+      "policy": "metadata-read",
+      "ms": 18.2884169917088,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+      "policy": "original",
+      "ms": 13.591084018116817,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+      "policy": "metadata-read",
+      "ms": 15.268582996213809,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+      "policy": "original",
+      "ms": 13.793249992886558,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+      "policy": "metadata-read",
+      "ms": 15.66725000157021,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+      "policy": "original",
+      "ms": 13.973249995615333,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+      "policy": "metadata-read",
+      "ms": 18.189124995842576,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+      "policy": "original",
+      "ms": 13.95933300955221,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+      "policy": "metadata-read",
+      "ms": 14.753916999325156,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+      "policy": "original",
+      "ms": 15.92370800790377,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 0,
+      "path": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+      "policy": "metadata-read",
+      "ms": 15.808291995199397,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+      "policy": "original",
+      "ms": 14.220416982425377,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+      "policy": "metadata-read",
+      "ms": 15.60745801543817,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+      "policy": "original",
+      "ms": 15.520083979936317,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+      "policy": "metadata-read",
+      "ms": 14.459124999120831,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+      "policy": "original",
+      "ms": 13.713749998714775,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+      "policy": "metadata-read",
+      "ms": 16.123500012326986,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+      "policy": "original",
+      "ms": 14.121041022008285,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+      "policy": "metadata-read",
+      "ms": 15.652542002499104,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+      "policy": "original",
+      "ms": 14.240999997127801,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+      "policy": "metadata-read",
+      "ms": 16.10508401063271,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+      "policy": "original",
+      "ms": 13.460875023156404,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+      "policy": "metadata-read",
+      "ms": 15.91041698702611,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.train-and-compare-complete-compound",
+      "policy": "original",
+      "ms": 14.371958008268848,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/etude.train-and-compare-complete-compound",
+      "policy": "metadata-read",
+      "ms": 15.432625019457191,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+      "policy": "original",
+      "ms": 14.724459004355595,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+      "policy": "metadata-read",
+      "ms": 15.523625013884157,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+      "policy": "original",
+      "ms": 15.504290990065783,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+      "policy": "metadata-read",
+      "ms": 16.364333976525813,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+      "policy": "original",
+      "ms": 16.48391698836349,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+      "policy": "metadata-read",
+      "ms": 15.977000002749264,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+      "policy": "original",
+      "ms": 14.828582992777228,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+      "policy": "metadata-read",
+      "ms": 14.94274998549372,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+      "policy": "original",
+      "ms": 14.173875009873882,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 1,
+      "path": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+      "policy": "metadata-read",
+      "ms": 16.856957983691245,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+      "policy": "original",
+      "ms": 14.41900001373142,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+      "policy": "metadata-read",
+      "ms": 16.84075000230223,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+      "policy": "original",
+      "ms": 18.067542026983574,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+      "policy": "metadata-read",
+      "ms": 16.218374978052452,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+      "policy": "original",
+      "ms": 14.69604202429764,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+      "policy": "metadata-read",
+      "ms": 16.52224999270402,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+      "policy": "original",
+      "ms": 16.087374999187887,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+      "policy": "metadata-read",
+      "ms": 18.379917019046843,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+      "policy": "original",
+      "ms": 16.767207998782396,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+      "policy": "metadata-read",
+      "ms": 16.343208990292624,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+      "policy": "original",
+      "ms": 13.676333997864276,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+      "policy": "metadata-read",
+      "ms": 15.871625015279278,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.train-and-compare-complete-compound",
+      "policy": "original",
+      "ms": 14.409332972718403,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/etude.train-and-compare-complete-compound",
+      "policy": "metadata-read",
+      "ms": 17.514791019493714,
+      "exit": 0,
+      "output_sha256": "ceef460a4ceb1e59e5ed59a1eb3f6d278b1ced1989c4a2d10acdde96bffee5fd"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+      "policy": "original",
+      "ms": 14.865459001157433,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+      "policy": "metadata-read",
+      "ms": 16.49804101907648,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+      "policy": "original",
+      "ms": 16.694791993359104,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+      "policy": "metadata-read",
+      "ms": 18.784290994517505,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+      "policy": "original",
+      "ms": 19.809833000181243,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+      "policy": "metadata-read",
+      "ms": 17.51395800965838,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+      "policy": "original",
+      "ms": 14.466166991041973,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+      "policy": "metadata-read",
+      "ms": 19.759791990509257,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+      "policy": "original",
+      "ms": 15.380416996777058,
+      "exit": 128,
+      "output_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "repetition": 2,
+      "path": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+      "policy": "metadata-read",
+      "ms": 18.05508299730718,
+      "exit": 0,
+      "output_sha256": "5e244977dc9f8e82b32749f794656c86f5d18055c7e3389d5388e1dc6c01b0ca"
+    }
+  ],
+  "preservation": {
+    "source_sha256": "d9dc08b5d7d241294b78bf5035d47e8e9069aa58c13808d04d31cd8a0f8230e4",
+    "storage": {
+      "after": {
+        "access_profiles": {
+          "retained_rows": 4,
+          "identical": true,
+          "added_rows": 0
+        },
+        "agent_sessions": {
+          "retained_rows": 604,
+          "identical": true,
+          "added_rows": 0
+        },
+        "auth_browser_bindings": {
+          "retained_rows": 7,
+          "identical": true,
+          "added_rows": 0
+        },
+        "blob_tokens": {
+          "retained_rows": 1401,
+          "identical": true,
+          "added_rows": 0
+        },
+        "ci_incidents": {
+          "retained_rows": 212,
+          "identical": true,
+          "added_rows": 0
+        },
+        "execs": {
+          "retained_rows": 218637,
+          "identical": true,
+          "added_rows": 6
+        },
+        "flow_events": {
+          "retained_rows": 901,
+          "identical": true,
+          "added_rows": 0
+        },
+        "flow_sessions": {
+          "retained_rows": 104,
+          "identical": true,
+          "added_rows": 0
+        },
+        "homes": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_instruments": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_observations": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_issue_changes": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_items": {
+          "retained_rows": 163,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_sync": {
+          "retained_rows": 21,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pr_landings": {
+          "retained_rows": 142,
+          "identical": true,
+          "added_rows": 0
+        },
+        "project_events": {
+          "retained_rows": 30536,
+          "identical": true,
+          "added_rows": 0
+        },
+        "projects": {
+          "retained_rows": 49,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_limits": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_switches": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_accounts": {
+          "retained_rows": 6,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_routes": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_session_accounts": {
+          "retained_rows": 3724,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_tokens": {
+          "retained_rows": 5,
+          "identical": true,
+          "added_rows": 0
+        },
+        "schema_migrations": {
+          "retained_rows": 62,
+          "identical": true,
+          "added_rows": 0
+        },
+        "session_events": {
+          "retained_rows": 521637,
+          "identical": true,
+          "added_rows": 0
+        },
+        "sqlite_sequence": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_deletions": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_events": {
+          "retained_rows": 66836,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_issue_identities": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_ingested_comments": {
+          "retained_rows": 611,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_observations": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_pr_repair_incidents": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_prs": {
+          "retained_rows": 449,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tasks": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tool_responses": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "waves": {
+          "retained_rows": 53,
+          "identical": true,
+          "added_rows": 0
+        },
+        "work_placements": {
+          "retained_rows": 441,
+          "identical": true,
+          "added_rows": 0
+        }
+      }
+    },
+    "counters": {
+      "after": {
+        "starts": 6,
+        "ends": 6,
+        "connections": 45,
+        "statements": 9389,
+        "rows": 156284
+      }
+    }
+  }
+}

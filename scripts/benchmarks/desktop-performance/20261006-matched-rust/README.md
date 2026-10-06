@@ -5,6 +5,11 @@ successful warm observations for each of four scenarios. Rust Session-list and
 roadmap reads improved. Neither variant meets the memory budget; native reopening
 p95 worsened. This is partial performance evidence, not Task acceptance.
 
+October 6 follow-up found that the sandbox refuses Git reads in retained sibling
+checkouts. The latest 36-launch cohort includes 31 failed Git commands. These
+comparisons do not establish successful existing-checkout discovery/status cost;
+see [Git attribution](#git-attribution-and-fixture-read-boundary--october-6).
+
 Jack Heart requested the missing matched comparison without another speculative
 memory patch. Private receipts remain at `/tmp/loo304-matched-20261006/` in
 `baseline/` and `candidate/`. [Aggregate measurements](summary.json) retain receipt
@@ -994,3 +999,68 @@ Checks: release build, fmt, all-target Clippy PASS; Task-work 7 and historical
 uncertainty 1 PASS; direct reads 84/84 and 39-table preservation PASS; mounted
 baseline/confirmation 20/20 each PASS preservation / FAIL memory, first candidate
 FAIL native deadline. Publication only.
+
+## Git attribution and fixture read boundary — October 6
+
+Jack Heart requested attribution before another resolver repair. The retained
+release executable from `5f696f158` was reused without rebuilding. Three bounded
+roadmap reads and three Session reads used the original sandbox, isolated fixture
+copy and instrumentation. [Receipts](git-attribution-summary.json) retain hashes,
+all command outcomes, timings and 39-table preservation; raw outputs/scripts stay
+at `/tmp/loo304-git-attribution-20261006/`.
+
+Each roadmap launches:
+
+| Git operation | Count | Successful |
+| --- | ---: | ---: |
+| Common directory discovery | 18 | 2 |
+| Checkout status | 12 | 0 |
+| Top-level discovery | 2 | 2 |
+| Exclude-path lookup | 1 | 1 |
+| Branch-tip lookup | 3 | 0 |
+
+Twelve common-directory calls come from distinct existing Task checkouts:
+`task_configuration_refusal` resolves the configured agent and calls
+`checkout_execution_boundary`. The following status and branch-tip reads provide
+separate work/delivery evidence. They cannot be deleted as duplicate lookups.
+The six remaining common-directory launches cover startup/current-repository and
+Wave repository resolution. Empty native sample stacks remain unusable evidence.
+
+All 12 sibling `.git` reads explicitly report `Operation not permitted`. The
+sandbox permits the primary repository and exact authored Wave configs/goals,
+but not those sibling markers or the other repositories' Git metadata. Git exit
+128 becomes unavailable action evidence while the outer roadmap still exits zero.
+This narrows the earlier performance claims; unchanged responses and retained
+SQLite rows do not establish usable repository observations.
+
+A separate diagnostic added **read-only Git metadata access** for those exact
+12 checkouts, retaining all write, network, credential-home and process restrictions.
+The same discovery commands then passed 36/36, versus 0/36 under the original
+policy, in three paired repetitions. It granted no checkout-content reads and
+ran no CLI, provider, status, mutation or mounted journey. Total time including
+one sandbox launch per command was 545 ms refused / 601 ms readable. That overhead
+is different from Git children of one CLI; it is not a production speed comparison.
+The private policy is diagnostic only; the ordinary runner remains unchanged.
+
+Original-policy roadmap wall times were 1869/477/472 ms; child CPU 553/448/451 ms.
+Session reads were 254/235/236 ms. Git's internal Trace2 totals were 26.9/25.9/27.1 ms
+per roadmap, including 14.0/13.1/13.9 ms common-directory work; these exclude process
+startup and parent waiting, so they cannot establish Git's full cost. Three samples
+supply no p95. Load was about 25.2. All six CLI starts/ends were retained; all 39
+source tables remained identical, with six new inspection Execs on the copy only.
+
+No production repair is selected. The next measurable fixture step is to provide
+bounded read-only checkout and Git-metadata observations for both variants, retain
+per-command exits, and prove that successful discovery/status and failed access are
+distinguished. Hash observed metadata/configuration before and after and reject
+changed-input comparisons; keep missing/recreated checkout and alias cases. Never
+expand writes or copied execution authority. Re-establish the baseline under that
+contract before claiming existing-checkout latency improvement. This diagnostic
+advances representative-workload attribution, not Desktop acceptance.
+
+Storage readback was 7.1 GiB free, below the recorder's 8 GiB admission threshold;
+no trace was attempted. Original CLI/native budgets, failed <32 MiB growth,
+independent Swift attribution, compositor/input and both hours remain open.
+No mounted replay was run: there is no product or runner change to validate.
+Review rejected replacing Git semantics or dropping boundary checks based on failed
+reads. Publication of this evidence correction does not authorize merge/completion.

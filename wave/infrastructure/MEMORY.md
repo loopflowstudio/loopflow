@@ -824,6 +824,15 @@ causal latency proof. Query-local materialization grants no persistent freshness
 or authority. The report owns exact evidence; every original latency/growth,
 Swift, compositor/input and hour obligation remains. Publication only.
 
+LOO-304 Git attribution: 31 of
+36 Git launches fail, including all twelve sibling checkout discovery/status
+paths denied by the sandbox. Distinct launch-boundary checks are not redundant
+identity reads. Exact read-only Git metadata access made the bounded discovery
+probe pass 36/36 versus 0/36; no production repair follows. Outer CLI success and
+SQLite preservation do not prove successful repository observations. Re-establish
+both variants with explicit Git outcomes and stable read-only inputs before
+claiming checkout-cost improvement. The matched report retains receipts; acceptance and sandbox/authority remain unchanged.
+
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 
 The detailed September 23–25 observations, historical schemas, test counts and
@@ -1029,31 +1038,23 @@ invented completion date. No fourth user-facing planning noun was selected.
 
 ## Earlier follow-ups (reselect through the accepted chapter)
 
-The [pre-curation backlog](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#earlier-follow-ups-reselect-through-the-accepted-chapter)
-retains historical reduction, Cadenza parity, host bootstrap, release feedback,
-upgrade preservation, instrumentation and replication suggestions. These are
-not current authorization or an instruction to revive retired Project/Run
-owners. Rebase-efficiency follow-ups were resolved by PR #818. Measure actual
-command drift, avoidable agent rebases and post-land repairs before tuning policy;
-the proposed synthetic workload harness remains unbuilt. Jack Heart's July 6
-“up/down 5ths” referent remains unresolved and deferred, not dropped.
+Unselected historical suggestions and exact links remain at
+`5f696f1588fb25e2f18085f4302a5d57f790da5c:wave/infrastructure/MEMORY.md`
+under this heading; they authorize no revival. PR #818 resolved rebase-efficiency
+follow-ups; measure current drift and repair costs before tuning policy. Its
+synthetic workload harness remains unbuilt. Jack Heart's July 6 “up/down 5ths”
+referent remains unresolved and deferred.
 
-## Direct invocation and large inputs (2026-09-25)
+## Direct invocation and large inputs (curated 2026-10-06)
 
-Work selectors give direct skills/flows attribution, context and placement;
-`lf task run` owns the managed Task Flow. Direct bound contributions receive
-fresh scratch and leave checkpointing to their caller. Bare names prefer skills;
-explicit verbs resolve their own kind. Reuse the skill-to-invocation loader,
-without one-skill wrappers or name-specific dispatch. Started is written at
-explicit interactive/headless CLI dispatch, after capture and before provider
-launch. Generic capture stays registry-independent: putting Started there broke
-the unavailable-registry regression. Read-only Work resolution and unopened review
-preparation never record execution. LOO-298's derivation from Run rows replaces
-this write only when that model is implemented.
+The September 25 implementation detail remains at
+`5f696f1588fb25e2f18085f4302a5d57f790da5c:wave/infrastructure/MEMORY.md`
+under this heading. Current Session/Exec semantics supersede its Run derivation.
+Direct selectors retain attribution/context/placement; managed progression belongs
+to the Task Flow. Reuse the invocation loader; keep capture registry-independent.
+Inspection and unopened review preparation must not mark work started.
 
-Recursive scratch exceeded both argv capacity and a provider input limit.
-Claude batch input uses text stdin backed by an anonymous file, with system
-instructions in the existing context file; captured and streamed output use the
-same launch path. Curate scratch instead of silently truncating instructions.
-The observed Codex rejected `turn/start` remained waiting; that driver failure
-is still unresolved, and Claude's working input path does not establish a fix.
+Recursive scratch exceeded argv and provider limits. Claude batch input uses
+file-backed stdin and the existing system-context file; curate rather than
+truncate. The observed Codex rejected `turn/start` stayed waiting. Its failure
+remains unresolved; Claude's working input path establishes no Codex repair.

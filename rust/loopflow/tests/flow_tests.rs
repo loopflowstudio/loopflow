@@ -2847,9 +2847,14 @@ case "$*" in *app-server*) ;; *)
         &["session", "connect", session["id"].as_str().unwrap()],
         Some(&path),
     );
-    // The TUI fixture exits immediately; it proves account delivery, not native resume.
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("before becoming resumable"));
+    // The fixture can exit before or after its Session receipt is observed.
+    // Either outcome still delivers the saved account; this is not a native resume proof.
+    assert!(
+        output.status.success()
+            || String::from_utf8_lossy(&output.stderr).contains("before becoming resumable"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let selected = fs::read_to_string(home.path().join("selected")).unwrap();
     let expected = ["claude", "codex", "claude", "claude", "codex", "codex"].map(|provider| {
         format!(

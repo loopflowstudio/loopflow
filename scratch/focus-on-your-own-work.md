@@ -203,6 +203,32 @@ website as rendered.
     when a Task with none takes its Project's, a Task naming one keeps it, and
     no surface says "default Flow". *Not done.*
 
+10a. **A Task's state comes from its Workflow.** Jack, October 6: "no
+    separate Task is ready state; that is derived from where it is in the
+    graph"; "at start? ready at end? done"; between, "active";
+    "abandoned/deleted bool should still stay"; then "I do think i want this
+    in this PR now". His words on Linear and on Tasks with no Workflow are in
+    the LOO-385 thread (`lf task comment LOO-385`); read them first.
+    - State is read from position: ready at `start`, active between, done at
+      `end`. Remove the stored ready/done status and every writer of it;
+      abandoned and deleted stay flags.
+    - Reaching `end`, by an edge or the set command, is completion.
+      `lf task complete` goes; its settled-PR and unresolved-execution checks
+      become refusals to reach `end`, and reaching it writes Linear.
+    - Linear complete while the Task is ready: not offered as available.
+      While active: a flag on the Task, shown as an error, work untouched,
+      `end` refused until the flag is cleared. Clearing it, Jack: "Button on lf
+      desktop / some lf task api": one `lf task` command clears the flag and
+      Desktop's button runs it.
+    - Agent's choices where Jack allowed either: a Task with no Workflow
+      reads as not ready; creating a Task takes up its Project's workflow;
+      existing Tasks get one by the draft migration only where their state
+      is unambiguous (done → `end`, never started → `start`).
+    Not in this slice: dropping the PR slot for a no-PR Workflow (LOO-385).
+    Done when tests show state following position through start, a node, an
+    edge and end; `end` refused over an unsettled PR; both Linear cases; and
+    no surface or wire field carries a stored ready/done. *Not done.*
+
 11. **Desktop draws the Workflow as a graph.** Jack, October 6, on the
     diagram in [pr-review.html](pr-review.html) ("The experience"): "this
     looks good, lets try to replicate this as a rough structural outline of

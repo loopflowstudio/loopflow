@@ -39,7 +39,7 @@ interpretations are at `6f246fda4:scratch/questions.md`.
   slot being three kinds of done: "no separate Task is ready state; that is
   derived from where it is in the graph"; "at start? ready at end? done".
   "abandoned/deleted bool should still stay"; between start and end,
-  "active". Not built here; LOO-385.
+  "active". Jack then: "I do think i want this in this PR now"; slice 10a.
 
 ## Step invocation — decided by Jack Heart (October 5)
 
@@ -282,50 +282,13 @@ ones most likely to matter in review:
 - **Seen, not fixed.** `ActiveSessionsLifetimeTests replacement` fails in a
   full parallel `swift test` and passes alone.
 
-## Choices the Defaults and editing pass made without Jack
+## Choices the Defaults and editing, and Docs and website passes made without Jack
 
-The agent's, October 6, building slice 7. None is confirmed by Jack Heart.
-
-- **"Wave settings" is the Wave page's Task default section;** Desktop has no
-  settings screen. Its menu sets the default, and lists Flows after workflows
-  because a Project default may still be a plain Flow.
-- **One catalog.** `lf flow list --json` lists workflows beside Flows: each
-  entry gains `kind`, `source` (the repository file, null for a builtin) and
-  `workflow` (stages and edges). Text output marks `(workflow)`. An unstarted
-  Task previews its default workflow from it.
-- **`lf flow customize NAME`** prints the repository file, writing the
-  builtin to `.lf/workflows/` or `.lf/flows/` when there is none; a workflow
-  wins over a Flow of the same name. Desktop's Customize (builtin) and Edit
-  (repository file) both call it, so only the label differs.
-- **Edit opens the file in the system's default application,** not the Task
-  file pane, and in the checkout Desktop has open for the repository.
-- **`lf wave update-plan --flow NAME`** rewrites only the `flow:` line. It
-  does not check that NAME loads: the CLI can save a default that names
-  nothing, which Desktop shows as invalid with Start disabled.
-- **Invalid files** stay listed with their reason and stay editable; Desktop
-  rereads the catalog when it becomes the active application, not on a timer.
-- **Not listed:** a skill used as a default, which `lf run` accepts.
-
-## Choices the Docs and website pass made without Jack
-
-The agent's, October 6, building slice 8. None is confirmed by Jack Heart.
-
-- **Operators on a workflow.** Jack's October 5 "a defined Flow with steps
-  left proceeds without asking" had no mechanism after resume was deleted.
-  The operate skills and docs now say: a Task at a stage its last edge
-  reached waits on a person; an edge that stopped or failed is rerun after
-  its log is read; no other edge is taken for the person.
-- **Skills name no Flow by default.** `lf task run <issue> <chosen-flow>`
-  became bare `lf task run <issue>`, with one paragraph on edges, `end`,
-  taking up a workflow and `lf --task <issue> run <flow>` for a Flow that
-  must not move the Task.
-- **"Worker" survives** in skills where it means whoever does the work.
-- **Website.** The flow example is builtin `pursue`; a fifth block shows the
-  `feature` workflow and an odd last block spans the grid. The SVG diagrams
-  are not redrawn.
-- **Architecture map.** TaskWorkflow is its own concept row.
-- **Not written:** a standalone Waiting or Desktop guide; `docs/lf.md`,
-  `conducting.md` and `swift/README.md` carry them.
+Slices 7–8, October 6; none confirmed by Jack Heart. Both lists are at
+`f57abb655:scratch/questions.md`. Most likely to matter: `lf flow list` lists
+workflow definitions beside Flows and a Flow file hides a same-named builtin
+workflow; `lf wave update-plan --flow NAME` does not check that NAME loads;
+the operate skills say a Task at a node waits on a person.
 
 ## Choices the earlier pass made without Jack
 

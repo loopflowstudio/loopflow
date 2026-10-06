@@ -5,7 +5,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -76,7 +76,8 @@ fn run_git(repo: &Path, args: &[&str]) -> Result<Output, GitError> {
     Ok(retained_output(repo, args)?)
 }
 
-type RetainedReads = HashMap<(PathBuf, Vec<String>), (Instant, Output)>;
+type Question = (PathBuf, Vec<String>);
+type RetainedReads = HashMap<Question, (Instant, Output)>;
 
 /// Set only by a process that never writes through Git.
 static RETAINED_READS: Mutex<Option<RetainedReads>> = Mutex::new(None);
@@ -86,93 +87,80 @@ static RETAINED_READS: Mutex<Option<RetainedReads>> = Mutex::new(None);
 const LAYOUT_RETENTION: Duration = Duration::from_secs(600);
 const CONTENT_RETENTION: Duration = Duration::from_secs(60);
 
+fn retained() -> MutexGuard<'static, Option<RetainedReads>> {
+    RETAINED_READS.lock().expect("git read cache poisoned")
+}
+
 /// Let this process reuse a Git answer for a short time instead of spawning
 /// `git` again. For a long-lived reader that asks the same questions on every
 /// reading and changes nothing itself; one-shot commands never call this.
 pub(crate) fn retain_reads() {
-    *RETAINED_READS.lock().expect("git read cache poisoned") = Some(HashMap::new());
+    *retained() = Some(HashMap::new());
 }
 
 pub(crate) fn retains_reads() -> bool {
-    RETAINED_READS
-        .lock()
-        .expect("git read cache poisoned")
-        .is_some()
+    retained().is_some()
 }
 
-fn retention(args: &[String]) -> Duration {
+fn is_layout(args: &[String]) -> bool {
     let layout = ["--git-common-dir", "--show-toplevel"];
-    if args.iter().any(|arg| layout.contains(&arg.as_str())) {
-        LAYOUT_RETENTION
-    } else {
-        CONTENT_RETENTION
-    }
+    args.iter().any(|arg| layout.contains(&arg.as_str()))
 }
 
-/// A reader must not take the index lock from an agent working in the checkout.
-fn read_only(repo: &Path, args: &[String]) -> std::io::Result<Output> {
-    Command::new("git")
+/// Ask Git and retain its answer. A reader must not take the index lock from
+/// an agent working in the checkout.
+fn ask(question: Question) -> std::io::Result<Output> {
+    let output = Command::new("git")
         .arg("-C")
-        .arg(repo)
-        .args(args)
+        .arg(&question.0)
+        .args(&question.1)
         .env("GIT_OPTIONAL_LOCKS", "0")
-        .output()
+        .output()?;
+    if let Some(reads) = retained().as_mut() {
+        reads.insert(question, (Instant::now(), output.clone()));
+    }
+    Ok(output)
 }
 
 /// `git -C repo args`, reusing a retained answer when this process keeps them.
 pub(crate) fn retained_output(repo: &Path, args: &[&str]) -> std::io::Result<Output> {
-    let key = (
+    let question = (
         repo.to_path_buf(),
         args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>(),
     );
     {
-        let reads = RETAINED_READS.lock().expect("git read cache poisoned");
-        match reads.as_ref() {
-            None => return Command::new("git").arg("-C").arg(repo).args(args).output(),
-            Some(reads) => {
-                if let Some((read_at, output)) = reads.get(&key) {
-                    if read_at.elapsed() < retention(&key.1) {
-                        return Ok(output.clone());
-                    }
-                }
+        let reads = retained();
+        let Some(reads) = reads.as_ref() else {
+            return Command::new("git").arg("-C").arg(repo).args(args).output();
+        };
+        let stands = if is_layout(&question.1) {
+            LAYOUT_RETENTION
+        } else {
+            CONTENT_RETENTION
+        };
+        if let Some((read_at, output)) = reads.get(&question) {
+            if read_at.elapsed() < stands {
+                return Ok(output.clone());
             }
         }
     }
-    let output = read_only(repo, &key.1)?;
-    if let Some(reads) = RETAINED_READS
-        .lock()
-        .expect("git read cache poisoned")
-        .as_mut()
-    {
-        reads.insert(key, (Instant::now(), output.clone()));
-    }
-    Ok(output)
+    ask(question)
 }
 
 /// Ask again what this process retains about `repo`'s contents. True when an
 /// answer differs from the retained one; layout answers are left standing.
 pub(crate) fn reread_retained(repo: &Path) -> bool {
-    let retained = |reads: &Option<RetainedReads>| {
-        reads
-            .iter()
-            .flatten()
-            .filter(|((asked, args), _)| asked == repo && retention(args) == CONTENT_RETENTION)
-            .map(|(key, (_, output))| (key.clone(), output.clone()))
-            .collect::<Vec<_>>()
-    };
-    let questions = retained(&RETAINED_READS.lock().expect("git read cache poisoned"));
+    let questions = retained()
+        .iter()
+        .flatten()
+        .filter(|((asked, args), _)| asked == repo && !is_layout(args))
+        .map(|(question, (_, output))| (question.clone(), output.clone()))
+        .collect::<Vec<_>>();
     let mut changed = false;
-    for (key, before) in questions {
-        let Ok(output) = read_only(repo, &key.1) else {
-            continue;
-        };
-        changed |= output.status != before.status || output.stdout != before.stdout;
-        if let Some(reads) = RETAINED_READS
-            .lock()
-            .expect("git read cache poisoned")
-            .as_mut()
-        {
-            reads.insert(key, (Instant::now(), output));
+    // Every one is asked again, not only up to the first that differs.
+    for (question, before) in questions {
+        if let Ok(output) = ask(question) {
+            changed |= output.status != before.status || output.stdout != before.stdout;
         }
     }
     changed

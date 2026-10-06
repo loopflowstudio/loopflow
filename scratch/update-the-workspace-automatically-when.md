@@ -51,7 +51,8 @@ build compiles SQLite unoptimized.
 ```bash
 cargo build --release -p loopflow   # <lf> is the absolute path of target/release/lf
 python3 scratch/measure/warm.py <home> <lf> [sample.txt]   # six refreshes, request to answering frame
-python3 scratch/measure/cold.py <home> <lf> sample.txt     # first reading, sampled
+python3 scratch/measure/cold-sample.py <home> <lf> sample.txt 12   # first reading, sampled
+python3 scratch/measure/flame.py sample.txt flame.html "<title>"   # the sample as a flame chart
 python3 scratch/measure/hot.py sample.txt 40 80           # hot frames by sample count
 python3 scratch/measure/commit.py <home> <lf> 5            # sqlite3 renames a Task, then a Session; writer's exit to the frame
 python3 scratch/measure/checkout.py <home> <lf> <clean Task checkout> 5   # a file written, then removed, to the frame
@@ -517,3 +518,6 @@ Earlier passes are at commit `018083656`.
   test --filter "TaskFiles|DTOFixture"` pass. `status_tests`
   `previous_release_merge_request_migrates…` needs
   `materialize_rust_tests.py`, left to gate. Gate owns the rest.
+- 2026-10-05 compress: clippy `--all-targets -D warnings` clean; `cargo test
+  -p loopflow --test workspace_watch` 10/10; `--lib -- workspace_watch
+  engine::git` 30/30. Not re-measured; gate owns the suites.

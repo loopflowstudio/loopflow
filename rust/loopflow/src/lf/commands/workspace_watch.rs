@@ -186,33 +186,28 @@ impl Part {
 
     /// Whether a commit that moved revisions from `old` to `new` can change
     /// this part. Planning conditions read Sessions, Flows and unfinished
-    /// Execs; only a Wave's Session history shows token totals.
-    fn changed(self, old: StoreRevisions, new: StoreRevisions) -> bool {
-        let displayed = |revisions| StoreRevisions {
-            usage: 0,
-            ..revisions
-        };
-        match self {
-            Part::Sessions => {
-                StoreRevisions {
-                    execs: 0,
-                    ..displayed(old)
-                } != StoreRevisions {
-                    execs: 0,
-                    ..displayed(new)
-                }
-            }
-            Part::Activity => old.execs != new.execs,
-            Part::Wave => old != new,
-            Part::Planning | Part::Task | Part::WorkActivity => displayed(old) != displayed(new),
+    /// Execs; the Session list reads no Exec, and only a Wave's Session
+    /// history shows token totals.
+    fn changed(self, mut old: StoreRevisions, new: StoreRevisions) -> bool {
+        if self == Part::Activity {
+            return old.execs != new.execs;
         }
+        if self != Part::Wave {
+            old.usage = new.usage;
+        }
+        if self == Part::Sessions {
+            old.execs = new.execs;
+        }
+        old != new
     }
 
-    /// Whether the only thing that moved is one the part can wait for.
+    /// Whether a change is to usage alone, which the part can wait for.
     fn rests(self, old: StoreRevisions, new: StoreRevisions) -> bool {
         self == Part::Wave
-            && old.usage != new.usage
-            && StoreRevisions { usage: 0, ..old } == StoreRevisions { usage: 0, ..new }
+            && StoreRevisions {
+                usage: new.usage,
+                ..old
+            } == new
     }
 
     fn clock(self) -> Option<Duration> {

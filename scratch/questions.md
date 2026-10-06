@@ -200,99 +200,62 @@ The agent's, October 5, building slice 1. None is confirmed by Jack Heart.
 - **Reaching `end` removes nothing:** the Task stays ready and
   `lf task complete` stays separate (draft default 3).
 
-## Choices the Loops pass made without Jack
+## Choices the Loops, Review repairs and Task primary passes made without Jack
 
-The agent's, October 6, building slice 2. None is confirmed by Jack Heart.
+The agent's, October 6, slices 2–4; none is confirmed by Jack Heart. The full
+lists are at `f38e3e2c9:scratch/questions.md` under each pass's heading. The
+ones most likely to matter in review:
 
-- **Authored form.** `- loop: <target>` is a flow item, with an optional
-  sibling `step:` (a skill name or mapping) and nothing else. It is allowed
-  in a Flow body and in an XOR path's `steps`.
-- **The occurrence name is the existing `id`** on a `step:` mapping; no new
-  field. A target matches an `id` first, else the one preceding step running
-  that skill. Two or more are an error that lists their positions.
-- **Scope.** A target is looked up among the steps before the loop in its own
-  Flow body or XOR path, composed Flows included, so a Flow composed twice
-  resolves each copy's loops to that copy.
-- **Captured form.** The compiled step keeps how many steps back it returns,
-  not a name; deciders need no id, and return counts are keyed by the
-  decider's position in its body. Wire shapes are unchanged; a builtin
-  graph's nodes now carry `id: null`.
-- **A malformed captured distance is no loop.** One `return_target` reads the
-  edge everywhere; a distance of zero or past the body's start, which the
-  loader cannot produce, means no edge, so Iterate there is an error.
-- **Old spelling fails loudly.** `repeat:` on a step is refused with a message
-  naming `loop:`, so another repository's Flow cannot silently lose its loop.
-  A `human: true` decider is refused.
-- **Done-when grep.** Left matching: release notes, dated `performance/`
-  reports and baselines, other Waves' memory (shipped or dated records), the
-  test of the refusal above, and an unrelated `repeat:` parameter in
-  `scripts/context_ablation.py`. That script now replays `loop-or-next`
-  launches, so records made under the old name are skipped.
-- **Website example** changed only its loop lines; its human steps wait for
-  the docs slice.
-- **Outside the slice.** The three-loop test ran into a Codex close that
-  failed when the provider process had already exited ("does not own its
-  process group"), about two runs in five. `close_engine` now treats a
-  process that is gone as closed.
-- **Seen, not fixed.** `scripts/check_architecture.py` reports
-  `task_workflows` and `task_workflow_traversals` missing from the map
-  (slice 1's tables; the docs slice's check). Five lib tests
-  (`journal::boot_time`, three `ops::chapter`, one `ops::ci_watch`) fail in a
+- **Loops.** `- loop: <target>` with an optional sibling `step:`; the
+  occurrence name is the existing `id`; `repeat:` is refused with a message
+  naming `loop:`; a `human: true` decider is refused.
+- **Steers.** Global `--steers-after STEER`; the driver passes each node its
+  previous run's newest steer, so a steer can arrive twice, never zero times.
+- **Ending.** `lf task run ISSUE end` takes an edge that runs nothing.
+- **Task primary.** `tasks.primary_session_id`; `lf session ensure --task
+  ISSUE [--choose SESSION]` remembers its first pick; only an empty Task gets
+  a new conversation; `lf resume` ignores the primary.
+- **Seen, not fixed.** `scripts/check_architecture.py` reports the two
+  workflow tables missing from the map (docs slice). Five lib tests fail in a
   full parallel `--lib` run and pass alone.
 
-## Choices the Review repairs pass made without Jack
+## Choices the Desktop pass made without Jack
 
-The agent's, October 6, building slice 3. None is confirmed by Jack Heart.
+The agent's, October 6, building slice 6. None is confirmed by Jack Heart.
 
-- **The option is global `--steers-after STEER`,** a steer's id (the Task
-  event id shown as `steer:N` in context reports). It limits the Task
-  direction any run in a Task checkout is given; it changes nothing without a
-  Task. `lf context` ignores it.
-- **What the driver passes.** Before each skill step it reads the Task's
-  newest steer and remembers it for that node, in memory. A node's later run
-  gets `--steers-after` its previous run's value; a `--steers-after` on the
-  Flow launch is the floor for every step. Operation steps get none.
-- **A steer can arrive twice, never zero times.** The step refreshes Linear
-  after the driver's read, so a steer that lands in that gap reaches that run
-  and the node's next one. Reading after the step instead would drop steers
-  that arrive mid-turn and are not injected live.
-- **Corrections** (`session resume`) carry no option; they add no seed.
-- **An edge that runs nothing is named by the stage it enters:**
-  `lf task run ISSUE end`. A Flow named like the stage on another edge from
-  the same stage is refused at load as two edges with one name. A bare
-  `lf task run ISSUE` still takes a stage's only edge, flowless or not.
-- **`end` skips the unknown-name check** made before placing a worktree; the
-  Task's stage decides whether it names an edge.
-- **Tests live in `flow_tests`,** which has the Codex stand-in a headless
-  Task run needs: one drives builtin `research` to `end`.
-
-## Choices the Task primary pass made without Jack
-
-The agent's, October 6, building slice 4. None is confirmed by Jack Heart.
-
-- **The Task names its primary.** `tasks.primary_session_id`, not a scope
-  mark on the Session row, after Jack's "just a smaller wrapper around this
-  that saves that id in a field". The conversation stays a Task member and
-  `primary_scope` on the wire stays null for it, so Desktop's grouping is
-  untouched. Nothing on the wire says which conversation is primary yet;
-  slice 6 decides how Desktop reads it.
-- **Command.** `lf session ensure --task ISSUE` returns the primary;
-  `--choose SESSION` names one of the Task's unfinished interactive
-  conversations and is refused for any other Session.
-- **Selection is remembered.** The first `ensure` records its pick (the only
-  one, else the most recently used); later use of another conversation does
-  not move it. A finished primary gives way to the same selection again.
-- **Only an empty Task gets a new conversation,** running `task/session` in
-  the Task's checkout and started like a repository's or Wave's primary. A
-  Task with no checkout is refused. Selecting an existing one launches nothing.
-- **`lf session replace` works on a Task primary:** it finishes that
-  conversation and starts a fresh one. A repeat naming the replaced
-  conversation is refused, unlike a repository's or Wave's. Desktop's Ctrl-C
-  is unchanged, since it never sees a Task scope mark.
-- **`lf resume` is unchanged:** it ranks every interactive conversation in
-  the checkout, finished ones included, and ignores the primary.
-- **Outside the slice.** `docs/lf-reference.md` was regenerated and picked up
-  earlier passes' flags (`commit --push`, `--accept-unknown-exec`).
+- **How Desktop reads the primary.** `task_primary` (true/false) on every
+  listed Session; `primary_scope` stays null for it, so grouping and Ctrl-C
+  are unchanged. Entering a Task with empty panes opens its primary, else a
+  waiting conversation, else the first open one. Desktop never calls
+  `session ensure`, so reading picks nothing.
+- **Wire removals.** Session `kind`, state `waiting` and `TaskSession.kind`
+  are gone, with the `agent_sessions.kind` column (dropped in the one draft).
+  A row reads Waiting from `attention`; headless work is labelled Run.
+- **Flow review participation is deleted** in Desktop: no conversation is
+  matched to a Flow step, so a stage button only opens the step's detail.
+  `human` on a Flow node is still on the wire, unproduced by builtins.
+- **Every Flow run** is a row under Work that opens to `lf flow show ID
+  --sessions --json`: the launched graph, where it stands, each step's Exec
+  and exit. Step text output stays in the Task's History section; the run
+  view does not embed transcripts.
+- **`current` draws as running.** A killed driver has no exit record, so its
+  run keeps reading as running.
+- **Refresh.** The shown Task's work and its opened unfinished runs reload on
+  the existing 15-second planning cadence: one more `lf task status` per tick.
+- **Workflow Start.** One button per edge leaving the stage the Task waits
+  at; none can be pressed while an edge runs, since a second Start would put
+  two drivers in the checkout. `lf` itself still allows it.
+- **An unstarted workflow has no preview.** Nothing lists workflows, so a
+  Task whose default is `feature` shows one line and an enabled Start until
+  its first run records the workflow. Slice 7 needs that listing anyway.
+- **The Flow picker stays** on a workflow Task; a Flow that leaves no edge is
+  refused by `lf` and the refusal is shown.
+- **Sessions on the Task page.** A Waiting group of full rows, then one-line
+  rows for the rest; closed conversations are not listed there.
+- **Outside the slice.** `ConversationLaunchTests` still expected `--mode`;
+  it now expects `--interactive`. `ActiveSessionsLifetimeTests replacement`
+  fails in a full parallel `swift test` and passes alone; whether it failed
+  before this pass is unchecked.
 
 ## Choices the Waiting pass made without Jack
 

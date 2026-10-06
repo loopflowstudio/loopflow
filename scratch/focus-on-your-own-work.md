@@ -153,7 +153,7 @@ are not built.
 - **Leftovers.** Native history readers still parse `structured_output`, for
   conversations recorded before this pass;
   `SessionFlowMembership::Step` remains for older manifests. Task status
-  still lists every Exec. Desktop does not draw step Execs.
+  still lists every Exec.
 - **Failing before this pass, unchanged** (reproduced on `8535598ef`):
   `status_tests previous_release_merge_request_migrates_into_readable_status_and_roadmap`.
   The Waiting pass repaired two `session_cli_tests` that still set up a
@@ -233,10 +233,7 @@ Flow history below means FlowExec rows joined to their Execs.
    store call's `now` judges filter and row): `--lib harness::attention` 8
    passed. The driver that owns a provider's stream saves one reading per
    Session (`session_activity`); one SQL rule judges Waiting for the row and
-   for `--waiting`. Left for slice 6, since each crosses the wire to Swift:
-   the one-variant `session::SessionKind` and `TaskSession.kind`, wire kind
-   `flow`, state `waiting` and the `kind` argument of `session_actions`. Left
-   for slice 8: `--needs-me` in four `website/docs/` pages. Demo items: a
+   for `--waiting`. Left for slice 8: `--needs-me` in four `website/docs/` pages. Demo items: a
    live provider asking a question; a native Claude or OpenCode terminal,
    which `lf` cannot hear (see questions.md).
 6. **Desktop.** The Task page draws its TaskWorkflow with the current stage
@@ -244,8 +241,14 @@ Flow history below means FlowExec rows joined to their Execs.
    graph/progress/output view from FlowExec. Waiting first, working Sessions
    in a compact group, no completion controls; Start runs `lf -b task run` as
    an app-owned child. Done when `swift build --build-tests` and the headless
-   Desktop tests pass with shared DTO fixtures. Demo items: native rendering
-   and interaction. *Not done.*
+   Desktop tests pass with shared DTO fixtures. **Built** at `e3ac73edb`, not yet compressed or
+   realigned: `swift build --build-tests` clean; `swift test --filter
+   "DesktopHeadlessTests|DTOFixtureTests"` passed; `dto_fixtures` 19,
+   `session_lifecycle_tests` 18, lib `store::` 182 and all-target Clippy
+   pass. A full `swift test` has one failure, `ActiveSessionsLifetimeTests
+   replacement`, which passes alone. Demo items: native rendering and
+   interaction; Start against a real `lf`; a Task opening on its primary; a
+   live run's progress moving.
 7. **Defaults and editing.** The Project's default names a workflow, shown and
    set in Wave settings; Edit opens the real workflow or Flow source, with
    builtin customization creating the `.lf/` file explicitly; an invalid file
@@ -280,6 +283,7 @@ Clear inherited `LF_*`/`LOOPFLOW_*` before Rust tests. Gate owns the full run.
 | `cargo test -p loopflow --lib store::` | Released frontier converts through the one draft; the record is append-only; a step must be its driver's child. |
 | `cargo test -p loopflow --test dto_fixtures` | Wire shapes are unchanged. |
 | `cargo test -p loopflow --lib harness::attention` | Recorded Claude, Codex and OpenCode streams under an injected clock: questions, open tools, hand-back, 120 seconds of quiet, a released driver, choice before paging. |
+| `swift test --filter "DesktopHeadlessTests\|DTOFixtureTests"` (in `swift/`) | The workflow's position and edge Start, a Flow run's graph and steps, Waiting-first order and the Task primary, from the shared fixtures. |
 | `git grep -nE "__flow-step\|FlowStep::\|execute_flow_command"` | No executable path. |
 
 October 5, after compress: the commands above except `land_tests` passed

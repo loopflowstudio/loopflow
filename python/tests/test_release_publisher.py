@@ -15,17 +15,13 @@ from scripts import deploy_website, publish_release, release_install_smoke
 
 
 def _native_artifacts(directory: Path) -> None:
-    binaries = []
-    for name in ("lf",):
-        binary = directory / name
-        binary.write_bytes(f"loopflow release {name}".encode())
-        binaries.append(binary)
+    binary = directory / "lf"
+    binary.write_bytes(b"loopflow release lf")
     for target in publish_release.TARGETS:
         package_dir = directory / target
         package_dir.mkdir()
         with tarfile.open(package_dir / f"lf-{target}.tar.gz", "w:gz") as package:
-            for binary in binaries:
-                package.add(binary, arcname=binary.name)
+            package.add(binary, arcname="lf")
 
 
 def test_publisher_requires_the_complete_native_matrix(tmp_path: Path):
@@ -231,26 +227,22 @@ def test_public_artifact_hashes_reject_modified_and_missing_assets(tmp_path: Pat
 def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
+    body = (
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        "  --version) echo 'lf 1.2.3' ;;\n"
+        "  --help) echo 'Usage: lf' ;;\n"
+        "  *) echo 'unknown command' >&2; exit 2 ;;\n"
+        "esac\n"
+    ).encode()
     for target in publish_release.TARGETS:
         with tarfile.open(artifacts / f"lf-{target}.tar.gz", "w:gz") as package:
-            for name in ("lf",):
-                body = (
-                    "#!/bin/sh\n"
-                    'case "$*" in\n'
-                    f"  --version) echo '{name} 1.2.3' ;;\n"
-                    "  --help) echo 'Usage: lf' ;;\n"
-                    "  'list --json') echo '[]' ;;\n"
-                    "  *) echo 'unknown command' >&2; exit 2 ;;\n"
-                    "esac\n"
-                ).encode()
-                info = tarfile.TarInfo(name)
-                info.mode = 0o755
-                info.size = len(body)
-                package.addfile(info, io.BytesIO(body))
+            info = tarfile.TarInfo("lf")
+            info.mode = 0o755
+            info.size = len(body)
+            package.addfile(info, io.BytesIO(body))
     (artifacts / "Loopflow.dmg").write_bytes(b"notarized artifact")
-    (artifacts / "install.sh").write_text(
-        '#!/bin/sh\nmkdir -p "$LF_INSTALL_DIR"\ncp native/lf "$LF_INSTALL_DIR/"\n'
-    )
+    (artifacts / "install.sh").write_text("#!/bin/sh\nexit 1\n")
     publish_release._write_checksums(tuple(artifacts.iterdir()), artifacts / "SHA256SUMS")
     hashes = {p.name: publish_release._sha256(p) for p in artifacts.iterdir()}
     monkeypatch.setenv("LF_RELEASE_MAIN_REPO", str(tmp_path))

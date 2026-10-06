@@ -168,22 +168,16 @@ def _extract_arm_binary(archives: tuple[Path, ...], output_dir: Path) -> Path:
     arm_archive = next(path for path in archives if "aarch64-apple-darwin" in path.name)
     with tarfile.open(arm_archive, "r:gz") as package:
         members = package.getmembers()
-        if sorted(member.name for member in members) != ["lf"] or not all(
-            member.isfile() for member in members
-        ):
+        if len(members) != 1 or members[0].name != "lf" or not members[0].isfile():
             raise RuntimeError(f"unexpected archive contents in {arm_archive.name}")
-        binaries = []
-        for name in ("lf",):
-            member = next(member for member in members if member.name == name)
-            source = package.extractfile(member)
-            if source is None:
-                raise RuntimeError(f"could not read {name} from {arm_archive.name}")
-            binary = output_dir / name
-            with binary.open("wb") as destination:
-                shutil.copyfileobj(source, destination)
-            binary.chmod(0o755)
-            binaries.append(binary)
-    return binaries[0]
+        source = package.extractfile(members[0])
+        if source is None:
+            raise RuntimeError(f"could not read lf from {arm_archive.name}")
+        binary = output_dir / "lf"
+        with binary.open("wb") as destination:
+            shutil.copyfileobj(source, destination)
+        binary.chmod(0o755)
+    return binary
 
 
 def _validate_release_candidate(binary: Path, scratch: Path) -> None:
@@ -724,22 +718,19 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
                 raise RuntimeError("publication repair did not pass public read-back")
         native = scratch / "native"
         native.mkdir()
-        expected_binaries = (_extract_arm_binary(_find_native_archives(scratch), native),)
+        binary = _extract_arm_binary(_find_native_archives(scratch), native)
         smoke_env = {
             "PATH": "/usr/bin:/bin",
             "HOME": str(scratch),
             "LF_HOME": str(scratch / "native-home"),
         }
-        for binary in expected_binaries:
-            reported = _run(
-                [str(binary), "--version"], cwd=scratch, env=smoke_env, capture=True
-            ).stdout.strip()
-            smoke_versions[binary.name] = reported
-            if reported != f"{binary.name} {version}":
-                raise RuntimeError(
-                    f"public {binary.name} reported {reported!r}, expected {version}"
-                )
-            _run([str(binary), "--help"], cwd=scratch, env=smoke_env, capture=True)
+        reported = _run(
+            [str(binary), "--version"], cwd=scratch, env=smoke_env, capture=True
+        ).stdout.strip()
+        if reported != f"lf {version}":
+            raise RuntimeError(f"public lf reported {reported!r}, expected {version}")
+        smoke_versions["lf"] = reported
+        _run([str(binary), "--help"], cwd=scratch, env=smoke_env, capture=True)
         smoke_versions.update(_verify_public_installer(scratch, tag))
     verified = PublicReleaseReceipt(
         verified_at=int(time.time()),

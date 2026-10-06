@@ -2,8 +2,7 @@
 
 Renamed from `concerto` in the 2026-07-08 wave/project/task restructure. The wave's
 scope widened past the Mac app: product now owns the shared API and every surface
-(CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
-they mean the Mac surface.
+(CLI, Mac, iOS, agent turns, workers). Older “Concerto” notes mean the Mac surface.
 
 ## Reactive workspace (2026-10-05)
 

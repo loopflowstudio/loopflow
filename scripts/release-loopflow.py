@@ -7,10 +7,16 @@ Usage:
 Expects to run from the repo root. On CI, signing credentials come from
 environment variables (NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER). Locally,
 it uses whatever Developer ID Application identity is in the keychain.
+
+Publisher preparation retains the submitted DMG and Apple submission ID outside
+the generated checkout. Retry the same `lf release run` after a wait timeout;
+it resumes that submission and staples a copy of the exact submitted image.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import plistlib
 import shutil
@@ -111,6 +117,19 @@ def _codesign_app(app_path: Path, identity: str, entitlements: Path | None = Non
     return result.returncode
 
 
+def _notarization_dir(dmg_path: Path) -> Path:
+    return Path(os.environ.get("LF_RELEASE_NOTARIZATION_DIR", dmg_path.parent / ".notarization"))
+
+
+def _write_submission(path: Path, receipt: dict[str, object]) -> None:
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as pending:
+        json.dump(receipt, pending)
+        pending.flush()
+        os.fsync(pending.fileno())
+        temporary = Path(pending.name)
+    temporary.replace(path)
+
+
 def _notarize_dmg(dmg_path: Path) -> int:
     key = os.environ.get("NOTARY_KEY")
     key_id = os.environ.get("NOTARY_KEY_ID")
@@ -123,31 +142,86 @@ def _notarize_dmg(dmg_path: Path) -> int:
         )
         return 1
 
+    retained = _notarization_dir(dmg_path)
+    retained.mkdir(parents=True, exist_ok=True)
+    receipt_path = retained / "submission.json"
+    submitted_dmg = retained / "Loopflow.dmg"
+    source_commit = run_capture(
+        ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, timeout=30
+    ).stdout.strip()
+    if receipt_path.exists():
+        receipt = json.loads(receipt_path.read_text())
+        if receipt["source_commit"] != source_commit:
+            raise RuntimeError("Retained notarization belongs to a different source commit")
+        with submitted_dmg.open("rb") as artifact:
+            digest = hashlib.file_digest(artifact, "sha256").hexdigest()
+        if digest != receipt["sha256"]:
+            raise RuntimeError("Retained notarization DMG changed")
+        if not receipt["submission_id"]:
+            raise RuntimeError(
+                "Notarization submission outcome unknown; inspect Apple history before retrying"
+            )
+    else:
+        shutil.copy2(dmg_path, submitted_dmg)
+        with submitted_dmg.open("rb") as artifact:
+            digest = hashlib.file_digest(artifact, "sha256").hexdigest()
+        receipt = {"source_commit": source_commit, "sha256": digest, "submission_id": None}
+        _write_submission(receipt_path, receipt)
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".p8", delete=False) as f:
         f.write(key)
         key_path = f.name
 
     try:
-        print("Submitting for notarization...", flush=True)
-        result = run(
+        auth = ["--key", key_path, "--key-id", key_id, "--issuer", issuer]
+        if not receipt["submission_id"]:
+            print("Submitting for notarization...", flush=True)
+            result = run_capture(
+                [
+                    "xcrun",
+                    "notarytool",
+                    "submit",
+                    str(submitted_dmg),
+                    *auth,
+                    "--output-format",
+                    "json",
+                ],
+                timeout=30 * 60,
+            )
+            if result.returncode:
+                raise RuntimeError(
+                    "Notarization upload did not return a receipt; "
+                    "inspect Apple history before retrying"
+                )
+            receipt["submission_id"] = json.loads(result.stdout)["id"]
+            _write_submission(receipt_path, receipt)
+        submission_id = str(receipt["submission_id"])
+        print(f"Waiting for notarization {submission_id}; retained at {retained}", flush=True)
+        result = run_capture(
             [
                 "xcrun",
                 "notarytool",
-                "submit",
-                str(dmg_path),
-                "--key",
-                key_path,
-                "--key-id",
-                key_id,
-                "--issuer",
-                issuer,
-                "--wait",
+                "wait",
+                submission_id,
+                *auth,
+                "--output-format",
+                "json",
+                "--timeout",
+                "25m",
             ],
-            check=False,
             timeout=30 * 60,
         )
-        if result.returncode != 0:
-            return result.returncode
+        if result.returncode:
+            raise RuntimeError(
+                f"Notarization {submission_id} wait failed; retry resumes the retained submission"
+            )
+        status = json.loads(result.stdout)["status"]
+        if status != "Accepted":
+            raise RuntimeError(f"Notarization {submission_id}: {status}")
+
+        # Stapling changes the bytes; retain the exact submitted image for retries.
+        dmg_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(submitted_dmg, dmg_path)
 
         print("Stapling notarization ticket...", flush=True)
         result = run(
@@ -171,7 +245,6 @@ def _copy_bundled_tools(app_macos_dir: Path) -> None:
             "--release",
             "--bin",
             "lf",
-
         ]
         bin_dir = REPO_ROOT / "target" / "release"
         result = run(
@@ -263,6 +336,9 @@ def _verify_app_resource_self_containment(app_path: Path, build_dir: Path) -> No
 
 
 def release() -> int:
+    dmg_path = SWIFT_DIR / "dist" / "Loopflow.dmg"
+    if (_notarization_dir(dmg_path) / "submission.json").is_file():
+        return _notarize_dmg(dmg_path)
     print("Building Loopflow release...", flush=True)
 
     result = run(

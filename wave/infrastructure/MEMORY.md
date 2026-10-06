@@ -25,13 +25,11 @@ implementation and configured acceptance remain unfinished; neither approval
 establishes readiness. Earlier detail remains at
 `c4373492cfc0c77fc27a7887045f74c48b381e72:wave/infrastructure/MEMORY.md`.
 
-The current Infrastructure Project recommends `code` after Jack's accepted review
-direction and v0.13.3 installation; KRs/targets and captured review boundaries remain.
-LOO-326's stopped recovery Flows and independent conversation closed, but unknown
-Exec `5f239ead-89f9-49c4-92c4-4c2f8b97ca94` still blocks completion. LOO-367's
-native-thread mismatch remains unresolved; preserve its conversation and evidence.
-LOO-370's disk blocker cleared; the opaque-root decision above supersedes conversion,
-without installed-Home migration authority. October 5 operation detail remains at
+The Infrastructure Project recommends `code` after Jack's accepted review and
+v0.13.3 installation; KRs/targets and captured reviews remain. LOO-326's exact
+unknown Exec and subsequent acceptance are retained under Transient recovery.
+LOO-367's native-thread mismatch remains unresolved; preserve its conversation.
+LOO-370's opaque-root decision above supersedes conversion. October 5 detail:
 `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
 
 ## Release follow-through (reconciled 2026-10-05)
@@ -399,14 +397,16 @@ installed Intelligence acceptance remain unproved; source grants no installation
 authority. Release's operation-entry lesson still applies. Earlier detail:
 `c99baa3baa23d324b013a03ea02cdcbc8953c2aa:wave/infrastructure/MEMORY.md`.
 
-Jack Heart also selected Loopflow Desktop, `WorkModel`, `RepoView` and Work-named
-observation/navigation on October 6. The naming implementation preserves wire
-fields, cache files, selection/layout keys and identities. Durable Work still means
-Wave/Project/Task; Sessions and Execs remain associated records. Presentation joins
-are `TaskProjection`/`WaveProjection`, not new Task/Wave owners. `TaskWorktreeSnapshot`
-is Git placement; `WorkspaceIdentity`, `SessionWorkspace` and terminal workspaces
-remain broader directory/layout concepts. `WorkReadingStatus` avoids conflating
-loading with durable `WorkStatus`.
+Jack Heart selected Loopflow Desktop and Work-named observation on October 6,
+then accepted the reviewed source/naming direction with “lg2m.” Wire/cache bytes,
+selection keys and identities stay unchanged; Work remains Wave/Project/Task.
+Workspace can be non-Git; TaskWorktreeSnapshot means Git placement. Loading is
+WorkReadingStatus, distinct from WorkStatus. Review and the two-reader proof at `457e65d6b` do not establish public CLI
+crash recovery or configured Intelligence repair. October 6 gate stopped below
+the 32 GiB disk reserve after supported recovery; static checks passed, product
+suites did not run. The CLI/crash suite remains absent. Release's entry-point
+lesson applies: operation fixtures cannot prove dispatch/recovery. Desktop's
+required boundary is headless app/view checks; mounted judgment is optional.
 
 
 ## One migration draft per Task (LOO-344, 2026-10-01)

@@ -15,7 +15,7 @@ struct WorkSurfaceView: View {
 
     @Environment(\.palette) private var palette
     @State private var controlError: String?
-    @State private var editingTask: WorkTaskSelection?
+    @State private var editingTask: TaskSelection?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
     private var queryError: String? { model.roadmap.errorMessage }
@@ -320,7 +320,7 @@ struct WorkSurfaceView: View {
                 section {
                     WorkSectionHeading(title: "Description") {
                         Button("Edit description") {
-                            editingTask = WorkTaskSelection(wave: found.wave.wave, task: task)
+                            editingTask = TaskSelection(wave: found.wave.wave, task: task)
                         }
                         .buttonStyle(.plain)
                         .font(Typography.body(12.5))
@@ -549,7 +549,7 @@ struct WorkSurfaceView: View {
 
     // MARK: - Controls
 
-    private struct WorkTaskSelection: Identifiable {
+    private struct TaskSelection: Identifiable {
         let wave: WaveSnapshot
         let task: RoadmapTask
 

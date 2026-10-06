@@ -81,3 +81,38 @@ and retry, suppress absent Flow presentation, then repeat mounted opening,
 reopening and failure recovery. No new human acceptance or agreed design change
 was supplied. The prior installed-path blocker remains; this local proof does
 not repair production Intelligence or establish configured acceptance.
+
+## Reactive redesign and accepted review — October 6, 2026
+
+Jack Heart questioned `ProjectPreparation`, requested a redesign informed by
+LOO-382, permitted dependency integration, and requested supervised pursue work
+followed by a rewritten walkthrough. Jack later selected Loopflow Desktop,
+WorkModel/RepoView and selective Work/Workspace/Worktree naming. These directions
+supersede extending the old preparation object and retaining Podium naming.
+
+Pursue Flows `e135ba90-1465-4f94-9eab-cea5131be921` and
+`ae012d45-8e3c-49c9-8760-09e46259f394` completed. SQLite owns Project selection;
+readiness derives from stored facts and both Desktop surfaces share activation.
+Pending presentation follows the live command handle; unfinished historical
+Execs remain unknown. Naming and retained Workspace meanings are documented in
+the [current design](keep-every-wave-ready-for.md).
+
+The first publisher withheld final cleanup after publishing `d3e0f2ec9`; it was
+preserved as `c99baa3ba`. Later fresh GitHub readback confirms
+[PR #1463](https://github.com/loopflowstudio/loopflow/pull/1463) at
+`457e65d6be132f290b8968c4b11959a1ca0823e6`, including naming `90013bd7e` and that
+checkpoint. This supersedes earlier statements that the naming changes were
+unpublished. The last publisher made no additional push. Subsequent local cleanup spans three Swift files: Roadmap action-wrapper removal,
+the private TaskSelection rename and Wave-scoped stable-ID selection. Local HEAD
+`c1685f82b` also integrates main’s v0.13.6 source; this records no newer PR readback.
+
+After the [updated walkthrough](pr-review.html) was opened again, Jack Heart
+responded “lg2m”. This accepts the reviewed source/naming direction and completes
+this review boundary. It does not establish a mounted demo, configured Intelligence
+repair, installation, remaining gate proofs or Task completion. No new design
+changes were requested. The walkthrough labels published source and local cleanup;
+all 16 excerpts match the published revision, with desktop/narrow renders inspected.
+
+Next: return this feedback to the saved Flow. Its following loop-decide owns
+navigation; no navigation verdict is supplied here. Keep CLI/crash, configured,
+mounted and other retained acceptance gaps in the design.

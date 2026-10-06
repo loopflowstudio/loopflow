@@ -27,3 +27,9 @@ integration. Import at explicit ensure/binding/applied rotation retains the orig
 file bytes as evidence and makes the old file inert; absence is recorded once too.
 This is a reversible implementation choice within the accepted cutover. No additional
 provider, installation, release or managed-review authority follows from it.
+
+October 6 reconciliation: authored memory and scratch fit. The complete supplied
+Task/steer input was read; `lf context --skill realign --json` reports the generated
+launch goal at 17,271/16,000 tokens at gate. Its provider-owned brief,
+steers and generated workspace inventory cannot be reduced by local plan curation.
+No budget was raised; the launch-input owner retains this overage.

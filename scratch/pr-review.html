@@ -1,166 +1,264 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Wave Project readiness — code walkthrough</title><style>*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#faf9f6;color:#202825;font:17px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:64px auto;padding:0 32px 80px}h1{font-size:38px;line-height:1.15;font-weight:600;letter-spacing:-1px}h2{font-size:27px;font-weight:550;margin:0 0 12px}p{max-width:850px}a{color:#225e57;text-underline-offset:3px}nav{display:flex;gap:22px;flex-wrap:wrap;margin:28px 0}small,figcaption,.meta{color:#56615c;font-size:13px}table{width:100%;border-collapse:collapse;margin:30px 0}th,td{text-align:left;vertical-align:top;padding:16px 12px;border-bottom:1px solid #cfd6d0}th{font-size:13px}td:first-child{width:22%}section{margin-top:72px;scroll-margin-top:25px}figure{margin:26px 0}figcaption{margin-bottom:8px;overflow-wrap:anywhere}pre{background:#edf0eb;padding:22px;overflow-x:auto;font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;tab-size:4;border-left:2px solid #9eafa4}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}details{padding:14px 0;border-top:1px solid #cfd6d0}summary{cursor:pointer}a:focus-visible,summary:focus-visible,pre:focus-visible{outline:3px solid #267c70;outline-offset:4px}.note{border-left:2px solid #9eafa4;padding-left:18px}@media(max-width:650px){main{padding:0 18px;margin:32px auto}h1{font-size:30px}table,tbody,tr,td{display:block}thead{display:none}td,td:first-child{width:auto;border:0;padding:5px 0}tr{padding:15px 0;border-bottom:1px solid #cfd6d0}td:before{content:attr(data-label);display:block;font-size:12px;color:#56615c}pre{font-size:13px;padding:14px}section{margin-top:50px}}@media print{body{background:white}main{margin:0;max-width:none;padding:0}nav{display:none}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:10px}section{break-before:page}a{color:inherit}details{display:block}}</style><main><header><p class="meta">LOO-366 · LOCAL BRANCH REVIEW · OCTOBER 6, 2026</p><h1>A usable Project when you open a Wave</h1><p>The branch separates ordinary Project activation from chapter rotation. Follow opening, persistent selection, recovery, then explicit realignment.</p><p class="meta">Base 1af81fe030177217dafedf192a1ad8c6a4ea095c → head 42e6c2706b1b35b2852e438ff94a49d060faccda. GitHub reports no PR for this branch. Uncommitted design/demo notes are separate from the committed code shown here; the temporary demo harness is excluded.</p></header><nav aria-label="Reading route"><a href="#open">Open a Wave</a><a href="#ensure">Activate and retry</a><a href="#rotate">Realign Projects</a><a href="#proof">Evidence limits</a></nav><table><thead><tr><th>When you…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody><tr><td data-label="When you…"><a href="#open">Open a Wave in Portfolio</a></td><td data-label="What happens">Cached planning remains visible while its selected Project is prepared; a failed preparation offers Retry.</td><td data-label="Where code controls this">ProjectPreparation calls the same ensure operation as the CLI; the polling task only reads.</td></tr><tr><td data-label="When you…"><a href="#ensure">Activate an existing ordinary Project</a></td><td data-label="What happens">The configured UUID is activated without requiring a Flow or renaming the Project.</td><td data-label="Where code controls this">ensure accepts provider facts before activation; the shared Home file selects the Project across checkouts.</td></tr><tr><td data-label="When you…"><a href="#ensure">Retry an uncertain creation</a></td><td data-label="What happens">The reserved UUID survives failure, so retry resumes the same creation.</td><td data-label="Where code controls this">ProjectTransition records the intended identity before provider effects; successful readback and binding settle it.</td></tr><tr><td data-label="When you…"><a href="#rotate">Explicitly realign Projects</a></td><td data-label="What happens">Started work carries forward; unreviewed backlog stays in its prior Project. Failed Apply retains the reviewed input.</td><td data-label="Where code controls this">ChapterPlan names exact destinations; apply_rotation switches the shared binding before completing the predecessor.</td></tr></tbody></table><p class="note">Accepted direction: Jack Heart selected one shared local binding and exact Project IDs. This supersedes the original task’s automatic candidate discovery. One configured current Project does not enforce one In Progress Project throughout Linear: other active Projects are left untouched.</p><p class="note"><strong>Observed gap in the disposable app:</strong> the main workspace opens Wave A without invoking ensure. It displays the configured Backlog Project and an empty Flow section. The activation code below belongs to the Portfolio pane. Ordinary opening is therefore not covered end to end.</p><section id="open"><h2>1. Opening prepares; polling observes</h2><p>New in this branch: Portfolio opening and Retry invoke activation outside the existing status loop. The primary conversation is independent. A generation check rejects obsolete results.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/swift/LoopflowMac/Views/WaveDetailPane.swift#L35-L56">swift/LoopflowMac/Views/WaveDetailPane.swift · ProjectPreparation · 42e6c2706 · lines 35–56</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>@MainActor
-@Observable
-final class ProjectPreparation {
-    private(set) var isPreparing = false
-    private(set) var errorMessage: String?
-    private var generation = 0
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reactive Wave Projects — PR 1463</title><style>*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#faf9f6;color:#202825;font:17px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:64px auto;padding:0 32px 80px}h1{font-size:38px;line-height:1.15;font-weight:600;letter-spacing:-1px}h2{font-size:27px;font-weight:550;margin:0 0 12px}p{max-width:850px}a{color:#225e57;text-underline-offset:3px}nav{display:flex;gap:22px;flex-wrap:wrap;margin:28px 0}small,figcaption,.meta{color:#56615c;font-size:13px}table{width:100%;border-collapse:collapse;margin:30px 0}th,td{text-align:left;vertical-align:top;padding:16px 12px;border-bottom:1px solid #cfd6d0}th{font-size:13px}td:first-child{width:22%}section{margin-top:72px;scroll-margin-top:25px}figure{margin:26px 0}figcaption{margin-bottom:8px;overflow-wrap:anywhere}pre{background:#edf0eb;padding:22px;overflow-x:auto;font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;tab-size:4;border-left:2px solid #9eafa4}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}details{padding:14px 0;border-top:1px solid #cfd6d0}summary{cursor:pointer}a:focus-visible,summary:focus-visible,pre:focus-visible{outline:3px solid #267c70;outline-offset:4px}.note{border-left:2px solid #9eafa4;padding-left:18px}@media(max-width:650px){main{padding:0 18px;margin:32px auto}h1{font-size:30px}table,tbody,tr,td{display:block}thead{display:none}td,td:first-child{width:auto;border:0;padding:5px 0}tr{padding:15px 0;border-bottom:1px solid #cfd6d0}td:before{content:attr(data-label);display:block;font-size:12px;color:#56615c}pre{font-size:13px;padding:14px}section{margin-top:50px}}@media print{body{background:white}main{margin:0;max-width:none;padding:0}nav{display:none}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:10px}section{break-before:page}a{color:inherit}details{display:block}}</style><main><header><p class="meta">LOO-366 · PR #1463 · OCTOBER 6, 2026</p><h1>Loopflow Desktop: Work, Projects, and updates</h1><p>The repository surface is now <code>RepoView</code>, backed by <code>WorkModel</code>. Work names describe observation and navigation; Workspace remains for broader environments. Project selection lives on the Wave’s SQLite row. Desktop sends an activation command and renders the database’s answer through LOO-382’s workspace stream. The per-view <code>ProjectPreparation</code> lifecycle is gone.</p><p class="meta"><a href="https://github.com/loopflowstudio/loopflow/pull/1463">Published PR #1463</a> · base c787c753049efd1de1d565b79891a18ba1b673b2 → head 457e65d6be132f290b8968c4b11959a1ca0823e6. Excerpts below are pinned to this published head; GitHub readback confirms that the naming and integration commits are already on this PR. Two uncommitted Swift cleanups remain: removal of redundant Roadmap action wrappers, and WorkTaskSelection → TaskSelection in WorkSurfaceView. They are not included in the published excerpts. This walkthrough and updated notes are local.</p></header><nav aria-label="Reading route"><a href="#names">Names and scope</a><a href="#selection">Selection</a><a href="#open">Opening and updates</a><a href="#retry">Failure and retry</a><a href="#rotation">Explicit rotation</a><a href="#proof">Evidence</a></nav><table><thead><tr><th>When you…</th><th>What happens</th><th>Where code controls this</th></tr></thead><tbody><tr><td data-label="When you…"><a href="#names">Open Loopflow Desktop</a></td><td data-label="What happens">A window displays the selected repository’s Work, retaining its own terminal layouts.</td><td data-label="Where code controls this">RepoView owns a WorkModel and per-window SessionsWorkspaceRegistry; WorkProjection joins planning and conversations.</td></tr><tr><td data-label="When you…"><a href="#open">Open a Wave in the main workspace or Portfolio</a></td><td data-label="What happens">Retained planning stays visible while the same activation operation runs. Committed changes arrive through the shared stream.</td><td data-label="Where code controls this">WorkModel.activateProject owns the command; the Rust ProjectReadiness projection supplies the displayed state.</td></tr><tr><td data-label="When you…"><a href="#selection">Select an existing ordinary Project</a></td><td data-label="What happens">Its exact identity becomes the Wave’s selection without renaming it or requiring a Flow.</td><td data-label="Where code controls this">bind_project accepts provider facts, then writes waves.current_project_id. The database enforces Wave ownership.</td></tr><tr><td data-label="When you…"><a href="#retry">Retry after an interrupted activation</a></td><td data-label="What happens">The same selected or reserved Project is reconciled. A provider outage does not authorize a replacement.</td><td data-label="Where code controls this">ensure reads the retained transition; actual Exec records carry the activation outcome and error.</td></tr><tr><td data-label="When you…"><a href="#rotation">Explicitly realign Projects</a></td><td data-label="What happens">A supplied plan selects successors and preserves ongoing work. Partial progress remains retryable.</td><td data-label="Where code controls this">apply_rotation changes selection after confirmed transfers; settlement checks the selected identity in its SQL write.</td></tr></tbody></table><p class="note">Scope: this PR includes the integrated LOO-382 workspace-stream dependency. Revision watching, frame sequencing and shared window delivery come from 382. LOO-366 adds database Project selection/readiness, activation on both surfaces, optional-Flow presentation and exact-ID recovery. Jack Heart requested the reactive redesign; installed acceptance is still separate.</p><section id="names"><h2>1. Name the thing being represented</h2><p>PodiumView → RepoView, PodiumModel → WorkModel. The repository view retains per-window terminal workspaces; switching repositories changes its content without inventing another durable Work object.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/swift/LoopflowMac/Views/RepoView.swift#L6-L35">swift/LoopflowMac/Views/RepoView.swift · RepoView: model and per-window layout · 457e65d6b · lines 6–35</a></figcaption><pre tabindex="0"><code>struct RepoView: View {
+    let portfolioService: PortfolioService
+    let initialRepoPath: String?
 
-    func open(wave: String, repo: String, query: RegistryQuery) async {
-        generation += 1
-        let attempt = generation
-        isPreparing = true
-        errorMessage = nil
-        do {
-            try await query.ensureProject(wave: wave, cwd: repo)
-            guard attempt == generation, !Task.isCancelled else { return }
-        } catch {
-            guard attempt == generation, !Task.isCancelled else { return }
-            errorMessage = &quot;Project preparation failed: \(error.localizedDescription)&quot;
-        }
-        isPreparing = false
+    @Environment(\.palette) private var palette
+    @State private var showsAutomation = false
+    @State private var model: WorkModel
+    /// Per-window terminal workspaces: this window&#x27;s panes and surfaces are
+    /// never shared with another window showing the same repository.
+    @State private var sessionWorkspaces: SessionsWorkspaceRegistry
+    private let taskLinks: WorkLinkRouter?
+    private let query: RegistryQuery
+
+    init(
+        portfolioService: PortfolioService,
+        initialRepoPath: String? = nil,
+        query: RegistryQuery = RegistryQueryLocal.shared,
+        taskLinks: WorkLinkRouter? = nil
+    ) {
+        self.portfolioService = portfolioService
+        self.initialRepoPath = initialRepoPath
+        self.query = query
+        self.taskLinks = taskLinks
+        let restored = initialRepoPath == nil &amp;&amp; !AppTestMode.shouldBypassRegistry
+            ? loadLoopflowState()?.selectedRepoPath : nil
+        let model = WorkModel.window(query: query, launchCandidates: [initialRepoPath, restored].compactMap { $0 })
+        _model = State(initialValue: model)
+        _sessionWorkspaces = State(initialValue: SessionsWorkspaceRegistry(localHomeId: model.savedHomeId))
+    }</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/swift/LoopflowMac/WorkProjection.swift#L5-L46">swift/LoopflowMac/WorkProjection.swift · Work identity and presentation joins · 457e65d6b · lines 5–46</a></figcaption><pre tabindex="0"><code>/// Planning identity stays stable when durable Task Work or a Session appears.
+struct WorkNodeKey: Hashable {
+    let repo: String
+    let work: WorkReference
+}
+
+struct TaskProjection: Identifiable {
+    let id: WorkNodeKey
+    let task: RoadmapTask
+    let sessions: [SessionRecord]
+
+    /// Shared durable evidence that work began. Inspection, a prepared
+    /// checkout, or a live process in the checkout never supplies it.
+    var started: Bool { task.runtime?.started == true }
+
+    /// The started working set. A Task with open Sessions stays reachable even
+    /// when its start predates recorded evidence.
+    var inWorkingSet: Bool {
+        if !sessions.isEmpty { return true }
+        guard started else { return false }
+        return !task.task.isTerminal || task.condition.unresolvedExecution
     }
-}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/swift/LoopflowMac/Views/WaveDetailPane.swift#L174-L201">swift/LoopflowMac/Views/WaveDetailPane.swift · WavePlanView opening, polling and Retry · 42e6c2706 · lines 174–201</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>        .background(palette.background)
-        .task(id: &quot;\(identity)|\(preparationRetry)&quot;) {
-            guard wave.isRegistered, AppTestMode.current() != .mockWaves else { return }
-            await preparation.open(wave: wave.name, repo: repoPath, query: RegistryQueryLocal.shared)
-            guard !Task.isCancelled else { return }
-            await refreshDetail()
-        }
-        .task(id: refreshIdentity) {
-            while !Task.isCancelled {
-                await refreshDetail()
-                try? await Task.sleep(for: .seconds(30))
+}
+
+enum WorkPresentation: String, CaseIterable {
+    case compact = &quot;Compact&quot;
+    case full = &quot;Full hierarchy&quot;
+    case sessions = &quot;Sessions&quot;
+}
+
+struct WaveProjection: Identifiable {
+    let id: WorkNodeKey
+    let roadmap: WaveRoadmap
+    let sessions: [SessionRecord]
+    let tasks: [TaskProjection]
+}
+
+/// A presentation of the two shared readings, never another inventory.
+struct WorkProjection {
+    let waves: [WaveProjection]
+    let unmatchedSessions: [SessionRecord]</code></pre></figure><p class="note"><code>TaskProjection</code> and <code>WaveProjection</code> name presentation joins. <code>WorkModel</code> also serves Portfolio; it is not a replacement Task record. The product label is Loopflow Desktop.</p><p><code>TaskWorktreeSnapshot</code> describes Git placement. <code>SessionWorkspace</code> and <code>WorkspaceIdentity</code> remain because primary conversations can use non-Git directories. Terminal layouts retain Workspace, and Apple’s <code>NSWorkspace</code> is unchanged.</p><details><summary>Saved data retains its names and bytes</summary><p>The file <code>workspace.json</code>, its envelope version, selection/layout preference keys, placement JSON fields and metric identifiers retain their existing spellings. The naming pass changes the code’s vocabulary without resetting saved state. A fixed pre-rename cache fixture checks retained Home/Task selection and unchanged file bytes.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/swift/Loopflow/Models/WorktreeLayout.swift#L4-L17">swift/Loopflow/Models/WorktreeLayout.swift · WorkspaceIdentity: Home plus a possibly non-Git path · 457e65d6b · lines 4–17</a></figcaption><pre tabindex="0"><code>public struct WorkspaceIdentity: Decodable, Hashable, Sendable {
+    enum CodingKeys: String, CodingKey {
+        case homeId = &quot;home_id&quot;
+        case worktree
+    }
+    public let homeId: String
+    public let worktree: String
+
+    public init(homeId: String, worktree: String) {
+        self.homeId = homeId
+        self.worktree = worktree
+    }
+}</code></pre></figure></details><p>Implemented CLI spelling (illustrative invocation):</p><pre tabindex="0">lf monitor work --watch --json</pre><p>It emits newline-delimited frames; there is no <code>monitor workspace</code> compatibility alias. Rust/Swift consumers and command documentation were updated together.</p></section><section id="selection"><h2>2. One selected Project, stored once</h2><p>The previous branch used a Home-local YAML binding. Its replacement references the accepted local Project row; the external UUID remains the provider identity. Existing YAML is imported once with its original bytes retained.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/rust/loopflow/src/store/migrations/drafts/project_readiness.sql#L20-L42">rust/loopflow/src/store/migrations/drafts/project_readiness.sql · selection, import evidence and transition reservation · 457e65d6b · lines 20–42</a></figcaption><pre tabindex="0"><code>-- Selection references the accepted local Project; provider UUID reservations stay
+-- in transitions until provider facts have been accepted.
+ALTER TABLE waves ADD COLUMN current_project_id TEXT REFERENCES projects(id);
+CREATE TABLE project_binding_imports (
+    wave_id TEXT PRIMARY KEY REFERENCES waves(id),
+    original_yaml TEXT,
+    imported_at INTEGER NOT NULL
+);
+
+-- Mutation recovery only: the Wave row owns current selection.
+CREATE TABLE project_transitions (
+    wave_id TEXT NOT NULL REFERENCES waves(id),
+    successor_id TEXT NOT NULL,
+    predecessor_id TEXT,
+    reset_name TEXT,
+    create_successor INTEGER CHECK(create_successor IN (0, 1)),
+    created_at INTEGER NOT NULL,
+    settled_at INTEGER,
+    PRIMARY KEY (wave_id, successor_id)
+);
+CREATE UNIQUE INDEX project_transitions_pending
+    ON project_transitions(wave_id) WHERE settled_at IS NULL;</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/rust/loopflow/src/store/sqlite/project_selection.rs#L23-L52">rust/loopflow/src/store/sqlite/project_selection.rs · write_in: compare selection and validate Wave ownership · 457e65d6b · lines 23–52</a></figcaption><pre tabindex="0"><code>fn write_in(
+    conn: &amp;Connection,
+    wave: &amp;WaveId,
+    expected: Option&lt;&amp;str&gt;,
+    project: &amp;str,
+) -&gt; StoreResult&lt;()&gt; {
+    if read_in(conn, wave)?.as_deref() != expected {
+        return Err(StoreError::InvalidAuthority(
+            &quot;Project selection changed; preserve the intervening decision&quot;.into(),
+        ));
+    }
+    let id: Option&lt;String&gt; = conn
+        .query_row(
+            &quot;SELECT id FROM projects WHERE wave_id=?1 AND external_project_id=?2&quot;,
+            params![wave, project],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let id = id.ok_or_else(|| {
+        StoreError::InvalidAuthority(
+            &quot;Project selection requires accepted facts owned by this Wave&quot;.into(),
+        )
+    })?;
+    conn.execute(
+        &quot;UPDATE waves SET current_project_id=?2 WHERE id=?1 AND current_project_id IS NOT ?2&quot;,
+        params![wave, id],
+    )?;
+    Ok(())
+}</code></pre></figure><p class="note">One selected Project is enforced. This does not force every other Linear Project out of In Progress. With no selection or imported binding, ensure reserves a new UUID; it never searches by name for a candidate. Known existing Projects must be bound explicitly.</p><details><summary>One-time import preserves bytes and rejects a competing selection</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/rust/loopflow/src/store/sqlite/project_selection.rs#L114-L145">rust/loopflow/src/store/sqlite/project_selection.rs · import_project_binding · 457e65d6b · lines 114–145</a></figcaption><pre tabindex="0"><code>    /// Preserve original bytes and select their exact accepted identity atomically.
+    pub(crate) fn import_project_binding(
+        &amp;self,
+        wave: &amp;WaveId,
+        original: Option&lt;&amp;str&gt;,
+        project: Option&lt;&amp;str&gt;,
+        _guard: &amp;PlanningLocks,
+    ) -&gt; StoreResult&lt;()&gt; {
+        let mut conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let imported: bool = tx.query_row(
+            &quot;SELECT EXISTS(SELECT 1 FROM project_binding_imports WHERE wave_id=?1)&quot;,
+            [wave],
+            |row| row.get(0),
+        )?;
+        if !imported {
+            if let Some(project) = project {
+                let selected = read_in(&amp;tx, wave)?;
+                if selected.as_deref().is_some_and(|id| id != project) {
+                    return Err(StoreError::InvalidAuthority(
+                        &quot;YAML import conflicts with the Wave&#x27;s selected Project&quot;.into(),
+                    ));
+                }
+                write_in(&amp;tx, wave, selected.as_deref(), project)?;
             }
+            tx.execute(&quot;INSERT INTO project_binding_imports(wave_id,original_yaml,imported_at) VALUES(?1,?2,unixepoch())&quot;, params![wave, original])?;
         }
+        tx.commit()?;
+        Ok(())
+    }
+}</code></pre></figure></details></section><section id="open"><h2>3. A command changes facts; the stream updates the view</h2><p>Both opening surfaces call this model action. Navigation does not cancel an in-flight command. “Preparing Project…” is derived from its live handle, including before the first readiness frame. The small task dictionary prevents duplicate commands in one window; the Rust Wave lock and reservation handle concurrent callers.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/swift/LoopflowMac/WorkModel.swift#L951-L973">swift/LoopflowMac/WorkModel.swift · activateProject · 457e65d6b · lines 951–973</a></figcaption><pre tabindex="0"><code>    // Command ownership survives navigation. These are transport handles and feedback;
+    // selected Project, readiness and execution outcomes arrive in Work frames.
+    private var projectCommands: [String: Task&lt;Void, Never&gt;] = [:]
+    private(set) var projectCommandErrors: [String: String] = [:]
+
+    func isProjectActivationPending(id: String) -&gt; Bool {
+        projectCommands[id] != nil
     }
 
-    @ViewBuilder
-    private var projectPreparation: some View {
-        if preparation.isPreparing {
-            ProgressView(&quot;Preparing Project…&quot;)
+    @discardableResult
+    func activateProject(id: String, name: String, repo: String) -&gt; Task&lt;Void, Never&gt;? {
+        guard !usesFixedFixture else { return nil }
+        if let command = projectCommands[id] { return command }
+        projectCommandErrors[id] = nil
+        let command = Task {
+            defer { projectCommands[id] = nil }
+            do { try await query.ensureProject(wave: name, cwd: repo) }
+            catch { projectCommandErrors[id] = error.localizedDescription }
         }
-        if let error = preparation.errorMessage {
-            VStack(alignment: .leading) {
-                Text(error).foregroundStyle(Color.statusWarning).textSelection(.enabled)
-                Button(&quot;Retry Project preparation&quot;) { preparationRetry += 1 }
-            }
-        }
+        projectCommands[id] = command
+        return command
+    }</code></pre></figure><p>Readiness is a projection of selection, accepted planning, pending transitions and the real activation Exec. It has no independent writer or state machine. A successful command does not directly replace the displayed Project; a workspace frame does.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/rust/loopflow/src/store/sqlite/project_selection.rs#L146-L172">rust/loopflow/src/store/sqlite/project_selection.rs · ProjectReadiness and ProjectActivation DTOs · 457e65d6b · lines 146–172</a></figcaption><pre tabindex="0"><code>#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = &quot;snake_case&quot;)]
+pub enum ProjectReadinessState {
+    Unconfigured,
+    Unavailable,
+    Inactive,
+    Ready,
+    Terminal,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProjectReadiness {
+    pub state: ProjectReadinessState,
+    pub project_id: Option&lt;String&gt;,
+    pub observed_at: Option&lt;i64&gt;,
+    pub pending_successor: Option&lt;String&gt;,
+    pub activation: Option&lt;ProjectActivation&gt;,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProjectActivation {
+    pub exec_id: String,
+    pub completed_at: Option&lt;i64&gt;,
+    pub outcome: Option&lt;String&gt;,
+    pub error: Option&lt;String&gt;,
+}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/rust/loopflow/src/store/sqlite/project_selection.rs#L192-L230">rust/loopflow/src/store/sqlite/project_selection.rs · project_readiness: derive from persisted facts · 457e65d6b · lines 192–230</a></figcaption><pre tabindex="0"><code>    pub(crate) fn project_readiness(&amp;self, wave: &amp;WaveId) -&gt; StoreResult&lt;ProjectReadiness&gt; {
+        let conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
+        Ok(conn.query_row(
+            &quot;SELECT p.external_project_id, f.observed_at,
+             CASE WHEN w.current_project_id IS NULL THEN &#x27;unconfigured&#x27;
+                  WHEN f.id IS NULL OR f.archived OR f.membership_unresolved OR p.pm_snapshot_synced_at!=f.observed_at
+                    OR NOT EXISTS(SELECT 1 FROM pm_wave_projects m WHERE m.wave_id=w.id AND m.project_id=f.id)
+                    OR (s.wave_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM json_each(f.body,&#x27;$.initiative_ids&#x27;) WHERE value=s.initiative))
+                    THEN &#x27;unavailable&#x27;
+                  WHEN p.status IN (&#x27;completed&#x27;,&#x27;canceled&#x27;) THEN &#x27;terminal&#x27;
+                  WHEN p.status=&#x27;started&#x27; THEN &#x27;ready&#x27; ELSE &#x27;inactive&#x27; END,
+             (SELECT successor_id FROM project_transitions WHERE wave_id=w.id AND settled_at IS NULL),
+             e.id,e.completed_at,e.outcome,e.error
+             FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id
+             LEFT JOIN pm_wave_sync s ON s.wave_id=w.id
+             LEFT JOIN pm_projects f ON f.repo=w.repo AND f.provider=COALESCE(s.provider,&#x27;linear&#x27;) AND f.id=p.external_project_id
+             LEFT JOIN execs e ON e.id=w.project_activation_exec_id WHERE w.id=?1&quot;,
+            [wave], |row| {
+                let state: String = row.get(2)?;
+                let exec: Option&lt;String&gt; = row.get(4)?;
+                Ok(ProjectReadiness {
+                    project_id: row.get(0)?, observed_at: row.get(1)?,
+                    state: match state.as_str() {
+                        &quot;unconfigured&quot; =&gt; ProjectReadinessState::Unconfigured,
+                        &quot;unavailable&quot; =&gt; ProjectReadinessState::Unavailable,
+                        &quot;terminal&quot; =&gt; ProjectReadinessState::Terminal,
+                        &quot;ready&quot; =&gt; ProjectReadinessState::Ready,
+                        _ =&gt; ProjectReadinessState::Inactive,
+                    },
+                    pending_successor: row.get(3)?,
+                    activation: exec.map(|exec_id| Ok::&lt;_,rusqlite::Error&gt;(ProjectActivation {
+                        exec_id, completed_at: row.get(5)?, outcome: row.get(6)?, error: row.get(7)?,
+                    })).transpose()?,
+                })
+            },
+        )?)
     }
-</code></pre></figure></section><p>The transport is direct: <code>RegistryQuery.ensureProject</code> executes <code>["wave", "ensure", wave, "--json"]</code>; completion triggers a fresh status read. The mock-waves app mode skips preparation, so a screenshot in that mode cannot prove activation.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/swift/LoopflowMac/Views/WorkSurfaceView.swift#L111-L166">swift/LoopflowMac/Views/WorkSurfaceView.swift · main workspace: current Project and empty Flow branch · 42e6c2706 · lines 111–166</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>    private var waveDetail: some View {
-        if let selection = model.selection, let roadmap = model.wave(id: selection.id) {
-            scrollingDetail(identifier: &quot;podium-detail-wave&quot;) {
-                VStack(alignment: .leading, spacing: Spacing.md) {
-                    HStack(alignment: .center, spacing: Spacing.md) {
-                        Text(roadmap.wave.displayName)
-                            .font(Typography.display)
-                            .foregroundStyle(palette.text)
-                            .accessibilityIdentifier(&quot;wave-title&quot;)
-                        Spacer()
-                    }
-                    if !roadmap.wave.goal.isEmpty {
-                        WaveObjectiveView(goal: roadmap.wave.goal, waveId: roadmap.wave.id)
-                    }
-                    ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
-                        planningNotice(task)
-                    }
-                }
-
-                section {
-                    WorkspaceSectionHeading(title: &quot;Current KRs&quot;) {
-                        Button(&quot;Project history&quot;) {
-                            model.historyReference = nil
-                            model.historyWave = roadmap.wave
-                        }
-                        .buttonStyle(.plain)
-                        .font(Typography.body(12.5))
-                        .foregroundStyle(palette.textTertiary)
-                        .accessibilityIdentifier(&quot;wave-chapter-history&quot;)
-                    }
-                    if let chapter = roadmap.currentProject {
-                        WaveProjectView(project: chapter)
-                    } else {
-                        Text(&quot;No current Project plan.&quot;).font(Typography.body(13)).foregroundStyle(palette.textSecondary)
-                    }
-                }
-
-                if let name = roadmap.currentProject?.flow {
-                    section {
-                        WorkspaceSectionHeading(&quot;Flow · \(name)&quot;)
-                        if let entry = model.flowCatalog.value?.first(where: { $0.name == name }),
-                           let graph = entry.graph, let template = entry.template {
-                            FlowTemplateView(graph: graph, template: template, navigation: model.navigation)
-                        } else {
-                            Text(model.flowCatalog.value?.first(where: { $0.name == name })?.unavailable
-                                 ?? model.flowCatalog.errorMessage ?? &quot;Flow template unavailable&quot;)
-                                .font(Typography.caption())
-                        }
-                    }
-                    .task { await model.loadFlowCatalog() }
-                }
-
-                switch roadmap.tasks {
-                case .unavailable(let reason):
-                    section {
-                        WorkspaceSectionHeading(&quot;Tasks&quot;)</code></pre></figure><section id="ensure"><h2>2. Activate one identity; retry that identity</h2><p>Observed October 5 on installed v0.13.4, not this source revision. Relevant output only:</p><pre>$ lf --version
-lf 0.13.4
-$ lf wave status intelligence --json
-… "id":"999bdbdd-c045-41a6-8ffc-a97c4a40b0b3",
-  "name":"Chapter demo-20260924","flow":"","status":"backlog" …
-… "tasks":{"state":"unavailable",
-  "reason":"Wave intelligence has no In Progress Project"} …</pre><p>Illustrative recovery commands after this branch is available; not executed against production:</p><pre>lf wave bind-project intelligence 999bdbdd-c045-41a6-8ffc-a97c4a40b0b3 --json
-lf wave ensure intelligence --json</pre><p>The base delegated current selection to chapter orchestration. This branch instead reads <code>&lt;Home&gt;/waves/&lt;WaveId&gt;/config.yaml</code>. The file owns selection; Linear owns status and content; SQLite owns accepted planning and recovery evidence.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/store/project_transitions.rs#L7-L17">rust/loopflow/src/store/project_transitions.rs · ProjectTransition · 42e6c2706 · lines 7–17</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>/// Recovery evidence for one explicit Project creation or rotation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProjectTransition {
-    pub wave_id: WaveId,
-    pub successor_id: String,
-    pub predecessor_id: Option&lt;String&gt;,
-    pub reset_name: Option&lt;String&gt;,
-    pub create_successor: Option&lt;bool&gt;,
-    pub created_at: i64,
-    pub settled_at: Option&lt;i64&gt;,
-}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/project.rs#L131-L228">rust/loopflow/src/ops/project.rs · ensure: select or reserve identity · 42e6c2706 · lines 131–228</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>pub async fn ensure(repo: &amp;Path, name: &amp;str) -&gt; OpsResult&lt;PmProject&gt; {
-    let store = super::pm::pm_store().await?;
-    let wave = crate::work::wave::context::resolve_managed_wave(
-        Some(&amp;store),
-        Some(repo),
-        Some(name),
-        None,
-    )
-    .await
-    .map_err(project_error)?;
-    super::pm::require_planning_home(&amp;store, &amp;wave).await?;
-    let acquisition = super::pm::lock_wave_planning(&amp;wave).await?;
-    let home = store.sqlite.home_dir().map_err(project_error)?;
-    let selected = read_project_binding(&amp;home, wave.id()).map_err(project_error)?;
-    let pending = store
-        .pending_project_transition(wave.id())
-        .await
-        .map_err(project_error)?;
-    let mut creation = match pending {
-        Some(transition)
-            if transition.predecessor_id.is_none() &amp;&amp; transition.reset_name.is_none() =&gt;
-        {
-            Some(transition)
-        }
-        Some(_) if selected.is_none() =&gt; {
-            return Err(project_error(
-                &quot;Project rotation is unfinished; resume the explicit reset&quot;,
-            ));
-        }
-        _ =&gt; None,
-    };
-    if let Some(creation) = &amp;creation {
-        if selected
-            .as_deref()
-            .is_some_and(|id| id != creation.successor_id)
-        {
-            return Err(project_error(
-                &quot;Project selection changed during creation; reconcile the retained transition&quot;,
-            ));
-        }
-    }
-    let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
-    if selected.is_none() &amp;&amp; creation.is_none() {
+}</code></pre></figure><p class="note">The view still needs local transport errors when a command cannot reach recorded execution. Those are keyed by Wave; they do not select a Project or manufacture readiness. Empty Flow presentation is suppressed. The old primary-window missing-activation path is repaired in source; a full mounted reopening demonstration remains outstanding.</p><details><summary>Inherited from LOO-382: the shared read-only workspace transport</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/rust/loopflow/src/lf/commands/work_watch.rs#L1-L8">rust/loopflow/src/lf/commands/work_watch.rs · workspace stream contract · 457e65d6b · lines 1–8</a></figcaption><pre tabindex="0"><code>//! `lf monitor work --watch --json`: one foreground reader per window.
+//!
+//! The store&#x27;s change revisions say which parts a commit can have changed. A
+//! part is projected again only then, on a read-only connection, and sent only
+//! when its content differs from the last frame. Bodies are the same wire types
+//! the one-shot `--json` reads print. The reader commits nothing, so it never
+//! wakes itself, and it records one Exec for its whole lifetime.</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/rust/loopflow/src/lf/commands/work_watch.rs#L55-L67">rust/loopflow/src/lf/commands/work_watch.rs · WorkFrame · 457e65d6b · lines 55–67</a></figcaption><pre tabindex="0"><code>#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkFrame {
+    pub sequence: u64,
+    pub answers: Option&lt;u64&gt;,
+    pub home: String,
+    /// The store revisions this frame was read at; `null` before a store exists.
+    pub revisions: Option&lt;StoreRevisions&gt;,
+    /// Why this part could not be read. Its body is then `null`.
+    pub unavailable: Option&lt;String&gt;,
+    #[serde(flatten)]
+    pub content: WorkContent,
+}</code></pre></figure></details></section><section id="retry"><h2>4. Retry preserves the intended identity</h2><p>Illustrative commands from the implemented interface, not an executed production repair. The first selects the exact existing Project; the second activates it. Both return Project JSON.</p><pre tabindex="0">lf wave bind-project intelligence 999bdbdd-c045-41a6-8ffc-a97c4a40b0b3 --json
+lf wave ensure intelligence --json</pre><p>A failed provider read returns its error. The recovery command is the same <code>lf wave ensure intelligence --json</code>; it consumes the existing selection or reservation. Completed or canceled history requires explicit reconciliation.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/rust/loopflow/src/ops/project.rs#L175-L198">rust/loopflow/src/ops/project.rs · ensure: reserve before provider effects · 457e65d6b · lines 175–198</a></figcaption><pre tabindex="0"><code>    if selected.is_none() &amp;&amp; creation.is_none() {
         ctx.client
             .require_initiative(&amp;ctx.initiative)
             .await
@@ -183,52 +281,7 @@ pub(crate) struct ProjectTransition {
     let id = selected
         .as_deref()
         .or_else(|| creation.as_ref().map(|t| t.successor_id.as_str()))
-        .expect(&quot;selection or creation reservation exists&quot;);
-    let mut observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    let mut project = match ctx.client.find_project(id).await.map_err(project_error)? {
-        Some(project) =&gt; project,
-        None if creation.is_some() &amp;&amp; selected.is_none() =&gt; {
-            ctx.client
-                .require_initiative(&amp;ctx.initiative)
-                .await
-                .map_err(project_error)?;
-            let content = ProjectContent {
-                flow: String::new(),
-                krs: Vec::new(),
-                metric_targets: Vec::new(),
-            };
-            let created = ctx
-                .client
-                .create_project(&amp;ctx.initiative, wave.slug(), &amp;content, Some(id))
-                .await
-                .map_err(project_error)?;
-            if created != id {
-                return Err(project_error(
-                    &quot;provider returned a different Project identity&quot;,
-                ));
-            }
-            observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-            require_project(&amp;ctx, id).await?
-        }
-        None =&gt; {
-            return Err(project_error(format!(
-                &quot;configured Project {id} is unavailable; its binding is unchanged&quot;
-            )))
-        }
-    };</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/project.rs#L229-L276">rust/loopflow/src/ops/project.rs · ensure: accept, activate, bind and settle · 42e6c2706 · lines 229–276</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>    require_active_candidate(&amp;project)?;
-    // Only a retained creation reservation authorizes repairing an unattached Project.
-    if creation.is_some()
-        &amp;&amp; project.initiative_ids.is_empty()
-        &amp;&amp; project.team_ids == [ctx.team_id.clone()]
-    {
-        ctx.client
-            .attach_project(&amp;ctx.initiative, id)
-            .await
-            .map_err(project_error)?;
-        observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-        project = require_project(&amp;ctx, id).await?;
-    }
-    project = accept_project(&amp;store, &amp;wave, &amp;ctx, project, observed_at, &amp;acquisition).await?;
+        .expect(&quot;selection or creation reservation exists&quot;);</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/rust/loopflow/src/ops/project.rs#L244-L277">rust/loopflow/src/ops/project.rs · ensure: accept facts, activate and settle · 457e65d6b · lines 244–277</a></figcaption><pre tabindex="0"><code>    project = accept_project(&amp;store, &amp;wave, &amp;ctx, project, observed_at, &amp;acquisition).await?;
     require_active_candidate(&amp;project)?;
     if project.status != ProjectStatus::Started {
         ctx.client
@@ -244,174 +297,74 @@ pub(crate) struct ProjectTransition {
             ));
         }
     }
-    write_project_binding(&amp;home, wave.id(), selected.as_deref(), id, &amp;acquisition)
-        .map_err(project_error)?;
-    if read_project_binding(&amp;home, wave.id())
-        .map_err(project_error)?
-        .as_deref()
-        != Some(id)
-    {
-        return Err(project_error(
-            &quot;Project binding confirmation changed; retry ensure&quot;,
-        ));
-    }
     if creation.is_some() {
         store
-            .settle_project_transition(wave.id(), id, acquisition)
-            .await
+            .sqlite
+            .finish_project_creation(wave.id(), selected.as_deref(), id, &amp;acquisition)
             .map_err(project_error)?;
+    } else {
+        write_project_binding(
+            &amp;store.sqlite,
+            wave.id(),
+            selected.as_deref(),
+            id,
+            &amp;acquisition,
+        )
+        .map_err(project_error)?;
     }
     Ok(project)
-}</code></pre></figure><p class="note">No binding means creation, even if an ordinary Project already exists. Rollout must seed known IDs first. Missing access or terminal history is an error, never permission to replace the configured Project. Ordinary creation requires neither KRs nor Flow.</p><details><summary>Shared file preservation and observational reads</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/work/wave/project_binding.rs#L60-L139">rust/loopflow/src/work/wave/project_binding.rs · read_project_binding / write_project_binding · 42e6c2706 · lines 60–139</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>    let path = path(home, wave);
-    read(&amp;path)?
-        .map(|content| decode(&amp;path, &amp;content))
-        .transpose()
-        .map(Option::flatten)
-}
+}</code></pre></figure><p class="note">Status-only activation preserves names, authored content and empty Flow. Creation finishes selection and reservation settlement in one SQLite transaction. Uncertain provider effects are reconciled by exact UUID; SQLite and Linear are still separate systems.</p><details><summary>How the UI shows recorded failure and offers Retry</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/swift/LoopflowMac/Views/ProjectReadinessView.swift#L5-L44">swift/LoopflowMac/Views/ProjectReadinessView.swift · ProjectReadinessView · 457e65d6b · lines 5–44</a></figcaption><pre tabindex="0"><code>/// Both Wave surfaces render the Rust reading; none of these labels mutate readiness.
+struct ProjectReadinessView: View {
+    let readiness: ProjectReadiness?
+    let isPending: Bool
+    let transportError: String?
+    let retry: () -&gt; Void
 
-/// The caller retains the Wave planning guard through provider reconciliation.
-pub(crate) fn write_project_binding(
-    home: &amp;Path,
-    wave: &amp;WaveId,
-    expected: Option&lt;&amp;str&gt;,
-    project: &amp;str,
-    _guard: &amp;crate::store::PlanningLocks,
-) -&gt; Result&lt;(), BindingError&gt; {
-    let path = path(home, wave);
-    uuid::Uuid::parse_str(project).map_err(|e| error(&amp;path, e))?;
-    let previous = read(&amp;path)?;
-    let selected = previous
-        .as_deref()
-        .map(|s| decode(&amp;path, s))
-        .transpose()?
-        .flatten();
-    if selected.as_deref() != expected {
-        return Err(error(
-            &amp;path,
-            &quot;Project selection changed; preserve the intervening decision&quot;,
-        ));
-    }
-    if selected.as_deref() == Some(project) {
-        return Ok(());
-    }
-    let file = YamlFile::from_str(previous.as_deref().unwrap_or(&quot;pm:\n  {}\n&quot;))
-        .map_err(|e| error(&amp;path, e))?;
-    let document = file
-        .document()
-        .ok_or_else(|| error(&amp;path, &quot;missing document&quot;))?;
-    if document.get_mapping(&quot;pm&quot;).is_none() {
-        document.set(&quot;pm&quot;, yaml_edit::Mapping::new());
-    }
-    let pm = document
-        .get_mapping(&quot;pm&quot;)
-        .ok_or_else(|| error(&amp;path, &quot;pm must be a mapping&quot;))?;
-    pm.set(&quot;linear_project&quot;, project);
-    let rendered = file.to_string();
-    if decode(&amp;path, &amp;rendered)?.as_deref() != Some(project) {
-        return Err(error(
-            &amp;path,
-            &quot;edited document did not retain the selected Project&quot;,
-        ));
-    }
-    let parent = path.parent().expect(&quot;Wave configuration has a parent&quot;);
-    fs::create_dir_all(parent).map_err(|e| error(&amp;path, e))?;
-    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|e| error(&amp;path, e))?;
-    temporary
-        .write_all(rendered.as_bytes())
-        .map_err(|e| error(&amp;path, e))?;
-    temporary
-        .as_file()
-        .sync_all()
-        .map_err(|e| error(&amp;path, e))?;
-    // Detect unrelated file edits made while constructing the replacement too.
-    if read(&amp;path)? != previous {
-        return Err(error(
-            &amp;path,
-            &quot;configuration changed while preparing the replacement&quot;,
-        ));
-    }
-    temporary.persist(&amp;path).map_err(|e| error(&amp;path, e))?;
-    File::open(parent)
-        .and_then(|dir| dir.sync_all())
-        .map_err(|e| error(&amp;path, e))?;
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{path, read_project_binding, write_project_binding};
-    use crate::id::WaveId;
-    use crate::store::PlanningLocks;</code></pre></figure></details></section><section id="rotate"><h2>3. Realignment is an explicit plan</h2><p>The caller supplies KRs and stable successor UUIDs before mutation. Every pair is reserved before the first provider write; retry consumes that plan. Chapter history metadata remains a proposed extension, not implemented by this receipt.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/chapter.rs#L36-L52">rust/loopflow/src/ops/chapter.rs · ChapterPlan and WaveChapterPlan · 42e6c2706 · lines 36–52</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>/// Retained command input. Names describe the plan; IDs select its destinations.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ChapterPlan {
-    pub name: String,
-    pub waves: Vec&lt;WaveChapterPlan&gt;,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WaveChapterPlan {
-    pub wave_id: WaveId,
-    pub successor_id: String,
-    pub create: bool,
-    pub project_name: String,
-    pub content: ProjectContent,
-}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/chapter.rs#L390-L411">rust/loopflow/src/ops/chapter.rs · reserve all pairs before apply · 42e6c2706 · lines 390–411</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>    // Every pair is reserved before the first provider mutation.
-    for entry in &amp;prepared {
-        if !entry.reserved {
-            store
-                .reserve_project_transition(entry.transition.clone(), entry.acquisition.clone())
-                .await
-                .map_err(error)?;
+    private var message: String? {
+        if let transportError { return transportError }
+        guard let readiness else { return nil }
+        if let error = readiness.activation?.error { return error }
+        if let activation = readiness.activation {
+            if activation.completedAt == nil { return &quot;Project activation has no recorded outcome yet.&quot; }
+            if activation.outcome != &quot;succeeded&quot; { return &quot;Project activation \(activation.outcome ?? &quot;outcome unknown&quot;).&quot; }
+        }
+        switch readiness.state {
+        case .ready: return nil
+        case .unconfigured: return &quot;No Project selected yet.&quot;
+        case .unavailable: return &quot;Selected Project evidence is unavailable. Retained planning is shown below.&quot;
+        case .inactive: return &quot;Selected Project is not In Progress.&quot;
+        case .terminal: return &quot;Selected Project is completed or canceled. Choose its successor explicitly.&quot;
         }
     }
-    for entry in &amp;mut prepared {
-        apply_rotation(&amp;store, entry).await.map_err(|cause| {
-            error(format!(
-                &quot;Wave {}: {cause}; retry with the same chapter plan&quot;,
-                entry.wave.slug()
-            ))
-        })?;
-    }
-    Ok(ChapterRotation {
-        name: plan.name.clone(),
-        waves: prepared.into_iter().map(|entry| entry.result).collect(),
-    })
-}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/chapter.rs#L710-L782">rust/loopflow/src/ops/chapter.rs · apply_rotation: confirmed switch and settlement · 42e6c2706 · lines 710–782</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>    if !entry.switched
-        &amp;&amp; rotation_tasks(store, entry).await?.iter().any(|task| {
-            task.task.project_id.as_deref() == entry.transition.predecessor_id.as_deref()
-                &amp;&amp; task.disposition != TaskDisposition::Historical
-        })
-    {
-        return Err(error(&quot;predecessor still has unfinished selected work&quot;));
-    }
-    let current = read_project(store, entry, &amp;id).await?;
-    if current.status != ProjectStatus::Started || !matches_plan(&amp;current, &amp;entry.input.content) {
-        return Err(error(&quot;successor changed before the Project switch&quot;));
-    }
-    if let Some(previous) = &amp;entry.transition.predecessor_id {
-        let current = read_project(store, entry, previous).await?;
-        if !matches!(
-            current.status,
-            ProjectStatus::Backlog
-                | ProjectStatus::Planned
-                | ProjectStatus::Started
-                | ProjectStatus::Completed
-        ) {
-            return Err(error(
-                &quot;predecessor status changed before the Project switch&quot;,
-            ));
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            if isPending {
+                ProgressView(&quot;Preparing Project…&quot;)
+            } else if let message {
+                Text(message).foregroundStyle(Color.statusWarning).textSelection(.enabled)
+                if readiness?.state != .terminal { Button(&quot;Retry Project preparation&quot;, action: retry) }
+            }
+            if let successor = readiness?.pendingSuccessor {
+                Text(&quot;Project transition remains unresolved: \(successor)&quot;)
+                    .font(Typography.caption()).textSelection(.enabled)
+            }
         }
+        .accessibilityIdentifier(&quot;project-readiness&quot;)
     }
-    let home = store.sqlite.home_dir().map_err(error)?;
-    let expected = if entry.switched {
+}</code></pre></figure></details></section><section id="rotation"><h2>5. Rotation remains an explicit operation</h2><p>A KR-bearing plan names exact successor UUIDs. Preflight and reservation precede provider writes; started work retains identity and unreviewed backlog stays in its predecessor. Opening a Wave never performs this rotation.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/rust/loopflow/src/ops/chapter.rs#L733-L776">rust/loopflow/src/ops/chapter.rs · apply_rotation: select successor, complete predecessor, settle · 457e65d6b · lines 733–776</a></figcaption><pre tabindex="0"><code>    let expected = if entry.switched {
         Some(id.as_str())
     } else {
         entry.transition.predecessor_id.as_deref()
     };
-    write_project_binding(&amp;home, entry.wave.id(), expected, &amp;id, &amp;entry.acquisition)
-        .map_err(error)?;
+    write_project_binding(
+        &amp;store.sqlite,
+        entry.wave.id(),
+        expected,
+        &amp;id,
+        &amp;entry.acquisition,
+    )
+    .map_err(error)?;
     if let Some(previous) = &amp;entry.transition.predecessor_id {
         let mut project = read_project(store, entry, previous).await?;
         if !matches!(
@@ -436,168 +389,33 @@ pub struct WaveChapterPlan {
             }
         }
     }
-    if read_project_binding(&amp;home, entry.wave.id())
-        .map_err(error)?
-        .as_deref()
-        != Some(&amp;id)
-    {
-        return Err(error(
-            &quot;Project binding changed before settlement; preserve the intervening decision&quot;,
-        ));
-    }
     store
         .settle_project_transition(entry.wave.id(), &amp;id, entry.acquisition.clone())
         .await
         .map_err(error)?;
     Ok(())
-}</code></pre></figure></section><p>Illustrative CLI: <code>lf repo new-chapter autumn --plan /path/to/chapter-plan.json --dry-run --json</code>, then the same command without <code>--dry-run</code>. The plan name must match. No rotation was performed in this review.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/swift/LoopflowMac/Views/ProjectRealignmentView.swift#L56-L85">swift/LoopflowMac/Views/ProjectRealignmentView.swift · perform: preserve preview bytes on failed Apply · 42e6c2706 · lines 56–85</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>    private func perform(previewOnly: Bool) {
-        busy = true
-        errorMessage = nil
-        Task {
-            defer { busy = false }
-            do {
-                let input: String
-                if previewOnly {
-                    let path = (plan as NSString).expandingTildeInPath
-                    input = try await Task.detached {
-                        try String(contentsOfFile: path, encoding: .utf8)
-                    }.value
-                } else {
-                    guard let preview else { return }
-                    input = preview.input
-                }
-                let report = try await RegistryQueryLocal.shared.realignProjects(
-                    name: name, plan: input, preview: previewOnly, cwd: repo
-                )
-                preview = (input, report)
-                applied = !previewOnly
-                if applied { onApplied() }
-            } catch {
-                // An uncertain apply retries the reviewed bytes, even if the file changed.
-                if previewOnly { preview = nil }
-                errorMessage = error.localizedDescription
-            }
+}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/457e65d6be132f290b8968c4b11959a1ca0823e6/rust/loopflow/src/store/sqlite/project_transitions.rs#L115-L140">rust/loopflow/src/store/sqlite/project_transitions.rs · settle_project_transition: selection and settlement in one write · 457e65d6b · lines 115–140</a></figcaption><pre tabindex="0"><code>    pub(crate) fn settle_project_transition(
+        &amp;self,
+        wave: &amp;WaveId,
+        successor: &amp;str,
+    ) -&gt; StoreResult&lt;()&gt; {
+        let conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
+        let updated = conn.execute(
+            &quot;UPDATE project_transitions SET settled_at=COALESCE(settled_at, ?3)
+             WHERE wave_id=?1 AND successor_id=?2
+               AND EXISTS(SELECT 1 FROM waves w JOIN projects p ON p.id=w.current_project_id
+                          WHERE w.id=?1 AND p.external_project_id=?2)&quot;,
+            params![
+                wave.as_str(),
+                successor,
+                time::OffsetDateTime::now_utc().unix_timestamp()
+            ],
+        )?;
+        if updated != 1 {
+            return Err(StoreError::InvalidData(
+                &quot;Project binding changed before settlement or transition is missing; preserve the intervening decision&quot;.into(),
+            ));
         }
+        Ok(())
     }
-}</code></pre></figure><p class="note">The Desktop control requires a retained JSON file path. It exposes the operation, but does not author a chapter plan. The skills provide KR planning and separate candidate admission; whether this file-based interaction is convenient remains a product review question.</p><details><summary>Why backlog stays while started work moves</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/chapter.rs#L963-L1030">rust/loopflow/src/ops/chapter.rs · classify_task · 42e6c2706 · lines 963–1030</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>pub fn classify_task(task: &amp;PmItem, evidence: &amp;TaskStartEvidence) -&gt; (TaskDisposition, String) {
-    let state = task.state.as_deref();
-    let terminal = matches!(state, Some(&quot;completed&quot; | &quot;canceled&quot; | &quot;duplicate&quot;)) || task.completed;
-    if evidence.abandoned
-        &amp;&amp; !terminal
-        &amp;&amp; (state == Some(&quot;started&quot;)
-            || evidence.worker_claimed
-            || evidence.begun
-            || evidence.published
-            || evidence.authored != Some(false))
-    {
-        let reason = if evidence.authored.is_none() {
-            &quot;local retirement has unavailable checkout evidence&quot;
-        } else {
-            &quot;local retirement conflicts with refreshed start evidence&quot;
-        };
-        return (TaskDisposition::Unresolved, reason.into());
-    }
-    if evidence.completed &amp;&amp; !terminal {
-        return (
-            TaskDisposition::Unresolved,
-            &quot;local completion awaits provider settlement&quot;.into(),
-        );
-    }
-    if evidence.abandoned &amp;&amp; !terminal &amp;&amp; !evidence.completed {
-        return (
-            TaskDisposition::Unresolved,
-            &quot;local abandonment awaits explicit provider settlement&quot;.into(),
-        );
-    }
-    if terminal || evidence.completed {
-        if evidence.worker_claimed {
-            return (
-                TaskDisposition::Unresolved,
-                &quot;terminal planning state conflicts with an active worker claim&quot;.into(),
-            );
-        }
-        return (
-            TaskDisposition::Historical,
-            &quot;work is already terminal&quot;.into(),
-        );
-    }
-    if evidence.worker_claimed
-        || evidence.begun
-        || evidence.published
-        || evidence.authored == Some(true)
-        || state == Some(&quot;started&quot;)
-    {
-        return (
-            TaskDisposition::Move,
-            &quot;work has started; retain its identity and execution&quot;.into(),
-        );
-    }
-    if evidence.authored == Some(false) &amp;&amp; matches!(state, Some(&quot;backlog&quot; | &quot;unstarted&quot; | &quot;triage&quot;))
-    {
-        return (
-            TaskDisposition::Historical,
-            &quot;unreviewed backlog remains in its existing Project&quot;.into(),
-        );
-    }
-    (
-        TaskDisposition::Unresolved,
-        &quot;start evidence is unavailable; refresh before rotating this Task&quot;.into(),
-    )
-}
-
-#[cfg(test)]
-#[path = &quot;chapter_tests.rs&quot;]</code></pre></figure></details><section id="proof"><h2>What this review establishes</h2><p>Source implements exact selection, ordinary activation, retained creation identity, and explicit rotation. The installed demo failed before these operations could be exercised. The disposable app now opens against a private Home. Real operations through a test adapter activated A, created B once and retained cached planning through an outage. Main-window opening did not call ensure; mounted Portfolio activation remains unproved.</p><ul><li>Recorded earlier: 11 headless ProjectPreparation/WaveDetailReading tests passed. They do not establish mounted opening, Apply retry or configured provider behavior.</li><li>Inspected: the ordinary Backlog fixture preserves name, empty Flow, content and issue bodies after repeated ensure. Rotation fixtures cover uncertain provider mutations. These are synthetic operation tests.</li><li>Still open in the design: cross-process CLI/crash proofs, configured acceptance, mounted Desktop/skill outcomes, output-handle leak investigation and CI-repair entry coverage.</li><li>LOO-367 owns Task admission/completion; this branch removes Project-level prerequisites. A usable Project alone does not prove the end-to-end Task KR.</li></ul><details><summary>Inspected preservation fixture</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/chapter_tests.rs#L1168-L1222">rust/loopflow/src/ops/chapter_tests.rs · project_ensure_activates_exact_backlog_without_changing_content_or_tasks · 42e6c2706 · lines 1168–1222</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>async fn project_ensure_activates_exact_backlog_without_changing_content_or_tasks() {
-    let directory = tempfile::tempdir().unwrap();
-    let repo = fixture_repo(directory.path());
-    let mut fixture = provider_fixture();
-    let id = &quot;999bdbdd-c045-41a6-8ffc-a97c4a40b0b3&quot;;
-    let mut project = fixture
-        .projects
-        .remove(&quot;00000000-0000-4000-8000-000000000001&quot;)
-        .unwrap();
-    project[&quot;id&quot;] = json!(id);
-    project[&quot;name&quot;] = json!(&quot;Summer work — customer requests&quot;);
-    project[&quot;status&quot;][&quot;type&quot;] = json!(&quot;backlog&quot;);
-    let content = &quot;# Authored plan\n\n## KRs\n- [ ] Preserve work\n&quot;;
-    project[&quot;content&quot;] = json!(content);
-    fixture.projects.insert(id.into(), project);
-    for issue in fixture.issues.values_mut() {
-        if issue[&quot;project&quot;][&quot;id&quot;] == &quot;00000000-0000-4000-8000-000000000001&quot; {
-            issue[&quot;project&quot;][&quot;id&quot;] = json!(id);
-        }
-        issue[&quot;branchName&quot;] = Value::Null;
-        issue[&quot;updatedAt&quot;] = json!(&quot;1970-01-01T00:00:00Z&quot;);
-    }
-    // Unrelated current Projects cannot override explicit selection.
-    let mut competing = fixture.projects[id].clone();
-    competing[&quot;id&quot;] = json!(&quot;competing&quot;);
-    competing[&quot;status&quot;][&quot;type&quot;] = json!(&quot;started&quot;);
-    fixture.projects.insert(&quot;competing&quot;.into(), competing);
-    let issues = fixture.issues.clone();
-    let provider = Arc::new(Mutex::new(fixture));
-    let (url, server) = serve_fixture(provider.clone()).await;
-    let context = context(&amp;directory.path().join(&quot;registry.db&quot;), &amp;repo, &amp;url).await;
-    PM_TEST_CONTEXT
-        .scope(context, async {
-            crate::ops::project::bind_project(&amp;repo, &quot;a&quot;, id)
-                .await
-                .unwrap();
-            let first = crate::ops::project::ensure(&amp;repo, &quot;a&quot;).await.unwrap();
-            assert_eq!(
-                first,
-                crate::ops::project::ensure(&amp;repo, &quot;a&quot;).await.unwrap()
-            );
-            assert_eq!(first.id, id);
-            assert_eq!(first.name, &quot;Summer work — customer requests&quot;);
-            assert_eq!(first.status, ProjectStatus::Started);
-            assert!(first.flow.is_empty());
-            assert_eq!(first.krs.len(), 1);
-            let state = provider.lock().await;
-            assert_eq!(state.projects[id][&quot;content&quot;], content);
-            assert_eq!(state.issues, issues);
-            assert_eq!(state.projects.len(), 3);
-            assert_eq!(state.mutations, 1);
-        })
-        .await;
-    server.abort();
-}</code></pre></figure></details><p><a href="keep-every-wave-ready-for.md">Current local design</a> · <a href="project-readiness-demo.md">Demo evidence</a></p></section></main></html>
+}</code></pre></figure><p class="note">Desktop’s Realign Projects control still takes a retained JSON plan file. It keeps reviewed bytes on Apply failure. The reactive redesign removes the stale manual refresh callback; it does not add a plan editor or historical chapter metadata.</p></section><section id="proof"><h2>What was proved</h2><p>GitHub readback shows published head <code>457e65d6b</code>, including naming commit <code>90013bd7e</code> and integration with main. The final publisher made no further changes because broader acceptance remains incomplete. That refusal did not remove commits already pushed. Two Swift cleanups remain uncommitted and outside the excerpts.</p><ul><li>Naming: recorded passes for 33 Rust integration/DTO/command tests and 139 headless Swift tests, plus formatting, all-target Clippy, architecture and Swift boundary checks.</li><li>Integration: the selection-only commit regression passed at <code>457e65d6b</code>; two actual CLI Work readers observed the changed selection. The local cleanup subsequently has a recorded five-test Desktop pass.</li><li>Earlier reactive checks covered Project activation/recovery, rotation, revision triggers and DTOs; pending presentation passed 40 headless tests. These checks establish their respective revisions, not full final-tree acceptance.</li><li>The old disposable app predates this redesign. Configured Intelligence activation, public CLI crash recovery, mounted opening/retry, skill-driven outcomes and remaining gate work are still unproved. No installation, production repair, merge or Task completion is claimed.</li></ul><details><summary>Unpublished source changes</summary><p><code>RoadmapView.swift</code> removes RoadmapTaskSelection and a duplicate TaskControl enum, passing the existing Task and Wave directly to one action function. Run and resume already invoked the same launcher. <code>WorkSurfaceView.swift</code> renames its private editor selection to TaskSelection. Current design/memory edits retain the evidence and remaining acceptance gaps.</p></details><p><a href="keep-every-wave-ready-for.md">Current design and remaining proof</a> · <a href="project-readiness-demo.md">Dated demo evidence and review feedback</a></p></section></main></html>

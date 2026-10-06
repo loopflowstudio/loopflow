@@ -47,21 +47,11 @@ empty-Flow template UI and `yaml-edit` are removed. Do not restore those owners.
 SQLite retains exact-ID selection and original import bytes; existing Wave/checkout
 locks and transition evidence preserve uncertainty and Task/PR/Session/Flow identity.
 
-The compression pass also removes Portfolio's post-realignment refresh counter,
-callback and async wrapper: initial and subsequent workspace frames own detail
-updates. Ensure and rotation share response/accepted-body ownership validation;
-the current-Project reader is synchronous because it only reads SQLite. Keep the
-rotation adapter: it supplies the already-held Wave/checkout guard without repeating
-acceptance policy. The chapter-sweep fixture now binds through the real operation
-after its fake provider starts; its old direct selection preceded accepted facts.
-Its fake provider includes the required exact Project lookup. Sweep assertions are
-unchanged. The follow-up compression removes the detail view's per-Wave filter
-dictionary: its enclosing view already keys its lifetime by repository and Wave.
-One filter and its timestamp suffice. The unused history-reference state and
-duplicate mock-mode guard are removed too. No remaining deletion target was
-identified in these paths. Focused checks exposed a mock detail fixture missing
-the required readiness field; the fixture now supplies it, and its existing
-decode test reports decoding errors directly instead of only an absent snapshot.
+Compression removed redundant Portfolio refresh/detail state, Roadmap action
+wrappers and duplicate Task selection types. `WavePlanView` owns one stable
+Task ID, scoped to its keyed Wave view. Persisted identity and authority are
+unchanged. Prior rationale/checks: `90013bd7e5bac5a17a213b6eabb48a1f7292dde8:scratch/keep-every-wave-ready-for.md`;
+the dirty cleanup is retained in `/tmp/loo366-gate/before.tar.gz`.
 
 ## Intelligence repair — Jack Heart's October 5 steer
 
@@ -116,14 +106,16 @@ Local synthetic passes establish neither installed conversion nor configured rea
 
 ## Remaining coherent cut
 
-October 6 reconciliation: reactive source is committed at `c2edcdba3`; dependency
-`e887a21c1` entered through `66a3daa86`, and telemetry repair #1462 through
-`9552df051`. Compression is checkpointed at `45debbb7c`; HEAD `d3e0f2ec9`
-adds the live pending-command presentation requested in the iteration feedback.
-The subsequent detail-filter simplification and required mock-readiness repair
-remain local edits, with their 28-test pass recorded below. The pending presentation
-passed 40 focused tests before those edits; neither result is a full gate.
-
+October 6 reconciliation: Jack Heart's “lg2m” after the updated walkthrough
+accepts the source/naming direction and completes that review boundary; the
+[demo record](project-readiness-demo.md) retains the feedback and limits.
+Its last recorded GitHub readback places PR #1463 at `457e65d6b`, superseding
+`d3e0f2ec9`. Local HEAD `c1685f82b` merges main's v0.13.6 source (`e177eafe6`),
+including canonicalized store revisions; it does not establish publication or
+installation of this Task. The Project-readiness draft remains separate.
+Three local Swift files contain the Roadmap action simplification, private
+TaskSelection rename and Wave-scoped stable-ID selection cleanup. The recorded
+33-test headless pass covers that cleanup, not the remaining acceptance below.
 
 Registration, exact-ID readers/admission, ensure, rotation, Portfolio activation
 and chapter skills are implemented. Their contracts and proof boundaries remain
@@ -356,10 +348,10 @@ Desktop activates through `RegistryQuery` and the shared CLI transport outside
 ## Desktop integration after upstream #1447 — October 5
 
 Merge `c4373492c` integrated #1447's cached-workspace rendering changes.
-`PodiumModel` restores the saved workspace and retains last-good planning on read
+`WorkModel` now restores the saved workspace and retains last-good planning on read
 failure; its planning and Session refresh loops run independently. `WavesView`
 now creates its window model lazily. `WaveDetailPane` separately polls status
-and renders `reading.plan(cached: plan)`. The model dispatches opening/Retry; both surfaces consume the workspace stream.
+and renders `reading.plan(cached: plan)`. The model dispatches opening/Retry; both surfaces consume the Work stream.
 
 Keep activation at the explicit Wave-opening/retry boundary through the shared
 transport, outside model construction, cache restoration and both periodic read
@@ -528,20 +520,12 @@ names. Full proposal: `42e6c2706b1b35b2852e438ff94a49d060faccda:scratch/keep-eve
 
 ## Implementation and deletion history
 
-The seven implementation steps and compression inventory are retained at
+Earlier steps and deletion rationale remain at
 `42e6c2706b1b35b2852e438ff94a49d060faccda:scratch/keep-every-wave-ready-for.md`.
-Accepted-fact projection, transactional registration, exact-ID selection and
-rotation retain their operation proofs above. Preserve cancellation-safe Wave
-and checkout guards through queued writes. `lock_wave_planning` and
-`require_planning_home` live in `ops/pm.rs`, independent of chapter orchestration.
-
-The deleted name selectors, name-derived successor IDs, snapshot replay and
-backlog expiration must not return. `read_project` accepts ownership-validated
-readbacks with original acquisition time; `matches_plan` checks authored fields.
-Desktop previews retain their report and input together on Apply failure; only
-new Preview rereads the file. Mounted proof remains unfinished. Migration-marked
-conversion exists only for released-data preservation. The October 6 implementation
-below changes none of these preservation requirements.
+Cancellation-safe guards, exact-ID readers and rotation proofs are retained above.
+Desktop keeps its preview report/input on Apply failure; only a new Preview
+rereads the file. Mounted proof remains unfinished. Migration-marked conversion
+serves released-data preservation only.
 
 ## Reactive implementation — October 6
 
@@ -681,8 +665,83 @@ Registration compression evidence: `eb80d7198178a418cf44b3074f9b666f3e11cd40`.
 
 Earlier reactive implementation checks remain at `fd98f97352fdfc16145adf0efcc045443ae3a824:scratch/keep-every-wave-ready-for.md`; logs: `/tmp/loo366-pursue/`.
 
-Compression checks: `scripts/test_desktop.sh -Xswiftc -gnone --filter 'ProjectActivationTests|WaveDetailReadingTests|TaskHistoryFilterTests|MockWaveFixtureTests'` built Desktop and passed 28 headless tests with inherited LF authority removed after repairing the missing readiness fixture field (initial run: two failures); diff/context checks passed. Logs: `/tmp/loo366-compress-detail{,-retry}.log`. Earlier compression results remain at `d3e0f2ec9:scratch/keep-every-wave-ready-for.md`; gate retains CLI/crash/configured and skill acceptance, output-handle investigation and CI-repair entry proof; mounted judgment remains with review.
+Earlier compression and pending-presentation checks (28 and 40 headless tests,
+including repaired initial failures) remain at
+`457e65d6be132f290b8968c4b11959a1ca0823e6:scratch/keep-every-wave-ready-for.md`;
+logs remain under `/tmp/loo366-compress-detail*` and `/tmp/loo366-pending-tests-retry.log`.
+Current transport feedback takes precedence over retained activation failure.
+CLI/crash, configured and mounted acceptance remain open as described above.
 
-Pending presentation checks: `scripts/test_desktop.sh -Xswiftc -gnone --filter 'ProjectActivationTests|WaveDetailReadingTests|PodiumModelTests'` built Desktop and passed 40 headless tests with inherited LF authority removed; `uv run --no-sync python scripts/check_swift_multiplatform_boundaries.py`, diff and context-budget checks passed. The first build rejected a test-file edit during compilation; the stable-tree rerun passed. Logs: `/tmp/loo366-pending-tests-retry.log`. CLI/crash and configured proof remain with gate, mounted judgment with review. Source review corrected current transport-error precedence over retained activation failure; no new readiness owner was introduced.
+## Naming direction — October 6
 
-Reconciliation check: `git diff --check` and `lf context --skill realign --json` passed; existing 40/28-test logs reviewed, no code changed or tests rerun.
+Jack Heart selected Loopflow Desktop, superseding Podium, and authorized this
+independent naming implementation. The shared observable state is `WorkModel`;
+`RepoView` shows one selected repository while the model also serves Portfolio.
+Work observation, frames, requests, scope, navigation, projection, cache and their
+consumers now use Work names. The CLI stream is `lf monitor work --watch --json`;
+Rust/Swift callers, fixtures, filenames, tests, current docs and tooling move together.
+Task/Wave presentation joins are `TaskProjection` and `WaveProjection`. They add
+no durable Work kinds: Wave/Project/Task remain the owners, with associated Sessions
+and Execs. Loading uses `WorkReadingStatus`, distinct from durable `WorkStatus`.
+
+Delete — do not maintain: the Podium-prefixed implementation, Workspace-prefixed
+observation/navigation/projection APIs and `monitor workspace` spelling. No alias
+or parallel reader remains. Historical releases, measurements and the supervisor's
+review artifacts retain their original names and provenance.
+
+`TaskWorktreeSnapshot` describes Git placement. `WorkspaceIdentity` and
+`SessionWorkspace` retain their names: primary conversation paths can be non-Git
+directories. Terminal workspaces own panes and broader working environments;
+`NSWorkspace` is Apple's API. The existing `workspace.json` cache, envelope version,
+selection/layout preference keys, placement JSON fields and metric identifiers
+remain unchanged. No migration or identity churn is introduced. A fixed pre-rename
+cache payload proves retained Home/Task selection and unchanged file bytes.
+
+The stream fixture now seeds its accepted Project selection before registering
+a Task, fixing the pre-existing admission failure without weakening watcher
+assertions. Architecture declarations now include the existing readiness tables
+and historical YAML import. Neither correction changes production behavior.
+
+Naming checkpoint: `90013bd7e5bac5a17a213b6eabb48a1f7292dde8`, integrated with
+main at `457e65d6be132f290b8968c4b11959a1ca0823e6`;
+the later publication and accepted review are recorded under “Remaining coherent
+cut.” The supervisor's review artifacts remain separate. Broader gate,
+configured Intelligence, CLI/crash and mounted acceptance above remain open.
+No production provider mutation, installed-Home access, installation or release
+belongs to this naming contribution.
+
+Earlier naming checks and compression results (33 Rust, 139 Swift, five and
+33 focused Swift tests), plus the one-test two-reader proof, remain in the
+pre-gate plan at `/tmp/loo366-gate/before.tar.gz` and their original logs under
+`/tmp/loo366-naming/`, `/tmp/loo366-compress-naming/`,
+`/tmp/loo366-compress-final/` and `/tmp/loo366-sync-work-watch.log`.
+They are historical passes, not a gate for the current tree.
+
+## Gate availability — October 6
+
+Gate at `c1685f82b` preserved the existing dirty cleanup and review artifacts at
+`/tmp/loo366-gate/before.tar.gz`. Source inspection covered ensure/binding,
+rotation preflight, SQLite selection/readiness, CLI dispatch and Desktop command
+ownership/selection. It found no demonstrated repair in those inspected paths;
+this is not a complete review or a passing gate.
+
+The resource preflight failed: supported recovery removed 3.7 GiB of eligible
+inactive build artifacts but left 17.0 GiB free against the required 32 GiB
+reserve. A standalone zero-wait uv prune also found its cache locked. Active and
+recent builds remain intact. Product suites, Clippy and app builds did not run;
+prior passes do not establish this tree's gate. Logs: `/tmp/loo366-gate/`.
+
+The public CLI/crash suite remains absent. Existing `task_deletion_tests.rs` and
+`tests/e2e/task_deletion.py` demonstrate a Linux-only TLS proxy using fixture CA
+trust without changing the production endpoint; macOS does not honor that fixture
+trust path. This is a possible acceptance harness, not an implemented or executed
+Project-readiness proof. Operation fixtures do not cover public dispatch or
+process crashes. Skill/admission outcomes, output-handle leak investigation and
+CI-repair entry coverage remain open. Configured Intelligence acceptance still
+requires the published commands; no installed Home or provider was mutated.
+
+Headless Desktop model/view tests and app builds are the automated boundary;
+display-dependent mounted judgment belongs to optional demo/review, not a gate
+prerequisite. Configured provider acceptance remains separate and unproved.
+
+Gate check: `cargo fmt --all -- --check`, `uv run python scripts/check_architecture.py`, `uv run python scripts/check_migrations.py`, `uv run python scripts/check_swift_multiplatform_boundaries.py`, and `git diff --check` passed; affected Rust/Python/website/Swift suites and Clippy deferred to a capable gate/CI because resource recovery failed; CLI/crash acceptance remains unimplemented.

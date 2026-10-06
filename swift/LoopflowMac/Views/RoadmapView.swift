@@ -36,13 +36,6 @@ func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
     return nil
 }
 
-private struct RoadmapTaskSelection: Identifiable {
-    let wave: WaveSnapshot
-    let task: RoadmapTask
-
-    var id: String { "\(wave.id):\(task.id)" }
-}
-
 /// One query, two shapes. Both read the single `lf roadmap` snapshot: NOW
 /// re-shapes it into a flat, cross-wave, condition-grouped list; ROADMAP keeps
 /// the Wave › Task tree.
@@ -340,7 +333,7 @@ struct RoadmapView: View {
                                 selection = .task(id: row.task.id)
                             },
                             onTaskAction: { row, action in
-                                perform(action, on: RoadmapTaskSelection(wave: row.wave, task: row.task))
+                                perform(action, task: row.task, wave: row.wave)
                             },
                             onOpenWorktree: openWorktree
                         )
@@ -382,7 +375,7 @@ struct RoadmapView: View {
             onRefresh: { await refresh() },
             onError: { controlError = $0 },
             onTaskAction: { task, action in
-                perform(action, on: RoadmapTaskSelection(wave: roadmap.wave, task: task))
+                perform(action, task: task, wave: roadmap.wave)
             },
             onOpenWorktree: openWorktree
         )
@@ -395,7 +388,7 @@ struct RoadmapView: View {
             activeControlId: activeControlId,
             onSelect: {},
             onAction: { action in
-                perform(action, on: RoadmapTaskSelection(wave: wave, task: task))
+                perform(action, task: task, wave: wave)
             },
             onOpenWorktree: openWorktree
         )
@@ -439,46 +432,30 @@ struct RoadmapView: View {
         onOpenWave(wave)
     }
 
-    private enum TaskControl {
-        case run
-        case resume
-    }
-
-    private func perform(_ action: RoadmapTaskAction, on selection: RoadmapTaskSelection) {
+    private func perform(_ action: RoadmapTaskAction, task: RoadmapTask, wave: WaveSnapshot) {
         switch action {
-        case .run:
-            perform(TaskControl.run, on: selection)
-        case .resume:
-            perform(TaskControl.resume, on: selection)
         case .openPr:
-            if let github = selection.task.activePr?.publication?.github {
+            if let github = task.activePr?.publication?.github {
                 NSWorkspace.shared.open(github.url)
             }
-        }
-    }
-
-    private func perform(_ control: TaskControl, on selection: RoadmapTaskSelection) {
-        let controlId = "task:\(selection.task.id)"
-        activeControlId = controlId
-        controlError = nil
-        Task {
-            do {
-                let repo = selection.wave.repo
-                let issue = selection.task.task.identifier
-                try await Task.detached(priority: .userInitiated) {
-                    switch control {
-                    case .run:
+        case .run, .resume:
+            let controlId = "task:\(task.id)"
+            activeControlId = controlId
+            controlError = nil
+            Task {
+                do {
+                    let repo = wave.repo
+                    let issue = task.task.identifier
+                    try await Task.detached(priority: .userInitiated) {
                         try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
-                    case .resume:
-                        try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
-                    }
-                }.value
-                await refresh()
-            } catch {
-                controlError = error.localizedDescription
-            }
-            if activeControlId == controlId {
-                activeControlId = nil
+                    }.value
+                    await refresh()
+                } catch {
+                    controlError = error.localizedDescription
+                }
+                if activeControlId == controlId {
+                    activeControlId = nil
+                }
             }
         }
     }

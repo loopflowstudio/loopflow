@@ -2,11 +2,6 @@
 import SwiftUI
 import Loopflow
 
-
-struct WaveWorkSelection: Equatable {
-    let id: String
-}
-
 struct WaveDetailReading {
     private(set) var snapshot: WaveDetailSnapshot?
     private(set) var errorMessage: String?
@@ -45,7 +40,6 @@ struct WaveDetailPane: View {
     let onOpenTask: (String) -> Void
 
     @Environment(\.palette) private var palette
-    @State private var selection: WaveWorkSelection?
     @State private var showHistory = false
     @State private var showRealignment = false
 
@@ -61,7 +55,6 @@ struct WaveDetailPane: View {
                 WavePlanView(
                     plan: wave.plan ?? WavePlan(objective: ""),
                     wave: wave,
-                    selection: $selection,
                     streamed: streamed,
                     isProjectActivationPending: isProjectActivationPending,
                     transportError: transportError,
@@ -111,7 +104,6 @@ struct WaveDetailPane: View {
 private struct WavePlanView: View {
     let plan: WavePlan
     let wave: WaveViewModel
-    @Binding var selection: WaveWorkSelection?
     let streamed: StreamedWaveDetail?
     let isProjectActivationPending: Bool
     let transportError: String?
@@ -119,6 +111,7 @@ private struct WavePlanView: View {
     let onOpenTask: (String) -> Void
 
     @Environment(\.palette) private var palette
+    @State private var selectedTaskID: String?
     @State private var reading = WaveDetailReading()
     @State private var historyFilter = TaskHistoryFilter()
     @State private var historyNow = Date()
@@ -141,9 +134,9 @@ private struct WavePlanView: View {
                         portfolio: portfolio
                     )
                 }
-                if let selection, let workMap {
+                if let selectedTaskID, let workMap {
                     WaveWorkInspector(
-                        selection: selection,
+                        selectedTaskID: selectedTaskID,
                         workMap: workMap,
                         onOpenTask: onOpenTask
                     )
@@ -252,7 +245,7 @@ private struct WavePlanView: View {
                     }
                     if truncated { Text("Planning is partial; more Tasks exist.") }
                     if tasks.isEmpty { Text("No current Tasks").foregroundStyle(palette.textSecondary) }
-                    ForEach(tasks) { task in WaveTaskWorkView(task: task, selection: $selection) }
+                    ForEach(tasks) { task in WaveTaskWorkView(task: task, selectedTaskID: $selectedTaskID) }
                 }
             } else {
                 WorkSectionHeading("Tasks")
@@ -704,7 +697,7 @@ private extension MetricContractIssue {
 
 private struct WaveTaskWorkView: View {
     let task: WaveTaskWork
-    @Binding var selection: WaveWorkSelection?
+    @Binding var selectedTaskID: String?
 
     @Environment(\.palette) private var palette
 
@@ -747,17 +740,17 @@ private struct WaveTaskWorkView: View {
         .contentShape(Rectangle())
         .accessibilityIdentifier("wave-task")
         .onTapGesture {
-            selection = WaveWorkSelection(id: task.task.identifier)
+            selectedTaskID = task.task.id
         }
     }
 
     private var isSelected: Bool {
-        selection == WaveWorkSelection(id: task.task.identifier)
+        selectedTaskID == task.task.id
     }
 }
 
 private struct WaveWorkInspector: View {
-    let selection: WaveWorkSelection
+    let selectedTaskID: String
     let workMap: WaveWorkMap
     let onOpenTask: (String) -> Void
 
@@ -799,7 +792,7 @@ private struct WaveWorkInspector: View {
 
     private var task: WaveTaskWork? {
         return workMap.tasks.items
-            .first { $0.task.identifier == selection.id || $0.task.id == selection.id }
+            .first { $0.task.id == selectedTaskID }
     }
 
     private var taskLocation: String? {

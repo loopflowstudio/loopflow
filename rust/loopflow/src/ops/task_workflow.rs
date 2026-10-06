@@ -95,15 +95,16 @@ impl TaskWorkflowRecord {
         }];
         let edges: Vec<String> = workflow
             .outgoing(stage)
-            .map(|(_, edge)| match &edge.flow {
-                Some(flow) => format!(
-                    "- `lf -b task run {issue} {flow}` moves the Task to {}",
+            .map(|(_, edge)| {
+                let runs = match edge.flow {
+                    Some(_) => "",
+                    None => " and runs nothing",
+                };
+                format!(
+                    "- `lf -b task run {issue} {}` moves the Task to {}{runs}",
+                    edge.name(),
                     edge.to
-                ),
-                None => format!(
-                    "- `lf task run {issue} {}` moves the Task to {} and runs nothing",
-                    edge.to, edge.to
-                ),
+                )
             })
             .collect();
         if !edges.is_empty() {

@@ -543,13 +543,13 @@ impl SkillExecutor for &Driver<'_> {
                 .task_steers(task)
                 .await?
                 .last()
-                .map(|steer| steer.id);
+                .map_or(0, |steer| steer.id);
             let (node, _) = self.location();
             let seen = self
                 .steers
                 .lock()
                 .expect("Flow steers mutex poisoned")
-                .insert(node, newest.unwrap_or(0));
+                .insert(node, newest);
             step_cli.steers_after = seen.max(step_cli.steers_after);
         }
         // The step looks its skill up by name. An agent the Flow names for

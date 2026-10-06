@@ -124,10 +124,9 @@ stage with several until one is named, erroring on a name that is not a way
 out, and running ad hoc for a Task with no workflow: "that talbe looks
 right". Choosing and running stay one command.
 
-Still open: whether a stopped edge returns the Task to its stage or holds it
-on the edge (default: holds, shown as stopped); whether a finishing edge
-should reach the conversation beyond its own background tool or reading
-status (default: no).
+Built as slice 9: a stopped edge holds the Task on the edge. Still open:
+whether a finishing edge should reach the conversation beyond its own
+background tool or reading status (default: no).
 
 ## Built
 

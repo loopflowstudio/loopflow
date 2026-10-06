@@ -53,8 +53,15 @@ continues as `lf --task ISSUE run FLOW`. Jack then rejected the hidden step
 argument ("I hate __ and hidden arguments") and settled the record: each step
 is the plain command and "doesnt need to know its part of a flow"; the Flow's
 driver keeps an append-only FlowExec (name, launched graph, each step's Exec and
-node) for every run, none primary for a Task. The mutable outer record is
-TaskWorkflow, built in PR #1439 from an agent draft Jack has not reviewed.
+node) for every run, none primary for a Task. The outer record is the Task's
+Workflow (Jack, October 6: "lets just call TaskWorkflow Workflow"; "live
+state"): graph fixed when taken up, position stored, moves appended, `lf task
+move` sets a stage, edges named by what they run. Jack's words: run is the
+Workflow API's verb, exec the Flow's record. Built unreviewed in PR #1439;
+node/edge renaming, retries under one Task run, Project workflows, the
+Desktop graph and LOO-382 alignment remain. Lesson: the first build derived
+position from append-only rows and Jack sent it back; settle the model, store,
+CLI and Desktop contract before building a record.
 Built so: operations run through
 the ordinary CLI, the answer contract rides in the message with no provider
 schema, and a correction is `lf -b session resume ID MESSAGE`. The agent's
@@ -70,7 +77,7 @@ suites prove decisions, correction, routing and loop passes; a real provider
 step, a driver killed mid-turn and a populated-store migration remain unproven.
 Every slice has headless tests only.
 
-Desktop (October 6, unreviewed by Jack) draws the TaskWorkflow and every Flow
+Desktop (October 6, unreviewed by Jack) draws the Workflow and every Flow
 run from FlowExec, lists Waiting first, and matches no conversation to a Flow
 step. Lessons: `lf` allows a second `lf task run` while an edge runs, so only
 Desktop's disabled Start keeps two drivers out of a checkout; a killed driver
@@ -80,8 +87,7 @@ update-plan --flow` saves a name without loading it; Desktop shows that
 default invalid, Start disabled.
 
 Main `16fa97425` adds native-human-input recency for `lf resume`; the Task
-primary reuses that ranking. Remote/performance/defaults/website scope stays
-LOO-353; LOO-366/367 retain separate policy scope.
+primary reuses that ranking.
 
 ## Session and operate pairs (2026-10-05)
 
@@ -247,17 +253,10 @@ never silently restart its Flow. Ordinary reads remain read-only.
 October 4 removed mutable Flow switching; the superseded “switch now” proposal
 is at `16168c473:wave/product/MEMORY.md`.
 
-Earlier planning accepted automatic Wave wakes for operational blockers and
-reading existing Task/Session output. The Ask removal decision above supersedes
-this escalation plan and its direct-Ask caller contract. A repo-associated Session may request repo attention with
-original evidence and a reason. These asynchronous requests never release direct
-Asks and do not introduce a messaging UI. Upstream `3dc89bc9a` already removed
-the resident/listener, external chat bridge and turn claims. The outbox survives
-without a production dispatcher. Establish primary-owned claims and receipts;
-do not restore that service or assume its journal still provides recovery.
-Prove structured wakes and interactive draft input through one native execution
-owner before primary cutover. A second Harness or terminal keystroke injection
-does not prove that integration.
+The earlier automatic Wave-wake and repo-attention plan is superseded by the
+Ask removal above; its text is at `f57abb655:wave/product/MEMORY.md` under
+this heading. Upstream `3dc89bc9a` removed the resident/listener and chat
+bridge; do not restore that service or assume its journal provides recovery.
 
 The Task workspace implements Rust-derived checkout association
 and a paged directory browser independent of Project hydration and PR diff bases.

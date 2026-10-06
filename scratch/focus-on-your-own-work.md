@@ -154,22 +154,19 @@ provider asking a question; Desktop on screen (rendering, Start, a Task
 opening on its primary, progress moving, the Wave page's menu and Edit); the
 website as rendered.
 
-9. **Workflow as live state.** Jack: "lets just call TaskWorkflow Workflow";
-   October 6: "mutable is probably wrong word. live state or something". The
+9. **Workflow as live state.** — **done**, `5cf71ffd7`, compressed
+   `f57abb655`. Jack: "lets just call TaskWorkflow Workflow"; October 6:
+   "mutable is probably wrong word. live state or something". Built to the
    contract in [task-workflow.md](task-workflow.md): position stored and
    written by the process running the edge; an append-only history of moves
    with who and a note; `lf task move` sets a stage and runs nothing; a
-   stopped edge holds the Task on the edge; `lf task run` keeps the behavior
-   Jack confirmed. Done when tests cover: set to a stage; a stopped edge
-   retried, then going back; a late-settled landing corrected by set; status,
-   JSON and the Swift decoder carrying stored position and history. *Built
-   (`5cf71ffd7`) and compressed, not yet realigned.* Compression removed
-   authored edge names, as slice 10 asks. `task_flow_launch_tests` 6, lib
-   `workflow` 6, `dto_fixtures` 19, Swift
-   `DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests` 34 pass;
-   all-target Clippy clean. Choices: [questions.md](questions.md). Demo
-   items: the Move to menu and a stopped edge on screen; a conversation
-   choosing an edge.
+   stopped edge holds the Task on the edge. Compression removed authored
+   edge names, as slice 10 asks. Check, October 6 at `f57abb655`: `cargo
+   test -p loopflow --test task_flow_launch_tests` 6 passed (set, stopped
+   edge retried then back, late landing corrected); status JSON and the
+   Swift decoder by `dto_fixtures` 19 and Swift 34, as recorded at
+   compression. Choices: [questions.md](questions.md). Demo items: the Move
+   to menu and a stopped edge on screen; a conversation choosing an edge.
 
 9a. **One Task run, many Flow execs.** (Words: Jack, October 6, "i think
     maybe cleaner to say run for task and exec for flow", then "er run for

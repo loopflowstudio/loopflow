@@ -775,27 +775,25 @@ copied Sessions acquire no execution authority. Configured-repository fixtures
 must honor Team identity and resolve Task links from the Wave repository.
 
 October 6 retained twenty warm Task-opening samples, but the hour soak failed
-on disk exhaustion after seven rounds. Fourth-round RSS grew 52.7 MiB; matched
-baseline and both hours remain unproved. The original 78.6 GiB trace has timestamp
-attribution only and stays intact. Bounded recording now retains exact child-open
-raw paths and failed outcomes. A smaller Hitches/Hangs probe still generated
-799 MB in thirty seconds; TMPDIR was ignored. Final bundle size hides raw storage
-cost. The benchmark guide retains observer/RSS distinctions and failures. No
-production allocation cause or performance acceptance follows from these probes.
+on disk exhaustion after seven rounds. The 78.6 GiB historical trace has timestamp
+attribution only and stays intact. Bounded recording retains exact child-open
+paths and failures; even a smaller Hitches/Hangs probe used 799 MB in thirty
+seconds and ignored TMPDIR. Full matched hours remain storage-limited.
 
-Fixed-image OCR diagnosis (160 observations) found no consistent autorelease
-benefit; warm medians were 189–194 ms. OCR was already warm before the failed
-soak. The later contained workspace replay disproved the unsupported claim that
-this host could not render: 20/20 endpoints and five rounds over 150 seconds
-passed preservation, while fourth-round RSS grew 52.6/54.5 MiB across two soaks. Most growth
-occurred in first native input/capture; allocated heap stayed roughly flat after
-round one. Exact-process maps and restricted `leaks` output do not establish
-its cause. No production allocation repair is supported yet.
+Contained replay proved rendering available: 20/20 endpoints, five rounds over
+150 seconds, preserved state, failed RSS (+52.6/+54.5 MiB). In-process checkpoints
+retain first-round growth; RSS-only diagnostics omit hitch/hang coverage.
+Earlier detailed evidence remains at `98f6f13c4:wave/infrastructure/MEMORY.md`.
 
-Four-round reporting now uses in-process start/end checkpoints; asynchronous
-recorder attachment can miss first-round growth. RSS-only diagnostics retain
-missing hitch/hang coverage. The benchmark guide owns raw receipts and remaining
-allocation attribution; matched p95 and both hour soaks remain unproved.
+Jack Heart requested subcomponent experiments. Process
+maps now separate terminal rendering, capture and OCR: workspace native input
+without capture added 15.4 MiB; capture/OCR then added 81.2 MiB transiently, with
+only 0.8 MiB more live default-zone allocations and 25.1 MiB more empty large
+allocations. This supports capture pressure, not a proven production leak or
+oversized atlas. Bitmap reuse and capture autorelease scopes both preserved 20/20
+endpoints but failed growth (+48.4/+53.0 MiB); both were removed. The altered
+no-capture variant's later reopen timeout remains failed evidence. Benchmark
+guidance owns receipts and equivalent-pixel capture/allocation experiments. No repair or budget revision is justified; matched p95/hours remain open.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

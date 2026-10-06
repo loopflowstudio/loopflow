@@ -68,6 +68,60 @@ struct DesktopPerformanceTests {
     }
 
 #if canImport(GhosttyKit)
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_MEMORY_PHASES"] == "1"))
+    func terminalMemoryPhases() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        let journal = try PerformanceJournal(url: URL(fileURLWithPath: try #require(environment["LF_DESKTOP_PERF_OUTPUT"])))
+        func phase(_ name: String) async throws {
+            try journal.write(["event": "allocation_phase", "phase": name,
+                               "pid": ProcessInfo.processInfo.processIdentifier])
+            try await Task.sleep(for: .seconds(3))
+        }
+        bootstrapLoopflowApp()
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.finishLaunching()
+        try #require(NSScreen.main != nil)
+        let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1400, height: 800),
+                                       styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.contentView = nil; window.close() }
+        window.contentView = NSView(frame: window.contentLayoutRect)
+        window.orderFront(nil)
+        try await phase("blank")
+        try window.capture()
+        try await phase("blank_captured")
+        GhosttyManager.shared.initialize()
+        try #require(GhosttyManager.shared.state == .ready)
+        let terminal = GhosttyMetalView(terminal: .shell(UUID().uuidString), frame: window.contentLayoutRect)
+        terminal.workingDirectory = try #require(environment["HOME"])
+        terminal.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
+        window.contentView = terminal
+        terminal.createSurface(manager: GhosttyManager.shared)
+        defer { terminal.destroySurface() }
+        let surface = try #require(terminal.surface)
+        let input = "owned-terminal-memory\n"
+        input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
+        try await wait(window) { terminalText(surface).contains("owned-terminal-memory") }
+        try await phase("terminal_rendered")
+        let bitmap = try #require(terminal.bitmapImageRepForCachingDisplay(in: terminal.bounds))
+        terminal.cacheDisplay(in: terminal.bounds, to: bitmap)
+        let image = try #require(bitmap.cgImage)
+        try journal.write(["event": "bitmap", "width": bitmap.pixelsWide, "height": bitmap.pixelsHigh,
+                           "bytes_per_row": bitmap.bytesPerRow])
+        try await phase("terminal_bitmap")
+        for level: VNRequestTextRecognitionLevel in [.fast, .accurate] {
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = level
+            request.recognitionLanguages = ["en-US"]
+            request.usesLanguageCorrection = false
+            try VNImageRequestHandler(cgImage: image).perform([request])
+        }
+        try await phase("terminal_ocr")
+        try window.capture()
+        try await phase("terminal_recaptured")
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_TEST_NATIVE_FIXTURE"] != nil))
     func embeddedLaunchContract() async throws {
         let environment = ProcessInfo.processInfo.environment

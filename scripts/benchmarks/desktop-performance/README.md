@@ -576,3 +576,79 @@ refused provider comments and cancellation read receipts remain visible. This
 confirms the failure without treating diagnostic durations as hour coverage or
 four warm observations as a scored p95. Focused runner/recorder tests pass 54;
 Ruff and diff checks pass. No production memory fix, merge or completion is claimed.
+
+### First-native allocation isolation, October 6
+
+`terminalMemoryPhases` is an opt-in contained diagnostic (`LOOPFLOW_MEMORY_PHASES=1`,
+`LF_DESKTOP_PERF_OUTPUT`, and an owned `LOOPFLOW_TEST_NATIVE_FIXTURE`). Launch it
+through the runner's `_native_command`, as for `embeddedLaunchContract`; it uses
+only an owned cat PTY. It pauses three seconds at each journal PID/phase so an
+external `vmmap -summary` can inspect that exact process. The retained invocation
+is `/tmp/loo304-phase-probe.py`; receipts are
+`/tmp/loo304-terminal-phases-20261006/`. This diagnostic deliberately retains one
+bitmap across its bitmap/OCR phases; its final RSS is not a leak measurement.
+
+| Standalone phase | Immediate RSS MiB | Observation |
+| --- | ---: | --- |
+| Blank window | 83.3 | No terminal or workspace |
+| Blank capture/OCR | 145.0 | Blank pixels do not establish warmed text recognition |
+| Terminal rendered, input returned | 134.3 | No terminal capture yet |
+| Terminal bitmap | 211.0 | 2800 × 1600, 11,200 bytes/row; 17.1 MiB bitmap |
+| Terminal OCR | 239.5 | Both unchanged recognizers |
+| Recapture/OCR | 307.1 | First bitmap still deliberately retained |
+
+The rendered→bitmap maps add 17.1 MiB of CG image storage, about 17 MiB of
+IOSurface storage and 17.2 MiB of empty large malloc allocations. Default-zone
+live bytes stay about 14 MiB. These are region deltas, not allocation stacks;
+map acquisition follows the immediate RSS checkpoint. Pinned Ghostty allocates
+three size-dependent IOSurface render targets and grows initially tiny atlases.
+Neither the maps nor source inspection establishes an oversized atlas or an
+unnecessary production render target.
+
+A controlled full-workspace variant delays bitmap/OCR until after first native
+input. In `/tmp/loo304-workspace-capture-isolation-retry-20261006/`, first-phase
+RSS is 225.5 MiB before launch, 241.0 MiB after input without capture, and
+322.1 MiB immediately after capture/OCR. The capture map adds only 0.8 MiB of
+live default-zone allocations (35.7→36.5), 25.1 MiB of empty large allocations
+and 0.3 MiB of resident IOSurfaces. Thus much of this first-phase increase can
+occur in capture/recognition without comparable live workspace retention.
+This does not attribute every retained byte or justify subtracting observer cost.
+
+The variant changes observation ordering and is **not acceptance**. Its second
+reopen timed out; the failure capture and original records remain. The first
+attempt at `/tmp/loo304-workspace-capture-isolation-20261006/` trapped after
+using a prior capture timestamp in the no-capture branch (exit -5); the corrected
+diagnostic leaves capture timing null. Neither change enters the ordinary runner.
+
+Two proposed repairs were tested on the original five-sample/150-second workflow:
+
+| Experiment | Endpoints | Round-four growth | Disposition |
+| --- | ---: | ---: | --- |
+| Reuse a size/scale-matched bitmap | 20/20 | +48.4 MiB | Rejected; still fails <32 MiB |
+| Autorelease scope around full capture/OCR | 20/20 | +53.0 MiB | Rejected; no demonstrated benefit |
+
+Receipts and exact experimental source are under `/tmp/loo304-bitmap-reuse-20261006/`
+and `/tmp/loo304-capture-pool-20261006/`. The reconstructed reuse source matches
+its recorded aggregate source hash. The scopes preserve all pixels, recognizers,
+identities, populations and endpoints; neither changes the baseline or prewarms
+startup. Both experiments were removed. No production allocation repair is
+supported by these results.
+
+Remaining options are a controlled capture implementation comparison with exact
+pixel/recognition equivalence, or allocation attribution inside AppKit/Vision's
+first terminal capture. The latter need not require the restricted `leaks` tool.
+A renderer patch needs evidence of avoidable renderer allocation first. The
+original <32 MiB budget, matched twenty-successful-sample p95s, both full hours,
+and hitch/hang/compositor proof remain outstanding; none of these short probes
+changes those obligations. No trace, snapshot, live Home or external authority
+was changed.
+
+Final unchanged-workflow replay: `/tmp/loo304-firstphase-final-replay-20261006/`
+passed 20/20 endpoints and five preserved rounds over 150 seconds. Round-four
+growth was **54.5 MiB**, still failing. Warm medians (four observations each) were
+1,224 ms cold-workspace construction, 340 ms warm Task, 280 ms Task reopen and
+1,318 ms native reopen; p95 remains unavailable. All 246 CLI processes ended,
+with 1,343 connections, 111,761 statements and 1,356,237 rows. The source hash
+stayed identical; unavailable comments/cancellations remain visible. This replay
+restores every original capture and shows that the diagnostic-only reorder was
+not carried into the shipped measurement path.

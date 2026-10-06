@@ -144,7 +144,7 @@ struct WavesView: View {
         .onChange(of: selectedWave?.id, initial: true) { _, _ in
             model.detailWaveId = selectedWave.flatMap { $0.isRegistered ? $0.id : nil }
         }
-        // Registered Waves arrive with every planning frame.
+        // Each planning frame refreshes the Wave list.
         .onChange(of: model.planningSequence) { _, _ in
             Task {
                 await syncRepoStates()

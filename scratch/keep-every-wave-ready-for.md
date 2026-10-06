@@ -110,39 +110,19 @@ Waves still need designated destinations. No global reset is authorized.
 
 ## Cached-name cutover — approved and implemented October 5
 
-Jack Heart approved one-time historical name-only replacement in comments
+Jack Heart authorized one historical name-only correction in comments
 `5419b87c-bfec-4f42-8914-021483249895` and
-`fb2d9c94-ad0c-4762-8658-213734ddc5c2`. Earlier counterexamples and the unresolved
-policy are preserved at
-`f93638e4e69116e575d98f9b5482774fcda5b93c:scratch/keep-every-wave-ready-for.md`.
-A cached plain name can represent either a stripped provider name or an exact
-provider name; no migration can distinguish those histories. Jack authorized
-accepting either once, while retaining the original evidence.
+`fb2d9c94-ad0c-4762-8658-213734ddc5c2`. The existing `project_readiness` draft
+archives original bodies/times and grants only pre-cut rows one name/slug correction
+at equal revision. Older/rejected writes cannot spend it; all non-name conflicts
+and subsequent conflicts stay strict. Acceptance and projection share a transaction.
 
-The Task's one draft, `project_readiness.sql`, archives pre-cut Linear bodies,
-acquisition timestamps and archive/membership flags. The body retains revision,
-name and slug. Only those rows receive an unconsumed conversion marker. The first
-accepted observation may replace name/slug at the same revision; every other
-field retains existing conflict checks. An older observation or rejected write
-cannot spend the exception. Planning and marker updates share their existing
-transaction. New rows and converted rows reject later equal-revision conflicts.
-Repository-alias repair carries the evidence in the same transaction as planning.
-
-Task inspection/resolution and Wave snapshots now keep provider names. Sync and
-reteam no longer plan or apply prefix renames; the unused rename API and reteam
-wrapper are deleted. Creation's explicit naming remains distinct. Ordinary
-Project synchronization and recording moved from `chapter` to `project`.
-Snapshot and detail ingestion now project accepted entity rows within their SQLite
-transaction. Each entity retains its own acquisition time. The separate
-`sync_projects` replay and `update_task_plan` API are removed; preservation tests
-use accepted observation ingestion. Rotation and reteam now accept confirmed readbacks. Shared acquisition ownership
-survives queued SQLite workers; reteam reconciles confirmed Team relationships.
-
-Focused cutover tests cover the indistinguishable histories, already exact names,
-original body/time retention, rollback, older acquisitions, non-name conflict,
-new rows and subsequent rejection. Lookup and reteam tests preserve ordinary
-names. These are local synthetic proofs, not installed conversion or configured
-Wave acceptance.
+Names remain verbatim through lookup, sync and reteam. Snapshot replay, generic
+planning writers and identifier-only transfer writers are deleted. Retain original
+body/time, rollback, older-acquisition and strict-repeat proofs. Detailed implementation
+and exact evidence remain at
+`57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:scratch/keep-every-wave-ready-for.md`.
+Local synthetic passes establish neither installed conversion nor configured readiness.
 
 ## Remaining coherent cut
 
@@ -174,39 +154,78 @@ These are synthetic operation proofs, not configured Intelligence acceptance.
 Concurrency uses two futures in one process. The post-binding recovery case seeds
 the complete binding after a failed write; it does not interrupt a real process
 between binding and settlement. Cross-process/cross-checkout and crash proofs remain
-with gate. Existing check results cover the local `accept_project` consolidation;
-realignment adds no runtime change.
+with gate. Existing check results cover the local `accept_project` consolidation.
 
-Step 5 is next: rotation currently neither consumes `project_transitions` nor
-writes the shared binding, so even a successful provider rotation leaves readers
-on the predecessor. Replace `chapter::select_current`, `plan_rotation`'s name inference
-and name-derived UUIDs with exact transitions. Created-successor and before/after-
-configuration-switch rotation proofs remain open. KR-first Wave/repository
-rotation, Desktop activation and configured readiness (steps 5–7) are unfinished.
-Operation/CLI fixtures still need explicit bindings as rotation moves to the new
-owner; CI repair and the earlier output-handle leak remain with gate. The branch
-is not releasable and no installed-Home write is authorized.
+Step 5 remains next, with the recovery correction below. Rotation still uses
+names/status and neither consumes transitions nor switches the binding. The
+branch is not releasable. Desktop, skills and configured acceptance remain open.
+
+### Rotation recovery correction — October 5
+
+Source inspection found two missing inputs in the earlier receipt contract.
+These are architectural counterexamples, not executed interruption tests. The
+superseded contract remains at
+`57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:scratch/keep-every-wave-ready-for.md`.
+
+1. Wave A settles, then Wave B fails. Retrying only `new-chapter <name>` cannot
+   identify A's settled destination without matching names, consulting a receipt
+   as current selection, or mistaking A's new binding for another predecessor.
+   `pending_project_transition` deliberately omits settled receipts. Preserve
+   exact destinations in the caller's retained planning artifact; query receipts
+   by `(Wave ID, successor ID)`, including settled history. An intervening binding
+   remains a conflict; an old plan must never rotate the Wave backward.
+2. Task X transfers, the binding switches, and predecessor completion fails.
+   During the interruption, backlog Task Y starts in the predecessor and an
+   external edit returns X there. Accepted refresh overwrites `pm_items` and
+   projects both current memberships into `tasks`; it retains no transition
+   membership. Reclassifying sweeps Y into the successor; ignoring the predecessor
+   loses X's required reconciliation. The same problem exists for provider Tasks
+   without a local Task row. The receipt must retain the exact selected issue IDs,
+   independently of current membership. No Task bodies or execution ownership are
+   copied. An external move of a selected issue after the switch is reported as a
+   conflict, never overwritten merely because its ID appears in the receipt.
+
+Implementation choice, requiring no new product decision: KR planning emits a
+retained JSON plan containing the chapter name and per-Wave stable identity,
+exact successor UUID, explicit create/existing intent and Project content. Allocate
+new UUIDs once while authoring that file. Both Wave and repository operations take
+that same input; the repository operation composes the Wave operation. CLI uses
+`lf repo new-chapter <name> --plan <path> --dry-run --json`, then the same file
+without `--dry-run`. The name must agree with the file and never selects a Project.
+Existing destinations must exist; creation reservations cannot substitute for
+missing existing Projects. The artifact is command input, not current selection.
+Retain it alongside Task candidates through partial failure and Task admission.
+
+Extend this Task's existing migration draft with transition-owned issue-ID
+membership. Before each transfer, persist its selected ID under the retained Wave
+and checkout guards. Before the binding switch, recovery reclassifies remaining
+predecessor work and retains earlier selections, including uncertain transfers.
+After the switch, recovery uses only that set; new historical starts stay put.
+Reservation records intent, never successful provider effects. Exact readbacks
+still own transfer confirmation, and Task/PR/Session/Flow rows keep their owners.
+
+Preflight the whole input, nonempty KRs, destination access and Task evidence before
+provider writes; persist every participating reservation before applying any Wave.
+Retry validates the input against the reserved pair and selected binding. Settled
+receipts establish only that exact operation's history. They cannot choose the
+current Project or authorize reversing a later binding.
+
+Required operation proofs: partial repository settlement then retry with zero
+extra Projects; same display name used for two distinct explicit plans; selected
+issue moved externally after the switch while another historical Task starts;
+pre-switch response loss followed by new work; and caller cancellation around
+membership persistence. Retain the existing created-successor, backlog, checkout
+exclusion and execution-identity proofs. None of these new proofs has run.
 
 ### Accepted planning must own durable projection — October 5
 
-Collection prerequisite corrected October 5: the reviewed instruction to retain
-the listing Project's association contradicted the issue's own provider facts.
-`fetch_pm_snapshot_for_projects` overwrote both `project_id` and its display slug
-after `list_items` decoded them. A moved issue therefore acquired the predecessor
-ID with its newer provider revision; a detached issue acquired invented membership.
-Atomic projection would faithfully persist that corruption. The loopback operation
-regression `fetch_pm_snapshot_preserves_moved_and_detached_issue_ownership` failed
-with `project-123` instead of `successor`. Removing the overwrite preserves both
-reported ownership and revision, including null membership. The original collection
-test and the empty-Flow migration-adoption test also pass. These are synthetic
-collection/adoption proofs, not concurrent provider or durable-transfer acceptance.
-
-Collection preserves issue-reported ownership and rotation accepts confirmed
-Project/issue readbacks before durable projection. Reteam now uses full readbacks
-and explicit Team acceptance; both identifier-only writers are deleted.
-Created-successor recovery stays with shared binding and exact-ID transitions. A reported destination outside the
-listed Projects still needs explicit ownership resolution, never reattachment to
-the requested collection. These source changes do not establish configured recovery.
+Collection now preserves issue-reported ownership, including moved and detached
+issues. Its loopback regression failed before removing the listing-Project overwrite.
+Atomic projection must consume those reported facts, never reattach them to the
+queried Project. Rotation/reteam accept full readbacks; the identifier-only writers
+are deleted. Exact collection evidence and the old ownership counterexample remain
+at `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:scratch/keep-every-wave-ready-for.md`.
+These synthetic passes do not establish configured recovery.
 
 The five store counterexamples and their exact regression names remain at
 `f2b127d87bc0bb99654ba66118fb91a77099b73f:scratch/keep-every-wave-ready-for.md`:
@@ -273,30 +292,18 @@ Cover both full and partial ingestion, already-held locks, Task creation/update,
 independently aged detail entities and an older provider response after rotation.
 Store-level proofs alone cannot establish operation recovery.
 
-### Created-successor recovery changes the cut order — October 5
+### Created-successor recovery — retained failing evidence
 
-`rotation_recovers_a_created_successor_after_confirmed_transfer` enters through
-`rotate`, creates the successor, and loses the connection immediately after the
-transfer readback. Accepted planning, Task checkout, PR and Flow survive. Retry
-fails with `competing current chapter names: A — next, A — previous`. The same
-fixture with an existing exactly named successor completes on retry.
+`rotation_recovers_a_created_successor_after_confirmed_transfer` loses the
+connection after transfer readback. Accepted planning, Task/PR/checkout and Flow
+survive, but retry fails on `A — next, A — previous`. The existing-successor case
+completes. Different predecessor names also broke the two-Wave backlog fixture;
+its narrowed matching-name pass is not differing-name coverage. Details remain at
+`57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:scratch/keep-every-wave-ready-for.md`.
 
-This invalidates requiring all rotation recovery proofs before replacing selection.
-Preserving provider names exposes `plan_rotation`'s name-based target/predecessor
-inference and the final name comparisons. Do not restore stripping, rename provider
-Projects or patch that deletion target. The accepted shared binding and exact-ID
-transition receipt must replace the selector before the creation proof can pass.
-Writer deletion can precede that replacement, but it is not an independently ready
-rotation cut. Finish the remaining membership work;
-then implement binding, receipt and rotation together before judging recovery.
-The new regression
-remains failing under the old selector; the original reteam regressions now pass.
-The two-Wave backlog proof also failed on `A — previous, B — previous`. Its focused
-fixture now uses matching predecessor names to isolate preservation; differing-name
-rotation remains unproved and requires the planned selector replacement.
-
-The rejected global fence’s pass does not apply to this tree. Inspection Execs
-and unexecuted Flows do not establish started work.
+Exact transitions replace that selector; never restore name stripping or extend
+the obsolete inference. The October 5 recovery correction above owns the missing
+inputs. Ensure's proofs do not establish rotation recovery.
 
 ### Preservation boundary — October 5
 
@@ -377,8 +384,9 @@ Execs still do not establish Started.
 
 After a failed reset, released checkout locks permit ordinary starts. Recovery
 reclassifies while the predecessor remains configured. After the configuration
-switch, retry reconciles selected transfers and predecessor completion without
-sweeping new historical bindings into the successor. Pending receipts alone never
+switch, retry checks the persisted selected issue IDs and predecessor completion
+without sweeping new historical bindings into the successor. External membership
+changes of selected issues remain conflicts, not implicit permission to move them. Pending receipts alone never
 deny starts. Prove both start/rotation orderings and response loss on both sides
 of this boundary through operation entry points, retaining actual failures.
 Release's recovery findings reinforce this requirement; its publication and
@@ -423,30 +431,17 @@ from synthetic tests or readiness alone.
 
 ## Implementation anchors
 
-Selection and writer replacements are listed under **Delete — do not maintain**;
-existing failure sequences and lock requirements are in **Remaining coherent cut**.
-The following surviving capabilities constrain their replacements:
+`work/wave/config.rs` retains authored policy; `project_binding` owns only shared
+Project selection. `ProjectContent` keeps empty-string Flow; LOO-367 owns launch
+validation. `checked_projects_with_store` retains exact missing-membership lookup
+and ownership checks. Linear creation accepts a caller UUID, but attachment is
+separate; `find_project` distinguishes archived from absent. Duplicate-ID and
+attachment behavior still need configured proof. `rotation_lock` supplies the
+shared per-Wave OS lock with a 30-second bound.
 
-- `work/wave/config.rs` reads authored policy from `GOAL.md`; only the Project
-  binding moves to the Home-local file described above.
-- `ProjectContent` retains its empty-string Flow representation. LOO-367 owns
-  validation when launching an explicitly selected or configured Flow.
-- `ops/pm.rs::checked_projects_with_store` retrieves retained IDs omitted from
-  membership and validates ownership; keep those checks while preserving names.
-- `create_project` accepts a chosen UUID, but Initiative attachment is a separate
-  mutation. `find_project` distinguishes archived records from absence. Recovery
-  must handle an unattached Project without creating another identity.
-- LOO-364's `ops/human_session/primary.rs` reserves identity before launch and
-  reuses it on retry. Reuse that principle without Session storage or startup.
-  `chapter::rotation_lock` supplies a per-Wave OS lock with a 30-second bound.
-- Linear's [GraphQL schema](https://raw.githubusercontent.com/linear/linear/master/packages/sdk/src/schema.graphql),
-  inspected October 3, accepts a caller UUID and optional content/status on create,
-  and status-only updates without a revision precondition. This supports exact-ID
-  reconciliation, not cross-mutation atomicity. Duplicate-ID and attachment
-  behavior still need configured proof.
-- Desktop's `WaveDetailPane` polls every 30 seconds and names its ordinary plan
-  `chapterAndTasks`/`WaveChapterView`. Activate outside polling through
-  `RegistryQuery`, the shared CLI transport and decoded snapshot owner.
+Desktop activates through `RegistryQuery` and the shared CLI transport outside
+30-second polling. Exact schema references and earlier implementation anchors:
+`57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:scratch/keep-every-wave-ready-for.md`.
 
 ## Desktop integration after upstream #1447 — October 5
 
@@ -529,8 +524,9 @@ provider ID, optional predecessor provider ID, optional explicit reset name,
 creation timestamp and settlement timestamp. A unique unfinished transition per
 Wave serializes admission alongside the Wave lock. For reset, persist the exact
 selected predecessor/successor before effects; for initial ensure, predecessor
-is null. Existing Project facts remain in their existing tables. Do not copy
-Tasks, KRs, names, provider status or execution cursors into this receipt.
+is null. Existing Project facts remain in their existing tables. Retain selected issue IDs as transition-owned membership, as specified in the
+October 5 recovery correction. Do not copy Task bodies, KRs, provider status or
+execution cursors into this receipt.
 
 This is operation recovery evidence, not a Chapter object or second plan. Fresh
 provider observations determine the next missing effect; a phase counter must
@@ -551,7 +547,7 @@ of display names. Remove name-derived successor UUID generation.
 
 ## Optional coordinated reset
 
-Keep explicit `lf repo new-chapter <name> --dry-run --json` and apply as the
+Use `lf repo new-chapter <name> --plan <path> --dry-run --json` and apply as the
 coordinated operation. Tools and their operating skills coordinate participating
 Waves across the repository and through its hierarchy, with a unified chapter
 name and metadata. Approximate synchronization permits recoverable partial
@@ -566,7 +562,8 @@ Ordinary ensure has no KR requirement.
 Replace shared-predecessor-name inference with independent per-Wave selection
 plus the exact transition receipt. The configured Project identifies each
 predecessor; different predecessor names are normal.
-Reset accepts exact successor IDs or reserves new ones. Do not locate targets
+Reset consumes exact successor IDs from the retained plan and reserves them
+before effects, with explicit create/existing intent. Do not locate targets
 by chapter name. Existing explicit target Projects retain identity and content;
 apply only the authored next-plan changes supplied to the operation. Copy an
 optional Flow only when present. Install the supplied new KRs and any supplied
@@ -701,8 +698,9 @@ cases below own requirements; this list identifies each next cut:
 4. Transition persistence and exact-ID ensure are implemented with stateful
    operation recovery coverage. Retain the released-frontier migration test;
    cross-checkout CLI proof remains with gate's project-readiness acceptance.
-5. Replace rotation through Wave-scoped KR-first creation and repository
-   composition, retaining preservation coverage with the new recovery semantics.
+5. Implement the October 5 recovery correction: retained exact-ID input,
+   transition-owned selected issue IDs, Wave-scoped KR-first rotation and
+   repository composition; prove both sides of the binding switch.
 6. Add Desktop activation and explicit reset preview/apply/retry per **Outcome and
    demo**. Rename ordinary Chapter labels to Project; keep metrics with Project.
    Change Rust/Swift DTO fields and fixtures together, without defaults.
@@ -880,12 +878,8 @@ preparation is not publication. Release's child memory still records manual
 v0.13.3 verification, unresolved unattended settlements and the operation-entry
 recovery obligation for ensure/rotation.
 
-Earlier compression evidence in this plan's Git history: checkout admission at
-`25542c7b1`, binding at `1e5086aa3` (the empty mapping template failed two tests),
-and reteam at `3555375af`. Their surviving constraints are retained above.
-
 Release's operation-entry recovery lesson still applies; its publication and
 installation evidence establishes no Project-readiness acceptance. Registration
 compression and prior check evidence remain at `eb80d7198178a418cf44b3074f9b666f3e11cd40`.
 
-Checks: `cargo test -p loopflow --lib --no-run` passed; compiled lib filters `project_ensure` (7) and `project_binding` (5) passed under `scripts/test_network.py`; `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` passed. Realignment: `git diff --check` passed; no runtime changes or test rerun. Gate retains configured/CLI/Desktop acceptance, the prior output-handle leak and CI repair.
+Checks: `cargo test -p loopflow --lib --no-run` passed; compiled lib filters `project_ensure` (7) and `project_binding` (5) passed under `scripts/test_network.py`; `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` passed. Recovery design correction: `git diff --check` passed; no runtime change or test rerun. Gate retains configured/CLI/Desktop acceptance, the prior output-handle leak and CI repair.

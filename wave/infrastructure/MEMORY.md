@@ -11,8 +11,8 @@ and the decision delivered in comment `3829b49e-2ade-4bee-8850-2ae2297399a8`
 on [LOO-370](https://linear.app/loopflow/issue/LOO-370/finish-removing-the-retired-run-model-from-runtime-and-tooling).
 Preserve populated history and one storage owner, remove unnecessary offline
 conversion machinery, and retain the alias/recovery counterevidence in history.
-Source delivery is authorized; installed-Home migration, live interruption and
-release are not authorized by this cleanup decision.
+Only source delivery is authorized; installed migration, live interruption and
+release remain unauthorized.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -24,25 +24,21 @@ implementation and configured acceptance remain unfinished; neither approval
 establishes readiness. Earlier detail remains at
 `c4373492cfc0c77fc27a7887045f74c48b381e72:wave/infrastructure/MEMORY.md`.
 
-The current Infrastructure Project now recommends `code` (pursue, then PR review),
-following Jack's accepted review direction and installation of v0.13.3. Its KRs
-and targets are unchanged. Existing captured Flows retain their review boundaries.
-
-The October 5 operation retired LOO-326's two stopped recovery Flows and closed
-its finished independent conversation through supported commands. Completion
-still rejects unfinished read-only Exec `5f239ead-89f9-49c4-92c4-4c2f8b97ca94`;
-shipped PRs #1413/#1435 do not resolve that remaining lifecycle evidence gap.
-LOO-367's saved loop-decide failed on a native-thread mismatch; do not replace
-its conversation or replay on unchanged evidence. LOO-370's earlier disk blocker
-has cleared; its physical conversion requirement is superseded by the explicit
-opaque-root decision above, without permission to migrate the installed Home.
+The current Infrastructure Project recommends `code` after Jack's accepted review
+direction and v0.13.3 installation; KRs/targets and captured review boundaries remain.
+LOO-326's stopped recovery Flows and independent conversation closed, but unknown
+Exec `5f239ead-89f9-49c4-92c4-4c2f8b97ca94` still blocks completion. LOO-367's
+native-thread mismatch remains unresolved; preserve its conversation and evidence.
+LOO-370's disk blocker cleared; the opaque-root decision above supersedes conversion,
+without installed-Home migration authority. October 5 operation detail remains at
+`57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
 
 ## Release follow-through (2026-10-04)
 
 Jack Heart directed Infrastructure to take responsibility for finishing every
 release. Release owns the release-specific execution and evidence; Infrastructure
 retains responsibility through verified publication and installed acceptance.
-A merged version bump, successful agent turn, or queued build is not completion.
+A merged bump or queued build is not completion.
 Resume interrupted releases through the supported release operation, preserve
 exact publication evidence, and surface any unresolved blocker and next action
 without requiring Jack to rediscover the gap. Keep progress updates in the
@@ -219,8 +215,7 @@ automatic shared failover. Isolated agents retain their own account/fallback.
 The updated Linear brief owns the current scope; stop-bundling's branch evidence
 does not yet establish shipment.
 
-Renamed from `systems` on 2026-07-08. Current objectives and configured release
-schedule supersede historical nightly/weekly notes.
+Renamed from `systems` on 2026-07-08; current schedules supersede historical ones.
 
 The 2026-09-30 [LOO-298 decisions](#data-model-and-performance-decisions-reconciled-2026-09-30)
 supersede older Run-owner, historical-import, pinned-development-Home and
@@ -347,15 +342,18 @@ and remain visible. Malformed bodies stay errors. Earlier reader/store evidence
 and the unresolved output-handle leak remain at
 `1825a5a45c743833f625e8c8144949ed139b97f9:wave/infrastructure/MEMORY.md`.
 
-`lf wave ensure` reserves one UUID before creation and settles after binding
-confirmation. Six operation fixtures cover same-process concurrency, uncertain mutations,
-binding recovery and Backlog without Flow; the seventh test covers migration.
-Post-binding recovery is seeded, not a process interruption. Accepted facts precede activation,
-so delayed Backlog cannot reopen newer completed history. Rotation still neither
-consumes these receipts nor switches the binding. Exact-ID/KR-first rotation,
-cross-process crashes, Desktop and configured Intelligence acceptance remain open;
-no installed-Home write is authorized. Release's operation-entry lesson applies:
-ensure proofs cannot establish rotation recovery.
+Ensure's six synthetic operation fixtures and one migration proof retain exact-ID
+creation, uncertain mutations and empty-Flow Backlog. Post-binding recovery is seeded,
+not a crash; accepted facts precede activation. Evidence:
+`57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:scratch/keep-every-wave-ready-for.md`.
+
+October 5 source review found two rotation gaps: name-only retries cannot identify
+settled destinations; current membership cannot identify the original transfer set
+after the binding switch. The revised plan retains exact destinations in caller
+input and selected issue IDs in transition evidence, without selection/execution
+authority. Later historical starts stay put; external moves remain conflicts.
+These source-derived counterexamples are not executed proofs or new Jack Heart
+approvals. Rotation, Desktop and configured Intelligence acceptance remain open.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 
@@ -463,11 +461,9 @@ entry is not evidence of shipment or configured Desktop acceptance.
 
 ## Synced planning integration (LOO-334, 2026-09-30)
 
-Main's landed current-state cutover supersedes the earlier intermediate-schema
-bridge below. Planning now migrates from released Session ownership; it does not
-restore the historical importer or old execution drafts. Managed validation uses
-the single FlowSession driver, after native recovery and completed-Task cleanup.
-Task adoption retains branch/worktree/PR identity without inferring Flow progress.
+Main's landed cutover supersedes the intermediate-schema bridge. Retained
+integration detail: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
+Planning preserves Task/PR identity without inferring execution progress.
 
 ## Planning and launch preservation (curated 2026-10-02)
 
@@ -1066,7 +1062,6 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 
 ## Direct invocation and large inputs (curated 2026-10-05)
 
-`44fe36620:wave/infrastructure/MEMORY.md` retains direct-invocation and large-input
-evidence. Caller-owned checkpointing, common invocation loading and Claude's
-file-backed stdin remain required. Codex's rejected `turn/start` remaining waiting
-is unresolved; Claude success proves no repair.
+`44fe36620:wave/infrastructure/MEMORY.md` retains evidence. Preserve caller-owned
+checkpointing, common invocation loading and Claude's file-backed stdin. Rejected
+Codex `turn/start` remaining waiting is unresolved; Claude success proves no repair.

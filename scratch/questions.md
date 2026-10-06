@@ -21,3 +21,9 @@ status and evidence; earlier review notes remain at
 
 Shared local binding ownership and the bounded historical name-only cutover are
 resolved. Neither decision establishes implementation or installed acceptance.
+
+October 6: Jack Heart authorized SQLite selection, one-time YAML import and LOO-382
+integration. Import at explicit ensure/binding/applied rotation retains the original
+file bytes as evidence and makes the old file inert; absence is recorded once too.
+This is a reversible implementation choice within the accepted cutover. No additional
+provider, installation, release or managed-review authority follows from it.

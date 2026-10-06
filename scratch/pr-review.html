@@ -1,804 +1,603 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PR #1452 walkthrough · reactive workspace</title>
-<style>
-:root{--ink:#1f1b18;--soft:#6b635c;--rule:#e4ddd3;--paper:#fbf8f3;--code:#f3eee6;--accent:#7a2e2e;--note:#f6efe2}
-*{box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
-main{max-width:1040px;margin:0 auto;padding:56px 24px 96px}
-h1{font:600 30px/1.2 Georgia,"Times New Roman",serif;margin:0 0 8px}
-h2{font:600 22px/1.3 Georgia,"Times New Roman",serif;margin:72px 0 6px;padding-top:20px;border-top:1px solid var(--rule)}
-h3{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--soft);margin:32px 0 8px}
-p{margin:0 0 14px;max-width:70ch}
-a{color:var(--accent)}
-a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-p code,li code,td code,dd code{font-size:.88em;background:var(--code);padding:1px 4px;border-radius:3px}
-.meta{color:var(--soft);font-size:14px;margin-bottom:20px}
-nav{font-size:14px;margin:20px 0 0;display:flex;flex-wrap:wrap;gap:6px 18px}
-nav a{text-decoration:none;border-bottom:1px solid var(--rule)}
-figure{margin:18px 0 22px}
-pre{margin:0;background:var(--code);padding:16px 18px;border-radius:4px;overflow-x:auto;font-size:13px;line-height:1.55;tab-size:4}
-figcaption{font-size:12.5px;color:var(--soft);margin-top:6px;overflow-wrap:anywhere}
-figcaption code{font-size:12px}
-.ln{color:#b0a698;user-select:none}
-.om{color:var(--soft);font-style:italic}
-pre.term{white-space:pre-wrap;overflow-wrap:anywhere}
-.term .p{color:var(--accent);user-select:none}
-.term .c{color:var(--soft)}
-.note{background:var(--note);border-left:3px solid var(--accent);padding:12px 16px;margin:16px 0 22px;max-width:76ch;font-size:15px}
-.note p:last-child{margin-bottom:0}
-.note b{font-weight:600}
-table{border-collapse:collapse;width:100%;margin:18px 0;font-size:15px}
-th,td{text-align:left;vertical-align:top;padding:10px 14px 10px 0;border-bottom:1px solid var(--rule)}
-th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--soft);font-weight:600}
-details{margin:14px 0;border-top:1px solid var(--rule);padding-top:10px}
-summary{cursor:pointer;font-size:14px;color:var(--soft)}
-ol.dec{padding-left:20px;max-width:76ch}
-ol.dec li{margin-bottom:14px}
-@media (max-width:720px){
- main{padding:32px 16px 64px}
- table.map thead{display:none}
- table.map,table.map tbody,table.map tr,table.map td{display:block;width:100%}
- table.map tr{border-bottom:1px solid var(--rule);padding:10px 0}
- table.map td{border:0;padding:3px 0}
- table.map td::before{content:attr(data-l);display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--soft)}
- pre{font-size:12px;padding:12px}
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Wave Project readiness — code walkthrough</title><style>*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#faf9f6;color:#202825;font:17px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:64px auto;padding:0 32px 80px}h1{font-size:38px;line-height:1.15;font-weight:600;letter-spacing:-1px}h2{font-size:27px;font-weight:550;margin:0 0 12px}p{max-width:850px}a{color:#225e57;text-underline-offset:3px}nav{display:flex;gap:22px;flex-wrap:wrap;margin:28px 0}small,figcaption,.meta{color:#56615c;font-size:13px}table{width:100%;border-collapse:collapse;margin:30px 0}th,td{text-align:left;vertical-align:top;padding:16px 12px;border-bottom:1px solid #cfd6d0}th{font-size:13px}td:first-child{width:22%}section{margin-top:72px;scroll-margin-top:25px}figure{margin:26px 0}figcaption{margin-bottom:8px;overflow-wrap:anywhere}pre{background:#edf0eb;padding:22px;overflow-x:auto;font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;tab-size:4;border-left:2px solid #9eafa4}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}details{padding:14px 0;border-top:1px solid #cfd6d0}summary{cursor:pointer}a:focus-visible,summary:focus-visible,pre:focus-visible{outline:3px solid #267c70;outline-offset:4px}.note{border-left:2px solid #9eafa4;padding-left:18px}@media(max-width:650px){main{padding:0 18px;margin:32px auto}h1{font-size:30px}table,tbody,tr,td{display:block}thead{display:none}td,td:first-child{width:auto;border:0;padding:5px 0}tr{padding:15px 0;border-bottom:1px solid #cfd6d0}td:before{content:attr(data-label);display:block;font-size:12px;color:#56615c}pre{font-size:13px;padding:14px}section{margin-top:50px}}@media print{body{background:white}main{margin:0;max-width:none;padding:0}nav{display:none}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:10px}section{break-before:page}a{color:inherit}details{display:block}}</style><main><header><p class="meta">LOO-366 · LOCAL BRANCH REVIEW · OCTOBER 6, 2026</p><h1>A usable Project when you open a Wave</h1><p>The branch separates ordinary Project activation from chapter rotation. Follow opening, persistent selection, recovery, then explicit realignment.</p><p class="meta">Base 1af81fe030177217dafedf192a1ad8c6a4ea095c → head 42e6c2706b1b35b2852e438ff94a49d060faccda. GitHub reports no PR for this branch. Uncommitted design/demo notes are separate from the committed code shown here; the temporary demo harness is excluded.</p></header><nav aria-label="Reading route"><a href="#open">Open a Wave</a><a href="#ensure">Activate and retry</a><a href="#rotate">Realign Projects</a><a href="#proof">Evidence limits</a></nav><table><thead><tr><th>When you…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody><tr><td data-label="When you…"><a href="#open">Open a Wave in Portfolio</a></td><td data-label="What happens">Cached planning remains visible while its selected Project is prepared; a failed preparation offers Retry.</td><td data-label="Where code controls this">ProjectPreparation calls the same ensure operation as the CLI; the polling task only reads.</td></tr><tr><td data-label="When you…"><a href="#ensure">Activate an existing ordinary Project</a></td><td data-label="What happens">The configured UUID is activated without requiring a Flow or renaming the Project.</td><td data-label="Where code controls this">ensure accepts provider facts before activation; the shared Home file selects the Project across checkouts.</td></tr><tr><td data-label="When you…"><a href="#ensure">Retry an uncertain creation</a></td><td data-label="What happens">The reserved UUID survives failure, so retry resumes the same creation.</td><td data-label="Where code controls this">ProjectTransition records the intended identity before provider effects; successful readback and binding settle it.</td></tr><tr><td data-label="When you…"><a href="#rotate">Explicitly realign Projects</a></td><td data-label="What happens">Started work carries forward; unreviewed backlog stays in its prior Project. Failed Apply retains the reviewed input.</td><td data-label="Where code controls this">ChapterPlan names exact destinations; apply_rotation switches the shared binding before completing the predecessor.</td></tr></tbody></table><p class="note">Accepted direction: Jack Heart selected one shared local binding and exact Project IDs. This supersedes the original task’s automatic candidate discovery. One configured current Project does not enforce one In Progress Project throughout Linear: other active Projects are left untouched.</p><p class="note"><strong>Observed gap in the disposable app:</strong> the main workspace opens Wave A without invoking ensure. It displays the configured Backlog Project and an empty Flow section. The activation code below belongs to the Portfolio pane. Ordinary opening is therefore not covered end to end.</p><section id="open"><h2>1. Opening prepares; polling observes</h2><p>New in this branch: Portfolio opening and Retry invoke activation outside the existing status loop. The primary conversation is independent. A generation check rejects obsolete results.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/swift/LoopflowMac/Views/WaveDetailPane.swift#L35-L56">swift/LoopflowMac/Views/WaveDetailPane.swift · ProjectPreparation · 42e6c2706 · lines 35–56</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>@MainActor
+@Observable
+final class ProjectPreparation {
+    private(set) var isPreparing = false
+    private(set) var errorMessage: String?
+    private var generation = 0
+
+    func open(wave: String, repo: String, query: RegistryQuery) async {
+        generation += 1
+        let attempt = generation
+        isPreparing = true
+        errorMessage = nil
+        do {
+            try await query.ensureProject(wave: wave, cwd: repo)
+            guard attempt == generation, !Task.isCancelled else { return }
+        } catch {
+            guard attempt == generation, !Task.isCancelled else { return }
+            errorMessage = &quot;Project preparation failed: \(error.localizedDescription)&quot;
+        }
+        isPreparing = false
+    }
+}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/swift/LoopflowMac/Views/WaveDetailPane.swift#L174-L201">swift/LoopflowMac/Views/WaveDetailPane.swift · WavePlanView opening, polling and Retry · 42e6c2706 · lines 174–201</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>        .background(palette.background)
+        .task(id: &quot;\(identity)|\(preparationRetry)&quot;) {
+            guard wave.isRegistered, AppTestMode.current() != .mockWaves else { return }
+            await preparation.open(wave: wave.name, repo: repoPath, query: RegistryQueryLocal.shared)
+            guard !Task.isCancelled else { return }
+            await refreshDetail()
+        }
+        .task(id: refreshIdentity) {
+            while !Task.isCancelled {
+                await refreshDetail()
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var projectPreparation: some View {
+        if preparation.isPreparing {
+            ProgressView(&quot;Preparing Project…&quot;)
+        }
+        if let error = preparation.errorMessage {
+            VStack(alignment: .leading) {
+                Text(error).foregroundStyle(Color.statusWarning).textSelection(.enabled)
+                Button(&quot;Retry Project preparation&quot;) { preparationRetry += 1 }
+            }
+        }
+    }
+</code></pre></figure></section><p>The transport is direct: <code>RegistryQuery.ensureProject</code> executes <code>["wave", "ensure", wave, "--json"]</code>; completion triggers a fresh status read. The mock-waves app mode skips preparation, so a screenshot in that mode cannot prove activation.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/swift/LoopflowMac/Views/WorkSurfaceView.swift#L111-L166">swift/LoopflowMac/Views/WorkSurfaceView.swift · main workspace: current Project and empty Flow branch · 42e6c2706 · lines 111–166</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>    private var waveDetail: some View {
+        if let selection = model.selection, let roadmap = model.wave(id: selection.id) {
+            scrollingDetail(identifier: &quot;podium-detail-wave&quot;) {
+                VStack(alignment: .leading, spacing: Spacing.md) {
+                    HStack(alignment: .center, spacing: Spacing.md) {
+                        Text(roadmap.wave.displayName)
+                            .font(Typography.display)
+                            .foregroundStyle(palette.text)
+                            .accessibilityIdentifier(&quot;wave-title&quot;)
+                        Spacer()
+                    }
+                    if !roadmap.wave.goal.isEmpty {
+                        WaveObjectiveView(goal: roadmap.wave.goal, waveId: roadmap.wave.id)
+                    }
+                    ForEach(roadmap.unavailableTasks, id: \.taskId) { task in
+                        planningNotice(task)
+                    }
+                }
+
+                section {
+                    WorkspaceSectionHeading(title: &quot;Current KRs&quot;) {
+                        Button(&quot;Project history&quot;) {
+                            model.historyReference = nil
+                            model.historyWave = roadmap.wave
+                        }
+                        .buttonStyle(.plain)
+                        .font(Typography.body(12.5))
+                        .foregroundStyle(palette.textTertiary)
+                        .accessibilityIdentifier(&quot;wave-chapter-history&quot;)
+                    }
+                    if let chapter = roadmap.currentProject {
+                        WaveProjectView(project: chapter)
+                    } else {
+                        Text(&quot;No current Project plan.&quot;).font(Typography.body(13)).foregroundStyle(palette.textSecondary)
+                    }
+                }
+
+                if let name = roadmap.currentProject?.flow {
+                    section {
+                        WorkspaceSectionHeading(&quot;Flow · \(name)&quot;)
+                        if let entry = model.flowCatalog.value?.first(where: { $0.name == name }),
+                           let graph = entry.graph, let template = entry.template {
+                            FlowTemplateView(graph: graph, template: template, navigation: model.navigation)
+                        } else {
+                            Text(model.flowCatalog.value?.first(where: { $0.name == name })?.unavailable
+                                 ?? model.flowCatalog.errorMessage ?? &quot;Flow template unavailable&quot;)
+                                .font(Typography.caption())
+                        }
+                    }
+                    .task { await model.loadFlowCatalog() }
+                }
+
+                switch roadmap.tasks {
+                case .unavailable(let reason):
+                    section {
+                        WorkspaceSectionHeading(&quot;Tasks&quot;)</code></pre></figure><section id="ensure"><h2>2. Activate one identity; retry that identity</h2><p>Observed October 5 on installed v0.13.4, not this source revision. Relevant output only:</p><pre>$ lf --version
+lf 0.13.4
+$ lf wave status intelligence --json
+… "id":"999bdbdd-c045-41a6-8ffc-a97c4a40b0b3",
+  "name":"Chapter demo-20260924","flow":"","status":"backlog" …
+… "tasks":{"state":"unavailable",
+  "reason":"Wave intelligence has no In Progress Project"} …</pre><p>Illustrative recovery commands after this branch is available; not executed against production:</p><pre>lf wave bind-project intelligence 999bdbdd-c045-41a6-8ffc-a97c4a40b0b3 --json
+lf wave ensure intelligence --json</pre><p>The base delegated current selection to chapter orchestration. This branch instead reads <code>&lt;Home&gt;/waves/&lt;WaveId&gt;/config.yaml</code>. The file owns selection; Linear owns status and content; SQLite owns accepted planning and recovery evidence.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/store/project_transitions.rs#L7-L17">rust/loopflow/src/store/project_transitions.rs · ProjectTransition · 42e6c2706 · lines 7–17</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>/// Recovery evidence for one explicit Project creation or rotation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProjectTransition {
+    pub wave_id: WaveId,
+    pub successor_id: String,
+    pub predecessor_id: Option&lt;String&gt;,
+    pub reset_name: Option&lt;String&gt;,
+    pub create_successor: Option&lt;bool&gt;,
+    pub created_at: i64,
+    pub settled_at: Option&lt;i64&gt;,
+}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/project.rs#L131-L228">rust/loopflow/src/ops/project.rs · ensure: select or reserve identity · 42e6c2706 · lines 131–228</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>pub async fn ensure(repo: &amp;Path, name: &amp;str) -&gt; OpsResult&lt;PmProject&gt; {
+    let store = super::pm::pm_store().await?;
+    let wave = crate::work::wave::context::resolve_managed_wave(
+        Some(&amp;store),
+        Some(repo),
+        Some(name),
+        None,
+    )
+    .await
+    .map_err(project_error)?;
+    super::pm::require_planning_home(&amp;store, &amp;wave).await?;
+    let acquisition = super::pm::lock_wave_planning(&amp;wave).await?;
+    let home = store.sqlite.home_dir().map_err(project_error)?;
+    let selected = read_project_binding(&amp;home, wave.id()).map_err(project_error)?;
+    let pending = store
+        .pending_project_transition(wave.id())
+        .await
+        .map_err(project_error)?;
+    let mut creation = match pending {
+        Some(transition)
+            if transition.predecessor_id.is_none() &amp;&amp; transition.reset_name.is_none() =&gt;
+        {
+            Some(transition)
+        }
+        Some(_) if selected.is_none() =&gt; {
+            return Err(project_error(
+                &quot;Project rotation is unfinished; resume the explicit reset&quot;,
+            ));
+        }
+        _ =&gt; None,
+    };
+    if let Some(creation) = &amp;creation {
+        if selected
+            .as_deref()
+            .is_some_and(|id| id != creation.successor_id)
+        {
+            return Err(project_error(
+                &quot;Project selection changed during creation; reconcile the retained transition&quot;,
+            ));
+        }
+    }
+    let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
+    if selected.is_none() &amp;&amp; creation.is_none() {
+        ctx.client
+            .require_initiative(&amp;ctx.initiative)
+            .await
+            .map_err(project_error)?;
+        let reserved = ProjectTransition {
+            wave_id: wave.id().clone(),
+            successor_id: uuid::Uuid::new_v4().to_string(),
+            predecessor_id: None,
+            reset_name: None,
+            create_successor: None,
+            created_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+            settled_at: None,
+        };
+        store
+            .reserve_project_transition(reserved.clone(), acquisition.clone())
+            .await
+            .map_err(project_error)?;
+        creation = Some(reserved);
+    }
+    let id = selected
+        .as_deref()
+        .or_else(|| creation.as_ref().map(|t| t.successor_id.as_str()))
+        .expect(&quot;selection or creation reservation exists&quot;);
+    let mut observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+    let mut project = match ctx.client.find_project(id).await.map_err(project_error)? {
+        Some(project) =&gt; project,
+        None if creation.is_some() &amp;&amp; selected.is_none() =&gt; {
+            ctx.client
+                .require_initiative(&amp;ctx.initiative)
+                .await
+                .map_err(project_error)?;
+            let content = ProjectContent {
+                flow: String::new(),
+                krs: Vec::new(),
+                metric_targets: Vec::new(),
+            };
+            let created = ctx
+                .client
+                .create_project(&amp;ctx.initiative, wave.slug(), &amp;content, Some(id))
+                .await
+                .map_err(project_error)?;
+            if created != id {
+                return Err(project_error(
+                    &quot;provider returned a different Project identity&quot;,
+                ));
+            }
+            observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+            require_project(&amp;ctx, id).await?
+        }
+        None =&gt; {
+            return Err(project_error(format!(
+                &quot;configured Project {id} is unavailable; its binding is unchanged&quot;
+            )))
+        }
+    };</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/project.rs#L229-L276">rust/loopflow/src/ops/project.rs · ensure: accept, activate, bind and settle · 42e6c2706 · lines 229–276</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>    require_active_candidate(&amp;project)?;
+    // Only a retained creation reservation authorizes repairing an unattached Project.
+    if creation.is_some()
+        &amp;&amp; project.initiative_ids.is_empty()
+        &amp;&amp; project.team_ids == [ctx.team_id.clone()]
+    {
+        ctx.client
+            .attach_project(&amp;ctx.initiative, id)
+            .await
+            .map_err(project_error)?;
+        observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        project = require_project(&amp;ctx, id).await?;
+    }
+    project = accept_project(&amp;store, &amp;wave, &amp;ctx, project, observed_at, &amp;acquisition).await?;
+    require_active_candidate(&amp;project)?;
+    if project.status != ProjectStatus::Started {
+        ctx.client
+            .set_project_status(id, ProjectStatus::Started)
+            .await
+            .map_err(project_error)?;
+        observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        project = require_project(&amp;ctx, id).await?;
+        project = accept_project(&amp;store, &amp;wave, &amp;ctx, project, observed_at, &amp;acquisition).await?;
+        if project.status != ProjectStatus::Started {
+            return Err(project_error(
+                &quot;accepted Project evidence does not confirm activation&quot;,
+            ));
+        }
+    }
+    write_project_binding(&amp;home, wave.id(), selected.as_deref(), id, &amp;acquisition)
+        .map_err(project_error)?;
+    if read_project_binding(&amp;home, wave.id())
+        .map_err(project_error)?
+        .as_deref()
+        != Some(id)
+    {
+        return Err(project_error(
+            &quot;Project binding confirmation changed; retry ensure&quot;,
+        ));
+    }
+    if creation.is_some() {
+        store
+            .settle_project_transition(wave.id(), id, acquisition)
+            .await
+            .map_err(project_error)?;
+    }
+    Ok(project)
+}</code></pre></figure><p class="note">No binding means creation, even if an ordinary Project already exists. Rollout must seed known IDs first. Missing access or terminal history is an error, never permission to replace the configured Project. Ordinary creation requires neither KRs nor Flow.</p><details><summary>Shared file preservation and observational reads</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/work/wave/project_binding.rs#L60-L139">rust/loopflow/src/work/wave/project_binding.rs · read_project_binding / write_project_binding · 42e6c2706 · lines 60–139</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>    let path = path(home, wave);
+    read(&amp;path)?
+        .map(|content| decode(&amp;path, &amp;content))
+        .transpose()
+        .map(Option::flatten)
 }
-@media print{body{background:#fff}pre{white-space:pre-wrap;border:1px solid #ddd}nav{display:none}details>*{display:block}h2{break-after:avoid}}
-</style>
-</head>
-<body>
-<main>
-<h1>The open workspace follows the store and the checkouts</h1>
-<p class="meta"><a href="https://github.com/loopflowstudio/loopflow/pull/1452">PR #1452</a> · LOO-382 · base <code>1af81fe03</code> → head <code>410cffecb</code> · published head equals the local branch; no unpublished changes · 71 files, +6,796 −617</p>
 
-<p>Jack Heart asked that a change made anywhere appear in the open Desktop window without a refresh. Each window keeps one <code>lf</code> process open. The store counts displayed changes, the process watches Task checkouts on disk, and it re-reads and sends only the parts that could have changed. After the first walkthrough Jack asked that reading the current Waves and Tasks be simple and fast, so the read behind the list was rebuilt as well.</p>
-<p>Delivered since the last walkthrough: a planning read that went from about 2 s to about 0.2 s, a first reading recorded at 1.1–2.3 s where it was 6.5–7.1 s (4.65 s in this page's own run, at load 33), checkout changes within seconds, token totals within about 10 s, a failing part that backs off, and the working-set rule moved from Swift to Rust. Dropped with measurements: one reader per window, and exempting read-only commands. Both are in <a href="#decisions">Open decisions</a>.</p>
+/// The caller retains the Wave planning guard through provider reconciliation.
+pub(crate) fn write_project_binding(
+    home: &amp;Path,
+    wave: &amp;WaveId,
+    expected: Option&lt;&amp;str&gt;,
+    project: &amp;str,
+    _guard: &amp;crate::store::PlanningLocks,
+) -&gt; Result&lt;(), BindingError&gt; {
+    let path = path(home, wave);
+    uuid::Uuid::parse_str(project).map_err(|e| error(&amp;path, e))?;
+    let previous = read(&amp;path)?;
+    let selected = previous
+        .as_deref()
+        .map(|s| decode(&amp;path, s))
+        .transpose()?
+        .flatten();
+    if selected.as_deref() != expected {
+        return Err(error(
+            &amp;path,
+            &quot;Project selection changed; preserve the intervening decision&quot;,
+        ));
+    }
+    if selected.as_deref() == Some(project) {
+        return Ok(());
+    }
+    let file = YamlFile::from_str(previous.as_deref().unwrap_or(&quot;pm:\n  {}\n&quot;))
+        .map_err(|e| error(&amp;path, e))?;
+    let document = file
+        .document()
+        .ok_or_else(|| error(&amp;path, &quot;missing document&quot;))?;
+    if document.get_mapping(&quot;pm&quot;).is_none() {
+        document.set(&quot;pm&quot;, yaml_edit::Mapping::new());
+    }
+    let pm = document
+        .get_mapping(&quot;pm&quot;)
+        .ok_or_else(|| error(&amp;path, &quot;pm must be a mapping&quot;))?;
+    pm.set(&quot;linear_project&quot;, project);
+    let rendered = file.to_string();
+    if decode(&amp;path, &amp;rendered)?.as_deref() != Some(project) {
+        return Err(error(
+            &amp;path,
+            &quot;edited document did not retain the selected Project&quot;,
+        ));
+    }
+    let parent = path.parent().expect(&quot;Wave configuration has a parent&quot;);
+    fs::create_dir_all(parent).map_err(|e| error(&amp;path, e))?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|e| error(&amp;path, e))?;
+    temporary
+        .write_all(rendered.as_bytes())
+        .map_err(|e| error(&amp;path, e))?;
+    temporary
+        .as_file()
+        .sync_all()
+        .map_err(|e| error(&amp;path, e))?;
+    // Detect unrelated file edits made while constructing the replacement too.
+    if read(&amp;path)? != previous {
+        return Err(error(
+            &amp;path,
+            &quot;configuration changed while preparing the replacement&quot;,
+        ));
+    }
+    temporary.persist(&amp;path).map_err(|e| error(&amp;path, e))?;
+    File::open(parent)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|e| error(&amp;path, e))?;
+    Ok(())
+}
 
-<nav aria-label="Sections"><a href="#map">Map</a><a href="#s1">1 · A change reaches the window</a><a href="#s2">2 · What counts as a change</a><a href="#s3">3 · Checkouts on disk</a><a href="#s4">4 · Desktop applies a frame</a><a href="#s5">5 · Failure and recovery</a><a href="#s6">6 · The read made fast</a><a href="#s7">7 · The working set</a><a href="#decisions">Open decisions</a><a href="#evidence">Evidence</a></nav>
+#[cfg(test)]
+mod tests {
+    use super::{path, read_project_binding, write_project_binding};
+    use crate::id::WaveId;
+    use crate::store::PlanningLocks;</code></pre></figure></details></section><section id="rotate"><h2>3. Realignment is an explicit plan</h2><p>The caller supplies KRs and stable successor UUIDs before mutation. Every pair is reserved before the first provider write; retry consumes that plan. Chapter history metadata remains a proposed extension, not implemented by this receipt.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/chapter.rs#L36-L52">rust/loopflow/src/ops/chapter.rs · ChapterPlan and WaveChapterPlan · 42e6c2706 · lines 36–52</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>/// Retained command input. Names describe the plan; IDs select its destinations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChapterPlan {
+    pub name: String,
+    pub waves: Vec&lt;WaveChapterPlan&gt;,
+}
 
-<h2 id="map">Map</h2>
-<table class="map">
-<thead><tr><th>When you…</th><th>What happens</th><th>Where the code controls this</th></tr></thead>
-<tbody>
-<tr><td data-l="When you…">Create, rename or complete a Task from a terminal, a worker, or another window</td><td data-l="What happens">The open window's rows change in place in well under a second. A Task with no started work shows in its Wave's Task list and stays out of the left outline, by Jack's decision.</td><td data-l="Where the code controls this">Schema triggers count the write; the reader's loop sees the count move and re-reads planning. <a href="#s1">Stop 1</a>, <a href="#s2">Stop 2</a></td></tr>
-<tr><td data-l="When you…">Edit a file or commit in a Task's checkout</td><td data-l="What happens">The Task's condition updates within about three seconds. A build writing ignored files costs a few Git commands and no re-read.</td><td data-l="Where the code controls this">A filesystem watch names the checkout; Git is asked again about that checkout only; planning is re-read only if an answer differs. <a href="#s3">Stop 3</a></td></tr>
-<tr><td data-l="When you…">Let an agent work for hours</td><td data-l="What happens">Transcript lines re-read nothing. Token totals in a Wave's Session history update at most every 10 seconds.</td><td data-l="Where the code controls this">Two trigger conditions on Session events, and the rule that only Wave detail follows usage. <a href="#s2">Stop 2</a></td></tr>
-<tr><td data-l="When you…">Rename or complete a Session inside Desktop, or switch repository</td><td data-l="What happens">The row changes at once and cannot flicker back; rows for the previous repository are discarded.</td><td data-l="Where the code controls this">Desktop sends a numbered request and ignores frames that do not answer it. <a href="#s4">Stop 4</a></td></tr>
-<tr><td data-l="When you…">Lose the reader, or hit a part that cannot be read</td><td data-l="What happens">The last good rows stay, marked unavailable with the reason. The reader retries after 1, 2, 4 seconds and so on up to a minute.</td><td data-l="Where the code controls this">The retry schedule in the reader; the reopen loop in Desktop. <a href="#s5">Stop 5</a></td></tr>
-<tr><td data-l="When you…">Finish a Task whose checkout still holds unsettled work</td><td data-l="What happens">It stays in the outline until that work is settled.</td><td data-l="Where the code controls this">Rust derives one field on the Task's condition; Swift only reads it. <a href="#s7">Stop 7</a></td></tr>
-</tbody>
-</table>
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WaveChapterPlan {
+    pub wave_id: WaveId,
+    pub successor_id: String,
+    pub create: bool,
+    pub project_name: String,
+    pub content: ProjectContent,
+}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/chapter.rs#L390-L411">rust/loopflow/src/ops/chapter.rs · reserve all pairs before apply · 42e6c2706 · lines 390–411</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>    // Every pair is reserved before the first provider mutation.
+    for entry in &amp;prepared {
+        if !entry.reserved {
+            store
+                .reserve_project_transition(entry.transition.clone(), entry.acquisition.clone())
+                .await
+                .map_err(error)?;
+        }
+    }
+    for entry in &amp;mut prepared {
+        apply_rotation(&amp;store, entry).await.map_err(|cause| {
+            error(format!(
+                &quot;Wave {}: {cause}; retry with the same chapter plan&quot;,
+                entry.wave.slug()
+            ))
+        })?;
+    }
+    Ok(ChapterRotation {
+        name: plan.name.clone(),
+        waves: prepared.into_iter().map(|entry| entry.result).collect(),
+    })
+}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/chapter.rs#L710-L782">rust/loopflow/src/ops/chapter.rs · apply_rotation: confirmed switch and settlement · 42e6c2706 · lines 710–782</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>    if !entry.switched
+        &amp;&amp; rotation_tasks(store, entry).await?.iter().any(|task| {
+            task.task.project_id.as_deref() == entry.transition.predecessor_id.as_deref()
+                &amp;&amp; task.disposition != TaskDisposition::Historical
+        })
+    {
+        return Err(error(&quot;predecessor still has unfinished selected work&quot;));
+    }
+    let current = read_project(store, entry, &amp;id).await?;
+    if current.status != ProjectStatus::Started || !matches_plan(&amp;current, &amp;entry.input.content) {
+        return Err(error(&quot;successor changed before the Project switch&quot;));
+    }
+    if let Some(previous) = &amp;entry.transition.predecessor_id {
+        let current = read_project(store, entry, previous).await?;
+        if !matches!(
+            current.status,
+            ProjectStatus::Backlog
+                | ProjectStatus::Planned
+                | ProjectStatus::Started
+                | ProjectStatus::Completed
+        ) {
+            return Err(error(
+                &quot;predecessor status changed before the Project switch&quot;,
+            ));
+        }
+    }
+    let home = store.sqlite.home_dir().map_err(error)?;
+    let expected = if entry.switched {
+        Some(id.as_str())
+    } else {
+        entry.transition.predecessor_id.as_deref()
+    };
+    write_project_binding(&amp;home, entry.wave.id(), expected, &amp;id, &amp;entry.acquisition)
+        .map_err(error)?;
+    if let Some(previous) = &amp;entry.transition.predecessor_id {
+        let mut project = read_project(store, entry, previous).await?;
+        if !matches!(
+            project.status,
+            ProjectStatus::Backlog
+                | ProjectStatus::Planned
+                | ProjectStatus::Started
+                | ProjectStatus::Completed
+        ) {
+            return Err(error(&quot;predecessor status changed during rotation&quot;));
+        }
+        if project.status != ProjectStatus::Completed {
+            entry
+                .ctx
+                .client
+                .set_project_status(previous, ProjectStatus::Completed)
+                .await
+                .map_err(error)?;
+            project = read_project(store, entry, previous).await?;
+            if project.status != ProjectStatus::Completed {
+                return Err(error(&quot;predecessor completion is not confirmed&quot;));
+            }
+        }
+    }
+    if read_project_binding(&amp;home, entry.wave.id())
+        .map_err(error)?
+        .as_deref()
+        != Some(&amp;id)
+    {
+        return Err(error(
+            &quot;Project binding changed before settlement; preserve the intervening decision&quot;,
+        ));
+    }
+    store
+        .settle_project_transition(entry.wave.id(), &amp;id, entry.acquisition.clone())
+        .await
+        .map_err(error)?;
+    Ok(())
+}</code></pre></figure></section><p>Illustrative CLI: <code>lf repo new-chapter autumn --plan /path/to/chapter-plan.json --dry-run --json</code>, then the same command without <code>--dry-run</code>. The plan name must match. No rotation was performed in this review.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/swift/LoopflowMac/Views/ProjectRealignmentView.swift#L56-L85">swift/LoopflowMac/Views/ProjectRealignmentView.swift · perform: preserve preview bytes on failed Apply · 42e6c2706 · lines 56–85</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>    private func perform(previewOnly: Bool) {
+        busy = true
+        errorMessage = nil
+        Task {
+            defer { busy = false }
+            do {
+                let input: String
+                if previewOnly {
+                    let path = (plan as NSString).expandingTildeInPath
+                    input = try await Task.detached {
+                        try String(contentsOfFile: path, encoding: .utf8)
+                    }.value
+                } else {
+                    guard let preview else { return }
+                    input = preview.input
+                }
+                let report = try await RegistryQueryLocal.shared.realignProjects(
+                    name: name, plan: input, preview: previewOnly, cwd: repo
+                )
+                preview = (input, report)
+                applied = !previewOnly
+                if applied { onApplied() }
+            } catch {
+                // An uncertain apply retries the reviewed bytes, even if the file changed.
+                if previewOnly { preview = nil }
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+}</code></pre></figure><p class="note">The Desktop control requires a retained JSON file path. It exposes the operation, but does not author a chapter plan. The skills provide KR planning and separate candidate admission; whether this file-based interaction is convenient remains a product review question.</p><details><summary>Why backlog stays while started work moves</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/chapter.rs#L963-L1030">rust/loopflow/src/ops/chapter.rs · classify_task · 42e6c2706 · lines 963–1030</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>pub fn classify_task(task: &amp;PmItem, evidence: &amp;TaskStartEvidence) -&gt; (TaskDisposition, String) {
+    let state = task.state.as_deref();
+    let terminal = matches!(state, Some(&quot;completed&quot; | &quot;canceled&quot; | &quot;duplicate&quot;)) || task.completed;
+    if evidence.abandoned
+        &amp;&amp; !terminal
+        &amp;&amp; (state == Some(&quot;started&quot;)
+            || evidence.worker_claimed
+            || evidence.begun
+            || evidence.published
+            || evidence.authored != Some(false))
+    {
+        let reason = if evidence.authored.is_none() {
+            &quot;local retirement has unavailable checkout evidence&quot;
+        } else {
+            &quot;local retirement conflicts with refreshed start evidence&quot;
+        };
+        return (TaskDisposition::Unresolved, reason.into());
+    }
+    if evidence.completed &amp;&amp; !terminal {
+        return (
+            TaskDisposition::Unresolved,
+            &quot;local completion awaits provider settlement&quot;.into(),
+        );
+    }
+    if evidence.abandoned &amp;&amp; !terminal &amp;&amp; !evidence.completed {
+        return (
+            TaskDisposition::Unresolved,
+            &quot;local abandonment awaits explicit provider settlement&quot;.into(),
+        );
+    }
+    if terminal || evidence.completed {
+        if evidence.worker_claimed {
+            return (
+                TaskDisposition::Unresolved,
+                &quot;terminal planning state conflicts with an active worker claim&quot;.into(),
+            );
+        }
+        return (
+            TaskDisposition::Historical,
+            &quot;work is already terminal&quot;.into(),
+        );
+    }
+    if evidence.worker_claimed
+        || evidence.begun
+        || evidence.published
+        || evidence.authored == Some(true)
+        || state == Some(&quot;started&quot;)
+    {
+        return (
+            TaskDisposition::Move,
+            &quot;work has started; retain its identity and execution&quot;.into(),
+        );
+    }
+    if evidence.authored == Some(false) &amp;&amp; matches!(state, Some(&quot;backlog&quot; | &quot;unstarted&quot; | &quot;triage&quot;))
+    {
+        return (
+            TaskDisposition::Historical,
+            &quot;unreviewed backlog remains in its existing Project&quot;.into(),
+        );
+    }
+    (
+        TaskDisposition::Unresolved,
+        &quot;start evidence is unavailable; refresh before rotating this Task&quot;.into(),
+    )
+}
 
-<h2 id="s1">1 · A change reaches the window</h2>
-<p>A captured run of the command Desktop runs, against a private copy of Jack's store. Each line is one frame, reduced to its envelope; the planning body is about 600 KB and is not shown. Process-activity frames and heartbeats are left out.</p>
-<figure><pre class="term"><code><span class="p">$</span> lf monitor workspace --watch --json
-  4.65s  seq=2   answers=null planning  plan=10 sess=10 flow=0 exec=126 usag=145
-<span class="c">  6.29s  # other shell: sqlite3 renames Task LOO-382</span>
-  6.91s  seq=5   answers=null planning  plan=11 sess=10 flow=0 exec=126 usag=145
-<span class="c">  8.52s  # other shell: a file is written in this Task&#x27;s checkout</span>
- 11.48s  seq=9   answers=null planning  plan=11 sess=10 flow=0 exec=126 usag=145
-<span class="c"> 11.48s  # the file is removed</span>
- 14.50s  seq=12  answers=null planning  plan=11 sess=10 flow=0 exec=126 usag=145
-<span class="c"> 14.51s  # stdin: refresh id=9</span>
- 14.78s  seq=13  answers=9    planning  plan=11 sess=10 flow=0 exec=126 usag=145</code></pre>
-<figcaption>Observed 2026-10-06 04:34 with <code>target/release/lf</code> built at <code>410cffecb</code>, machine load 33. Times are from process start. Lines marked # are what a second shell did. The copy is a snapshot of Jack's store with this branch's draft schema applied by hand.</figcaption></figure>
-<p>The rename moved <code>planning</code> from 10 to 11 and its frame followed 0.62 s later. The file write and its removal moved no revision; their frames came 3.0 s later, from the checkout watch in <a href="#s3">Stop 3</a>. The refresh was answered in 0.27 s, and its frame says so with <code>answers=9</code>. The first reading took 4.65 s in this run; the plan records 1.1–2.3 s at lower load.</p>
-
-<h3>The line on the wire</h3>
-<figure><pre><code><span class="ln">  53</span>  /// One line of the stream. `sequence` orders every frame of one process;
-<span class="ln">  54</span>  /// `answers` is the newest request handled before this frame&#x27;s reading began.
-<span class="ln">  55</span>  #[derive(Debug, Clone, Serialize, Deserialize)]
-<span class="ln">  56</span>  pub struct WorkspaceFrame {
-<span class="ln">  57</span>      pub sequence: u64,
-<span class="ln">  58</span>      pub answers: Option&lt;u64&gt;,
-<span class="ln">  59</span>      pub home: String,
-<span class="ln">  60</span>      /// The store revisions this frame was read at; `null` before a store exists.
-<span class="ln">  61</span>      pub revisions: Option&lt;StoreRevisions&gt;,
-<span class="ln">  62</span>      /// Why this part could not be read. Its body is then `null`.
-<span class="ln">  63</span>      pub unavailable: Option&lt;String&gt;,
-<span class="ln">  64</span>      #[serde(flatten)]
-<span class="ln">  65</span>      pub content: WorkspaceContent,
-<span class="ln">  66</span>  }
-<span class="ln">  67</span>  
-<span class="ln">  68</span>  #[derive(Debug, Clone, Serialize, Deserialize)]
-<span class="ln">  69</span>  #[serde(tag = &quot;part&quot;, content = &quot;body&quot;, rename_all = &quot;snake_case&quot;)]
-<span class="ln">  70</span>  #[non_exhaustive]
-<span class="ln">  71</span>  pub enum WorkspaceContent {
-<span class="ln">  72</span>      Planning(Option&lt;Box&lt;PlanningPart&gt;&gt;),
-<span class="ln">  73</span>      Sessions(Option&lt;SessionsPart&gt;),
-<span class="ln">  74</span>      Task(Option&lt;TaskPart&gt;),
-<span class="ln">  75</span>      Wave(Option&lt;Box&lt;WavePart&gt;&gt;),
-<span class="ln">  76</span>      WorkActivity(Option&lt;WorkActivityPart&gt;),
-<span class="ln">  77</span>      Activity(Option&lt;ActivitySnapshot&gt;),
-<span class="ln">  78</span>      Heartbeat(Heartbeat),
-<span class="ln">  79</span>  }
-<span class="om">    ⋮  lines 80–122 omitted</span>
-<span class="ln"> 123</span>  /// `projections` counts readings per part, including those that sent nothing.
-<span class="ln"> 124</span>  #[derive(Debug, Clone, Serialize, Deserialize)]
-<span class="ln"> 125</span>  pub struct Heartbeat {
-<span class="ln"> 126</span>      pub projections: BTreeMap&lt;String, u64&gt;,
-<span class="ln"> 127</span>  }
-<span class="ln"> 128</span>  
-<span class="ln"> 129</span>  #[derive(Debug, Clone, Deserialize)]
-<span class="ln"> 130</span>  #[serde(tag = &quot;action&quot;, rename_all = &quot;snake_case&quot;, deny_unknown_fields)]
-<span class="ln"> 131</span>  enum Request {
-<span class="ln"> 132</span>      /// What this window shows. Replaces the previous scope.
-<span class="ln"> 133</span>      Scope {
-<span class="ln"> 134</span>          id: u64,
-<span class="ln"> 135</span>          repo: Option&lt;String&gt;,
-<span class="ln"> 136</span>          headless: bool,
-<span class="ln"> 137</span>          task: Option&lt;String&gt;,
-<span class="ln"> 138</span>          wave: Option&lt;String&gt;,
-<span class="ln"> 139</span>          activity: Option&lt;WorkActivityScope&gt;,
-<span class="ln"> 140</span>      },
-<span class="ln"> 141</span>      /// Read every part again and answer, changed or not: after a local
-<span class="ln"> 142</span>      /// write, sleep, or any other gap in observation.
-<span class="ln"> 143</span>      Refresh { id: u64 },
-<span class="ln"> 144</span>  }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/rust/loopflow/src/lf/commands/workspace_watch.rs#L53-L144"><code>rust/loopflow/src/lf/commands/workspace_watch.rs</code></a> · <code>WorkspaceFrame, WorkspaceContent, Heartbeat, Request</code> · 410cffecb · lines 53–79, 123–144</figcaption></figure>
-<p>Each body is the type the matching one-shot command prints, so Swift keeps its decoders and a saved launch workspace still restores.</p>
-
-<h3>The loop that produces it</h3>
-<figure><pre><code><span class="ln"> 731</span>      let result = (|| -&gt; Result&lt;()&gt; {
-<span class="ln"> 732</span>          let mut seen = None;
-<span class="ln"> 733</span>          loop {
-<span class="ln"> 734</span>              let requests = {
-<span class="ln"> 735</span>                  let mut mailbox = lock(&amp;shared);
-<span class="ln"> 736</span>                  if let Some(error) = mailbox.error.take() {
-<span class="ln"> 737</span>                      anyhow::bail!(error);
-<span class="ln"> 738</span>                  }
-<span class="ln"> 739</span>                  if mailbox.closed {
-<span class="ln"> 740</span>                      return Ok(());
-<span class="ln"> 741</span>                  }
-<span class="ln"> 742</span>                  mailbox.look = false;
-<span class="ln"> 743</span>                  std::mem::take(&amp;mut mailbox.requests)
-<span class="ln"> 744</span>              };
-<span class="ln"> 745</span>              let mut answers = None;
-<span class="ln"> 746</span>              for request in requests {
-<span class="ln"> 747</span>                  answers = Some(reader.accept(request));
-<span class="ln"> 748</span>              }
-<span class="ln"> 749</span>              reader.open();
-<span class="ln"> 750</span>              let mut revisions = reader.revisions();
-<span class="ln"> 751</span>              if seen != revisions &amp;&amp; seen.is_some() {
-<span class="ln"> 752</span>                  // Let a burst of related commits land before reading any of it.
-<span class="ln"> 753</span>                  let first = Instant::now();
-<span class="ln"> 754</span>                  loop {
-<span class="ln"> 755</span>                      let mailbox = lock(&amp;shared);
-<span class="ln"> 756</span>                      let (mut mailbox, _) = shared
-<span class="ln"> 757</span>                          .1
-<span class="ln"> 758</span>                          .wait_timeout_while(mailbox, QUIET, |mailbox| {
-<span class="ln"> 759</span>                              !mailbox.look &amp;&amp; !mailbox.closed
-<span class="ln"> 760</span>                          })
-<span class="ln"> 761</span>                          .expect(&quot;workspace reader mailbox poisoned&quot;);
-<span class="ln"> 762</span>                      let again = std::mem::take(&amp;mut mailbox.look);
-<span class="ln"> 763</span>                      if !again || first.elapsed() &gt;= BURST {
-<span class="ln"> 764</span>                          break;
-<span class="ln"> 765</span>                      }
-<span class="ln"> 766</span>                  }
-<span class="ln"> 767</span>                  revisions = reader.revisions();
-<span class="ln"> 768</span>              }
-<span class="ln"> 769</span>              seen = revisions;
-<span class="ln"> 770</span>              if watch {
-<span class="ln"> 771</span>                  reader.observe_checkouts(revisions, &amp;shared);
-<span class="ln"> 772</span>              }
-<span class="ln"> 773</span>              {
-<span class="ln"> 774</span>                  let mut mailbox = lock(&amp;shared);
-<span class="ln"> 775</span>                  mailbox.revisions = revisions;
-<span class="ln"> 776</span>                  if answers.is_some() {
-<span class="ln"> 777</span>                      mailbox.answers = answers;
-<span class="ln"> 778</span>                  }
-<span class="ln"> 779</span>              }
-<span class="ln"> 780</span>              for part in Part::ALL {
-<span class="ln"> 781</span>                  let now = Instant::now();
-<span class="ln"> 782</span>                  if !reader.due(part, revisions, now) {
-<span class="ln"> 783</span>                      continue;
-<span class="ln"> 784</span>                  }
-<span class="ln"> 785</span>                  let (reason, content) = match reader.project(part) {
-<span class="ln"> 786</span>                      Ok(content) =&gt; (None, content),
-<span class="ln"> 787</span>                      Err(error) =&gt; (Some(format!(&quot;{error:#}&quot;)), unavailable(part)),
-<span class="ln"> 788</span>                  };
-<span class="ln"> 789</span>                  let identity = fingerprint(&amp;reason, &amp;content)?;
-<span class="ln"> 790</span>                  let state = reader.parts.entry(part).or_default();
-<span class="ln"> 791</span>                  let send = state.force || state.sent != Some(identity);
-<span class="ln"> 792</span>                  state.read_at = revisions;
-<span class="ln"> 793</span>                  state.read_on = Some(now);
-<span class="ln"> 794</span>                  state.force = false;
-<span class="ln"> 795</span>                  state.stale = false;
-<span class="ln"> 796</span>                  state.failures = if reason.is_some() {
-<span class="ln"> 797</span>                      state.failures.saturating_add(1)
-<span class="ln"> 798</span>                  } else {
-<span class="ln"> 799</span>                      0
-<span class="ln"> 800</span>                  };
-<span class="ln"> 801</span>                  state.sent = Some(identity);
-<span class="ln"> 802</span>                  let mut mailbox = lock(&amp;shared);
-<span class="ln"> 803</span>                  *mailbox.projections.entry(part.name().into()).or_default() += 1;
-<span class="ln"> 804</span>                  if send {
-<span class="ln"> 805</span>                      enqueue(&amp;mut mailbox, part.name(), &amp;home, reason, content);
-<span class="ln"> 806</span>                      shared.1.notify_all();
-<span class="ln"> 807</span>                  }
-<span class="ln"> 808</span>                  if mailbox.closed {
-<span class="ln"> 809</span>                      return Ok(());
-<span class="ln"> 810</span>                  }
-<span class="ln"> 811</span>              }
-<span class="ln"> 812</span>              if !watch {
-<span class="ln"> 813</span>                  return Ok(());
-<span class="ln"> 814</span>              }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/rust/loopflow/src/lf/commands/workspace_watch.rs#L731-L814"><code>rust/loopflow/src/lf/commands/workspace_watch.rs</code></a> · <code>run: the reader&#x27;s one loop</code> · 410cffecb · lines 731–814</figcaption></figure>
-
-<h2 id="s2">2 · What counts as a change</h2>
-<p>The store keeps five counters. Triggers on each displayed table add one inside the writer's own transaction, so every writer is counted, including older binaries and <code>sqlite3</code>, and a rolled-back write counts nothing.</p>
-<figure><pre><code><span class="ln">   1</span>  -- Change revisions for displayed data. Every committed write to a table a
-<span class="ln">   2</span>  -- workspace surface reads bumps its domain here, inside the writer&#x27;s own
-<span class="ln">   3</span>  -- transaction, so any reader can ask &quot;what changed&quot; without scanning history.
-<span class="ln">   4</span>  -- A domain follows what a write can change on screen, not which table it
-<span class="ln">   5</span>  -- lands in: provider transcript lines bump nothing, and usage moves only its
-<span class="ln">   6</span>  -- own domain.
-<span class="ln">   7</span>  CREATE TABLE store_revisions (
-<span class="ln">   8</span>      domain TEXT PRIMARY KEY NOT NULL CHECK (domain IN (&#x27;planning&#x27;, &#x27;sessions&#x27;, &#x27;flows&#x27;, &#x27;execs&#x27;, &#x27;usage&#x27;)),
-<span class="ln">   9</span>      revision INTEGER NOT NULL
-<span class="ln">  10</span>  ) WITHOUT ROWID;
-<span class="ln">  11</span>  INSERT INTO store_revisions(domain, revision)
-<span class="ln">  12</span>  VALUES (&#x27;planning&#x27;, 0), (&#x27;sessions&#x27;, 0), (&#x27;flows&#x27;, 0), (&#x27;execs&#x27;, 0), (&#x27;usage&#x27;, 0);
-<span class="ln">  13</span>  
-<span class="om">    ⋮  lines 14–317 omitted</span>
-<span class="ln"> 318</span>  -- sessions: every Session event except usage and transcript lines. A transcript
-<span class="ln"> 319</span>  -- line is an `events.jsonl` observation of a type no summary reader selects;
-<span class="ln"> 320</span>  -- provider attempts and identities share that receipt key and are displayed.
-<span class="ln"> 321</span>  CREATE TRIGGER store_revision_session_events_insert AFTER INSERT ON session_events
-<span class="ln"> 322</span>  WHEN NOT (NEW.kind = &#x27;usage&#x27; OR (NEW.kind = &#x27;observed&#x27; AND instr(NEW.receipt_key, &#x27;:events.jsonl:&#x27;) &gt; 0
-<span class="ln"> 323</span>      AND CASE WHEN json_valid(NEW.payload) THEN COALESCE(json_extract(NEW.payload, &#x27;$.evidence.schema_version&#x27;), 0) = 1
-<span class="ln"> 324</span>          AND COALESCE(json_extract(NEW.payload, &#x27;$.evidence.type&#x27;), &#x27;&#x27;) IN
-<span class="ln"> 325</span>              (&#x27;activity&#x27;, &#x27;handoff&#x27;, &#x27;user_input&#x27;, &#x27;conversation&#x27;, &#x27;text&#x27;, &#x27;tool_use&#x27;, &#x27;result&#x27;, &#x27;provider_output&#x27;, &#x27;usage&#x27;)
-<span class="ln"> 326</span>          ELSE 0 END))
-<span class="ln"> 327</span>  BEGIN
-<span class="ln"> 328</span>      UPDATE store_revisions SET revision = revision + 1 WHERE domain = &#x27;sessions&#x27;;
-<span class="ln"> 329</span>  END;
-<span class="om">    ⋮  lines 330–353 omitted</span>
-<span class="ln"> 354</span>  -- usage: token counts, recorded as a `usage` event or an `events.jsonl` usage
-<span class="ln"> 355</span>  -- line. Rows are only appended. Agents write these every few seconds, so a
-<span class="ln"> 356</span>  -- reader showing totals follows this domain alone and rests between readings.
-<span class="ln"> 357</span>  CREATE TRIGGER store_revision_usage_insert AFTER INSERT ON session_events
-<span class="ln"> 358</span>  WHEN NEW.kind = &#x27;usage&#x27; OR (NEW.kind = &#x27;observed&#x27; AND instr(NEW.receipt_key, &#x27;:events.jsonl:&#x27;) &gt; 0
-<span class="ln"> 359</span>      AND CASE WHEN json_valid(NEW.payload) THEN COALESCE(json_extract(NEW.payload, &#x27;$.evidence.type&#x27;), &#x27;&#x27;) = &#x27;usage&#x27;
-<span class="ln"> 360</span>          ELSE 0 END)
-<span class="ln"> 361</span>  BEGIN
-<span class="ln"> 362</span>      UPDATE store_revisions SET revision = revision + 1 WHERE domain = &#x27;usage&#x27;;
-<span class="ln"> 363</span>  END;</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/rust/loopflow/src/store/migrations/drafts/store_revisions.sql#L1-L363"><code>rust/loopflow/src/store/migrations/drafts/store_revisions.sql</code></a> · <code>store_revisions, the Session-event trigger and the usage trigger</code> · 410cffecb · lines 1–13, 318–329, 354–363 · draft migration; 25 tables get three triggers each, plus one for usage</figcaption></figure>
-<p>Which counters a part follows is one function, and whether a due part is read now is another.</p>
-<figure><pre><code><span class="ln"> 187</span>      /// Whether a commit that moved revisions from `old` to `new` can change
-<span class="ln"> 188</span>      /// this part. Planning conditions read Sessions, Flows and unfinished
-<span class="ln"> 189</span>      /// Execs; the Session list reads no Exec, and only a Wave&#x27;s Session
-<span class="ln"> 190</span>      /// history shows token totals.
-<span class="ln"> 191</span>      fn changed(self, mut old: StoreRevisions, new: StoreRevisions) -&gt; bool {
-<span class="ln"> 192</span>          if self == Part::Activity {
-<span class="ln"> 193</span>              return old.execs != new.execs;
-<span class="ln"> 194</span>          }
-<span class="ln"> 195</span>          if self != Part::Wave {
-<span class="ln"> 196</span>              old.usage = new.usage;
-<span class="ln"> 197</span>          }
-<span class="ln"> 198</span>          if self == Part::Sessions {
-<span class="ln"> 199</span>              old.execs = new.execs;
-<span class="ln"> 200</span>          }
-<span class="ln"> 201</span>          old != new
-<span class="ln"> 202</span>      }
-<span class="ln"> 203</span>  
-<span class="ln"> 204</span>      /// Whether a change is to usage alone, which the part can wait for.
-<span class="ln"> 205</span>      fn rests(self, old: StoreRevisions, new: StoreRevisions) -&gt; bool {
-<span class="ln"> 206</span>          self == Part::Wave
-<span class="ln"> 207</span>              &amp;&amp; StoreRevisions {
-<span class="ln"> 208</span>                  usage: new.usage,
-<span class="ln"> 209</span>                  ..old
-<span class="ln"> 210</span>              } == new
-<span class="ln"> 211</span>      }
-<span class="om">    ⋮  lines 212–462 omitted</span>
-<span class="ln"> 463</span>      fn due(&amp;self, part: Part, revisions: Option&lt;StoreRevisions&gt;, now: Instant) -&gt; bool {
-<span class="ln"> 464</span>          if !part.selected(&amp;self.scope) {
-<span class="ln"> 465</span>              return false;
-<span class="ln"> 466</span>          }
-<span class="ln"> 467</span>          let Some(state) = self.parts.get(&amp;part) else {
-<span class="ln"> 468</span>              return true;
-<span class="ln"> 469</span>          };
-<span class="ln"> 470</span>          let Some(read_on) = state.read_on else {
-<span class="ln"> 471</span>              return true;
-<span class="ln"> 472</span>          };
-<span class="ln"> 473</span>          state.force
-<span class="ln"> 474</span>              || state.stale
-<span class="ln"> 475</span>              || state.retry_due(read_on, now)
-<span class="ln"> 476</span>              || match (state.read_at, revisions) {
-<span class="ln"> 477</span>                  (Some(old), Some(new)) =&gt; {
-<span class="ln"> 478</span>                      part.changed(old, new) &amp;&amp; (!part.rests(old, new) || now - read_on &gt;= USAGE_REST)
-<span class="ln"> 479</span>                  }
-<span class="ln"> 480</span>                  (None, None) =&gt; false,
-<span class="ln"> 481</span>                  _ =&gt; true,
-<span class="ln"> 482</span>              }
-<span class="ln"> 483</span>              || part.clock().is_some_and(|clock| now - read_on &gt;= clock)
-<span class="ln"> 484</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/rust/loopflow/src/lf/commands/workspace_watch.rs#L187-L484"><code>rust/loopflow/src/lf/commands/workspace_watch.rs</code></a> · <code>Part::changed, Part::rests, Reader::due</code> · 410cffecb · lines 187–211, 463–484</figcaption></figure>
-<div class="note"><p><b>The Session-event condition has been wrong once.</b> Its first version silenced about 1,270 displayed rows a day. If it skips too much, a row stops updating and nothing catches it, because the periodic re-check reads the same counters. A test walks each fact <code>session list</code> shows; Work activity and Wave history have no such test.</p>
-<p><b>Any <code>lf</code> command still re-runs planning in every open window.</b> Each command records an Exec, which moves <code>execs</code>. Ten <code>lf session list</code> calls caused 20–22 planning readings of about 0.2 s each, with no frame sent. See <a href="#decisions">Open decisions</a>.</p></div>
-
-<h2 id="s3">3 · Checkouts on disk</h2>
-<p>A dirty file or a new commit is not a store commit. The reader watches each existing Task checkout and, for a linked worktree, its Git metadata directory.</p>
-<figure><pre><code><span class="ln">  10</span>  /// A checkout an agent is building in changes continuously. It is asked about
-<span class="ln">  11</span>  /// at most this often.
-<span class="ln">  12</span>  const REST: Duration = Duration::from_secs(3);
-<span class="ln">  13</span>  
-<span class="ln">  14</span>  #[derive(Debug, Default)]
-<span class="ln">  15</span>  pub(super) struct Checkouts {
-<span class="ln">  16</span>      watched: Vec&lt;PathBuf&gt;,
-<span class="ln">  17</span>      changed: Arc&lt;Mutex&lt;BTreeSet&lt;PathBuf&gt;&gt;&gt;,
-<span class="ln">  18</span>      asked_on: Option&lt;Instant&gt;,
-<span class="ln">  19</span>      #[cfg(target_os = &quot;macos&quot;)]
-<span class="ln">  20</span>      stream: Option&lt;crate::engine::fs_events::Stream&gt;,
-<span class="ln">  21</span>  }
-<span class="ln">  22</span>  
-<span class="ln">  23</span>  /// A linked worktree keeps its index and HEAD outside the checkout.
-<span class="ln">  24</span>  fn metadata(worktree: &amp;Path) -&gt; Option&lt;PathBuf&gt; {
-<span class="ln">  25</span>      let pointer = std::fs::read_to_string(worktree.join(&quot;.git&quot;)).ok()?;
-<span class="ln">  26</span>      Path::new(pointer.strip_prefix(&quot;gitdir:&quot;)?.trim())
-<span class="ln">  27</span>          .canonicalize()
-<span class="ln">  28</span>          .ok()
-<span class="ln">  29</span>  }
-<span class="om">    ⋮  lines 30–89 omitted</span>
-<span class="ln">  90</span>      /// The checkouts that changed since they were last taken, once rested.
-<span class="ln">  91</span>      pub(super) fn take(&amp;mut self, now: Instant) -&gt; BTreeSet&lt;PathBuf&gt; {
-<span class="ln">  92</span>          if self.asked_on.is_some_and(|asked| now - asked &lt; REST) {
-<span class="ln">  93</span>              return BTreeSet::new();
-<span class="ln">  94</span>          }
-<span class="ln">  95</span>          let changed = std::mem::take(
-<span class="ln">  96</span>              &amp;mut *self
-<span class="ln">  97</span>                  .changed
-<span class="ln">  98</span>                  .lock()
-<span class="ln">  99</span>                  .unwrap_or_else(|error| error.into_inner()),
-<span class="ln"> 100</span>          );
-<span class="ln"> 101</span>          if !changed.is_empty() {
-<span class="ln"> 102</span>              self.asked_on = Some(now);
-<span class="ln"> 103</span>          }
-<span class="ln"> 104</span>          changed
-<span class="ln"> 105</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/rust/loopflow/src/lf/commands/workspace_watch/checkouts.rs#L10-L105"><code>rust/loopflow/src/lf/commands/workspace_watch/checkouts.rs</code></a> · <code>Checkouts</code> · 410cffecb · lines 10–29, 90–105</figcaption></figure>
-<figure><pre><code><span class="ln"> 396</span>      /// Follow the checkouts of the Tasks registered now, and ask Git again
-<span class="ln"> 397</span>      /// about those that changed on disk. The parts showing Git facts are read
-<span class="ln"> 398</span>      /// again only when an answer differs.
-<span class="ln"> 399</span>      fn observe_checkouts(&amp;mut self, revisions: Option&lt;StoreRevisions&gt;, shared: &amp;Shared) {
-<span class="ln"> 400</span>          let (Some(store), Some(revisions)) = (&amp;self.store, revisions) else {
-<span class="ln"> 401</span>              return;
-<span class="ln"> 402</span>          };
-<span class="ln"> 403</span>          if self.watched_at != Some(revisions.planning) {
-<span class="ln"> 404</span>              let Ok(checkouts) = store.sqlite.task_checkouts() else {
-<span class="ln"> 405</span>                  return;
-<span class="ln"> 406</span>              };
-<span class="ln"> 407</span>              let wake = shared.clone();
-<span class="ln"> 408</span>              self.checkouts.watch(
-<span class="ln"> 409</span>                  checkouts.into_iter().map(|row| row.worktree).collect(),
-<span class="ln"> 410</span>                  move || {
-<span class="ln"> 411</span>                      lock(&amp;wake).look = true;
-<span class="ln"> 412</span>                      wake.1.notify_all();
-<span class="ln"> 413</span>                  },
-<span class="ln"> 414</span>              );
-<span class="ln"> 415</span>              self.watched_at = Some(revisions.planning);
-<span class="ln"> 416</span>          }
-<span class="ln"> 417</span>          let changed = self.checkouts.take(Instant::now());
-<span class="ln"> 418</span>          // Every one is asked again, not only up to the first that differs.
-<span class="ln"> 419</span>          let mut differs = false;
-<span class="ln"> 420</span>          for worktree in &amp;changed {
-<span class="ln"> 421</span>              differs |= crate::engine::git::reread_retained(worktree);
-<span class="ln"> 422</span>          }
-<span class="ln"> 423</span>          if differs {
-<span class="ln"> 424</span>              for part in [Part::Planning, Part::Wave] {
-<span class="ln"> 425</span>                  self.parts.entry(part).or_default().stale = true;
-<span class="ln"> 426</span>              }
-<span class="ln"> 427</span>          }
-<span class="ln"> 428</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/rust/loopflow/src/lf/commands/workspace_watch.rs#L396-L428"><code>rust/loopflow/src/lf/commands/workspace_watch.rs</code></a> · <code>Reader::observe_checkouts</code> · 410cffecb · lines 396–428</figcaption></figure>
-<p>The reader keeps Git's answers. When a checkout changes it asks the same questions again and compares.</p>
-<figure><pre><code><span class="ln"> 110</span>  /// Ask Git and retain its answer. A reader must not take the index lock from
-<span class="ln"> 111</span>  /// an agent working in the checkout.
-<span class="ln"> 112</span>  fn ask(question: Question) -&gt; std::io::Result&lt;Output&gt; {
-<span class="ln"> 113</span>      let output = Command::new(&quot;git&quot;)
-<span class="ln"> 114</span>          .arg(&quot;-C&quot;)
-<span class="ln"> 115</span>          .arg(&amp;question.0)
-<span class="ln"> 116</span>          .args(&amp;question.1)
-<span class="ln"> 117</span>          .env(&quot;GIT_OPTIONAL_LOCKS&quot;, &quot;0&quot;)
-<span class="ln"> 118</span>          .output()?;
-<span class="ln"> 119</span>      if let Some(reads) = retained().as_mut() {
-<span class="ln"> 120</span>          reads.insert(question, (Instant::now(), output.clone()));
-<span class="ln"> 121</span>      }
-<span class="ln"> 122</span>      Ok(output)
-<span class="ln"> 123</span>  }
-<span class="om">    ⋮  lines 124–149 omitted</span>
-<span class="ln"> 150</span>  /// Ask again what this process retains about `repo`&#x27;s contents. True when an
-<span class="ln"> 151</span>  /// answer differs from the retained one; layout answers are left standing.
-<span class="ln"> 152</span>  pub(crate) fn reread_retained(repo: &amp;Path) -&gt; bool {
-<span class="ln"> 153</span>      let questions = retained()
-<span class="ln"> 154</span>          .iter()
-<span class="ln"> 155</span>          .flatten()
-<span class="ln"> 156</span>          .filter(|((asked, args), _)| asked == repo &amp;&amp; !is_layout(args))
-<span class="ln"> 157</span>          .map(|(question, (_, output))| (question.clone(), output.clone()))
-<span class="ln"> 158</span>          .collect::&lt;Vec&lt;_&gt;&gt;();
-<span class="ln"> 159</span>      let mut changed = false;
-<span class="ln"> 160</span>      // Every one is asked again, not only up to the first that differs.
-<span class="ln"> 161</span>      for (question, before) in questions {
-<span class="ln"> 162</span>          if let Ok(output) = ask(question) {
-<span class="ln"> 163</span>              changed |= output.status != before.status || output.stdout != before.stdout;
-<span class="ln"> 164</span>          }
-<span class="ln"> 165</span>      }
-<span class="ln"> 166</span>      changed
-<span class="ln"> 167</span>  }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/rust/loopflow/src/engine/git.rs#L110-L167"><code>rust/loopflow/src/engine/git.rs</code></a> · <code>ask, reread_retained</code> · 410cffecb · lines 110–123, 150–167</figcaption></figure>
-<div class="note"><p><b>macOS only.</b> Elsewhere no watch starts and the five-minute clock still stands. The reader's CPU while a checkout is building is unmeasured.</p></div>
-
-<h2 id="s4">4 · Desktop applies a frame</h2>
-<p><code>PodiumModel</code> remains the window's single owner of what is shown. Every frame is asked four things before it changes anything: is it newer, is it from this Home, does it answer the last local write, and is it for what the window shows now. This is unchanged since the first walkthrough.</p>
-<figure><pre><code><span class="ln"> 630</span>      private func apply(_ frame: WorkspaceFrame) async {
-<span class="ln"> 631</span>          let part = frame.content.part
-<span class="ln"> 632</span>          if case .heartbeat = frame.content { return }
-<span class="ln"> 633</span>          guard frame.sequence &gt; appliedSequence[part] ?? 0 else { return }
-<span class="ln"> 634</span>          if let workspaceHome, workspaceHome != frame.home {
-<span class="ln"> 635</span>              // Another Home answers now; nothing shown from the previous one names anything here.
-<span class="ln"> 636</span>              dropHomeContent()
-<span class="ln"> 637</span>          }
-<span class="ln"> 638</span>          workspaceHome = frame.home
-<span class="ln"> 639</span>          let answers = frame.answers ?? 0
-<span class="ln"> 640</span>          let reason = frame.unavailable ?? &quot;Workspace reader returned no \(part) reading&quot;
-<span class="ln"> 641</span>          switch frame.content {
-<span class="ln"> 642</span>          case .planning(let body):
-<span class="ln"> 643</span>              guard answers &gt;= planningFloor else { return }
-<span class="ln"> 644</span>              await applyPlanning(body, wire: frame.wire, reason: reason)
-<span class="ln"> 645</span>              planningSequence = frame.sequence
-<span class="ln"> 646</span>              resumePlanningWaiters(through: answers)
-<span class="ln"> 647</span>          case .sessions(let body):
-<span class="ln"> 648</span>              guard answers &gt;= max(sessionsFloor, scopeFloor), let repoPath else { return }
-<span class="ln"> 649</span>              guard let body else {
-<span class="ln"> 650</span>                  sessions = .unavailable(lastGood: sessions.value, reason: reason)
-<span class="ln"> 651</span>                  break
-<span class="ln"> 652</span>              }
-<span class="ln"> 653</span>              guard body.repo.normalizedFilePath == repoPath.normalizedFilePath,
-<span class="ln"> 654</span>                    body.includesHeadless == navigation.showsHeadlessSessions else { return }
-<span class="ln"> 655</span>              let next = PodiumReading.available(body.entries)
-<span class="ln"> 656</span>              if sessions != next { sessions = next }
-<span class="ln"> 657</span>              if savedSessionRepos.remove(repoPath) != nil {
-<span class="ln"> 658</span>                  LaunchJournal.home.refreshed(&quot;sessions&quot;, ms: workspaceOpened.elapsedMs, ok: true)
-<span class="ln"> 659</span>              }
-<span class="ln"> 660</span>              endLaunchWhenCurrent()
-<span class="ln"> 661</span>              // Explicit history is read on request, never restored at launch.
-<span class="ln"> 662</span>              if !body.includesHeadless, let page = frame.wire?.sessionPage {
-<span class="ln"> 663</span>                  cache?.saveSessions([page], repo: repoPath)
-<span class="ln"> 664</span>              }
-<span class="ln"> 665</span>          case .task(let body):
-<span class="ln"> 666</span>              guard answers &gt;= scopeFloor, let shown = selection, shown.kind == .task,
-<span class="ln"> 667</span>                    let task = task(id: shown.id)?.task else { return }
-<span class="ln"> 668</span>              guard let body else {
-<span class="ln"> 669</span>                  taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value, reason: reason)
-<span class="ln"> 670</span>                  break
-<span class="ln"> 671</span>              }
-<span class="ln"> 672</span>              guard body.task == task.task.identifier else { return }
-<span class="ln"> 673</span>              let next = PodiumReading.available(body.work)
-<span class="ln"> 674</span>              if taskWork[task.id] != next { taskWork.values[task.id] = next }
-<span class="ln"> 675</span>          case .wave(let body):
-<span class="ln"> 676</span>              guard answers &gt;= scopeFloor, let detailWaveId else { return }
-<span class="ln"> 677</span>              guard body == nil || body?.wave == detailWaveId else { return }
-<span class="ln"> 678</span>              waveDetail = StreamedWaveDetail(wave: detailWaveId, sequence: frame.sequence,
-<span class="ln"> 679</span>                                             snapshot: body?.detail, reason: body == nil ? reason : nil)
-<span class="ln"> 680</span>          case .workActivity(let body):
-<span class="ln"> 681</span>              guard answers &gt;= scopeFloor, let scope = activityScope(for: selection) else { return }
-<span class="ln"> 682</span>              guard let body else {
-<span class="ln"> 683</span>                  workActivity = .unavailable(lastGood: workActivity.value, reason: reason)
-<span class="ln"> 684</span>                  break
-<span class="ln"> 685</span>              }
-<span class="ln"> 686</span>              guard body.scope == scope else { return }
-<span class="ln"> 687</span>              workActivityScope = scope
-<span class="ln"> 688</span>              let next = PodiumReading.available(body.snapshot)
-<span class="ln"> 689</span>              if workActivity != next { workActivity = next }
-<span class="ln"> 690</span>          case .activity(let body):
-<span class="ln"> 691</span>              guard let body else {
-<span class="ln"> 692</span>                  processActivity = .unavailable(lastGood: processActivity.value, reason: reason)
-<span class="ln"> 693</span>                  break
-<span class="ln"> 694</span>              }
-<span class="ln"> 695</span>              await Self.resolveRepoOrigins(body.nodes.compactMap(\.repo))
-<span class="ln"> 696</span>              let next = PodiumReading.available(body)
-<span class="ln"> 697</span>              if processActivity != next { processActivity = next }
-<span class="ln"> 698</span>          case .heartbeat:
-<span class="ln"> 699</span>              break
-<span class="ln"> 700</span>          }
-<span class="ln"> 701</span>          appliedSequence[part] = frame.sequence
-<span class="ln"> 702</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/swift/LoopflowMac/PodiumModel.swift#L630-L702"><code>swift/LoopflowMac/PodiumModel.swift</code></a> · <code>PodiumModel.apply(_:)</code> · 410cffecb · lines 630–702</figcaption></figure>
-<figure><pre><code><span class="ln"> 609</span>      /// A local write changed Session rows; a frame read before it is stale.
-<span class="ln"> 610</span>      private func supersedeSessions() {
-<span class="ln"> 611</span>          sessionsGeneration &amp;+= 1
-<span class="ln"> 612</span>          guard workspaceObservation != nil else { return }
-<span class="ln"> 613</span>          sessionsFloor = send { .refresh(id: $0) }
-<span class="ln"> 614</span>      }
-<span class="om">    ⋮  lines 615–749 omitted</span>
-<span class="ln"> 750</span>      /// One explicit read of everything, for a change the cadence should not wait on.
-<span class="ln"> 751</span>      func refresh() async {
-<span class="ln"> 752</span>          if workspaceObservation != nil {
-<span class="ln"> 753</span>              // Frames read before this request may predate the caller&#x27;s write.
-<span class="ln"> 754</span>              let id = send { .refresh(id: $0) }
-<span class="ln"> 755</span>              (planningFloor, sessionsFloor) = (id, id)
-<span class="ln"> 756</span>              await withCheckedContinuation { planningWaiters.append((id, $0)) }
-<span class="ln"> 757</span>              return
-<span class="ln"> 758</span>          }
-<span class="ln"> 759</span>          async let sessions: Void = refreshSessions()
-<span class="ln"> 760</span>          await refreshPlanning()
-<span class="ln"> 761</span>          await sessions
-<span class="ln"> 762</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/swift/LoopflowMac/PodiumModel.swift#L609-L762"><code>swift/LoopflowMac/PodiumModel.swift</code></a> · <code>supersedeSessions, refresh</code> · 410cffecb · lines 609–614, 750–762</figcaption></figure>
-<div class="note"><p><b>Two guards still protect the same reads.</b> The generation counters guard the one-shot paths, which run when no reader is open: fixtures and about sixty test call sites. The plan lists those bodies as still to delete.</p></div>
-
-<h2 id="s5">5 · Failure and recovery</h2>
-<p>A captured run in an empty throwaway Home. A hand-inserted Wave row is deliberately incomplete, so planning cannot be read. Heartbeats are shown here because they count readings.</p>
-<figure><pre class="term"><code><span class="p">$</span> lf monitor workspace --watch --json
-  0.30s  seq=1   answers=null planning  plan=0 sess=0 flow=0 exec=3 usag=0
-<span class="c">  0.30s  # other shell: sqlite3 inserts a Wave row with no Home placement</span>
-  0.52s  seq=3   answers=null planning  plan=1 sess=0 flow=0 exec=3 usag=0 unavailable=&quot;failed to read Wave Home placement: invalid data: wave 25ed785c-3202-4&quot;
-  2.30s  seq=4   answers=null heartbeat plan=1 sess=0 flow=0 exec=3 usag=0 {&quot;activity&quot;:1,&quot;planning&quot;:2}
-  4.30s  seq=5   answers=null heartbeat plan=1 sess=0 flow=0 exec=3 usag=0 {&quot;activity&quot;:2,&quot;planning&quot;:3}
-  6.31s  seq=6   answers=null heartbeat plan=1 sess=0 flow=0 exec=3 usag=0 {&quot;activity&quot;:3,&quot;planning&quot;:4}
-  8.31s  seq=8   answers=null heartbeat plan=1 sess=0 flow=0 exec=3 usag=0 {&quot;activity&quot;:4,&quot;planning&quot;:4}
- 10.32s  seq=10  answers=null heartbeat plan=1 sess=0 flow=0 exec=3 usag=0 {&quot;activity&quot;:5,&quot;planning&quot;:5}
- 12.33s  seq=11  answers=null heartbeat plan=1 sess=0 flow=0 exec=3 usag=0 {&quot;activity&quot;:6,&quot;planning&quot;:5}
- 14.33s  seq=13  answers=null heartbeat plan=1 sess=0 flow=0 exec=3 usag=0 {&quot;activity&quot;:7,&quot;planning&quot;:5}
- 16.33s  seq=15  answers=null heartbeat plan=1 sess=0 flow=0 exec=3 usag=0 {&quot;activity&quot;:8,&quot;planning&quot;:5}</code></pre>
-<figcaption>Observed 2026-10-06 with the same binary. The braces on a heartbeat are readings per part since the reader started, sent or not.</figcaption></figure>
-<p>The failure arrives as <code>unavailable</code>, not as an empty list. Planning is then read three more times in the next ten seconds, at widening gaps, and not again in the six seconds after that. In the first walkthrough's run it was read about every second.</p>
-<figure><pre><code><span class="ln"> 232</span>  /// What was last read for one part, and what was last sent.
-<span class="ln"> 233</span>  #[derive(Debug, Default)]
-<span class="ln"> 234</span>  struct PartState {
-<span class="ln"> 235</span>      read_at: Option&lt;StoreRevisions&gt;,
-<span class="ln"> 236</span>      read_on: Option&lt;Instant&gt;,
-<span class="ln"> 237</span>      sent: Option&lt;[u8; 32]&gt;,
-<span class="ln"> 238</span>      force: bool,
-<span class="ln"> 239</span>      /// Something it reads outside the store changed.
-<span class="ln"> 240</span>      stale: bool,
-<span class="ln"> 241</span>      /// Consecutive failed readings.
-<span class="ln"> 242</span>      failures: u32,
-<span class="ln"> 243</span>  }
-<span class="ln"> 244</span>  
-<span class="ln"> 245</span>  impl PartState {
-<span class="ln"> 246</span>      /// A failed reading is retried without a change, each time after twice
-<span class="ln"> 247</span>      /// the wait, so a part that cannot be read does not hold the one loop.
-<span class="ln"> 248</span>      fn retry_due(&amp;self, read_on: Instant, now: Instant) -&gt; bool {
-<span class="ln"> 249</span>          self.failures &gt; 0
-<span class="ln"> 250</span>              &amp;&amp; now - read_on
-<span class="ln"> 251</span>                  &gt;= CHECK
-<span class="ln"> 252</span>                      .saturating_mul(1 &lt;&lt; (self.failures - 1).min(16))
-<span class="ln"> 253</span>                      .min(RETRY_CAP)
-<span class="ln"> 254</span>      }
-<span class="ln"> 255</span>  }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/rust/loopflow/src/lf/commands/workspace_watch.rs#L232-L255"><code>rust/loopflow/src/lf/commands/workspace_watch.rs</code></a> · <code>PartState, retry_due</code> · 410cffecb · lines 232–255</figcaption></figure>
-<p>On the Desktop side, a reader that ends leaves the rows in place, marked unavailable, and is reopened after 1 s, doubling to 30 s.</p>
-<figure><pre><code><span class="ln"> 530</span>      /// The window&#x27;s one refresh owner: one reader process whose frames say
-<span class="ln"> 531</span>      /// what changed. Runs until cancelled, reopening the reader when it ends.
-<span class="ln"> 532</span>      func keepWorkspaceCurrent() async {
-<span class="ln"> 533</span>          if usesFixedFixture {
-<span class="ln"> 534</span>              if AppTestMode.current() == .sessionFixtures { await refreshSessions() }
-<span class="ln"> 535</span>              return
-<span class="ln"> 536</span>          }
-<span class="ln"> 537</span>          guard query.streamsWorkspace else {
-<span class="ln"> 538</span>              // This transport has no reader: one reading, shown until asked again.
-<span class="ln"> 539</span>              await refresh()
-<span class="ln"> 540</span>              await refreshProcessActivity()
-<span class="ln"> 541</span>              return
-<span class="ln"> 542</span>          }
-<span class="ln"> 543</span>          var delay = Duration.seconds(1)
-<span class="ln"> 544</span>          while !Task.isCancelled {
-<span class="ln"> 545</span>              var observation: WorkspaceObservation?
-<span class="ln"> 546</span>              do {
-<span class="ln"> 547</span>                  let opened = try await query.watchWorkspace()
-<span class="ln"> 548</span>                  observation = opened
-<span class="ln"> 549</span>                  guard !Task.isCancelled else { await opened.cancel(); return }
-<span class="ln"> 550</span>                  // A new reader numbers its frames from one and reads the store
-<span class="ln"> 551</span>                  // as it is now, which includes every local write so far.
-<span class="ln"> 552</span>                  workspaceObservation = opened
-<span class="ln"> 553</span>                  workspaceOpened = .now
-<span class="ln"> 554</span>                  appliedSequence = [:]
-<span class="ln"> 555</span>                  (planningFloor, sessionsFloor, scopeFloor, sentScope) = (0, 0, 0, nil)
-<span class="ln"> 556</span>                  syncWorkspaceScope()
-<span class="ln"> 557</span>                  for try await frame in opened.frames {
-<span class="ln"> 558</span>                      guard !Task.isCancelled else { break }
-<span class="ln"> 559</span>                      await apply(frame)
-<span class="ln"> 560</span>                      if frame.content.part != &quot;heartbeat&quot; { delay = .seconds(1) }
-<span class="ln"> 561</span>                  }
-<span class="ln"> 562</span>                  if !Task.isCancelled { throw RegistryQueryError(&quot;Workspace observation ended&quot;) }
-<span class="ln"> 563</span>              } catch ActiveSessionsObservationError.configurationChanged {
-<span class="ln"> 564</span>                  // The installed `lf` or its Home selection was replaced.
-<span class="ln"> 565</span>                  delay = .milliseconds(100)
-<span class="ln"> 566</span>              } catch {
-<span class="ln"> 567</span>                  if !Task.isCancelled { workspaceUnavailable(error.localizedDescription) }
-<span class="ln"> 568</span>              }
-<span class="ln"> 569</span>              workspaceObservation = nil
-<span class="ln"> 570</span>              await observation?.cancel()
-<span class="ln"> 571</span>              resumePlanningWaiters(through: .max)
-<span class="ln"> 572</span>              do { try await Task.sleep(for: delay) } catch { return }
-<span class="ln"> 573</span>              delay = min(delay * 2, .seconds(30))
-<span class="ln"> 574</span>          }
-<span class="ln"> 575</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/swift/LoopflowMac/PodiumModel.swift#L530-L575"><code>swift/LoopflowMac/PodiumModel.swift</code></a> · <code>keepWorkspaceCurrent</code> · 410cffecb · lines 530–575</figcaption></figure>
-
-<h2 id="s6">6 · The read made fast</h2>
-<p>Sampled on the store copy, 83% of a warm planning reading was one query: the completion gate asking, once per Task, which unfinished Execs belong to it. One statement now answers that for every Task.</p>
-<figure><pre><code><span class="ln">  69</span>  /// Every unfinished Exec paired with each Task it belongs to: the same
-<span class="ln">  70</span>  /// membership as `exec_ids`, reached from the few unfinished Execs instead of
-<span class="ln">  71</span>  /// from every Session a Task has, and for all Tasks in one statement. The
-<span class="ln">  72</span>  /// index and join order are pinned: left to itself the planner scans every
-<span class="ln">  73</span>  /// Exec and every event that names one.
-<span class="ln">  74</span>  fn open_exec_tasks() -&gt; String {
-<span class="ln">  75</span>      let session = session_membership(&quot;a&quot;);
-<span class="ln">  76</span>      format!(
-<span class="ln">  77</span>          &quot;WITH open AS MATERIALIZED (SELECT id,cwd FROM execs INDEXED BY execs_unfinished
-<span class="ln">  78</span>              WHERE completed_at IS NULL),
-<span class="ln">  79</span>          sessions AS (SELECT DISTINCT se.exec_id AS exec,se.session_id AS session
-<span class="ln">  80</span>              FROM open CROSS JOIN session_events se ON se.exec_id=open.id
-<span class="ln">  81</span>              UNION SELECT a.driver_exec_id,a.id FROM open CROSS JOIN agent_sessions a ON a.driver_exec_id=open.id),
-<span class="ln">  82</span>          flows AS (SELECT DISTINCT fe.exec_id AS exec,fe.flow_id AS flow
-<span class="ln">  83</span>              FROM open CROSS JOIN flow_events fe ON fe.exec_id=open.id)
-<span class="ln">  84</span>          SELECT open.id,tw.id FROM open JOIN tasks tw ON {}
-<span class="ln">  85</span>          UNION SELECT s.exec,tw.id FROM sessions s JOIN agent_sessions a ON a.id=s.session
-<span class="ln">  86</span>              JOIN tasks tw ON ({session})
-<span class="ln">  87</span>          UNION SELECT f.exec,tw.id FROM flows f JOIN flow_sessions af ON af.id=f.flow
-<span class="ln">  88</span>              JOIN tasks tw ON af.task_id=tw.id OR ({})&quot;,
-<span class="ln">  89</span>          checkout(&quot;open.cwd&quot;),
-<span class="ln">  90</span>          checkout(FLOW_CWD)
-<span class="ln">  91</span>      )
-<span class="ln">  92</span>  }
-<span class="ln">  93</span>  
-<span class="ln">  94</span>  /// The unfinished Execs of every Task, read once for a reading of many Tasks.
-<span class="ln">  95</span>  /// Unfinished Execs are few; a checkout&#x27;s Exec history grows without bound.
-<span class="ln">  96</span>  #[derive(Debug)]
-<span class="ln">  97</span>  pub(crate) struct OpenExecs {
-<span class="ln">  98</span>      by_task: HashMap&lt;String, Vec&lt;Exec&gt;&gt;,
-<span class="ln">  99</span>  }
-<span class="om">    ⋮  lines 100–175 omitted</span>
-<span class="ln"> 176</span>      pub(crate) fn open_execs(&amp;self) -&gt; StoreResult&lt;OpenExecs&gt; {
-<span class="ln"> 177</span>          let mut conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
-<span class="ln"> 178</span>          let tx = conn.transaction()?;
-<span class="ln"> 179</span>          let execs = tx
-<span class="ln"> 180</span>              .prepare(&amp;format!(
-<span class="ln"> 181</span>                  &quot;{} INDEXED BY execs_unfinished WHERE e.completed_at IS NULL
-<span class="ln"> 182</span>                  ORDER BY e.started_at DESC,e.id&quot;,
-<span class="ln"> 183</span>                  super::execs::EXEC_SELECT
-<span class="ln"> 184</span>              ))?
-<span class="ln"> 185</span>              .query_map([], super::execs::read_exec)?
-<span class="ln"> 186</span>              .collect::&lt;rusqlite::Result&lt;Vec&lt;_&gt;&gt;&gt;()?;
-<span class="ln"> 187</span>          let mut tasks: HashMap&lt;ExecId, Vec&lt;String&gt;&gt; = HashMap::new();
-<span class="ln"> 188</span>          let mut query = tx.prepare(&amp;open_exec_tasks())?;
-<span class="ln"> 189</span>          let mut rows = query.query([])?;
-<span class="ln"> 190</span>          while let Some(row) = rows.next()? {
-<span class="ln"> 191</span>              tasks.entry(row.get(0)?).or_default().push(row.get(1)?);
-<span class="ln"> 192</span>          }
-<span class="ln"> 193</span>          drop(rows);
-<span class="ln"> 194</span>          drop(query);
-<span class="ln"> 195</span>          tx.commit()?;
-<span class="ln"> 196</span>          let mut by_task: HashMap&lt;String, Vec&lt;Exec&gt;&gt; = HashMap::new();
-<span class="ln"> 197</span>          // Each Task&#x27;s Execs keep the newest-first order they were read in.
-<span class="ln"> 198</span>          for exec in execs {
-<span class="ln"> 199</span>              for task in tasks.remove(&amp;exec.id).unwrap_or_default() {
-<span class="ln"> 200</span>                  by_task.entry(task).or_default().push(exec.clone());
-<span class="ln"> 201</span>              }
-<span class="ln"> 202</span>          }
-<span class="ln"> 203</span>          Ok(OpenExecs { by_task })
-<span class="ln"> 204</span>      }
-<span class="ln"> 205</span>  
-<span class="ln"> 206</span>      /// Sessions and Flows in full, with only the Execs still unfinished.
-<span class="ln"> 207</span>      /// Completion and recovery ask nothing of finished execution.
-<span class="ln"> 208</span>      pub(crate) fn task_open_work(&amp;self, task: &amp;TaskId, open: &amp;OpenExecs) -&gt; StoreResult&lt;TaskWork&gt; {
-<span class="ln"> 209</span>          let mut conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
-<span class="ln"> 210</span>          let tx = conn.transaction()?;
-<span class="ln"> 211</span>          let (sessions, flows) = members(&amp;tx, task)?;
-<span class="ln"> 212</span>          tx.commit()?;
-<span class="ln"> 213</span>          Ok(TaskWork {
-<span class="ln"> 214</span>              sessions,
-<span class="ln"> 215</span>              flows,
-<span class="ln"> 216</span>              execs: open.by_task.get(task.as_str()).cloned().unwrap_or_default(),
-<span class="ln"> 217</span>          })
-<span class="ln"> 218</span>      }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/rust/loopflow/src/store/sqlite/task_work.rs#L69-L218"><code>rust/loopflow/src/store/sqlite/task_work.rs</code></a> · <code>open_exec_tasks, OpenExecs, open_execs, task_open_work</code> · 410cffecb · lines 69–99, 176–218</figcaption></figure>
-<p>The same value carries the other things a reading asks once. Before the per-Task details run, Git is asked about up to eight existing checkouts at a time, so the details find the answers waiting.</p>
-<figure><pre><code><span class="ln"> 724</span>  /// What a reading asks once and every Task&#x27;s detail then shares, so the cost
-<span class="ln"> 725</span>  /// of a plan does not grow by a statement per Task.
-<span class="ln"> 726</span>  #[derive(Debug)]
-<span class="ln"> 727</span>  struct SharedTaskReads {
-<span class="ln"> 728</span>      checkouts: Vec&lt;crate::store::sqlite::TaskCheckout&gt;,
-<span class="ln"> 729</span>      local_home: crate::durable::HomeId,
-<span class="ln"> 730</span>      open: OpenExecs,
-<span class="ln"> 731</span>  }
-<span class="ln"> 732</span>  
-<span class="ln"> 733</span>  impl SharedTaskReads {
-<span class="ln"> 734</span>      async fn read(store: &amp;SharedStore) -&gt; Result&lt;Self&gt; {
-<span class="ln"> 735</span>          let checkouts = store.task_checkouts().await?;
-<span class="ln"> 736</span>          ask_checkouts_ahead(&amp;checkouts);
-<span class="ln"> 737</span>          Ok(Self {
-<span class="ln"> 738</span>              checkouts,
-<span class="ln"> 739</span>              local_home: store.local_home().await?.id,
-<span class="ln"> 740</span>              open: store.sqlite.open_execs()?,
-<span class="ln"> 741</span>          })
-<span class="ln"> 742</span>      }
-<span class="ln"> 743</span>  }
-<span class="ln"> 744</span>  
-<span class="ln"> 745</span>  /// Git is asked about each existing checkout in turn by the Task details. A
-<span class="ln"> 746</span>  /// process that retains answers asks about several checkouts at once first,
-<span class="ln"> 747</span>  /// so the details find them waiting; any other process would only ask twice.
-<span class="ln"> 748</span>  fn ask_checkouts_ahead(checkouts: &amp;[crate::store::sqlite::TaskCheckout]) {
-<span class="ln"> 749</span>      const AT_ONCE: usize = 8;
-<span class="ln"> 750</span>      if !crate::engine::git::retains_reads() {
-<span class="ln"> 751</span>          return;
-<span class="ln"> 752</span>      }
-<span class="ln"> 753</span>      let existing = checkouts
-<span class="ln"> 754</span>          .iter()
-<span class="ln"> 755</span>          .map(|checkout| checkout.worktree.as_path())
-<span class="ln"> 756</span>          .filter(|worktree| worktree.is_dir())
-<span class="ln"> 757</span>          .collect::&lt;Vec&lt;_&gt;&gt;();
-<span class="ln"> 758</span>      let next = std::sync::atomic::AtomicUsize::new(0);
-<span class="ln"> 759</span>      std::thread::scope(|scope| {
-<span class="ln"> 760</span>          for _ in 0..AT_ONCE.min(existing.len()) {
-<span class="ln"> 761</span>              scope.spawn(|| {
-<span class="ln"> 762</span>                  while let Some(worktree) =
-<span class="ln"> 763</span>                      existing.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-<span class="ln"> 764</span>                  {
-<span class="ln"> 765</span>                      // The answers are kept by Git&#x27;s reader; failures are the details&#x27; to report.
-<span class="ln"> 766</span>                      let _ = crate::engine::git::is_clean(worktree);
-<span class="ln"> 767</span>                      let _ = crate::engine::git::rev_parse(worktree, &quot;HEAD&quot;);
-<span class="ln"> 768</span>                      let _ = crate::engine::git::worktree_root(worktree);
-<span class="ln"> 769</span>                      let _ = crate::engine::worktrees::git_common_dir(worktree);
-<span class="ln"> 770</span>                  }
-<span class="ln"> 771</span>              });
-<span class="ln"> 772</span>          }
-<span class="ln"> 773</span>      });
-<span class="ln"> 774</span>  }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/rust/loopflow/src/lf/commands/waves.rs#L724-L774"><code>rust/loopflow/src/lf/commands/waves.rs</code></a> · <code>SharedTaskReads, ask_checkouts_ahead</code> · 410cffecb · lines 724–774</figcaption></figure>
-<div class="note"><p><b>The pinned index is load-bearing.</b> Without <code>INDEXED BY</code> and <code>CROSS JOIN</code> the bundled SQLite scans the whole Exec table: 350 ms against 23 ms, measured in-process. The system <code>sqlite3</code> chose the fast plan unaided, so the slow plan does not show up there.</p>
-<p><b>The rule is met for Exec membership only.</b> The gate still runs a few statements per unfinished Task, about 40 ms of a 200 ms reading. Left alone by Jack's rule for this round: not a clear win against rewriting the code that decides <code>lf task complete</code>.</p></div>
-
-<h2 id="s7">7 · The working set</h2>
-<p>Whether a finished Task still belongs in the outline was decided in Swift from three separate fields. Rust now derives it once and sends it.</p>
-<figure><pre><code><span class="ln">1462</span>  fn derive_task_condition(
-<span class="ln">1463</span>      runtime: Option&lt;&amp;TaskRuntimeSnapshot&gt;,
-<span class="ln">1464</span>      next_move: &amp;NextMove,
-<span class="ln">1465</span>      local_progress: LocalProgressEvidence,
-<span class="ln">1466</span>      action_evidence: Option&lt;&amp;TaskActionEvidence&gt;,
-<span class="ln">1467</span>      flow: &amp;TaskFlowRecord,
-<span class="ln">1468</span>      observed_at: time::OffsetDateTime,
-<span class="ln">1469</span>  ) -&gt; TaskConditionSnapshot {
-<span class="ln">1470</span>      // A removed historical checkout does not reopen settled work.
-<span class="ln">1471</span>      let unresolved_execution = runtime.is_some_and(|runtime| {
-<span class="ln">1472</span>          runtime.status == WorkStatus::Ready
-<span class="ln">1473</span>              || matches!(flow, TaskFlowRecord::Pinned(flow) if flow.execution != TaskExecutionState::Idle)
-<span class="ln">1474</span>              || (local_progress.state == LocalProgressEvidenceState::Observed
-<span class="ln">1475</span>                  &amp;&amp; local_progress.unsettled == Some(true))
-<span class="ln">1476</span>      });</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/rust/loopflow/src/lf/commands/waves.rs#L1462-L1476"><code>rust/loopflow/src/lf/commands/waves.rs</code></a> · <code>derive_task_condition</code> · 410cffecb · lines 1462–1476</figcaption></figure>
-<figure><pre><code><span class="ln">  16</span>      /// Shared durable evidence that work began. Inspection, a prepared
-<span class="ln">  17</span>      /// checkout, or a live process in the checkout never supplies it.
-<span class="ln">  18</span>      var started: Bool { task.runtime?.started == true }
-<span class="ln">  19</span>  
-<span class="ln">  20</span>      /// The started working set. A Task with open Sessions stays reachable even
-<span class="ln">  21</span>      /// when its start predates recorded evidence.
-<span class="ln">  22</span>      var inWorkingSet: Bool {
-<span class="ln">  23</span>          if !sessions.isEmpty { return true }
-<span class="ln">  24</span>          guard started else { return false }
-<span class="ln">  25</span>          return !task.task.isTerminal || task.condition.unresolvedExecution
-<span class="ln">  26</span>      }
-<span class="ln">  27</span>  }</code></pre><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/410cffecbb75abc1fc3aa86448f8cc7b9309bde5/swift/LoopflowMac/WorkspaceProjection.swift#L16-L27"><code>swift/LoopflowMac/WorkspaceProjection.swift</code></a> · <code>WorkspaceTask.inWorkingSet</code> · 410cffecb · lines 16–27</figcaption></figure>
-<div class="note"><p><b>A required field on the wire.</b> A workspace saved by an earlier build lacks it, so the first launch after upgrading should show no saved planning until the reader answers. Expected from the decoder rule; not exercised.</p></div>
-
-<h2 id="decisions">Open decisions</h2>
-<ol class="dec">
-<li><b>One reader per window was dropped.</b> Jack listed it among the performance taboos to remove. The separate active-Session reader starts in 0.23 s, idles at 0.2% of a core and holds 25 MB, and starts only when the Monitor is first opened. Folding it in means rewriting its start, retry and Home-change handling in Swift. The copy has no run receipts, so its idle cost on Jack's Home is higher than measured.</li>
-<li><b>Read-only commands still re-run planning</b> (<a href="#s2">Stop 2</a>). The fix as planned cannot be written in a trigger: an insert does not know the command only reads, and Desktop's remaining reads run inside the Task checkout, where a live process is a real completion blocker. It needs a change to Infrastructure's Exec model.</li>
-<li><b>The reader idles at 1.6% of a core</b> and 37 MB, against a 1% target. Unprofiled; the two-second process observation is the likely cost.</li>
-<li><b>The shared store changed without Infrastructure's review:</b> one table, 76 triggers and three indexes. The Session-event triggers parse each inserted payload as JSON; the cost on large transcript lines is unmeasured.</li>
-<li><b>No derived state is stored.</b> Jack said he wanted it in the database, then that SQLite reads should not be a problem. The branch computes each reading fresh. Recorded as an unconfirmed reading of his answer.</li>
-<li><b>LOO-382's first acceptance line is unmet by decision.</b> A Task that has not started stays out of the outline.</li>
-</ol>
-
-<h2 id="evidence">Evidence</h2>
-<table>
-<thead><tr><th>Claim</th><th>Support</th><th>Kind</th></tr></thead>
-<tbody>
-<tr><td>A store commit, a checkout change and a refresh each produce a planning frame; a failed reading is unavailable and backs off</td><td>The two transcripts above</td><td>Run for this walkthrough at this head. One run each, load 33.</td></tr>
-<tr><td>Gate, Task work, watch, revisions and Git retention behave after the hand-resolved merge with <code>main</code></td><td>113 Rust unit tests, 10 watch integration tests, 19 fixture tests, 88 Swift tests in seven suites</td><td>Run by Claude at <code>cecdc1d3f</code>. The one commit since changes plan and memory text only.</td></tr>
-<tr><td>Planning projection 190–200 ms; renamed Task 301–327 ms and Session 121–131 ms, commit to frame; first reading 1.1–2.3 s</td><td><code>scratch/measure/</code> scripts, five or six samples each</td><td>Recorded in the plan by the agent. Reader timings on the copy, not rows on screen.</td></tr>
-<tr><td>File in a checkout to frame 1.3–2.7 s; 145 usage rows cause 3 Wave-detail readings and no planning reading</td><td><code>checkout.py</code>, <code>usage.py</code></td><td>Recorded in the plan. The cost of one Wave-detail reading is unmeasured.</td></tr>
-<tr><td>The Task file comparison re-reads on a Git change</td><td>One Swift test, 0.19 s</td><td>Recorded. Not exercised in the window.</td></tr>
-<tr><td>Rows on screen, selection, drafts, panes and scroll on the real app; the installed-app walkthrough</td><td>None since the optimizations</td><td>Unverified. The rendered benchmark has not been rerun. The full suites and CI on this head were not checked.</td></tr>
-</tbody>
-</table>
-<p class="meta">Excerpts are copied from the files at <code>410cffecb</code> with their line numbers. Links open the pinned revision on GitHub; the page reads offline without them.</p>
-</main>
-</body>
-</html>
+#[cfg(test)]
+#[path = &quot;chapter_tests.rs&quot;]</code></pre></figure></details><section id="proof"><h2>What this review establishes</h2><p>Source implements exact selection, ordinary activation, retained creation identity, and explicit rotation. The installed demo failed before these operations could be exercised. The disposable app now opens against a private Home. Real operations through a test adapter activated A, created B once and retained cached planning through an outage. Main-window opening did not call ensure; mounted Portfolio activation remains unproved.</p><ul><li>Recorded earlier: 11 headless ProjectPreparation/WaveDetailReading tests passed. They do not establish mounted opening, Apply retry or configured provider behavior.</li><li>Inspected: the ordinary Backlog fixture preserves name, empty Flow, content and issue bodies after repeated ensure. Rotation fixtures cover uncertain provider mutations. These are synthetic operation tests.</li><li>Still open in the design: cross-process CLI/crash proofs, configured acceptance, mounted Desktop/skill outcomes, output-handle leak investigation and CI-repair entry coverage.</li><li>LOO-367 owns Task admission/completion; this branch removes Project-level prerequisites. A usable Project alone does not prove the end-to-end Task KR.</li></ul><details><summary>Inspected preservation fixture</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/42e6c2706b1b35b2852e438ff94a49d060faccda/rust/loopflow/src/ops/chapter_tests.rs#L1168-L1222">rust/loopflow/src/ops/chapter_tests.rs · project_ensure_activates_exact_backlog_without_changing_content_or_tasks · 42e6c2706 · lines 1168–1222</a> (local revision; remote availability unverified)</figcaption><pre tabindex="0"><code>async fn project_ensure_activates_exact_backlog_without_changing_content_or_tasks() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let mut fixture = provider_fixture();
+    let id = &quot;999bdbdd-c045-41a6-8ffc-a97c4a40b0b3&quot;;
+    let mut project = fixture
+        .projects
+        .remove(&quot;00000000-0000-4000-8000-000000000001&quot;)
+        .unwrap();
+    project[&quot;id&quot;] = json!(id);
+    project[&quot;name&quot;] = json!(&quot;Summer work — customer requests&quot;);
+    project[&quot;status&quot;][&quot;type&quot;] = json!(&quot;backlog&quot;);
+    let content = &quot;# Authored plan\n\n## KRs\n- [ ] Preserve work\n&quot;;
+    project[&quot;content&quot;] = json!(content);
+    fixture.projects.insert(id.into(), project);
+    for issue in fixture.issues.values_mut() {
+        if issue[&quot;project&quot;][&quot;id&quot;] == &quot;00000000-0000-4000-8000-000000000001&quot; {
+            issue[&quot;project&quot;][&quot;id&quot;] = json!(id);
+        }
+        issue[&quot;branchName&quot;] = Value::Null;
+        issue[&quot;updatedAt&quot;] = json!(&quot;1970-01-01T00:00:00Z&quot;);
+    }
+    // Unrelated current Projects cannot override explicit selection.
+    let mut competing = fixture.projects[id].clone();
+    competing[&quot;id&quot;] = json!(&quot;competing&quot;);
+    competing[&quot;status&quot;][&quot;type&quot;] = json!(&quot;started&quot;);
+    fixture.projects.insert(&quot;competing&quot;.into(), competing);
+    let issues = fixture.issues.clone();
+    let provider = Arc::new(Mutex::new(fixture));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let context = context(&amp;directory.path().join(&quot;registry.db&quot;), &amp;repo, &amp;url).await;
+    PM_TEST_CONTEXT
+        .scope(context, async {
+            crate::ops::project::bind_project(&amp;repo, &quot;a&quot;, id)
+                .await
+                .unwrap();
+            let first = crate::ops::project::ensure(&amp;repo, &quot;a&quot;).await.unwrap();
+            assert_eq!(
+                first,
+                crate::ops::project::ensure(&amp;repo, &quot;a&quot;).await.unwrap()
+            );
+            assert_eq!(first.id, id);
+            assert_eq!(first.name, &quot;Summer work — customer requests&quot;);
+            assert_eq!(first.status, ProjectStatus::Started);
+            assert!(first.flow.is_empty());
+            assert_eq!(first.krs.len(), 1);
+            let state = provider.lock().await;
+            assert_eq!(state.projects[id][&quot;content&quot;], content);
+            assert_eq!(state.issues, issues);
+            assert_eq!(state.projects.len(), 3);
+            assert_eq!(state.mutations, 1);
+        })
+        .await;
+    server.abort();
+}</code></pre></figure></details><p><a href="keep-every-wave-ready-for.md">Current local design</a> · <a href="project-readiness-demo.md">Demo evidence</a></p></section></main></html>

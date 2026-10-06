@@ -1,5 +1,24 @@
 # infrastructure wave memory
 
+## Storage footprint (LOO-390, 2026-10-06)
+
+Jack Heart authorized autonomous investigation, cleanup and delivery. Findings,
+measurements and prioritized proposals: [storage footprint review](../../docs/reviews/storage-footprint.md).
+`session_events` was 92% of a 2.6 GiB store growing about 0.5 GiB a day since the
+October 2 capture cutover: every streamed token was two rows, and the same
+events also sit in `runs/*/events.jsonl`. Source now coalesces increments before
+SQLite, validates an exact-frontier store in place during install preflight
+(full copies killed by the 30 s currency probe stranded 11.7 GiB in `$TMPDIR`),
+limits the WAL to 64 MiB, and keeps two fingerprinted migration backups.
+27.9 GiB was reclaimed: stranded preflight copies and Cargo output of two merged
+idle worktrees. Installed effect awaits a release and is unobserved. Existing
+rows are not rewritten. Jack's 78.7 GiB recording and 81-copy leads were gone
+before measurement. Undecided, and left intact: which of SQLite or `events.jsonl`
+is the system of record, capture retention, binary/artifact pruning, and about
+23 GiB of legacy `traces`, `backups`, `lfd.db*` and `logs` with no reader.
+Unknown ownership is not permission to delete. The two `session_record` tests
+that open a Home fail under an inherited `LF_HOME`; run them with `LF_*` cleared.
+
 ## Retained capture storage and autonomous cleanup (2026-10-05)
 
 Jack Heart requested that Infrastructure resolve LOO-370 without another
@@ -576,45 +595,18 @@ suppression, Claude cached identity/routing, Flow account bundles and reset cred
 [LOO-338](https://linear.app/loopflow/issue/LOO-338) owns the command rename;
 this branch retains `lf auth`. Authorization is not evidence of shipment.
 
-The [design](https://github.com/loopflowstudio/loopflow/blob/8973f689a9e11a83b2dfa467fecddd095940d435/scratch/verify-managed-account-identity-on.md)
-and [review and gate evidence](https://github.com/loopflowstudio/loopflow/blob/8973f689a9e11a83b2dfa467fecddd095940d435/scratch/verify-managed-account-identity-on-review.md)
-are preserved in local history before scratch clearing; remote availability was
-not checked. Current behavior belongs in [subscriptions](../../docs/subscriptions.md).
+Design, review and gate evidence remain at `8973f689a9e1:scratch/`; current
+behavior belongs in [subscriptions](../../docs/subscriptions.md).
 
-- **Usage acceptance cannot establish the intended login.** The incident found
-  wrong native logins displayed as verified under configured labels. Shared
-  validation in `provider_account/identity.rs` compares expected email and
-  per-user subject, never shared workspace identity. Codex cached status, routing
-  and readiness inspect current credentials; connect/import and explicit
-  verification also compare `account/read` email with the file identity using
-  file-store mode. Claude connect/import and verification use profile email/UUID,
-  never stale `.claude.json`.
-  Public auth tests cover disagreement, duplicates and relabel refusal; identity
-  tests retain shared-workspace/different-user acceptance.
-- **Reconnect must preserve the live login while authorization waits.** The
-  existing staged connect path installs only after identity and duplicate checks;
-  its paused-browser regression reads the unchanged live credential before
-  completion. The provider-directory install lock serializes Loopflow installs,
-  not native provider writers. This does not prove refresh coordination or sole
-  browser ownership: Codex can still open an extra tab on macOS.
-- **An unavailable identity service is not credential rejection.** `poll_codex`
-  classifies both account and usage RPC errors before decoding identity. The
-  public `account_read_failure_preserves_credentials_unless_revoked` regression
-  proves a 500 preserves connected state while a 401 records missing credentials,
-  retaining other account facts. A plan is separate from quota: observed Pro
-  precedes Plus only among healthy automatic candidates; explicit selection and
-  Session affinity remain authoritative. JSON windows retain dated observations;
-  expired text windows show unknown, not new capacity.
-- **Fixture isolation includes executable selection.** Gate launched real Claude
-  because the harness prepended inherited `LF_BIN`'s directory ahead of stubs.
-  [TESTING.md](../../TESTING.md#test-without-an-installed-loopflow) now requires
-  clearing inherited `LF_*` authority and pinning the compiled source CLI for
-  managed-Run gate invocations. An isolated Home alone is insufficient. The
-  interrupted run remains failed evidence; accidental native credential reads
-  or refresh effects were not audited.
+Usage acceptance cannot establish the intended login: validation compares
+expected email and per-user subject, never shared workspace identity. Reconnect
+stages and installs only after identity and duplicate checks, without proving
+native refresh coordination or sole browser ownership. An unavailable identity
+service is not credential rejection; a plan is separate from quota. Fixture
+isolation includes executable selection: clear inherited `LF_*` authority and pin
+the compiled source CLI. The four detailed findings remain at
+`abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
 
-Exact check counts, failed gate and credential caveats remain at
-`d4d77d8e22f4244ad83027ba9c85bb8644a622e6:wave/infrastructure/MEMORY.md`.
 Synthetic passes prove no live OAuth or installed acceptance. State remains
 Home-local; LOO-340 owns shared authority. No installed repair is authorized.
 
@@ -633,15 +625,10 @@ windows with their original time/owner; missing windows and reset success never
 prove new capacity. Record selected account before native Session discovery.
 
 Browser login without pasted code, first-time connection, remembered Linear
-profile targeting and live Claude/Codex windows remain unproved. The configured
-Claude probe returned `invalid_grant`. Native directory locks and Keychain writes
-remain outside Loopflow's flock/atomic-write proof. The copied-Home demo retained
-schema and credential-state discrepancies; copies still reference original
-credential homes. No source binary may migrate the installed Home. Synthetic
-gate passes, an intervened SSH-fetch fixture and empty-Home checks establish
-neither these live outcomes nor installed acceptance; historical receipts are not
-reusable for a changed tree. Exported API migration docs do not prove external
-consumers migrated.
+profile targeting and live Claude/Codex windows remain unproved; the configured
+Claude probe returned `invalid_grant`. No source binary may migrate the installed
+Home. Synthetic passes establish no live or installed outcome. Remaining caveats:
+`abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
 
 ## Task deletion and command ownership (LOO-305, curated 2026-10-05)
 
@@ -661,14 +648,10 @@ original completion time on retry. Planning-only creation needs neither checkout
 nor agent; post-create allocation failure retains identity for recovery rather
 than compensating deletion. Upstream tracking never defines checkout identity.
 
-The configured deletion demo removed LOO-299–302 and verified absence, but also
-advanced installed-Home drafts and broke its older CLI. Jack subsequently forbade
-branch-binary access and promotion; LOO-321 owns that recovery. Further source
-proofs use disposable Homes and remove inherited authority. The Linux synthetic
-proof and focused passes do not establish process settlement, full gate or
-installed acceptance. Removal is not termination; exact execution evidence remains
-necessary. Provider authors own markerless steers; blank participant overrides
-must not invent attribution.
+The configured deletion demo removed LOO-299–302 but advanced installed-Home
+drafts and broke its older CLI; Jack then forbade branch-binary access and
+promotion. Source proofs use disposable Homes without inherited authority.
+Removal is not termination. Detail: `abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
 
 ## Task convergence (LOO-319, curated 2026-10-02)
 

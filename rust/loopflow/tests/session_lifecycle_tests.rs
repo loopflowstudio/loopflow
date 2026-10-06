@@ -720,6 +720,132 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
 }
 
 #[test]
+fn a_task_primary_is_one_of_its_own_conversations() {
+    let fixture = Fixture::new(false);
+    let sole_path = fixture.repo.create_named_worktree("task-sole");
+    let task = support::register_unrun_task(
+        fixture.home.path(),
+        &sole_path,
+        "task-sole",
+        &fixture.repo.head_sha(),
+    );
+    let several_path = fixture.repo.create_named_worktree("task-several");
+    support::register_sibling_task(&task, "INF-124", "task-several", &several_path);
+    let empty_path = fixture.repo.create_named_worktree("task-empty");
+    support::register_sibling_task(&task, "INF-125", "task-empty", &empty_path);
+    let converse = |checkout: &Path| -> String {
+        let before = fixture.launches().len();
+        let output = fixture
+            .command(&LAUNCH)
+            .current_dir(checkout)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        fixture.session_row(&fixture.launches()[before]).0
+    };
+    let primary = |args: &[&str]| -> Value {
+        fixture.json(&[&["session", "ensure", "--json", "--task"], args].concat())
+    };
+    let members = |issue: &str| -> Vec<String> {
+        fixture
+            .json(&["session", "list", "--all", "--task", issue, "--json"])
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|session| session["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // The Task's only unfinished interactive conversation is its primary.
+    let sole = converse(&sole_path);
+    let chosen = primary(&["INF-123"]);
+    assert_eq!(chosen["id"], sole.as_str());
+    // It stays an ordinary member of its Task.
+    assert_eq!(chosen["primary_scope"], Value::Null);
+    assert_eq!(members("INF-123"), std::slice::from_ref(&sole));
+
+    // Among several, the most recently used one; the others stay open.
+    let earlier = converse(&several_path);
+    let later = converse(&several_path);
+    fixture
+        .db()
+        .execute(
+            "UPDATE agent_sessions SET created_at=created_at-60 WHERE id=?1",
+            [&earlier],
+        )
+        .unwrap();
+    assert_eq!(primary(&["INF-124"])["id"], later.as_str());
+    assert_eq!(members("INF-124").len(), 2);
+
+    // An explicit choice wins, and keeps winning over later use.
+    assert_eq!(
+        primary(&["INF-124", "--choose", &earlier])["id"],
+        earlier.as_str()
+    );
+    let newest = converse(&several_path);
+    assert_eq!(primary(&["INF-124"])["id"], earlier.as_str());
+    assert_eq!(members("INF-124").len(), 3);
+    assert!(members("INF-124").contains(&newest));
+
+    // Another Task's conversation cannot be chosen.
+    let foreign = fixture.run(&[
+        "session", "ensure", "--task", "INF-124", "--choose", &sole, "--json",
+    ]);
+    assert!(!foreign.status.success(), "{foreign:?}");
+    assert_eq!(primary(&["INF-124"])["id"], earlier.as_str());
+
+    // A finished primary gives way to the Task's most recent conversation.
+    fixture
+        .db()
+        .execute(
+            "UPDATE agent_sessions SET completed_at=1 WHERE id=?1",
+            [&earlier],
+        )
+        .unwrap();
+    assert_eq!(primary(&["INF-124"])["id"], newest.as_str());
+
+    // Reading inventory creates nothing; asking for the primary of a Task
+    // with no conversation starts one in its checkout.
+    let before = fixture.count("agent_sessions");
+    assert!(members("INF-125").is_empty());
+    assert_eq!(fixture.count("agent_sessions"), before);
+    let created = primary(&["INF-125"]);
+    assert_eq!(fixture.count("agent_sessions"), before + 1);
+    let (skill, cwd): (String, String) = fixture
+        .db()
+        .query_row(
+            "SELECT skill,cwd FROM agent_sessions WHERE id=?1",
+            [created["id"].as_str().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(skill, "task/session");
+    assert_eq!(
+        Path::new(&cwd).canonicalize().unwrap(),
+        empty_path.canonicalize().unwrap()
+    );
+    assert_eq!(primary(&["INF-125"])["id"], created["id"]);
+    assert_eq!(
+        members("INF-125"),
+        [created["id"].as_str().unwrap().to_string()]
+    );
+
+    // Replacing it finishes that conversation and names a fresh one.
+    let successor = fixture.json(&[
+        "session",
+        "replace",
+        created["id"].as_str().unwrap(),
+        "--json",
+    ]);
+    assert_ne!(successor["id"], created["id"]);
+    assert_eq!(primary(&["INF-125"])["id"], successor["id"]);
+    assert_eq!(
+        members("INF-125"),
+        [successor["id"].as_str().unwrap().to_string()]
+    );
+}
+
+#[test]
 fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     let fixture = Fixture::new(false);
     let task_path = fixture.repo.create_named_worktree("task-binding");

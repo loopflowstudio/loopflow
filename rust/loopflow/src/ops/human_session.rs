@@ -49,6 +49,15 @@ pub async fn latest_interactive_session(
                 == Some(&current)
         })
         .collect::<Vec<_>>();
+    most_recent(store, candidates).await
+}
+
+/// Rank by native human input, then each conversation's last interactive
+/// opening, then its creation. Assistant output never changes the choice.
+async fn most_recent(
+    store: &SharedStore,
+    candidates: Vec<(AgentSession, Option<i64>)>,
+) -> Result<Option<AgentSession>> {
     let human = provider_conversation::human_input_times(
         store,
         candidates.iter().map(|(session, _)| session),
@@ -1288,7 +1297,7 @@ pub(crate) fn human_open_argv(
     Ok(argv)
 }
 
-const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository or Wave. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
+const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository, Wave or Task. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
 
 #[cfg(not(test))]
 async fn conversation_exec_is_running(id: &str) -> Result<bool> {

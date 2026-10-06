@@ -56,10 +56,10 @@ Open Loopflow or run its CLI
 | `--shared` | Run in the provider's ordinary home despite an `isolate: true` default Default: false. |
 | `--__account-lease-probe` | Internal SSH compatibility and broker-connectivity probe Default: false. Internal. |
 | `--yolo` | Skip permission prompts Default: false. |
-| `--interactive / -i` | Run interactively |
-| `--batch / -b` | Run headless: print the output and return when the work ends |
-| `--tui` | Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch) |
-| `--ide` | Hand off Claude or Codex to the vendor app (overrides session.launch) |
+| `--interactive / -i` | Run interactively Default: false. |
+| `--batch / -b` | Run headless: print the output and return when the work ends Default: false. |
+| `--tui` | Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch) Default: false. |
+| `--ide` | Hand off Claude or Codex to the vendor app (overrides session.launch) Default: false. |
 | `--chrome` | Override Chrome integration; omission inherits configuration |
 | `--__cron-receipt` | Exact cron receipt attribution for mechanical release execution Internal. |
 | `--__cron-lock-fd` | cron lock fd Internal. |
@@ -276,6 +276,7 @@ Commit changes
 | Argument | What it does |
 |---|---|
 | `--message / -m` | message |
+| `--push / -p` | Push the branch after committing Default: false. |
 | `--no-add` | no add Default: false. |
 | `<paths>` | Commit only these paths, preserving other staged and unstaged edits |
 | `--help / -h` | Print help |
@@ -489,11 +490,13 @@ Connect to the live conversation, or resume its saved history
 
 ## lf session ensure
 
-Find or start the one ongoing conversation of this repository or a Wave
+Find or start the one ongoing conversation of this repository, a Wave or a Task
 
 | Argument | What it does |
 |---|---|
 | `--wave / -w` | The Wave's conversation instead of the repository's |
+| `--task` | The Task's: the one chosen, else its only or most recently used conversation |
+| `--choose` | Make this conversation of the Task its primary |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1335,6 +1338,7 @@ Complete planning work, or a placed Task whose pull requests are settled
 |---|---|
 | `<issue>` | issue |
 | `--summary` | summary |
+| `--accept-unknown-exec` | Accept one historical Exec's unknown outcome for completion only; retain its checkout |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

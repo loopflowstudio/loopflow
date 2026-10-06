@@ -122,11 +122,19 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             };
             open(id, *json, mode).await
         }
-        SessionCommand::Ensure { wave, json } => {
+        SessionCommand::Ensure {
+            wave,
+            task,
+            choose,
+            json,
+        } => {
+            use crate::ops::human_session::primary;
             let store = open_shared_store().await?;
             let repo = crate::repo::find_repo_root()?;
-            let session =
-                crate::ops::human_session::primary::ensure(&store, &repo, wave.as_deref()).await?;
+            let session = match task {
+                Some(task) => primary::ensure_task(&store, &repo, task, choose.as_deref()).await?,
+                None => primary::ensure(&store, &repo, wave.as_deref()).await?,
+            };
             report_primary(&session, *json)
         }
         SessionCommand::Replace { id, json } => {

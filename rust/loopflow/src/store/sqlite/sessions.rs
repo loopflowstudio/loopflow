@@ -277,23 +277,94 @@ fn read_summary(
     })())
 }
 
+fn interactive_sessions_in<P: rusqlite::Params>(
+    conn: &Connection,
+    selection: &str,
+    params: P,
+) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
+    let mut query = conn.prepare(&format!(
+        "SELECT candidates.*, (
+            SELECT MAX(json_extract(payload,'$.opened_at_ms'))
+            FROM session_events WHERE session_id=candidates.id AND kind='observed'
+            AND json_extract(payload,'$.type')='interactive_opened'
+        ) AS opened_at FROM ({SESSION_SELECT}
+        WHERE s.interactive=1 {selection}) AS candidates"
+    ))?;
+    let rows = query.query_map(params, |row| {
+        Ok((read_session(row)?, row.get("opened_at")?))
+    })?;
+    rows.map(|row| {
+        let (session, opened) = row?;
+        Ok((session?, opened))
+    })
+    .collect()
+}
+
+fn task_primary_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<AgentSession>> {
+    conn.query_row(
+        &format!(
+            "{SESSION_SELECT} WHERE s.id=(SELECT primary_session_id FROM tasks WHERE id=?1)
+             AND s.completed_at IS NULL"
+        ),
+        [task.as_str()],
+        read_session,
+    )
+    .optional()?
+    .transpose()
+}
+
 impl SqliteStore {
     pub(crate) fn resume_candidates(&self) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!(
-            "SELECT candidates.*, (
-                SELECT MAX(json_extract(payload,'$.opened_at_ms'))
-                FROM session_events WHERE session_id=candidates.id AND kind='observed'
-                AND json_extract(payload,'$.type')='interactive_opened'
-            ) AS opened_at FROM ({SESSION_SELECT}
-            WHERE s.interactive=1) AS candidates"
-        ))?;
-        let rows = query.query_map([], |row| Ok((read_session(row)?, row.get("opened_at")?)))?;
-        rows.map(|row| {
-            let (session, opened) = row?;
-            Ok((session?, opened))
-        })
-        .collect()
+        interactive_sessions_in(&conn, "", [])
+    }
+
+    /// A Task's unfinished interactive conversations, each with its last opening.
+    pub(crate) fn task_conversations(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        interactive_sessions_in(
+            &conn,
+            &format!(
+                "AND s.completed_at IS NULL AND s.id IN ({})",
+                super::task_work::session_ids("?1")
+            ),
+            [task.as_str()],
+        )
+    }
+
+    /// The conversation a Task's primary pointer names, while it is unfinished.
+    pub(crate) fn task_primary(&self, task: &TaskId) -> StoreResult<Option<AgentSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        task_primary_in(&conn, task)
+    }
+
+    /// Name one of the Task's own unfinished interactive conversations its
+    /// primary. The earlier choice stays an ordinary conversation of the Task.
+    pub(crate) fn choose_task_primary(
+        &self,
+        task: &TaskId,
+        session: &str,
+    ) -> StoreResult<AgentSession> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let chosen = conn.execute(
+            &format!(
+                "UPDATE tasks SET primary_session_id=?2 WHERE id=?1 AND ?2 IN (
+                    SELECT s.id FROM agent_sessions s WHERE s.interactive=1
+                    AND s.completed_at IS NULL AND s.id IN ({}))",
+                super::task_work::session_ids("?1")
+            ),
+            params![task.as_str(), session],
+        )?;
+        if chosen != 1 {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Session {session} is not an unfinished interactive conversation of this Task"
+            )));
+        }
+        task_primary_in(&conn, task)?
+            .ok_or_else(|| invalid(format!("Session {session} disappeared while being chosen")))
     }
 
     pub(crate) fn session_summaries(
@@ -685,14 +756,10 @@ impl SqliteStore {
         session: AgentSession,
         caller_exec: Option<&crate::id::ExecId>,
     ) -> StoreResult<AgentSession> {
-        let (kind, column, id) = match scope {
-            PrimaryScope::Repository(repo) => ("repository", "repo", repo.to_string()),
-            PrimaryScope::Wave(wave) => ("wave", "wave_id", wave.to_string()),
-        };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = tx
-            .query_row(
+        let column = |kind: &str, column: &str, id: String| {
+            tx.query_row(
                 &format!(
                     "{SESSION_SELECT} WHERE s.primary_scope=?1 AND s.{column}=?2 \
                      AND s.completed_at IS NULL"
@@ -701,7 +768,13 @@ impl SqliteStore {
                 read_session,
             )
             .optional()?
-            .transpose()?;
+            .transpose()
+        };
+        let current = match scope {
+            PrimaryScope::Repository(repo) => column("repository", "repo", repo.to_string())?,
+            PrimaryScope::Wave(wave) => column("wave", "wave_id", wave.to_string())?,
+            PrimaryScope::Task(task) => task_primary_in(&tx, task)?,
+        };
         match current {
             Some(current) if Some(current.id.as_str()) == replacing => {
                 tx.execute(
@@ -713,10 +786,22 @@ impl SqliteStore {
             None => {}
         }
         let session = reserve_session_in(&tx, session, caller_exec)?;
-        tx.execute(
-            "UPDATE agent_sessions SET primary_scope=?2 WHERE id=?1",
-            params![session.id, kind],
-        )?;
+        // A Task's primary stays an ordinary member conversation; its Task
+        // names it. A repository's or Wave's is marked on its own row.
+        match scope {
+            PrimaryScope::Repository(_) => tx.execute(
+                "UPDATE agent_sessions SET primary_scope='repository' WHERE id=?1",
+                [&session.id],
+            )?,
+            PrimaryScope::Wave(_) => tx.execute(
+                "UPDATE agent_sessions SET primary_scope='wave' WHERE id=?1",
+                [&session.id],
+            )?,
+            PrimaryScope::Task(task) => tx.execute(
+                "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+                params![task.as_str(), session.id],
+            )?,
+        };
         tx.commit()?;
         Ok(session)
     }
@@ -740,9 +825,22 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The scope a Session is or was primary for.
+    /// The Task a Session is primary for, else the repository or Wave it is or
+    /// was primary for.
     pub fn primary_scope(&self, id: &str) -> StoreResult<Option<PrimaryScope>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let task: Option<String> = conn
+            .query_row(
+                "SELECT id FROM tasks WHERE primary_session_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(task) = task {
+            return Ok(Some(PrimaryScope::Task(
+                TaskId::parse(&task).map_err(invalid)?,
+            )));
+        }
         let row: Option<(Option<String>, Option<String>, Option<String>)> = conn
             .query_row(
                 "SELECT primary_scope,wave_id,repo FROM agent_sessions WHERE id=?1",

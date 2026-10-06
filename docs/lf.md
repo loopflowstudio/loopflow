@@ -98,7 +98,8 @@ lf usage --task LOO-265 --context   # each step's input by source, flagged over 
 lf mon show SESSION --context       # one step: instructions, memory, scratch, goal, steers, carried, tools
 lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
-lf --task EXP-12 skill task/session # an ongoing conversation about one Task
+lf session ensure --task EXP-12     # a Task's primary conversation
+lf --task EXP-12 skill task/session # another conversation about that Task
 lf session connect SESSION         # continue a conversation
 lf session replace SESSION         # fresh conversation for the same scope
 lf context --task EXP-12 --json     # effective context limits, sources and usage
@@ -110,6 +111,11 @@ finds it or starts it, a Wave's with its goal and memory, and repeats return the
 same Session. `replace`
 stops that conversation, keeps it as history, and starts a fresh one.
 
+A Task's primary is one of its own conversations: the one named with
+`--choose SESSION`, else its only unfinished interactive conversation, else the
+most recently used. A Task with none gets a new one in its checkout. The others
+stay open, and listing Sessions never picks or starts one.
+
 Session connect, rename, bind and complete take the durable Session ID shown by
 `lf session list`. Capture keys and history prefixes select retained inputs for
 inspection and replay; they do not select these Session actions.
@@ -118,7 +124,7 @@ inspection and replay; they do not select these Session actions.
 | --- | --- | --- |
 | Repository | `lf operate` | `lf session ensure` |
 | Wave | `lf --wave growth wave/operate` | `lf session ensure -w growth` |
-| Task | `lf task/operate EXP-12` | `lf --task EXP-12 skill task/session` |
+| Task | `lf task/operate EXP-12` | `lf session ensure --task EXP-12` |
 
 Each conversation is its scope's operator and carries the matching operate
 procedure. It continues every started Task that has Flow steps left and no live

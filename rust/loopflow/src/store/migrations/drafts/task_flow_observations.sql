@@ -146,3 +146,7 @@ END;
 CREATE TRIGGER task_workflow_traversals_are_append_only BEFORE UPDATE ON task_workflow_traversals BEGIN
     SELECT RAISE(ABORT,'A Task workflow record is append-only');
 END;
+
+-- A Task's primary conversation is one of its own, named here. The Session
+-- keeps its Task membership and carries no scope mark.
+ALTER TABLE tasks ADD COLUMN primary_session_id TEXT REFERENCES agent_sessions(id) ON DELETE SET NULL;

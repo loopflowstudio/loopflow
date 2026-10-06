@@ -588,11 +588,17 @@ pub enum SessionCommand {
         #[arg(long = "try", conflicts_with = "replace")]
         try_open: bool,
     },
-    /// Find or start the one ongoing conversation of this repository or a Wave
+    /// Find or start the one ongoing conversation of this repository, a Wave or a Task
     Ensure {
         /// The Wave's conversation instead of the repository's
         #[arg(short = 'w', long)]
         wave: Option<String>,
+        /// The Task's: the one chosen, else its only or most recently used conversation
+        #[arg(long, conflicts_with = "wave")]
+        task: Option<String>,
+        /// Make this conversation of the Task its primary
+        #[arg(long, value_name = "SESSION", requires = "task")]
+        choose: Option<String>,
         #[arg(long)]
         json: bool,
     },

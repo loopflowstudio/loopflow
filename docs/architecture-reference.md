@@ -206,6 +206,12 @@ completes it and admits the successor in one transaction, so a scope never has
 two or none midway. Primary grants no Flow, review or process authority, and
 the Wave's goal and memory reach it as ordinary Wave context.
 
+A Task's primary is one of its own conversations, named by
+`tasks.primary_session_id`; its row carries no scope mark and it stays a Task
+member. `lf session ensure --task` keeps an explicit choice, else selects the
+sole unfinished interactive conversation, else the most recently used by
+`lf resume`'s ranking, and creates one only when the Task has none.
+
 An AgentSession can have many historical driving Execs and at most one current
 driver. Driver compare-and-set increments its driver generation. A continuing
 engine keeps its provider generation and origin through handoff and a driverless

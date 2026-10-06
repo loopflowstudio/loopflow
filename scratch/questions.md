@@ -77,16 +77,6 @@ readers (`flow list/show`, `task status`, Desktop) are clients of that state
 and work for any Flow; the state is read-only to everyone but the driver. The
 only control is ending the driver process.
 
-What it reopened (agent's reading, since confirmed by point 7): `68c1ffc55` removed the
-Flow record outright, and with it things that were useful for any Flow: the
-graph as launched, each step's result and iteration, and a live position for
-Desktop's graph. Point 4 allows the driver to keep exactly that. The next
-loop should give every Flow a driver-written record (started with its
-compiled graph; each step started and ended with its child Exec, graph key
-and iteration; ended) and have `flow list/show`, `task status` and Desktop
-read it. It carries no Task selection, no resume and no authority, and no
-step reads or writes it.
-
 8. On a record that extends the driver Exec: "its not exactly 1:1 with exec
    in the same way that a simple interactive skill session is not 1:1 with
    its launching process". Then: "ok so yeah maybe we still want FlowSession.
@@ -135,22 +125,8 @@ The rule: Flow bookkeeping belongs to the driver process. It may record what
 it started and where it is (journal events, rows or files it writes itself).
 A step is told nothing and writes nothing about the Flow.
 
-Agent's reading of what follows, for the implementing pass to confirm in
-source:
-
-- The step looks its skill up by name when it runs. A mid-run edit to the
-  skill file changes later steps. Step-level overrides become ordinary
-  arguments or go.
-- A deciding or routing step gets its answer contract in its message; the
-  driver already validates the answer and corrects it. A correction continues
-  the same conversation through the ordinary resume command.
-- The driver finds its step's Exec and conversation as its own child, not by
-  sequence number.
-- Identifying a driver among Execs must not depend on re-resolving names
-  later. `drive()` already journals Flow started/ended with the Flow name
-  against the driver Exec; that is ordinary logging and can carry the name.
-- `LF_FLOW_ID` (driver Exec id, for shared notes) is the step's parent Exec
-  id; whether it stays is open.
+The agent's readings of these points, since built, are at
+`b30b193a0:scratch/questions.md`.
 
 ## Asked of Jack, unanswered; the pass took the default
 
@@ -328,6 +304,34 @@ The agent's, October 6, building slice 3. None is confirmed by Jack Heart.
   Task's stage decides whether it names an edge.
 - **Tests live in `flow_tests`,** which has the Codex stand-in a headless
   Task run needs: one drives builtin `research` to `end`.
+
+## Choices the Task primary pass made without Jack
+
+The agent's, October 6, building slice 4. None is confirmed by Jack Heart.
+
+- **The Task names its primary.** `tasks.primary_session_id`, not a scope
+  mark on the Session row, after Jack's "just a smaller wrapper around this
+  that saves that id in a field". The conversation stays a Task member and
+  `primary_scope` on the wire stays null for it, so Desktop's grouping is
+  untouched. Nothing on the wire says which conversation is primary yet;
+  slice 6 decides how Desktop reads it.
+- **Command.** `lf session ensure --task ISSUE` returns the primary;
+  `--choose SESSION` names one of the Task's unfinished interactive
+  conversations and is refused for any other Session.
+- **Selection is remembered.** The first `ensure` records its pick (the only
+  one, else the most recently used); later use of another conversation does
+  not move it. A finished primary gives way to the same selection again.
+- **Only an empty Task gets a new conversation,** running `task/session` in
+  the Task's checkout and started like a repository's or Wave's primary. A
+  Task with no checkout is refused. Selecting an existing one launches nothing.
+- **`lf session replace` works on a Task primary:** it finishes that
+  conversation and starts a fresh one. A repeat naming the replaced
+  conversation is refused, unlike a repository's or Wave's. Desktop's Ctrl-C
+  is unchanged, since it never sees a Task scope mark.
+- **`lf resume` is unchanged:** it ranks every interactive conversation in
+  the checkout, finished ones included, and ignores the primary.
+- **Outside the slice.** `docs/lf-reference.md` was regenerated and picked up
+  earlier passes' flags (`commit --push`, `--accept-unknown-exec`).
 
 ## Choices the earlier pass made without Jack
 

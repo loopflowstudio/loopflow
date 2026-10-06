@@ -117,13 +117,15 @@ pub enum TitleSource {
     Human,
 }
 
-/// What a conversation is the one ongoing conversation of. The Session row
-/// already carries the scope's identity; primary grants no Flow or process authority.
+/// What a conversation is the one ongoing conversation of. A repository's or
+/// Wave's row carries the scope's identity; a Task names its own, which stays
+/// one of the Task's conversations. Primary grants no Flow or process authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PrimaryScope {
     Repository(crate::repository::CanonicalRepo),
     Wave(WaveId),
+    Task(TaskId),
 }
 
 /// The Work a conversation names. Admission fills a Task's Wave.

@@ -39,6 +39,34 @@ impl Store {
         .await
     }
 
+    pub(crate) async fn task_conversations(
+        &self,
+        task: &crate::durable::TaskId,
+    ) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
+        let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_conversations(&task)).await
+    }
+
+    pub(crate) async fn task_primary(
+        &self,
+        task: &crate::durable::TaskId,
+    ) -> StoreResult<Option<AgentSession>> {
+        let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_primary(&task)).await
+    }
+
+    pub(crate) async fn choose_task_primary(
+        &self,
+        task: &crate::durable::TaskId,
+        session: &str,
+    ) -> StoreResult<AgentSession> {
+        let (task, session) = (task.clone(), session.to_string());
+        run_sqlite(&self.sqlite, move |store| {
+            store.choose_task_primary(&task, &session)
+        })
+        .await
+    }
+
     pub async fn ensure_primary_session(
         &self,
         scope: &crate::session::PrimaryScope,

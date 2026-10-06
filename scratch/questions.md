@@ -282,6 +282,9 @@ The agent's, October 6, building slice 2. None is confirmed by Jack Heart.
   not a name; deciders need no id, and return counts are keyed by the
   decider's position in its body. Wire shapes are unchanged; a builtin
   graph's nodes now carry `id: null`.
+- **A malformed captured distance is no loop.** One `return_target` reads the
+  edge everywhere; a distance of zero or past the body's start, which the
+  loader cannot produce, means no edge, so Iterate there is an error.
 - **Old spelling fails loudly.** `repeat:` on a step is refused with a message
   naming `loop:`, so another repository's Flow cannot silently lose its loop.
   A `human: true` decider is refused.

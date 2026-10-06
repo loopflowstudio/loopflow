@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
-use crate::engine::flow::ConcreteStep;
+use crate::engine::flow::{return_target, ConcreteStep};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
@@ -42,34 +42,18 @@ pub enum FlowTransition {
 /// Compute a transition; the caller must settle it under its execution authority.
 ///
 /// # Errors
-/// Returns an error for an invalid cursor or backward-edge definition, or a
-/// iterate decision at a step without a backward edge. Errors and blocked
+/// Returns an error for an invalid cursor, or an iterate decision at a step
+/// without a backward edge. Errors and blocked
 /// outcomes leave progress unchanged.
 pub fn finish_step(
     steps: &[ConcreteStep],
     index: usize,
     progress: &mut FlowProgress,
 ) -> Result<FlowTransition> {
-    let step = steps
-        .get(index)
-        .ok_or_else(|| anyhow!("flow cursor {index} is outside {} steps", steps.len()))?;
-    let edge = match step {
-        ConcreteStep::Skill(skill) => match skill.returns {
-            Some(back) => {
-                let target = index
-                    .checked_sub(back)
-                    .filter(|target| {
-                        *target < index && matches!(steps[*target], ConcreteStep::Skill(_))
-                    })
-                    .ok_or_else(|| {
-                        anyhow!("loop at step {index} must return to a preceding step")
-                    })?;
-                Some((index.to_string(), target))
-            }
-            None => None,
-        },
-        ConcreteStep::Command(_) | ConcreteStep::Xor(_) => None,
-    };
+    if index >= steps.len() {
+        bail!("flow cursor {index} is outside {} steps", steps.len());
+    }
+    let edge = return_target(steps, index);
 
     let decision = match &progress.verdict {
         Some(verdict) => {
@@ -98,10 +82,10 @@ pub fn finish_step(
                 .clone(),
         )),
         FlowDecision::Iterate => {
-            let Some((id, target)) = edge else {
+            let Some(target) = edge else {
                 bail!("iterate decision at step {index} has no declared backward edge");
             };
-            let traversals = progress.repeats.entry(id).or_default();
+            let traversals = progress.repeats.entry(index.to_string()).or_default();
             *traversals = traversals.saturating_add(1);
             progress.direction = Some(
                 progress

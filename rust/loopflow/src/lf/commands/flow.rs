@@ -1,4 +1,5 @@
 use crate::durable::WorkRef;
+use crate::engine::flow::return_target;
 use crate::engine::flow_output::FlowOutput;
 use crate::engine::{
     compile_flow, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext, ExecutionCursor,
@@ -506,11 +507,11 @@ impl SkillExecutor for &Driver<'_> {
         let current = self.current();
         let output = current.as_ref().and_then(FlowOutput::for_step);
         let mut message = self.message.unwrap_or_default().to_owned();
-        if let Some(back) = skill.returns {
+        if skill.returns.is_some() {
             let position = self.position.lock().expect("Flow position mutex poisoned");
             let (body, leaf) = position.current_body(self.steps);
             let traversals = leaf.progress.repeats.get(&leaf.index.to_string());
-            let target = match leaf.index.checked_sub(back).map(|target| &body[target]) {
+            let target = match return_target(body, leaf.index).map(|target| &body[target]) {
                 Some(ConcreteStep::Skill(target)) => target.skill.name.as_str(),
                 _ => "an earlier step",
             };

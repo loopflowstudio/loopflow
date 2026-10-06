@@ -271,6 +271,9 @@ October 6, Loops (slice 2), before compress: `--lib engine::` 414,
 `flow_discovery_tests` 3, `dto_fixtures` 18, `golden_prompt` 1 passed;
 all-target Clippy clean. Swift fixtures changed a label only and were not
 built. The agent's choices are in [questions.md](questions.md).
+After compress (one `return_target` shared by graph, transition and driver):
+`--lib engine::` 414, `flow_tests` 25, `session_lifecycle_tests` 17 passed;
+all-target Clippy clean.
 
 Configured demo, still separate: in a private Home, `lf -b task run INF-123
 proof` prints and blocks; `lf monitor` and `lf flow show ID --sessions` show a

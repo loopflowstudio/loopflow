@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::engine::flow::{flatten_resolved, resolve_flow, ResolvedFlowItem};
+use crate::engine::flow::{flatten_resolved, resolve_flow, return_target, ResolvedFlowItem};
 
 use std::path::Path;
 
@@ -398,14 +398,6 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<FlowNode> {
         result.push(node);
     }
     result
-}
-
-/// Index of the earlier occurrence the deciding skill at `index` returns to.
-fn return_target(steps: &[ConcreteStep], index: usize) -> Option<usize> {
-    let ConcreteStep::Skill(skill) = &steps[index] else {
-        return None;
-    };
-    index.checked_sub(skill.returns?)
 }
 
 /// Exact occurrence in this compiled graph: its preorder node key, counting

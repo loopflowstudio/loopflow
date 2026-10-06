@@ -402,23 +402,17 @@ pub(crate) fn resolve_flow(flow: &Flow, repo: &Path) -> Result<Vec<ResolvedFlowI
 /// Steps back from the end of `preceding` to the one occurrence `target`
 /// names: an occurrence id, else the only step running that skill.
 fn resolve_loop_target(preceding: &[ConcreteStep], target: &str) -> Result<usize, LoadError> {
-    let matching = |by_id: bool| -> Vec<usize> {
+    let positions = |names: &dyn Fn(&ConcreteSkill) -> bool| -> Vec<usize> {
         preceding
             .iter()
             .enumerate()
-            .filter_map(|(index, step)| {
-                match step {
-                    ConcreteStep::Skill(skill) if by_id => skill.id.as_deref() == Some(target),
-                    ConcreteStep::Skill(skill) => skill.skill.name == target,
-                    ConcreteStep::Command(_) | ConcreteStep::Xor(_) => false,
-                }
-                .then_some(index)
-            })
+            .filter(|(_, step)| matches!(step, ConcreteStep::Skill(skill) if names(skill)))
+            .map(|(index, _)| index)
             .collect()
     };
-    let mut found = matching(true);
+    let mut found = positions(&|skill| skill.id.as_deref() == Some(target));
     if found.is_empty() {
-        found = matching(false);
+        found = positions(&|skill| skill.skill.name == target);
     }
     match found[..] {
         [index] => Ok(preceding.len() - index),
@@ -435,6 +429,16 @@ fn resolve_loop_target(preceding: &[ConcreteStep], target: &str) -> Result<usize
             preceding.len()
         ))),
     }
+}
+
+/// Index of the earlier step the deciding skill at `index` returns to.
+pub(crate) fn return_target(steps: &[ConcreteStep], index: usize) -> Option<usize> {
+    let ConcreteStep::Skill(skill) = steps.get(index)? else {
+        return None;
+    };
+    index
+        .checked_sub(skill.returns?)
+        .filter(|target| *target < index)
 }
 
 fn validate_occurrence_ids(

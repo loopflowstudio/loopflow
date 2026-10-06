@@ -286,6 +286,26 @@ tokio::task_local! {
     pub(crate) static PLANNING_ACCEPTANCE_GATE: (Arc<tokio::sync::Notify>, Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>);
 }
 
+// The blocking worker owns acquisition through commit, even if its async caller is canceled.
+async fn run_planning_write(
+    store: &sqlite::SqliteStore,
+    acquisition: Option<Arc<std::fs::File>>,
+    write: impl FnOnce(sqlite::SqliteStore) -> StoreResult<()> + Send + 'static,
+) -> StoreResult<()> {
+    #[cfg(test)]
+    let gate = PLANNING_ACCEPTANCE_GATE.try_with(Clone::clone).ok();
+    run_sqlite(store, move |store| {
+        let _acquisition = acquisition;
+        #[cfg(test)]
+        if let Some((entered, release)) = gate {
+            entered.notify_one();
+            let _ = release.lock().expect("planning test gate poisoned").recv();
+        }
+        write(store)
+    })
+    .await
+}
+
 impl Store {
     #[cfg(test)]
     pub(crate) fn from_sqlite_for_test(sqlite: sqlite::SqliteStore) -> Self {
@@ -302,15 +322,7 @@ impl Store {
         snapshot: PmSnapshotRow,
         acquisition: Option<Arc<std::fs::File>>,
     ) -> StoreResult<()> {
-        #[cfg(test)]
-        let gate = PLANNING_ACCEPTANCE_GATE.try_with(Clone::clone).ok();
-        run_sqlite(&self.sqlite, move |store| {
-            let _acquisition = acquisition;
-            #[cfg(test)]
-            if let Some((entered, release)) = gate {
-                entered.notify_one();
-                let _ = release.lock().expect("planning test gate poisoned").recv();
-            }
+        run_planning_write(&self.sqlite, acquisition, move |store| {
             store.put_pm_snapshot(&snapshot)
         })
         .await
@@ -328,15 +340,7 @@ impl Store {
         let wave = wave.clone();
         let provider = provider.to_string();
         let initiative = initiative.to_string();
-        #[cfg(test)]
-        let gate = PLANNING_ACCEPTANCE_GATE.try_with(Clone::clone).ok();
-        run_sqlite(&self.sqlite, move |store| {
-            let _acquisition = acquisition;
-            #[cfg(test)]
-            if let Some((entered, release)) = gate {
-                entered.notify_one();
-                let _ = release.lock().expect("planning test gate poisoned").recv();
-            }
+        run_planning_write(&self.sqlite, acquisition, move |store| {
             store.put_pm_project(&wave, &provider, &initiative, &project, observed_at)
         })
         .await
@@ -354,15 +358,7 @@ impl Store {
         let wave = wave.clone();
         let provider = provider.to_string();
         let initiative = initiative.to_string();
-        #[cfg(test)]
-        let gate = PLANNING_ACCEPTANCE_GATE.try_with(Clone::clone).ok();
-        run_sqlite(&self.sqlite, move |store| {
-            let _acquisition = acquisition;
-            #[cfg(test)]
-            if let Some((entered, release)) = gate {
-                entered.notify_one();
-                let _ = release.lock().expect("planning test gate poisoned").recv();
-            }
+        run_planning_write(&self.sqlite, Some(acquisition), move |store| {
             store.reconcile_pm_project_teams(&wave, &provider, &initiative, &project, observed_at)
         })
         .await
@@ -378,15 +374,7 @@ impl Store {
     ) -> StoreResult<()> {
         let repo = repo.to_string();
         let provider = provider.to_string();
-        #[cfg(test)]
-        let gate = PLANNING_ACCEPTANCE_GATE.try_with(Clone::clone).ok();
-        run_sqlite(&self.sqlite, move |store| {
-            let _acquisition = acquisition;
-            #[cfg(test)]
-            if let Some((entered, release)) = gate {
-                entered.notify_one();
-                let _ = release.lock().expect("planning test gate poisoned").recv();
-            }
+        run_planning_write(&self.sqlite, acquisition, move |store| {
             store.put_pm_task(
                 &repo,
                 &provider,
@@ -452,8 +440,7 @@ impl Store {
     ) -> StoreResult<()> {
         let repo = repo.to_string();
         let provider = provider.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            let _acquisition = acquisition;
+        run_planning_write(&self.sqlite, acquisition, move |store| {
             store.invalidate_pm_task(&repo, &provider, &expected)
         })
         .await

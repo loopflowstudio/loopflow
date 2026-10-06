@@ -8,7 +8,9 @@ status and evidence; earlier review notes remain at
 - Preservation mechanics need no product decision. Acceptance retains shared
   acquisition guards through SQLite commit; cold detail re-reads ownership under
   its guard, and reteam uses full readbacks and authorized Team reconciliation.
-  Registration/population fencing is next. Created-successor recovery stays with
+  The prior iteration’s reteam repair request is satisfied locally;
+  registration/population fencing is next. Configuration-switch interleavings
+  depend on the later binding/transition replacement. Created-successor recovery stays with
   binding/transition replacement; name selection cannot recover preserved names.
 - Chapter metadata representation and projection. Cross-Wave historical inspection
   remains proposed; Wave-scoped chapter creation is requested.

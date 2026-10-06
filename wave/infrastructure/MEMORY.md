@@ -282,30 +282,29 @@ both durable-identity shortcuts deleted. Shared SQL ownership and focused tests
 preserve foreign/unmapped plans and legitimate same-Wave Task/PR identity.
 Replay/generic writers are deleted; restart retains accepted facts. Rotation now
 accepts confirmed readbacks. Exact source/evidence remains at `d4d77d8e22f4244ad83027ba9c85bb8644a622e6`.
-Reteam now accepts full issue readbacks and exact Team readbacks, preserving
-Initiative ownership and independently newer facts. The identifier-only writers
-are deleted; local recovery passes prove no configured acceptance.
+Reteam accepts full issue and exact Team readbacks, preserving Initiative ownership
+and independently newer facts. Identifier-only writers are deleted.
 
-October 5: queued SQLite acceptance now retains shared Wave guards through commit
-after caller cancellation. Multi-Wave operations acquire in stable ID order;
-held callers reuse guards. Cold discovery re-reads ownership under the lock.
-Null-detail invalidation retains exclusion and compares the queried revision/age
-so delayed absence cannot invalidate newer facts. Inspection follows UUID across
-identifier changes. Local cancellation/reteam proofs establish no registration/start
-fencing or installed recovery.
+October 5: queued SQLite workers own Wave guards through commit, including after
+caller cancellation; one shared writer preserves that lifetime. Multi-Wave
+operations lock in stable ID order and reuse held guards. Cold detail re-reads
+ownership under the lock; delayed absence compares the queried revision/age.
+Inspection follows UUID across renames. Cancellation proofs exclude competing
+reteam preview until commit; separate apply fixtures cover cached recovery and
+expansion/move/narrowing response loss. These supersede the unrepaired-reteam
+finding, not registration/start fencing or installed acceptance.
 
-Created-successor recovery retains Task/PR/Flow identity, then rejects
-`A — next` and `A — previous` under the old selector. Its proof therefore belongs
-with shared binding and exact-ID transition replacement; do not restore stripping.
-Jack Heart's policy is unchanged. Relationship serialization and membership fencing
+Created-successor retry retains Task/PR/Flow identity but rejects
+`A — next` and `A — previous`. Recovery needs shared binding and exact-ID
+transitions; restoring name stripping would violate Jack Heart’s policy. Relationship serialization and membership fencing
 remain before selection, ensure and rotation. Desktop activation
 must preserve #1447's cached plans and independent Session reads, outside polling.
 #1446's ongoing procedures retain started-Task follow-through; reads never provision.
 Installed and configured acceptance remain unproved.
 
 Collection preserves issue-reported ownership; listing Project IDs cannot override
-it. October 5 removed that overwrite after a failing loopback regression; collection
-proofs establish no installed acceptance.
+it. October 5’s failing loopback regression prompted removal; installed acceptance
+remains unproved.
 
 Jack Heart's October 5 comment `e4dafef5-2a87-4359-818a-3770356ba850` requests
 autonomous Intelligence repair without another review Session. The reported

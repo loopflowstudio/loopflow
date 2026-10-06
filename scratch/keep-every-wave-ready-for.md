@@ -132,6 +132,13 @@ Wave acceptance.
 
 ## Remaining coherent cut
 
+October 5 realignment: the previous iteration's cancellation/cold-detail/reteam
+repair request is implemented in `2cac145295a5d94a9517d8ee5298c255bc15cce0`,
+with the subsequent local compression retaining those paths. The recorded focused
+checks below cover that repair; the earlier “reteam remains unrepaired” feedback
+is superseded. Step 2 is the next implementation boundary, not another pass at
+identifier-only writes or async-scope locking.
+
 The branch is not releasable: shared binding, exact-ID ensure, transition recovery,
 KR-first rotation, backlog preservation, Desktop activation and configured
 acceptance remain. The implementation order below owns their sequencing. Both
@@ -666,7 +673,9 @@ cases below own requirements; this list identifies each next cut:
    recovery remains with steps 3–5, not a repair to the old name selector.
 2. Establish stable Task/checkout membership across registration, relocation and
    every admission path under **Preservation boundary**. Prove both rotation/start
-   orderings and failed-reset re-entry before changing selection.
+   orderings and failed-reset re-entry at the existing operation boundary. Final
+   before/after-configuration-switch proofs depend on steps 3–5; the known
+   created-successor/name-selector failure remains with that replacement.
 3. Add the shared Wave-ID configuration reader/writer and explicit binding setup,
    then replace every current-Project selector, including Task routing and
    CLI/status/DTO consumers. Preserve the designated Intelligence Project.
@@ -815,6 +824,14 @@ collection and selects retained/new identity with an explicit match. Ownership
 errors still roll back the entire observation. Full-refresh ordering and freshness
 remain separate. The subsequent acquisition/reteam cut below supplies those repairs.
 
+October 5 compression keeps one `run_planning_write` owner for the queued
+worker's acquisition lifetime, including invalidation. Reteam retains each
+Project's preflight Wave association and stores registered Waves with their held
+guards; repeated configuration searches and parallel lookup collections are
+removed. Review preserves stable-ID lock ordering, exact Team readbacks and
+independent entity ages. Prior check evidence is retained at
+`2cac145295a5d94a9517d8ee5298c255bc15cce0:scratch/keep-every-wave-ready-for.md`.
+
 The remaining selection deletion targets require configured identity and exact-ID
 transitions. Reteam readbacks and cancellation-safe acceptance are implemented;
 registration, start exclusion and created-successor recovery remain unfinished.
@@ -848,7 +865,10 @@ accepted old facts. Production acceptance now moves an `Arc<File>` guard into
 the queued worker, retaining ownership through commit. Snapshot refresh, detail,
 reteam and rotation use this lifetime; held-lock callers reuse it. No lock is
 acquired inside SQLite. The operation tests pause real acceptance workers,
-cancel their callers, and exercise competing reteam before and after release.
+cancel their callers, and show competing reteam preview blocked until release,
+then able to read the accepted result. Separate apply/re-entry fixtures cover
+cached membership and response loss during Team expansion, issue moves and
+narrowing. These do not yet prove rotation/start exclusion.
 
 Cold detail discovers its Wave, locks, then reads provider ownership again.
 Changed ownership reports retry without acquiring another Wave out of order.
@@ -863,4 +883,4 @@ created-successor failure remains an explicit replacement target. Membership
 fencing, shared binding/ensure, KR-first rotation, Desktop and configured acceptance
 remain unfinished. No installed Home or designated Intelligence Project was mutated.
 
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b ops::pm::planning_lookup_tests repository_team_reteam interrupted_reteam_preserves_confirmed_identifier task_creation_refusal_preserves_inventory rotation_persists_confirmed_transfer_before_final_refresh --test-threads=4` passed (25); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed; broader/configured acceptance remains with gate.
+Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b ops::pm::planning_lookup_tests repository_team_reteam interrupted_reteam_preserves_confirmed_identifier rotation_persists_confirmed_transfer_before_final_refresh --test-threads=4` passed (24); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed; broader/configured acceptance remains with gate. Realign: `git diff --check` passed; source review reused those checks without rerunning behavioral suites.

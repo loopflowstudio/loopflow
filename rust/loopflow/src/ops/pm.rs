@@ -2136,12 +2136,10 @@ async fn apply_or_plan_repository_reteam(
         }
     }
     registered.sort_by(|left, right| left.id().as_str().cmp(right.id().as_str()));
-    let mut acquisitions = BTreeMap::new();
-    for wave in &registered {
-        acquisitions.insert(
-            wave.slug().to_string(),
-            super::chapter::rotation_lock(wave).await?,
-        );
+    let mut locked_waves = BTreeMap::new();
+    for wave in registered {
+        let acquisition = super::chapter::rotation_lock(&wave).await?;
+        locked_waves.insert(wave.slug().to_string(), (wave, acquisition));
     }
     let mut project_moves = Vec::new();
     let mut moves = Vec::new();
@@ -2244,14 +2242,14 @@ async fn apply_or_plan_repository_reteam(
                     });
                 }
             }
-            projects.push(project);
+            projects.push((wave, project));
         }
     }
 
     if apply {
         // Linear requires the destination Team on a Project before its Issues
         // can move. Expand first; narrowing is the final provider phase.
-        for project in &projects {
+        for (_, project) in &projects {
             if !project.team_ids.iter().any(|team| team == team_id) {
                 let mut teams = project.team_ids.clone();
                 teams.push(team_id.clone());
@@ -2268,14 +2266,8 @@ async fn apply_or_plan_repository_reteam(
             }
         }
 
-        for project in &projects {
-            let wave = registered
-                .iter()
-                .find(|wave| {
-                    read_initiative(repo, wave.slug(), resolved.repository.provider).as_ref()
-                        == project.initiative_ids.first()
-                })
-                .expect("preflight established the Project Wave");
+        for (wave, project) in &projects {
+            let (wave, acquisition) = &locked_waves[*wave];
             let mut expected_teams = project.team_ids.clone();
             if !expected_teams.contains(team_id) {
                 expected_teams.push(team_id.clone());
@@ -2284,24 +2276,16 @@ async fn apply_or_plan_repository_reteam(
                 resolved,
                 wave,
                 project,
-                acquisitions[wave.slug()].clone(),
+                acquisition.clone(),
                 &expected_teams,
             )
             .await?;
         }
         for update in identifier_updates {
-            let wave = registered
-                .iter()
-                .find(|wave| wave.slug() == update.wave)
-                .expect("registered reteam Wave");
-            let (_, changed) = accept_reteam_task(
-                repo,
-                resolved,
-                wave,
-                &update.issue_id,
-                acquisitions[wave.slug()].clone(),
-            )
-            .await?;
+            let (wave, acquisition) = &locked_waves[&update.wave];
+            let (_, changed) =
+                accept_reteam_task(repo, resolved, wave, &update.issue_id, acquisition.clone())
+                    .await?;
             task_updates += usize::from(changed);
         }
 
@@ -2335,18 +2319,9 @@ async fn apply_or_plan_repository_reteam(
                 .move_item_to_team(&mv.id, team_id)
                 .await
                 .map_err(pm_to_ops)?;
-            let wave = registered
-                .iter()
-                .find(|wave| wave.slug() == mv.wave)
-                .expect("registered reteam Wave");
-            let (confirmed_identifier, changed) = accept_reteam_task(
-                repo,
-                resolved,
-                wave,
-                &mv.id,
-                acquisitions[wave.slug()].clone(),
-            )
-            .await?;
+            let (wave, acquisition) = &locked_waves[&mv.wave];
+            let (confirmed_identifier, changed) =
+                accept_reteam_task(repo, resolved, wave, &mv.id, acquisition.clone()).await?;
             if confirmed_identifier != new_identifier {
                 return Err(OpsError::Message(format!(
                     "Task {} move is not confirmed",
@@ -2357,7 +2332,7 @@ async fn apply_or_plan_repository_reteam(
             mv.new_identifier = Some(new_identifier);
         }
 
-        for project in &projects {
+        for (_, project) in &projects {
             if project_needs_reteam(team_id, &project.team_ids) {
                 progress.status(&format!(
                     "narrowing Project `{}` onto team {team_key}",
@@ -2372,19 +2347,13 @@ async fn apply_or_plan_repository_reteam(
             }
         }
 
-        for project in &projects {
-            let wave = registered
-                .iter()
-                .find(|wave| {
-                    read_initiative(repo, wave.slug(), resolved.repository.provider).as_ref()
-                        == project.initiative_ids.first()
-                })
-                .expect("preflight established the Project Wave");
+        for (wave, project) in &projects {
+            let (wave, acquisition) = &locked_waves[*wave];
             accept_reteam_project(
                 resolved,
                 wave,
                 project,
-                acquisitions[wave.slug()].clone(),
+                acquisition.clone(),
                 std::slice::from_ref(team_id),
             )
             .await?;
@@ -2409,7 +2378,7 @@ async fn apply_or_plan_repository_reteam(
                 &snapshot,
                 observed_at,
                 store,
-                Some(acquisitions[wave].clone()),
+                Some(locked_waves[wave].1.clone()),
             )
             .await?;
         }

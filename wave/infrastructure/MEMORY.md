@@ -94,15 +94,33 @@ The Swift cleanup finding stays in release memory (shipped in v0.12.24).
 PR #1413 merged these as acd6654f9 after hosted CI passed, including Swift under
 combined headless and external-network restrictions. Merge is not installation.
 
-The Task then could not complete: an earlier restart had stranded its review
-under a replaced Flow, an independent Flow had failed, and their Execs and one
-provider turn never settled before a machine restart removed the evidence.
-Branch repair (PR 2): an Exec or provider turn that began before the last boot
-has exited; a review whose Flow ended awaits no one; `lf flow end ID` retires one
-stopped Flow by request, keeping its failure and history and inventing no step
-result. Live or unknown execution since boot still blocks. Closing LOO-326 needs
-an installed release carrying this, then `lf flow end` and `lf task complete`
-from outside any `lf --task LOO-326` run, whose own Exec gates completion.
+Jack Heart's October 5 steer records #1413/#1435 installed in v0.13.3,
+both stopped recovery Flows ended and the headless Session completed. Installed
+0.13.3 readback still shows Exec `5f239ead-89f9-49c4-92c4-4c2f8b97ca94`
+without terminal fields. Its exact process receipt is absent; it started after
+the current boot. The shared trace's terminal events lack Exec IDs and cannot
+settle it. Session closure does not prove child exit. Preserve the unknown
+outcome until exact exit evidence or a subsequent boot establishes death;
+completion remains outside this Task's active contribution.
+
+Branch prevention now keys process receipts by Exec ID and removes them only
+after a successful terminal write. Interrupt cleanup follows the same rule;
+pruning requires exact death plus a matching persisted terminal record. Failed
+writes, PID reuse and pruning must preserve unfinished identity without inventing
+an outcome. These loss paths are not proved causes of the original incident.
+Release's October 4 retained-landing evidence remains the counterexample: its
+receipt proved death while separate leases established re-entry authority.
+This source repair cannot recover the missing identity or complete LOO-326;
+October 5 gate passed architecture, formatting, Clippy and 78 website tests.
+Rust reached 1,903 passes before host security pressure interrupted four tests
+and left 333 unrun (17 skipped). Receipt regressions passed; CI owns unfinished
+verification. Installed behavior remains unproved.
+
+Release's October 5 recovery adds a separate download lesson: bounded retries
+cannot compensate for an overall deadline that kills healthy slow transfers.
+Its 76 MB transfer near 200 KiB/s exceeded five minutes and completed within
+fifteen. Keep deadline sizing separate from read retry policy; publication and
+installation still do not establish public smoke verification.
 
 PR #1435 CI at `6c760f285` exposed a release cleanup race: a terminal repair
 Exec receipt can precede closure of inherited checkout descriptors. A delayed

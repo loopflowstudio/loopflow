@@ -322,23 +322,22 @@ KRs, Tasks and identity, with no competing creation or repository rotation.
 This explicit ID supplies bootstrap selection, not a candidate heuristic.
 The active-Project adoption test proves no Backlog activation or installed repair.
 
-Registration exclusion/retry preserves unbound checkout Sessions, Flow membership
-and unset Started. October 5 source now takes the Wave guard before Project
-resolution and carries it into either registration worker through commit, even
-after caller cancellation. It releases before checkout setup and execution.
-Accepted issue ownership/content/age still need transactional selection; the
-Started-count selector and rotation's missing checkout exclusion remain.
+Registration now takes the Wave guard before Project resolution and retains it
+through either SQLite registration commit, including caller cancellation, then
+releases it before checkout setup and execution. Admission uses exclusive canonical
+workspace/Task roots and shared ancestors, covering future missing roots without
+a population scan while siblings progress independently. Both APIs preserve unbound
+conversations, Task/PR atomicity and unset Started. The rejected Home-wide guard
+remains at `2d96630b3:wave/infrastructure/MEMORY.md`; both missing-root failures
+remain at `be36cde18:wave/infrastructure/MEMORY.md`. Git leases remain separate.
 
-October 5's missing-root regressions failed in both admission orderings. The repair
-locks canonical workspace/explicit Task paths exclusively and ancestors shared,
-through SQLite commit. Ancestor exclusion covers future roots without a Task
-population scan; siblings progress independently. The rejected Home-wide guard
-remains at `2d96630b3:wave/infrastructure/MEMORY.md`. Registration now holds Wave
-exclusion through commit but still needs accepted facts; rotation exclusion remains unimplemented.
-Git leases and admission remain separate. `store/sqlite/admission.rs` merges all
-roots' ancestor modes before locking. Registration retry retains unbound
-conversations without setting Started; it proves neither rotation recovery nor
-configured readiness.
+Registration still inserts supplied planning under a Started-count selector;
+rotation still lacks checkout exclusion. October 5 source inspection also finds
+registration returns `()` while its caller uses the earlier Task for publication,
+checkout finishing and execution. Transactional acceptance must return the accepted
+Task to those consumers, retaining reserved identity and each entity's observation
+age. A correct stored row alone cannot prove the operation used accepted facts.
+Release's entry-point recovery lesson applies; publication proves no Project readiness.
 
 `b06e17d3c:wave/infrastructure/MEMORY.md` retains the prior build/13-test/Clippy
 record and acquisition details. CI repair, both rotation/start orderings and

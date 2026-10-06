@@ -142,6 +142,18 @@ steer publication, checkout creation or execution. New-issue creation's provider
 guard has already returned; registration acquires a fresh guard without nesting.
 Both registration APIs retain Task/PR atomicity and unset Started.
 
+October 5 source review: both registration APIs return `()`, and
+`create_prepared_task` continues with its pre-registration `Task` for steer
+publication, checkout finishing and optional execution. Selecting accepted facts
+only in SQL would leave those consumers using the rejected snapshot. Return the
+committed Task from registration and use it downstream, preserving the reserved
+Task/PR/checkout identity. Select accepted issue ownership, content and entity age
+in the insertion transaction; keep provider acquisition outside it. Exercise a
+newer accepted issue between resolution and registration through the operation
+entry point, asserting both persisted and returned planning. A move outside the
+selected Wave/Project must preserve existing work without launching from stale
+ownership. This is remaining implementation, not a reproduced runtime failure.
+
 Hierarchical admission repaired both missing-root orderings and preserves sibling
 progress; the population scan is deleted. **Preservation boundary** below owns the
 remaining lock contract. Earlier failures and detailed evidence remain at
@@ -885,4 +897,4 @@ Issue moves. Full repository preflight still precedes writes, and every Wave gua
 survives through acceptance. The existing multi-Project and interruption fixtures
 retain names, ownership and recovery assertions. No old selector was extended.
 
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4`, isolated `scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b repository_team_reteam --test-threads=1` (5 passed), `cargo clippy --all-targets --jobs 4 -- -D warnings` and formatting passed; gate retains operation-entry, rotation and configured acceptance.
+Checks: reconciliation `git diff --check` passed (prose only); prior `cargo test -p loopflow --lib --no-run --jobs 4`, isolated `scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b repository_team_reteam --test-threads=1` (5 passed), `cargo clippy --all-targets --jobs 4 -- -D warnings` and formatting passed; gate retains operation-entry, rotation and configured acceptance.

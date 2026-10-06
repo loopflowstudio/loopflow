@@ -533,3 +533,4 @@ Earlier passes are at commit `018083656`.
   changes nothing the plan relies on; every function, constant and deletion
   the plan names is in the tree. `cargo check -p loopflow --all-targets`
   clean; `check_migrations.py` pass against v0.13.5. Gate owns the suites.
+- 2026-10-06 delivery: Jack Heart requested `lf queue -b` then landing. Queue completed; gate architecture/Python/website passed, Rust 2269/2274 with five ambient LF-environment failures then all five passed with inherited LF variables removed. Swift 378/379 passed; remaining source-vocabulary check matched a comment, corrected and both focused tests passed headlessly. Original logs: /tmp/loo382-gate.log; focused receipts /tmp/loo382-focused-gate.log and /tmp/loo382-swift-focused.log. Runtime budgets and installed demonstration limits remain as recorded.

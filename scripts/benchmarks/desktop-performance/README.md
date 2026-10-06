@@ -110,7 +110,7 @@ symbols. `20261005-first-launch/` is the receipt: about 390 ms more before
 `main`.
 
 `desktop_performance.py write-visible` opens one window on a private Home
-through the real `lf monitor workspace --watch` reader, then commits from
+through the real `lf monitor work --watch` reader, then commits from
 `sqlite3`: a Task created and renamed, a Session created, renamed and completed.
 Each interval runs from the writer's exit to the row read back from a captured
 bitmap; `write_ms` is recorded beside it. The Home must be a copy (it refuses

@@ -17,7 +17,7 @@ struct TaskMonitorTests {
     func taskEvidence() async throws {
         let feed = ActiveSessionsTestFeed()
         let query = try query(feed: feed)
-        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         model.observeActiveSessions()
         try await waitForActiveSessions { model.activeSessions.value != nil }
@@ -121,7 +121,7 @@ struct TaskMonitorTests {
         session["terminal_ids"] = [shells[0].id]
         let sessionJSON = String(decoding: try JSONSerialization.data(withJSONObject: [session]), as: UTF8.self)
         let query = try query(feed: ActiveSessionsTestFeed(), sessions: sessionJSON)
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1400, height: 750),
@@ -130,9 +130,9 @@ struct TaskMonitorTests {
         defer { window.contentView = nil }
         try await settle(window)
         // Task entry retains the shell selection; opening a conversation is explicit.
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-now").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-now").button().tap()
         try await settle(window)
-        let navigator = try view.inspect().find(WorkspaceNavigator.self).actualView()
+        let navigator = try view.inspect().find(WorkNavigator.self).actualView()
         navigator.onOpenSession(try #require(model.sessions.value?.first))
         try await settle(window)
         #expect(model.navigation.selectedSessionId == "monitor-session")
@@ -163,20 +163,20 @@ struct TaskMonitorTests {
         window.setContentSize(NSSize(width: 1100, height: 650))
         try await settle(window)
         store.toggleZoom(monitor.id)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-now").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-now").button().tap()
         try await settle(window)
         #expect(store.focusedPaneId == monitor.id)
         navigator.onOpenSession(try #require(model.sessions.value?.first))
         try await settle(window)
         #expect(window.firstResponder === terminals[0])
         // Another Task opens its own retained workspace.
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review").button().tap()
         try await settle(window)
         #expect(model.navigation.content == .terminals)
         #expect(model.selection == .task(id: "issue-review"))
         #expect(window.firstResponder !== terminals[0])
         #expect(store.layout.allPanes.filter { $0.content == .shell } == shells)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-now").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-now").button().tap()
         try await settle(window)
         #expect(store.focusedPaneId == shells[0].id)
         #expect(window.firstResponder === terminals[0])

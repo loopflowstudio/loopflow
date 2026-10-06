@@ -9,7 +9,7 @@ use crate::durable::{
 use crate::id::WaveId;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
-use crate::work::project::{Project, ProjectEventKind};
+use crate::work::project::ProjectEventKind;
 use crate::work::task::{Task, TaskEventKind};
 
 use super::SqliteStore;
@@ -598,23 +598,41 @@ pub(super) fn require_task_worker_eligible(conn: &Connection, work: &WorkRef) ->
             ));
         }
     }
-    require_current_task_chapter(conn, work)
+    require_current_task_project(conn, work)
 }
 
-pub(super) fn require_current_task_chapter(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
+pub(super) fn require_current_task_project(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
     let WorkRef::Task(task) = work else {
         return Ok(());
     };
-    let expired: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM tasks t JOIN projects p ON p.id=t.project_id
-         WHERE t.id=?1 AND t.started_at IS NULL AND
-         (p.status != 'started' OR (SELECT count(*) FROM projects current
-          WHERE current.wave_id=p.wave_id AND current.status='started') != 1))",
+    let (project, started): (String, bool) = conn.query_row(
+        "SELECT project_id, started_at IS NOT NULL FROM tasks WHERE id=?1",
         [task.as_str()],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    if expired {
-        return Err(StoreError::InvalidAuthority("this Task belongs to chapter history; resume the chapter transition before starting work".into()));
+    if started {
+        return Ok(());
+    }
+    require_selected_project(conn, &ProjectId::from_raw(project))
+}
+
+pub(super) fn require_selected_project(conn: &Connection, project: &ProjectId) -> StoreResult<()> {
+    let (wave, provider_id, status): (WaveId, String, String) = conn.query_row(
+        "SELECT wave_id, external_project_id, status FROM projects WHERE id=?1",
+        [project.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    let selected = super::project_selection::read_in(conn, &wave).map_err(invalid_durable)?;
+    if selected.as_deref() != Some(provider_id.as_str()) {
+        return Err(StoreError::InvalidAuthority(
+            "Task Project is not the Wave's configured Project; ensure the Wave before starting new work".into(),
+        ));
+    }
+    if status != "started" {
+        return Err(StoreError::InvalidAuthority(
+            "configured Project is not In Progress; ensure the Wave before starting new work"
+                .into(),
+        ));
     }
     Ok(())
 }
@@ -652,63 +670,30 @@ pub(crate) fn create_wave_work(
     inherit_placement(tx, &work, None, created_at)
 }
 
-pub(crate) fn create_project_work(tx: &Transaction<'_>, project: &Project) -> StoreResult<()> {
-    let project_id = tx
-        .query_row(
-            "SELECT id FROM projects WHERE external_project_id=?1",
-            [project.plan.id.as_str()],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .unwrap_or_else(|| ProjectId::new().to_string());
-    tx.execute(
-        "INSERT OR IGNORE INTO projects (
-            id, wave_id, external_project_id, created_at
-         ) VALUES (?1, ?2, ?3, ?4)",
-        params![
-            project_id,
-            project.wave_id.as_str(),
-            project.plan.id.as_str(),
-            project.created_at.unix_timestamp(),
-        ],
+pub(super) fn inherit_project_placement(
+    tx: &Transaction<'_>,
+    project_id: &ProjectId,
+) -> StoreResult<()> {
+    let (wave_id, created_at) = tx.query_row(
+        "SELECT wave_id,created_at FROM projects WHERE id=?1",
+        [project_id.as_str()],
+        |row| Ok((row.get::<_, WaveId>(0)?, row.get::<_, i64>(1)?)),
     )?;
-    let work = WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?);
-    let parent = WorkRef::Wave(project.wave_id.clone());
     inherit_placement(
         tx,
-        &work,
-        Some(&parent),
-        project.created_at.unix_timestamp(),
-    )?;
-    Ok(())
+        &WorkRef::Project(project_id.clone()),
+        Some(&WorkRef::Wave(wave_id)),
+        created_at,
+    )
 }
 
-pub(crate) fn create_task_work(tx: &Transaction<'_>, task: &Task) -> StoreResult<()> {
-    let project_id = task.project_id.as_str().to_string();
-    let task_id = tx
-        .query_row(
-            "SELECT id FROM tasks WHERE external_issue_id=?1",
-            [task.plan.id.as_str()],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .unwrap_or_else(|| TaskId::new().to_string());
-    tx.execute(
-        "INSERT OR IGNORE INTO tasks (
-            id, project_id, external_issue_id, issue_identifier, created_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![
-            task_id,
-            project_id,
-            task.plan.id.as_str(),
-            task.plan.identifier,
-            task.created_at.unix_timestamp(),
-        ],
-    )?;
-    let work = WorkRef::Task(TaskId::parse(&task_id).map_err(invalid_durable)?);
-    let parent = WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?);
-    inherit_placement(tx, &work, Some(&parent), task.created_at.unix_timestamp())?;
-    Ok(())
+pub(super) fn inherit_task_placement(tx: &Transaction<'_>, task: &Task) -> StoreResult<()> {
+    inherit_placement(
+        tx,
+        &WorkRef::Task(task.id.clone()),
+        Some(&WorkRef::Project(task.project_id.clone())),
+        task.created_at.unix_timestamp(),
+    )
 }
 
 pub(crate) fn work_for_child_in(conn: &Connection, target: &ChildRef) -> StoreResult<WorkRef> {
@@ -852,7 +837,7 @@ mod durable_store_tests {
             plan: ProjectPlan {
                 flow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
-                id: LinearProjectId::new("project-uuid").unwrap(),
+                id: LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap(),
                 slug: "probe".to_string(),
                 name: "Probe".to_string(),
                 prompt_context: "Probe Task execution".to_string(),
@@ -865,6 +850,14 @@ mod durable_store_tests {
             updated_at: now,
         };
         store.insert_project(&project).unwrap();
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store,
+            &wave_id,
+            None,
+            project.plan.id.as_str(),
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
         let task = Task {
             id: task_id.clone(),
             plan: TaskPlan {
@@ -904,8 +897,130 @@ mod durable_store_tests {
             created_at: now,
             updated_at: now,
         };
-        store.insert_task(&task, &pr).unwrap();
+        store.insert_task(task.clone(), &pr, false).unwrap();
         (dir, store, task_id)
+    }
+
+    #[test]
+    fn configured_project_admission_preserves_started_continuation() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut other = store.project(&task.project_id).unwrap().unwrap();
+        other.id = ProjectId::new();
+        other.plan.id = LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap();
+        other.plan.name = "An unrelated ordinary plan".into();
+        store.insert_project(&other).unwrap();
+        // Another Started Project does not compete with the configured identity.
+        let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
+        store.insert_task(new_task.clone(), &pr, false).unwrap();
+        let initial = store
+            .start_task_flow(&task_id, &autonomous_position(&task_id))
+            .unwrap();
+        assert!(!store.task_started(&task_id).unwrap());
+        let mut input = unpublished_conversation(Some(new_task.id.clone()), None, 1);
+        input.cwd = new_task.worktree.clone();
+        store.create_session(input, None, None).unwrap();
+        assert!(store.task_started(&new_task.id).unwrap());
+        let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store,
+            &task.wave_id,
+            Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3"),
+            other.plan.id.as_str(),
+            &guard,
+        )
+        .unwrap();
+        let (mut rejected, mut rejected_pr) =
+            unregistered_task(&store, &task_id, dir.path().join("rejected"));
+        rejected.plan.id = LinearIssueId::new("third-issue").unwrap();
+        rejected.plan.identifier = "PROBE-3".into();
+        rejected.workspace_slug = "rejected".into();
+        rejected_pr.slug = "rejected".into();
+        rejected_pr.branch = "rejected".into();
+        assert!(store
+            .insert_task(rejected.clone(), &rejected_pr, false)
+            .is_err());
+        assert!(store.task(&rejected.id).unwrap().is_none());
+        assert!(store.task_prs(&rejected.id).unwrap().is_empty());
+        assert!(store
+            .claim_task_worker(
+                &task_id,
+                initial.id(),
+                initial.version,
+                &owner(41001),
+                time::OffsetDateTime::now_utc(),
+            )
+            .is_err());
+        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), initial);
+        // An established start remains eligible after its Project becomes history.
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE projects SET status='completed' WHERE id=?1",
+                [task.project_id.as_str()],
+            )
+            .unwrap();
+        }
+        let continued = store
+            .start_task_flow(&new_task.id, &autonomous_position(&new_task.id))
+            .unwrap();
+        claim(&store, &new_task.id, &continued, 41002);
+        assert!(store.task_started(&new_task.id).unwrap());
+        assert_eq!(
+            store.task(&task_id).unwrap().unwrap().worktree,
+            task.worktree
+        );
+    }
+
+    #[test]
+    fn configured_project_admission_requires_a_selected_active_project() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let flow = autonomous_position(&task_id);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE waves SET current_project_id=NULL WHERE id=?1",
+                [&task.wave_id],
+            )
+            .unwrap();
+        assert!(store.start_task_flow(&task_id, &flow).is_err());
+        assert!(store.task_flow(&task_id).unwrap().is_none());
+        assert!(!store.task_started(&task_id).unwrap());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                rusqlite::params![task.wave_id, task.project_id.as_str()],
+            )
+            .unwrap();
+        for status in ["backlog", "planned", "paused", "completed", "canceled"] {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE projects SET status=?2 WHERE id=?1",
+                    rusqlite::params![task.project_id.as_str(), status],
+                )
+                .unwrap();
+            assert!(store.start_task_flow(&task_id, &flow).is_err());
+            assert!(store.task_flow(&task_id).unwrap().is_none());
+        }
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE projects SET status='started', flow='' WHERE id=?1",
+                [task.project_id.as_str()],
+            )
+            .unwrap();
+        store.start_task_flow(&task_id, &flow).unwrap();
     }
 
     #[test]
@@ -1299,7 +1414,7 @@ mod durable_store_tests {
         let error = writer.join().unwrap().unwrap_err();
         assert!(error
             .to_string()
-            .contains("Project would change AgentSession ancestry"));
+            .contains("selected Project cannot change Wave ownership"));
         let (run_wave, project_wave): (String, String) = conn
             .query_row(
                 "SELECT r.wave_id,p.wave_id FROM agent_sessions r JOIN tasks t ON t.id=r.task_id
@@ -1310,6 +1425,328 @@ mod durable_store_tests {
             .unwrap();
         assert_eq!(run_wave, task.wave_id.as_str());
         assert_eq!(run_wave, project_wave);
+    }
+
+    #[test]
+    fn chapter_evidence_retains_taskless_mechanical_work_without_marking_started() {
+        let (_dir, store, task_id) = store_with_task();
+        let mut flow = autonomous_position(&task_id);
+        flow.task_id = None;
+        flow.invocation.steps = vec![crate::engine::flow::ConcreteStep::Command(
+            crate::engine::flow::ConcreteCommand {
+                item: crate::engine::flow::Command {
+                    command: "sync".into(),
+                    args: vec!["--plan".into()],
+                },
+                sources: vec![],
+            },
+        )];
+        let flow = store.create_flow(&flow).unwrap();
+        assert!(!store.chapter_task_evidence(&task_id).unwrap().begun);
+        store
+            .begin_flow_operation(flow.id(), flow.version, None, None)
+            .unwrap();
+        assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
+        assert!(!store.task_started(&task_id).unwrap());
+    }
+
+    fn unregistered_task(
+        store: &SqliteStore,
+        existing: &TaskId,
+        checkout: PathBuf,
+    ) -> (Task, TaskPr) {
+        let mut task = store.task(existing).unwrap().unwrap();
+        let mut pr = store.task_prs(existing).unwrap().remove(0);
+        task.id = TaskId::new();
+        task.plan.id = LinearIssueId::new("later-issue").unwrap();
+        task.plan.identifier = "PROBE-2".into();
+        task.worktree = checkout;
+        task.workspace_slug = "later-checkout".into();
+        pr.id = TaskPrId::new();
+        pr.task_id = task.id.clone();
+        pr.slug = task.workspace_slug.clone();
+        pr.branch = task.workspace_slug.clone();
+        (task, pr)
+    }
+
+    #[test]
+    fn descendant_admission_excludes_registration_of_a_missing_root() {
+        for initializing in [false, true] {
+            let (dir, store, existing) = store_with_task();
+            let (task, pr) = unregistered_task(&store, &existing, dir.path().join("missing-root"));
+            let cwd = task.worktree.join("src/nested");
+            let admission = store.lock_checkout(&cwd).unwrap();
+            let mut earlier = unpublished_conversation(None, None, 1);
+            earlier.cwd = cwd;
+            earlier.work_source = None;
+            let register = || store.insert_task(task.clone(), &pr, initializing);
+            assert!(register().is_err());
+            assert!(store.task(&task.id).unwrap().is_none());
+            assert!(store.task_prs(&task.id).unwrap().is_empty());
+            drop(admission);
+            let earlier = store.create_session(earlier, None, None).unwrap();
+            register().unwrap();
+            assert_eq!(
+                store.session_task_ids(&earlier.id).unwrap(),
+                vec![task.id.clone()]
+            );
+            assert_eq!(store.session(&earlier.id).unwrap().unwrap(), earlier);
+            assert!(!store.task_started(&task.id).unwrap());
+        }
+    }
+
+    #[test]
+    fn missing_root_exclusion_preserves_taskless_session_admission() {
+        let (dir, store, existing) = store_with_task();
+        let (task, pr) = unregistered_task(&store, &existing, dir.path().join("missing-root"));
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = task.worktree.join("src/nested");
+        conversation.work_source = None;
+        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        assert!(store
+            .create_session(conversation.clone(), None, None)
+            .is_err());
+        assert!(store.session(&conversation.id).unwrap().is_none());
+        drop(exclusion);
+        let session = store.create_session(conversation, None, None).unwrap();
+        store.insert_task(task.clone(), &pr, true).unwrap();
+        assert_eq!(
+            store.session_task_ids(&session.id).unwrap(),
+            vec![task.id.clone()]
+        );
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+        assert!(!store.task_started(&task.id).unwrap());
+    }
+
+    #[test]
+    fn unrelated_checkout_exclusion_does_not_block_task_registration() {
+        let (dir, store, existing) = store_with_task();
+        let (task, pr) =
+            unregistered_task(&store, &existing, dir.path().join("independent-checkout"));
+
+        let _unrelated = store
+            .lock_checkout(&dir.path().join("unrelated-checkout/missing/src"))
+            .unwrap();
+        store.insert_task(task.clone(), &pr, true).unwrap();
+        assert_eq!(
+            store.task(&task.id).unwrap().unwrap().worktree,
+            task.worktree
+        );
+        assert_eq!(store.task_prs(&task.id).unwrap(), vec![pr]);
+    }
+
+    #[test]
+    fn checkout_exclusion_preserves_registration_and_retry() {
+        for initializing in [false, true] {
+            let (dir, store, existing) = store_with_task();
+            let (task, pr) =
+                unregistered_task(&store, &existing, dir.path().join("missing-checkout"));
+
+            let mut conversation = unpublished_conversation(None, None, 1);
+            conversation.cwd = task.worktree.join("src");
+            conversation.work_source = None;
+            let session = store.create_session(conversation, None, None).unwrap();
+            let exclusion = store.lock_checkout(&task.worktree).unwrap();
+            let register = || store.insert_task(task.clone(), &pr, initializing);
+            assert!(register().is_err());
+            assert!(store.task(&task.id).unwrap().is_none());
+            assert!(store.task_prs(&task.id).unwrap().is_empty());
+            assert!(store.session_task_ids(&session.id).unwrap().is_empty());
+            assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+            drop(exclusion);
+            register().unwrap();
+            assert_eq!(
+                store.session_task_ids(&session.id).unwrap(),
+                vec![task.id.clone()]
+            );
+            assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+            let work = store.task_work(&task.id).unwrap();
+            assert_eq!(work.sessions.len(), 1);
+            assert_eq!(work.sessions[0].id, session.id);
+            assert!(!store.task_started(&task.id).unwrap());
+            assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
+        }
+    }
+
+    #[test]
+    fn checkout_session_membership_survives_project_transfer_without_binding() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = task.worktree.join("src");
+        conversation.work_source = None;
+        let session = store.create_session(conversation, None, None).unwrap();
+        let before = store.task_work(&task_id).unwrap();
+        assert_eq!(before.sessions.len(), 1);
+        assert_eq!(before.sessions[0].id, session.id);
+        assert_eq!(session.task_id, None);
+        assert!(!store.task_started(&task_id).unwrap());
+        assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
+
+        let successor = ProjectId::new();
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'successor',2)",
+            rusqlite::params![successor.as_str(), task.wave_id.as_str()],
+        ).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET project_id=?2 WHERE id=?1",
+                rusqlite::params![task_id.as_str(), successor.as_str()],
+            )
+            .unwrap();
+
+        let retained = store.task(&task_id).unwrap().unwrap();
+        assert_eq!(retained.project_id, successor);
+        assert_eq!(retained.worktree, task.worktree);
+        let after = store.task_work(&task_id).unwrap();
+        assert_eq!(after.sessions, before.sessions);
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+    }
+
+    #[test]
+    fn checkout_exclusion_follows_session_flow_membership() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        for bound in [true, false] {
+            let mut flow = autonomous_position(&task_id);
+            flow.cwd = task.worktree.clone();
+            if !bound {
+                flow.task_id = None;
+            }
+            store.create_flow(&flow).unwrap();
+            let mut session = conversation(Some(flow.id().to_string()), None, None);
+            session.cwd = dir.path().join("elsewhere");
+            let exclusion = store.lock_checkout(&task.worktree).unwrap();
+            assert!(store.create_session(session.clone(), None, None).is_err());
+            assert!(store.session(&session.id).unwrap().is_none());
+            drop(exclusion);
+            let admitted = store.create_session(session, None, None).unwrap();
+            assert_eq!(admitted.task_id, bound.then(|| task_id.clone()));
+            assert!(store
+                .task_work(&task_id)
+                .unwrap()
+                .sessions
+                .iter()
+                .any(|member| member.id == admitted.id));
+            let mut next = admitted.clone();
+            next.artifact_key = crate::session_record::new_artifact_key();
+            let exclusion = store.lock_checkout(&task.worktree).unwrap();
+            assert!(store
+                .replace_session_input(admitted.captured, next.clone())
+                .is_err());
+            assert_eq!(store.session(&admitted.id).unwrap().unwrap(), admitted);
+            drop(exclusion);
+            let replaced = store
+                .replace_session_input(admitted.captured, next)
+                .unwrap();
+            assert_eq!(replaced.flow_session_id, admitted.flow_session_id);
+            assert_ne!(replaced.captured, admitted.captured);
+        }
+    }
+
+    #[test]
+    fn checkout_exclusion_preserves_unbound_history_until_binding_retries() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = dir.path().join("elsewhere");
+        let session = store.create_session(conversation, None, None).unwrap();
+        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        assert!(store
+            .bind_session(&session.id, session.captured, &task_id)
+            .is_err());
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+        assert!(!store.task_started(&task_id).unwrap());
+        drop(exclusion);
+        let bound = store
+            .bind_session(&session.id, session.captured, &task_id)
+            .unwrap();
+        assert_eq!(bound.task_id.as_ref(), Some(&task_id));
+        assert!(store.task_started(&task_id).unwrap());
+    }
+
+    #[test]
+    fn checkout_exclusion_preserves_bound_session_input_until_retry() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut input = unpublished_conversation(Some(task_id.clone()), None, 1);
+        input.cwd = dir.path().join("elsewhere");
+        let session = store.create_session(input, None, None).unwrap();
+        let mut next = session.clone();
+        next.artifact_key = crate::session_record::new_artifact_key();
+        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        let result = store.replace_session_input(session.captured, next.clone());
+        assert!(
+            result.is_err(),
+            "input changed while its Task checkout was excluded"
+        );
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+        drop(exclusion);
+        let replaced = store.replace_session_input(session.captured, next).unwrap();
+        assert_eq!(replaced.task_id.as_ref(), Some(&task_id));
+        assert_eq!(replaced.cwd, session.cwd);
+        assert_ne!(replaced.captured, session.captured);
+    }
+
+    #[test]
+    fn checkout_exclusion_covers_missing_subdirectories_and_explicit_tasks() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = task.worktree.join("missing/subdirectory");
+        assert!(store
+            .create_session(conversation.clone(), None, None)
+            .is_err());
+        assert!(store.session(&conversation.id).unwrap().is_none());
+        conversation.cwd = dir.path().join("elsewhere");
+        conversation.task_id = Some(task_id.clone());
+        assert!(store
+            .create_session(conversation.clone(), None, None)
+            .is_err());
+        assert!(!store.task_started(&task_id).unwrap());
+        drop(exclusion);
+        let created = store.create_session(conversation, None, None).unwrap();
+        assert_eq!(created.task_id.as_ref(), Some(&task_id));
+        assert!(store.task_started(&task_id).unwrap());
+    }
+
+    #[test]
+    fn session_binding_retains_a_task_in_completed_project_history() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = dir.path().to_path_buf();
+        let session = store.create_session(conversation, None, None).unwrap();
+        assert!(!store.task_started(&task_id).unwrap());
+
+        // Rotation can complete a predecessor after observing untouched backlog.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE projects SET status='completed' WHERE id=?1",
+                [task.project_id.as_str()],
+            )
+            .unwrap();
+        let bound = store
+            .bind_session(&session.id, session.captured, &task_id)
+            .unwrap();
+        assert_eq!(bound.task_id.as_ref(), Some(&task_id));
+        assert!(store.task_started(&task_id).unwrap());
+        let retained = store.task(&task_id).unwrap().unwrap();
+        assert_eq!(retained.project_id, task.project_id);
+        assert_eq!(retained.worktree, task.worktree);
+        assert_eq!(
+            store
+                .bind_session(&session.id, session.captured, &task_id)
+                .unwrap(),
+            bound
+        );
     }
 
     #[test]
@@ -1849,7 +2286,6 @@ mod durable_store_tests {
         // The review's reserved capture starts the Task before anything launches.
         assert!(store.task_started(&task_id).unwrap());
         assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
-        assert!(!store.retire_chapter_backlog(&task_id).unwrap());
 
         // Activation may precede transfer. A reserved Task is already started
         // and must retain execution while its Project is still the predecessor.
@@ -2120,7 +2556,6 @@ mod durable_store_tests {
             (ended(&original), "replaced".into())
         );
         assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
-        assert!(!store.retire_chapter_backlog(&task_id).unwrap());
     }
 
     #[test]

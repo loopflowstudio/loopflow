@@ -284,7 +284,7 @@ struct TaskFilesTests {
             default: throw RegistryQueryError("Unexpected file/launch request")
             }
         }
-        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
         let generic = registry.layout(for: fixtureWorkspace("/src/loopflow"))

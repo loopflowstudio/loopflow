@@ -2,7 +2,7 @@ import Loopflow
 import SwiftUI
 
 struct WorkActivityView: View {
-    @Bindable var model: PodiumModel
+    @Bindable var model: WorkModel
 
     @Environment(\.palette) private var palette
     @State private var turnIntentError: String?
@@ -19,7 +19,7 @@ struct WorkActivityView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(palette.surface)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("podium-activity")
+        .accessibilityIdentifier("loopflow-activity")
         .task(id: model.selection) {
             await model.refreshWorkActivity()
         }
@@ -36,7 +36,7 @@ struct WorkActivityView: View {
                         .font(Typography.caption(10))
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
-                        .accessibilityIdentifier("podium-activity-scope")
+                        .accessibilityIdentifier("loopflow-activity-scope")
                 }
                 Spacer(minLength: Spacing.sm)
                 if model.selection != nil {
@@ -57,7 +57,7 @@ struct WorkActivityView: View {
                     .foregroundStyle(palette.text)
                     .lineLimit(2)
                     .textSelection(.enabled)
-                    .accessibilityIdentifier("podium-selection-summary")
+                    .accessibilityIdentifier("loopflow-selection-summary")
             }
         }
         .padding(.horizontal, Spacing.lg)
@@ -69,7 +69,7 @@ struct WorkActivityView: View {
         if model.workActivity.value == nil, model.workActivity.errorMessage == nil {
             ProgressView("Reading Activity…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityIdentifier("podium-activity-loading")
+                .accessibilityIdentifier("loopflow-activity-loading")
         } else if let items = model.workActivity.value?.items, !items.isEmpty {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -85,14 +85,14 @@ struct WorkActivityView: View {
                     }
                 }
             }
-            .accessibilityIdentifier("podium-activity-list")
+            .accessibilityIdentifier("loopflow-activity-list")
         } else {
             ContentUnavailableView(
                 "No Activity in this window",
                 systemImage: "clock.arrow.circlepath",
                 description: Text("Work creation, Runs, PRs, and Steers will appear here.")
             )
-            .accessibilityIdentifier("podium-activity-empty")
+            .accessibilityIdentifier("loopflow-activity-empty")
         }
     }
 
@@ -131,7 +131,7 @@ struct WorkActivityView: View {
                     Link("Open PR #\(github.number)", destination: github.url)
                         .font(Typography.caption(9).weight(.semibold))
                         .foregroundStyle(Color.loopflowBurgundy)
-                        .accessibilityIdentifier("podium-open-pr-\(github.number)")
+                        .accessibilityIdentifier("loopflow-open-pr-\(github.number)")
                 }
             }
         }
@@ -140,7 +140,7 @@ struct WorkActivityView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(entry.subject), \(entry.summary), \(exactTime(entry.recordedAt))")
-        .accessibilityIdentifier("podium-activity-\(entry.id)")
+        .accessibilityIdentifier("loopflow-activity-\(entry.id)")
     }
 
     private var scopeTitle: String {

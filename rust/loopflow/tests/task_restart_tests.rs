@@ -1,8 +1,9 @@
 mod support;
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use loopflow::durable::FlowSession;
@@ -65,7 +66,9 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
 
 #[test]
 fn restart_uses_old_valid_planning_and_preserves_invalid_work() {
-    for condition in ["valid", "invalid", "removed", "terminal", "moved", "advice"] {
+    for condition in [
+        "valid", "delayed", "invalid", "removed", "terminal", "moved", "advice",
+    ] {
         let repo = TestRepo::new();
         support::bind_task_planning(&repo);
         repo.create_branch("restart-proof");
@@ -112,7 +115,11 @@ fn restart_uses_old_valid_planning_and_preserves_invalid_work() {
             record.item.project_id = Some("another-project".into());
         }
         runtime
-            .block_on(registered.store.put_pm_task(&scope, "linear", record))
+            .block_on(
+                registered
+                    .store
+                    .put_pm_task(&scope, "linear", record, None, None),
+            )
             .unwrap();
         // Age the acquired facts without pretending a stale provider response won.
         rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -130,25 +137,82 @@ fn restart_uses_old_valid_planning_and_preserves_invalid_work() {
                 ))
                 .unwrap();
         }
+        let mut accepted_plan = runtime
+            .block_on(registered.store.get_task(&registered.task.id))
+            .unwrap()
+            .unwrap()
+            .plan;
         let mut args = vec!["task", "restart", "INF-123", "--flow", "proof", "--json"];
         if condition == "advice" {
             args.push("new direction requires publication");
         }
-        let output = command(repo.path(), home.path(), &args)
+        if condition == "delayed" {
+            let hook = repo.path().join(".git/hooks/pre-commit");
+            fs::write(&hook,
+                "#!/bin/sh\ntouch \"$LF_HOME/checkpoint-waiting\"\nfor attempt in $(seq 1 300); do\n  [ -f \"$LF_HOME/planning-accepted\" ] && exit 0\n  sleep 0.1\ndone\nexit 1\n",
+            ).unwrap();
+            fs::set_permissions(hook, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let mut child = command(repo.path(), home.path(), &args)
             .env("HTTPS_PROXY", "http://127.0.0.1:1")
             .env("HTTP_PROXY", "http://127.0.0.1:1")
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .unwrap();
+        if condition == "delayed" {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !home.path().join("checkpoint-waiting").exists() {
+                assert!(
+                    child.try_wait().unwrap().is_none(),
+                    "restart exited before checkpoint"
+                );
+                assert!(Instant::now() < deadline, "restart never checkpointed");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let mut record = runtime
+                .block_on(
+                    registered
+                        .store
+                        .pm_task_observation(&scope, "linear", "INF-123"),
+                )
+                .unwrap()
+                .record
+                .unwrap();
+            record.item.name = "New direction during restart".into();
+            record.item.description = "Preserve the accepted provider change".into();
+            record.item.revision = Some("2026-10-05T12:00:00Z".into());
+            record.observed_at = OffsetDateTime::now_utc().unix_timestamp() + 1;
+            runtime
+                .block_on(
+                    registered
+                        .store
+                        .put_pm_task(&scope, "linear", record, None, None),
+                )
+                .unwrap();
+            accepted_plan = runtime
+                .block_on(registered.store.get_task(&registered.task.id))
+                .unwrap()
+                .unwrap()
+                .plan;
+            fs::write(home.path().join("planning-accepted"), "accepted").unwrap();
+        }
+        let output = child.wait_with_output().unwrap();
         let current = runtime
             .block_on(registered.store.task_flow(&registered.task.id))
             .unwrap()
             .unwrap();
-        if condition == "valid" {
+        if matches!(condition, "valid" | "delayed") {
             assert!(
                 output.status.success(),
                 "{} worker: {}",
                 String::from_utf8_lossy(&output.stderr),
                 fs::read_to_string(home.path().join("worker.log")).unwrap_or_default()
+            );
+            let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(
+                response["pm_snapshot_synced_at"],
+                accepted_plan.pm_snapshot_synced_at
             );
             assert_ne!(current.id(), old.id());
             let deadline = Instant::now() + Duration::from_secs(15);
@@ -178,7 +242,7 @@ fn restart_uses_old_valid_planning_and_preserves_invalid_work() {
             assert_eq!(task.project_id, registered.task.project_id);
             assert_eq!(task.wave_id, registered.task.wave_id);
             assert_eq!(task.worktree, registered.task.worktree);
-            assert_eq!(task.plan.pm_snapshot_synced_at, 1);
+            assert_eq!(task.plan, accepted_plan);
         } else {
             assert!(!output.status.success(), "{condition} admitted restart");
             let error = String::from_utf8_lossy(&output.stderr);

@@ -43,7 +43,7 @@ final class LaunchJournal: @unchecked Sendable {
     /// The journal of the Home this process's `lf` reads resolve to. It writes
     /// nothing until the app calls `begin`, so tests and fixture runs stay silent.
     static let home = LaunchJournal(
-        directory: WorkspaceCache.homeDirectory.appendingPathComponent("timings", isDirectory: true))
+        directory: WorkCache.homeDirectory.appendingPathComponent("timings", isDirectory: true))
 
     static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"

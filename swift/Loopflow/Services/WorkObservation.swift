@@ -1,17 +1,17 @@
 import Foundation
 
-/// One foreground reader per window: `lf monitor workspace --watch --json`.
+/// One foreground reader per window: `lf monitor work --watch --json`.
 /// Each part arrives again only when a commit changed what it shows.
-public struct WorkspaceObservation: Sendable {
-    public let frames: AsyncThrowingStream<WorkspaceFrame, any Error>
+public struct WorkObservation: Sendable {
+    public let frames: AsyncThrowingStream<WorkFrame, any Error>
     /// Requests are delivered in the order they are made.
-    public let request: @Sendable (WorkspaceRequest) -> Void
+    public let request: @Sendable (WorkRequest) -> Void
     /// Returns only after the owned reader has exited.
     public let cancel: @Sendable () async -> Void
 
     public init(
-        frames: AsyncThrowingStream<WorkspaceFrame, any Error>,
-        request: @escaping @Sendable (WorkspaceRequest) -> Void,
+        frames: AsyncThrowingStream<WorkFrame, any Error>,
+        request: @escaping @Sendable (WorkRequest) -> Void,
         cancel: @escaping @Sendable () async -> Void
     ) {
         self.frames = frames
@@ -34,7 +34,7 @@ public struct WorkActivityScope: Decodable, Equatable, Sendable {
 }
 
 /// What a window shows. Mirrors the Rust reader's `scope` request.
-public struct WorkspaceScope: Equatable, Sendable {
+public struct WorkScope: Equatable, Sendable {
     public let repo: String?
     public let headless: Bool
     /// Task identifier whose work is shown.
@@ -54,8 +54,8 @@ public struct WorkspaceScope: Equatable, Sendable {
 
 /// Every request carries an id; a frame's `answers` names the newest one
 /// handled before that frame was read.
-public enum WorkspaceRequest: Equatable, Sendable {
-    case scope(id: Int, WorkspaceScope)
+public enum WorkRequest: Equatable, Sendable {
+    case scope(id: Int, WorkScope)
     case refresh(id: Int)
 
     public var id: Int {
@@ -96,9 +96,9 @@ public struct StoreRevisions: Decodable, Equatable, Sendable {
     public let usage: Int64
 }
 
-/// One line of the stream. Mirrors Rust `WorkspaceFrame`: the body is the same
+/// One line of the stream. Mirrors Rust `WorkFrame`: the body is the same
 /// wire type the one-shot `--json` read prints.
-public struct WorkspaceFrame: Decodable, Sendable {
+public struct WorkFrame: Decodable, Sendable {
     public struct Planning: Decodable, Sendable {
         public let roadmap: RoadmapSnapshot
         public let waves: [WaveSnapshot]
@@ -208,13 +208,13 @@ public struct WorkspaceFrame: Decodable, Sendable {
         case "heartbeat": content = .heartbeat(try container.decode(Heartbeat.self, forKey: .body))
         default:
             throw DecodingError.dataCorruptedError(forKey: .part, in: container,
-                                                   debugDescription: "unknown workspace part \(part)")
+                                                   debugDescription: "unknown work part \(part)")
         }
     }
 
     /// Decode one stream line, keeping the wire text a saved workspace needs.
-    public static func decode(line: Data) throws -> WorkspaceFrame {
-        let frame = try JSONDecoder().decode(WorkspaceFrame.self, from: line)
+    public static func decode(line: Data) throws -> WorkFrame {
+        let frame = try JSONDecoder().decode(WorkFrame.self, from: line)
         let wire: Wire?
         switch frame.content {
         case .planning(.some), .sessions(.some):
@@ -230,7 +230,7 @@ public struct WorkspaceFrame: Decodable, Sendable {
         default:
             wire = nil
         }
-        return WorkspaceFrame(sequence: frame.sequence, answers: frame.answers, home: frame.home,
+        return WorkFrame(sequence: frame.sequence, answers: frame.answers, home: frame.home,
                               revisions: frame.revisions, unavailable: frame.unavailable,
                               content: frame.content, wire: wire)
     }

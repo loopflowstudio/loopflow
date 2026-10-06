@@ -80,12 +80,12 @@ struct DesktopPerformanceTests {
         var child = environment.filter { !$0.key.hasPrefix("LF_") && !$0.key.hasPrefix("LOOPFLOW_") }
         child["LF_HOME"] = home
         let reader = child
-        let query = RegistryQuery(watchWorkspace: {
+        let query = RegistryQuery(watchWork: {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: lf)
-            process.arguments = ["monitor", "workspace", "--watch", "--json"]
+            process.arguments = ["monitor", "work", "--watch", "--json"]
             process.environment = reader
-            return try LocalWorkspaceObservation.start(process: process, configurationChanged: { false })
+            return try LocalWorkObservation.start(process: process, configurationChanged: { false })
         }) { args, _ in
             // The window under measurement reads through its one reader.
             throw RegistryQueryError("write-to-visible ran lf \(args.joined(separator: " "))")
@@ -97,8 +97,8 @@ struct DesktopPerformanceTests {
             try journal.write(["event": "setup", "outcome": "unavailable", "reason": "No native screen"])
             throw PerformanceFailure("unavailable", "No native screen")
         }
-        let model = PodiumModel(query: query, repoPath: repo)
-        let keeping = Task { await model.keepWorkspaceCurrent() }
+        let model = WorkModel(query: query, repoPath: repo)
+        let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
@@ -113,7 +113,7 @@ struct DesktopPerformanceTests {
             model.roadmap.value != nil && model.sessions.value != nil
         }
         // The outline lists started Tasks only, so the renamed Task is one of those.
-        let current = model.workspace.waves.flatMap { wave in wave.tasks.map { (wave.roadmap.wave.id, $0) } }
+        let current = model.projection.waves.flatMap { wave in wave.tasks.map { (wave.roadmap.wave.id, $0) } }
         guard let (wave, listed) = current.first(where: { $0.1.inWorkingSet && !$0.1.task.task.isTerminal }) else {
             try journal.write(["event": "setup", "outcome": "unavailable",
                                "reason": "No started Task in \(repo) to rename and model a new one on"])
@@ -132,7 +132,7 @@ struct DesktopPerformanceTests {
                                     "Rows are written with sqlite3, not lf: no Exec, sync or provider is involved.",
                                     "Each write waits for the reader to be idle; overlapping writes are not sampled.",
                                     "Forced bitmap capture and OCR are intrusive observer costs."]])
-        let navigator = try view.inspect().find(WorkspaceNavigator.self).actualView()
+        let navigator = try view.inspect().find(WorkNavigator.self).actualView()
         let picker = try navigator.inspect().find(ViewType.Picker.self)
         let search = try navigator.inspect().find(ViewType.TextField.self)
         let run = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
@@ -146,7 +146,7 @@ struct DesktopPerformanceTests {
                 let session = "bench-session-\(run)-\(attempt)"
                 // The filter keeps the written row on screen whatever the Home holds.
                 try search.setInput("Probe")
-                try picker.select(value: WorkspacePresentation.compact)
+                try picker.select(value: WorkPresentation.compact)
                 await model.refresh()
                 try await written("task_renamed", attempt, journal, window, store, sql: """
                     UPDATE pm_items SET body=json_set(body,'$.name','\(label) moved') WHERE id='\(template.id.sqlQuoted)';
@@ -162,7 +162,7 @@ struct DesktopPerformanceTests {
                     """, ready: { window.contentText.contains { $0.contains(fresh) } })
 
                 // A conversation in the Wave: one bound to no Work is not in the outline.
-                try picker.select(value: WorkspacePresentation.sessions)
+                try picker.select(value: WorkPresentation.sessions)
                 await model.refresh()
                 try await written("session_created", attempt, journal, window, store, sql: """
                     BEGIN IMMEDIATE;
@@ -184,7 +184,7 @@ struct DesktopPerformanceTests {
 
                 // Outside every interval: the next attempt starts from the same Tasks.
                 try store.write("DELETE FROM pm_items WHERE id='\(task)'; \(restore)")
-                try picker.select(value: WorkspacePresentation.compact)
+                try picker.select(value: WorkPresentation.compact)
                 try await wait(window, render: true, for: .seconds(60)) { !shows(label) }
             }
         } catch {
@@ -229,9 +229,9 @@ struct DesktopPerformanceTests {
 #if canImport(GhosttyKit)
     private func measure(population: String, taskCount: Int, samples: Int, journal: PerformanceJournal) async throws {
         let (query, planning) = try populationQuery(taskCount: taskCount)
-        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
-        try #require(model.workspace.waves.first?.tasks.count == taskCount)
+        try #require(model.projection.waves.first?.tasks.count == taskCount)
         try #require(model.sessions.value?.count == taskCount / 2)
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
         let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
@@ -262,8 +262,8 @@ struct DesktopPerformanceTests {
         window.contentView = NSHostingView(rootView: view)
         window.orderFront(nil)
         defer { window.contentView = nil; window.close() }
-        try await wait(window, render: true) { hasRendered(window, "workspace-task-perf-task-0") }
-        let navigator = try view.inspect().find(WorkspaceNavigator.self).actualView()
+        try await wait(window, render: true) { hasRendered(window, "work-task-perf-task-0") }
+        let navigator = try view.inspect().find(WorkNavigator.self).actualView()
         let picker = try navigator.inspect().find(ViewType.Picker.self)
         let search = try navigator.inspect().find(ViewType.TextField.self)
         let records = try #require(model.sessions.value)
@@ -275,34 +275,34 @@ struct DesktopPerformanceTests {
             // Reset outside the measured interval; every attempt starts from the
             // same visible population and retained surfaces, including the first.
             try search.setInput("")
-            try picker.select(value: WorkspacePresentation.compact)
-            try await wait(window, render: true) { hasRendered(window, "workspace-task-perf-task-0") }
+            try picker.select(value: WorkPresentation.compact)
+            try await wait(window, render: true) { hasRendered(window, "work-task-perf-task-0") }
             try await sample("full", population, attempt, journal, window, action: {
-                try picker.select(value: WorkspacePresentation.full)
-            }, ready: { hasRendered(window, "workspace-wave-wave-1") && hasRendered(window, "workspace-task-perf-task-0") })
-            let disclosure = try navigator.inspect().find(viewWithAccessibilityIdentifier: "workspace-disclose-wave-wave-1").button()
+                try picker.select(value: WorkPresentation.full)
+            }, ready: { hasRendered(window, "work-wave-wave-1") && hasRendered(window, "work-task-perf-task-0") })
+            let disclosure = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-disclose-wave-wave-1").button()
             try await sample("fold", population, attempt, journal, window, action: {
                 try disclosure.tap()
-            }, ready: { hasRendered(window, "workspace-wave-wave-1") && !hasRendered(window, "workspace-task-perf-task-0") })
+            }, ready: { hasRendered(window, "work-wave-wave-1") && !hasRendered(window, "work-task-perf-task-0") })
             try await sample("expand", population, attempt, journal, window, action: {
                 try disclosure.tap()
-            }, ready: { hasRendered(window, "workspace-task-perf-task-0") && hasRendered(window, "workspace-session-count-perf-task-0") })
+            }, ready: { hasRendered(window, "work-task-perf-task-0") && hasRendered(window, "work-session-count-perf-task-0") })
             try await sample("compact", population, attempt, journal, window, action: {
-                try picker.select(value: WorkspacePresentation.compact)
-            }, ready: { hasRendered(window, "workspace-task-perf-task-0") && !hasRendered(window, "workspace-wave-wave-1") })
+                try picker.select(value: WorkPresentation.compact)
+            }, ready: { hasRendered(window, "work-task-perf-task-0") && !hasRendered(window, "work-wave-wave-1") })
             try await sample("sessions", population, attempt, journal, window, action: {
-                try picker.select(value: WorkspacePresentation.sessions)
-            }, ready: { hasRendered(window, "session-row-perf-session-0") && !hasRendered(window, "workspace-task-perf-task-0") })
+                try picker.select(value: WorkPresentation.sessions)
+            }, ready: { hasRendered(window, "session-row-perf-session-0") && !hasRendered(window, "work-task-perf-task-0") })
             try await sample("filter", population, attempt, journal, window, action: {
                 try search.setInput("Conversation 002")
             }, ready: { hasRendered(window, "session-row-perf-session-2") && !hasRendered(window, "session-row-perf-session-0") })
             try #require(model.selection == .task(id: "perf-task-0"))
             try search.setInput("")
-            try picker.select(value: WorkspacePresentation.compact)
+            try picker.select(value: WorkPresentation.compact)
             // Keep the same population; a shorter viewport makes both sizes
             // scrollable. Resize and start the held read outside the interval.
             window.setContentSize(NSSize(width: 1400, height: 300))
-            try await wait(window, render: true) { hasRendered(window, "workspace-task-perf-task-0") }
+            try await wait(window, render: true) { hasRendered(window, "work-task-perf-task-0") }
             let scroll = try #require(window.contentView.flatMap { scrollView(in: $0) })
             let document = try #require(scroll.documentView)
             let destination = document.bounds.height - scroll.contentView.bounds.height
@@ -320,7 +320,7 @@ struct DesktopPerformanceTests {
                 // Lazy row measurement can correct the estimated content height.
                 // Capture the destination before judging retention across refresh.
                 try await wait(window, render: true) {
-                    hasRendered(window, "workspace-task-perf-task-\(taskCount - 1)")
+                    hasRendered(window, "work-task-perf-task-\(taskCount - 1)")
                 }
                 scrolledOffset = scroll.contentView.bounds.minY
                 labelsBeforeRefresh = window.outlineText
@@ -331,7 +331,7 @@ struct DesktopPerformanceTests {
                 !model.isRefreshing && abs(scroll.contentView.bounds.minY - scrolledOffset) < 1
                     && model.selection == .task(id: "perf-task-0")
                     && model.sessions.value == records
-                    && model.workspace.waves.first?.tasks.last?.task.task.id == "perf-task-\(taskCount - 1)"
+                    && model.projection.waves.first?.tasks.last?.task.task.id == "perf-task-\(taskCount - 1)"
                     && window.outlineText.contains { $0.contains(String(format: "Updated %03d", taskCount - 1)) }
                     && !window.outlineText.contains { $0.contains("Updated 000") }
             }, observation: {
@@ -346,7 +346,7 @@ struct DesktopPerformanceTests {
             window.setContentSize(NSSize(width: 1400, height: 800))
             scroll.contentView.scroll(to: .zero)
             scroll.reflectScrolledClipView(scroll.contentView)
-            try await wait(window, render: true) { hasRendered(window, "workspace-task-perf-task-0") }
+            try await wait(window, render: true) { hasRendered(window, "work-task-perf-task-0") }
             navigator.onOpenSession(first)
             try await wait(window) { window.firstResponder === terminals[0] }
             let draft = "draft-\(attempt)"
@@ -485,8 +485,8 @@ struct DesktopPerformanceTests {
     private func hasRendered(_ window: PerformanceWindow, _ id: String) -> Bool {
         // Identities are asserted against the shared model/pane owners; these
         // unique fixture labels independently prove the pixels changed too.
-        if id == "workspace-wave-wave-1" { return window.outlineText.contains { $0.contains("product") } }
-        if let index = Int(id.replacingOccurrences(of: "workspace-task-perf-task-", with: "")) {
+        if id == "work-wave-wave-1" { return window.outlineText.contains { $0.contains("product") } }
+        if let index = Int(id.replacingOccurrences(of: "work-task-perf-task-", with: "")) {
             return window.outlineText.contains { $0.contains(String(format: "Task %03d", index)) }
         }
         if let index = Int(id.replacingOccurrences(of: "session-row-perf-session-", with: "")) {
@@ -586,7 +586,7 @@ struct DesktopPerformanceTests {
 }
 
 /// Hold the fixture's transport response to exercise scrolling while the real
-/// Podium reader is refreshing. No product state is changed outside that reader.
+/// Work reader is refreshing. No product state is changed outside that reader.
 @MainActor
 private final class PerformancePlanning {
     let roadmap: String

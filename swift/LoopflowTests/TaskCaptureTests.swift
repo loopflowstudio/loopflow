@@ -20,23 +20,23 @@ struct TaskCaptureTests {
         let repo = "/tmp/session-picker-" + UUID().uuidString
         let other = repo + "-other"
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Unexpected read") }
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         #expect(model.selectedSessionSkill == "capture-tasks")
         var launches: [SessionSkillLaunch] = []
-        let view = WorkspaceNavigator(model: model, onOpenSession: { _ in }, onNewSession: { launches.append($0) })
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-skill").button().tap()
+        let view = WorkNavigator(model: model, onOpenSession: { _ in }, onNewSession: { launches.append($0) })
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-skill").button().tap()
         #expect(launches.isEmpty)
         model.selectSessionSkill("wave/session", repo: repo)
         #expect(launches.isEmpty)
         #expect(model.selectedSessionSkill == "wave/session")
-        let updated = WorkspaceNavigator(model: model, onOpenSession: { _ in }, onNewSession: { launches.append($0) })
-        try updated.inspect().find(viewWithAccessibilityIdentifier: "workspace-create-task").button().tap()
+        let updated = WorkNavigator(model: model, onOpenSession: { _ in }, onNewSession: { launches.append($0) })
+        try updated.inspect().find(viewWithAccessibilityIdentifier: "work-create-task").button().tap()
         #expect(launches.map { $0.arguments(lf: "lf") } == [["lf", "--mode", "interactive", "skill", "wave/session"]])
-        #expect(PodiumModel(query: query, repoPath: repo).selectedSessionSkill == "wave/session")
-        #expect(PodiumModel(query: query, repoPath: other).selectedSessionSkill == "capture-tasks")
+        #expect(WorkModel(query: query, repoPath: repo).selectedSessionSkill == "wave/session")
+        #expect(WorkModel(query: query, repoPath: other).selectedSessionSkill == "capture-tasks")
         model.selectSessionSkill("debug", repo: other)
         #expect(model.selectedSessionSkill == "wave/session")
-        #expect(PodiumModel(query: query, repoPath: other).selectedSessionSkill == "debug")
+        #expect(WorkModel(query: query, repoPath: other).selectedSessionSkill == "debug")
     }
 
     @Test("Skill discovery includes namespaced skills and keeps failures explicit")
@@ -73,8 +73,8 @@ struct TaskCaptureTests {
                 model.navigation.content = .details
             }
             var captured: SessionSkillLaunch?
-            let view = WorkspaceNavigator(model: model, onOpenSession: { _ in }, onNewSession: { captured = $0 })
-            try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-create-task").button().tap()
+            let view = WorkNavigator(model: model, onOpenSession: { _ in }, onNewSession: { captured = $0 })
+            try view.inspect().find(viewWithAccessibilityIdentifier: "work-create-task").button().tap()
             let launch = try #require(captured)
             let name = selection == nil || selection?.id == "missing" ? nil : wave.wave.name
             #expect(launch == SessionSkillLaunch(repoPath: "/src/loopflow", wave: name, skill: "capture-tasks"))
@@ -100,11 +100,11 @@ struct TaskCaptureTests {
 
     @Test("No repository means no capture entry point")
     func noRepository() throws {
-        let model = PodiumModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected read") })
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected read") })
         #expect(model.sessionSkillLaunch == nil)
-        let view = WorkspaceNavigator(model: model, onOpenSession: { _ in }, onNewSession: { _ in })
+        let view = WorkNavigator(model: model, onOpenSession: { _ in }, onNewSession: { _ in })
         #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-create-task")
+            try view.inspect().find(viewWithAccessibilityIdentifier: "work-create-task")
         }
     }
 
@@ -164,7 +164,7 @@ struct TaskCaptureTests {
         let before = repoPanes.layout
         let content = model.navigation.content
         // Missing executable: invoking the actual button must preserve all state.
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-create-task").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-create-task").button().tap()
         #expect(repoPanes.layout == before)
         #expect(taskPanes.layout == taskLayout)
         #expect(model.navigation.content == content)
@@ -173,7 +173,7 @@ struct TaskCaptureTests {
 
         let helper = URL(fileURLWithPath: host).appendingPathComponent("lf")
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-create-task").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-create-task").button().tap()
         #expect(model.selection == .task(id: task.id))
         #expect(model.navigation.showsRetainedTerminals)
         #expect(model.navigation.content == .terminals)
@@ -188,12 +188,12 @@ struct TaskCaptureTests {
         try Data().write(to: URL(fileURLWithPath: host).appendingPathComponent("complete"))
     }
 
-    private func makeModel() throws -> PodiumModel {
+    private func makeModel() throws -> WorkModel {
         let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: fixture))
-        let model = PodiumModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected read") }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected read") }, repoPath: "/src/loopflow")
         model.applyFixture(roadmap: .available(roadmap), waves: .available(roadmap.waves.map { $0.wave.toWave() }),
                            processActivity: .loading, workActivity: .loading, repos: [])
         return model

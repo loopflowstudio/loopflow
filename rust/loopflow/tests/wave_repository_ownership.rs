@@ -190,13 +190,16 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         let snapshot: loopflow::pm::PmSnapshot =
             serde_json::from_str(include_str!("../../../tests/fixtures/dto/pm_show.json")).unwrap();
         store
-            .put_pm_snapshot(PmSnapshotRow {
-                wave_id: legacy.id().clone(),
-                provider: "linear".into(),
-                initiative: "initiative-infrastructure".into(),
-                synced_at: 1,
-                snapshot: snapshot.clone(),
-            })
+            .put_pm_snapshot(
+                PmSnapshotRow {
+                    wave_id: legacy.id().clone(),
+                    provider: "linear".into(),
+                    initiative: "initiative-infrastructure".into(),
+                    synced_at: 1,
+                    snapshot: snapshot.clone(),
+                },
+                None,
+            )
             .await
             .unwrap();
         let resolved = store
@@ -344,22 +347,32 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     );
 
     store
-        .put_pm_snapshot(PmSnapshotRow {
-            wave_id: alpha.id().clone(),
-            provider: "linear".to_string(),
-            initiative: "initiative-alpha".to_string(),
-            synced_at: 1,
-            snapshot: loopflow::pm::PmSnapshot {
-                projects: vec![],
-                items: vec![],
+        .put_pm_snapshot(
+            PmSnapshotRow {
+                wave_id: alpha.id().clone(),
+                provider: "linear".to_string(),
+                initiative: "initiative-alpha".to_string(),
+                synced_at: 1,
+                snapshot: loopflow::pm::PmSnapshot {
+                    projects: vec![],
+                    items: vec![],
+                },
             },
-        })
+            None,
+        )
         .await
         .unwrap();
     let project = project(&alpha);
     store.create_project(&project).await.unwrap();
+    rusqlite::Connection::open(&database)
+        .unwrap()
+        .execute(
+            "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+            rusqlite::params![project.wave_id, project.id.as_str()],
+        )
+        .unwrap();
     let (task, task_pr) = task(&alpha, &project, &repo_a);
-    store.create_task(&task, &task_pr).await.unwrap();
+    store.create_task(&task, &task_pr, None).await.unwrap();
     let placement = alpha_placement;
     let overlap = relocate_wave(
         &store,
@@ -400,16 +413,19 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let occupied = registered_wave(&repo_a, "occupied");
     store.create_wave(&occupied).await.unwrap();
     store
-        .put_pm_snapshot(PmSnapshotRow {
-            wave_id: occupied.id().clone(),
-            provider: "linear".to_string(),
-            initiative: "initiative-occupied".to_string(),
-            synced_at: 1,
-            snapshot: loopflow::pm::PmSnapshot {
-                projects: vec![],
-                items: vec![],
+        .put_pm_snapshot(
+            PmSnapshotRow {
+                wave_id: occupied.id().clone(),
+                provider: "linear".to_string(),
+                initiative: "initiative-occupied".to_string(),
+                synced_at: 1,
+                snapshot: loopflow::pm::PmSnapshot {
+                    projects: vec![],
+                    items: vec![],
+                },
             },
-        })
+            None,
+        )
         .await
         .unwrap();
     let collision = relocate_wave(&store, alpha.id(), &repo_a, None, Some("occupied"))
@@ -751,8 +767,18 @@ async fn relocation_refuses_meaningful_destination_history() {
     store.create_wave(&project_shadow).await.unwrap();
     let owned_project = project(&project_shadow);
     store.create_project(&owned_project).await.unwrap();
+    rusqlite::Connection::open(&database)
+        .unwrap()
+        .execute(
+            "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+            rusqlite::params![owned_project.wave_id, owned_project.id.as_str()],
+        )
+        .unwrap();
     let (owned_task, owned_pr) = task(&project_shadow, &owned_project, &target);
-    store.create_task(&owned_task, &owned_pr).await.unwrap();
+    store
+        .create_task(&owned_task, &owned_pr, None)
+        .await
+        .unwrap();
 
     let child_shadow = registered_wave(&target, "with-child");
     store.create_wave(&child_shadow).await.unwrap();
@@ -762,16 +788,19 @@ async fn relocation_refuses_meaningful_destination_history() {
     let pm_shadow = registered_wave(&target, "with-pm");
     store.create_wave(&pm_shadow).await.unwrap();
     store
-        .put_pm_snapshot(PmSnapshotRow {
-            wave_id: pm_shadow.id().clone(),
-            provider: "linear".to_string(),
-            initiative: "initiative-pm".to_string(),
-            synced_at: 1,
-            snapshot: loopflow::pm::PmSnapshot {
-                projects: vec![],
-                items: vec![],
+        .put_pm_snapshot(
+            PmSnapshotRow {
+                wave_id: pm_shadow.id().clone(),
+                provider: "linear".to_string(),
+                initiative: "initiative-pm".to_string(),
+                synced_at: 1,
+                snapshot: loopflow::pm::PmSnapshot {
+                    projects: vec![],
+                    items: vec![],
+                },
             },
-        })
+            None,
+        )
         .await
         .unwrap();
 

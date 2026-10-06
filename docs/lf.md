@@ -13,6 +13,34 @@ registered Task. Connect a provider with `lf account connect codex EMAIL`, or
 use an existing provider login. `lf account --cached` inspects saved evidence
 without contacting providers.
 
+## Open a Wave for work
+
+```bash
+lf wave ensure infrastructure --json
+lf wave bind-project intelligence <project-uuid> --json
+lf wave ensure intelligence --json
+```
+
+Ensure reuses the shared configured Project, activates it if needed, or recovers
+one reserved creation. Existing Project selection is explicit by UUID. Names,
+chapters and default Flows are optional. Failed reads preserve the binding;
+status and roadmap never create Projects. Desktop prepares the Project on opening
+and offers Retry while retaining the cached plan and independent conversation.
+
+For coordinated chapters, plan KRs first and retain exact destination IDs:
+
+```bash
+lf repo new-chapter October --plan scratch/chapter-plan.json --dry-run --json
+lf repo new-chapter October --plan scratch/chapter-plan.json --json
+```
+
+Use `lf wave new-chapter <wave> October --plan scratch/chapter-plan.json` for one
+Wave. Retry the same retained input after interruption. Started work carries its
+identity; unreviewed backlog stays in its prior Project. Admit new Task candidates
+separately after creation. Desktop’s **Realign Projects…** previews a retained plan
+file and applies the exact bytes reviewed. See [planning](architecture/planning.md)
+for the input format.
+
 ## Use one Home
 
 Ordinary commands, Task workers and agent tools use the installed `lf` and

@@ -2,21 +2,21 @@ import AppKit
 import Loopflow
 import SwiftUI
 
-struct WorkspacePaletteRow: Identifiable, Equatable {
-    let id: WorkspaceDestination
+struct WorkPaletteRow: Identifiable, Equatable {
+    let id: WorkDestination
     let title: String
     let detail: String
     let key: String
 }
 
-extension PodiumModel {
+extension WorkModel {
     var paletteIsStale: Bool {
         roadmap.errorMessage != nil || sessions.errorMessage != nil || flowCatalog.errorMessage != nil
             || visibleRoadmaps.contains { $0.tasks.unavailableReason != nil || !$0.unavailableTasks.isEmpty }
     }
 
-    var paletteRows: [WorkspacePaletteRow] {
-        var rows: [WorkspacePaletteRow] = []
+    var paletteRows: [WorkPaletteRow] {
+        var rows: [WorkPaletteRow] = []
         for wave in visibleRoadmaps {
             rows.append(.init(id: .wave(wave.wave.id), title: wave.wave.name, detail: "Wave", key: wave.wave.name))
             for task in wave.tasks.items {
@@ -67,10 +67,10 @@ extension PodiumModel {
         return rows
     }
 
-    func searchDestinations(_ text: String) -> [WorkspacePaletteRow] {
+    func searchDestinations(_ text: String) -> [WorkPaletteRow] {
         let query = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let rows = paletteRows
-        func rank(_ row: WorkspacePaletteRow) -> Int {
+        func rank(_ row: WorkPaletteRow) -> Int {
             if query.isEmpty {
                 return navigation.recentDestinations.firstIndex { $0.id == row.id } ?? Int.max
             }
@@ -88,16 +88,16 @@ extension PodiumModel {
     }
 }
 
-struct WorkspacePalette: View {
-    @Bindable var model: PodiumModel
-    let activate: (WorkspaceDestination) -> Void
+struct WorkPalette: View {
+    @Bindable var model: WorkModel
+    let activate: (WorkDestination) -> Void
     @State private var search = ""
-    @State private var highlighted: WorkspaceDestination?
+    @State private var highlighted: WorkDestination?
     @Environment(\.palette) private var palette
 
-    private var rows: [WorkspacePaletteRow] { model.searchDestinations(search) }
+    private var rows: [WorkPaletteRow] { model.searchDestinations(search) }
 
-    private var effectiveSelection: WorkspaceDestination? {
+    private var effectiveSelection: WorkDestination? {
         rows.first(where: { $0.id == highlighted })?.id ?? rows.first?.id
     }
 
@@ -142,7 +142,7 @@ struct WorkspacePalette: View {
                 model.navigation.recentDestinations.removeAll { !available.contains($0.id) }
             }
         }
-        .accessibilityIdentifier("workspace-palette")
+        .accessibilityIdentifier("work-palette")
     }
 
     private func move(_ offset: Int) {
@@ -154,7 +154,7 @@ struct WorkspacePalette: View {
 }
 
 struct TaskLinkView: View {
-    @Bindable var model: PodiumModel
+    @Bindable var model: WorkModel
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Open Task").font(Typography.sectionTitle(26))
@@ -183,7 +183,7 @@ struct TaskLinkView: View {
 }
 
 /// Cmd-K is intercepted before a retained terminal can consume it.
-struct WorkspacePaletteShortcut: NSViewRepresentable {
+struct WorkPaletteShortcut: NSViewRepresentable {
     let presented: Bool
     let restoreFocus: Bool
     let open: () -> Void
@@ -227,7 +227,7 @@ struct WorkspacePaletteShortcut: NSViewRepresentable {
 
 struct FlowCatalogInspector: View {
     let entry: FlowCatalogEntry?
-    @Bindable var navigation: WorkspaceNavigation
+    @Bindable var navigation: WorkNavigation
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -255,7 +255,7 @@ private struct PaletteSearchField: NSViewRepresentable {
         field.drawsBackground = false
         field.font = NSFont(name: "Lato-Regular", size: 13) ?? .systemFont(ofSize: 13)
         field.placeholderString = "Go to a Wave, Task, Session or Flow"
-        field.setAccessibilityIdentifier("workspace-palette-search")
+        field.setAccessibilityIdentifier("work-palette-search")
         field.delegate = context.coordinator
         return field
     }

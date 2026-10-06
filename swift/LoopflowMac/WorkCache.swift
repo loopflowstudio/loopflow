@@ -1,4 +1,4 @@
-// WorkspaceCache — the last workspace a refresh showed, kept inside the Home it
+// WorkCache — the last workspace a refresh showed, kept inside the Home it
 // describes so a returning launch renders before any `lf` read.
 //
 // It holds the wire text of successful reads, restored through the decoder
@@ -11,7 +11,7 @@
 import Foundation
 import Loopflow
 
-struct WorkspaceSnapshot: Codable, Equatable, Sendable {
+struct WorkSnapshot: Codable, Equatable, Sendable {
     struct Repository: Codable, Equatable, Sendable {
         /// The default interactive Session listing, one wire page each.
         var sessionPages: [String]?
@@ -28,7 +28,7 @@ struct WorkspaceSnapshot: Codable, Equatable, Sendable {
     var repositories: [String: Repository] = [:]
 }
 
-final class WorkspaceCache: @unchecked Sendable {
+final class WorkCache: @unchecked Sendable {
     static let version = 1
     /// Most-recently saved repositories kept; older ones are dropped.
     static let maxRepositories = 8
@@ -38,24 +38,25 @@ final class WorkspaceCache: @unchecked Sendable {
 
     private struct Envelope: Codable {
         var version: Int
-        var snapshot: WorkspaceSnapshot
+        var snapshot: WorkSnapshot
     }
 
     private let url: URL
     private let queue = DispatchQueue(label: "studio.loopflow.workspace-cache", qos: .utility)
-    private var snapshot = WorkspaceSnapshot()
+    private var snapshot = WorkSnapshot()
     /// Whether `snapshot` already holds this process's view of the file.
     private var loaded = false
     /// Hashes of the last raw text per part, so an unchanged poll writes nothing.
     private var lastInput: [String: Int] = [:]
 
     init(directory: URL) {
+        // Keep the stored filename and envelope readable across presentation renames.
         url = directory.appendingPathComponent("workspace.json", isDirectory: false)
     }
 
     /// The cache of the Home this process's `lf` reads resolve to. Every window
     /// shares it, so one window's save never drops another's repository.
-    static let home = WorkspaceCache(directory: homeDirectory)
+    static let home = WorkCache(directory: homeDirectory)
 
     /// Where Desktop keeps what it saves inside the Home.
     static var homeDirectory: URL {
@@ -66,7 +67,7 @@ final class WorkspaceCache: @unchecked Sendable {
 
     /// The saved workspace, or `nil` when absent, corrupt or from another version.
     /// An unusable file is removed so the next save starts clean.
-    func load() -> WorkspaceSnapshot? {
+    func load() -> WorkSnapshot? {
         queue.sync {
             // A later window in this process opens from what is already held.
             if loaded { return snapshot }
@@ -114,7 +115,7 @@ final class WorkspaceCache: @unchecked Sendable {
         queue.async { [self] in
             guard snapshot.homeId != id else { return }
             if snapshot.homeId != nil {
-                snapshot = WorkspaceSnapshot()
+                snapshot = WorkSnapshot()
                 lastInput = [:]
             }
             snapshot.homeId = id
@@ -125,7 +126,7 @@ final class WorkspaceCache: @unchecked Sendable {
     /// Wait for queued saves; tests and orderly shutdown only.
     func flush() { queue.sync {} }
 
-    private func update(_ part: String, input: String, _ change: @escaping @Sendable (inout WorkspaceSnapshot) -> Void) {
+    private func update(_ part: String, input: String, _ change: @escaping @Sendable (inout WorkSnapshot) -> Void) {
         queue.async { [self] in
             let hash = input.hashValue
             guard lastInput[part] != hash else { return }
@@ -208,7 +209,7 @@ final class WorkspaceCache: @unchecked Sendable {
     }
 }
 
-extension WorkspaceSnapshot.Repository {
+extension WorkSnapshot.Repository {
     fileprivate init(savedAt: Date) { self.init(sessionPages: nil, selection: nil, savedAt: savedAt) }
 }
 

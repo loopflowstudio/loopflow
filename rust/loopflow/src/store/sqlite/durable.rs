@@ -940,7 +940,7 @@ mod durable_store_tests {
             cwd: "/repo.probe".into(),
             message: None,
             model: None,
-            current_attempt: None,
+            selected_capture: None,
             pending_session_id: None,
             ready_summary: None,
             worker_generation: 0,
@@ -994,12 +994,12 @@ mod durable_store_tests {
         store
             .reserve_attempt(flow.id(), flow.version, flow.claim.as_ref(), None)
             .unwrap()
-            .current_attempt
+            .selected_capture
             .unwrap()
-            .run_id
+            .artifact_key
     }
 
-    /// Launch the reserved Run: the worker's publication of its attempt.
+    /// Launch the reserved capture: the worker's publication of its attempt.
     fn publish(
         store: &SqliteStore,
         flow: &FlowSession,
@@ -1016,7 +1016,7 @@ mod durable_store_tests {
         )
     }
 
-    /// Park a Task's Flow at its review with the review's Run launched and,
+    /// Park a Task's Flow at its review with the review's capture published and,
     /// when given, its feedback ready.
     fn parked_review(
         store: &SqliteStore,
@@ -1197,7 +1197,7 @@ mod durable_store_tests {
         let run_count: i64 = conn
             .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
             .unwrap();
-        // Callers cannot publish a Run under a different node or loop pass.
+        // Callers cannot publish a capture under a different node or loop pass.
         for (node, iterations) in [(Some(u32::MAX), None), (None, Some(vec![vec![99]]))] {
             let mut requested = conversation(Some(position.invocation.id.clone()), None, None);
             requested.node = node;
@@ -1691,7 +1691,7 @@ mod durable_store_tests {
                 cwd: "/repo".into(),
                 message: None,
                 model: None,
-                current_attempt: None,
+                selected_capture: None,
                 pending_session_id: None,
                 ready_summary: None,
                 worker_generation: 0,
@@ -1846,7 +1846,7 @@ mod durable_store_tests {
             .reserve_task_review(position.id(), position.version)
             .unwrap();
         let session_id = crate::ops::human_session::flow_id(&position).unwrap();
-        // The review's reserved Run starts the Task before anything launches.
+        // The review's reserved capture starts the Task before anything launches.
         assert!(store.task_started(&task_id).unwrap());
         assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
         assert!(!store.retire_chapter_backlog(&task_id).unwrap());
@@ -1862,7 +1862,7 @@ mod durable_store_tests {
                 [task.project_id.as_str()],
             )
             .unwrap();
-        let (reserved, run) = store.reserve_review_run(&position).unwrap();
+        let (reserved, run) = store.reserve_review_capture(&position).unwrap();
         assert_eq!(store.session(&session_id).unwrap().unwrap(), run);
         assert!(!run.input_published);
 
@@ -1899,7 +1899,6 @@ mod durable_store_tests {
         store
             .rename_session(
                 &session_id,
-                None,
                 "Parser review",
                 crate::session::TitleSource::Human,
             )
@@ -1909,7 +1908,7 @@ mod durable_store_tests {
         let mut runs = vec![first_run];
         for _ in 0..2 {
             let stale = position.clone();
-            let (reserved, run) = store.reserve_review_run(&position).unwrap();
+            let (reserved, run) = store.reserve_review_capture(&position).unwrap();
             assert!(!run.input_published);
             assert_eq!(run.task_id, first_attempt.task_id);
             assert_eq!(run.wave_id, first_attempt.wave_id);
@@ -1923,7 +1922,7 @@ mod durable_store_tests {
                     .find(|input| **input == first_attempt.artifact_key),
                 Some(&first_attempt.artifact_key)
             );
-            assert!(store.reserve_review_run(&stale).is_err());
+            assert!(store.reserve_review_capture(&stale).is_err());
             assert!(store
                 .ready_session(
                     &session_id,
@@ -1974,7 +1973,6 @@ mod durable_store_tests {
         store
             .rename_session(
                 &session_id,
-                None,
                 "generated suggestion",
                 crate::session::TitleSource::Generated,
             )
@@ -2157,7 +2155,7 @@ mod durable_store_tests {
         assert!(store
             .claim_session_driver(id, retired_driver.as_ref(), &exec, false)
             .is_err());
-        assert!(store.reserve_review_run(&flow).is_err());
+        assert!(store.reserve_review_capture(&flow).is_err());
         assert!(store
             .ready_session(id, before.captured, "late approval")
             .is_err());
@@ -2309,7 +2307,7 @@ mod durable_store_tests {
         assert_eq!(recovered.claim, Some(replacement.clone()));
         assert_eq!(
             recovered
-                .current_attempt
+                .selected_capture
                 .as_ref()
                 .unwrap()
                 .outcome
@@ -2323,10 +2321,10 @@ mod durable_store_tests {
             .unwrap();
         assert!(released.cursor.progress.verdict.is_none());
         assert!(released.claim.is_none());
-        assert_eq!(released.current_attempt, recovered.current_attempt);
+        assert_eq!(released.selected_capture, recovered.selected_capture);
         assert!(store.flow_output(id).is_err());
         let retried = store.retry_flow(id, None).unwrap();
-        assert!(retried.current_attempt.is_none());
+        assert!(retried.selected_capture.is_none());
     }
 
     #[test]
@@ -2357,7 +2355,7 @@ mod durable_store_tests {
             .recover_flow(position.id(), Some(&replacement))
             .is_err());
         assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-        assert_eq!(before.current_attempt.unwrap().run_id, run);
+        assert_eq!(before.selected_capture.unwrap().artifact_key, run);
         assert_eq!(store.task_events_after(&task_id, 0).unwrap(), events);
     }
 
@@ -2407,9 +2405,9 @@ mod durable_store_tests {
         assert_eq!(
             Some(&sessions[0].artifact_key),
             saved
-                .current_attempt
+                .selected_capture
                 .as_ref()
-                .map(|attempt| &attempt.run_id)
+                .map(|attempt| &attempt.artifact_key)
         );
         assert_eq!(saved.current().step, "review-design");
         assert_eq!(saved.current().id.as_deref(), Some("review"));
@@ -2631,7 +2629,10 @@ mod durable_store_tests {
         assert_eq!(failed.cursor.index, position.cursor.index);
         assert_eq!(failed.cursor.iteration, position.cursor.iteration);
         assert!(!failed.has_pending_decision());
-        assert_eq!(failed.current_attempt.as_ref().unwrap().run_id, first);
+        assert_eq!(
+            failed.selected_capture.as_ref().unwrap().artifact_key,
+            first
+        );
         let failed = store.retry_flow(id, None).unwrap();
         let second_claim = claim(&store, &task_id, &failed, 502);
         let second = reserved_capture(&store, &task_id);
@@ -2709,7 +2710,7 @@ mod durable_store_tests {
             .task_flow(&work)
             .unwrap()
             .unwrap()
-            .current_attempt
+            .selected_capture
             .is_none());
         reserved_capture(&store, &work);
         let conn = store.conn.lock().unwrap();
@@ -2726,20 +2727,26 @@ mod durable_store_tests {
         );
         drop(conn);
         assert!(store.task_started(&work).unwrap());
-        // The launch publishes that Run under the claim; nothing else can.
+        // The launch publishes that capture under the claim; nothing else can.
         let flow = store.task_flow(&work).unwrap().unwrap();
-        let run = flow.current_attempt.clone().unwrap();
+        let run = flow.selected_capture.clone().unwrap();
         assert!(!run.published);
         assert!(store
             .publish_attempt(flow.id(), flow.version, run.captured, None, "codex", None)
             .is_err());
-        publish(&store, &flow, &run.run_id, flow.claim.as_ref().unwrap()).unwrap();
+        publish(
+            &store,
+            &flow,
+            &run.artifact_key,
+            flow.claim.as_ref().unwrap(),
+        )
+        .unwrap();
         assert!(
             store
                 .task_flow(&work)
                 .unwrap()
                 .unwrap()
-                .current_attempt
+                .selected_capture
                 .unwrap()
                 .published
         );
@@ -2893,7 +2900,7 @@ mod durable_store_tests {
             "the driver keeps the position until it stops"
         );
         assert!(
-            settled.current_attempt.is_none(),
+            settled.selected_capture.is_none(),
             "a new position has no attempt"
         );
         assert!(store

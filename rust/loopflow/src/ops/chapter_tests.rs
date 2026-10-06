@@ -548,7 +548,7 @@ async fn local_started_task(
                 cwd: repo.into(),
                 message: Some("original input".into()),
                 model: None,
-                current_attempt: None,
+                selected_capture: None,
                 pending_session_id: None,
                 ready_summary: None,
                 worker_generation: 0,

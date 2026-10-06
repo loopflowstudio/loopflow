@@ -1,17 +1,17 @@
 # Check cost by step
 
 ```bash
-uv run python -m scripts.check_cost --runs ~/.lf/runs \
+uv run python -m scripts.check_cost --captures ~/.lf/runs \
   --since 2026-09-30T00:00:00-07:00 --until 2026-09-30T21:15:00Z
 
 # Compare a later window after the revised skills are installed and used.
-uv run python -m scripts.check_cost --runs ~/.lf/runs \
+uv run python -m scripts.check_cost --captures ~/.lf/runs \
   --since 2026-10-01T00:00:00-07:00 --until 2026-10-01T14:15:00-07:00 \
   --baseline performance/baselines/check-cost-2026-09-30.json
 ```
 
 Jack Heart requested this baseline on 2026-09-30 (LOO-357). The collector reads
-existing local Run manifests, normalized command events and submitted context.
+existing local capture manifests, normalized command events and submitted context.
 It emits aggregate numbers only. It neither invokes providers nor adds a store.
 
 ## September 30 baseline

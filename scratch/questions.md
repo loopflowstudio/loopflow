@@ -195,44 +195,41 @@ draft renames `projects.flow` and the stage columns.
 
 ## Choices the state-from-position pass made without Jack
 
-The agent's, October 6, slice 10a. None is confirmed by Jack Heart.
+The agent's, October 6, slice 10a; none is confirmed by Jack Heart. The list
+is at `9060bbea2:scratch/questions.md` under this heading. Most likely to
+matter: a never-started Task, and every started unfinished Task on an
+existing Home, has no Workflow and reads `not_ready` until it first runs;
+`lf task move ISSUE end [--force]` replaces `lf task complete`; an empty
+unpublished PR is retired at `end` instead of refusing it (reverses part of
+W2-151); a reopened Task has no active PR and cannot run. **Risk for Jack:**
+if Linear's GitHub integration completes an issue when its PR merges and the
+plan refreshes before `lf` settles the landing, the Task stays active and
+flagged until someone forces it.
 
-- **Stored.** `tasks.work_state` and `work_terminal_at` are dropped;
-  `tasks.abandoned_at` is the one mark. State is one SQL expression over
-  `task_workflows`. Waves and Projects keep their stored status.
-- **Migration.** A done Task is put at `end` of `unplanned`, a workflow with
-  nothing between, by a move with no Exec. Departure from the plan: a
-  never-started Task gets no Workflow (SQL cannot load a workflow's graph)
-  and reads `not_ready` until it first runs. So does every started,
-  unfinished Task on an existing Home.
-- **Words on the wire.** `not_ready`, `ready`, `active`, `done`,
-  `abandoned`; abandoned outranks position. A move's `exec_id` may be null.
-- **Completion.** `lf task complete` is gone. `lf task move ISSUE end
-  [--reason] [--force] [--accept-unknown-exec ID]` replaces it, also for a
-  planning-only Task and for a Task with no Workflow (`unplanned`). An edge
-  into `end` completes on arrival; refused, the Task stays on its edge.
-  `lf land -c` and a merged completing PR put the Task at `end` by a `set`
-  move. `--force` is on `task run` too.
-- **An empty unpublished PR no longer holds a Task from `end`:** it is
-  retired there, so a no-PR workflow can finish. A PR with commits or a
-  publication still refuses, as does a dirty worktree. This reverses part
-  of W2-151.
-- **Reopening.** `lf task move` away from `end` makes the Task active again;
-  `lf task run` on a done Task is refused, naming `task move`. A reopened
-  Task has no active PR and cannot run until it has one; not built.
-- **Linear.** Read from the cached plan, never fetched. Active and Linear
-  complete: `planning_conflict` on the Task, launches allowed, `end`
-  refused without `--force`, the note records the force. Ready or not
-  ready and Linear ended: launch refused before any move, listed under
-  Later. Canceled and duplicate keep refusing launches.
-- **Risk for Jack.** If Linear's GitHub integration completes an issue when
-  its PR merges, and the plan is refreshed before `lf` settles the landing,
-  that landing leaves the Task active and flagged until someone forces it.
-  A completion whose Linear write succeeded and whose store write did not
-  leaves the same flag.
-- **Creating a Task** takes up its Project's workflow when that loads.
-- **Desktop** shows the conflict with **Complete anyway** (`--force`). No
-  state badge was added.
+## Choices the Workflow graph pass made without Jack
+
+The agent's, October 6, slice 11. None is confirmed by Jack Heart.
+
+- **Description.** A node is `name: skill` or `name: {skill, description}`.
+  With none authored, the skill's first line of prose stands in (a skill's
+  frontmatter is not read). It is resolved when the definition loads and
+  kept in the Task's stored graph; a Workflow taken up before this pass has
+  none and Desktop shows the skill name. Builtins say "you review the
+  plan", "you try the change", "you read the findings".
+- **Routing.** Nodes sit on one row in authored order. The first edge into
+  the next column runs straight; an edge back to its own node arcs over it;
+  every other edge (backward, passing over a node, or a second edge between
+  the same two) takes its own lane below the row.
+- **Buttons.** The label of each edge Rust lists as choosable is the button,
+  named by what it runs; an edge that runs nothing reads "finish". The
+  separate "Run pursue" buttons are gone. **Move to** stays a menu.
+- **Flow runs** is 340 points wide beside the graph and full width for a
+  Task with no Workflow. Newest first is Rust's order reversed. The Work
+  list below keeps conversations and Execs and no longer lists Flows.
+- **Jack's open question, default taken:** a single headless skill Run with
+  no Flow is not in the Flow run log; it stays in Work.
+- **Fixtures.** `task_work.json` now carries the whole builtin `feature`
+  (five edges); `flow_catalog.json` gains builtin `research`.
 
 ## Choices the Workflow live-state pass made without Jack
 

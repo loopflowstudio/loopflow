@@ -226,7 +226,9 @@ lf task status DES-123         # node, or the edge it is on
 lf task move DES-123 design    # go back without running anything
 ```
 
-`start` and `end` are implicit. An edge runs anything `lf run` accepts, a
+`start` and `end` are implicit. A node may say what you do there:
+`design: { skill: review-design, description: you review the plan }`;
+without one, the skill's first line stands in. An edge runs anything `lf run` accepts, a
 skill included. Only an edge into `end` may omit `flow:`; take it with
 `lf task run ISSUE end`. A Task with no PR is a workflow with no landing edge,
 like builtin `research`. An edge is named by what it runs, so two edges

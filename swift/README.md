@@ -142,15 +142,20 @@ below the outline. Sessions without a Task association are also available under
 **Debug → Sessions → Orphan Sessions** in the repository menu, or `lf session list --orphan`.
 There is no creation opt-out from checkout association. **Task details** opens the description, comments and Run history.
 
-A Task on a workflow draws it: nodes, the edges between them, and the current
-node or running edge. At a node the page reads **Waiting on you** and offers
-one button per edge leaving it; each runs `lf -b task run` as a child of the
-app. No edge is offered while one runs. An edge whose Flow stopped holds the
+A Task on a workflow draws it as a graph: `start` and `end` as circles, each
+node a box saying what you do there, one labelled arrow per edge, a loop back
+as an arc over its node. The current node or running edge is marked. At a node
+the page reads **Waiting on you** and the labels of the edges leaving it are
+buttons; each runs `lf -b task run` as a child of the app. No edge is offered while one runs. An edge whose Flow stopped holds the
 Task, reads **Stopped on**, and is offered again with the others leaving its
-node. **Move to** puts the Task at any node through `lf task move`. An unstarted Task previews its
+node. **Move to** puts the Task at any node through `lf task move`; `end` completes it.
+When Linear calls an active Task complete, the page shows that as an error with
+**Complete anyway**, which runs the move with `--force`. An unstarted Task previews its
 Project's workflow. One that names no workflow reads invalid, with
 Start disabled.
-Each Flow exec of the Task is a row that opens to its graph, steps and output
+Beside the graph, **Flow runs** lists every Flow exec in the Task's checkout,
+newest first, whether an edge or a person started it; it is not the Workflow's
+history. Each row opens to its graph, steps and output
 (`lf flow show ID --sessions --json`); **Detailed Flow** exposes the captured
 branches and repeats. A run whose driver exited early reads **Stopped**. A run
 whose driver was killed has no exit record and keeps reading as running.

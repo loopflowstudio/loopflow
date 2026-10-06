@@ -19,9 +19,14 @@ struct DTOFixtureTests {
         #expect(!work.execs.isEmpty)
         let workflow = try #require(work.workflow)
         #expect(workflow.nodes.map(\.name) == ["design", "demo"])
-        #expect(workflow.edges.last?.flow == nil)
-        #expect(workflow.edges.last?.launchName == "end")
-        #expect(workflow.position == .edge(index: 1, execId: work.flows[0].id, running: true))
+        #expect(workflow.nodes.map(\.description) == ["you review the plan", "you try the change"])
+        #expect(workflow.edges.last?.launchName == "ship")
+        // An edge that runs nothing is chosen by the node it enters.
+        let research = try JSONDecoder().decode([FlowCatalogEntry].self, from: loadFixtureData("flow_catalog.json"))
+            .named("research")?.workflow
+        #expect(research?.edges.last?.flow == nil)
+        #expect(research?.edges.last?.launchName == "end")
+        #expect(workflow.position == .edge(index: 2, execId: work.flows[0].id, running: true))
         #expect(workflow.outgoing.isEmpty)
         #expect(workflow.history.map(\.kind) == [.set, .tookUp, .chose, .arrived, .chose])
         #expect(workflow.history.map(\.actor) == [.person, .person, .person, .edge, .conversation])

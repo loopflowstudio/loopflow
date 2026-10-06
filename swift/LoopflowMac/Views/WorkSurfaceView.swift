@@ -270,8 +270,15 @@ struct WorkSurfaceView: View {
                     .tint(palette.accentInk)
                     .foregroundStyle(palette.accentInk)
                 }
-                if let workflow = model.taskWork[task.id].value?.workflow {
-                    WorkflowView(model: model, task: task, wave: found.wave.wave, workflow: workflow)
+                // The Workflow beside every Flow run of the Task.
+                HStack(alignment: .top, spacing: Spacing.lg) {
+                    if let workflow = model.taskWork[task.id].value?.workflow {
+                        WorkflowView(model: model, task: task, wave: found.wave.wave, workflow: workflow)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        FlowRunLog(model: model, task: task, wave: found.wave.wave).frame(width: 340)
+                    } else {
+                        FlowRunLog(model: model, task: task, wave: found.wave.wave)
+                    }
                 }
                 if let unavailable = found.wave.unavailableTasks.first(where: { $0.taskId == task.id }) {
                     evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)
@@ -758,7 +765,7 @@ struct WaveWorkflowView: View {
                 .font(Typography.code(11)).foregroundStyle(palette.textTertiary)
                 .accessibilityIdentifier("wave-workflow-source")
             if let workflow = entry?.workflow {
-                WorkflowGraphRow(nodes: workflow.nodes, edges: workflow.edges)
+                WorkflowGraph(nodes: workflow.nodes, edges: workflow.edges)
             } else {
                 Text(entry?.unavailable.map { "\(name) is invalid: \($0)" }
                      ?? model.flowCatalog.errorMessage

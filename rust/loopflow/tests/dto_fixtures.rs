@@ -445,7 +445,7 @@ fn task_work_preserves_all_owners() {
     assert_eq!(
         workflow.position,
         loopflow::ops::workflow::WorkflowPosition::Edge {
-            edge: 1,
+            edge: 2,
             exec_id: work.flows[0].summary.id.clone(),
             running: true,
         }

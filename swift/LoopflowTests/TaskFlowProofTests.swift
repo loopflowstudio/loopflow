@@ -52,7 +52,7 @@ struct TaskFlowTests {
         }
 
         let catalog = try JSONDecoder().decode([FlowCatalogEntry].self, from: fixture("flow_catalog.json"))
-        #expect(catalog.map(\.id) == ["flow/feature", "flow/broken", "workflow/code", "workflow/proof"])
+        #expect(catalog.map(\.id) == ["flow/feature", "flow/broken", "workflow/code", "workflow/proof", "workflow/research"])
         // A workflow carries nodes and edges instead of a Flow graph; an invalid file keeps its source.
         #expect(catalog[2].workflow?.edges.map(\.launchName) == ["pursue", "pursue", "ship"])
         #expect(catalog[2].source == nil && catalog[2].graph == nil)

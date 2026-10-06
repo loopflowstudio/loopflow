@@ -15,6 +15,9 @@ public struct Workflow: Codable, Sendable, Equatable {
     public struct Node: Codable, Sendable, Hashable {
         public let name: String
         public let skill: String
+        /// One line saying what the person does here; `nil` when neither the
+        /// definition nor its skill says.
+        public let description: String?
     }
 
     public struct Edge: Codable, Sendable, Hashable {

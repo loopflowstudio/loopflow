@@ -161,39 +161,14 @@ run, many Flow execs (three attempts; run is the Workflow API's verb, exec the
 Flow's record) — `274a63a8a`. 10. Nodes and edges; Projects have workflows —
 `5b71ff345`, rerun October 6: `task_flow_launch_tests` 8 passed.
 
-10a. **A Task's state comes from its Workflow.** Jack, October 6: "no
-    separate Task is ready state; that is derived from where it is in the
-    graph"; "at start? ready at end? done"; between, "active";
-    "abandoned/deleted bool should still stay"; then "I do think i want this
-    in this PR now". His words on Linear and on Tasks with no Workflow are in
-    the LOO-385 thread (`lf task comment LOO-385`); read them first.
-    - State is read from position: ready at `start`, active between, done at
-      `end`. Remove the stored ready/done status and every writer of it;
-      abandoned and deleted stay flags.
-    - Reaching `end`, by an edge or the set command, is completion.
-      `lf task complete` goes; its settled-PR and unresolved-execution checks
-      become refusals to reach `end`, and reaching it writes Linear.
-    - Linear complete while the Task is ready: not offered as available.
-      While active: a flag on the Task, shown as an error, work untouched,
-      `end` refused until the flag is cleared. Clearing it, Jack: "Button on lf
-      desktop / some lf task api", or alternatively "some sort of --force
-      option to allow moving a run forward even when theres the flag". Build
-      the second: `--force` on the command that reaches `end`, recorded in
-      the move's note; Desktop's button passes it. No separate clear command
-      (Jack, of `--force`: "i think i prefer that").
-    - Agent's choices where Jack allowed either: a Task with no Workflow
-      reads as not ready; creating a Task takes up its Project's workflow;
-      existing Tasks get one by the draft migration only where their state
-      is unambiguous (done → `end`, never started → `start`).
-    Not in this slice: dropping the PR slot for a no-PR Workflow (LOO-385).
-    Done when tests show state following position through start, a node, an
-    edge and end; `end` refused over an unsettled PR; both Linear cases; and
-    no surface or wire field carries a stored ready/done. **Built, not yet
-    compressed or realigned.** `tasks.work_state` is dropped; `lf task move
-    ISSUE end` replaces `lf task complete`. Departures and choices, including
-    never-started Tasks reading not ready and an empty unpublished PR
-    retiring at `end`: [questions.md](questions.md). Demo items: Complete
-    anyway on screen; a real Linear completion against an active Task.
+10a. **A Task's state comes from its Workflow** is **done**; its text is at
+`9060bbea2:scratch/focus-on-your-own-work.md`. Jack, October 6: "no separate
+Task is ready state; that is derived from where it is in the graph"; "I do
+think i want this in this PR now". State is read from position,
+`lf task move ISSUE end` replaces `lf task complete`, `tasks.work_state` is
+dropped — `7f2c384c7`, rerun October 6: `task_flow_launch_tests` 13 passed,
+`dto_fixtures` 20 passed. Demo items: Complete anyway on screen; a real
+Linear completion against an active Task.
 
 11. **Desktop draws the Workflow as a graph.** Jack, October 6, on the
     diagram in [pr-review.html](pr-review.html) ("The experience"): "this
@@ -215,8 +190,15 @@ Flow's record) — `274a63a8a`. 10. Nodes and edges; Projects have workflows —
     filtered or grouped by it. Open: whether a single headless skill Run
     with no Flow also belongs in that log.
     Done when the headless Desktop tests render `feature` and a no-PR
-    definition from the shared fixture with the position marked. Demo item:
-    how it looks. *Not done.*
+    definition from the shared fixture with the position marked. **Built,
+    not yet compressed or realigned.** `WorkflowGraph` replaces the text row
+    on the Task page, the Wave page, the Flow preview and the catalogue
+    inspector; **Flow runs** sits beside it. A node is `name: skill` or
+    `name: {skill, description}`. Check: `swift test --filter
+    "DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests"` 36 passed;
+    `cargo test -p loopflow --lib engine::workflow` 3 passed. Choices:
+    [questions.md](questions.md). Demo item: how it looks, in particular
+    label widths, which are estimated from character counts.
 
 12. **Align Desktop and the store with LOO-382.** Layer 4 of the contract in
     [task-workflow.md](task-workflow.md). If #1452 has merged, merge main and

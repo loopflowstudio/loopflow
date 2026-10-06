@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::error::LoadError;
 use super::flow::{compile_flow, find_flow_source_path, load_flow, load_skill};
+use super::skills::first_prose_line;
 
 pub const START: &str = "start";
 pub const END: &str = "end";
@@ -32,6 +33,9 @@ pub struct WorkflowNode {
     pub name: String,
     /// The skill the Task conversation uses at this node.
     pub skill: String,
+    /// One line saying what the person does here: authored, else the
+    /// skill's first line of prose.
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +101,13 @@ struct AuthoredWorkflow {
     #[serde(default)]
     nodes: serde_yaml_ng::Mapping,
     edges: Vec<WorkflowEdge>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AuthoredNode {
+    skill: String,
+    description: Option<String>,
 }
 
 /// The repository file that defines workflow `name`.
@@ -189,17 +200,26 @@ fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<WorkflowDefi
     let authored: AuthoredWorkflow =
         serde_yaml_ng::from_str(content).map_err(|error| error.to_string())?;
     let mut nodes = Vec::new();
-    for (node, skill) in &authored.nodes {
-        let (Some(node), Some(skill)) = (node.as_str(), skill.as_str()) else {
-            return Err("each node is `name: skill`".into());
+    for (node, authored) in &authored.nodes {
+        let malformed = "each node is `name: skill` or `name: {skill, description}`";
+        let node = node.as_str().ok_or(malformed)?;
+        let AuthoredNode { skill, description } = match authored.as_str() {
+            Some(skill) => AuthoredNode {
+                skill: skill.to_string(),
+                description: None,
+            },
+            None => serde_yaml_ng::from_value(authored.clone())
+                .map_err(|error| format!("node {node}: {malformed}: {error}"))?,
         };
         if node == START || node == END {
             return Err(format!("{node} is implicit and cannot be a node"));
         }
-        load_skill(skill, repo).map_err(|error| format!("node {node}: {error}"))?;
+        let loaded = load_skill(&skill, repo).map_err(|error| format!("node {node}: {error}"))?;
         nodes.push(WorkflowNode {
             name: node.to_string(),
-            skill: skill.to_string(),
+            description: description
+                .or_else(|| loaded.content.as_deref().and_then(first_prose_line)),
+            skill,
         });
     }
     let workflow = WorkflowDefinition {
@@ -279,6 +299,10 @@ mod tests {
         let feature = load_workflow("feature", repo.path()).unwrap().unwrap();
         let nodes: Vec<_> = feature.nodes.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(nodes, ["design", "demo"]);
+        assert_eq!(
+            feature.nodes[0].description.as_deref(),
+            Some("you review the plan")
+        );
         let from_demo: Vec<_> = feature
             .outgoing("demo")
             .map(|(_, edge)| (edge.to.as_str(), edge.flow.as_deref()))
@@ -311,6 +335,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(valid.outgoing(START).count(), 1);
+        // A node that says nothing about itself is described by its skill.
+        let described = valid.nodes[0].description.clone().unwrap();
+        assert!(!described.is_empty() && !described.contains('\n'));
+        let authored = load(
+            "nodes:\n  review: {skill: demo, description: you try it}\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {from: review, to: end}\n",
+        )
+        .unwrap();
+        assert_eq!(authored.nodes[0].description.as_deref(), Some("you try it"));
         for (content, expected) in [
             (
                 "nodes:\n  review: demo\n  lost: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n",

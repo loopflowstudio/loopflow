@@ -20,26 +20,20 @@ struct WorkflowView: View {
                 Text(workflow.name).font(Typography.code(12)).foregroundStyle(palette.textSecondary)
             }
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                WorkflowGraphRow(
+                WorkflowGraph(
                     nodes: workflow.nodes, edges: workflow.edges,
                     current: { if case .node(let node) = workflow.position { node } else { nil } }(),
                     running: workflow.onEdge.flatMap { $0.running ? $0.index : nil },
-                    stopped: workflow.onEdge.flatMap { $0.running ? nil : $0.index })
+                    stopped: workflow.onEdge.flatMap { $0.running ? nil : $0.index },
+                    choices: workflow.outgoing, unavailable: unavailable,
+                    hint: { "lf task run \(task.task.identifier) \($0.launchName) · to \($0.to)" },
+                    choose: { edge in Task { await model.startFlow(edge.launchName, task: task, wave: wave) } })
                 Text(position)
                     .font(Typography.body(13))
                     .foregroundStyle(palette.textSecondary)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-workflow-position")
                 HStack(spacing: Spacing.sm) {
-                    ForEach(workflow.choices, id: \.index) { index, edge in
-                        Button(edge.flow.map { "Run \($0)" } ?? "Finish") {
-                            Task { await model.startFlow(edge.launchName, task: task, wave: wave) }
-                        }
-                        .buttonStyle(WorkspaceOutlineButtonStyle())
-                        .disabled(unavailable != nil)
-                        .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.launchName) · to \(edge.to)")
-                        .accessibilityIdentifier("task-workflow-run-\(index)")
-                    }
                     // Put the Task at a node without running anything.
                     Menu("Move to") {
                         ForEach(["start"] + workflow.nodes.map(\.name) + ["end"], id: \.self) { node in
@@ -104,39 +98,42 @@ struct WorkflowView: View {
     }
 }
 
-/// A workflow's nodes in authored order, each followed by the edges leaving it.
-struct WorkflowGraphRow: View {
-    let nodes: [Workflow.Node]
-    let edges: [Workflow.Edge]
-    /// The node a Task waits at, and the edge it is running, when a Task has taken the workflow up.
-    var current: String?
-    var running: Int?
-    var stopped: Int?
+/// Every Flow run in the Task's checkout, newest first, whatever started it.
+/// It is not the Workflow's history: a run that carried an edge and one
+/// started ad hoc are the same kind of row.
+struct FlowRunLog: View {
+    let model: PodiumModel
+    let task: RoadmapTask
+    let wave: WaveSnapshot
     @Environment(\.palette) private var palette
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Spacing.sm) {
-                ForEach(["start"] + nodes.map(\.name) + ["end"], id: \.self) { node in
-                    WorkspaceChip(text: node, tone: current == node ? .human : .neutral)
-                        .accessibilityIdentifier("task-workflow-node-\(node)")
-                        .accessibilityValue(current == node ? "Current" : "")
-                    ForEach(edges.leaving(node), id: \.index) { index, edge in
-                        Text("→ \(edge.flow ?? "no Flow") → \(edge.to)")
-                            .font(Typography.code(11))
-                            .foregroundStyle(
-                                running == index ? WorkspaceTone.running.ink
-                                    : stopped == index ? WorkspaceTone.blocked.ink : palette.textTertiary)
-                            .accessibilityValue(running == index ? "Running" : stopped == index ? "Stopped" : "")
-                            .accessibilityIdentifier("task-workflow-edge-\(index)")
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            WorkspaceSectionHeading("Flow runs")
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                if let flows = model.taskWork[task.id].value?.flows {
+                    ForEach(flows.reversed()) { flow in
+                        FlowRunView(model: model, flow: flow, wave: wave)
                     }
+                    if flows.isEmpty {
+                        Text("No Flow has run.").accessibilityIdentifier("task-flow-runs-empty")
+                    }
+                } else if model.taskWork[task.id].errorMessage == nil {
+                    Text("Reading Flow runs…")
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .workspacePanel(padding: 13)
         }
+        .font(Typography.body(12))
+        .foregroundStyle(palette.textSecondary)
+        .textSelection(.enabled)
+        .accessibilityIdentifier("task-flow-runs")
     }
 }
 
-/// Every retained owner, including headless work and conversations without turns.
+/// The Task's conversations and mechanical Execs, including headless work and
+/// conversations without turns. Its Flow runs are listed by `FlowRunLog`.
 struct TaskWorkView: View {
     let model: PodiumModel
     let task: RoadmapTask
@@ -154,14 +151,11 @@ struct TaskWorkView: View {
                     row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
                         state: session.completedAt == nil ? "open" : "completed")
                 }
-                ForEach(work.flows) { flow in
-                    FlowRunView(model: model, flow: flow, wave: wave)
-                }
                 ForEach(work.execs) { exec in
                     row("Exec", id: exec.id, name: exec.command ?? "Unknown command",
                         state: exec.outcome ?? "unknown")
                 }
-                if work.sessions.isEmpty && work.flows.isEmpty && work.execs.isEmpty {
+                if work.sessions.isEmpty && work.execs.isEmpty {
                     Text("No recorded work.")
                 }
             }

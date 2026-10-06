@@ -336,6 +336,16 @@ pub struct FlowStepExec {
     pub exit_code: Option<i32>,
 }
 
+impl FlowStepExec {
+    /// The step's label with the pass any returned loop is on: "implement · pass 2".
+    pub fn position(&self) -> String {
+        match crate::engine::flow_graph::loop_passes(&self.iterations) {
+            Some(passes) => format!("{} · {passes}", self.label),
+            None => self.label.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{render_steers, Steer, WorkStatus};

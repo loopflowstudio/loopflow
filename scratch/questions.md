@@ -26,3 +26,16 @@ Recorded at kickoff, 2026-10-05. None of these has Jack Heart's confirmation.
 6. **Jack's screenshots were not available to kickoff.** The plan rests on the
    Task's description of them. The color cause matches the app instance running
    at the screenshot times, but the screenshots themselves were not compared.
+
+Added 2026-10-05 after Jack's demo feedback. Not confirmed by Jack.
+
+7. **The branch left the header.** Jack said git and PR context are not needed
+   "per se"; the header now holds the directory only, which also removes a
+   `git` call per prompt. Restoring it is one prompt segment.
+8. **Header size and color.** 11pt system monospace in the dim grey `#A39B93`
+   against the 13pt body. Jack asked for a different size and color, not these values.
+9. **"The bar on the right" is not built.** His screenshot shows only a left
+   bar on the failed block. The left accent still appears on hover as well as
+   on failed and selected blocks.
+10. **The command is bold** through zsh's `zle_highlight`, under the Loopflow
+    prompt only. Jack's screenshot shows it; he did not name it.

@@ -118,39 +118,19 @@ Jack's list: the directory in the header, the bar on the right, the spacing,
 a header set in a different size from the command and output, and a header in
 different colors. Git and PR context are not needed "per se".
 
-Proposals that follow (mine, not agreed):
-
-- **Draw the header in the overlay, not in terminal rows.** A terminal grid has
-  one font size, so a smaller or larger header cannot be prompt text. The design
-  rejected overlay headers because they need per-block directory storage and a
-  reserved row; Jack's font-size request reopens that. The `lf2` patch would
-  record the working directory on the prompt row at submission (the shell
-  already reports it through OSC 7), the Loopflow prompt would keep a blank
-  header row for the overlay to draw into, and the header could then also
-  carry spacing that is not a whole row.
-- **Drop the branch from the header**, leaving the directory. Not done yet:
-  Jack said it is not needed, not that it must go.
-- **The bar**: draw the left accent only on failed and selected blocks, as in
-  the screenshot, unless Jack means something else on the right.
-- **Half-row padding**: with the header drawn by the overlay, shift each block's
-  fill and hairline by half a row so the blank row is shared between the block
-  above and the block below, and a failed block is red evenly top and bottom.
-- **Bold command**: the Loopflow prompt can end with `%B` and reset in `preexec`;
-  zsh's `zle_highlight` default region does the same without touching output.
-  Half-row space under the command is not available in a cell grid; skip it.
-
-Proof for that pass: the headless block-layout and zsh-hook tests extended for
-the stored directory and the shifted frames, the patch's Zig tests for the
-directory surviving reflow, and Jack comparing a Desktop shell with this
-screenshot.
+Built after the demo, unseen by Jack (choices are the implementer's, recorded
+in `questions.md` 7–10): the header is drawn by the overlay at 11pt in dim grey
+from a concealed prompt row, holds the directory only, block bands share the
+blank row half and half, and the command is bold. Not built: a gap between
+command and output (a cell grid has no half rows), and any right-side bar. The
+left accent still shows on hover as well as on failed and selected blocks.
 
 Background on what people say they value in Warp, Ghostty and other
 terminals: [terminal-ux-research.md](terminal-ux-research.md).
 
 ## Unresolved
 
-- Whether one blank row is the right amount between blocks, and whether the
-  red block's uneven top/bottom reads as wrong.
+- Whether one blank row, now split evenly, is the right amount between blocks.
 - What "the bar on the right" is, and whether Jack wants it in this Task.
 - Which Warp affordances Jack wants next. He asked for the list, not for any
   of them to be built.
@@ -160,9 +140,9 @@ terminals: [terminal-ux-research.md](terminal-ux-research.md).
 
 ## Recommended next action
 
-Jack looks at the relaunched Loopflow Dev: `ls`, `sdl`, a third command, and
-confirms or corrects the gap. Then decide the right-side bar and any Warp
-affordance to pull into this Task versus a follow-up. Proof for the spacing is
-Jack's eye on a real shell; proof for anything interactive added later is the
-display suite (`LOOPFLOW_NATIVE_TESTS=1 swift test --filter "Embedded terminal"`),
-which has still not run for `lf2`.
+Jack looks at a Loopflow Dev built from the branch head: `ls`, `sdl`, a third
+command, then a bare Enter and a scroll. He confirms or corrects the header,
+the gap and the even red, and says what the right-side bar is. Proof for these
+is his eye on a real shell; the display suite
+(`LOOPFLOW_NATIVE_TESTS=1 swift test --filter "Embedded terminal"`) has still
+not run for `lf2`.

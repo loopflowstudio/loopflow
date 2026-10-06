@@ -1,6 +1,7 @@
 # Polish CLI colors and command blocks in Desktop (LOO-381)
 
-Status: kickoff plan, implemented on the branch 2026-10-05; not demoed. Jack
+Status: kickoff plan, implemented on the branch 2026-10-05. Jack saw the first
+build that day; the header pass that followed his feedback is unseen. Jack
 Heart requested the Task on 2026-10-05; nothing below is approved by Jack beyond
 the Task's own scope and acceptance. Header contents, spacing and prompt
 ownership are kickoff choices and stay open to his demo review. Assumptions are
@@ -21,7 +22,8 @@ From an agent shell (the tainted case), run `lf desktop`, then in Desktop:
    in green, as in Warp with the same Codex version and `~/.codex/config.toml`.
 2. Open a shell. Run `ls`, then `sdl`. Each command sits under a one-line
    context header (directory, branch), indented off the edge. Only `sdl` has a
-   red block background. The fresh prompt below is undecorated.
+   red block background. The header is smaller and dimmer than the bold
+   command. The fresh prompt below has its header and no block chrome.
 3. Click the `ls` block, Command-C, paste: `ls` and its output. Drag across two
    words in the `sdl` output: the block highlight disappears; Command-C pastes
    those words. Click the `sdl` block: the text highlight disappears. Narrow the
@@ -158,16 +160,34 @@ separately authorized action; see `scratch/questions.md`.
 
 ### 4. A Loopflow prompt for zsh shells that still have the system default
 
+Revised 2026-10-05 after Jack's demo feedback (directory, spacing, a header in
+its own size and color; git and PR "not needed per se"). Details in
+[the demo record](polish-cli-colors-and-command-demo.md).
+
 A Loopflow-owned zsh `.zshenv`, written to a temporary `ZDOTDIR` at each shell
 launch and chained in front of Ghostty's integration, replaces `PROMPT` on first
-`precmd` only when it equals macOS's default (`%n@%m %1~ %# `): line one is the
-context header (`~/src/loopflow` dim, branch in the accent color), line two is
-`❯ `. It turns on `prompt_subst` in that shell so the branch stays current. A customized prompt is left alone and
-serves as its own header. Copy excludes the header because the block text is
-semantic input plus output. bash and fish keep their prompts.
+`precmd` only when it equals macOS's default (`%n@%m %1~ %# `). The prompt is
+three rows: a blank row, a header row, and `❯ ` with the command in bold
+(`zle_highlight`, which zsh ends before output).
 
-Rejected: drawing headers in the overlay (needs per-block cwd storage and a
-reserved row). Rejected: a settings toggle; adapting to the prompt found needs none.
+The header row is the directory as concealed terminal text behind a marker
+(`¶ `), truncated to 60 characters. The terminal therefore still owns it: it is
+the directory at submission and scrolls and reflows with its rows. The overlay
+reads marked rows back with Ghostty's existing `ghostty_surface_read_text` and
+draws them at 11pt in dim grey. No patch change and no per-block storage.
+
+Block bands move half a row down on each edge that borders a blank row, so the
+gap is shared by the blocks on either side and a failed block is red evenly.
+
+A customized prompt is left alone, serves as its own header, and gets no blank
+row or shift. Copy excludes the header because block text is semantic input
+plus output. bash and fish keep their prompts.
+
+Rejected: recording the directory on the prompt row in the patch (a new
+artifact for what a terminal row already stores). Rejected: one rectangle read
+of the viewport (Ghostty joins soft-wrapped rows, so lines stop matching rows).
+Rejected: a trailing `%B` in the prompt (output stays bold). Rejected: a
+settings toggle; adapting to the prompt found needs none.
 
 ## Contract
 
@@ -186,8 +206,10 @@ with no reported status (`133;D` without a code, or interrupted): neutral, never
 red. Selected block evicted from scrollback: selection gone, Command-C copies
 nothing. Missing prompt script: the user's prompt, blocks still drawn.
 
-**Operational boundary.** One block query per 100 ms per visible shell pane,
-with a single upward prompt search. No launch-time subprocess is added.
+**Operational boundary.** Per visible shell pane every 100 ms: one block query
+with a single upward prompt search, plus one short row read for each row that
+can hold a header (a block's first two rows and rows outside completed blocks).
+No launch-time subprocess is added.
 
 **Exclusions.** Xcode/SwiftPM build parity and resource regeneration (LOO-280);
 client provenance and shared viewing (LOO-282, LOO-283); live workspace and
@@ -219,9 +241,15 @@ from output text.
   was not authorized in this pass (`scratch/questions.md` 1). Until then, check
   locally by swapping the pin for `path: ".build/local/GhosttyKit.xcframework"`
   and reverting it before committing.
-- **Display checks.** The real-PTY suite (`LOOPFLOW_NATIVE_TESTS=1`) and the
-  demo walk-through have not run; overlay rows have not been compared with
-  rendered rows on screen.
+- **Display checks.** The real-PTY suite (`LOOPFLOW_NATIVE_TESTS=1`) has not
+  run; overlay rows have not been compared with rendered rows on screen.
+- **The overlay header has not been seen.** Headless tests cover the prompt
+  bytes, marker parsing, candidate rows and frames. That Ghostty hides the
+  concealed row and that the row read returns it rest on reading Ghostty's
+  source at the pinned revision. If either fails on screen, a shell shows the
+  header twice or not at all.
+- **Jack's open points:** whether the gap is right, what "the bar on the
+  right" is, and which Warp affordances come next (`scratch/questions.md` 7–10).
 - **Color proof in a Desktop pane.** The environment fix is tested on the
   launch environment Desktop computes; the Codex footer has not been looked at inside Desktop.
 - `swift/project.yml` (Xcode build) still links Ghostty-disabled stubs: LOO-280.
@@ -231,8 +259,9 @@ from output text.
 - A Codex Session opened in a Desktop launched from an agent shell shows the
   colored footer; `env` in a Desktop shell there shows no `NO_COLOR`, `PAGER=cat`
   or `CODEX_CI`, and shows `COLORTERM=truecolor`.
-- In a Desktop zsh shell, `ls` then `sdl`: only `sdl` is red, each has a header
-  and gutter, and the live prompt has neither.
+- In a Desktop zsh shell, `ls` then `sdl`: only `sdl` is red, evenly above and
+  below; each has one small dim directory header (never doubled, never
+  missing), as does the live prompt.
 - The demo's selection sequence never shows two highlights, and every paste
   equals the highlighted selection, through scroll and a wrapping resize.
 - Provider panes show no block overlays; typing, paste, image paste and retained
@@ -243,7 +272,8 @@ Gate, headless:
 - `cd swift && swift build` succeeds.
 - `cd swift && swift test --filter "GhosttyShellBlockTests|LocalWaveAgentLauncherTests"`
   passes (environment, frame math against padding, block style, zsh hooks, prompt
-  script emitting `133;A`, `133;A;k=s`, `133;B` and `133;D;127` for a missing command).
+  script emitting `133;A`, `133;A;k=s`, the concealed header, `133;B` and
+  `133;D;127` for a missing command; header parsing and half-row frames).
 - `uv run python scripts/loopflow-dev.py ghostty-build` passes its Zig tests and
   prints the checksum pinned in `Package.swift`.
 
@@ -266,7 +296,7 @@ them. `main` has not moved since the base, and the `lf2` URL still returns 404.
 
 Check: against the local `lf2` framework (pin swapped to a path, then restored),
 `swift test --filter "GhosttyShellBlockTests|LocalWaveAgentLauncherTests"` —
-13 passed. Display suite and Zig tests not rerun; gate owns them.
+14 passed after the header pass. Display suite and Zig tests not rerun; gate owns them.
 
 Check: kickoff PTY capture of the Codex 0.160.0 footer per environment (throwaway
 script, not in the repository) — colored under Ghostty and Warp environments,

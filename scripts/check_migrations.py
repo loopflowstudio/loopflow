@@ -402,9 +402,9 @@ def main() -> None:
                     f"{path.name} is namespaced ahead of the package version "
                     f"{active[0]}.{active[1]}.{active[2]}"
                 )
-            if key[3] != 1 or name != "release":
+            if key[3] < 1 or name != "release":
                 _fail(
-                    f"{path.name} is not the single `<version>.001_release.sql` "
+                    f"{path.name} is not a `<version>.<ordinal>_release.sql` "
                     "canonical batch for its package release"
                 )
         ids[key] = path.name

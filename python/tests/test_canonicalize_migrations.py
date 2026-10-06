@@ -1,6 +1,7 @@
 """The release cut: drafts become one ordered, release-scoped batch."""
 
 import json
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -255,16 +256,38 @@ def test_re_running_the_same_release_is_deterministic(tmp_path: Path) -> None:
     assert (first / MIGRATIONS_RS).read_text() == (second / MIGRATIONS_RS).read_text()
 
 
-def test_a_release_cannot_publish_a_second_batch(repo: Path) -> None:
-    draft(repo, "add_wave_colour")
+def test_corrected_release_appends_late_drafts_without_changing_version(repo: Path) -> None:
+    draft(repo, "add_wave_colour", body="ALTER TABLE waves ADD COLUMN colour TEXT;\n")
     assert run(repo, "0.11.30").returncode == 0
-    draft(repo, "add_task_priority")
+    first = (repo / MIGRATIONS / "0.11.30.001_release.sql").read_bytes()
+    draft(
+        repo,
+        "add_task_priority",
+        depends_on="add_wave_colour",
+        body="ALTER TABLE waves ADD COLUMN priority INTEGER;\n",
+    )
 
     result = run(repo, "0.11.30")
 
-    assert result.returncode == 1
-    assert "already has canonical migration" in result.stderr
-    assert draft_names(repo) == {"add_task_priority"}
+    assert result.returncode == 0, result.stderr
+    assert (repo / MIGRATIONS / "0.11.30.001_release.sql").read_bytes() == first
+    assert (
+        "-- draft: add_task_priority" in (repo / MIGRATIONS / "0.11.30.002_release.sql").read_text()
+    )
+    assert "ordinal: 2" in (repo / MIGRATIONS_RS).read_text()
+    assert not draft_names(repo)
+    before = (repo / MIGRATIONS_RS).read_bytes()
+    assert run(repo, "0.11.30").returncode == 0
+    assert (repo / MIGRATIONS_RS).read_bytes() == before
+
+    with sqlite3.connect(":memory:") as database:
+        for name in canonical_files(repo):
+            database.executescript((repo / MIGRATIONS / name).read_text())
+        assert [row[1] for row in database.execute("PRAGMA table_info(waves)")] == [
+            "id",
+            "colour",
+            "priority",
+        ]
 
 
 def test_an_abandoned_release_leaves_drafts_regenerable(repo: Path) -> None:

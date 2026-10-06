@@ -2078,6 +2078,10 @@ mod tests {
             "default",
             "repo/operate",
             "wave/operate",
+            "task/operate",
+            "repo/session",
+            "wave/session",
+            "task/session",
         ] {
             let components = gather_context(&GatherContextOpts {
                 repo_root: repo.path().to_path_buf(),
@@ -2096,18 +2100,38 @@ mod tests {
             assert!(!prompt.contains("scripts/dev-lf"));
             assert!(!prompt.contains("LOO-267"));
 
-            let orchestrates = matches!(name, "repo/operate" | "wave/operate");
-            assert_eq!(prompt.contains("flow start"), orchestrates, "{name}");
-            for procedure in ["lf restart", "lf wave place", "lf ps --json"] {
+            let scope = name.split_once('/').map(|(scope, _)| scope);
+            assert_eq!(prompt.contains("flow start"), scope.is_some(), "{name}");
+            for procedure in ["lf restart", "lf wave place"] {
                 assert_eq!(
                     prompt.contains(procedure),
-                    name == "repo/operate",
+                    scope == Some("repo"),
                     "{name}: {procedure}"
                 );
             }
-            if !orchestrates {
+            if scope.is_none() {
                 assert!(!prompt.contains("doppler run"), "{name}");
             }
+            assert!(!prompt.contains("lf skill show"), "{name}");
+        }
+    }
+
+    #[test]
+    fn each_session_carries_its_operate_procedure_once() {
+        for scope in ["repo", "wave", "task"] {
+            let operate = crate::engine::builtins::get_builtin_skill(&format!("{scope}/operate"))
+                .expect("operate skill");
+            let procedure = operate
+                .splitn(3, "---\n")
+                .nth(2)
+                .expect("operate skill has a body");
+            let session = crate::engine::builtins::get_builtin_skill(&format!("{scope}/session"))
+                .expect("session skill");
+            assert_eq!(session.matches(procedure).count(), 1, "{scope}");
+            assert!(
+                session.contains("nothing schedules your next one"),
+                "{scope}"
+            );
         }
     }
 

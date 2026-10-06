@@ -122,7 +122,8 @@ it started. `--built` reuses the bundle already in `--work`; `--home <other
 work>/home` copies another run's Home, so a baseline and a candidate read the
 same data. It needs a logged-in desktop; OS file caches stay warm, and
 main-thread stalls are `record_live.py`'s. `20261004-launch-rendered/` compares
-a baseline and a candidate.
+a baseline and a candidate; `20261005-first-render/` alternates the two in
+rounds so both see the same host load.
 
 `startup.py` measures when the model first holds outline content for an
 uncached launch, a launch with a saved workspace, a saved launch whose reads

@@ -2670,9 +2670,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(crate::ops::project::current_project(&store, &wave)
-            .await
-            .is_err());
+        assert!(crate::ops::project::current_project(&store, &wave).is_err());
         assert!(!directory.path().join("waves").exists());
         let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
         crate::store::sqlite::project_selection::write_project_binding(
@@ -2685,9 +2683,7 @@ mod tests {
         .unwrap();
         let before = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         for _ in 0..2 {
-            let current = crate::ops::project::current_project(&store, &wave)
-                .await
-                .unwrap();
+            let current = crate::ops::project::current_project(&store, &wave).unwrap();
             assert_eq!(current.id, selected);
             assert!(current.flow.is_empty());
             let super::Evidence::Ok {

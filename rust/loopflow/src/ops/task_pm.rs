@@ -79,7 +79,7 @@ pub fn resolve_current_project(
         .map_err(|error| OpsError::Message(error.to_string()))?
         .block_on(async {
             let store = crate::ops::pm::pm_store().await?;
-            crate::ops::project::current_project(&store, &wave).await
+            crate::ops::project::current_project(&store, &wave)
         })?;
     Ok(ResolvedProject { snapshot, project })
 }

@@ -48,7 +48,6 @@ struct WaveDetailPane: View {
     @State private var showHistory = false
     @State private var showRealignment = false
     @State private var historyReference: String?
-    @State private var workRefresh: UInt64 = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,7 +63,6 @@ struct WaveDetailPane: View {
                     wave: wave,
                     repoPath: repoPath,
                     selection: $selection,
-                    refreshSignal: workRefresh,
                     streamed: streamed,
                     transportError: transportError,
                     onActivateProject: onActivateProject,
@@ -77,7 +75,7 @@ struct WaveDetailPane: View {
             }
         }
         .sheet(isPresented: $showRealignment) {
-            ProjectRealignmentView(repo: repoPath) { workRefresh += 1 }
+            ProjectRealignmentView(repo: repoPath)
         }
         .sheet(isPresented: $showHistory) {
             ProjectHistoryView(wave: wave.name, repo: repoPath, sourceReference: historyReference)
@@ -115,7 +113,6 @@ private struct WavePlanView: View {
     let wave: WaveViewModel
     let repoPath: String
     @Binding var selection: WaveWorkSelection?
-    let refreshSignal: UInt64
     let streamed: StreamedWaveDetail?
     let transportError: String?
     let onActivateProject: () -> Void
@@ -130,7 +127,6 @@ private struct WavePlanView: View {
     @State private var isAwaitingDetail = true
 
     private var identity: String { "\(repoPath)|\(wave.id)" }
-    private var refreshIdentity: String { "\(identity)|\(refreshSignal)" }
     private var workMap: WaveWorkMap? { reading.snapshot?.workMap }
 
     var body: some View {
@@ -162,8 +158,13 @@ private struct WavePlanView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(palette.background)
-        .task(id: refreshIdentity) { await refreshDetail() }
-        .onChange(of: streamed?.sequence) { _, _ in applyStreamed() }
+        .onChange(of: streamed?.sequence, initial: true) { _, _ in
+            if AppTestMode.current() == .mockWaves {
+                applyMockDetail()
+            } else {
+                applyStreamed()
+            }
+        }
     }
 
     /// Later readings arrive from the window's workspace stream when a commit
@@ -293,14 +294,6 @@ private struct WavePlanView: View {
             }
             .tint(palette.textSecondary)
             .accessibilityIdentifier("wave-live-status-footer")
-        }
-    }
-
-    private func refreshDetail() async {
-        if AppTestMode.current() == .mockWaves {
-            applyMockDetail()
-        } else {
-            applyStreamed()
         }
     }
 

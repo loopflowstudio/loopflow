@@ -1234,7 +1234,7 @@ where
     let acquisition = lock_wave_planning(&registered).await?;
     let ctx = resolve_context(repo, wave).await?;
     refresh_pm_snapshot_locked(repo, &registered, &ctx, &store, acquisition.clone()).await?;
-    let project = super::project::current_project(&store, &registered).await?;
+    let project = super::project::current_project(&store, &registered)?;
     let find_existing = |items: Vec<PmItem>| {
         items
             .into_iter()
@@ -3133,7 +3133,7 @@ pub(crate) async fn chapter_sweep_candidates(repo: &Path) -> OpsResult<ChapterSw
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?
             .ok_or_else(|| OpsError::Message(format!("{name}: current chapter is unavailable")))?;
-        let chapter = super::project::current_project(&store, &wave).await?;
+        let chapter = super::project::current_project(&store, &wave)?;
         for project in ctx
             .client
             .list_projects_including_archived(&ctx.initiative, true)
@@ -3193,7 +3193,7 @@ pub(crate) async fn require_outside_current_chapter(
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message("current Wave is unavailable".into()))?;
-    let chapter = super::project::current_project(&store, &wave).await?;
+    let chapter = super::project::current_project(&store, &wave)?;
     if resolved.item.project_id.as_deref() == Some(chapter.id.as_str())
         || resolved.item.completed
         || matches!(

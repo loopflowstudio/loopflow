@@ -18,7 +18,7 @@ pub(crate) async fn wave_metric_portfolio(
     wave: &Wave,
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricPortfolioDto> {
-    match super::project::current_project(store, wave).await {
+    match super::project::current_project(store, wave) {
         Ok(project) => {
             chapter_metric_portfolio(store, wave, &project.metric_targets, evaluation_time).await
         }

@@ -41,7 +41,7 @@ pub(crate) fn select_project<'a>(
     Ok(project)
 }
 
-pub(crate) async fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmProject> {
+pub(crate) fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmProject> {
     let projects = store
         .sqlite
         .accepted_projects(wave.id())
@@ -54,7 +54,7 @@ pub(crate) async fn resolve_project_for_task(
     wave: &Wave,
     project_id: &str,
 ) -> OpsResult<Project> {
-    let current = current_project(store, wave).await?;
+    let current = current_project(store, wave)?;
     if current.id != project_id {
         return Err(project_error(
             "new Tasks require the Wave's configured Project",
@@ -299,7 +299,7 @@ fn require_active_candidate(project: &PmProject) -> OpsResult<()> {
 
 // Validate both the response and the accepted body: a delayed response may lose
 // to newer stored facts, and only those accepted facts may authorize activation.
-async fn accept_project(
+pub(crate) async fn accept_project(
     store: &Store,
     wave: &Wave,
     ctx: &super::pm::PmContext,

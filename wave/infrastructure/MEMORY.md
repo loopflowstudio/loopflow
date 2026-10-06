@@ -394,13 +394,14 @@ old file edits thereafter select nothing. Creation selection/settlement commit
 together. Readiness derives from accepted facts, original age, transition evidence
 and the actual activation Exec. An unfinished Exec proves no current liveness.
 Both Desktop surfaces share activation and streamed reads; absent Flow renders no
-template. Partial Project acceptance must remain visible before a full inventory
-sync without manufacturing Task absence or full-refresh freshness. Watchers never
-activate. The headless Desktop checks passed; source verification establishes no
-installed Intelligence repair, mounted acceptance or production outcome.
-Remaining proofs live in the design. Release retains operation-entry recovery
-and the published-installation boundary; source work grants no install authority.
-Earlier Desktop evidence remains at
+template. Partial Project acceptance stays visible without inventing Task absence
+or full-refresh freshness. Watchers never activate. Compression removed Portfolio's
+post-reset refresh callback; committed workspace frames own updates. Live command
+feedback and persisted Exec uncertainty remain distinct: the pending presentation
+is still missing. Headless checks prove no installed Intelligence repair or mounted
+acceptance. Release child memory reinforces operation-entry recovery: internal
+fixtures cannot replace public CLI/crash proof. Remaining acceptance lives in the
+design; source work grants no installation authority. Earlier Desktop evidence:
 `42e6c2706b1b35b2852e438ff94a49d060faccda:scratch/keep-every-wave-ready-for.md`.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)

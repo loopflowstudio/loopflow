@@ -510,20 +510,15 @@ async fn accept_project(
     project: PmProject,
     observed_at: i64,
 ) -> OpsResult<PmProject> {
-    require_owned(&entry.ctx, &project, false)?;
-    let accepted = store
-        .put_pm_project(
-            entry.wave.id(),
-            entry.ctx.provider.as_str(),
-            &entry.ctx.initiative,
-            project,
-            observed_at,
-            Some(entry.acquisition.clone()),
-        )
-        .await
-        .map_err(error)?;
-    require_owned(&entry.ctx, &accepted, false)?;
-    Ok(accepted)
+    super::project::accept_project(
+        store,
+        &entry.wave,
+        &entry.ctx,
+        project,
+        observed_at,
+        &entry.acquisition,
+    )
+    .await
 }
 
 async fn read_project(store: &Store, entry: &PreparedRotation, id: &str) -> OpsResult<PmProject> {

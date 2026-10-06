@@ -154,6 +154,9 @@ async fn planning_graphql(
             .filter(|issue| issue["project"]["id"] == vars["projectId"])
             .collect::<Vec<_>>();
         json!({"project":{"issues":page(issues)}})
+    } else if query.contains("query FindProject") {
+        let owned = planning_project(vars["id"].as_str().unwrap(), &project_id);
+        json!({"projects":page(vec![owned])})
     } else if query.contains("query ProjectOwnership") {
         let owned = planning_project(vars["id"].as_str().unwrap(), &project_id);
         json!({"project": owned})
@@ -1732,23 +1735,20 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
-    let (repo, wave) = runtime.block_on(fixture.planning_repo());
+    let (repo, _wave) = runtime.block_on(fixture.planning_repo());
     runtime.block_on(fixture.seed(now() + 86_400));
     let selected = "00000000-0000-4000-8000-000000000001";
-    crate::store::sqlite::project_selection::write_project_binding(
-        &fixture.store.sqlite,
-        wave.id(),
-        None,
-        selected,
-        &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-    )
-    .unwrap();
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState {
         initial_project_id: Some(selected.into()),
         ..PlanningState::default()
     }));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+        runtime
+            .block_on(crate::ops::project::bind_project(
+                &repo, "product", selected,
+            ))
+            .unwrap();
         crate::ops::task::task_create(
             &repo,
             Some("product"),

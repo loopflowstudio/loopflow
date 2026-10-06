@@ -4,7 +4,6 @@ import Loopflow
 /// Explicit repository operation; opening a Wave never invokes rotation.
 struct ProjectRealignmentView: View {
     let repo: String
-    let onApplied: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var plan = ""
@@ -74,7 +73,6 @@ struct ProjectRealignmentView: View {
                 )
                 preview = (input, report)
                 applied = !previewOnly
-                if applied { onApplied() }
             } catch {
                 // An uncertain apply retries the reviewed bytes, even if the file changed.
                 if previewOnly { preview = nil }

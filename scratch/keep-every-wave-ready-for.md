@@ -41,16 +41,21 @@ unproved here. No stack parent or Task identity was replaced.
 
 ### Delete — do not maintain
 
-- Delete `work/wave/project_binding.rs`, its YAML writer and file-selector tests.
-  Preserve exact-ID compare/replace, authored bytes as import evidence, Wave locks,
-  uncertainty, and Task/PR/Session/Flow identity on the SQLite path.
-- Delete `ProjectPreparation`, per-view generations and activation-owned direct
-  refresh. Preserve explicit opening/Retry through `PodiumModel.activateProject`;
-  the command survives navigation. Both surfaces consume the existing workspace
-  stream. Transport errors remain scoped to the Wave.
-- Remove empty-Flow template UI and the now-unused `yaml-edit` dependency.
-- Retain transition recovery, name-cutover evidence and all independent work
-  exclusion. No generic jobs, ready flags, watch mutations or trigger side effects.
+Completed: `work/wave/project_binding.rs`, its YAML writer/exclusive tests,
+`ProjectPreparation`, per-view activation generations, activation-owned refresh,
+empty-Flow template UI and `yaml-edit` are removed. Do not restore those owners.
+SQLite retains exact-ID selection and original import bytes; existing Wave/checkout
+locks and transition evidence preserve uncertainty and Task/PR/Session/Flow identity.
+
+The compression pass also removes Portfolio's post-realignment refresh counter,
+callback and async wrapper: initial and subsequent workspace frames own detail
+updates. Ensure and rotation share response/accepted-body ownership validation;
+the current-Project reader is synchronous because it only reads SQLite. Keep the
+rotation adapter: it supplies the already-held Wave/checkout guard without repeating
+acceptance policy. The chapter-sweep fixture now binds through the real operation
+after its fake provider starts; its old direct selection preceded accepted facts.
+Its fake provider includes the required exact Project lookup. Sweep assertions are
+unchanged. No remaining deletion target was identified in these paths.
 
 ## Intelligence repair — Jack Heart's October 5 steer
 
@@ -104,6 +109,12 @@ and exact evidence remain at
 Local synthetic passes establish neither installed conversion nor configured readiness.
 
 ## Remaining coherent cut
+
+October 6 reconciliation: reactive source is committed at `c2edcdba3`; dependency
+`e887a21c1` entered through `66a3daa86`. HEAD `9552df051` also includes telemetry
+repair #1462 (`102b8cfa0`); that integration supplies no new readiness proof.
+The existing uncommitted compression changes below retain their recorded checks.
+
 
 Registration, exact-ID readers/admission, ensure, rotation, Portfolio activation
 and chapter skills are implemented. Their contracts and proof boundaries remain
@@ -293,7 +304,12 @@ roadmap, background refresh and Project inspection never initiate provisioning.
 An unavailable sibling Wave or global reset does not prevent ordinary work here.
 
 On opening, show retained Project and Tasks while preparation runs. With no
-retained plan, show “Preparing Project…” until acquisition resolves. An outage
+retained plan, show “Preparing Project…” while the local activation command is
+pending. This presentation remains unimplemented: `ProjectReadinessView` currently
+shows “No Project selected yet” or an unknown-outcome message, and the model's
+command handle is not exposed to either surface. An unfinished persisted Exec must
+still mean unknown; any pending indicator must derive from the live transport
+handle, without another persisted lifecycle. An outage
 shows its cause and Retry, never an empty-project prompt. The configured ID
 selects the current Project even if another provider Project is In Progress.
 Other Projects do not block opening the configured one. Project
@@ -451,9 +467,9 @@ Expose unresolved backlog in the planning follow-up without making an exhaustive
 review or every future Task a prerequisite for creating the successor.
 After successor activation and required Task dispositions are confirmed, update
 the config reference from the recorded predecessor to the successor, then
-complete the predecessor. Persist both IDs before effects; retry accepts config
+complete the predecessor. Persist both IDs before effects; retry accepts SQLite selection
 matching either endpoint and reconciles the missing effects. A different config
-ID is an intervening decision, not permission to overwrite it. Config and provider
+ID is an intervening decision, not permission to overwrite it. SQLite selection and provider
 changes are not one transaction: prove crashes on both sides of the switch.
 Complete predecessor after transfer, never merely because successor activation
 succeeded. No global rollback, Session restart, Task completion or inferred KR win.
@@ -539,6 +555,7 @@ and rotation fixtures preserve identity and failure recovery; headless model tes
 retain planning through failure/navigation and suppress empty-Flow presentation.
 These are disposable source proofs, not configured or mounted acceptance.
 
+Remaining implementation: the pending-command presentation described under Outcome and demo.
 Remaining proofs: actual configured Intelligence repair after publication/install;
 public CLI ensure with simulated provider, actual process crashes across rotation;
 mounted opening/reopening/retry in both surfaces; skill-driven chapter/admission
@@ -651,4 +668,8 @@ recovery obligation for ensure/rotation.
 
 Registration compression evidence: `eb80d7198178a418cf44b3074f9b666f3e11cd40`.
 
-Checks: `cargo test -p loopflow --lib project_` 59 passed; rotation 11, revisions 3, DTO fixtures 19 and two-reader workspace-watch 1 passed; final import/settlement regressions passed; Desktop activation/DTO/model-stream 53 and final opening 4 passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and context budgets passed. Gate retains configured/CLI/crash and mounted/skill acceptance, the output-handle leak and CI repair. Logs: `/tmp/loo366-pursue/`.
+Earlier reactive implementation checks remain at `fd98f97352fdfc16145adf0efcc045443ae3a824:scratch/keep-every-wave-ready-for.md`; logs: `/tmp/loo366-pursue/`.
+
+Compression checks: network-isolated `cargo test -p loopflow --lib chapter` 32 passed, 1 failed on fixture setup; repaired `task_sweep_previews_old_chapters` 1 passed; headless `scripts/test_desktop.sh -Xswiftc -gnone --filter 'ProjectActivationTests|WaveDetailReadingTests|PodiumModelTests'` 38 passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, diff and context-budget checks passed. Gate retains configured/CLI/crash and mounted/skill acceptance, the output-handle leak and CI repair.
+
+Reconciliation check: `git diff --check` passed; prior focused results above reused because this pass changes prose only; CLI/crash and configured proof remain with gate, mounted judgment with demo/review.

@@ -27,3 +27,5 @@ largest remaining cost. Installed 0.13.4 reads 1.80 s median (three samples),
 26 passed; `cargo clippy --all-targets -- -D warnings` clean. Gate owns the suites.
 Timing after the shared head read was sampled only at load 112: not comparable,
 not re-measured; installed `lf wt timing` owns it.
+Realign, October 5: `lf wt timing` on installed 0.13.4 still reads 3 samples,
+1.80 s median; branch is level with origin/main. No behavior changed, no rerun.

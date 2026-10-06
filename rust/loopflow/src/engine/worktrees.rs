@@ -956,7 +956,7 @@ struct RemoteFacts {
 
 /// Ask the remote which branches exist and what PR state their heads have.
 ///
-/// GitHub answers both in one call. Any other remote, or an unavailable
+/// GitHub answers both together. Any other remote, or an unavailable
 /// GitHub, is asked for its branches directly. Each call ends within
 /// `REMOTE_LIMIT`, and a GitHub call that reached it is not followed by another.
 fn remote_facts(

@@ -814,14 +814,11 @@ proof. Matched Swift attribution, latency/growth, both hours and compositor proo
 remain open; publication only is authorized.
 
 October 6 recorder decomposition retained owned ten-second probes: Hitches alone
-projected 13.2 GiB/hour, Hangs 103.0; neither exports both required tables. Those
-short-probe rates are estimates. The 2 GiB guard remains; no full hour or cleanup
-occurred. Actual TOCs put clocks under `info/summary`; the reader's synthetic
+projected 13.2 GiB/hour, Hangs 103.0; neither exports both required tables. The 2 GiB guard remains; no full hour ran. Actual TOCs put clocks under `info/summary`; the reader's synthetic
 `run-info` assumption lost coverage. Reports now decode real clocks and reject
 trace-enabled completion with missing tables or endpoint gaps. Starting recording
 after `soak_begin` still needs a readiness barrier. Faithful lower-volume recording,
-compositor/input proof and both hours remain unresolved. Exact receipts and
-capacity requirements belong in the same report; no installed Home was touched.
+compositor/input proof and both hours remain unresolved. Receipts remain in the report; the installed Home was untouched.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

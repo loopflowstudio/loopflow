@@ -179,9 +179,12 @@ Linear completion against an active Task.
     belongs in the Flow run log (default: no). Demo item: how it looks, in
     particular label widths, which are estimated from character counts.
 
-12. **Align Desktop and the store with LOO-382.** Layer 4 of the contract in
-    [task-workflow.md](task-workflow.md); #1452 merged first (`c787c7530`),
-    so this PR owns the reconciliation. **Built, not yet realigned.**
+12. **Align Desktop and the store with LOO-382** is **done**. Layer 4 of the
+    contract in [task-workflow.md](task-workflow.md); #1452 merged first
+    (`c787c7530`), so this PR owned the reconciliation. Built `c60fbf4f3`,
+    compressed `a1b4ca012` (Desktop's unused `TaskStatus` mirror and its
+    fixture test deleted; `task_status.json` stays as the CLI contract Rust
+    round-trips).
     - *Store.* The one draft moves `flows` for `flow_execs` and
       `flow_exec_steps`, `planning` for `task_workflows` and
       `task_workflow_moves`, and `sessions` for `session_activity`; a store
@@ -196,14 +199,16 @@ Linear completion against an active Task.
       `refresh`, and a Task frame read before it is ignored. The
       `lf task status` and `lf flow show` readers are deleted; the catalogue
       is re-read by the window when the app becomes active, not by a view.
-    - Check, October 6: `cargo test -p loopflow --lib store::sqlite::revisions`
-      5 passed; `--test dto_fixtures` 20 passed; `swift test --filter
-      "DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests"` 36 passed,
+    - Check, October 6 at `a1b4ca012`: `cargo test -p loopflow --lib
+      store::sqlite::revisions` 5 passed; `swift test --filter
+      "DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests"` 35 passed,
       one showing a move and a new Flow run arriving from a frame with
       `lf task move` the only `lf` call.
     - Choices: [questions.md](questions.md). Demo items: the window on
       screen following a Flow started in a terminal; a Session turning
       Waiting after two quiet minutes.
+
+Every slice in this list is done. What is left is review and the demo items.
 
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task

@@ -3,9 +3,9 @@
 LOO-353, PR #1439 at `ac91bf9e1`. Prepared by the agent after one looping
 `pursue` Flow built the eight slices in
 [the design](focus-on-your-own-work.md). **Jack Heart has not run this yet;
-his observations go under "Jack's review" below.** Slices 9–11 (`lf task
-move`, state from position, the drawn graph) postdate this rehearsal and
-were not rehearsed. Code walkthrough:
+his observations go under "Jack's review" below.** Slices 9–12 (`lf task
+move`, state from position, the drawn graph, the Task page fed by the
+workspace stream) postdate this rehearsal and were not rehearsed. Code walkthrough:
 [pr-review.html](pr-review.html). Unreviewed choices:
 [questions.md](questions.md). The October 5 review is at
 `42c31408a:scratch/demo-task-flows.md`.

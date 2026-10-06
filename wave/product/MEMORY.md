@@ -117,15 +117,14 @@ Every slice has headless tests only.
 Desktop (October 6, unreviewed by Jack) draws the Workflow and every Flow
 run from FlowExec, lists Waiting first, and matches no conversation to a Flow
 step. `INSERT OR REPLACE` fires no update trigger: a revision rule comparing
-old and new rows needs an upsert. Lessons: `lf` allows a second `lf task run` while an edge runs, so only
+old and new rows needs an upsert. Waiting by quiet is no write, so no
+trigger sees it; the stream's reader keeps that clock. All twelve slices
+are built (`a1b4ca012`). Lessons: `lf` allows a second `lf task run` while an edge runs, so only
 Desktop's disabled Start keeps two drivers out of a checkout; a killed driver
 has no exit record and its run reads as running forever. `lf flow list` now
 lists workflows, so an unstarted Task previews its default. `lf wave
 update-plan --workflow` saves a name without loading it; Desktop shows it
 invalid, Start disabled.
-
-Main `16fa97425` adds native-human-input recency for `lf resume`; the Task
-primary reuses that ranking.
 
 ## Session and operate pairs (2026-10-05)
 

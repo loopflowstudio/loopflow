@@ -286,9 +286,9 @@ ones most likely to matter in review:
   `waiting`, `TaskSession.kind` and the `agent_sessions.kind` column are
   gone; `task_primary` marks a Task's primary on every listed Session.
 - **Desktop matches no conversation to a Flow step** and never calls
-  `session ensure`. Each Flow run is a row that opens to `lf flow show ID
-  --sessions --json`; `current` draws as running, so a killed driver's run
-  reads as running forever.
+  `session ensure`. Each Flow run is a row that opens to its steps (read
+  from the stream's `task` part since slice 12); `current` draws as running,
+  so a killed driver's run reads as running forever.
 - **Workflow Start** is one button per edge leaving the waiting stage, all
   disabled while an edge runs; `lf` itself still allows a second run.
 - **Seen, not fixed.** `ActiveSessionsLifetimeTests replacement` fails in a

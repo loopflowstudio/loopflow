@@ -7,4 +7,4 @@ t = time.time()
 while True:
     f = json.loads(p.stdout.readline())
     if f["part"] == "planning": break
-print("first planning %.2fs" % (time.time() - t)); s.wait(); p.stdin.close(); p.wait()
+print("first planning %.2fs" % (time.time() - t)); s.wait(); p.kill(); p.wait()

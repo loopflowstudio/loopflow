@@ -49,38 +49,57 @@ indexes, recreate them on the copy by hand. Use a release build: a debug
 build compiles SQLite unoptimized.
 
 ```bash
-cargo build --release -p loopflow
-python3 scratch/measure/warm.py <home> target/release/lf [sample.txt]   # six refreshes, request to answering frame
-python3 scratch/measure/cold.py <home> target/release/lf sample.txt     # first reading, sampled
-python3 scratch/measure/hot.py sample.txt 40 80                         # hot frames by sample count
+cargo build --release -p loopflow   # <lf> is the absolute path of target/release/lf
+python3 scratch/measure/warm.py <home> <lf> [sample.txt]   # six refreshes, request to answering frame
+python3 scratch/measure/cold.py <home> <lf> sample.txt     # first reading, sampled
+python3 scratch/measure/hot.py sample.txt 40 80           # hot frames by sample count
+python3 scratch/measure/commit.py <home> <lf> 5            # sqlite3 renames a Task, then a Session; writer's exit to the frame
 ```
 
 Always record `uptime` beside a number; this machine is rarely quiet.
 
-### Slices
+### Slices (all five built, 2026-10-05)
 
-Each is implemented, compressed and realigned before the next.
+Numbers are from the copy with a release `lf`; load is the one-minute average.
 
-1. **Built: one membership read.** `SqliteStore::open_execs` pairs every
-   unfinished Exec with its Tasks in one statement, by the SQL membership
-   rule the full read uses; the gate takes each Task's Execs from it. The
-   index and join order are pinned, because the bundled SQLite otherwise
-   scans every Exec (350 ms against 23 ms). Warm planning in the watch,
-   release `lf`, request to answering frame: 0.30–0.69 s at load 71, against
-   2.8–6.6 s at load 32 before. Six samples; the machine was never quiet.
-2. **Cold cost. Started, unmeasured.** A first reading took 6.5–7.1 s at
-   load 18–70: about 2.7 s in Git subprocesses (`worktree_root`,
-   `is_clean_for_pathspec`, `rev_parse`, `git_common_dir`), 1.25 s in process
-   admission, the rest waiting on them. Written and compiled, not measured or
-   tested: `wave_main_repo` and `task_reference` no longer ask Git about a
-   repository or checkout directory that is gone. Still asking about missing
-   directories: `task_configuration_refusal`. Admission cost is out of scope.
-3. **Whatever the warm profile shows next**, until a warm planning reading is
-   at most 300 ms on the copy. Then commit-to-frame for a Task and a Session.
-4. **A failing part backs off** instead of being re-read every second.
-5. **Rust owns the working-set rule.** Whether a finished Task still has
-   unresolved execution is derived once in Rust and sent; Swift keeps only
-   the window's own filters.
+1. **One membership read.** `SqliteStore::open_execs` pairs every unfinished
+   Exec with its Tasks in one statement; the gate takes each Task's Execs
+   from it. The index and join order are pinned, because the bundled SQLite
+   otherwise scans every Exec (350 ms against 23 ms).
+2. **Cold reading: 4.2–4.6 s** at load 17–30 (five starts, one 7.0 s), against
+   6.5–7.1 s. No caller asks Git about a repository or checkout that is gone
+   (`wave_main_repo`, `task_reference`, `git_common_dir`). The last of those
+   changed no timing: Git already failed fast there. What is left, sampled:
+   about 1.7 s of Git on the 32 checkouts that exist, five commands each, one
+   after another; 0.9 s process admission; 0.6 s of foreign-key checking that
+   a development build runs twice on every open. Not built: asking Git about
+   the checkouts at once. A launch shows saved text first (LOO-376), so this
+   wait is the first refresh, not the first frame.
+3. **Warm reading: 0.25–0.28 s** request to answering frame at load 20 (six
+   refreshes; 0.28–0.32 s at load 26), against 2.8–6.6 s. Timed inside the
+   reader once: the planning projection is 190–200 ms (roadmap 180, Wave
+   list 12), and a back-to-back refresh waits about 70 ms behind the process
+   reading before it. **Commit to frame, five samples at load 15–19: a
+   renamed Task 301–327 ms, a renamed Session 121–131 ms**, each including
+   the 100 ms quiet wait. Slice 1 alone met the 300 ms projection target, so
+   nothing else was changed for it.
+   **The rule is not fully met.** The gate still runs statements per
+   unfinished Task: its Sessions and Flows (`members`, about 30 ms of a
+   reading and the one read that still walks a Task's finished Sessions),
+   then per Session its driver, row and pending turn, and per Task its
+   status, Flow and PRs. Reading them in bulk means restating the completion
+   rule over open Sessions only, in the code that also decides `lf task
+   complete`. Not built: the reading fits its budget, and that rewrite risks
+   the authority for about 40 ms (question 25).
+4. **A failing part backs off.** It is read again after 1 s, 2 s, 4 s … up
+   to 60 s (`PartState::retry_due`). A commit to what it reads, or a request,
+   still reads it at once. Unit-tested; not run against a failing store.
+5. **Rust owns the working-set rule.** `TaskConditionSnapshot` carries
+   `unresolved_execution`: the Task is ready, its Flow is not idle, or its
+   checkout holds observed unsettled work. Swift's
+   `TaskHistoryFilter.hasUnresolvedExecution` is deleted; `includes` takes
+   the Task and its condition. Whether a Task has open Sessions, and
+   "started", stay in Swift: they join Session rows the window holds.
 
 ## Remaining work
 
@@ -98,18 +117,12 @@ deleted. Not yet done:
    and in the outline once a Run or Session is recorded. The Task's first
    acceptance line and that decision conflict; Jack has not chosen
    (question 22). Found by running the rendered benchmark, not by reading.
-1. **Planning reading is about 2 s on a copy of Jack's store, not 300 ms.**
-   Inside the retained process it was about 7.5 s before two changes: Git
-   answers are reused briefly, and Exec membership is reached from the 109
-   unfinished Execs. Samples were taken with the machine at load 50–60, so
-   they are rough. What is left is mostly per-Task Session membership SQL and
-   Git content reads. The follow-up Task Jack asked for on a miss is **not
-   filed**. Commit to frame on a fresh copy (2026-10-05, debug build, load
-   14–20, 2 samples each): a created or renamed Task 2.3–2.6 s once Git
-   answers are warm, 25 s before; a Session row 0.2 s alone and 2.1–2.3 s
-   when its commit lands behind a planning reading, because one loop reads
-   the parts in turn (question 19). The first planning reading after the
-   reader starts took 7 s on one start and 76 s on another.
+1. **The reader meets the budgets; the window has not been re-measured.**
+   Planning projection 190–200 ms, commit to frame 0.3 s for a Task and
+   0.13 s for a Session (slices above). The rendered benchmark (item 5) was
+   last run before these slices, at 2.3 s and 0.56 s; nobody has rerun it.
+   A first reading is still 4.2–4.6 s. A Session commit that lands behind a
+   planning reading now waits about 0.2 s for it, not 2 s (question 19).
 2. **`active` is still its own process.** `monitor active --watch` was not
    folded in (question 5's fallback, taken for now); a window runs two readers.
    Both share one Swift pipe reader, `LocalLineObservation`.
@@ -539,11 +552,9 @@ costs seconds. This plan earns no KR by itself.
   a day). One landing means no interval in which a surviving poll loop bumps
   it. Desktop's remaining one-shot reads (file clicks, comments, the 10 s
   comparison loop) each still write an Exec and re-run it (question 9).
-- **Commit-to-frame latency** on a tiny store was 309 ms and 718 ms in a
-  debug build; on a copy of Jack's store it is the planning reading, about
-  2.3 s (remaining work 1). No release build has been timed.
-- **The 300 ms projection budget is missed** (about 2 s, remaining work 1).
-  The Exec scan was most of the cost but not all of it.
+- **The planning reading grows with unfinished Tasks.** 190–200 ms for 140
+  Tasks, because the gate still runs statements per Task (slice 3). It fits
+  the budget on Jack's store today; nothing bounds it.
 - **A long-lived process holds one binary** across an `lf` upgrade. It must
   exit on configuration change, as the active reader does.
 - **Migration on the 1.4 GB store** took 0.19 s on a copy, applied with
@@ -551,6 +562,10 @@ costs seconds. This plan earns no KR by itself.
 
 ## Check results
 
+- 2026-10-05 slices 2–5: `cargo test -p loopflow --test workspace_watch`
+  8/8; `--test dto_fixtures` 19/19; `--lib -- lf::commands::waves` 14/14;
+  `--lib -- workspace_watch` 3/3; clippy `--all-targets -D warnings` clean;
+  `swift test` on the eight affected suites 88/88. Gate owns the rest.
 - 2026-10-05 realign, after merging main (#1447): `swift test --filter
   PodiumModelStreamTests` 6/6. No code changed; Rust not rerun.
 - 2026-10-05 `desktop_performance.py write-visible --samples 3` on a Home

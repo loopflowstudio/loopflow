@@ -16,4 +16,4 @@ for i in range(1, 7):
     print("refresh %d planning %.2fs unavailable=%s" % (i, time.time() - t, f["unavailable"]), flush=True)
 hb = wait(lambda f: f["part"] == "heartbeat"); print(hb["body"])
 if sampler: sampler.wait()
-p.stdin.close(); p.wait()
+p.kill(); p.wait()

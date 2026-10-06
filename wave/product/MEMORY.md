@@ -29,8 +29,8 @@ and a miss ships with numbers and a follow-up Task.
 - An unreadable store must not read as empty.
 - On the branch, unshipped: one `lf monitor workspace --watch` per window
   replaces the 2–30 s loops; the Task-files comparison keeps its 10 s read.
-  Rendered on a copy of Jack's store (debug, 3 samples): a Task change in
-  2.3 s against 1 s, a Session row in 0.56 s against 0.5 s.
+  Reader on a copy of Jack's store (release, 5 samples): commit to frame
+  0.3 s for a Task, 0.13 s for a Session. The window was not re-measured.
 - The outline lists started Tasks only (2026-09-25), so a Task created with
   no Run never reaches the left pane. LOO-382 asks that it does. Unresolved.
 

@@ -111,11 +111,32 @@ Added 2026-10-05 after Jack Heart read the PR walkthrough.
     types, read in bulk, store no derived state and add no change log. Jack
     said "i think we want it in the db" about derived state; that is not
     built. He also said not to over-index on a keyed Swift store.
-24. **A failing part is re-read about every second with no backoff.** Seen
-    in a throwaway Home: planning read 3 times in 2 s while failing. On a
-    store where planning takes 2 s this would likely hold the one loop;
-    unmeasured.
+24. **Built: a failing part backs off**, 1 s doubling to 60 s. The cap is a
+    guess. A commit or a request still reads the part at once, so a part
+    that fails while agents commit is read as often as a healthy one.
     Jack added: "this db's only purpose really is to serve this UX." Read as:
     display-shaped rows are the store's primary tables, not a cache beside
     them. The store also holds execution authority (Flow position, claims,
     landing locks); how those relate to display rows is not worked out.
+
+Added 2026-10-05 building the planning-read slices. Nobody has confirmed these.
+
+25. **The planning reading still runs statements per unfinished Task**, so
+    the plan's rule is met for Exec membership only. Stopped there because
+    the projection is 190–200 ms against 300 ms, and the remaining reads are
+    the completion rule `lf task complete` also uses. Reading them in bulk
+    is the next step when the reading stops fitting; whether to do it now,
+    or to store derived rows as Jack described (question 23), is his call.
+26. **A first reading is 4.2–4.6 s and was left there.** About 1.7 s is Git
+    asked about 32 existing checkouts in turn; asking at once was not built.
+    0.6 s is a foreign-key check a development build runs on every store
+    open, twice per start; whether an installed build pays it was not
+    checked.
+27. **`unresolved_execution` is a required field on the Task condition.**
+    Workspace text saved by an earlier build lacks it, so the first launch
+    after upgrading should show no saved planning until the reader answers.
+    Expected from LOO-376's rule that saved text goes through the live
+    decoder; not exercised.
+28. **The outline's "has open Sessions" and "started" tests stay in Swift.**
+    Slice 5 moved only the finished-Task rule. Moving the rest means Rust
+    joining Sessions into the planning part.

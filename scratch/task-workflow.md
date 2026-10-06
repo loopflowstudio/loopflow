@@ -98,7 +98,7 @@ The agent's choices here are listed in [questions.md](questions.md) under
   `research` (`engine/workflow.rs`). Rejected: an unknown or unreachable
   stage, a stage skill or edge Flow that does not load, a flowless edge that
   does not enter `end`, two edges from one stage running the same Flow.
-- **Record.** `task_workflows` (Task, name, captured graph; the newest row is
+- **Record.** `task_workflows` (Task, captured named graph; the newest row is
   the Task's) and `task_workflow_traversals` (edge, the Exec that ran it), in
   the one draft, both append-only.
 - **Moving.** `lf task run ISSUE [FLOW]` takes the outgoing edge that runs
@@ -111,7 +111,9 @@ The agent's choices here are listed in [questions.md](questions.md) under
   command for each outgoing edge.
 - **Check.** `cargo test -p loopflow --test task_flow_launch_tests` (5) and
   `--lib engine::workflow ops::task_workflow` (3, stage guidance included)
-  pass; Swift `DTOFixtureTests` decodes the workflow.
+  pass; Swift `DTOFixtureTests` decodes the workflow. After compress (name
+  column, workflow listing and authored-edge type removed): the same two
+  commands, `dto_fixtures` 18 and all-target Clippy pass.
 
 Not built: a take-over command (open choice 2); Desktop drawing (slice 5);
 workflow defaults in Wave settings and source editing (slice 6); docs

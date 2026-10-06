@@ -521,3 +521,4 @@ Earlier passes are at commit `018083656`.
 - 2026-10-05 compress: clippy `--all-targets -D warnings` clean; `cargo test
   -p loopflow --test workspace_watch` 10/10; `--lib -- workspace_watch
   engine::git` 30/30. Not re-measured; gate owns the suites.
+- 2026-10-05 sync: `cargo test -p loopflow --lib accepted_historical_uncertainty_completes_without_releasing_execution_protection` 1/1; bulk unfinished-Exec reads retain main's completion acceptance and Session-history API.

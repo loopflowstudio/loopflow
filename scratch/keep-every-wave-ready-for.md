@@ -153,6 +153,9 @@ initialization event and readback. The queued writer receives the existing Wave
 guard by ownership; cancellation cannot release it before commit. Planning is accepted
 into that owned Task without another full Task copy. Reserved Task/PR/
 checkout identity and initial facts without a cached observation remain intact.
+Registration now uses one runtime, store and resolved Wave through selection and
+insertion; `resolve_project_for_task` borrows them. The redundant store opener is
+deleted, and the prepared-registration operation fixture supplies its binding.
 
 Rotation takes ordered Wave locks, enumerates exact Task roots and acquires one
 checkout lock set before classification. Queued writers retain both scopes through
@@ -164,7 +167,9 @@ separate. Detailed registration, rotation and admission evidence remains at
 `7e7204ddad0092beb1a633676f5d44af0853a9a8:scratch/keep-every-wave-ready-for.md`.
 These proofs establish neither configuration-switch recovery nor readiness.
 
-The branch is not releasable. Steps 4–7 still own ensure,
+October 5 reconciliation: step 3's SQLite selector replacement is complete,
+superseding the previous iteration's instruction to implement it. The branch is
+not releasable. Steps 4–7 still own ensure,
 transition recovery, KR-first rotation, Desktop activation and configured acceptance.
 Registration and first managed start now share `durable::require_selected_project`: the
 configured provider ID and Started status are required; other Started Projects do
@@ -173,6 +178,10 @@ use the existing database's Home, including inside queued SQLite transactions.
 Rotation still owns `chapter::select_current`/name inference and needs exact
 transitions under the existing admission boundary. Operation fixtures still need
 explicit bindings as their callers move to ensure and exact-ID rotation.
+The single migration draft currently contains only the cached-name cutover;
+transition persistence and the `ensure` operation/CLI are absent. Step 4 is the
+next implementation boundary, followed by exact-ID rotation and its retained
+created-successor and configuration-switch interruption proofs.
 
 Reader/DTO evidence and the malformed-body failure remain at
 `ff458672407194236da0ad04705b23006d6db5bf:scratch/keep-every-wave-ready-for.md`.
@@ -871,23 +880,14 @@ preparation is not publication. Release's child memory still records manual
 v0.13.3 verification, unresolved unattended settlements and the operation-entry
 recovery obligation for ensure/rotation.
 
-Checkout admission shares canonical path order, ancestor sharing and guard lifetime
-through queued commits across registration, Sessions, Flows and CI repair. Earlier
-compression detail remains at `25542c7b1:scratch/keep-every-wave-ready-for.md`.
+Earlier compression evidence in this plan's Git history: checkout admission at
+`25542c7b1`, binding at `1e5086aa3` (the empty mapping template failed two tests),
+and reteam at `3555375af`. Their surviving constraints are retained above.
 
-Binding compression evidence remains at `1e5086aa3:scratch/keep-every-wave-ready-for.md`.
-Keep committed ownership, authored YAML bytes and stale-binding refusal; the empty
-mapping template failed two tests and was rejected.
+Reconciliation October 5 inspected Release's complete goal and memory, the only
+immediate child scope. Its operation-entry recovery lesson still applies: store
+proofs cannot establish ensure/rotation retry. No new product decision changes
+steps 4–7 or authorizes installed-Home writes. Registration compression and its
+prior check evidence are preserved at `eb80d7198178a418cf44b3074f9b666f3e11cd40`.
 
-Reteam's retained compression and earlier check evidence remain at
-`3555375af:scratch/keep-every-wave-ready-for.md`; its full preflight, exact readbacks
-and cancellation-safe acceptance remain required.
-
-Compression October 5: Task registration now uses one runtime, store and resolved
-Wave through selection and insertion. `resolve_project_for_task` borrows that
-store/Wave; the redundant `project_store` opener is deleted. Guard ownership still
-moves into the queued SQLite writer before checkout setup. The operation fixture
-now supplies its required explicit binding. Release’s operation-entry recovery
-lesson still applies; steps 4–7 and configured acceptance remain unfinished.
-
-Checks: network-isolated `cargo nextest run -p loopflow --lib -E 'test(prepared_registration_consumes) | test(configured_project_admission) | test(registration_returns_accepted) | test(registration_retains)' --no-fail-fast`: 5 passed; formatting, all-target Clippy and diff checks passed. Earlier store results and the unresolved output-handle leak remain at `c1f9b6ebbd3de006fe334099301704862c1bafb6:scratch/keep-every-wave-ready-for.md`; gate retains leak investigation, CI repair and configured acceptance.
+Checks: `git diff --check` passed; `lf context --skill realign` fits both budgets. Prior five focused tests, formatting and all-target Clippy passes remain at `eb80d7198`; no code changed during realign, so they were not rerun. Gate retains the unresolved output-handle leak, CI repair and configured acceptance.

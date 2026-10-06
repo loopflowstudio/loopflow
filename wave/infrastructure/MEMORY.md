@@ -333,15 +333,17 @@ publication, checkout finishing and execution. Existing accepted issue facts win
 transactionally, preserving their own acquisition age and reserved placement.
 Both registration APIs now share one insertion transaction, including optional
 initialization evidence and committed readback; downstream effects use that Task.
-Initial supplied facts remain usable without an accepted observation; configured identity now owns registration selection.
+Selection and insertion reuse one store and resolved Wave; no second opener is
+needed. Initial facts remain usable without a cached observation; the binding
+selects registration's Project.
 
 Rotation now gathers exact Task roots under ordered Wave locks and acquires one
 checkout lock set. Queued planning writers retain both scopes after cancellation;
 a caller-owned lock alone would release exclusion before a queued commit. Automatic
 backlog cancellation and its standalone retirement writer are deleted. Unreviewed
 backlog stays with its Project; unresolved abandonment keeps its separate settlement.
-Shared binding, transition recovery, CI repair acceptance and configured readiness
-remain open. Focused operation proofs pass; publication proves no readiness.
+Shared binding is implemented; transition recovery, CI repair acceptance and
+configured readiness remain open. Operation proofs establish no readiness.
 
 October 5 binding preserves YAML bytes and committed ownership; delayed Backlog
 cannot bind newer completed history. Routing, metrics and Project editing use its

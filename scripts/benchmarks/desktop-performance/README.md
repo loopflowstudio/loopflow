@@ -247,7 +247,8 @@ No live conversation or credentials are used.
 Scenario receipts in `cli-volume/` cover native reopening; setup receipts stay
 separate in `fixture-setup-cli-volume/` and `fixture_setup_cli_volume` in the report.
 Both retain partial counts. Older recordings without separate setup receipts
-remain unscoped. Neither measures DTO-backed planning refresh or the retained-cat
-soak. Snapshot mode separately records real Task-link CLI reads. Real refresh and
-Task-bound native reopening throughout the soak still require integration; neither
-mode currently measures that combined journey.
+remain unscoped. Fixture-mode counters do not measure DTO-backed planning refresh
+or the retained-cat soak. Snapshot mode records real refresh and Task-link CLI
+reads from both Homes throughout the combined soak. The combined path is
+implemented; a matched rendered comparison and hour-long acceptance receipt
+remain outstanding.

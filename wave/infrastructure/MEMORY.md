@@ -771,10 +771,9 @@ refresh. Copied SQLite alone cannot isolate retained checkout/process references
 or external effects. Release's installed filtering proof above supplies none of
 these performance measurements.
 
-LOO-304's combined snapshot/owned-Task soak is implemented in `33c65d8ba`;
-the earlier separate-path feedback is superseded. One production Podium/window
-and refresh owner retain drafts, selection, panes, transcript and native identity
-through Task-based reopening. Public bind and Rust membership own the association.
+LOO-304's `33c65d8ba` combines snapshot refresh and owned Task reopening in one
+Podium/window, preserving drafts, selection, panes, transcript and native identity.
+Public bind and Rust membership own the association.
 The test transport joins observations from separate Homes without rewriting copied
 identities; only the owned Session can connect. Setup/scenario counters stay
 separate and retain partial receipts without SQL or values.

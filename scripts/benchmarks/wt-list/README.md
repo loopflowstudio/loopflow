@@ -24,6 +24,51 @@ database into that fresh Home first (a copy-on-write clone on APFS), so the run
 pays for a store of real size and writes only to the copy. `--offline` routes
 every remote call to a closed local port.
 
+## 2026-10-05: GitHub's answer time, installed 0.13.4
+
+`lf wt timing` on the main Home after 0.13.4 was installed (JSON, 55 worktrees):
+
+| Installed | Samples | Median | p95 | Startup | Local Git | Remote | Receipts |
+|---|---|---|---|---|---|---|---|
+| 0.13.3 | 4 | 8.09 s | 16.67 s | 4.90 s | 0.42 s | 1.64 s | 2.45 s |
+| 0.13.4 | 3 | 1.80 s | 2.09 s | 0.14 s | 0.39 s | 1.62 s | 0.00 s |
+
+Phase columns are medians. Three and four samples are not a p95. The listing
+now ends about 0.2 s after GitHub answers, so GitHub is what is left.
+
+**GitHub's answer time grew with the branches in one query.** For this
+repository's 53 branches, `gh api graphql` took 0.41 s for a trivial query,
+0.67 s for branch existence alone, 0.71 s for PR states alone and 0.91–1.11 s
+for both (five or six runs each). The same branches split across 2, 4 and 8
+requests side by side took 0.69 s, 0.65 s and 0.67 s. The listing now asks 16
+branches per request, and reads the Git facts it needs first side by side
+instead of in turn. One request that fails or is stopped leaves every branch
+unknown, as a failed single call did.
+
+Same host and repository, fresh empty Home, one warm-up discarded, two
+alternating rounds of ten samples. `baseline` is installed 0.13.4; `candidate`
+is this branch. Raw rows: [20261005/](20261005/) (`github-requests-*`).
+
+| Run | Mode | Samples | Median | p95 | `gh` processes | `gh` each | Load (1 m) |
+|---|---|---|---|---|---|---|---|
+| baseline | text | 10 + 10 | 1.47 s, 1.53 s | 1.72 s, 1.81 s | 1 | 1.11–1.16 s | 26, 19 |
+| baseline | JSON | 10 + 10 | 1.52 s, 1.42 s | 1.73 s, 1.72 s | 1 | 1.08–1.18 s | 26, 16 |
+| candidate | text | 10 + 10 | 1.06 s, 1.07 s | 1.40 s, 1.18 s | 4 | 0.69–0.70 s | 22, 15 |
+| candidate | JSON | 10 + 10 | 1.02 s, 1.04 s | 1.11 s, 1.82 s | 4 | 0.68–0.69 s | 20, 14 |
+
+- **≤1 s warm p95 is still not met online**: about 1.0–1.1 s median. A request
+  costs about 0.4 s before GitHub does any work and 0.7 s with a quarter of the
+  branches; the rest is process start, the Git reads before the request, and
+  output. Going lower means answering PR state or `remote_gone` from something
+  other than the remote, which the listing does not do.
+- One JSON round's p95 is a single 1.82 s sample; a request's tail now has four
+  chances to land in a listing. Ten samples do not size that.
+- A fresh Home, so no store cost: 0.13.4 already measured that at 0.14 s on the
+  main Home. Installed figures for this change come from `lf wt timing`.
+- After these rows the listing stopped reading branch heads twice: 72 and 68
+  Git processes, not 73 and 69. Its one check ran at load 112 (1.73 s and
+  1.29 s medians), which sizes nothing; the rows above were not re-measured.
+
 ## 2026-10-05: startup against a 1.1 GB store
 
 The first sample from ordinary use (installed 0.13.3, JSON) read 8.09 s total:
@@ -169,8 +214,7 @@ The file is trimmed to its newest 500 lines when it reaches 1,000. It is
 appended under a file lock, never through SQLite, so a contended store cannot
 lose the slow sample. Text-mode diff stats are `total − startup − listing`.
 A process killed with SIGKILL leaves no sample; time before `main` is not
-measured. No numbers from ordinary use exist yet: the only samples so far are
-four runs in a disposable Home while building this.
+measured. Numbers from ordinary use are in the dated sections above.
 
 ### Limits of this evidence
 

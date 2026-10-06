@@ -36,6 +36,8 @@ struct WaveDetailReading {
 struct WaveDetailPane: View {
     let wave: WaveViewModel
     let repoPath: String
+    /// The window's streamed reading of this Wave, once one has arrived.
+    let streamed: StreamedWaveDetail?
     let onClose: () -> Void
     let onOpenTask: (String) -> Void
 
@@ -57,6 +59,7 @@ struct WaveDetailPane: View {
                     repoPath: repoPath,
                     selection: $selection,
                     refreshSignal: workRefresh,
+                    streamed: streamed,
                     onOpenTask: onOpenTask
                 )
                 .frame(minWidth: 230, idealWidth: 320, maxWidth: 440, maxHeight: .infinity)
@@ -101,6 +104,7 @@ private struct WavePlanView: View {
     let repoPath: String
     @Binding var selection: WaveWorkSelection?
     let refreshSignal: UInt64
+    let streamed: StreamedWaveDetail?
     let onOpenTask: (String) -> Void
 
     @Environment(\.palette) private var palette
@@ -138,12 +142,21 @@ private struct WavePlanView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(palette.background)
-        .task(id: refreshIdentity) {
-            while !Task.isCancelled {
-                await refreshDetail()
-                try? await Task.sleep(for: .seconds(30))
-            }
+        .task(id: refreshIdentity) { await refreshDetail() }
+        .onChange(of: streamed?.sequence) { _, _ in applyStreamed() }
+    }
+
+    /// Later readings arrive from the window's workspace stream when a commit
+    /// changes this Wave; nothing here reads on a clock.
+    private func applyStreamed() {
+        guard let streamed, streamed.wave == wave.id, AppTestMode.current() != .mockWaves else { return }
+        if let snapshot = streamed.snapshot {
+            historyNow = Date()
+            reading.update(snapshot)
+        } else {
+            reading.recordFailure(RegistryQueryError(streamed.reason ?? "Wave status unavailable"))
         }
+        isAwaitingDetail = false
     }
 
     private var displayedPlan: WavePlan { reading.plan(cached: plan) }
@@ -215,7 +228,7 @@ private struct WavePlanView: View {
                 case .available(let inventory, let truncated):
                     let filter = historyFilters[identity] ?? TaskHistoryFilter()
                     let tasks = inventory.filter {
-                        filter.includes($0.task, runtime: $0.runtime, condition: $0.condition, flow: $0.flow, now: historyNow)
+                        filter.includes($0.task, condition: $0.condition, now: historyNow)
                     }
                     WorkspaceSectionHeading(title: "Tasks", count: tasks.count) {
                         TaskHistoryControls(filter: Binding(

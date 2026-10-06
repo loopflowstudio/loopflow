@@ -188,15 +188,19 @@ They retain original ownership, physical failure, frozen coverage, candidate,
 caller bytes and child-held locks without republishing or double settlement.
 Synthetic proofs do not establish configured automatic settlements.
 
-October 5 source inspection found public installer smoke used fake HOME/LF_HOME
-although promotion resolves the OS account Home, then hashed the entry gate as
-if it were the executable. The follow-up isolates promotion in a disposable
-container and verifies selected CLI bytes; native macOS smoke stays separate.
-Candidate preflight uses the packaged Linux CLI in a fresh network-disabled
-container for preparation, cached reuse and publication; cached receipts cannot
-bypass it. Service or cleanup failure prevents success. Docker was unavailable
-locally: real container/public acceptance remains open, and simulated checks
-establish neither macOS installation nor automatic settlement.
+PR #1457 merged installer isolation: candidate preflight and public installer
+smoke use disposable Linux containers, checking selected CLI bytes instead of
+the entry gate. Native macOS smoke stays separate. Prior simulated checks prove
+neither container/public acceptance nor automatic settlement.
+
+October 6 scheduled receipt cron_a4b8b11b2a534bf99d183e677f2a6871 failed after
+recovery cron_5d930c31c7ae4a118f6b93774496991c passed continuity but the scorecard
+emitted retired product/task-loop-trust. Accepted chapter commit 42451654e removed
+that contract; remove its hardcoded producer output, preserving strict metric
+validation and lifecycle rows. Installed CLI with the repaired checkout reports
+35 rows; twelve focused tests pass. Original failed receipts and repair ownership
+remain unchanged. Jack Heart authorized publication; the operator owns subsequent
+release recovery after LOO-382. This manual proof supplies no automatic settlement.
 
 Release's September 28 incident proves entry points need operation-level recovery:
 an agent reported failure successfully, producing a misleading green cron receipt.
@@ -331,27 +335,12 @@ configured checks are in [the pre-curation memory](https://github.com/loopflowst
 ### Legacy retirement completed (2026-10-04)
 
 Jack Heart explicitly authorized clearing all legacy stores and their process
-owners. Fresh `lsof` identified 15 owners of the four retained installed stores.
-Current `lf monitor prune` had no registered orphan targets; the old `ask cancel`
-command failed reading the current installation manifest (`work_dispositions`
-missing). Exact executable/start-time checks and process ancestry bounded the
-shutdown to those owners, their matching legacy wrappers and descendants.
-All 37 processes exited after SIGTERM; no SIGKILL was required. The current
-Session and main-Home processes were outside that set.
-
-The four stores moved intact to `~/.lf-retired/20261004T161815Z/installed/`.
-The unused root database and two demo databases moved with the remaining legacy
-root to `remaining-home/` in the same archive. Its `retirement.json` records
-process identities, signals and source/destination paths. The seven earlier
-snapshots remain at `~/.lf-retired/20261002T191224Z/worktrees/`. Archives preserve
-history and consume disk space; retirement does not mean erasure.
-
-Verification: all 37 recorded process identities exited, legacy handles reached
-zero, `~/.lf-dev` no longer exists, and installed `lf home id` still returns
-`home_39860354aaca640c2ccb50bf6ca609d8`; prune inspection reports zero errors.
-LOO-342 was already marked done in the October 4 status read. This retirement
-supersedes the pending-store findings above and closes the remaining acceptance
-gap after the October 2 installed routing checks.
+owners. All 37 identified processes exited after SIGTERM, none needing SIGKILL.
+The four installed stores, the unused root database and two demo databases are
+intact under `~/.lf-retired/20261004T161815Z/` (`retirement.json` records
+identities, signals and paths); seven earlier snapshots remain at
+`~/.lf-retired/20261002T191224Z/worktrees/`. `~/.lf-dev` no longer exists and the main Home
+identity is unchanged. [Method and verification](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#legacy-retirement-completed-2026-10-04).
 
 ## Worktree listing and fenced dispatch (LOO-375, 2026-10-05)
 
@@ -362,8 +351,11 @@ and awaits release/install validation. Numbers and method:
 
 - **Process count, not Git work, was the listing cost** (PR 1): about 370 serial
   Git processes became about 70 through batched ref reads, concurrent `status`,
-  one GitHub call and per-commit-pair answers in `.git/lf-commit-facts`. One
-  GitHub round trip (1–1.8 s) is the remaining online floor.
+  one GitHub call and per-commit-pair answers in `.git/lf-commit-facts`.
+- **GitHub's answer time grows with the branches in one query** (PR 3, branch
+  evidence). Installed 0.13.4 read 1.80 s median over three samples, 1.62 s of
+  it the remote. Asking 16 branches per request side by side: 1.45 s → 1.03 s
+  median on a fresh Home. One unanswered request leaves every branch unknown.
 - **Every store open scanned the whole database** (PR 2). The first installed
   sample read 8.09 s: 4.91 s before listing, 1.90 s in receipts. Opening ran
   `PRAGMA foreign_key_check`, and one command opens the store five times, so
@@ -381,7 +373,7 @@ and awaits release/install validation. Numbers and method:
   the store in `<Home>/perf/wt-list.jsonl`, read with `lf wt timing`.
 - **Jack Heart's delivery contract:** land after autonomous checks and honest
   benchmarks; installed timing is post-merge validation, so the Task stays
-  open. One installed sample is not a p95; ≤1 s warm p95 online is unmet.
+  open. Seven installed samples are not a p95; ≤1 s warm p95 online is unmet.
 - **Install preflight/promote read the OS account's Home whatever `LF_HOME`
   says.** Tests running them are container-only installation proofs.
 - **A closed Session with a confirmed-dead provider no longer blocks Task
@@ -911,26 +903,16 @@ published machine artifacts only; `lf task sync` (which replaced `lf rebase` in
 #1367) owns checkout updates. The schedule is opt-in login plus weekly, Monday
 09:00 local, with positional daily/hourly/5min. The separate daemon is retired.
 
-Observed October 4 with published 0.13.0:
-
-- **Natural login catch-up.** v0.13.0 published at 00:20 PDT while the laptop
-  was asleep, then off after a 1% battery shutdown. `com.loopflow.refresh` ran
-  at the 12:04 login and promoted 0.12.32 → 0.13.0 with exact-store preflight
-  and no migration (refresh.log, switch-49b58550 receipt).
-- **Real calendar firing.** The 5min cadence fired at 20:10 and 20:15 through
-  launchd itself (runs 1 → 3); weekly was then restored byte-identical and
-  idempotent. No Monday 09:00 firing or sleep-coalesced wake run has been
-  observed; neither is Loopflow code. Read refresh.log after October 5 09:00.
-- **Complete artifacts.** Receipt CLI/app/helper hashes, the entry gate, the
-  notarized signature and /Applications 0.13.0 all match. Repeat `lf install`
-  changes no receipt, Task, PR, Flow or Wave identity.
-- **Fresh published path.** Ubuntu 24.04 container without Git: public installer,
-  repeat without download, and missing-entry repair retain the Home identity.
-- **Checkout updates.** Sandbox with the installed binary: stale main with an
-  unpublished commit plus staged/modified/untracked bytes catches up, repeats
-  as a no-op, picks up advanced upstream, bases a sibling on it, and a sibling
-  sync refreshes canonical main first. Clean main fast-forwards. The real main
-  checkout was already current; its incident path was not replayed there.
+Observed October 4 with published 0.13.0
+([evidence](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#installation-and-checkout-closure-loo-292-2026-10-04)):
+the login schedule caught up 0.12.32 → 0.13.0 after a shutdown with exact-store
+preflight and no migration; the 5min cadence fired twice through launchd and
+weekly was restored byte-identical; receipt, signature and /Applications hashes
+match and a repeat install changes no identity; an Ubuntu 24.04 container
+without Git installed and repaired a missing entry; sandboxed
+`lf task sync` caught up a stale main while preserving unpublished, staged,
+modified and untracked bytes. No Monday 09:00 firing or sleep-coalesced wake
+has been observed; neither is Loopflow code.
 
 Unresolved, not blocking: the currency probe (`--version` plus a 30 s preflight)
 returned not-current once at load ~14, starting a redundant download; preflight
@@ -951,8 +933,8 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
 
 ## Gotchas
 
-- **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly** (filed). `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
-- **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures — two `bin/lf.rs` tests naming a deleted command had never run at all.
+- **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly**. `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
+- **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.
 - **Tests must survive draft migration materialization** (learned 2026-07-21).
@@ -962,7 +944,10 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
   at `migrations/drafts/` passes locally and fails the release tree at compile
   time.
 - **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in TESTING.md: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
-- **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between one command and the next, and `done` advanced 6→22 with no `--continue` from the losing session. Nothing was lost that time. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
+- **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between commands and `done` advanced 6→22 with no `--continue` from the losing session. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
+- **A sync target is not always the PR's upstream** (2026-10-06). `lf sync
+  origin/<own branch>` made that tip #1456's base; land refused its own commits
+  as foreign. Fixed in source; #1456 lands after a release installs the fix.
 - **Linear Project UUIDs survive renames; derived slugs do not.** Project content
   lives in Linear and the local SQLite snapshot, with no `projects/*.md` cache.
   Use stable IDs when reconciling current names with captured historical plans.

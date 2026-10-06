@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the lifecycle scorecard and typed Project metric inputs."""
+"""Generate the lifecycle scorecard from retained execution evidence."""
 
 from __future__ import annotations
 
@@ -154,17 +154,6 @@ def load_lifecycle(
         )
         prs.append(value)
     return prs
-
-
-def task_loop_trust_observation(window_ended_at: datetime) -> dict[str, Any]:
-    return {
-        "wave": "product",
-        "metric_id": "task-loop-trust",
-        "instrument": "lifecycle-scorecard",
-        "kind": "unavailable",
-        "source_as_of": window_ended_at.isoformat().replace("+00:00", "Z"),
-        "reason": "Current Work records do not identify complete Task-loop intervals",
-    }
 
 
 def parse_time(value: str) -> datetime:
@@ -601,7 +590,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         history = load_history(args.history, repo)
         with open_read_only(database) as connection:
             prs = load_lifecycle(connection, repo, since, until)
-        metric_observation = task_loop_trust_observation(generated_at)
         report = build_report(policy, repo, generated_at, history, load_gates(repo), prs)
     except (FileNotFoundError, OSError, ValueError, sqlite3.Error) as error:
         print(f"lifecycle-scorecard: {error}", file=sys.stderr)
@@ -611,7 +599,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             json.dumps(
                 {
                     "report": report,
-                    "metric_observations": [metric_observation],
+                    "metric_observations": [],
                     "text": format_report(report),
                 },
                 sort_keys=True,

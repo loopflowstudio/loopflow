@@ -67,6 +67,7 @@ Open Loopflow or run its CLI
 | `--max-turns` | Maximum agent turns for this invocation |
 | `--wave` | Add Wave context and identity without changing the working directory |
 | `--task` | Execute in this Task's checkout |
+| `--steers-after` | Give the agent only Task direction newer than this steer |
 | `--wt` | Execute in an existing worktree by name or branch |
 | `--__cwd` | Keep a Work-bound internal launch in this exact checkout Internal. |
 | `--no-loopflow` | Exclude loopflow operating guidance Default: false. |

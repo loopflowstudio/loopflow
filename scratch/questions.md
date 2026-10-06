@@ -154,10 +154,9 @@ source:
 
 ## Asked of Jack, unanswered; the pass took the default
 
-- **Who backgrounds, now that `-b` blocks?** `task create --run/--flow` is
-  deleted; skills tell the agent to background `lf task run` with its own tool;
-  Desktop starts it as a child process, watches three seconds for a refusal and
-  leaves it running.
+- **Backgrounding** (answered above): `task create --run/--flow` is deleted;
+  Desktop starts `lf task run` as a child, watches three seconds for a refusal
+  and leaves it running.
 - **Planning refusal** (terminal, moved or removed Task) applies to every Flow
   launch that resolves to a Task. It does not apply to a single skill or an
   interactive conversation in a Task worktree: binding stays allowed for done
@@ -205,9 +204,8 @@ confirmed by Jack Heart.
   `--model`, and only when the launch named none; `action_style` on a step is
   dropped. The default XOR router is now the builtin skill `xor-route`, which
   a repository can override.
-- **Steers.** Every step receives all of its Task's steers, like any skill run
-  in the checkout. Per-node acknowledgement, which spared a repeated node
-  steers it had already seen, is gone.
+- **Steers.** Per-node acknowledgement is gone; slice 3 restores the saving
+  (below).
 - **`LF_FLOW_ID` stays,** set by the driver in the step's environment so the
   S1–S5 skills can share a note. `lf` reads it nowhere.
 - **Started.** The driver marks its Task started when it writes the Flow row;
@@ -304,6 +302,32 @@ The agent's, October 6, building slice 2. None is confirmed by Jack Heart.
   (slice 1's tables; the docs slice's check). Five lib tests
   (`journal::boot_time`, three `ops::chapter`, one `ops::ci_watch`) fail in a
   full parallel `--lib` run and pass alone.
+
+## Choices the Review repairs pass made without Jack
+
+The agent's, October 6, building slice 3. None is confirmed by Jack Heart.
+
+- **The option is global `--steers-after STEER`,** a steer's id (the Task
+  event id shown as `steer:N` in context reports). It limits the Task
+  direction any run in a Task checkout is given; it changes nothing without a
+  Task. `lf context` ignores it.
+- **What the driver passes.** Before each skill step it reads the Task's
+  newest steer and remembers it for that node, in memory. A node's later run
+  gets `--steers-after` its previous run's value; a `--steers-after` on the
+  Flow launch is the floor for every step. Operation steps get none.
+- **A steer can arrive twice, never zero times.** The step refreshes Linear
+  after the driver's read, so a steer that lands in that gap reaches that run
+  and the node's next one. Reading after the step instead would drop steers
+  that arrive mid-turn and are not injected live.
+- **Corrections** (`session resume`) carry no option; they add no seed.
+- **An edge that runs nothing is named by the stage it enters:**
+  `lf task run ISSUE end`. A Flow named like the stage on another edge from
+  the same stage is refused at load as two edges with one name. A bare
+  `lf task run ISSUE` still takes a stage's only edge, flowless or not.
+- **`end` skips the unknown-name check** made before placing a worktree; the
+  Task's stage decides whether it names an edge.
+- **Tests live in `flow_tests`,** which has the Codex stand-in a headless
+  Task run needs: one drives builtin `research` to `end`.
 
 ## Choices the earlier pass made without Jack
 

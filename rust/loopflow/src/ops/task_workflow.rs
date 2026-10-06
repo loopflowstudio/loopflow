@@ -100,7 +100,10 @@ impl TaskWorkflowRecord {
                     "- `lf -b task run {issue} {flow}` moves the Task to {}",
                     edge.to
                 ),
-                None => format!("- `lf task run {issue}` moves the Task to {}", edge.to),
+                None => format!(
+                    "- `lf task run {issue} {}` moves the Task to {} and runs nothing",
+                    edge.to, edge.to
+                ),
             })
             .collect();
         if !edges.is_empty() {
@@ -163,7 +166,7 @@ pub(crate) fn describe_edges(workflow: &Workflow, stage: &str) -> String {
         .outgoing(stage)
         .map(|(_, edge)| match &edge.flow {
             Some(flow) => format!("{flow} (to {})", edge.to),
-            None => format!("no flow (to {})", edge.to),
+            None => format!("{} (runs no Flow)", edge.to),
         })
         .collect();
     if edges.is_empty() {

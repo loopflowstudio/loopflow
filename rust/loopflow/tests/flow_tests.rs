@@ -1782,7 +1782,7 @@ fn scripted_provider(home: &Path, answers: &[&str]) -> (TempDir, String) {
     let provider = codex_app_server_script("@answer@", "if [ \"$1\" = --version ]; then exit 0; fi")
         .replace(
             "read -r turn_start",
-            "read -r turn_start\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
+            "read -r turn_start\nprintf '%s\\n' \"$turn_start\" >> \"$LF_HOME/prompts\"\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
         )
         .replace("\"@answer@\"", "'\"$answer\"'");
     assert!(
@@ -2088,6 +2088,114 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
             {"decider": 5, "traversals": 1}
         ])
     );
+}
+
+#[test]
+fn a_repeated_node_receives_only_task_direction_newer_than_its_last_run() {
+    let repo = loopflow_test_support::TestRepo::new();
+    support::bind_task_planning(&repo);
+    let home = TempDir::new().unwrap();
+    let checkout = repo.path().canonicalize().unwrap();
+    let task =
+        support::register_unrun_task(home.path(), &checkout, "repeat-steers", &repo.head_sha());
+    observe_planning(&task, &checkout);
+    repo.create_branch("repeat-steers");
+    write_skill(repo.path(), "work-proof", "Fixture step.");
+    write_flow(repo.path(), "twice", "- work-proof\n- loop: work-proof\n");
+    let steer = |text: &str| -> i64 {
+        let kind = serde_json::json!({"kind": "steer", "author": {"kind": "user"}, "text": text});
+        rusqlite::Connection::open(home.path().join("loopflow.db"))
+            .unwrap()
+            .query_row(
+                "INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,?2,unixepoch()) RETURNING id",
+                [task.task.id.as_str(), &kind.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+    let earlier = steer("Keep the parser strict.");
+    let (_bin, path) = scripted_provider(home.path(), &[WORK, ITERATE, WORK, ADVANCE, WORK]);
+    let run = |args: &[&str]| {
+        let mut args = args.to_vec();
+        args.extend(["--batch", "--no-loopflow"]);
+        let ran = run_lf(repo.path(), home.path(), &args, Some(&path));
+        assert!(
+            ran.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        fs::read_to_string(home.path().join("prompts"))
+            .unwrap()
+            .lines()
+            .map(|prompt| prompt.contains("Keep the parser strict."))
+            .collect::<Vec<_>>()
+    };
+    // work, decide, work, decide: each node's first run is given the steer,
+    // its second is spared it.
+    assert_eq!(
+        run(&["--task", "INF-123", "flow", "twice"]),
+        [true, true, false, false]
+    );
+    // The driver asked for that with an option any run takes.
+    steer("Report the first error only.");
+    let after = earlier.to_string();
+    let given = run(&[
+        "--task",
+        "INF-123",
+        "--steers-after",
+        &after,
+        "skill",
+        "work-proof",
+    ]);
+    assert_eq!(given.last(), Some(&false));
+    let prompts = fs::read_to_string(home.path().join("prompts")).unwrap();
+    assert!(prompts
+        .lines()
+        .last()
+        .unwrap()
+        .contains("Report the first error only."));
+}
+
+#[test]
+fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
+    let repo = loopflow_test_support::TestRepo::new();
+    support::bind_task_planning(&repo);
+    let home = TempDir::new().unwrap();
+    let checkout = repo.path().canonicalize().unwrap();
+    let task =
+        support::register_unrun_task(home.path(), &checkout, "research-end", &repo.head_sha());
+    observe_planning(&task, &checkout);
+    repo.create_branch("research-end");
+    let (_bin, path) = scripted_provider(home.path(), &[WORK]);
+    let run = |args: &[&str]| run_lf(repo.path(), home.path(), args, Some(&path));
+    let position = || {
+        lf_json(
+            repo.path(),
+            home.path(),
+            &["task", "status", "INF-123", "--json"],
+        )["execution"]["work"]["workflow"]["position"]["stage"]
+            .clone()
+    };
+    let ran = run(&["-b", "--no-loopflow", "task", "run", "INF-123", "research"]);
+    assert!(
+        ran.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert_eq!(position(), "findings");
+    // Two edges leave findings; the refusal names the one that runs nothing.
+    let refused = run(&["task", "run", "INF-123"]);
+    assert!(!refused.status.success());
+    let error = String::from_utf8_lossy(&refused.stderr).to_string();
+    assert!(error.contains("end (runs no Flow)"), "{error}");
+    assert_eq!(position(), "findings");
+    let ended = run(&["task", "run", "INF-123", "end"]);
+    assert!(
+        ended.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ended.stderr)
+    );
+    assert_eq!(position(), "end");
 }
 
 #[test]

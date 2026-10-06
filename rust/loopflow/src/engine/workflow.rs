@@ -51,6 +51,14 @@ pub struct Workflow {
     pub edges: Vec<WorkflowEdge>,
 }
 
+impl WorkflowEdge {
+    /// What `lf task run ISSUE <name>` calls this edge: its Flow, or the stage
+    /// it enters when it runs none.
+    pub fn name(&self) -> &str {
+        self.flow.as_deref().unwrap_or(&self.to)
+    }
+}
+
 impl Workflow {
     /// Edges leaving `node`, with their index in the authored order.
     pub fn outgoing<'a>(
@@ -157,14 +165,14 @@ fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<Workflow, St
         }
         if workflow
             .outgoing(&edge.from)
-            .filter(|(_, other)| other.flow == edge.flow)
+            .filter(|(_, other)| other.name() == edge.name())
             .count()
             > 1
         {
             return Err(format!(
-                "{} has two outgoing edges running {}",
+                "{} has two outgoing edges named {}",
                 edge.from,
-                edge.flow.as_deref().unwrap_or("no flow")
+                edge.name()
             ));
         }
     }

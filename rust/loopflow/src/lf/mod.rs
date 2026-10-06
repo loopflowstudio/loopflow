@@ -128,6 +128,10 @@ pub struct Cli {
     #[arg(long, value_name = "TASK", conflicts_with = "wt")]
     pub task: Option<String>,
 
+    /// Give the agent only Task direction newer than this steer
+    #[arg(long = "steers-after", value_name = "STEER")]
+    pub steers_after: Option<i64>,
+
     /// Execute in an existing worktree by name or branch
     #[arg(long, value_name = "NAME", conflicts_with = "task")]
     pub wt: Option<String>,
@@ -214,6 +218,9 @@ impl Cli {
         if let Some(turns) = self.max_turns {
             args.extend(["--max-turns".to_string(), turns.to_string()]);
         }
+        if let Some(steer) = self.steers_after {
+            args.extend(["--steers-after".to_string(), steer.to_string()]);
+        }
         args
     }
 
@@ -240,6 +247,7 @@ impl Cli {
             max_turns: self.max_turns,
             wave: self.wave.clone(),
             task: self.task.clone(),
+            steers_after: self.steers_after,
             wt: self.wt.clone(),
             bound_cwd: self.bound_cwd.clone(),
             no_loopflow: self.no_loopflow,

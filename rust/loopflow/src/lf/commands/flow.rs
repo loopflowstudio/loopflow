@@ -128,6 +128,8 @@ fn execute(
             cwd: repo,
             launcher: cli,
             position: Mutex::new(ExecutionCursor::default()),
+            task: task.clone(),
+            steers: Mutex::default(),
         };
         // The driver's one record of its Flow, written before any step runs.
         driver.store.sqlite.record_flow_exec(
@@ -328,6 +330,9 @@ struct Driver<'a> {
     launcher: &'a Cli,
     /// Where the engine stands, as of its last checkpoint.
     position: Mutex<ExecutionCursor>,
+    task: Option<crate::durable::TaskId>,
+    /// The Task's newest steer when each node last started, by node key.
+    steers: Mutex<std::collections::HashMap<u32, i64>>,
 }
 
 /// How a step's process ended, before any answer is read.
@@ -530,6 +535,23 @@ impl SkillExecutor for &Driver<'_> {
         step_cli.only_account.clear();
         step_cli.isolate = false;
         step_cli.shared = false;
+        // A node that runs again is spared the Task direction its earlier run
+        // was already given.
+        if let Some(task) = &self.task {
+            let newest = self
+                .store
+                .task_steers(task)
+                .await?
+                .last()
+                .map(|steer| steer.id);
+            let (node, _) = self.location();
+            let seen = self
+                .steers
+                .lock()
+                .expect("Flow steers mutex poisoned")
+                .insert(node, newest.unwrap_or(0));
+            step_cli.steers_after = seen.max(step_cli.steers_after);
+        }
         // The step looks its skill up by name. An agent the Flow names for
         // this occurrence is the one option that travels, as `--model`.
         if step_cli.model.is_none() {

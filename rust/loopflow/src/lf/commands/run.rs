@@ -265,7 +265,13 @@ fn prepare_task_input(
         if let Err(error) = crate::ops::linear_observe::refresh_task_comments(&store, &task).await {
             tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
         }
-        let seed = crate::ops::task_input::read_seed(&store, &task, wave.slug(), 0).await?;
+        let seed = crate::ops::task_input::read_seed(
+            &store,
+            &task,
+            wave.slug(),
+            cli.steers_after.unwrap_or(0),
+        )
+        .await?;
         Ok(Some((store, seed)))
     })
 }

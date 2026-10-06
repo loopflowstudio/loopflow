@@ -207,7 +207,11 @@ Flow history below means FlowExec rows joined to their Execs.
    `lf task run ISSUE end` (the target stage's name) take it, and say so in
    the refusal and the stage guidance. Done when a test shows a node's second
    run receives only steers newer than its first, and a test walks `research`
-   to `end`. *Not done.*
+   to `end`. *Built October 6, not yet compressed or realigned:*
+   `flow_tests a_repeated_node_receives_only_task_direction_newer_than_its_last_run`
+   and `the_research_workflow_ends_on_its_edge_that_runs_nothing` pass, with
+   `task_flow_launch_tests` 5 and all-target Clippy clean. The option is
+   `--steers-after`; the agent's choices are in [questions.md](questions.md).
 4. **Task primary.** `PrimaryScope::Task(TaskId)` under the existing scope
    lock. Explicit choice wins; else the sole unfinished interactive Task
    conversation; else the most recent by `latest_interactive_session`'s

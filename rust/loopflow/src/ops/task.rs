@@ -446,7 +446,8 @@ pub fn task_place(
         ..
     } = options.clone();
     // An unknown name is refused before any worktree is placed for it.
-    if let Some(flow) = flow.as_deref() {
+    // `end` may name an edge that runs nothing; the Task's stage decides.
+    if let Some(flow) = flow.as_deref().filter(|flow| *flow != END) {
         if load_task_workflow(repo, flow)?.is_none() {
             load_task_flow(repo, flow)?;
         }
@@ -500,7 +501,7 @@ fn traverse_task_workflow(
             record
                 .workflow
                 .outgoing(stage)
-                .any(|(_, edge)| edge.flow.as_deref() == Some(name))
+                .any(|(_, edge)| edge.name() == name)
         })
     };
     let named = match requested {
@@ -530,14 +531,16 @@ fn traverse_task_workflow(
     let issue = &task.plan.identifier;
     let mut edges = workflow
         .outgoing(&stage)
-        .filter(|(_, edge)| requested.is_none() || edge.flow.as_deref() == requested);
+        .filter(|(_, edge)| requested.is_none_or(|name| edge.name() == name));
     let (index, edge) = match (edges.next(), edges.next()) {
         (Some(edge), None) => edge,
         (None, _) | (Some(_), Some(_)) => {
             let asked = match requested {
                 Some(flow) => format!("{flow} does not leave {stage}"),
                 None if stage == END => format!("workflow {} has reached its end", workflow.name),
-                None => format!("{stage} has more than one outgoing edge; name its Flow"),
+                None => format!(
+                    "{stage} has more than one outgoing edge; name one as `lf task run {issue} <name>`"
+                ),
             };
             return Err(task_error(format!(
                 "Task {issue} is at {stage} of workflow {}: {asked}. Outgoing edges: {}. `lf task run {issue} <workflow>` takes up another workflow; `lf run <flow>` in the Task worktree runs a Flow without moving the Task",

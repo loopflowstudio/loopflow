@@ -778,9 +778,8 @@ October 6 contained proofs preserve membership, drafts, history and external-eff
 denial. A PTY probe isolated login: cat and Bash exec-cat passed; both login forms
 failed at execvp despite an exact allowance. Setuid remains a causal hypothesis. Pinned Ghostty forces
 embedded commands into shell mode and wraps both modes in login; `direct:` cannot
-bypass it. A different host alone does not fix this policy boundary. A supported
-upstream option or production GhosttyKit launch repair remains needed before
-mounted acceptance. The benchmark guide owns evidence. Journey, matched p95 and soak remain unproved. Jack's October 6 direction
+bypass it. A different host alone does not fix this policy boundary. Mounted acceptance needs a production GhosttyKit launch repair; evidence lives
+in the benchmark guide. Journey, matched p95 and soak remain unproved. Jack's October 6 direction
 authorizes source publication, not merge/completion. Preserve private snapshots
 and budgets; denied work is not a speedup. Earlier evidence: `d8f1214b0:wave/infrastructure/MEMORY.md`.
 

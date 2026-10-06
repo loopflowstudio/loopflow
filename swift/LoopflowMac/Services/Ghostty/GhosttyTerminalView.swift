@@ -1255,7 +1255,8 @@ enum LoopflowZshBootstrap {
             precmd_functions=(${precmd_functions:#_loopflow_prompt})
             [[ $PROMPT == '\(macOSDefaultPrompt)' ]] || builtin return 0
             builtin setopt prompt_subst
-            PROMPT=$'%F{8}%~%f${_loopflow_branch}\\n%F{\(accent)}\u{276F}%f '
+            # The leading blank row separates this block from the output above.
+            PROMPT=$'\\n%F{8}%~%f${_loopflow_branch}\\n%F{\(accent)}\u{276F}%f '
             precmd_functions=(_loopflow_prompt_context $precmd_functions)
             _loopflow_prompt_context
         }

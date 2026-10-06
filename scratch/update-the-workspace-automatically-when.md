@@ -143,8 +143,18 @@ above, and dropped with its evidence if it turns out not to be a clear win.
    the wire, in Swift and in the frame fixture. The cost of one Wave-detail
    reading on Jack's store is unmeasured. The copy's draft was re-applied by
    hand (table recreated, trigger added).
-9. **The Task-files comparison stops polling.** Its 10 s `lf` loop goes;
-   it follows the same checkout changes as slice 7.
+9. **Task-files comparison: built, in Swift.** The 10 s loop is deleted.
+   The view already watched the checkout; `TaskFileObservation` now also
+   watches a linked worktree's Git metadata directory, and a change to
+   `HEAD`, `index` or a ref re-reads the comparison. The recorded PR base
+   is part of the view's reading identity, so a store commit that moves it
+   re-reads too. A window showing a comparison spawns `lf` on change, not 6
+   times a minute. Swift test: a `HEAD` rewritten in a linked worktree's
+   metadata re-read the comparison in 0.19 s. Not exercised in the window.
+   It does not use the Rust watch of slice 7: both watch the same two
+   directories, each for its own reader. Found on the way: on a temporary
+   volume the checkout's own FSEvents paths never matched (`/private`
+   prefix); real checkouts are unaffected and it was left alone.
 10. **One reader per window.** `active` becomes a part of the workspace
     stream and the separate `monitor active --watch` process is deleted;
     its native-receipt reader, bounded frames and explicit retry survive.

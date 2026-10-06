@@ -611,6 +611,78 @@ fn unavailable(part: Part) -> WorkContent {
     }
 }
 
+/// Requests arrive one JSON line each on stdin. Its end closes the reader.
+fn read_requests(shared: &Shared) {
+    let mut stdin = std::io::stdin().lock();
+    loop {
+        let mut line = Vec::new();
+        let read =
+            std::io::Read::take(&mut stdin, MAX_REQUEST as u64 + 1).read_until(b'\n', &mut line);
+        let mut mailbox = lock(shared);
+        match read {
+            Ok(0) => mailbox.closed = true,
+            Ok(_) if line.len() <= MAX_REQUEST => match serde_json::from_slice(&line) {
+                Ok(request) => mailbox.requests.push(request),
+                Err(error) => mailbox.error = Some(format!("invalid reader request: {error}")),
+            },
+            _ => mailbox.error = Some("reader stdin failed or request exceeds 16 KiB".into()),
+        }
+        let done = mailbox.closed || mailbox.error.is_some();
+        shared.1.notify_all();
+        if done {
+            break;
+        }
+    }
+}
+
+/// Write unsent frames until the reader closes. A parent that stopped reading
+/// closes it.
+fn write_frames(shared: &Shared) {
+    let mut stdout = std::io::stdout().lock();
+    loop {
+        let frame = {
+            let mut mailbox = lock(shared);
+            loop {
+                if let Some((_, frame)) = mailbox.unsent.pop_front() {
+                    break frame;
+                }
+                if mailbox.closed {
+                    return;
+                }
+                mailbox = shared
+                    .1
+                    .wait(mailbox)
+                    .expect("work reader mailbox poisoned");
+            }
+        };
+        let written = encode(&frame)
+            .map_err(std::io::Error::other)
+            .and_then(|bytes| stdout.write_all(&bytes))
+            .and_then(|()| stdout.flush());
+        if written.is_err() {
+            lock(shared).closed = true;
+            shared.1.notify_all();
+            return;
+        }
+    }
+}
+
+/// Let a burst of related commits land before reading any of it.
+fn settle(shared: &Shared) {
+    let first = Instant::now();
+    loop {
+        let mailbox = lock(shared);
+        let (mut mailbox, _) = shared
+            .1
+            .wait_timeout_while(mailbox, QUIET, |mailbox| !mailbox.look && !mailbox.closed)
+            .expect("work reader mailbox poisoned");
+        let again = std::mem::take(&mut mailbox.look);
+        if !again || first.elapsed() >= BURST {
+            break;
+        }
+    }
+}
+
 pub(super) fn run(watch: bool) -> Result<()> {
     let database = crate::store::database_path_from_env()?;
     let home = crate::store::lf_home_dir();
@@ -639,32 +711,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
     // stdin is the only way a parent stops the reader.
     if watch {
         let input = shared.clone();
-        std::thread::spawn(move || {
-            let mut stdin = std::io::stdin().lock();
-            loop {
-                let mut line = Vec::new();
-                let read = std::io::Read::take(&mut stdin, MAX_REQUEST as u64 + 1)
-                    .read_until(b'\n', &mut line);
-                let mut mailbox = lock(&input);
-                match read {
-                    Ok(0) => mailbox.closed = true,
-                    Ok(_) if line.len() <= MAX_REQUEST => match serde_json::from_slice(&line) {
-                        Ok(request) => mailbox.requests.push(request),
-                        Err(error) => {
-                            mailbox.error = Some(format!("invalid reader request: {error}"))
-                        }
-                    },
-                    _ => {
-                        mailbox.error = Some("reader stdin failed or request exceeds 16 KiB".into())
-                    }
-                }
-                let done = mailbox.closed || mailbox.error.is_some();
-                input.1.notify_all();
-                if done {
-                    break;
-                }
-            }
-        });
+        std::thread::spawn(move || read_requests(&input));
         let changes = shared.clone();
         std::thread::spawn(move || {
             let mut store = StoreChanges::watch(&database);
@@ -698,35 +745,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
         });
     }
     let output = shared.clone();
-    let writer = std::thread::spawn(move || {
-        let mut stdout = std::io::stdout().lock();
-        loop {
-            let frame = {
-                let mut mailbox = lock(&output);
-                loop {
-                    if let Some((_, frame)) = mailbox.unsent.pop_front() {
-                        break frame;
-                    }
-                    if mailbox.closed {
-                        return;
-                    }
-                    mailbox = output
-                        .1
-                        .wait(mailbox)
-                        .expect("work reader mailbox poisoned");
-                }
-            };
-            let written = encode(&frame)
-                .map_err(std::io::Error::other)
-                .and_then(|bytes| stdout.write_all(&bytes))
-                .and_then(|()| stdout.flush());
-            if written.is_err() {
-                lock(&output).closed = true;
-                output.1.notify_all();
-                return;
-            }
-        }
-    });
+    let writer = std::thread::spawn(move || write_frames(&output));
 
     let result = (|| -> Result<()> {
         let mut seen = None;
@@ -749,21 +768,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
             reader.open();
             let mut revisions = reader.revisions();
             if seen != revisions && seen.is_some() {
-                // Let a burst of related commits land before reading any of it.
-                let first = Instant::now();
-                loop {
-                    let mailbox = lock(&shared);
-                    let (mut mailbox, _) = shared
-                        .1
-                        .wait_timeout_while(mailbox, QUIET, |mailbox| {
-                            !mailbox.look && !mailbox.closed
-                        })
-                        .expect("work reader mailbox poisoned");
-                    let again = std::mem::take(&mut mailbox.look);
-                    if !again || first.elapsed() >= BURST {
-                        break;
-                    }
-                }
+                settle(&shared);
                 revisions = reader.revisions();
             }
             seen = revisions;

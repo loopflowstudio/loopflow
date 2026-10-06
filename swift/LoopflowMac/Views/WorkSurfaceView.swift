@@ -169,7 +169,7 @@ struct WorkSurfaceView: View {
                 case .available(let inventory, let truncated):
                     let filter = model.taskHistoryFilters[roadmap.wave.id] ?? TaskHistoryFilter()
                     let tasks = inventory.filter {
-                        filter.includes($0.task, runtime: $0.runtime, condition: $0.condition, flow: $0.flow, now: model.taskHistoryNow)
+                        filter.includes($0.task, condition: $0.condition, now: model.taskHistoryNow)
                     }
                     section {
                         WorkspaceSectionHeading(title: "Tasks", count: tasks.count) {

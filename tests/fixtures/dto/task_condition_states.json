@@ -58,7 +58,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     }
   },
   "completed": {
@@ -133,7 +134,8 @@
         "authored_commits": false,
         "recovery_required": false,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     }
   },
   "stale": {
@@ -495,7 +497,8 @@
         "authored_commits": false,
         "recovery_required": true,
         "reason": null
-      }
+      },
+      "unresolved_execution": true
     }
   },
   "unavailable": {
@@ -569,7 +572,8 @@
         "authored_commits": null,
         "recovery_required": true,
         "reason": "failed to inspect Task worktree"
-      }
+      },
+      "unresolved_execution": true
     }
   },
   "user_wait": {
@@ -932,7 +936,8 @@
         "authored_commits": false,
         "recovery_required": false,
         "reason": null
-      }
+      },
+      "unresolved_execution": true
     }
   },
   "dirty": {
@@ -1006,7 +1011,8 @@
         "authored_commits": false,
         "recovery_required": true,
         "reason": null
-      }
+      },
+      "unresolved_execution": true
     }
   },
   "authored_commits": {
@@ -1396,7 +1402,8 @@
         "authored_commits": true,
         "recovery_required": false,
         "reason": null
-      }
+      },
+      "unresolved_execution": true
     }
   }
 }

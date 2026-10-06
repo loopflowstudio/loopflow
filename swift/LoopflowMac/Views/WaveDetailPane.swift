@@ -228,7 +228,7 @@ private struct WavePlanView: View {
                 case .available(let inventory, let truncated):
                     let filter = historyFilters[identity] ?? TaskHistoryFilter()
                     let tasks = inventory.filter {
-                        filter.includes($0.task, runtime: $0.runtime, condition: $0.condition, flow: $0.flow, now: historyNow)
+                        filter.includes($0.task, condition: $0.condition, now: historyNow)
                     }
                     WorkspaceSectionHeading(title: "Tasks", count: tasks.count) {
                         TaskHistoryControls(filter: Binding(

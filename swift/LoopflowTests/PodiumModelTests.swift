@@ -696,8 +696,7 @@ struct PodiumModelStreamTests {
         defer { keeping.cancel() }
         let listed = { (filter: TaskHistoryFilter) -> Bool in
             guard let row = model.task(id: "issue-now")?.task else { return false }
-            return filter.includes(row.task, runtime: row.runtime, condition: row.condition, flow: row.flow,
-                                   now: model.taskHistoryNow)
+            return filter.includes(row.task, condition: row.condition, now: model.taskHistoryNow)
         }
         var completed = TaskHistoryFilter()
         completed.showCompleted = true
@@ -930,6 +929,10 @@ private struct PodiumTestFixture {
                     plan["completed_at"] = Date().addingTimeInterval(-60).formatted(.iso8601)
                     rows[row]["task"] = plan
                     rows[row]["runtime"] = NSNull()
+                    if var condition = rows[row]["condition"] as? [String: Any] {
+                        condition["unresolved_execution"] = false
+                        rows[row]["condition"] = condition
+                    }
                 }
                 evidence["items"] = rows
                 waves[wave]["tasks"] = evidence

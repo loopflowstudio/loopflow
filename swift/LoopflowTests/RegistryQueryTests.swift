@@ -263,7 +263,8 @@ struct RegistryQueryTests {
             "authored_commits": false,
             "recovery_required": false,
             "reason": null
-          }
+          },
+          "unresolved_execution": true
         },
         "actions": {
           "recommended": "resume",

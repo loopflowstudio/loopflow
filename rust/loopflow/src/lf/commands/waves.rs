@@ -175,6 +175,7 @@ pub enum TaskConditionState {
 pub use crate::ops::task_actions::{
     ci_failure_reason, derive_task_actions, TaskAction, TaskActionEvidence, TaskActionModel,
 };
+use crate::ops::task_flow::TaskFlowRecord;
 pub use crate::ops::task_flow::TaskFlowSnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +209,10 @@ pub struct TaskConditionSnapshot {
     /// Age of the durable Work evidence at that sample, if Work exists.
     pub evidence_age_secs: Option<i64>,
     pub local_progress: LocalProgressEvidence,
+    /// Started work a finished plan has not settled: the Task is still ready,
+    /// its Flow is not idle, or its checkout holds observed unsettled work.
+    /// Keeps a terminal Task in the working set.
+    pub unresolved_execution: bool,
 }
 
 /// Stable references for one Task, shared verbatim by `lf wave status` and
@@ -1144,7 +1149,7 @@ async fn snapshot_task_detail(
                 flow_record,
             )
         }
-        None => (None, None, crate::ops::task_flow::TaskFlowRecord::None),
+        None => (None, None, TaskFlowRecord::None),
     };
     let home_id = task
         .and_then(|task| shared.checkouts.iter().find(|row| row.task_id == task.id))
@@ -1250,6 +1255,7 @@ async fn snapshot_task_detail(
         &next_move,
         local_progress,
         action_evidence.as_ref(),
+        &flow_record,
         observed_at,
     );
     let actions = action_evidence.as_ref().map_or_else(
@@ -1422,8 +1428,16 @@ fn derive_task_condition(
     next_move: &NextMove,
     local_progress: LocalProgressEvidence,
     action_evidence: Option<&TaskActionEvidence>,
+    flow: &TaskFlowRecord,
     observed_at: time::OffsetDateTime,
 ) -> TaskConditionSnapshot {
+    // A removed historical checkout does not reopen settled work.
+    let unresolved_execution = runtime.is_some_and(|runtime| {
+        runtime.status == WorkStatus::Ready
+            || matches!(flow, TaskFlowRecord::Pinned(flow) if flow.execution != TaskExecutionState::Idle)
+            || (local_progress.state == LocalProgressEvidenceState::Observed
+                && local_progress.unsettled == Some(true))
+    });
     let active_pr_phase = action_evidence
         .and_then(|e| e.latest_pr_phase)
         .filter(|phase| phase.is_active());
@@ -1493,6 +1507,7 @@ fn derive_task_condition(
             .expect("Task condition observation time formats as RFC 3339"),
         evidence_age_secs: runtime.and_then(|runtime| age_secs(&runtime.updated_at, observed_at)),
         local_progress,
+        unresolved_execution,
     }
 }
 
@@ -2244,7 +2259,7 @@ mod tests {
     use super::{
         derive_task_condition, metric_portfolio_text, next_move_for_task, truncate_start,
         LocalProgressEvidence, LocalProgressEvidenceState, NextMove, NextMoveOwner,
-        TaskConditionState, TaskRuntimeSnapshot,
+        TaskConditionState, TaskFlowRecord, TaskRuntimeSnapshot,
     };
     use crate::durable::WorkStatus;
     use crate::ops::task_actions::TaskActionEvidence;
@@ -2706,6 +2721,62 @@ mod tests {
     }
 
     #[test]
+    fn a_finished_task_stays_current_only_while_execution_is_unresolved() {
+        let unresolved = |status, flow: &TaskFlowRecord, state, unsettled| {
+            let runtime = TaskRuntimeSnapshot {
+                work_id: "task-1".to_string(),
+                status,
+                reason: "settled".to_string(),
+                updated_at: "2026-07-21T00:00:00Z".to_string(),
+                provider: "codex".to_string(),
+                started: true,
+            };
+            derive_task_condition(
+                Some(&runtime),
+                &NextMove {
+                    owner: NextMoveOwner::Task,
+                    reason: "settled".to_string(),
+                },
+                LocalProgressEvidence {
+                    state,
+                    unsettled: Some(unsettled),
+                    dirty: None,
+                    authored_commits: None,
+                    recovery_required: Some(unsettled),
+                    reason: None,
+                },
+                None,
+                flow,
+                OffsetDateTime::now_utc(),
+            )
+            .unresolved_execution
+        };
+        let review = TaskFlowRecord::Pinned(crate::ops::task_flow::PinnedTaskFlow {
+            invocation_id: "inv".into(),
+            graph: crate::engine::flow_graph::FlowGraph::new("feature", &[]),
+            current: None,
+            completed: Vec::new(),
+            returns: Vec::new(),
+            iterations: Vec::new(),
+            execution: TaskExecutionState::Human,
+            reason: "Review remains open".into(),
+            restart_required: false,
+        });
+        let none = TaskFlowRecord::None;
+        let missing = LocalProgressEvidenceState::Missing;
+        // A removed checkout alone does not reopen settled work.
+        assert!(!unresolved(WorkStatus::Done, &none, missing, true));
+        assert!(unresolved(WorkStatus::Ready, &none, missing, true));
+        assert!(unresolved(WorkStatus::Done, &review, missing, false));
+        assert!(unresolved(
+            WorkStatus::Done,
+            &none,
+            LocalProgressEvidenceState::Observed,
+            true
+        ));
+    }
+
+    #[test]
     fn task_condition_distinguishes_clear_work_from_external_waits() {
         let runtime = TaskRuntimeSnapshot {
             work_id: "task-1".to_string(),
@@ -2733,6 +2804,7 @@ mod tests {
             &next_move,
             evidence(),
             None,
+            &TaskFlowRecord::None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(advisory.state, TaskConditionState::Clear);
@@ -2745,6 +2817,7 @@ mod tests {
             },
             evidence(),
             None,
+            &TaskFlowRecord::None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(delegated.state, TaskConditionState::Waiting);
@@ -2758,6 +2831,7 @@ mod tests {
             },
             evidence(),
             None,
+            &TaskFlowRecord::None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(user_handoff.state, TaskConditionState::Waiting);
@@ -2807,6 +2881,7 @@ mod tests {
                     reason: None,
                 },
                 Some(&actions),
+                &TaskFlowRecord::None,
                 OffsetDateTime::now_utc(),
             );
             assert_eq!(condition.state, expected);
@@ -2832,6 +2907,7 @@ mod tests {
                             status: runtime.status.clone(),
                             ..actions
                         }),
+                        &TaskFlowRecord::None,
                         OffsetDateTime::now_utc(),
                     );
                     assert_eq!(terminal.state, TaskConditionState::Blocked);
@@ -2873,6 +2949,7 @@ mod tests {
             },
             local_progress,
             Some(&action_evidence),
+            &TaskFlowRecord::None,
             OffsetDateTime::now_utc(),
         );
 

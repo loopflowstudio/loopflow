@@ -200,21 +200,12 @@ final class GhosttySurfacePool {
 
 // MARK: - GhosttyMetalView
 
-struct GhosttyCommandBlockLayout: Equatable {
-    let id: UInt64
-    let startRow: Int
-    let endRow: Int
-
-    func contains(_ row: Int) -> Bool {
-        startRow...endRow ~= row
-    }
-}
-
-func ghosttyCommandBlock(
-    atViewportRow row: Int,
-    in blocks: [GhosttyCommandBlockLayout]
-) -> GhosttyCommandBlockLayout? {
-    blocks.first { $0.contains(row) }
+/// Space between the pane edge and the terminal grid, in points. Ghostty lays
+/// the grid out from the top-left with this padding; block overlays and
+/// pointer rows use the same numbers.
+enum GhosttyTerminalPadding {
+    static let x: CGFloat = 12
+    static let y: CGFloat = 8
 }
 
 func ghosttyViewportRow(
@@ -224,29 +215,76 @@ func ghosttyViewportRow(
     cellHeight: CGFloat
 ) -> Int? {
     guard rows > 0, cellHeight > 0 else { return nil }
-    let contentHeight = CGFloat(rows) * cellHeight
-    let topInset = max(0, (bounds.height - contentHeight) / 2)
-    let distanceFromTop = bounds.height - point.y - topInset
-    guard distanceFromTop >= 0, distanceFromTop < contentHeight else { return nil }
+    let distanceFromTop = bounds.height - point.y - GhosttyTerminalPadding.y
+    guard distanceFromTop >= 0, distanceFromTop < CGFloat(rows) * cellHeight else { return nil }
     return Int(distanceFromTop / cellHeight)
 }
 
+/// The full-width band covering a block's rows. Under the Loopflow prompt a
+/// blank row precedes every header; each edge that borders one moves half a
+/// row down, so the gap is shared evenly by the blocks on either side.
 func ghosttyCommandBlockFrame(
     _ block: GhosttyCommandBlockLayout,
     bounds: CGRect,
-    rows: Int,
-    cellHeight: CGFloat
+    cellHeight: CGFloat,
+    blankRowAbove: Bool = false,
+    blankRowBelow: Bool = false
 ) -> CGRect {
-    let contentHeight = CGFloat(rows) * cellHeight
-    let topInset = max(0, (bounds.height - contentHeight) / 2)
-    let top = bounds.height - topInset - CGFloat(block.startRow) * cellHeight
-    let bottom = bounds.height - topInset - CGFloat(block.endRow + 1) * cellHeight
-    return CGRect(
-        x: 4,
-        y: bottom + 1,
-        width: max(0, bounds.width - 8),
-        height: max(0, top - bottom - 2)
+    let origin = bounds.height - GhosttyTerminalPadding.y
+    let top = origin - (CGFloat(block.startRow) + (blankRowAbove ? 0.5 : 0)) * cellHeight
+    let bottom = origin - (CGFloat(block.endRow + 1) + (blankRowBelow ? 0.5 : 0)) * cellHeight
+    return CGRect(x: 0, y: bottom, width: bounds.width, height: max(0, top - bottom))
+}
+
+/// Where a header row's text is drawn: on its row, at the grid's left edge.
+func ghosttyBlockHeaderFrame(row: Int, bounds: CGRect, cellHeight: CGFloat) -> CGRect {
+    CGRect(
+        x: GhosttyTerminalPadding.x,
+        y: bounds.height - GhosttyTerminalPadding.y - CGFloat(row + 1) * cellHeight,
+        width: max(0, bounds.width - 2 * GhosttyTerminalPadding.x),
+        height: cellHeight
     )
+}
+
+/// Block chrome. A resting block has none; hover is faint; selection is a
+/// cream tint and bar; a reported failure is red, selected or not. Every fill keeps
+/// the dimmest palette color (8) at 3:1 or better, which caps red near 0.18.
+struct GhosttyCommandBlockStyle {
+    let fill: NSColor
+    let accent: NSColor
+
+    init(block: GhosttyCommandBlockLayout, hovered: Bool) {
+        // Red means failed and nothing else. Selection and hover are the
+        // terminal's cream, so a selected failure still reads as both.
+        let cream = NSColor(red: 0xF5 / 255, green: 0xF1 / 255, blue: 0xEA / 255, alpha: 1)
+        let red = NSColor(red: 0xD4 / 255, green: 0x45 / 255, blue: 0x3A / 255, alpha: 1)
+        if block.failed {
+            fill = red.withAlphaComponent(0.14)
+        } else if block.selected {
+            fill = cream.withAlphaComponent(0.06)
+        } else if hovered {
+            fill = cream.withAlphaComponent(0.03)
+        } else {
+            fill = .clear
+        }
+        if block.selected {
+            accent = cream.withAlphaComponent(0.9)
+        } else if block.failed {
+            accent = red.withAlphaComponent(hovered ? 1 : 0.75)
+        } else if hovered {
+            accent = cream.withAlphaComponent(0.3)
+        } else {
+            accent = .clear
+        }
+    }
+}
+
+/// A right-click on the selected block opens the menu for that block. Ghostty
+/// would select the word under the pointer instead, which ends the block
+/// selection; a press inside a text selection it already leaves alone.
+func ghosttyRightClickKeepsBlock(row: Int?, blocks: [GhosttyCommandBlockLayout]) -> Bool {
+    guard let row else { return false }
+    return blocks.contains { $0.selected && $0.contains(row) }
 }
 
 @MainActor
@@ -299,9 +337,14 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var dropHighlight: NSView?
     private let commandBlockOverlay = CALayer()
     private var commandBlocks: [GhosttyCommandBlockLayout] = []
-    private var hoveredCommandBlock: GhosttyCommandBlockLayout?
-    private var selectedCommandBlock: (id: UInt64, text: String)?
-    private var commandBlockMouseDown = false
+    /// Header text by viewport row, read from the terminal on each refresh.
+    private var blockHeaders: [Int: String] = [:]
+    /// Set once this shell has shown a Loopflow header: its prompts start
+    /// with a blank row, which block edges then share.
+    private var promptHasBlankRow = false
+    private var hoveredRow: Int?
+    /// Where the left button went down, until a drag moves away from it.
+    private var clickOrigin: CGPoint?
     private var lastCommandBlockRefresh: CFTimeInterval = 0
     private var focusRequested = false
     private var inputEnabled = true
@@ -388,9 +431,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         displayLink = nil
         commandBlockOverlay.removeFromSuperlayer()
         commandBlocks = []
-        hoveredCommandBlock = nil
-        selectedCommandBlock = nil
-        commandBlockMouseDown = false
+        blockHeaders = [:]
+        hoveredRow = nil
+        clickOrigin = nil
 
         if let trackingArea {
             removeTrackingArea(trackingArea)
@@ -458,88 +501,138 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         }
         let nextBlocks = rawBlocks.prefix(min(count, rawBlocks.count)).map {
             GhosttyCommandBlockLayout(
-                id: $0.id,
                 startRow: Int($0.start_row),
-                endRow: Int($0.end_row)
+                endRow: Int($0.end_row),
+                exitCode: $0.exit_code < 0 ? nil : Int($0.exit_code),
+                selected: $0.selected
             )
         }
-        guard nextBlocks != commandBlocks || commandBlockOverlay.frame != bounds else { return }
+        let nextHeaders = readBlockHeaders(blocks: nextBlocks, size: size)
+        if !nextHeaders.isEmpty { promptHasBlankRow = true }
+        guard nextBlocks != commandBlocks
+            || nextHeaders != blockHeaders
+            || commandBlockOverlay.frame != bounds
+        else { return }
         commandBlocks = nextBlocks
-        if let selectedCommandBlock,
-           !commandBlocks.contains(where: { $0.id == selectedCommandBlock.id }) {
-            self.selectedCommandBlock = nil
-        }
-        if let hoveredCommandBlock,
-           !commandBlocks.contains(where: {
-               $0.startRow == hoveredCommandBlock.startRow
-                   && $0.endRow == hoveredCommandBlock.endRow
-           }) {
-            self.hoveredCommandBlock = nil
-        }
-        renderCommandBlocks(size: size)
+        blockHeaders = nextHeaders
+        renderCommandBlocks()
     }
 
-    private func renderCommandBlocks(size: ghostty_surface_size_s? = nil) {
+    /// A selected block is for copying. Once input goes to the shell the
+    /// highlight would sit stale above the new command, so it ends there:
+    /// on text and on every key, Escape included, except Command chords,
+    /// which are app and Ghostty bindings such as copy and jump to prompt.
+    private func clearBlockSelection() {
+        guard isShellPane, let surface, commandBlocks.contains(where: \.selected) else { return }
+        // No block holds this row, which clears the selection.
+        _ = ghostty_surface_select_command_block(surface, .max)
+        refreshCommandBlocks()
+    }
+
+    private func readBlockHeaders(
+        blocks: [GhosttyCommandBlockLayout],
+        size: ghostty_surface_size_s
+    ) -> [Int: String] {
+        guard let surface else { return [:] }
+        var headers: [Int: String] = [:]
+        for row in GhosttyBlockHeader.candidateRows(blocks: blocks, rows: Int(size.rows)) {
+            func point(_ column: Int) -> ghostty_point_s {
+                ghostty_point_s(
+                    tag: GHOSTTY_POINT_VIEWPORT,
+                    coord: GHOSTTY_POINT_COORD_EXACT,
+                    x: UInt32(column),
+                    y: UInt32(row)
+                )
+            }
+            // Ghostty clamps the end column to the grid.
+            let line = readText {
+                ghostty_surface_read_text(
+                    surface,
+                    ghostty_selection_s(
+                        top_left: point(0),
+                        bottom_right: point(GhosttyBlockHeader.columns - 1),
+                        rectangle: true
+                    ),
+                    $0
+                )
+            }
+            headers[row] = line.flatMap(GhosttyBlockHeader.text(inRow:))
+        }
+        return headers
+    }
+
+    /// The non-empty text a Ghostty read produced.
+    private func readText(_ read: (UnsafeMutablePointer<ghostty_text_s>) -> Bool) -> String? {
+        guard let surface else { return nil }
+        var text = ghostty_text_s()
+        guard read(&text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let bytes = text.text, text.text_len > 0 else { return nil }
+        return String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
+    }
+
+    private func renderCommandBlocks() {
         guard isShellPane, let surface else { return }
-        let surfaceSize = size ?? ghostty_surface_size(surface)
+        let surfaceSize = ghostty_surface_size(surface)
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         let cellHeight = CGFloat(surfaceSize.cell_height_px) / scale
-        let rowCount = Int(surfaceSize.rows)
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         commandBlockOverlay.frame = bounds
-        commandBlockOverlay.sublayers = commandBlocks.map { block in
+        let blockLayers = commandBlocks.map { block in
             let frame = ghosttyCommandBlockFrame(
                 block,
                 bounds: bounds,
-                rows: rowCount,
-                cellHeight: cellHeight
+                cellHeight: cellHeight,
+                // A block scrolled past its header has no blank row in view.
+                blankRowAbove: blockHeaders[block.startRow + 1] != nil,
+                blankRowBelow: promptHasBlankRow
             )
-            let hovered = hoveredCommandBlock.map {
-                $0.startRow == block.startRow && $0.endRow == block.endRow
-            } ?? false
-            let selected = selectedCommandBlock?.id == block.id
+            let style = GhosttyCommandBlockStyle(
+                block: block,
+                hovered: hoveredRow.map(block.contains) ?? false
+            )
 
             let surfaceLayer = CALayer()
             surfaceLayer.frame = frame
-            surfaceLayer.cornerRadius = 3
-            surfaceLayer.backgroundColor = commandBlockColor(
-                selected: selected,
-                hovered: hovered
-            ).cgColor
+            surfaceLayer.backgroundColor = style.fill.cgColor
 
+            // A hairline above each block separates it from the one before.
+            let separator = CALayer()
+            separator.frame = CGRect(x: 0, y: frame.height - 1, width: frame.width, height: 1)
+            separator.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor
+            surfaceLayer.addSublayer(separator)
+
+            // The accent bar sits in the left gutter, clear of the text.
             let accentLayer = CALayer()
-            accentLayer.frame = CGRect(x: 0, y: 0, width: 3, height: frame.height)
+            accentLayer.frame = CGRect(x: 4, y: 2, width: 3, height: max(0, frame.height - 5))
             accentLayer.cornerRadius = 1.5
-            accentLayer.backgroundColor = commandBlockAccentColor(
-                selected: selected,
-                hovered: hovered
-            ).cgColor
+            accentLayer.backgroundColor = style.accent.cgColor
             surfaceLayer.addSublayer(accentLayer)
             return surfaceLayer
         }
+        let font = NSFont.monospacedSystemFont(ofSize: GhosttyBlockHeader.fontSize, weight: .regular)
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        let headerLayers = blockHeaders.map { row, text in
+            let rowFrame = ghosttyBlockHeaderFrame(row: row, bounds: bounds, cellHeight: cellHeight)
+            let textLayer = CATextLayer()
+            textLayer.frame = CGRect(
+                x: rowFrame.minX,
+                y: rowFrame.midY - lineHeight / 2,
+                width: rowFrame.width,
+                height: lineHeight
+            )
+            textLayer.string = text
+            textLayer.font = font
+            textLayer.fontSize = font.pointSize
+            textLayer.foregroundColor = GhosttyBlockHeader.color.cgColor
+            textLayer.truncationMode = .start
+            textLayer.contentsScale = scale
+            return textLayer
+        }
+        commandBlockOverlay.sublayers = blockLayers + headerLayers
         CATransaction.commit()
-    }
-
-    private func commandBlockColor(selected: Bool, hovered: Bool) -> NSColor {
-        if selected {
-            return NSColor(red: 0x72 / 255, green: 0x2F / 255, blue: 0x37 / 255, alpha: 0.28)
-        }
-        if hovered {
-            return NSColor(red: 0x72 / 255, green: 0x2F / 255, blue: 0x37 / 255, alpha: 0.16)
-        }
-        return NSColor.white.withAlphaComponent(0.045)
-    }
-
-    private func commandBlockAccentColor(selected: Bool, hovered: Bool) -> NSColor {
-        if selected {
-            return NSColor(red: 0xB8 / 255, green: 0x62 / 255, blue: 0x6C / 255, alpha: 0.95)
-        }
-        if hovered {
-            return NSColor(red: 0x8B / 255, green: 0x3D / 255, blue: 0x47 / 255, alpha: 0.8)
-        }
-        return NSColor.white.withAlphaComponent(0.16)
     }
 
     private func viewportRow(at point: CGPoint) -> Int? {
@@ -641,6 +734,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             }
         }
 
+        if !mods.contains(.command) { clearBlockSelection() }
+
         // Let other command shortcuts through to the terminal
         let key = translateKey(event)
         return ghostty_surface_key(surface, key)
@@ -654,6 +749,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if keyToDraw == nil {
             keyToDraw = Perf.signposter.beginInterval(Perf.terminalKeyToDraw, id: Perf.signposter.makeSignpostID())
         }
+        if !event.modifierFlags.contains(.command) { clearBlockSelection() }
 
         if ghosttyShouldHandleKeyDownDirectly(
             characters: event.characters,
@@ -817,35 +913,20 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     // MARK: - Mouse Input
 
+    // The terminal owns both selections. Every pointer event reaches Ghostty,
+    // so a drag selects text inside a block; a plain click that selected no
+    // text selects the block under it, or clears the block outside one.
     override func mouseDown(with event: NSEvent) {
         focusForPointerInput()
         guard let surface else { return }
         let point = convert(event.locationInWindow, from: nil)
-        let selectionModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
-        if isShellPane,
-           event.modifierFlags.intersection(selectionModifiers).isEmpty,
-           let row = viewportRow(at: point),
-           let block = ghosttyCommandBlock(atViewportRow: row, in: commandBlocks),
-           let text = readCommandBlock(surface: surface, viewportRow: row) {
-            commandBlockMouseDown = true
-            selectedCommandBlock = (id: block.id, text: text)
-            renderCommandBlocks()
-            return
-        }
-        clearCommandBlockSelection()
-        _ = ghostty_surface_mouse_button(
-            surface,
-            GHOSTTY_MOUSE_PRESS,
-            GHOSTTY_MOUSE_LEFT,
-            translateMods(event.modifierFlags)
-        )
+        let mods = translateMods(event.modifierFlags)
+        clickOrigin = event.clickCount == 1 ? point : nil
+        ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, mods)
+        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, mods)
     }
 
     override func mouseUp(with event: NSEvent) {
-        if commandBlockMouseDown {
-            commandBlockMouseDown = false
-            return
-        }
         guard let surface else { return }
         _ = ghostty_surface_mouse_button(
             surface,
@@ -853,23 +934,39 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             GHOSTTY_MOUSE_LEFT,
             translateMods(event.modifierFlags)
         )
+        let selectionModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+        guard isShellPane,
+              clickOrigin != nil,
+              event.modifierFlags.intersection(selectionModifiers).isEmpty,
+              !ghostty_surface_has_selection(surface)
+        else { return }
+        clickOrigin = nil
+        // A row outside the grid selects nothing, which clears the block.
+        let row = viewportRow(at: convert(event.locationInWindow, from: nil))
+        _ = ghostty_surface_select_command_block(surface, row.map(UInt16.init) ?? .max)
+        refreshCommandBlocks()
     }
 
     override func rightMouseDown(with event: NSEvent) {
         focusForPointerInput()
         guard let surface else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard !ghosttyRightClickKeepsBlock(row: viewportRow(at: point), blocks: commandBlocks) else {
+            showContextMenu(at: point)
+            return
+        }
 
-        // Send to terminal first
-        let consumed = ghostty_surface_mouse_button(
-            surface,
-            GHOSTTY_MOUSE_PRESS,
-            GHOSTTY_MOUSE_RIGHT,
-            translateMods(event.modifierFlags)
-        )
+        // Send to terminal first, at the press's own position: Ghostty keeps
+        // a text selection the press lands in and otherwise selects the word.
+        let mods = translateMods(event.modifierFlags)
+        ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, mods)
+        let consumed = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, mods)
+        // A word selected by the press ended any block selection.
+        refreshCommandBlocks()
 
         // If terminal didn't consume it, show context menu
         if !consumed {
-            showContextMenu(at: event.locationInWindow)
+            showContextMenu(at: point)
         }
     }
 
@@ -887,11 +984,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         guard let surface else { return }
         let point = convert(event.locationInWindow, from: nil)
         if isShellPane {
-            let nextHover = viewportRow(at: point).flatMap {
-                ghosttyCommandBlock(atViewportRow: $0, in: commandBlocks)
-            }
-            if nextHover != hoveredCommandBlock {
-                hoveredCommandBlock = nextHover
+            let row = viewportRow(at: point)
+            if row != hoveredRow {
+                hoveredRow = row
                 renderCommandBlocks()
             }
         }
@@ -900,13 +995,18 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        if commandBlockMouseDown { return }
+        let point = convert(event.locationInWindow, from: nil)
+        if let origin = clickOrigin, hypot(point.x - origin.x, point.y - origin.y) > 3 {
+            clickOrigin = nil
+        }
         mouseMoved(with: event)
+        // A drag that started a text selection ended the block selection.
+        if commandBlocks.contains(where: \.selected) { refreshCommandBlocks() }
     }
 
     override func mouseExited(with event: NSEvent) {
-        if hoveredCommandBlock != nil {
-            hoveredCommandBlock = nil
+        if hoveredRow != nil {
+            hoveredRow = nil
             renderCommandBlocks()
         }
         guard let surface else { return }
@@ -949,8 +1049,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         clearItem.target = self
         menu.addItem(clearItem)
 
-        let screenPoint = convert(point, to: nil)
-        menu.popUp(positioning: nil, at: screenPoint, in: self)
+        menu.popUp(positioning: nil, at: point, in: self)
     }
 
     @objc private func copyAction() {
@@ -972,43 +1071,23 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     // MARK: - Copy/Paste
 
+    /// Copies whichever selection the terminal holds, read at copy time.
     private func copySelection() -> Bool {
-        if let selectedCommandBlock {
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            return pasteboard.setString(selectedCommandBlock.text, forType: .string)
-        }
-        guard let surface else { return false }
-        var text = ghostty_text_s()
-        guard ghostty_surface_read_selection(surface, &text) else { return false }
-        defer { ghostty_surface_free_text(surface, &text) }
-        guard let bytes = text.text, text.text_len > 0 else { return false }
-
+        guard let surface,
+              let selection = readText({
+                  ghostty_surface_has_selection(surface)
+                      ? ghostty_surface_read_selection(surface, $0)
+                      : ghostty_surface_read_selected_command_block(surface, $0)
+              })
+        else { return false }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        let selection = String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
         return pasteboard.setString(selection, forType: .string)
     }
 
     private func focusForPointerInput() {
         onFocus()
         window?.makeFirstResponder(self)
-    }
-
-    private func clearCommandBlockSelection() {
-        guard selectedCommandBlock != nil else { return }
-        selectedCommandBlock = nil
-        renderCommandBlocks()
-    }
-
-    private func readCommandBlock(surface: ghostty_surface_t, viewportRow: Int) -> String? {
-        var text = ghostty_text_s()
-        guard ghostty_surface_read_command_block(surface, UInt16(viewportRow), &text) else {
-            return nil
-        }
-        defer { ghostty_surface_free_text(surface, &text) }
-        guard let bytes = text.text, text.text_len > 0 else { return nil }
-        return String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
     }
 
     private func pasteFromClipboard() -> Bool {
@@ -1079,6 +1158,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func insertTerminalText(_ text: String) -> Bool {
         guard let surface else { return false }
+        clearBlockSelection()
         text.withCString { ptr in
             ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
         }
@@ -1239,6 +1319,58 @@ struct GhosttyTerminalView: View {
 
 #endif
 
+// Block geometry and the header format stay outside the Ghostty build: the
+// shell bootstrap below names the header marker in every configuration.
+
+/// The directory line above a command. The Loopflow prompt prints it as
+/// concealed terminal text, so it scrolls, reflows and survives with its rows;
+/// the overlay reads it back and draws it smaller and dimmer than the command.
+enum GhosttyBlockHeader {
+    /// Starts a header row. Nothing a person types begins a prompt row with it.
+    static let marker = "\u{B6} "
+    /// The prompt truncates the directory to this many characters.
+    static let maxLength = 60
+    /// Columns read from each candidate row.
+    static let columns = marker.count + maxLength
+
+    /// Smaller than the terminal's 13pt body.
+    static let fontSize: CGFloat = 11
+    static let color = NSColor(TerminalPalette.dim)
+
+    /// The header a terminal row holds, or `nil` for any other row.
+    static func text(inRow row: String) -> String? {
+        guard row.hasPrefix(marker) else { return nil }
+        let text = row.dropFirst(marker.count).trimmingCharacters(in: .whitespaces)
+        return text.isEmpty ? nil : text
+    }
+
+    /// Viewport rows that can hold a header: a block's first two rows (its
+    /// first row when the blank row above scrolled away) and every row outside
+    /// a completed block, where the live prompt and empty prompts sit.
+    static func candidateRows(blocks: [GhosttyCommandBlockLayout], rows: Int) -> [Int] {
+        (0..<rows).filter { row in
+            guard let block = blocks.first(where: { $0.contains(row) }) else { return true }
+            return row <= block.startRow + 1
+        }
+    }
+}
+
+/// A completed shell command as Ghostty reports it: viewport rows, the exit
+/// status the shell gave, and whether it is the terminal's selected block.
+struct GhosttyCommandBlockLayout: Equatable {
+    let startRow: Int
+    let endRow: Int
+    /// `nil` when the shell reported no status; never drawn as a failure.
+    let exitCode: Int?
+    let selected: Bool
+
+    var failed: Bool { (exitCode ?? 0) > 0 }
+
+    func contains(_ row: Int) -> Bool {
+        startRow...endRow ~= row
+    }
+}
+
 let ghosttyDropTypes: [NSPasteboard.PasteboardType] = [
     .fileURL, .URL, .tiff, .png, .string,
 ]
@@ -1264,6 +1396,56 @@ func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? 
     return ["env", envPrefix, command].joined(separator: " ")
 }
 
+/// zsh reads `ZDOTDIR/.zshenv` first. Loopflow's gives a shell still on the
+/// macOS default prompt a blank row, a header row holding the directory, and a
+/// command line, leaves every other prompt alone, then hands over to Ghostty's
+/// integration, which restores the user's own ZDOTDIR.
+///
+/// The header row is concealed text behind `GhosttyBlockHeader.marker`: the
+/// terminal keeps it as the directory at submission, and the overlay draws it
+/// in its own size and color.
+enum LoopflowZshBootstrap {
+    static let macOSDefaultPrompt = "%n@%m %1~ %# "
+
+    static let zshenv = """
+    if [[ -o interactive ]]; then
+        # Runs once, after the user's rc files have had their say.
+        _loopflow_prompt() {
+            precmd_functions=(${precmd_functions:#_loopflow_prompt})
+            [[ $PROMPT == '\(macOSDefaultPrompt)' ]] || builtin return 0
+            PROMPT=$'\\n%{\\e[8m%}\(GhosttyBlockHeader.marker)%\(GhosttyBlockHeader.maxLength)<\u{2026}<%~%<<%{\\e[28m%}\\n%F{\(accent)}\u{276F}%f '
+            # The command is bold; zsh ends the highlight before output starts.
+            zle_highlight=(${zle_highlight:#default:*} default:bold)
+        }
+        builtin typeset -ga precmd_functions zle_highlight
+        precmd_functions+=(_loopflow_prompt)
+    fi
+    builtin source -- "$GHOSTTY_RESOURCES_DIR/shell-integration/zsh/.zshenv"
+
+    """
+
+    private static let accent = TerminalPalette.css(TerminalPalette.accentHex)
+
+    /// Writes the bootstrap and returns its directory. Rewritten per shell:
+    /// the system may clear temporary files while the app stays open, and a
+    /// ZDOTDIR without a `.zshenv` would skip the user's rc files.
+    static func install() -> String? {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-zsh", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try zshenv.write(
+                to: directory.appendingPathComponent(".zshenv"),
+                atomically: true,
+                encoding: .utf8
+            )
+            return directory.path
+        } catch {
+            return nil
+        }
+    }
+}
+
 /// Keep a real shell after the initial conversation exits or hands off to an
 /// app. The PTY marker lets successive manual lf launches find this terminal.
 func buildWorkspaceShellCommand(id: String, argv: [String], env: [String: String]) -> String {
@@ -1278,7 +1460,7 @@ func buildWorkspaceShellCommand(id: String, argv: [String], env: [String: String
         case \(shellEscape(URL(fileURLWithPath: shell).lastPathComponent)) in
             zsh)
                 if [ "${ZDOTDIR+x}" = x ]; then export GHOSTTY_ZSH_ZDOTDIR="$ZDOTDIR"; fi
-                export ZDOTDIR="$GHOSTTY_RESOURCES_DIR/shell-integration/zsh"
+                export ZDOTDIR=\(LoopflowZshBootstrap.install().map(shellEscape) ?? #""$GHOSTTY_RESOURCES_DIR/shell-integration/zsh""#)
                 ;;
             bash)
                 export GHOSTTY_BASH_ENV="${ENV-}"

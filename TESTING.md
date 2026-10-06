@@ -355,7 +355,8 @@ actor. A newer local compiler's pass does not establish older-toolchain support.
 SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
 Keep tests that reference Ghostty-only types or helpers inside
 `#if canImport(GhosttyKit)`. Keep file-local helpers inside the enclosing
-whole-file platform gate. When changing terminal code or its tests, gate both
+whole-file platform gate. App code outside `#if GHOSTTY_ENABLED` compiles in
+the fallback too: a type it names must also live outside that block. When changing terminal code or its tests, gate both
 build configurations: run the headless Swift suite and
 `uv run python scripts/test.py --loopflow`. A SwiftPM pass alone does not prove
 the Xcode test target compiles.
@@ -1026,6 +1027,9 @@ For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
 Verify the repair in that same environment. A pass under a developer's installed
 Loopflow can hide the CI failure.
+Include direct provider-harness startup tests in this check: even an expected
+spawn failure first resolves the conversation's `lf`. Pin a fixture executable
+under the environment lock and restore the pin afterward.
 
 Release repair checks must cover completion before inherited checkout locks close.
 Use the public release path with a delayed repair launcher; a terminal Exec receipt

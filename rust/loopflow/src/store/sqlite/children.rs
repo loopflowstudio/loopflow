@@ -55,6 +55,7 @@ impl SqliteStore {
     // and lifecycle events share one sqlite transaction boundary.
 
     pub fn insert_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
+        let _admission = self.lock_checkout(&task.worktree)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         insert_initial_task(&transaction, task, pr)?;
@@ -63,6 +64,7 @@ impl SqliteStore {
     }
 
     pub fn insert_task_with_worktree(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
+        let _admission = self.lock_checkout(&task.worktree)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         insert_initial_task(&transaction, task, pr)?;

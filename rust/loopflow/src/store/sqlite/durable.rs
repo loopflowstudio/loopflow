@@ -1303,6 +1303,76 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn unrelated_checkout_exclusion_does_not_block_task_registration() {
+        let (dir, store, existing) = store_with_task();
+        let mut task = store.task(&existing).unwrap().unwrap();
+        let mut pr = store.task_prs(&existing).unwrap().remove(0);
+        task.id = TaskId::new();
+        task.plan.id = LinearIssueId::new("independent-issue").unwrap();
+        task.plan.identifier = "PROBE-2".into();
+        task.worktree = dir.path().join("independent-checkout");
+        task.workspace_slug = "independent-checkout".into();
+        pr.id = TaskPrId::new();
+        pr.task_id = task.id.clone();
+        pr.slug = task.workspace_slug.clone();
+        pr.branch = task.workspace_slug.clone();
+
+        let _unrelated = store
+            .lock_checkout(&dir.path().join("unrelated-checkout"))
+            .unwrap();
+        store.insert_task_with_worktree(&task, &pr).unwrap();
+        assert_eq!(
+            store.task(&task.id).unwrap().unwrap().worktree,
+            task.worktree
+        );
+        assert_eq!(store.task_prs(&task.id).unwrap(), vec![pr]);
+    }
+
+    #[test]
+    fn checkout_exclusion_preserves_registration_and_retry() {
+        for initializing in [false, true] {
+            let (dir, store, existing) = store_with_task();
+            let mut task = store.task(&existing).unwrap().unwrap();
+            let mut pr = store.task_prs(&existing).unwrap().remove(0);
+            task.id = TaskId::new();
+            task.plan.id = LinearIssueId::new("later-issue").unwrap();
+            task.plan.identifier = "PROBE-2".into();
+            task.worktree = dir.path().join("missing-checkout");
+            task.workspace_slug = "later-checkout".into();
+            pr.id = TaskPrId::new();
+            pr.task_id = task.id.clone();
+            pr.slug = task.workspace_slug.clone();
+            pr.branch = task.workspace_slug.clone();
+
+            let mut conversation = unpublished_conversation(None, None, 1);
+            conversation.cwd = task.worktree.join("src");
+            conversation.work_source = None;
+            let session = store.create_session(conversation, None, None).unwrap();
+            let exclusion = store.lock_checkout(&task.worktree).unwrap();
+            let register = || {
+                if initializing {
+                    store.insert_task_with_worktree(&task, &pr)
+                } else {
+                    store.insert_task(&task, &pr)
+                }
+            };
+            assert!(register().is_err());
+            assert!(store.task(&task.id).unwrap().is_none());
+            assert!(store.task_prs(&task.id).unwrap().is_empty());
+            assert!(store.session_task_ids(&session.id).unwrap().is_empty());
+            assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+            drop(exclusion);
+            register().unwrap();
+            assert_eq!(
+                store.session_task_ids(&session.id).unwrap(),
+                vec![task.id.clone()]
+            );
+            assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+            assert!(!store.task_started(&task.id).unwrap());
+        }
+    }
+
+    #[test]
     fn task_registration_retains_earlier_checkout_conversations_without_binding() {
         let (dir, store, existing) = store_with_task();
         let mut task = store.task(&existing).unwrap().unwrap();

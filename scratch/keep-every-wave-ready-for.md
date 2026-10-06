@@ -139,16 +139,29 @@ and shares Session admission without changing its boundary. The recorded build,
 13 focused tests and Clippy cover that checkpoint; no behavioral suite was rerun
 for this reconciliation.
 
-Step 2 remains next. `lock_task_checkouts` reads the Task population before
-acquiring path locks; neither registration API participates in population
-exclusion. Both call `insert_initial_task`, which validates supplied Project
-ownership and Started count but does not select accepted issue facts. Rotation
-holds Wave guards through provider work, without checkout exclusion. These are
-source observations, not executed race proofs. Stabilizing population and
-revalidating accepted registration must precede judging rotation/start safety;
-replacing the Started-count selector itself remains coupled to shared binding
-in step 3. Review/worker admission and CI repair require operation-entry coverage;
-CI repair already holds its Task checkout at the outer boundary.
+Step 2 remains next. Both registration APIs now acquire existing checkout
+admission before SQLite and retain it through commit. The focused regression
+covers exclusion, unchanged earlier Session bytes and membership, and successful
+retry without setting Started. Registration still uses supplied planning and the
+Started-count selector; accepted issue facts and population stability remain open.
+Rotation holds Wave guards only. This is not rotation/start safety.
+
+A Home-wide shared population guard retained by checkout admissions, with an
+exclusive guard for registration, was tried and removed on October 5.
+`unrelated_checkout_exclusion_does_not_block_task_registration` failed after
+2.43 seconds with `checkout admission unavailable`. One unrelated checkout guard
+prevented a new Task; rotation retaining that guard across provider work would
+extend the failure across Waves. The retained test prevents this regression.
+No Home-wide guard ships in this tree. The narrower checkout repair remains.
+
+Population exclusion needs a shorter or narrower owner than the checkout guard.
+A revised implementation must coordinate registration with its Wave's planning
+boundary and revalidate admission's discovered roots before writing; a taskless
+Session below a not-yet-registered, missing root still exposes the lookup race.
+This is a proposed mechanism, not implemented safety. Keep acquisition outside
+SQLite and avoid reacquiring a caller-held Wave guard. Cancellation-safe queued
+workers must retain every guard needed by their writes. The old name selector
+and created-successor recovery remain coupled to shared binding in steps 3–5.
 
 The branch is not releasable: shared binding, exact-ID ensure, transition recovery,
 KR-first rotation, backlog preservation, Desktop activation and configured
@@ -301,7 +314,7 @@ executed provider-rotation proof:
 - **Registration changes membership without a Session write.**
   `ops/task.rs::create_prepared_task` resolves a Project before existing-issue
   registration via `Store::create_task_with_worktree`, holding a worktree lease
-  but no Wave planning lock. A provider-started issue can move remotely during
+  and checkout admission, but no Wave planning lock. A provider-started issue can move remotely during
   rotation, then register locally against the predecessor after checkout locks
   were collected. Its earlier taskless conversations immediately become Task
   work. Unknown unregistered backlog would block rotation; this example relies
@@ -343,7 +356,8 @@ population, checkout admission locks in canonical-path order, then SQLite writes
 Stabilize registration and membership-changing relocation through classification,
 transfer and the durable configuration switch. Resolve and revalidate the selected
 Project within that boundary; callers already holding the Wave lock must not
-reacquire it. The exact population-fence implementation remains open.
+reacquire it. The Home-wide guard counterexample above rules out retaining a
+population lock in every checkout guard; its replacement remains open.
 
 Execution starts acquire affected checkout locks before SQLite and never wait
 for Wave planning locks. Cover direct Session creation, review reservation,
@@ -849,17 +863,10 @@ under this heading. Shared `associate_project` rollback, independent entity ages
 `run_planning_write` guard lifetime, stable-ID lock order and exact Team readbacks
 remain required; full-refresh freshness differs from partial acceptance.
 
-October 5 compression retains one Task insertion and placement inheritance,
-full reteam readbacks, and the Store/acquisition guard through refresh acceptance.
-Held-lock refresh now takes the registered Wave directly; the duplicate
-`store_pm_snapshot` wrapper and its second registration are deleted. Its rejection
-proof uses the surviving store ingestion API without an unused provider client.
-Session creation and input replacement share `lock_session_checkouts`, including
-Flow workspace and bound/inherited Task roots. CI repair retains its separate outer
-admission and never reacquires inside reservation. Checkout lock storage resolves
-before sorted acquisition. Prior detail remains at
-`83ba62f56de7d4f911ba23772ee074ef345350f8:scratch/keep-every-wave-ready-for.md`.
-Step 2 stays open; these reductions establish no rotation exclusion or readiness.
+Compression details remain at `b06e17d3c:scratch/keep-every-wave-ready-for.md`:
+one Task insertion, registered-Wave refresh identity, cancellation-safe acquisition
+and shared Session admission remain implemented. CI repair owns outer admission
+without reacquiring it inside reservation. These prove no rotation exclusion.
 
 The selection deletion targets require configured identity and exact-ID transitions;
 the old name selector remains unchanged. Rotation still holds only Wave locks.
@@ -887,11 +894,10 @@ boundary with #1451's pending-version behavior; no release-tree gate ran here.
 
 ### Retained acquisition evidence
 
-Cancellation-safe SQLite ownership, cold-detail re-reading, delayed-absence
-invalidation and full reteam readback proofs remain at
-`9bfc5077d:scratch/keep-every-wave-ready-for.md` under
-“Acquisition ownership through cancellation”. Those repairs remain implemented;
-they establish neither rotation/start exclusion nor installed readiness. The new
-input-replacement regression failed before the admission fix and passes afterward.
+Cancellation-safe acquisition, cold-detail ownership, reteam and the earlier
+input-replacement checks remain at
+`b06e17d3c:scratch/keep-every-wave-ready-for.md`. They establish neither
+rotation/start exclusion nor installed readiness. Release's entry-point recovery
+lesson still applies; its publication/installation evidence proves no readiness.
 
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b checkout_exclusion input_replacement_retains_workspace_and_task_membership cancelled_detail_acceptance cancelled_snapshot_acceptance rejected_project_snapshot repository_team_reteam --test-threads=4` passed (13); `cargo fmt --all`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `git diff --check` and `lf context --skill compress --json` passed; CI repair operation-entry, rotation/start and configured acceptance remain with implementation/gate. Realign: `git diff --check` and `lf context --skill realign --json` passed; behavioral checks reused from `972a253559`.
+Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b checkout_exclusion task_registration_retains_earlier_checkout_conversations_without_binding input_replacement_retains_workspace_and_task_membership session_binding_retains_a_task_in_completed_project_history --test-threads=4` passed (9); `cargo fmt --all`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed. Experimental Home-wide fencing failed unrelated registration and was removed; population/accepted-fact selection, operation-entry rotation and configured acceptance remain unfinished.

@@ -323,22 +323,22 @@ This explicit ID supplies bootstrap selection, not a candidate heuristic.
 The active-Project adoption test proves no Backlog activation or installed repair.
 
 Preservation includes unbound checkout Sessions and Flow associations, excluding
-primary scopes. Registration still inserts supplied planning under a Started-count
-selector without rereading accepted issue ownership. Checkout admission discovers
-Task roots before locking; both registration APIs remain outside population
-exclusion, and rotation holds only Wave guards. Stabilize population and revalidate
-accepted registration before claiming rotation/start safety. Historical binding
-stays allowed; pending receipts cannot indefinitely deny starts.
+primary scopes. Both registration APIs now acquire checkout admission before
+SQLite; exclusion/retry preserves earlier Session bytes and leaves Started unset.
+They still insert supplied planning under the Started-count selector. Discovery
+still precedes locking; accepted issue selection and population stability remain
+unfinished, and rotation holds only Wave guards. Historical binding stays allowed.
 
-Compression at `972a253559` retains registered Wave identity and acquisition
-ownership through refresh, and shares Session creation/input-replacement admission.
-CI repair holds its explicit Task checkout at operation entry, without reacquiring
-inside reservation. The recorded build, 13 focused checks and Clippy pass are
-local evidence; operation-entry CI repair, both rotation/start orderings and
-failed-reset recovery remain unproved. Release's child memory reinforces testing
-recovery through the actual entry point; publication and installation prove no
-Project readiness. Earlier admission evidence remains at
-`9bfc5077d:wave/infrastructure/MEMORY.md`.
+A Home-wide population lock experiment failed the unrelated-checkout registration
+regression on October 5: one checkout guard denied registration elsewhere. It was
+removed. Population stability must not extend checkout exclusion across the Home;
+queued SQLite writes must retain their necessary guards through cancellation.
+The plan owns the revised mechanism and remaining operation-entry proofs.
+
+`b06e17d3c:wave/infrastructure/MEMORY.md` retains the prior build/13-test/Clippy
+record and acquisition details. CI repair, both rotation/start orderings and
+failed-reset recovery remain unproved. Release's entry-point recovery lesson
+applies; publication and installation establish no Project readiness.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 

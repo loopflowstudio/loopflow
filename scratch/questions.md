@@ -9,7 +9,9 @@ status and evidence; earlier review notes remain at
   acquisition guards through SQLite commit; cold detail re-reads ownership under
   its guard, and reteam uses full readbacks and authorized Team reconciliation.
   The prior iteration’s reteam repair request is satisfied locally;
-  registration/population fencing is next. Configuration-switch interleavings
+  registration now respects checkout exclusion; accepted facts and population
+  stability remain next. A Home-wide population guard was rejected after it
+  blocked unrelated registration; the design records the executed counterexample. Configuration-switch interleavings
   depend on the later binding/transition replacement. Created-successor recovery stays with
   binding/transition replacement; name selection cannot recover preserved names.
 - Chapter metadata representation and projection. Cross-Wave historical inspection

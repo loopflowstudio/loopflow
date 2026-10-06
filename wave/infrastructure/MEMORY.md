@@ -45,20 +45,11 @@ exact publication evidence, and surface any unresolved blocker and next action
 without requiring Jack to rediscover the gap. Keep progress updates in the
 ongoing conversation while recovery is active.
 
-Release's October 5 memory records v0.13.3 publication, CLI/app installation
-and manual public digest/version verification, including #1441's retired-UI-receipt
-removal and `lf list --json` smoke repair. The configured jobs were reinstalled
-with unchanged 09:00/10:00 schedules through the installation gate; their installed
-owner remains Infrastructure. Manual runner recovery and readback supply neither
-a scheduled verified receipt nor LOO-285's two unattended settlements. Preserve
-the retained publisher checkout lease for supported recovery; exact evidence
-belongs in [Release memory](release/MEMORY.md).
-
-Jack Heart's same-version recovery direction is now source at #1451 (`c3e86c8ad`):
-correct an unpublished preparation without consuming another version. Earlier
-published artifacts and migration bytes stay immutable; corrected cuts append a
-batch within the pending version. Tagged invalid candidates remain explicit
-blockers. This source change neither backfills v0.13.1 nor proves installation.
+Release memory records v0.13.3 publication and installation, including #1441's
+retired UI-receipt removal and CLI smoke repair. Manual public read-back matched
+assets, DMGs, website and crate identity; it establishes neither a scheduled
+verified receipt nor two unattended settlements. Exact recovery evidence belongs
+in [Release memory](release/MEMORY.md).
 
 ## Capture cutover (LOO-370, reconciled 2026-10-05)
 
@@ -182,19 +173,26 @@ reacquire after dropping the parent's shared handle. Parent death and elapsed
 wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
-`a60ac0281` fixes retry timing; `02d6b3c00` atomically covers materialized dues
-across same-Home segments. Original ownership/provenance survives; firing segments
-own telemetry/retry, and Home changes break continuation. Synthetic tests cover
-interruption, late writers and recovery without republishing. `95643bd50` adds
-calendar/closure overlap continuation and retains old physical receipts. Save
-physical failure before accounting; an accounting error must not erase lock loss.
-Repeated overlap adds no settlement. Local interruption proofs at `d60d254ef` show
-public reconciliation retains target/checkout locks after controller death;
-retry preserves the failed cron receipt, candidate, coverage and caller bytes
-without republishing. Cron exit cannot establish orphaned verifier lock release.
-Candidate-ref/workflow lost acknowledgements, verifier materialization and
-post-arm Task compensation have focused synthetic proofs. Gate, Jack Heart's
-review and configured settlements remain open.
+Same-Home coverage, overlap, retry timing and interruption proofs remain at
+`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`
+and its referenced commits `a60ac0281`, `02d6b3c00`, `95643bd50`, `d60d254ef`.
+They retain original ownership, physical failure, frozen coverage, candidate,
+caller bytes and child-held locks without republishing or double settlement.
+Synthetic proofs do not establish configured automatic settlements.
+
+PR #1457 merged installer isolation: candidate preflight and public installer
+smoke use disposable Linux containers, checking selected CLI bytes instead of
+the entry gate. Native macOS smoke stays separate. Prior simulated checks prove
+neither container/public acceptance nor automatic settlement.
+
+October 6 scheduled receipt cron_a4b8b11b2a534bf99d183e677f2a6871 failed after
+recovery cron_5d930c31c7ae4a118f6b93774496991c passed continuity but the scorecard
+emitted retired product/task-loop-trust. Accepted chapter commit 42451654e removed
+that contract; remove its hardcoded producer output, preserving strict metric
+validation and lifecycle rows. Installed CLI with the repaired checkout reports
+35 rows; twelve focused tests pass. Original failed receipts and repair ownership
+remain unchanged. Jack Heart authorized publication; the operator owns subsequent
+release recovery after LOO-382. This manual proof supplies no automatic settlement.
 
 Release's September 28 incident proves entry points need operation-level recovery:
 an agent reported failure successfully, producing a misleading green cron receipt.
@@ -202,14 +200,20 @@ Jack's later steer records v0.12.24 publication/install and skill-to-Flow activa
 at unchanged 10:00. That supersedes the child's dated pending-activation evidence,
 without proving this accounting branch is installed or either qualifying outcome.
 Release-specific detail remains in [release memory](release/MEMORY.md).
+October 5 child evidence records repaired installed jobs using the machine gate
+at unchanged 09:00/10:00 schedules. Ownership remains Infrastructure; the child
+is not registered. History exposed three unresolved opportunities with unknown
+timezone provenance, zero executions and no qualifying pair. Schedule repair
+cannot backfill that evidence or count as an unattended settlement.
 
 All 36 telemetry failures, including the original 35, remain dated counterevidence
 from September 24. The missing `agent_turns` diagnosis is historical: integrated
 scorecard source consumes SessionHistory. The isolated doctor/scorecard Flow
 regression proves Recovery cannot replace natural Scheduled evidence. No installed
 pass or accepted Intelligence handoff is established; reproduce current failure
-before commissioning duplicate analytics repair. Required UI/public proof and
-actual automatic settlement observations remain outstanding. The working plan
+before commissioning duplicate analytics repair. Required headless Desktop/public proof and
+actual automatic settlement observations remain outstanding. LOO-357 retired
+the UI-host prerequisite; PR #1441 removed its scheduled validator requirement. The working plan
 owns remaining implementation; no production release, install, schedule change,
 Home transfer or review completion is authorized by local reconciliation.
 
@@ -251,23 +255,27 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Installed worker recovery (curated 2026-10-05)
+## Installed worker recovery (2026-10-02 PDT; curated October 5)
 
-Jack Heart authorized the October 2 recovery and published installation of
-v0.12.32. Exact PR, workflow, installer and identity-preservation evidence remains
-at `596572efc19f305df8abf5ed0bdacdc44468fe1c:wave/infrastructure/MEMORY.md`
-under “Installed worker recovery”. LOO-367 resumed its saved Flow; historical
-unowned Execs no longer blocked it, while current ownership still did. LOO-285's
-resumption supplied neither cross-segment acceptance nor automatic settlements.
-October 4's operator acceptance above supersedes LOO-295's pending proof and
-LOO-292's review wait.
+Jack Heart authorized recovery and published installation of v0.12.32 after
+PR #1415 merged. Exact release/workflow identities, preserved-file checks and
+recovery observations remain at
+`8d8f68dc1e8cae33fd3b05a28a50b864d4d503ab:wave/infrastructure/MEMORY.md`
+under this heading. The published installer preserved the Home with no migration;
+LOO-367 resumed its saved Flow. LOO-285's focused CI-repair ownership checks and
+operator-triggered release established neither automatic settlements nor completion.
 
-The retained `invalid stored landing placement: home` defect degraded repository
-reconciliation and interrupted release settlement. Supported re-entry recognized
-an existing merge and completed the same release without deleting records or
-worktrees. LOO-373 owns repair; Release memory retains its later recovery evidence.
-Collect related recovery defects into one repair batch with installed-state
-preflight; the operator's adjustment was not a new release policy approved by Jack.
+LOO-295 reconciled merged PR #1283 while preserving all eight unrelated files;
+its later October 4 acceptance above supersedes the then-open review obligation.
+LOO-292's later closure likewise supersedes its pending demo. The retained
+`invalid stored landing placement: home` defect interrupted reconciliation and
+release settlement; supported re-entry completed the same release without deleting
+records or worktrees. LOO-373 owns repair and exact evidence in Release memory.
+
+Jack questioned serial releases. The operator committed to batching demonstrated
+recovery repairs with installed-state preflight; this was not Jack's approval of
+a new release policy. Source merges, installation and configured acceptance remain
+separate facts.
 
 ## Optional chapters and Task workflows (2026-10-02)
 
@@ -417,39 +425,26 @@ configured checks are in [the pre-curation memory](https://github.com/loopflowst
 ### Legacy retirement completed (2026-10-04)
 
 Jack Heart explicitly authorized clearing all legacy stores and their process
-owners. Fresh `lsof` identified 15 owners of the four retained installed stores.
-Current `lf monitor prune` had no registered orphan targets; the old `ask cancel`
-command failed reading the current installation manifest (`work_dispositions`
-missing). Exact executable/start-time checks and process ancestry bounded the
-shutdown to those owners, their matching legacy wrappers and descendants.
-All 37 processes exited after SIGTERM; no SIGKILL was required. The current
-Session and main-Home processes were outside that set.
-
-The four stores moved intact to `~/.lf-retired/20261004T161815Z/installed/`.
-The unused root database and two demo databases moved with the remaining legacy
-root to `remaining-home/` in the same archive. Its `retirement.json` records
-process identities, signals and source/destination paths. The seven earlier
-snapshots remain at `~/.lf-retired/20261002T191224Z/worktrees/`. Archives preserve
-history and consume disk space; retirement does not mean erasure.
-
-Verification: all 37 recorded process identities exited, legacy handles reached
-zero, `~/.lf-dev` no longer exists, and installed `lf home id` still returns
-`home_39860354aaca640c2ccb50bf6ca609d8`; prune inspection reports zero errors.
-LOO-342 was already marked done in the October 4 status read. This retirement
-supersedes the pending-store findings above and closes the remaining acceptance
-gap after the October 2 installed routing checks.
+owners. All 37 identified processes exited after SIGTERM, none needing SIGKILL.
+The four installed stores, the unused root database and two demo databases are
+intact under `~/.lf-retired/20261004T161815Z/` (`retirement.json` records
+identities, signals and paths); seven earlier snapshots remain at
+`~/.lf-retired/20261002T191224Z/worktrees/`. `~/.lf-dev` no longer exists and the main Home
+identity is unchanged. [Method and verification](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#legacy-retirement-completed-2026-10-04).
 
 ## Worktree listing and fenced dispatch (LOO-375, 2026-10-05)
 
 Jack Heart reported `lf wt list` at 44 s, 17 s after a deadlocked writer was
-killed. PR 1 shipped in v0.13.3; PR 2 merged as #1444 (`022a248df`)
-and is integrated here. Installed timing remains unproved. Numbers and method:
+killed. PR 1 shipped in v0.13.3 and PR 2 in v0.13.4. Numbers and method:
 [report](../../scripts/benchmarks/wt-list/README.md).
 
 - **Process count, not Git work, was the listing cost** (PR 1): about 370 serial
   Git processes became about 70 through batched ref reads, concurrent `status`,
-  one GitHub call and per-commit-pair answers in `.git/lf-commit-facts`. One
-  GitHub round trip (1–1.8 s) is the remaining online floor.
+  one GitHub call and per-commit-pair answers in `.git/lf-commit-facts`.
+- **GitHub's answer time grows with the branches in one query** (PR 3, branch
+  evidence). Installed 0.13.4 read 1.80 s median over three samples, 1.62 s of
+  it the remote. Asking 16 branches per request side by side: 1.45 s → 1.03 s
+  median on a fresh Home. One unanswered request leaves every branch unknown.
 - **Every store open scanned the whole database** (PR 2). The first installed
   sample read 8.09 s: 4.91 s before listing, 1.90 s in receipts. Opening ran
   `PRAGMA foreign_key_check`, and one command opens the store five times, so
@@ -467,7 +462,7 @@ and is integrated here. Installed timing remains unproved. Numbers and method:
   the store in `<Home>/perf/wt-list.jsonl`, read with `lf wt timing`.
 - **Jack Heart's delivery contract:** land after autonomous checks and honest
   benchmarks; installed timing is post-merge validation, so the Task stays
-  open. One installed sample is not a p95; ≤1 s warm p95 online is unmet.
+  open. Seven installed samples are not a p95; ≤1 s warm p95 online is unmet.
 - **Install preflight/promote read the OS account's Home whatever `LF_HOME`
   says.** Tests running them are container-only installation proofs.
 - **A closed Session with a confirmed-dead provider no longer blocks Task
@@ -941,26 +936,16 @@ published machine artifacts only; `lf task sync` (which replaced `lf rebase` in
 #1367) owns checkout updates. The schedule is opt-in login plus weekly, Monday
 09:00 local, with positional daily/hourly/5min. The separate daemon is retired.
 
-Observed October 4 with published 0.13.0:
-
-- **Natural login catch-up.** v0.13.0 published at 00:20 PDT while the laptop
-  was asleep, then off after a 1% battery shutdown. `com.loopflow.refresh` ran
-  at the 12:04 login and promoted 0.12.32 → 0.13.0 with exact-store preflight
-  and no migration (refresh.log, switch-49b58550 receipt).
-- **Real calendar firing.** The 5min cadence fired at 20:10 and 20:15 through
-  launchd itself (runs 1 → 3); weekly was then restored byte-identical and
-  idempotent. No Monday 09:00 firing or sleep-coalesced wake run has been
-  observed; neither is Loopflow code. Read refresh.log after October 5 09:00.
-- **Complete artifacts.** Receipt CLI/app/helper hashes, the entry gate, the
-  notarized signature and /Applications 0.13.0 all match. Repeat `lf install`
-  changes no receipt, Task, PR, Flow or Wave identity.
-- **Fresh published path.** Ubuntu 24.04 container without Git: public installer,
-  repeat without download, and missing-entry repair retain the Home identity.
-- **Checkout updates.** Sandbox with the installed binary: stale main with an
-  unpublished commit plus staged/modified/untracked bytes catches up, repeats
-  as a no-op, picks up advanced upstream, bases a sibling on it, and a sibling
-  sync refreshes canonical main first. Clean main fast-forwards. The real main
-  checkout was already current; its incident path was not replayed there.
+Observed October 4 with published 0.13.0
+([evidence](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#installation-and-checkout-closure-loo-292-2026-10-04)):
+the login schedule caught up 0.12.32 → 0.13.0 after a shutdown with exact-store
+preflight and no migration; the 5min cadence fired twice through launchd and
+weekly was restored byte-identical; receipt, signature and /Applications hashes
+match and a repeat install changes no identity; an Ubuntu 24.04 container
+without Git installed and repaired a missing entry; sandboxed
+`lf task sync` caught up a stale main while preserving unpublished, staged,
+modified and untracked bytes. No Monday 09:00 firing or sleep-coalesced wake
+has been observed; neither is Loopflow code.
 
 Unresolved, not blocking: the currency probe (`--version` plus a 30 s preflight)
 returned not-current once at load ~14, starting a redundant download; preflight
@@ -981,8 +966,8 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
 
 ## Gotchas
 
-- **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly** (filed). `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
-- **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures — two `bin/lf.rs` tests naming a deleted command had never run at all.
+- **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly**. `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
+- **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.
 - **Tests must survive draft migration materialization** (learned 2026-07-21).
@@ -992,7 +977,10 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
   at `migrations/drafts/` passes locally and fails the release tree at compile
   time.
 - **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in TESTING.md: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
-- **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between one command and the next, and `done` advanced 6→22 with no `--continue` from the losing session. Nothing was lost that time. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
+- **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between commands and `done` advanced 6→22 with no `--continue` from the losing session. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
+- **A sync target is not always the PR's upstream** (2026-10-06). `lf sync
+  origin/<own branch>` made that tip #1456's base; land refused its own commits
+  as foreign. Fixed in source; #1456 lands after a release installs the fix.
 - **Linear Project UUIDs survive renames; derived slugs do not.** Project content
   lives in Linear and the local SQLite snapshot, with no `projects/*.md` cache.
   Use stable IDs when reconciling current names with captured historical plans.

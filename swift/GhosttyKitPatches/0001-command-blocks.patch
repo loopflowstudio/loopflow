@@ -1,23 +1,296 @@
+diff --git a/include/ghostty.h b/include/ghostty.h
+index 19b6e0f..105aea6 100644
+--- a/include/ghostty.h
++++ b/include/ghostty.h
+@@ -461,6 +461,13 @@ typedef struct {
+   uint32_t cell_height_px;
+ } ghostty_surface_size_s;
+ 
++typedef struct {
++  uint16_t start_row;
++  uint16_t end_row;
++  int16_t exit_code; // -1 when the shell reported none
++  bool selected;
++} ghostty_command_block_s;
++
+ // Config types
+ 
+ // config.Color
+@@ -1118,6 +1125,12 @@ void ghostty_surface_complete_clipboard_request(ghostty_surface_t,
+                                                 void*,
+                                                 bool);
+ bool ghostty_surface_has_selection(ghostty_surface_t);
++size_t ghostty_surface_command_blocks(ghostty_surface_t,
++                                      ghostty_command_block_s*,
++                                      size_t);
++bool ghostty_surface_select_command_block(ghostty_surface_t, uint16_t);
++bool ghostty_surface_read_selected_command_block(ghostty_surface_t,
++                                                 ghostty_text_s*);
+ bool ghostty_surface_read_selection(ghostty_surface_t, ghostty_text_s*);
+ bool ghostty_surface_read_text(ghostty_surface_t,
+                                ghostty_selection_s,
+diff --git a/src/apprt/embedded.zig b/src/apprt/embedded.zig
+index 54d5472..856618e 100644
+--- a/src/apprt/embedded.zig
++++ b/src/apprt/embedded.zig
+@@ -1374,6 +1374,15 @@ pub const CAPI = struct {
+         }
+     };
+ 
++    // ghostty_command_block_s
++    const CommandBlock = extern struct {
++        start_row: u16,
++        end_row: u16,
++        /// The reported exit status, or -1 when the shell reported none.
++        exit_code: i16,
++        selected: bool,
++    };
++
+     // Reference the conditional exports based on target platform
+     // so they're included in the C API.
+     comptime {
+@@ -1592,6 +1601,110 @@ pub const CAPI = struct {
+         return surface.core_surface.hasSelection();
+     }
+ 
++    /// Return the completed semantic command blocks intersecting the visible
++    /// viewport. Rows are inclusive and relative to the viewport.
++    export fn ghostty_surface_command_blocks(
++        surface: *Surface,
++        blocks: [*]CommandBlock,
++        capacity: usize,
++    ) usize {
++        const core_surface = &surface.core_surface;
++        core_surface.renderer_state.mutex.lock();
++        defer core_surface.renderer_state.mutex.unlock();
++
++        const screen = core_surface.renderer_state.terminal.screens.active;
++        if (!screen.semantic_prompt.seen) return 0;
++        const last_row: u16 = @intCast(screen.pages.rows - 1);
++        const top = screen.pages.pin(.{ .viewport = .{} }) orelse return 0;
++        const selected = screen.selectedCommandBlock();
++
++        // One upward search finds the block the viewport starts inside; the
++        // rest is a single forward walk over the prompts below it.
++        var prior = top.promptIterator(.left_up, null);
++        var prompts = (prior.next() orelse top).promptIterator(.right_down, null);
++        var prompt = prompts.next() orelse return 0;
++        var count: usize = 0;
++        while (count < capacity) {
++            const start_row: u16 = if (screen.pages.pointFromPin(
++                .viewport,
++                prompt,
++            )) |pt| start: {
++                if (pt.viewport.y > last_row) break;
++                break :start @intCast(pt.viewport.y);
++            } else 0;
++
++            // The last prompt is the live one: not a block.
++            const following = prompts.next() orelse break;
++            defer prompt = following;
++            const end_row: u16 = if (screen.pages.pointFromPin(
++                .viewport,
++                following,
++            )) |pt| end: {
++                if (pt.viewport.y == 0) continue;
++                break :end @intCast(@min(pt.viewport.y - 1, last_row));
++            } else continue;
++
++            // A prompt with no input (a bare Enter) is not a command.
++            if (screen.pages.highlightSemanticContent(prompt, .input) == null) continue;
++
++            const row = prompt.rowAndCell().row;
++            blocks[count] = .{
++                .start_row = start_row,
++                .end_row = end_row,
++                .exit_code = if (row.command_exit_known) row.command_exit_code else -1,
++                .selected = if (selected) |block|
++                    block.prompt.node == prompt.node and block.prompt.y == prompt.y
++                else
++                    false,
++            };
++            count += 1;
++        }
++
++        return count;
++    }
++
++    /// Select the completed command block at a viewport row, replacing any
++    /// text selection. Returns false and leaves no block selected when the
++    /// row is the live prompt or outside any block.
++    export fn ghostty_surface_select_command_block(
++        surface: *Surface,
++        viewport_row: u16,
++    ) bool {
++        const core_surface = &surface.core_surface;
++        const selected = selected: {
++            core_surface.renderer_state.mutex.lock();
++            defer core_surface.renderer_state.mutex.unlock();
++
++            const screen = core_surface.renderer_state.terminal.screens.active;
++            const pin = screen.pages.pin(.{ .viewport = .{
++                .x = 0,
++                .y = viewport_row,
++            } }) orelse {
++                screen.clearCommandBlockSelection();
++                break :selected false;
++            };
++            break :selected screen.selectCommandBlock(pin) catch false;
++        };
++
++        // The text selection it replaced must stop being drawn.
++        core_surface.renderer_thread.wakeup.notify() catch {};
++        return selected;
++    }
++
++    /// Read the selected command block's input and output.
++    export fn ghostty_surface_read_selected_command_block(
++        surface: *Surface,
++        result: *Text,
++    ) bool {
++        const core_surface = &surface.core_surface;
++        core_surface.renderer_state.mutex.lock();
++        defer core_surface.renderer_state.mutex.unlock();
++
++        const screen = core_surface.renderer_state.terminal.screens.active;
++        const block = screen.selectedCommandBlock() orelse return false;
++        return readTextLocked(surface, block.text, result);
++    }
++
+     /// Same as ghostty_surface_read_text but reads from the user selection,
+     /// if any.
+     export fn ghostty_surface_read_selection(
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index b6d53be..4a83597 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1285,7 +1285,11 @@ const ReflowCursor = struct {
+             self.new_rows -= 1;
+         }
+ 
+-        self.copyRowMetadata(src_row);
++        // Loopflow: a soft-wrapped prompt is one prompt. A source row that
++        // continues a wrapped line must not overwrite the metadata of the
++        // row it unwraps into, and a row created by wrapping continues its
++        // prompt instead of starting another.
++        if (!src_row.wrap_continuation or self.x == 0) self.copyRowMetadata(src_row);
+ 
+         var x: usize = 0;
+         while (x < cols_len) {
+@@ -1294,6 +1298,10 @@ const ReflowCursor = struct {
+                 try self.cursorScrollOrNewPage(list, cap);
+                 self.copyRowMetadata(src_row);
+                 self.page_row.wrap_continuation = true;
++                if (self.page_row.semantic_prompt == .prompt) {
++                    self.page_row.semantic_prompt = .prompt_continuation;
++                }
++                self.page_row.command_exit_known = false;
+             }
+ 
+             // Move any tracked pins from the source.
+@@ -1980,6 +1988,8 @@ const ReflowCursor = struct {
+ 
+     fn copyRowMetadata(self: *ReflowCursor, other: *const Row) void {
+         self.page_row.semantic_prompt = other.semantic_prompt;
++        self.page_row.command_exit_known = other.command_exit_known;
++        self.page_row.command_exit_code = other.command_exit_code;
+     }
+ };
+ 
+@@ -12236,7 +12246,7 @@ test "PageList resize reflow less cols no reflow preserves semantic prompt" {
+         {
+             const p = s.pin(.{ .active = .{ .y = 2 } }).?;
+             const rac = p.rowAndCell();
+-            try testing.expect(rac.row.semantic_prompt == .prompt);
++            try testing.expect(rac.row.semantic_prompt == .prompt_continuation);
+         }
+     }
+ }
+diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
+index ea8ca14..c4010d0 100644
 --- a/src/terminal/Screen.zig
 +++ b/src/terminal/Screen.zig
-@@ -2912,7 +2912,42 @@
+@@ -55,6 +55,13 @@ saved_cursor: ?SavedCursor = null,
+ /// automatically setup tracking.
+ selection: ?Selection = null,
  
++/// The selected command block (if any), as a tracked pin on its prompt row.
++/// A screen has a text selection or a selected command block, never both:
++/// `select` clears this and `selectCommandBlock` clears `selection`. Read it
++/// through `selectedCommandBlock`, which drops a pin that no longer names a
++/// completed block.
++selected_command: ?*Pin = null,
++
+ /// The charset state
+ charset: CharsetState = .{},
+ 
+@@ -2380,6 +2387,9 @@ pub fn cursorSetSemanticContent(self: *Screen, t: union(enum) {
+             self.semantic_prompt.seen = true;
+             cursor.semantic_content = .prompt;
+             cursor.semantic_content_clear_eol = false;
++            if (cursor.page_row.semantic_prompt == .none) {
++                cursor.page_row.command_exit_known = false;
++            }
+             cursor.page_row.semantic_prompt = switch (kind) {
+                 .initial, .right => .prompt,
+                 .continuation, .secondary => .prompt_continuation,
+@@ -2388,6 +2398,19 @@ pub fn cursorSetSemanticContent(self: *Screen, t: union(enum) {
+     }
+ }
+ 
++/// Record the exit status the shell reported for the command the cursor is
++/// in, on that command's prompt row. The first report wins: after `clear`
++/// the nearest prompt above the cursor belongs to an older command.
++pub fn cursorSetCommandExit(self: *Screen, code: u8) void {
++    if (!self.semantic_prompt.seen) return;
++    var prompts = self.cursor.page_pin.promptIterator(.left_up, null);
++    const prompt_pin = prompts.next() orelse return;
++    const row = prompt_pin.rowAndCell().row;
++    if (row.command_exit_known) return;
++    row.command_exit_known = true;
++    row.command_exit_code = code;
++}
++
+ /// Set the selection to the given selection. If this is a tracked selection
+ /// then the screen will take ownership of the selection. If this is untracked
+ /// then the screen will convert it to tracked internally. This will automatically
+@@ -2412,6 +2435,7 @@ pub fn select(self: *Screen, sel_: ?Selection) Allocator.Error!void {
+     if (self.selection) |*old| old.deinit(self);
+     self.selection = tracked_sel;
+     self.dirty.selection = true;
++    self.clearCommandBlockSelection();
+ }
+ 
+ /// Same as select(null) but can't fail.
+@@ -2913,6 +2937,87 @@ pub fn selectOutput(self: *Screen, pin: Pin) ?Selection {
      return .init(hl.start, hl.end, false);
  }
+ 
++/// A completed shell command: its prompt row and the text of its input and
++/// output. The prompt itself is excluded from the text, but the
++/// prompt-to-prompt row extent is the block an embedder draws.
++pub const CommandBlock = struct {
++    prompt: Pin,
++    text: Selection,
 +
-+/// Select a completed shell command and its output as one unit. The prompt is
-+/// excluded from the text selection, but callers can use the prompt-to-prompt
-+/// row extent to draw a full-width block around the selection.
++    /// The exit status the shell reported, or null if it reported none.
++    pub fn exitCode(self: CommandBlock) ?u8 {
++        const row = self.prompt.rowAndCell().row;
++        return if (row.command_exit_known) row.command_exit_code else null;
++    }
++};
++
++/// The completed command block containing the pin.
 +///
 +/// An active command is not a block yet: a following prompt is the proof that
 +/// the shell completed it. This keeps clicks in the live composer available to
 +/// the shell.
-+pub fn selectCommandBlock(self: *Screen, pin: Pin) ?Selection {
++pub fn commandBlock(self: *const Screen, pin: Pin) ?CommandBlock {
 +    if (!self.semantic_prompt.seen) return null;
 +
 +    var prior_prompts = pin.promptIterator(.left_up, null);
 +    const prompt_pin = prior_prompts.next() orelse return null;
- 
++
 +    // A following prompt closes this command. Without it, the command is
 +    // either still running or is the live input row.
 +    var following_prompts = prompt_pin.promptIterator(.right_down, null);
@@ -33,52 +306,90 @@
 +        .output,
 +    );
 +
-+    return .init(
-+        input.start,
-+        if (output) |value| value.end else input.end,
-+        false,
-+    );
++    return .{
++        .prompt = prompt_pin,
++        .text = .init(
++            input.start,
++            if (output) |value| value.end else input.end,
++            false,
++        ),
++    };
++}
++
++/// Select the completed command block containing the pin, replacing any text
++/// selection. Returns false, leaving no block selected, when the pin is not
++/// in a completed block.
++pub fn selectCommandBlock(self: *Screen, pin: Pin) Allocator.Error!bool {
++    self.clearCommandBlockSelection();
++    const block = self.commandBlock(pin) orelse return false;
++    self.selected_command = try self.pages.trackPin(block.prompt);
++    self.clearSelection();
++    return true;
++}
++
++pub fn clearCommandBlockSelection(self: *Screen) void {
++    const tracked = self.selected_command orelse return;
++    self.pages.untrackPin(tracked);
++    self.selected_command = null;
++}
++
++/// The selected command block. The selection ends itself when its prompt row
++/// was evicted, erased, or no longer starts a completed command.
++pub fn selectedCommandBlock(self: *Screen) ?CommandBlock {
++    const tracked = self.selected_command orelse return null;
++    if (!tracked.garbage) {
++        if (self.commandBlock(tracked.*)) |block| {
++            if (block.prompt.node == tracked.node and
++                block.prompt.y == tracked.y) return block;
++        }
++    }
++    self.clearCommandBlockSelection();
++    return null;
 +}
 +
  pub const LineIterator = struct {
      screen: *const Screen,
      current: ?Pin = null,
-@@ -8704,8 +8739,55 @@
-             .y = 8,
-         } }).?) == null);
+@@ -8706,6 +8811,176 @@ test "Screen: selectOutput" {
      }
+ }
+ 
++fn testWriteCommand(s: *Screen, command: []const u8, output: []const u8) !void {
++    s.cursorSetSemanticContent(.{ .prompt = .initial });
++    try s.testWriteString("$ ");
++    s.cursorSetSemanticContent(.{ .input = .clear_explicit });
++    try s.testWriteString(command);
++    try s.testWriteString("\n");
++    s.cursorSetSemanticContent(.output);
++    try s.testWriteString(output);
 +}
 +
-+test "Screen: selectCommandBlock selects input and output after completion" {
++fn testCommandBlockText(s: *Screen, alloc: Allocator, block: CommandBlock) ![:0]const u8 {
++    return try s.selectionString(alloc, .{ .sel = block.text, .trim = false });
++}
++
++test "Screen: commandBlock is input and output after completion" {
 +    const testing = std.testing;
 +    const alloc = testing.allocator;
 +
 +    var s = try init(alloc, .{ .cols = 20, .rows = 10, .max_scrollback = 0 });
 +    defer s.deinit();
 +
-+    s.cursorSetSemanticContent(.{ .prompt = .initial });
-+    try s.testWriteString("$ ");
-+    s.cursorSetSemanticContent(.{ .input = .clear_explicit });
-+    try s.testWriteString("printf alpha\n");
-+    s.cursorSetSemanticContent(.output);
-+    try s.testWriteString("alpha\nbeta\n");
++    try testWriteCommand(&s, "printf alpha", "alpha\nbeta\n");
 +    s.cursorSetSemanticContent(.{ .prompt = .initial });
 +    try s.testWriteString("$ ");
 +
-+    var sel = s.selectCommandBlock(s.pages.pin(.{ .active = .{
++    const block = s.commandBlock(s.pages.pin(.{ .active = .{
 +        .x = 0,
 +        .y = 2,
 +    } }).?).?;
-+    defer sel.deinit(&s);
-+    const contents = try s.selectionString(alloc, .{
-+        .sel = sel,
-+        .trim = false,
-+    });
++    const contents = try testCommandBlockText(&s, alloc, block);
 +    defer alloc.free(contents);
 +    try testing.expectEqualStrings("printf alpha\nalpha\nbeta", contents);
- }
- 
-+test "Screen: selectCommandBlock leaves the active prompt interactive" {
++    try testing.expect(block.exitCode() == null);
++}
++
++test "Screen: commandBlock leaves the active prompt interactive" {
 +    const testing = std.testing;
 +    const alloc = testing.allocator;
 +
@@ -90,170 +401,203 @@
 +    s.cursorSetSemanticContent(.{ .input = .clear_explicit });
 +    try s.testWriteString("unfinished");
 +
-+    try testing.expect(s.selectCommandBlock(s.pages.pin(.{ .active = .{
-+        .x = 4,
-+        .y = 0,
-+    } }).?) == null);
++    const pin = s.pages.pin(.{ .active = .{ .x = 4, .y = 0 } }).?;
++    try testing.expect(s.commandBlock(pin) == null);
++    try testing.expect(!try s.selectCommandBlock(pin));
++    try testing.expect(s.selectedCommandBlock() == null);
++}
++
++test "Screen: command exit status survives reflow" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++
++    var s = try init(alloc, .{ .cols = 20, .rows = 10, .max_scrollback = 100 });
++    defer s.deinit();
++
++    try testWriteCommand(&s, "true", "fine\n");
++    s.cursorSetCommandExit(0);
++    try testWriteCommand(&s, "sdl", "command not found: sdl\n");
++    s.cursorSetCommandExit(127);
++    // A second report, as after `clear`, must not rewrite a finished command.
++    s.cursorSetCommandExit(0);
++    s.cursorSetSemanticContent(.{ .prompt = .initial });
++    try s.testWriteString("$ ");
++
++    try s.resize(.{ .cols = 8, .rows = 10, .reflow = true });
++    try s.resize(.{ .cols = 4, .rows = 10, .reflow = true });
++    try s.resize(.{ .cols = 8, .rows = 10, .reflow = true });
++
++    const first = s.commandBlock(s.pages.pin(.{ .screen = .{ .x = 0, .y = 1 } }).?).?;
++    try testing.expectEqual(@as(?u8, 0), first.exitCode());
++
++    // The failing command's output wrapped; find its block from its last row.
++    var failed: ?CommandBlock = null;
++    var y: u32 = 2;
++    while (s.pages.pin(.{ .screen = .{ .x = 0, .y = y } })) |pin| : (y += 1) {
++        const block = s.commandBlock(pin) orelse continue;
++        if (block.prompt.y != first.prompt.y) failed = block;
++    }
++    try testing.expectEqual(@as(?u8, 127), failed.?.exitCode());
++    const contents = try testCommandBlockText(&s, alloc, failed.?);
++    defer alloc.free(contents);
++    try testing.expectEqualStrings("sdl\ncommand not found: sdl", contents);
++}
++
++test "Screen: text and command block selection are mutually exclusive" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++
++    var s = try init(alloc, .{ .cols = 20, .rows = 10, .max_scrollback = 0 });
++    defer s.deinit();
++
++    try testWriteCommand(&s, "ls", "alpha\n");
++    s.cursorSetSemanticContent(.{ .prompt = .initial });
++    try s.testWriteString("$ ");
++
++    const output = s.pages.pin(.{ .active = .{ .x = 0, .y = 1 } }).?;
++    try s.select(.init(output, output.right(4), false));
++    try testing.expect(s.selection != null);
++
++    try testing.expect(try s.selectCommandBlock(output));
++    try testing.expect(s.selection == null);
++    try testing.expect(s.selectedCommandBlock() != null);
++
++    try s.select(.init(output, output.right(4), false));
++    try testing.expect(s.selection != null);
++    try testing.expect(s.selectedCommandBlock() == null);
++
++    // Clearing a text selection is not a new selection.
++    try testing.expect(try s.selectCommandBlock(output));
++    s.clearSelection();
++    try testing.expect(s.selectedCommandBlock() != null);
++
++    // Selecting outside any block clears it.
++    try testing.expect(!try s.selectCommandBlock(s.pages.pin(.{ .active = .{
++        .x = 0,
++        .y = 2,
++    } }).?));
++    try testing.expect(s.selectedCommandBlock() == null);
++}
++
++test "Screen: selected command block survives reflow" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++
++    var s = try init(alloc, .{ .cols = 20, .rows = 10, .max_scrollback = 100 });
++    defer s.deinit();
++
++    try testWriteCommand(&s, "first", "one\n");
++    try testWriteCommand(&s, "echo long", "0123456789abcdef\n");
++    s.cursorSetSemanticContent(.{ .prompt = .initial });
++    try s.testWriteString("$ ");
++
++    try testing.expect(try s.selectCommandBlock(s.pages.pin(.{ .active = .{
++        .x = 0,
++        .y = 3,
++    } }).?));
++
++    // Narrow enough that the command line itself wraps, then widen again.
++    for ([_]size.CellCountInt{ 10, 6, 20 }) |cols| {
++        try s.resize(.{ .cols = cols, .rows = 10, .reflow = true });
++
++        const block = s.selectedCommandBlock().?;
++        const contents = try testCommandBlockText(&s, alloc, block);
++        defer alloc.free(contents);
++        try testing.expectEqualStrings("echo long\n0123456789abcdef", contents);
++    }
++}
++
++test "Screen: selected command block ends when its rows are erased" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++
++    var s = try init(alloc, .{ .cols = 20, .rows = 10, .max_scrollback = 0 });
++    defer s.deinit();
++
++    try testWriteCommand(&s, "ls", "alpha\n");
++    s.cursorSetSemanticContent(.{ .prompt = .initial });
++    try s.testWriteString("$ ");
++    try testing.expect(try s.selectCommandBlock(s.pages.pin(.{ .active = .{} }).?));
++
++    s.reset();
++    try testing.expect(s.selectedCommandBlock() == null);
++    try testing.expect(s.selected_command == null);
 +}
 +
  test "Screen: selectionString basic" {
      const testing = std.testing;
      const alloc = testing.allocator;
---- a/src/apprt/embedded.zig
-+++ b/src/apprt/embedded.zig
-@@ -1372,6 +1372,13 @@
-                 .rectangle = self.rectangle,
-             };
-         }
-+    };
+diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
+index 323e4e9..bd7f81a 100644
+--- a/src/terminal/Terminal.zig
++++ b/src/terminal/Terminal.zig
+@@ -1279,6 +1279,15 @@ pub fn semanticPrompt(
+             // its reasonable at this point to reset our semantic content
+             // state but the spec doesn't really say what to do.
+             self.screens.active.cursorSetSemanticContent(.output);
 +
-+    // ghostty_command_block_s
-+    const CommandBlock = extern struct {
-+        id: u64,
-+        start_row: u16,
-+        end_row: u16,
-     };
- 
-     // Reference the conditional exports based on target platform
-@@ -1591,7 +1598,113 @@
-     export fn ghostty_surface_has_selection(surface: *Surface) bool {
-         return surface.core_surface.hasSelection();
-+    }
-+
-+    /// Return the completed semantic command blocks intersecting the visible
-+    /// viewport. Rows are inclusive and relative to the viewport.
-+    export fn ghostty_surface_command_blocks(
-+        surface: *Surface,
-+        blocks: [*]CommandBlock,
-+        capacity: usize,
-+    ) usize {
-+        if (capacity == 0) return 0;
-+
-+        const core_surface = &surface.core_surface;
-+        core_surface.renderer_state.mutex.lock();
-+        defer core_surface.renderer_state.mutex.unlock();
-+
-+        const screen = core_surface.renderer_state.terminal.screens.active;
-+        var count: usize = 0;
-+        var active_selection: ?terminal.Selection = null;
-+        var active_start: u16 = 0;
-+
-+        for (0..screen.pages.rows) |row| {
-+            const pin = screen.pages.pin(.{ .viewport = .{
-+                .x = 0,
-+                .y = @intCast(row),
-+            } }) orelse continue;
-+            const selection = screen.selectCommandBlock(pin);
-+
-+            if (selection) |value| {
-+                if (active_selection) |active| {
-+                    if (active.eql(value)) continue;
-+                    writeCommandBlock(
-+                        blocks,
-+                        capacity,
-+                        &count,
-+                        active,
-+                        active_start,
-+                        @intCast(row - 1),
-+                    );
-+                }
-+                active_selection = value;
-+                active_start = @intCast(row);
-+            } else if (active_selection != null) {
-+                writeCommandBlock(
-+                    blocks,
-+                    capacity,
-+                    &count,
-+                    active_selection.?,
-+                    active_start,
-+                    @intCast(row - 1),
++            // Loopflow: keep the reported status with the command's prompt
++            // row so an embedder can draw a failed block after scroll or
++            // reflow. Exit codes are bytes; anything else is a failure.
++            if (cmd.readOption(.exit_code)) |raw| {
++                self.screens.active.cursorSetCommandExit(
++                    std.math.cast(u8, raw) orelse 1,
 +                );
-+                active_selection = null;
 +            }
-+        }
-+
-+        if (active_selection != null) {
-+            writeCommandBlock(
-+                blocks,
-+                capacity,
-+                &count,
-+                active_selection.?,
-+                active_start,
-+                @intCast(screen.pages.rows - 1),
-+            );
-+        }
-+
-+        return count;
+         },
      }
+ }
+@@ -11932,6 +11941,34 @@ test "Terminal: semantic prompt" {
+     }
+ }
  
-+    fn writeCommandBlock(
-+        blocks: [*]CommandBlock,
-+        capacity: usize,
-+        count: *usize,
-+        selection: terminal.Selection,
-+        start_row: u16,
-+        end_row: u16,
-+    ) void {
-+        if (count.* >= capacity) return;
-+        const start = selection.start();
-+        blocks[count.*] = .{
-+            .id = @intFromPtr(start.node) ^
-+                (@as(u64, start.y) << 32) ^
-+                @as(u64, start.x),
-+            .start_row = start_row,
-+            .end_row = end_row,
-+        };
-+        count.* += 1;
++test "Terminal: end command records its exit status on the prompt row" {
++    const alloc = testing.allocator;
++    var t = try init(alloc, .{ .cols = 20, .rows = 10 });
++    defer t.deinit(alloc);
++
++    // A failed command, then a prompt whose command reports no status.
++    for ([_][]const u8{ "127", "" }) |status| {
++        try t.semanticPrompt(.init(.fresh_line_new_prompt));
++        try t.printString("$ ");
++        try t.semanticPrompt(.init(.end_prompt_start_input));
++        try t.printString("sdl");
++        try t.semanticPrompt(.init(.end_input_start_output));
++        try t.printString("\nnot found\n");
++        try t.semanticPrompt(.{
++            .action = .end_command,
++            .options_unvalidated = status,
++        });
 +    }
++    try t.semanticPrompt(.init(.fresh_line_new_prompt));
++    try t.printString("$ ");
 +
-+    /// Read a completed semantic command block at a viewport row without
-+    /// changing the terminal's ordinary text selection.
-+    export fn ghostty_surface_read_command_block(
-+        surface: *Surface,
-+        viewport_row: u16,
-+        result: *Text,
-+    ) bool {
-+        const core_surface = &surface.core_surface;
-+        core_surface.renderer_state.mutex.lock();
-+        defer core_surface.renderer_state.mutex.unlock();
++    const screen = t.screens.active;
++    const failed = screen.commandBlock(screen.pages.pin(.{ .active = .{ .y = 1 } }).?).?;
++    try testing.expectEqual(@as(?u8, 127), failed.exitCode());
++    const unknown = screen.commandBlock(screen.pages.pin(.{ .active = .{ .y = 3 } }).?).?;
++    try testing.expect(unknown.exitCode() == null);
++}
 +
-+        const screen = core_surface.renderer_state.terminal.screens.active;
-+        const pin = screen.pages.pin(.{ .viewport = .{
-+            .x = 0,
-+            .y = viewport_row,
-+        } }) orelse return false;
-+        const selection = screen.selectCommandBlock(pin) orelse return false;
-+        return readTextLocked(surface, selection, result);
-+    }
-+
-     /// Same as ghostty_surface_read_text but reads from the user selection,
-     /// if any.
-     export fn ghostty_surface_read_selection(
---- a/include/ghostty.h
-+++ b/include/ghostty.h
-@@ -460,6 +460,12 @@
-   uint32_t cell_width_px;
-   uint32_t cell_height_px;
- } ghostty_surface_size_s;
-+
-+typedef struct {
-+  uint64_t id;
-+  uint16_t start_row;
-+  uint16_t end_row;
-+} ghostty_command_block_s;
+ test "Terminal: semantic prompt continuations" {
+     const alloc = testing.allocator;
+     var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+diff --git a/src/terminal/page.zig b/src/terminal/page.zig
+index 3e7ca9a..1a5aab4 100644
+--- a/src/terminal/page.zig
++++ b/src/terminal/page.zig
+@@ -1929,7 +1929,13 @@ pub const Row = packed struct(u64) {
+     /// screen.
+     dirty: bool = false,
  
- // Config types
+-    _padding: u23 = 0,
++    /// The exit status of the command whose prompt starts on this row, once
++    /// the shell reports it (OSC 133;D with a code). Only meaningful on a
++    /// prompt row; a row that becomes a new prompt starts unknown.
++    command_exit_known: bool = false,
++    command_exit_code: u8 = 0,
++
++    _padding: u14 = 0,
  
-@@ -1118,6 +1124,12 @@
-                                                 void*,
-                                                 bool);
- bool ghostty_surface_has_selection(ghostty_surface_t);
-+size_t ghostty_surface_command_blocks(ghostty_surface_t,
-+                                      ghostty_command_block_s*,
-+                                      size_t);
-+bool ghostty_surface_read_command_block(ghostty_surface_t,
-+                                        uint16_t,
-+                                        ghostty_text_s*);
- bool ghostty_surface_read_selection(ghostty_surface_t, ghostty_text_s*);
- bool ghostty_surface_read_text(ghostty_surface_t,
-                                ghostty_selection_s,
+     /// The semantic prompt state of the row. See `semantic_prompt`.
+     pub const SemanticPrompt = enum(u2) {

@@ -1002,48 +1002,54 @@ text first; that latency has no owning Task (LOO-375 owns `wt list` only).
   still pending. No all-provider matrix exists. JSON prepare-without-kill
   has source/Swift contract coverage but no focused Rust behavioral proof yet.
 
-### Shell command blocks and build fidelity (2026-09-22)
+### Shell command blocks and build fidelity (2026-09-22, revised 2026-10-05)
 
 - Reviewer acceptance is **visible grouping before interaction plus one ordinary
   click anywhere in a completed command/output region selecting both**. Invisible
   OSC 133 metadata, triple-click gestures, or tooltips do not meet it. Warp is the
-  benchmark: full-width groups, persistent separation, restrained tint and left
-  accent, whole-surface hover/selection, and a distinct fresh prompt. Preserve
-  Loopflow's palette; context/timing and richer actions are options, not mandatory
-  copies of Warp. Provider Session panes remain outside shell-block semantics.
-- The checked-in Ghostty patch exposes visible block geometry and a separate
-  read-block API. Block Copy deliberately avoids native character highlighting:
-  the first demo showed two competing highlights. Keep geometry and hover separate
-  from one selected `(id, text)` snapshot. Page/pin IDs are not durable across
-  reflow/recycling; selection clears when its block leaves the visible list.
+  benchmark; preserve Loopflow's palette. Provider Session panes remain outside
+  shell-block semantics.
+- Jack Heart's October 5 report (LOO-381) added: colors lost in provider CLIs,
+  a context header and indentation per block, a red background from the real
+  exit status, and one selection at a time. Jack asked for more space between
+  blocks and Warp's small dim directory header (drawn in the overlay from a
+  concealed prompt row), then rejected burgundy selection beside red: red
+  means failed only, selection is cream. He approved the demo overall and
+  asked that it land; no per-check report, "the bar on the right" unresolved.
+- Block chrome never takes selection or focus from the shell: a right-click
+  keeps the selection under it, any key reaching the shell ends a block
+  selection, Command chords keep it. Fills keep the dimmest palette color at
+  3:1. Open: Option-letter inserts the composed character.
+- **Desktop inherits its launcher's environment.** Opened from an agent shell it
+  carried `NO_COLOR=1`, `PAGER=cat` and `TERM_PROGRAM`, and every pane lost
+  color. The GUI drops those variables at launch, beside the execution markers.
+  A prefix scrub also caught provider credentials `lf` reads; keep them by name.
+  Not the palette or Ghostty config.
+- **The terminal owns block state.** A Swift-side `(id, text)` snapshot produced
+  two competing highlights and stale copies; pointer-derived ids died on reflow.
+  The `lf2` patch keeps exit status on the prompt row and one text-or-block
+  selection in Ghostty's `Screen`; Swift holds only hover. Upstream also splits a
+  block when its command line soft-wraps; the patch treats the wrapped row as a
+  continuation. A new artifact version accompanies every patch change;
+  publication needs authorization. Jack authorized `lf2`; published 2026-10-05.
 - SwiftPM pins the published, checksum-verified patched artifact, not a local
   build path. `swift/GhosttyKitPatches/` plus `loopflow-dev.py ghostty-build`
-  carry the reproducible source patch. Use a new artifact version on patch changes;
-  publication is a separate authorized action. The upstream surface API did not
-  expose semantic geometry; a newer standalone VT API is not automatically an
-  embedded-surface replacement. Avoid synthetic multi-click API workarounds.
-- Real marked-output PTY tests prove parser→click→pasteboard block copy, clearing
-  at the live prompt, window-local release, and title delivery. Wait for parsed
-  completed blocks, not incidental prompt text. They do not prove automatic shell
-  hook injection or final appearance. `shellIntegrationEmitsSemanticMarks`
-  manually invokes zsh hooks; custom prompts and other bundled shells remain
-  unproven. Upstream excludes macOS `/bin/bash` from auto-injection. Provider
-  `TERM` stays `xterm-256color`; changing it needs separate fidelity evidence.
+  carry the patch and now run its Zig tests. Avoid synthetic multi-click
+  workarounds.
+- Headless tests cover the launch environment, block layout and style, and the
+  zsh hooks. The real-PTY click/drag/resize test needs a display and has not run
+  for `lf2` (filter by `GhosttyTerminalInputTests`; display names do not
+  match). Custom prompts, bash and fish headers, and on-screen overlay
+  alignment are unproven. Provider `TERM` stays
+  `xterm-256color`; changing it needs separate fidelity evidence.
 - **Build parity remains broken.** `project.yml` copies resources but still builds
-  Ghostty-disabled stubs, unlike SwiftPM. The later fresh Xcode build-for-testing
-  failure supersedes earlier compile-success notes. Binary/resource revision facts
-  also remain duplicated, the build recipe does not regenerate the shell payload,
-  and missing resources disable all terminals. Give both builds one dependency
-  and generated provenance, degrade missing shell resources to blockless terminals,
-  and contain resource-environment mutation. Copying payload alone is no proof.
-- Remaining block risks are hypotheses to measure: centered-grid math is shared
-  by geometry helpers and tests rather than checked against rendered padding;
-  per-row prompt scans at 10 Hz hold the renderer mutex and may repeatedly walk
-  long history. Patch Zig tests lack a recorded run. Final block appearance and
-  corrected split paste need configured-app confirmation. Keep separate command,
-  output, and last-command actions, multi-selection, bookmarks, and sharing
-  deferred until the core interaction is proven. Upstream API contribution may
-  reduce patch maintenance later (research reference: ghostty-org/ghostty#11747).
+  Ghostty-disabled stubs, unlike SwiftPM (LOO-280). Binary/resource revision
+  facts remain duplicated, the build recipe does not regenerate the shell
+  payload, and missing resources disable all terminals.
+- Still deferred until the core interaction is accepted: separate command,
+  output and last-command actions, multi-selection, bookmarks, sharing, exit-code
+  or duration badges. Upstream API contribution may reduce patch maintenance
+  later (ghostty-org/ghostty#11747).
 
 ### Shared viewing boundary
 
@@ -1066,15 +1072,9 @@ App-quit survival and remote Home attachment remain separate scope decisions.
 Client provenance is absent today; keep ELSEWHERE generic until the shared API
 can name the recorded terminal/location.
 
-The 2026-09-22 reconciliation filed these remaining concrete gaps under Mac
-Surface UX: [LOO-280](https://linear.app/loopflow/issue/LOO-280) for build/resource
-parity, [LOO-281](https://linear.app/loopflow/issue/LOO-281) for real-shell blocks,
-geometry, long-output measurements, and visual proof,
-[LOO-282](https://linear.app/loopflow/issue/LOO-282) for client provenance, and
-[LOO-283](https://linear.app/loopflow/issue/LOO-283) for the bounded shared-viewing
-comparison. This branch does not establish any Project's week/month evidence
-window; definitions and KRs remain unchanged. No open Task had enough evidence
-to close during this reconciliation.
+Filed 2026-09-22 under Mac Surface UX: LOO-280 build/resource parity; LOO-281
+real-shell blocks, geometry, long-output measurements and visual proof; LOO-282
+client provenance; LOO-283 the bounded shared-viewing comparison.
 
 ## Learnings
 

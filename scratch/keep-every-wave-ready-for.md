@@ -132,11 +132,23 @@ Wave acceptance.
 
 ## Remaining coherent cut
 
-October 5 realignment at `530513d4d`: cancellation/cold-detail/reteam repair,
+October 5 realignment at `972a253559`: cancellation/cold-detail/reteam repair,
 single Task insertion and Session/binding/mechanical-start checkout admission
-are implemented. The retained compression edits reuse the Store during refresh
-and resolve the admission directory before acquiring locks. Step 2 remains next:
-registration/population stability and rotation's use of checkout exclusion.
+are implemented. Compression retains registered Wave identity through refresh
+and shares Session admission without changing its boundary. The recorded build,
+13 focused tests and Clippy cover that checkpoint; no behavioral suite was rerun
+for this reconciliation.
+
+Step 2 remains next. `lock_task_checkouts` reads the Task population before
+acquiring path locks; neither registration API participates in population
+exclusion. Both call `insert_initial_task`, which validates supplied Project
+ownership and Started count but does not select accepted issue facts. Rotation
+holds Wave guards through provider work, without checkout exclusion. These are
+source observations, not executed race proofs. Stabilizing population and
+revalidating accepted registration must precede judging rotation/start safety;
+replacing the Started-count selector itself remains coupled to shared binding
+in step 3. Review/worker admission and CI repair require operation-entry coverage;
+CI repair already holds its Task checkout at the outer boundary.
 
 The branch is not releasable: shared binding, exact-ID ensure, transition recovery,
 KR-first rotation, backlog preservation, Desktop activation and configured
@@ -882,4 +894,4 @@ invalidation and full reteam readback proofs remain at
 they establish neither rotation/start exclusion nor installed readiness. The new
 input-replacement regression failed before the admission fix and passes afterward.
 
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b checkout_exclusion input_replacement_retains_workspace_and_task_membership cancelled_detail_acceptance cancelled_snapshot_acceptance rejected_project_snapshot repository_team_reteam --test-threads=4` passed (13); `cargo fmt --all`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `git diff --check` and `lf context --skill compress --json` passed; CI repair operation-entry, rotation/start and configured acceptance remain with implementation/gate.
+Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b checkout_exclusion input_replacement_retains_workspace_and_task_membership cancelled_detail_acceptance cancelled_snapshot_acceptance rejected_project_snapshot repository_team_reteam --test-threads=4` passed (13); `cargo fmt --all`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `git diff --check` and `lf context --skill compress --json` passed; CI repair operation-entry, rotation/start and configured acceptance remain with implementation/gate. Realign: `git diff --check` and `lf context --skill realign --json` passed; behavioral checks reused from `972a253559`.

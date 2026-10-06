@@ -324,15 +324,21 @@ The active-Project adoption test proves no Backlog activation or installed repai
 
 Preservation includes unbound checkout Sessions and Flow associations, excluding
 primary scopes. Registration still inserts supplied planning under a Started-count
-selector without rereading accepted ownership. Session creation/binding and mechanical
-starts exclude execution/Flow workspaces and explicit/inherited Task roots in
-canonical order, including missing paths; historical binding stays allowed.
-Rotation holds only Wave locks. Population stability, both rotation/start orderings
-and failed-reset re-entry remain unproved. Resolve lock storage before checkout
-acquisition and retain Store/Wave guards through acceptance. Pending receipts cannot
-indefinitely deny starts; Release's operation-entry recovery lesson applies.
-Earlier admission evidence remains at `9bfc5077d:wave/infrastructure/MEMORY.md`.
-Installation proves no readiness.
+selector without rereading accepted issue ownership. Checkout admission discovers
+Task roots before locking; both registration APIs remain outside population
+exclusion, and rotation holds only Wave guards. Stabilize population and revalidate
+accepted registration before claiming rotation/start safety. Historical binding
+stays allowed; pending receipts cannot indefinitely deny starts.
+
+Compression at `972a253559` retains registered Wave identity and acquisition
+ownership through refresh, and shares Session creation/input-replacement admission.
+CI repair holds its explicit Task checkout at operation entry, without reacquiring
+inside reservation. The recorded build, 13 focused checks and Clippy pass are
+local evidence; operation-entry CI repair, both rotation/start orderings and
+failed-reset recovery remain unproved. Release's child memory reinforces testing
+recovery through the actual entry point; publication and installation prove no
+Project readiness. Earlier admission evidence remains at
+`9bfc5077d:wave/infrastructure/MEMORY.md`.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 
@@ -771,14 +777,10 @@ Lessons from implementing it (2026-09-29–30):
 - A worker's claim named the process that launched it, not the worker, so stop
   and liveness targeted the wrong pid (fixed in `5bd311697`).
 
-Compression checkpoint `38d4e6d8a` retains one proof per final behavior. Its local
-logs record 44/46 affected passes, then both failed Session cases passing focused
-repairs, 17 Chapter passes, two native-ownership passes and build/final Clippy
-success. The direct SIGINT proof observes owned-child exit and Exec interruption;
-the retained Task-cancellation settlement case remains distinct. These observations
-are not a full final-tree gate, configured-provider acceptance or installed
-conversion. This realign reruns no behavioral suite. Dense cold/warm CLI timing
-and final documentation/gate reconciliation remain with the working plan.
+Compression evidence remains in
+`972a253559:wave/infrastructure/MEMORY.md`. Focused repairs
+were not a final-tree gate or configured/installed acceptance. SIGINT child-exit
+and Task-cancellation proofs remain distinct.
 
 Performance (instrumentation implemented in LOO-291; LOO-300 continues): `os_signpost`
 intervals under `studio.loopflow`/`perf` for cold start, navigation, Wave/Task/

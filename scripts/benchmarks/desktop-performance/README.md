@@ -510,9 +510,69 @@ the original action-to-capture and action-to-verification clocks and assertions;
 use identical instrumentation for both variants. These are process observations,
 not allocation ownership: other threads can allocate between checkpoints.
 
-The diagnostic and test build run headlessly. This contribution has no rendering
-environment; native launch versus retained workspace allocation still needs a
-contained rendered replay of the prepared all-row fixture with these checkpoints,
-then allocation stacks around the phase that grows. No production leak or repair
-is established. The failed 52.7 MiB result, twenty-sample acceptance cohorts,
-unavailable provider comments, and both 3600-second soaks remain outstanding.
+The fixed-image diagnostic did not establish rendering availability. The contained
+workspace replay below supersedes the earlier unsupported claim that this host
+had no rendering environment. The failed 52.7 MiB result, twenty-sample acceptance
+cohorts, unavailable provider comments and both 3600-second soaks remain outstanding.
+
+### Contained workspace memory phases, October 6
+
+```sh
+uv run python scripts/desktop_performance.py run --output /tmp/workspace-memory --samples 5 --soak-seconds 150 --no-xctrace --cli target/debug/lf --snapshot /tmp/loo304-compatible-snapshot-20261006-02 --repo /Users/jack/src/loopflow --issue LOO-368
+```
+
+`--no-xctrace` passes through the recorder's RSS/signpost mode. It leaves trace
+clocks, idle hitches and hangs unmeasured; it cannot establish hour acceptance.
+Comparisons require matching recorder modes. Four-round growth now uses the
+in-process `soak_begin` and fourth `soak_round` RSS checkpoints. The previous
+asynchronous recorder baseline could miss early allocations and sample after the
+round boundary. Missing checkpoint bytes stay unmeasured, including old journals;
+original receipts remain unchanged. Setup, native input, navigation/files and
+surface-release events also retain RSS without changing actions or endpoints.
+
+`/tmp/loo304-memory-phase-replay-20261006/` passed all 20 endpoints (five each).
+Warm `duration_ms` medians, four observations each, were 1,153 ms cold-workspace
+construction, 316 ms warm Task, 269 ms reopen and 1,073 ms native reopening.
+No p95 is available. Native capture median was 79.6 ms plus 237.0 ms OCR per
+capture; both recognizers and all identity checks remain. Observer costs are
+reported separately, never subtracted from the action duration. Each native
+sample retained one visible window and terminal focus; key-window `-1` remains
+an endpoint limitation. Scenario CLI volume: 553 connections, 45,987 statements,
+539,392 rows.
+
+`/tmp/loo304-memory-phase-soak-20261006/` passed five preserved rounds over 150 s
+with 150 CPU/RSS samples, 246 complete CLI processes, 1,343 connections, 111,765
+statements and 1,356,241 rows. App CPU median/max was 1.5/78.4 percent, excluding
+children. Exact RSS began at 224.7 MiB; round ends were 280.1, 285.7, 277.4,
+277.3 and 277.5 MiB. Fourth-round growth is **52.6 MiB**, failing <32 MiB.
+Its original asynchronously sampled report says 52.1 MiB and is preserved.
+No startup cost is warmed away or removed from the budget.
+
+This run includes intrusive `vmmap -summary` at the exact journal PID and one
+`leaks` inspection, so it is diagnosis, not an acceptance comparison. Default
+malloc allocated bytes were 35.6 MiB after the first round and 35.4 MiB after the
+fourth; resident zone pages were 87.1 and 93.7 MiB. Empty large allocations and
+IOSurface mappings remain visible in the raw maps. These distinguish allocator
+residency from live heap size but cannot attribute first-launch growth to an app
+allocation stack. `leaks` exited 1, warning that the signed test helper was not
+debuggable and only readonly memory was accessible; its 5,376-byte report is not
+proof of a full leak scan. No security permission or containment was broadened.
+
+The largest increase occurs within the first native input/capture phase; later
+rounds do not show monotonic retention. This neither proves nor excludes an app
+leak. A supported production repair still needs first-native-phase allocation
+attribution across Ghostty/Metal, bitmap capture and framework caches. The new
+checkpoints and exact-process maps narrow that work; they do not justify cache
+purging, autorelease changes or budget revision. All private raw evidence stays
+in the named directories. No copied identity, source snapshot or live Home changed.
+
+`/tmp/loo304-memory-phase-confirm-20261006/` verifies the final reporting code
+without intrusive tools: 20/20 endpoints, five preserved rounds, 150 seconds and
+150 resource samples; source, CLI and authored configs remained unchanged. RSS
+began at 222.0 MiB and ended round four at 276.6 MiB: **54.5 MiB growth**, still
+failing. CPU median/max was 1.5/81.6 percent. All 250 CLI processes ended, with
+1,363 connections, 112,753 statements and 1,368,111 rows. No timeouts occurred;
+refused provider comments and cancellation read receipts remain visible. This
+confirms the failure without treating diagnostic durations as hour coverage or
+four warm observations as a scored p95. Focused runner/recorder tests pass 54;
+Ruff and diff checks pass. No production memory fix, merge or completion is claimed.

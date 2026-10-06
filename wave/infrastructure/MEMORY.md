@@ -297,17 +297,13 @@ Retain the current serial implementation allocation rather than launch a second
 worker during this pass. Neither unchecked current Project KR has outcome proof;
 the metric portfolio and Project metric targets were empty in this observation.
 
-## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
+## One migration draft per Task (LOO-344)
 
-Jack Heart, 2026-09-30: only this machine is a client. A Task keeps one draft,
-`drafts/<name>.sql`, and edits it in place until landing; unreleased drafts on
-main are edited rather than undone by a later draft. Draft ids, `-- name:`/`-- id:`
-headers and the `development_migrations` receipt ledger are removed, so the
-applied-draft names, IDs and checksums in the LOO-321 diagnostics below no longer
-exist. Custom Homes keep exact-schema validation and stay disposable.
-`-- depends_on:` still orders drafts across Tasks at the release cut. Mechanics
-live in [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md). Branch
-evidence only; not shipped.
+Jack Heart selected one mutable draft per Task on September 30; released SQL
+stays immutable and custom Homes disposable. Current mechanics, including
+release ordering and materialization, belong in [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md).
+The October 1 branch-only cutover details remain at
+`1bd04e234:wave/infrastructure/MEMORY.md` under this heading; they do not prove shipment.
 
 ## One main Home (LOO-342, curated 2026-10-04)
 
@@ -787,13 +783,19 @@ raw paths and failed outcomes. A smaller Hitches/Hangs probe still generated
 cost. The benchmark guide retains observer/RSS distinctions and failures. No
 production allocation cause or performance acceptance follows from these probes.
 
-Independent fixed-image OCR diagnosis completed 160 observations: warm medians
-189–194 ms, substantial framework startup RSS, no consistent benefit from explicit
-autorelease draining. OCR was already warm before the failed soak; this does not
-explain its 52.7 MiB increase. Exact-process vmmap showed allocator slack, not an
-app leak. Journey journals now separate RSS around bitmap/OCR and action boundaries;
-matched rendered allocation replay remains necessary. No production repair or
-acceptance follows. The benchmark guide owns raw comparisons and remaining proof.
+Fixed-image OCR diagnosis (160 observations) found no consistent autorelease
+benefit; warm medians were 189–194 ms. OCR was already warm before the failed
+soak. The later contained workspace replay disproved the unsupported claim that
+this host could not render: 20/20 endpoints and five rounds over 150 seconds
+passed preservation, while fourth-round RSS grew 52.6/54.5 MiB across two soaks. Most growth
+occurred in first native input/capture; allocated heap stayed roughly flat after
+round one. Exact-process maps and restricted `leaks` output do not establish
+its cause. No production allocation repair is supported yet.
+
+Four-round reporting now uses in-process start/end checkpoints; asynchronous
+recorder attachment can miss first-round growth. RSS-only diagnostics retain
+missing hitch/hang coverage. The benchmark guide owns raw receipts and remaining
+allocation attribution; matched p95 and both hour soaks remain unproved.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

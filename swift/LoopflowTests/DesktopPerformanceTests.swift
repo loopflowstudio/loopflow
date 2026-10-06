@@ -452,6 +452,7 @@ struct DesktopPerformanceTests {
     private func measureOwnedSoak(view: SessionsView, window: PerformanceWindow,
                                   fixture: DesktopNativeSessionFixture, query: RegistryQuery,
                                   samples: Int, seconds: Double, journal: PerformanceJournal) async throws {
+        try journal.write(["event": "memory_phase", "phase": "owned_setup_begin"])
         let model = view.model
         let registry = view.workspaces
         let record = try #require(try await fixture.records().first)
@@ -470,6 +471,7 @@ struct DesktopPerformanceTests {
         companionView.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
         companionView.createSurface(manager: GhosttyManager.shared)
         let companionSurface = try #require(companionView.surface)
+        try journal.write(["event": "memory_phase", "phase": "companion_created"])
         multiplexer.setFocusedPane(sessionPane)
         let layout = multiplexer.layout
         defer {
@@ -490,6 +492,7 @@ struct DesktopPerformanceTests {
         let url = try #require(link.url)
         // PodiumView already owns keepWorkspaceCurrent. Starting another poller
         // here would invalidate the very idle measurement this test collects.
+        try journal.write(["event": "memory_phase", "phase": "owned_setup_end"])
         let start = ContinuousClock.now
         var round = 0
         if seconds > 0 {
@@ -517,6 +520,7 @@ struct DesktopPerformanceTests {
                 try send(window, message + "\n")
                 try await wait(window) { terminalText(surface).contains("reply:\(fixture.nativeId):\(message)") }
             })
+            try journal.write(["event": "memory_phase", "phase": "native_input_complete", "round": round])
             // Navigate away and back while the client is still live, retaining
             // both surfaces. The Task link selects the same recorded conversation.
             model.select(nil)
@@ -529,10 +533,12 @@ struct DesktopPerformanceTests {
             try #require(multiplexer.layout == layout)
             try #require(companionView.surface == companionSurface)
             try #require(try fixture.historyIsPreserved())
+            try journal.write(["event": "memory_phase", "phase": "navigation_files_complete", "round": round])
             try send(window, "quit\n")
             try await wait(window) { !registry.surfaces.hasSurface(identity) }
             registry.surfaces.release(identity)
             store.noteSurfaceClosed(identity)
+            try journal.write(["event": "memory_phase", "phase": "native_surface_released", "round": round])
             let retained = try await fixture.records()
             try #require(retained.map(\.id) == [fixture.sessionId])
             try #require(retained[0].taskIds.contains(fixture.taskId))

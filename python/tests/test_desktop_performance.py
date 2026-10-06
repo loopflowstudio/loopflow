@@ -406,21 +406,43 @@ def test_soak_reopens_after_planned_samples_keep_their_outcome(
     assert result["status"] == ("complete" if outcome == "passed" else "incomplete")
 
 
-def test_four_round_memory_uses_the_round_boundary(tmp_path: Path) -> None:
+@pytest.mark.parametrize("missing", [None, "soak_begin", "soak_round"])
+def test_four_round_memory_includes_growth_before_recorder_attaches(
+    tmp_path: Path, missing: str | None
+) -> None:
+    events = _soak_events()
+    for event in events:
+        if event["event"] == "soak_begin":
+            event["rss_bytes"] = 100 * 1024 * 1024
+        elif event["event"] == "soak_round":
+            event["rss_bytes"] = (140 + event["round"]) * 1024 * 1024
+        if event["event"] == missing:
+            event.pop("rss_bytes", None)
     directory = tmp_path / "soak-resources"
     directory.mkdir()
+    # The recorder attaches after early allocations, then samples past round four.
     (directory / "rss.jsonl").write_text(
         "\n".join(
             json.dumps(row)
             for row in [
-                {"t": 9, "rss_kib": 1024},
-                {"t": 13, "rss_kib": 3072},
-                {"t": 99, "rss_kib": 9000},
+                {"t": 9, "rss_kib": 140 * 1024},
+                {"t": 14, "rss_kib": 144 * 1024},
             ]
         )
     )
-    result = _report(tmp_path, _soak_events())
-    assert result["soak"]["memory_after_four_rounds_mib"] == 2
+    result = _report(tmp_path, events)
+    assert result["soak"]["memory_after_four_rounds_mib"] == (43 if missing is None else None)
+
+
+def test_comparison_rejects_different_recorder_modes(tmp_path: Path) -> None:
+    baseline = _report(tmp_path, _events())
+    current = _report(tmp_path, _events())
+    baseline["metadata"]["xctrace"] = True
+    current["metadata"]["xctrace"] = False
+    assert performance._comparison(current, baseline) == {
+        "available": False,
+        "reason": "Different xctrace",
+    }
 
 
 def test_cli_volume_keeps_partial_counts_and_missing_measurements(tmp_path: Path) -> None:

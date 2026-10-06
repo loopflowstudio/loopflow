@@ -191,6 +191,7 @@ def _soak(events: list[dict], plan: dict | None) -> dict:
     return {
         "requested_seconds": seconds,
         "status": "not_requested" if not seconds else "complete" if complete else "incomplete",
+        "begin": starts[0] if len(starts) == 1 else None,
         "rounds": rounds,
         "reopen_observations": repeated_starts + repeated_ends,
         "phases": by_kind["soak_phase"],
@@ -294,6 +295,7 @@ def _comparison(current: dict, baseline: dict) -> dict:
         "build_mode",
         "command",
         "measurement_source",
+        "xctrace",
         "snapshot",
         "repo",
         "issue",
@@ -363,15 +365,12 @@ def _report(output: Path, baseline: Path | None) -> dict:
     recording = output / "soak-resources" / "report.json"
     summary["soak"]["resources"] = json.loads(recording.read_text()) if recording.exists() else None
     summary["soak"]["memory_after_four_rounds_mib"] = None
-    rss_path = output / "soak-resources" / "rss.jsonl"
-    if rss_path.exists() and len(summary["soak"]["rounds"]) >= 4:
-        rss = [json.loads(line) for line in rss_path.read_text().splitlines()]
-        boundary = summary["soak"]["rounds"][3]["time"]
-        after = next((row for row in rss if row["t"] >= boundary), None)
-        if rss and after and rss[0]["t"] < boundary:
-            summary["soak"]["memory_after_four_rounds_mib"] = (
-                after["rss_kib"] - rss[0]["rss_kib"]
-            ) / 1024
+    soak = summary["soak"]
+    if len(soak["rounds"]) >= 4:
+        before = (soak["begin"] or {}).get("rss_bytes")
+        after = soak["rounds"][3].get("rss_bytes")
+        if before is not None and after is not None:
+            soak["memory_after_four_rounds_mib"] = (after - before) / (1024 * 1024)
     if baseline:
         summary["comparison"] = _comparison(
             summary, json.loads((baseline / "report.json").read_text())
@@ -971,6 +970,7 @@ def _run_native(
     snapshot: Path | None = None,
     repo: Path | None = None,
     issue: str | None = None,
+    xctrace: bool = True,
 ) -> None:
     environment = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
     isolated = output / "home"
@@ -1027,6 +1027,7 @@ def _run_native(
                                 str(output / "soak-resources"),
                                 "--phases",
                                 str(output / "attempts.jsonl"),
+                                *([] if xctrace else ["--no-xctrace"]),
                             ],
                             stdout=log,
                             stderr=subprocess.STDOUT,
@@ -1083,11 +1084,13 @@ def _run(
     snapshot: Path | None = None,
     repo: Path | None = None,
     issue: str | None = None,
+    xctrace: bool = True,
 ) -> int:
     output.mkdir(parents=True, exist_ok=False)
     metadata = {
         "schema": 1,
         "soak_seconds": soak_seconds,
+        "xctrace": xctrace,
         "cli_sha256": hashlib.sha256(cli.read_bytes()).hexdigest(),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "host": {"name": platform.node(), "os": platform.platform(), "arch": platform.machine()},
@@ -1132,7 +1135,9 @@ def _run(
         )
     else:
         try:
-            _run_native(output, metadata, samples, soak_seconds, cli, snapshot, repo, issue)
+            _run_native(
+                output, metadata, samples, soak_seconds, cli, snapshot, repo, issue, xctrace
+            )
         except (OSError, RuntimeError, ValueError) as error:
             metadata.update(outcome="failed", reason=str(error))
             metadata.setdefault("exit_code", None)
@@ -1220,6 +1225,11 @@ def main() -> int:
         default=0,
         help="Append unattended idle/navigation/typing; 3600 for the acceptance soak",
     )
+    run.add_argument(
+        "--no-xctrace",
+        action="store_true",
+        help="Diagnostic RSS/signposts only; leaves hitch/hang coverage unmeasured",
+    )
     run.add_argument("--snapshot", type=Path)
     run.add_argument("--repo", type=Path)
     run.add_argument("--issue")
@@ -1284,6 +1294,7 @@ def main() -> int:
             args.snapshot.resolve() if args.snapshot else None,
             args.repo.resolve() if args.repo else None,
             args.issue,
+            not args.no_xctrace,
         )
     summary = _report(args.output, args.baseline)
     print(args.output / "report.md")

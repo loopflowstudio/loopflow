@@ -315,6 +315,8 @@ final class TaskFilesStore {
     }
 
     private func invalidate(_ paths: [String]) {
+        // A commit, checkout or staging moved what the comparison reads.
+        var comparisonChanged = false
         for path in paths {
             if path == ".git" || path.hasPrefix(".git/") {
                 // Git and lf write other files here on every read; these move with the comparison.

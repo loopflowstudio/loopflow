@@ -188,7 +188,12 @@ Flow's record) — `274a63a8a`. 10. Nodes and edges; Projects have workflows —
     Not in this slice: dropping the PR slot for a no-PR Workflow (LOO-385).
     Done when tests show state following position through start, a node, an
     edge and end; `end` refused over an unsettled PR; both Linear cases; and
-    no surface or wire field carries a stored ready/done. *Not done.*
+    no surface or wire field carries a stored ready/done. **Built, not yet
+    compressed or realigned.** `tasks.work_state` is dropped; `lf task move
+    ISSUE end` replaces `lf task complete`. Departures and choices, including
+    never-started Tasks reading not ready and an empty unpublished PR
+    retiring at `end`: [questions.md](questions.md). Demo items: Complete
+    anyway on screen; a real Linear completion against an active Task.
 
 11. **Desktop draws the Workflow as a graph.** Jack, October 6, on the
     diagram in [pr-review.html](pr-review.html) ("The experience"): "this

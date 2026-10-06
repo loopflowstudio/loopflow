@@ -333,7 +333,7 @@ impl SqliteStore {
                     skill: Skill::named(label),
                     id: None,
                     human: false,
-                    repeat: None,
+                    returns: None,
                     sources: Vec::new(),
                 })
             })

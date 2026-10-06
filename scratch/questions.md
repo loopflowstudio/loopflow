@@ -15,6 +15,12 @@ interpretations are at `6f246fda4:scratch/questions.md`.
   introduce parallel paths or drivers." A Task command may prepare, then it
   enters the ordinary path; it never owns a second launcher, driver or record.
 
+- **Steers per step (October 6).** On the FlowExec pass dropping per-node
+  steer acknowledgement: "This seems potentially bad as that was specifically
+  added to address some runaway token counts". Repair is slice 3 in the
+  design; the mechanism there (a public newer-than option the driver passes)
+  is the agent's.
+
 ## Step invocation — decided by Jack Heart (October 5)
 
 At `45ca0d2ac` the driver passes each step a JSON `FlowStep` through the
@@ -258,6 +264,43 @@ The agent's, October 5, building slice 1. None is confirmed by Jack Heart.
   The list now says five.
 - **Reaching `end` removes nothing:** the Task stays ready and
   `lf task complete` stays separate (draft default 3).
+
+## Choices the Loops pass made without Jack
+
+The agent's, October 6, building slice 2. None is confirmed by Jack Heart.
+
+- **Authored form.** `- loop: <target>` is a flow item, with an optional
+  sibling `step:` (a skill name or mapping) and nothing else. It is allowed
+  in a Flow body and in an XOR path's `steps`.
+- **The occurrence name is the existing `id`** on a `step:` mapping; no new
+  field. A target matches an `id` first, else the one preceding step running
+  that skill. Two or more are an error that lists their positions.
+- **Scope.** A target is looked up among the steps before the loop in its own
+  Flow body or XOR path, composed Flows included, so a Flow composed twice
+  resolves each copy's loops to that copy.
+- **Captured form.** The compiled step keeps how many steps back it returns,
+  not a name; deciders need no id, and return counts are keyed by the
+  decider's position in its body. Wire shapes are unchanged; a builtin
+  graph's nodes now carry `id: null`.
+- **Old spelling fails loudly.** `repeat:` on a step is refused with a message
+  naming `loop:`, so another repository's Flow cannot silently lose its loop.
+  A `human: true` decider is refused.
+- **Done-when grep.** Left matching: release notes, dated `performance/`
+  reports and baselines, other Waves' memory (shipped or dated records), the
+  test of the refusal above, and an unrelated `repeat:` parameter in
+  `scripts/context_ablation.py`. That script now replays `loop-or-next`
+  launches, so records made under the old name are skipped.
+- **Website example** changed only its loop lines; its human steps wait for
+  the docs slice.
+- **Outside the slice.** The three-loop test ran into a Codex close that
+  failed when the provider process had already exited ("does not own its
+  process group"), about two runs in five. `close_engine` now treats a
+  process that is gone as closed.
+- **Seen, not fixed.** `scripts/check_architecture.py` reports
+  `task_workflows` and `task_workflow_traversals` missing from the map
+  (slice 1's tables; the docs slice's check). Five lib tests
+  (`journal::boot_time`, three `ops::chapter`, one `ops::ci_watch`) fail in a
+  full parallel `--lib` run and pass alone.
 
 ## Choices the earlier pass made without Jack
 

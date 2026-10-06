@@ -1907,7 +1907,7 @@ mod tests {
 
                 human,
                 id: None,
-                repeat: None,
+                returns: None,
                 sources: Vec::new(),
             })
         }
@@ -1937,7 +1937,7 @@ mod tests {
             ]),
         }));
         current.extend([
-            skill("loop-decide", false),
+            skill("loop-or-next", false),
             skill("pr-publish", false),
             skill("demo", true),
         ]);

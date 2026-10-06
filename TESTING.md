@@ -564,7 +564,7 @@ main Home. Children use the same Home and executable; PATH cannot choose a
 second store. A Home's database is always `$LF_HOME/loopflow.db`.
 
 When editing the repeated Task body, exercise every step on two passes and
-saved-decision recovery. Keep loop-decide after work and review so navigation
+saved-decision recovery. Keep loop-or-next after work and review so navigation
 cannot skip a later review.
 
 Include the CLI/desktop unblock projection when changing builtin Flow composition:

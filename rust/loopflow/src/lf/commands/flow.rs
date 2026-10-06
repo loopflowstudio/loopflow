@@ -506,19 +506,15 @@ impl SkillExecutor for &Driver<'_> {
         let current = self.current();
         let output = current.as_ref().and_then(FlowOutput::for_step);
         let mut message = self.message.unwrap_or_default().to_owned();
-        if let Some(repeat) = &skill.repeat {
-            let edge = skill.id.as_deref().expect("repeat occurrence has an id");
-            let traversals = self
-                .position
-                .lock()
-                .expect("Flow position mutex poisoned")
-                .leaf()
-                .progress
-                .repeats
-                .get(edge)
-                .copied()
-                .unwrap_or(0);
-            message.push_str(&format!("\n\nDecision occurrence {edge}: pass {}. The backward edge returns to {}. Compare the preceding pass's intended progress with its observed results; new evidence counts as progress. Missing prior evidence is an evidence gap, not proof of no progress.", u64::from(traversals) + 1, repeat.from));
+        if let Some(back) = skill.returns {
+            let position = self.position.lock().expect("Flow position mutex poisoned");
+            let (body, leaf) = position.current_body(self.steps);
+            let traversals = leaf.progress.repeats.get(&leaf.index.to_string());
+            let target = match leaf.index.checked_sub(back).map(|target| &body[target]) {
+                Some(ConcreteStep::Skill(target)) => target.skill.name.as_str(),
+                _ => "an earlier step",
+            };
+            message.push_str(&format!("\n\nDecision pass {}. The backward edge returns to {target}. Compare the preceding pass's intended progress with its observed results; new evidence counts as progress. Missing prior evidence is an evidence gap, not proof of no progress.", u64::from(traversals.copied().unwrap_or(0)) + 1));
         }
         if let Some(direction) = &ctx.direction {
             message.push_str(&format!(

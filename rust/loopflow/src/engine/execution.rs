@@ -159,7 +159,7 @@ impl ConcreteXor {
             skill: self.router.clone(),
             id: None,
             human: false,
-            repeat: None,
+            returns: None,
             sources: self.sources.clone(),
         }
     }
@@ -335,8 +335,7 @@ mod tests {
         SkillExecutor, SkillOutcome,
     };
     use crate::engine::flow::{
-        Command, ConcreteCommand, ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor,
-        RepeatPolicy, Skill,
+        Command, ConcreteCommand, ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill,
     };
     use crate::engine::transitions::{FlowDecision, FlowVerdict};
     use anyhow::{anyhow, Result};
@@ -490,17 +489,15 @@ mod tests {
             skill: Skill::named(name),
             id: None,
             human: false,
-            repeat: None,
+            returns: None,
             sources: vec!["test".to_string()],
         }
     }
 
-    fn step(name: &str, edge: Option<&str>) -> ConcreteStep {
+    fn step(name: &str, returns: Option<usize>) -> ConcreteStep {
         let mut value = skill(name);
         value.id = Some(name.to_owned());
-        value.repeat = edge.map(|from| RepeatPolicy {
-            from: from.to_owned(),
-        });
+        value.returns = returns;
         ConcreteStep::Skill(value)
     }
 
@@ -536,10 +533,10 @@ mod tests {
             step("init", None),
             step("a", None),
             step("compress", None),
-            step("ra", Some("a")),
+            step("ra", Some(2)),
             step("middle", None),
             step("b", None),
-            step("rb", Some("b")),
+            step("rb", Some(1)),
             step("final", None),
         ];
         let executor = RecordingExecutor::new(repo.path().to_owned())
@@ -584,7 +581,7 @@ mod tests {
         }
         assert_eq!(
             cursor.progress.repeats,
-            [("ra".to_owned(), 1), ("rb".to_owned(), 1)].into()
+            [("3".to_owned(), 1), ("6".to_owned(), 1)].into()
         );
         assert_eq!(cursor.iteration, 2);
         assert_eq!(cursor.index, items.len());
@@ -596,7 +593,7 @@ mod tests {
         let repo = fixture_repo().unwrap();
         let items = vec![
             step("work", None),
-            step("decide", Some("work")),
+            step("decide", Some(1)),
             step("final", None),
         ];
         let outcomes = (0..20)
@@ -629,7 +626,7 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(cursor.progress.repeats["decide"], 20);
+        assert_eq!(cursor.progress.repeats["1"], 20);
         assert_eq!(cursor.index, items.len());
     }
 
@@ -639,8 +636,8 @@ mod tests {
         let items = vec![
             step("start", None),
             step("middle", None),
-            step("inner", Some("start")),
-            step("outer", Some("middle")),
+            step("inner", Some(2)),
+            step("outer", Some(2)),
             step("final", None),
         ];
         let executor = RecordingExecutor::new(repo.path().to_owned())
@@ -678,7 +675,7 @@ mod tests {
         assert_eq!(cursor.index, items.len());
         assert_eq!(
             cursor.progress.repeats,
-            [("inner".to_owned(), 2), ("outer".to_owned(), 1)].into()
+            [("2".to_owned(), 2), ("3".to_owned(), 1)].into()
         );
         assert!(cursor.progress.verdict.is_none());
         assert_eq!(executor.saved_cursor(), cursor);
@@ -689,7 +686,7 @@ mod tests {
         let repo = fixture_repo().unwrap();
         let items = vec![
             step("work", None),
-            step("decide", Some("work")),
+            step("decide", Some(1)),
             step("final", None),
         ];
         for outcome in [
@@ -720,7 +717,7 @@ mod tests {
         let repo = fixture_repo().unwrap();
         let items = vec![
             step("work", None),
-            step("decide", Some("work")),
+            step("decide", Some(1)),
             step("final", None),
         ];
         let executor = RecordingExecutor::new(repo.path().to_owned())
@@ -745,7 +742,7 @@ mod tests {
             FlowOutcome::Completed
         );
         assert_eq!(resumed.calls(), ["work", "decide", "final"]);
-        assert_eq!(cursor.progress.repeats["decide"], 1);
+        assert_eq!(cursor.progress.repeats["1"], 1);
         assert!(cursor.progress.verdict.is_none());
         assert_eq!(
             FlowEngine::new(resumed.clone())
@@ -766,7 +763,11 @@ mod tests {
             "- xor:\n    paths:\n      selected:\n        flow: inner\n        description: selected path\n",
         )
         .unwrap();
-        std::fs::write(repo.path().join(".lf/flows/inner.yaml"), "- step:\n    name: work\n    id: work\n- step:\n    name: decide\n    id: decide\n    repeat:\n      from: work\n").unwrap();
+        std::fs::write(
+            repo.path().join(".lf/flows/inner.yaml"),
+            "- work\n- loop: work\n  step: decide\n",
+        )
+        .unwrap();
         let items = vec![
             step("prefix", None),
             xor("outer", repo.path()),
@@ -859,7 +860,7 @@ mod tests {
                 sources: vec![],
             }),
             xor("branch", repo.path()),
-            step("decide", Some("work")),
+            step("decide", Some(3)),
             step("final", None),
         ];
         let executor = RecordingExecutor::new(repo.path().to_owned())

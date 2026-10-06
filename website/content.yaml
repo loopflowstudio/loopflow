@@ -119,16 +119,10 @@ homepage:
               id: review_plan
               name: review-design
               human: true
-          - step:
-              id: implement
-              name: implement
+          - implement
           - compress
           - flow: refresh
-          - step:
-              id: decide
-              name: loop-decide
-              repeat:
-                from: implement
+          - loop: implement
           - pr-publish
           - step:
               id: review_demo

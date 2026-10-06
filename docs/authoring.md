@@ -48,7 +48,7 @@ Draft the affected usage docs and skill guidance first, then follow the simpler
 interaction through types, APIs, and infrastructure. Product clarity is valuable
 even without deleting code.
 Keep proposed alternatives distinct from accepted requirements and verified
-behavior. The work and updated plan supply evidence; `loop-decide` owns navigation
+behavior. The work and updated plan supply evidence; `loop-or-next` owns navigation
 when the Flow declares a decision step.
 
 ## Flows
@@ -147,27 +147,31 @@ lf feature
 lf task run DES-123 feature
 ```
 
-A loop is a backward edge in that Flow. It returns from a deciding step to an
-earlier step; the intervening steps form its body. Give the destination and
-deciding step stable ids:
+A loop is a backward edge in that Flow. `loop: <target>` runs a deciding step
+last and returns to an earlier step; the steps between form its body:
 
 ```yaml
-- step:
-    id: implement
-    name: implement
+- implement
 - compress
 - flow: refresh
-- step:
-    id: decide
-    name: loop-decide
-    repeat:
-      from: implement
+- loop: implement
 - pr-publish
 ```
 
-One pass runs implement, compress, refresh (sync → realign), and loop-decide.
-The work and updated plan supply evidence; loop-decide chooses Advance or Iterate through the
-[decision protocol](lf-reference.md#flow-decisions-and-recovery). Iterate returns to `from`
+`loop` names a preceding step by its skill. When that skill runs more than once,
+give one occurrence an `id` and loop to that. `step:` replaces the default
+`loop-or-next` decider:
+
+```yaml
+- step: {name: implement, id: first}
+- implement
+- loop: first
+  step: my-decider
+```
+
+One pass runs implement, compress, refresh (sync → realign), and loop-or-next.
+The work and updated plan supply evidence; loop-or-next chooses Advance or Iterate through the
+[decision protocol](lf-reference.md#flow-decisions-and-recovery). Iterate returns to the target
 with direction; Advance leaves the loop and publishes. This is `pursue`: one
 implementation loop with no human review or outer return edge.
 

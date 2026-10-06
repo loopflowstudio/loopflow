@@ -1136,7 +1136,7 @@ fn saved_flow_stand_in(fixture: &Fixture) {
     std::fs::write(lf.join("skills/decide-proof.md"), "Decide the fixture.").unwrap();
     std::fs::write(
         lf.join("flows/work-then-decide.yaml"),
-        "- step:\n    id: work\n    name: work-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: work\n",
+        "- work-proof\n- loop: work-proof\n  step: decide-proof\n",
     )
     .unwrap();
 }

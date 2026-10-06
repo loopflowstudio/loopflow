@@ -519,7 +519,7 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
             skill: Skill::named(label),
             id: None,
             human: false,
-            repeat: None,
+            returns: None,
             sources: Vec::new(),
         })],
     );

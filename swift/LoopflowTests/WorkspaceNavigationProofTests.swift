@@ -566,7 +566,7 @@ struct WorkspaceNavigationProofTests {
         // A historical invocation must not jump into an identically keyed node
         // of the current Flow. The real chip leaves this Session selected.
         try await named.membership(.step(flow: "feature", invocationId: "prior-invocation",
-                                        step: "loop-decide", node: 5, iterations: [[1, 1]],
+                                        step: "loop-or-next", node: 5, iterations: [[1, 1]],
                                         occurrence: .past), for: "first")
         await model.refresh()
         try await settle(window)

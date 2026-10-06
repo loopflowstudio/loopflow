@@ -167,7 +167,7 @@ Jack Heart, October 5: "i want you to manage a looping lf flow that implemetns
 each pass builds the first slice not marked done, compresses, syncs and
 realigns; realign marks the slice **done** here with its commit and one-line
 check result; the deciding step iterates while any slice is not done and
-advances to publish only when all are. A proof that needs a person, a display
+advances to publish only when all eight are; the list is the authority on how many there are. A proof that needs a person, a display
 or a live provider is listed under the slice as a demo item and never keeps a
 slice open. A pass that cannot finish its slice records why and stops blocked.
 
@@ -190,12 +190,26 @@ Flow history below means FlowExec rows joined to their Execs.
    advances; shared and overlapping return edges are preserved. Done when
    `git grep -E "loop-decide|repeat:"` matches only released migrations and
    dated reviews, and `flow_tests` covers three nested loops. *Not done.*
-3. **Task primary.** `PrimaryScope::Task(TaskId)` under the existing scope
+3. **Review repairs.** Two defects found on October 6. (a) Steers: Jack
+   Heart, on every step now receiving all of its Task's steers: "This seems
+   potentially bad as that was specifically added to address some runaway
+   token counts". Restore the saving without telling a step about its Flow:
+   the driver, which knows when it last ran this node, passes an ordinary
+   public option on the step's command that limits Task direction to steers
+   newer than a given one; the option works on any `lf` run. (b) A flowless
+   edge into `end` cannot be taken from a stage with another way out:
+   `lf task run ISSUE` answers "more than one outgoing edge; name its Flow"
+   and `end` is not a Flow, so builtin `research` can never end. Let
+   `lf task run ISSUE end` (the target stage's name) take it, and say so in
+   the refusal and the stage guidance. Done when a test shows a node's second
+   run receives only steers newer than its first, and a test walks `research`
+   to `end`. *Not done.*
+4. **Task primary.** `PrimaryScope::Task(TaskId)` under the existing scope
    lock. Explicit choice wins; else the sole unfinished interactive Task
    conversation; else the most recent by `latest_interactive_session`'s
    ranking, restricted to unfinished Task members. Read-only inventory creates
    nothing. Done when `session_lifecycle_tests` covers each rule. *Not done.*
-4. **Waiting.** Rust-owned; replaces Review/Reply attention,
+5. **Waiting.** Rust-owned; replaces Review/Reply attention,
    `SessionKind::FlowReview` and `--needs-me` with one Waiting value and
    `--waiting`. Immediate on explicit pending input or a successful
    interactive yield with no outstanding tools; otherwise after 120 seconds
@@ -204,19 +218,19 @@ Flow history below means FlowExec rows joined to their Execs.
    filtering happens before paging. Provider evidence:
    [harness-attention.md](harness-attention.md). Done when the injected-clock
    and recorded-trace tests pass for Claude, Codex and OpenCode. *Not done.*
-5. **Desktop.** The Task page draws its TaskWorkflow with the current stage
+6. **Desktop.** The Task page draws its TaskWorkflow with the current stage
    or running edge, and every Flow run of the Task gets the same
    graph/progress/output view from FlowExec. Waiting first, working Sessions
    in a compact group, no completion controls; Start runs `lf -b task run` as
    an app-owned child. Done when `swift build --build-tests` and the headless
    Desktop tests pass with shared DTO fixtures. Demo items: native rendering
    and interaction. *Not done.*
-6. **Defaults and editing.** The Project's default names a workflow, shown and
+7. **Defaults and editing.** The Project's default names a workflow, shown and
    set in Wave settings; Edit opens the real workflow or Flow source, with
    builtin customization creating the `.lf/` file explicitly; an invalid file
    stays saved and visibly invalid. Done when its headless tests pass.
    *Not done.*
-7. **Docs and website.** README, `docs/`, AGENTS.md, the architecture
+8. **Docs and website.** README, `docs/`, AGENTS.md, the architecture
    reference, builtin skills and the website describe TaskWorkflow, FlowExec,
    Sessions and Runs, Waiting and `lf task run`; no resident, review-handshake
    or worker text remains. Done when the website checks and
@@ -250,6 +264,13 @@ October 5, after compress: the commands above except `land_tests` passed
 (`store::` 181, `session_lifecycle_tests` 17, `flow_tests` 24,
 `flow_discovery_tests` 3, `task_flow_launch_tests` 1, `dto_fixtures` 18);
 all-target Clippy clean. `land_tests` and the full suites are gate's.
+
+October 6, Loops (slice 2), before compress: `--lib engine::` 414,
+`flow_tests` 25 six times running (three nested loops included),
+`session_lifecycle_tests` 17, `task_flow_launch_tests` 5,
+`flow_discovery_tests` 3, `dto_fixtures` 18, `golden_prompt` 1 passed;
+all-target Clippy clean. Swift fixtures changed a label only and were not
+built. The agent's choices are in [questions.md](questions.md).
 
 Configured demo, still separate: in a private Home, `lf -b task run INF-123
 proof` prints and blocks; `lf monitor` and `lf flow show ID --sessions` show a

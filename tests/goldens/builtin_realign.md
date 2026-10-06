@@ -213,7 +213,7 @@ Finish briefly: what changed, what remains, and any decision needed. Keep the
 check result to one line with its command and result or deferred owner. Update
 the existing plan; do not accumulate reports or repeated untested-claim lists.
 If everything already agrees, say so without manufacturing changes.
-Supply the facts for a reader such as loop-decide to judge; do not preselect
+Supply the facts for a reader such as loop-or-next to judge; do not preselect
 Advance, Iterate, or Blocked. Publication and workflow navigation belong to
 the caller.
 

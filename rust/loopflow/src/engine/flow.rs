@@ -37,17 +37,10 @@ impl Skill {
     }
 }
 
-/// The deciding occurrence can return to a preceding node.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RepeatPolicy {
-    pub from: String,
-}
+/// The skill a `loop:` item runs when it names none.
+const DEFAULT_DECIDER: &str = "loop-or-next";
 
-fn validate_step_settings(
-    id: Option<&str>,
-    human: bool,
-    repeat: Option<&RepeatPolicy>,
-) -> Result<(), LoadError> {
+fn validate_step_settings(id: Option<&str>, human: bool) -> Result<(), LoadError> {
     if id.is_some_and(|id| id.trim().is_empty()) {
         return Err(LoadError::InvalidFlow(
             "step id cannot be empty".to_string(),
@@ -58,24 +51,11 @@ fn validate_step_settings(
             "review steps require a stable id".to_string(),
         ));
     }
-    if human && repeat.is_some() {
-        return Err(LoadError::InvalidFlow(
-            "human steps return feedback; put the backward edge on a following loop-decide step"
-                .to_string(),
-        ));
-    }
-    if let Some(repeat) = repeat {
-        if id.is_none() || repeat.from.trim().is_empty() {
-            return Err(LoadError::InvalidFlow(
-                "repeat requires a deciding step with an id and a from node".to_string(),
-            ));
-        }
-    }
     Ok(())
 }
 
 /// An executable occurrence. Template names resolve to Target during loading;
-/// review and repeat settings belong to this occurrence, not to the definition.
+/// review and loop settings belong to this occurrence, not to the definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Step {
     pub target: Target,
@@ -83,8 +63,10 @@ pub struct Step {
     pub id: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub human: bool,
+    /// A deciding occurrence's authored target: the occurrence name or skill
+    /// of an earlier step it can return to.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub repeat: Option<RepeatPolicy>,
+    pub returns: Option<String>,
 }
 
 impl Step {
@@ -93,7 +75,7 @@ impl Step {
             target,
             id: None,
             human: false,
-            repeat: None,
+            returns: None,
         }
     }
 }
@@ -200,7 +182,8 @@ pub struct ConcreteSkill {
     pub skill: Skill,
     pub id: Option<String>,
     pub human: bool,
-    pub repeat: Option<RepeatPolicy>,
+    /// A deciding occurrence returns this many steps back in its own body.
+    pub returns: Option<usize>,
     pub sources: Vec<String>,
 }
 
@@ -413,34 +396,45 @@ pub(crate) fn resolve_flow(flow: &Flow, repo: &Path) -> Result<Vec<ResolvedFlowI
     let items = flatten_resolved(&resolved);
     let mut ids = HashSet::new();
     validate_occurrence_ids(&items, &mut ids)?;
-    validate_repeats(&items)?;
     Ok(resolved)
 }
 
-pub(crate) fn validate_repeats(items: &[ConcreteStep]) -> Result<(), LoadError> {
-    for (index, item) in items.iter().enumerate() {
-        if let ConcreteStep::Xor(branch) = item {
-            for path in branch.paths.values() {
-                validate_repeats(&path.steps)?;
-            }
-        }
-        let ConcreteStep::Skill(skill) = item else {
-            continue;
-        };
-        validate_step_settings(skill.id.as_deref(), skill.human, skill.repeat.as_ref())?;
-        let Some(repeat) = &skill.repeat else {
-            continue;
-        };
-        if !items[..index].iter().any(
-            |item| matches!(item, ConcreteStep::Skill(s) if s.id.as_deref() == Some(&repeat.from)),
-        ) {
-            return Err(LoadError::InvalidFlow(format!(
-                "repeat from {:?} must name a preceding node",
-                repeat.from
-            )));
-        }
+/// Steps back from the end of `preceding` to the one occurrence `target`
+/// names: an occurrence id, else the only step running that skill.
+fn resolve_loop_target(preceding: &[ConcreteStep], target: &str) -> Result<usize, LoadError> {
+    let matching = |by_id: bool| -> Vec<usize> {
+        preceding
+            .iter()
+            .enumerate()
+            .filter_map(|(index, step)| {
+                match step {
+                    ConcreteStep::Skill(skill) if by_id => skill.id.as_deref() == Some(target),
+                    ConcreteStep::Skill(skill) => skill.skill.name == target,
+                    ConcreteStep::Command(_) | ConcreteStep::Xor(_) => false,
+                }
+                .then_some(index)
+            })
+            .collect()
+    };
+    let mut found = matching(true);
+    if found.is_empty() {
+        found = matching(false);
     }
-    Ok(())
+    match found[..] {
+        [index] => Ok(preceding.len() - index),
+        [] => Err(LoadError::InvalidFlow(format!(
+            "loop target {target:?} must name a preceding step"
+        ))),
+        _ => Err(LoadError::InvalidFlow(format!(
+            "loop target {target:?} is ambiguous: steps {} of {} preceding all run it; give one an id and name that",
+            found
+                .iter()
+                .map(|index| (index + 1).to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            preceding.len()
+        ))),
+    }
 }
 
 fn validate_occurrence_ids(
@@ -774,6 +768,9 @@ fn parse_flow_mapping(
     map: &serde_yaml_ng::Mapping,
     loader: &mut DefinitionLoader<'_>,
 ) -> Result<Step, LoadError> {
+    if let Some(target) = map.get(key("loop")) {
+        return parse_loop(map, target);
+    }
     if let Some(skill_value) = map.get(key("step")) {
         if map.len() != 1 {
             return Err(LoadError::InvalidFlow(
@@ -800,7 +797,7 @@ fn parse_flow_mapping(
         return parse_xor_value(xor_value, loader);
     }
     Err(LoadError::InvalidFlow(
-        "flow item mapping must include step, cmd, flow, or xor".to_string(),
+        "flow item mapping must include step, loop, cmd, flow, or xor".to_string(),
     ))
 }
 
@@ -818,6 +815,35 @@ fn parse_command_value(value: &Value) -> Result<Step, LoadError> {
     Ok(Step::new(Target::Command(Command { command, args })))
 }
 
+/// `loop: <target>` runs a deciding skill last, `step` or `loop-or-next`, which
+/// advances, returns to the target or stops blocked.
+fn parse_loop(map: &serde_yaml_ng::Mapping, target: &Value) -> Result<Step, LoadError> {
+    let target = target
+        .as_str()
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+        .ok_or_else(|| LoadError::InvalidFlow("loop must name a preceding step".to_string()))?;
+    if map
+        .keys()
+        .any(|field| *field != key("loop") && *field != key("step"))
+    {
+        return Err(LoadError::InvalidFlow(
+            "a loop item takes only loop and step".to_string(),
+        ));
+    }
+    let mut step = match map.get(key("step")) {
+        Some(decider) => parse_skill_value(decider)?,
+        None => Step::new(Target::Skill(Skill::named(DEFAULT_DECIDER))),
+    };
+    if step.human {
+        return Err(LoadError::InvalidFlow(
+            "a loop's deciding step is autonomous".to_string(),
+        ));
+    }
+    step.returns = Some(target.to_string());
+    Ok(step)
+}
+
 /// The authored `step:` mapping flattens skill options and occurrence policy.
 #[derive(Debug, Deserialize)]
 struct SkillMapping {
@@ -826,13 +852,17 @@ struct SkillMapping {
     id: Option<String>,
     #[serde(default)]
     human: bool,
-    repeat: Option<RepeatPolicy>,
 }
 
 fn parse_skill_value(value: &Value) -> Result<Step, LoadError> {
     match value {
         Value::String(name) => Ok(Step::new(Target::Skill(Skill::named(name)))),
         Value::Mapping(map) => {
+            if map.contains_key(key("repeat")) {
+                return Err(LoadError::InvalidFlow(
+                    "step repeat is retired; follow the work with `- loop: <target>`".to_string(),
+                ));
+            }
             if map.contains_key(key("feedback")) || map.contains_key(key("interactive")) {
                 return Err(LoadError::InvalidFlow(
                     "feedback and interactive flow metadata are retired; use stable id plus human"
@@ -843,13 +873,13 @@ fn parse_skill_value(value: &Value) -> Result<Step, LoadError> {
                 serde_yaml_ng::from_value(value.clone()).map_err(|error| {
                     LoadError::InvalidFlow(format!("invalid step mapping: {error}"))
                 })?;
-            validate_step_settings(step.id.as_deref(), step.human, step.repeat.as_ref())?;
+            validate_step_settings(step.id.as_deref(), step.human)?;
             step.skill.content = None;
             Ok(Step {
                 target: Target::Skill(step.skill),
                 id: step.id,
                 human: step.human,
-                repeat: step.repeat,
+                returns: None,
             })
         }
         _ => Err(LoadError::InvalidFlow(
@@ -985,6 +1015,9 @@ fn parse_xor_path_skills(
         .map(|item| match item {
             Value::String(_) => parse_skill_value(item),
             Value::Mapping(skill_map) => {
+                if let Some(target) = skill_map.get(key("loop")) {
+                    return parse_loop(skill_map, target);
+                }
                 if let Some(skill_value) = skill_map.get(key("step")) {
                     return parse_skill_value(skill_value);
                 }
@@ -1063,7 +1096,7 @@ fn compile_steps(
     let mut items = Vec::new();
     for step in steps {
         if !matches!(step.target, Target::Skill(_))
-            && (step.id.is_some() || step.human || step.repeat.is_some())
+            && (step.id.is_some() || step.human || step.returns.is_some())
         {
             return Err(LoadError::InvalidFlow(
                 "occurrence metadata are valid only on skill nodes".into(),
@@ -1084,7 +1117,11 @@ fn compile_steps(
                 skill: resolve_skill_reference(skill, repo)?,
                 id: step.id.clone(),
                 human: step.human,
-                repeat: step.repeat.clone(),
+                returns: step
+                    .returns
+                    .as_deref()
+                    .map(|target| resolve_loop_target(&flatten_resolved(&items), target))
+                    .transpose()?,
                 sources: sources.to_vec(),
             })),
             Target::Xor(branch) => items.push(compile_branch(branch, repo, sources)?),
@@ -1163,47 +1200,58 @@ mod tests {
     }
 
     #[test]
-    fn backward_edges_require_an_earlier_target() {
+    fn loops_resolve_one_preceding_occurrence() {
         let tmp = TempDir::new().unwrap();
         let flows = tmp.path().join(".lf/flows");
         fs::create_dir_all(&flows).unwrap();
-        for from in ["missing", "review"] {
-            fs::write(flows.join("repeat-proof.yaml"), format!(
-                "- step:\n    id: implement\n    name: implement\n- step:\n    id: review\n    name: loop-decide\n    repeat:\n      from: {from}\n",
-            )).unwrap();
-            let result = load_flow("repeat-proof", tmp.path())
-                .and_then(|flow| compile_flow(&flow, tmp.path()));
-            assert!(result.unwrap_err().to_string().contains("preceding node"));
-        }
-    }
+        let compile = |body: &str| {
+            fs::write(flows.join("loop-proof.yaml"), body).unwrap();
+            load_flow("loop-proof", tmp.path()).and_then(|flow| compile_flow(&flow, tmp.path()))
+        };
+        let edges = |steps: &[ConcreteStep]| -> Vec<(String, usize)> {
+            steps
+                .iter()
+                .filter_map(|step| match step {
+                    ConcreteStep::Skill(skill) => Some((skill.skill.name.clone(), skill.returns?)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let pursue = compile_flow(&load_flow("pursue", tmp.path()).unwrap(), tmp.path()).unwrap();
+        assert_eq!(edges(&pursue), [("loop-or-next".to_string(), 4)]);
 
-    #[test]
-    fn human_reviews_do_not_own_return_edges() {
-        let tmp = TempDir::new().unwrap();
-        let steps = compile_flow(&load_flow("pursue", tmp.path()).unwrap(), tmp.path()).unwrap();
-        let edges: Vec<_> = steps
-            .iter()
-            .filter_map(|step| match step {
-                ConcreteStep::Skill(skill) => {
-                    if skill.human {
-                        assert!(skill.repeat.is_none());
-                    }
-                    skill
-                        .repeat
-                        .as_ref()
-                        .map(|edge| (skill.skill.name.as_str(), edge.from.as_str()))
-                }
-                _ => None,
-            })
-            .collect();
-        assert_eq!(edges, [("loop-decide", "implement")]);
-        let flows = tmp.path().join(".lf/flows");
-        fs::create_dir_all(&flows).unwrap();
-        fs::write(flows.join("invalid.yaml"), "- step: {id: implement, name: implement}\n- step: {id: demo, name: demo, human: true, repeat: {from: implement}}\n").unwrap();
-        assert!(load_flow("invalid", tmp.path())
-            .unwrap_err()
-            .to_string()
-            .contains("human steps return feedback"));
+        // A unique skill name is enough; repeated skills need one occurrence name.
+        let named = compile(
+            "- implement\n- step: {name: implement, id: second}\n- loop: second\n- loop: second\n  step: gate\n",
+        )
+        .unwrap();
+        assert_eq!(
+            edges(&named),
+            [("loop-or-next".to_string(), 1), ("gate".to_string(), 2)]
+        );
+        for (body, expected) in [
+            ("- implement\n- loop: missing\n", "preceding step"),
+            ("- loop: implement\n- implement\n", "preceding step"),
+            (
+                "- implement\n- implement\n- loop: implement\n",
+                "ambiguous: steps 1, 2 of 2",
+            ),
+            (
+                "- implement\n- loop: implement\n  id: decide\n",
+                "only loop and step",
+            ),
+            (
+                "- implement\n- loop: implement\n  step: {name: demo, id: demo, human: true}\n",
+                "autonomous",
+            ),
+            (
+                "- implement\n- step: {name: gate, repeat: {from: implement}}\n",
+                "repeat is retired",
+            ),
+        ] {
+            let error = compile(body).unwrap_err().to_string();
+            assert!(error.contains(expected), "{error}");
+        }
     }
 
     #[test]
@@ -1497,7 +1545,7 @@ Design the feature.
                 };
                 assert_eq!(step.sources, ["vsm-operate"]);
                 assert!(!step.human);
-                assert!(step.repeat.is_none());
+                assert!(step.returns.is_none());
                 let content = step.skill.content.as_ref().unwrap();
                 assert!(content.contains("lf wave list --current --json"));
                 assert!(content.contains("LF_FLOW_ID"));
@@ -1561,7 +1609,7 @@ Design the feature.
         let error = parse_flow_items(&value).expect_err("and steps are retired");
         assert!(error
             .to_string()
-            .contains("flow item mapping must include step, cmd, flow, or xor"));
+            .contains("flow item mapping must include step, loop, cmd, flow, or xor"));
     }
 
     #[test]
@@ -1577,7 +1625,7 @@ Design the feature.
         let error = parse_flow_items(&value).expect_err("or steps are not supported");
         assert!(error
             .to_string()
-            .contains("flow item mapping must include step, cmd, flow, or xor"));
+            .contains("flow item mapping must include step, loop, cmd, flow, or xor"));
     }
 
     #[test]
@@ -1594,7 +1642,7 @@ Design the feature.
         let error = parse_flow_items(&value).expect_err("generic loops are retired");
         assert!(error
             .to_string()
-            .contains("flow item mapping must include step, cmd, flow, or xor"));
+            .contains("loop must name a preceding step"));
     }
 
     #[test]
@@ -1960,10 +2008,8 @@ Design the feature.
               name: pin-other
               id: nested-work
               agent: claude
-          - step:
-              name: pin-other
-              id: nested-decide
-              repeat: {from: nested-work}
+          - loop: nested-work
+            step: pin-other
           - step:
               name: pin-other
               id: nested-human
@@ -2048,7 +2094,7 @@ Design the feature.
         fs::create_dir_all(&flows).unwrap();
         fs::write(flows.join("pin-validation.yaml"), "- step:\n    name: implement\n    id: outside\n- xor:\n    paths:\n      nested:\n        description: Nested\n        flow: pin-invalid\n").unwrap();
         for (body, expected) in [
-            ("- xor:\n    paths:\n      inline:\n        description: Invalid edge\n        steps:\n          - step:\n              name: loop-decide\n              id: deciding\n              repeat: {from: outside}\n", "preceding node"),
+            ("- xor:\n    paths:\n      inline:\n        description: Invalid edge\n        steps:\n          - loop: outside\n", "preceding step"),
             ("- xor:\n    paths:\n      inline:\n        description: Invalid gate\n        steps:\n          - step:\n              name: demo\n              human: true\n", "stable id"),
             ("- xor:\n    paths:\n      inline:\n        description: Duplicate gate\n        steps:\n          - step:\n              name: demo\n              id: outside\n              human: true\n", "not unique"),
         ] {

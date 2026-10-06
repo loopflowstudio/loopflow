@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 from scripts.check_cost import _is_check, _timestamp
 
-STEPS = ("implement", "compress", "loop-decide")
+STEPS = ("implement", "compress", "loop-or-next")
 TRIMMED_MEMORY_TOKENS = 4_000
 
 # ── Recorded evidence ────────────────────────────────────────────────────────
@@ -218,7 +218,7 @@ def census(runs: Path, since: str | None = None) -> dict[str, Any]:
         "schema_version": 1,
         "since": since,
         "steps": steps,
-        "method": "Replayable implement, compress and loop-decide launches. Source tokens are the "
+        "method": "Replayable implement, compress and loop-or-next launches. Source tokens are the "
         "record's captured asset weights (cl100k_base); steers are a byte share of the task "
         "channel. Peak input and output tokens exist only where the provider reported them. "
         "Native resumed history is never part of a recorded launch request.",

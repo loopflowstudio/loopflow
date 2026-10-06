@@ -1129,7 +1129,7 @@ def _flow_decision_retry_contract(
     (work / ".lf/skills/native-proof.md").write_text("Run the fixture command.")
     (work / ".lf/flows/native-proof.yaml").write_text(
         "- step:\n    id: work\n    name: native-proof\n"
-        "- step:\n    id: decide\n    name: native-proof\n    repeat:\n      from: work\n"
+        "- loop: work\n  step: native-proof\n"
     )
     server.fail_request = 4
     server.invalid_decision_output = not replace

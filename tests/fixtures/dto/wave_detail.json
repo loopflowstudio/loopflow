@@ -228,7 +228,7 @@
                 {
                   "key": 3,
                   "id": "decide",
-                  "label": "loop-decide",
+                  "label": "loop-or-next",
                   "kind": "skill",
                   "human": false,
                   "returns_to": 1,
@@ -254,7 +254,7 @@
                 {
                   "key": 5,
                   "id": "decide_delivery",
-                  "label": "loop-decide",
+                  "label": "loop-or-next",
                   "kind": "skill",
                   "human": false,
                   "returns_to": 1,

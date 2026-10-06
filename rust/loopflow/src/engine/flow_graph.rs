@@ -405,10 +405,7 @@ fn return_target(steps: &[ConcreteStep], index: usize) -> Option<usize> {
     let ConcreteStep::Skill(skill) = &steps[index] else {
         return None;
     };
-    let from = skill.repeat.as_ref()?.from.as_str();
-    steps[..index].iter().position(|target| {
-        matches!(target, ConcreteStep::Skill(target) if target.id.as_deref() == Some(from))
-    })
+    index.checked_sub(skill.returns?)
 }
 
 /// Exact occurrence in this compiled graph: its preorder node key, counting
@@ -463,16 +460,11 @@ pub(crate) fn location(
 /// first. Empty levels are retained so nested counts never masquerade as root
 /// counts. Visit tokens used for human-boundary identity are deliberately absent.
 pub fn flow_iterations(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Vec<Vec<u32>> {
-    let counts = steps
-        .iter()
-        .enumerate()
-        .filter_map(|(index, step)| {
-            return_target(steps, index)?;
-            let ConcreteStep::Skill(skill) = step else {
-                return None;
-            };
-            let id = skill.id.as_ref()?;
-            Some(cursor.progress.repeats.get(id).copied().unwrap_or(0))
+    let counts = (0..steps.len())
+        .filter(|index| return_target(steps, *index).is_some())
+        .map(|index| {
+            let traversals = cursor.progress.repeats.get(&index.to_string());
+            traversals.copied().unwrap_or(0)
         })
         .collect();
     let mut levels = vec![counts];
@@ -532,7 +524,7 @@ pub fn project_position(
             if on_path.is_some_and(|current| index < current) {
                 projection.completed.push(node.key);
             }
-            if node.id.is_some() && node.returns_to.is_some() {
+            if node.returns_to.is_some() {
                 projection.returns.push(FlowReturn {
                     decider: node.key,
                     traversals: counts
@@ -602,9 +594,9 @@ mod tests {
         description: Continue
         steps: []
 - step: {name: sample, id: start}
-- step: {name: loop-decide, id: inner, repeat: {from: start}}
+- loop: start
 - demo
-- step: {name: loop-decide, id: outer, repeat: {from: start}}
+- loop: start
 "#,
         )
         .unwrap();
@@ -672,9 +664,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
 
     use crate::engine::execution::{ExecutionCursor, NestedCursor};
-    use crate::engine::flow::{
-        ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, RepeatPolicy, Skill,
-    };
+    use crate::engine::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill};
     use crate::engine::flow_graph::{
         flow_iterations, project_position, FlowGraph, FlowNodeKind, PositionProjection,
     };
@@ -686,14 +676,12 @@ mod tests {
         project_position(&FlowGraph::new("", steps), key, &iterations, false)
     }
 
-    fn skill(name: &str, id: Option<&str>, human: bool, from: Option<&str>) -> ConcreteStep {
+    fn skill(name: &str, id: Option<&str>, human: bool, returns: Option<usize>) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(name),
             id: id.map(str::to_string),
             human,
-            repeat: from.map(|from| RepeatPolicy {
-                from: from.to_string(),
-            }),
+            returns,
             sources: Vec::new(),
         })
     }
@@ -703,9 +691,9 @@ mod tests {
         let steps = vec![
             skill("review", Some("start"), true, None),
             skill("implement", Some("build"), false, None),
-            skill("decide", None, false, Some("build")),
+            skill("decide", None, false, Some(1)),
             skill("review", Some("second"), true, None),
-            skill("decide", None, false, Some("start")),
+            skill("decide", None, false, Some(4)),
         ];
         let graph = FlowGraph::new("example", &steps);
         let projection = super::project_interactions(&graph);
@@ -737,7 +725,7 @@ mod tests {
             &[
                 skill("build", Some("build"), false, None),
                 skill("review", None, true, None),
-                skill("decide", None, false, Some("build")),
+                skill("decide", None, false, Some(2)),
             ],
         );
         let exit = graph
@@ -830,7 +818,7 @@ mod tests {
                     "compress",
                     "sync",
                     "realign",
-                    "loop-decide",
+                    "loop-or-next",
                     "pr-publish",
                 ],
                 &[],
@@ -898,7 +886,7 @@ mod tests {
                 "compress",
                 "sync",
                 "realign",
-                "loop-decide",
+                "loop-or-next",
                 "pr-publish",
             ]
         );
@@ -906,9 +894,9 @@ mod tests {
         let returns: Vec<_> = graph
             .steps
             .iter()
-            .filter_map(|node| node.returns_to.as_ref().map(|to| (node.id.clone(), to)))
+            .filter_map(|node| node.returns_to.as_ref().map(|to| (node.key, to)))
             .collect();
-        assert_eq!(returns, [(Some("decide".to_string()), &implement)]);
+        assert_eq!(returns, [(graph.steps[4].key, &implement)]);
         // Review and landing are the conversation's to launch, not this Flow's.
         assert!(graph.steps.iter().all(|node| !node.human));
         assert!(graph
@@ -923,21 +911,16 @@ mod tests {
         let steps = vec![
             skill("design", Some("design"), false, None),
             skill("implement", Some("implement"), false, None),
-            skill("loop-decide", Some("decide"), false, Some("implement")),
+            skill("loop-or-next", None, false, Some(1)),
             skill("demo", Some("demo"), true, None),
-            skill(
-                "loop-decide",
-                Some("decide_delivery"),
-                false,
-                Some("implement"),
-            ),
+            skill("loop-or-next", None, false, Some(3)),
             skill("land", None, false, None),
         ];
         let cursor = ExecutionCursor {
             index: 1,
             iteration: 3,
             progress: crate::engine::transitions::FlowProgress {
-                repeats: BTreeMap::from([("decide".into(), 2), ("decide_delivery".into(), 1)]),
+                repeats: BTreeMap::from([("2".into(), 2), ("4".into(), 1)]),
                 ..Default::default()
             },
             ..Default::default()
@@ -973,7 +956,7 @@ mod tests {
                         description: "Fix it".into(),
                         steps: vec![
                             skill("patch", Some("patch"), false, None),
-                            skill("check", Some("check"), false, Some("patch")),
+                            skill("check", Some("check"), false, Some(1)),
                         ],
                     },
                 ),
@@ -1007,7 +990,7 @@ mod tests {
         let cursor = ExecutionCursor {
             index: 1,
             progress: crate::engine::transitions::FlowProgress {
-                repeats: BTreeMap::from([("xor:1:fix/check".into(), 4)]),
+                repeats: BTreeMap::from([("xor:1:fix/1".into(), 4)]),
                 ..Default::default()
             },
             child: Some(Box::new(NestedCursor::Xor {
@@ -1016,7 +999,7 @@ mod tests {
                     index: 1,
                     iteration: 2,
                     progress: crate::engine::transitions::FlowProgress {
-                        repeats: BTreeMap::from([("check".into(), 2)]),
+                        repeats: BTreeMap::from([("1".into(), 2)]),
                         ..Default::default()
                     },
                     ..Default::default()
@@ -1057,23 +1040,23 @@ mod tests {
         fn begin() -> ConcreteStep {
             skill("patch", Some("begin"), false, None)
         }
-        fn check() -> ConcreteStep {
-            skill("check", Some("check"), false, Some("begin"))
+        fn check(returns: usize) -> ConcreteStep {
+            skill("check", Some("check"), false, Some(returns))
         }
         let steps = vec![
             begin(),
             branch(vec![
-                ("zeta", vec![begin(), check()]),
+                ("zeta", vec![begin(), check(1)]),
                 (
                     "alpha",
                     vec![
                         begin(),
-                        branch(vec![("fix", vec![begin(), check()])]),
-                        check(),
+                        branch(vec![("fix", vec![begin(), check(1)])]),
+                        check(2),
                     ],
                 ),
             ]),
-            check(),
+            check(2),
         ];
         let fixture: TaskFlowSnapshot = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/flow_numeric_nested.json"
@@ -1122,7 +1105,7 @@ mod tests {
         let cursor = ExecutionCursor {
             index: 1,
             progress: crate::engine::transitions::FlowProgress {
-                repeats: BTreeMap::from([("check".into(), 3)]),
+                repeats: BTreeMap::from([("2".into(), 3)]),
                 ..Default::default()
             },
             child: Some(Box::new(NestedCursor::Xor {
@@ -1134,7 +1117,7 @@ mod tests {
                         cursor: ExecutionCursor {
                             index: 1,
                             progress: crate::engine::transitions::FlowProgress {
-                                repeats: BTreeMap::from([("check".into(), 2)]),
+                                repeats: BTreeMap::from([("1".into(), 2)]),
                                 ..Default::default()
                             },
                             ..Default::default()

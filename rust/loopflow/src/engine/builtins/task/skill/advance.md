@@ -36,7 +36,7 @@ scope, constraints, and proof into its directive.
 
 Choose the next Flow from the actual catalog. An approved design can proceed
 directly to the `pursue` Flow (implement → compress → refresh
-→ loop-decide, repeated on Iterate, then pr-publish): `lf task run <issue> code`
+→ loop-or-next, repeated on Iterate, then pr-publish): `lf task run <issue> code`
 takes up the `code` workflow, whose first edge is that Flow. Its PR review
 happens in the Task conversation, not as a Flow step. Do not repeat initial
 design work merely to launch implementation. For work that still

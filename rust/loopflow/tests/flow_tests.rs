@@ -798,7 +798,7 @@ fn flow_parsing_parity() {
             }),
             id: None,
             human: false,
-            repeat: None,
+            returns: None,
         }
     );
 }
@@ -1764,6 +1764,42 @@ fn labels(graph: &serde_json::Value) -> Vec<&str> {
         .collect()
 }
 
+const WORK: &str = "done";
+const ITERATE: &str = r#"{"decision":"iterate","summary":"More to do","reason":null}"#;
+const ADVANCE: &str = r#"{"decision":"advance","summary":"Proof observed","reason":null}"#;
+
+/// A Codex stand-in whose nth turn returns the nth answer, and the PATH that
+/// finds it.
+fn scripted_provider(home: &Path, answers: &[&str]) -> (TempDir, String) {
+    fs::write(
+        home.join("answers"),
+        answers
+            .iter()
+            .map(|answer| serde_json::to_string(answer).unwrap() + "\n")
+            .collect::<String>(),
+    )
+    .unwrap();
+    let provider = codex_app_server_script("@answer@", "if [ \"$1\" = --version ]; then exit 0; fi")
+        .replace(
+            "read -r turn_start",
+            "read -r turn_start\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
+        )
+        .replace("\"@answer@\"", "'\"$answer\"'");
+    assert!(
+        provider.contains("$answer\"'"),
+        "the stand-in takes a script"
+    );
+    register_codex_account(home);
+    let bin = TempDir::new().unwrap();
+    write_executable(&bin.path().join("codex"), &provider);
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    (bin, path)
+}
+
 #[test]
 fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     let repo = loopflow_test_support::TestRepo::new();
@@ -1789,7 +1825,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     write_flow(
         repo.path(),
         "two-loops",
-        "- cmd: sync --plan\n- step:\n    id: implement\n    name: implement-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: implement\n- xor:\n    router: route-proof\n    paths:\n      alpha:\n        description: Check the plan\n        flow: plan-check\n      zeta:\n        description: Show the work\n        skill: demo-proof\n- step:\n    id: decide_delivery\n    name: decide-proof\n    repeat:\n      from: implement\n- cmd: __telemetry-scorecard\n",
+        "- cmd: sync --plan\n- implement-proof\n- loop: implement-proof\n  step: decide-proof\n- xor:\n    router: route-proof\n    paths:\n      alpha:\n        description: Check the plan\n        flow: plan-check\n      zeta:\n        description: Show the work\n        skill: demo-proof\n- loop: implement-proof\n  step: decide-proof\n- cmd: __telemetry-scorecard\n",
     );
     let task_flow = || {
         lf_json(
@@ -1823,41 +1859,11 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
         .collect();
     assert_eq!(returns, [None, None, Some(1), None, Some(1), None]);
 
-    // The provider stand-in's nth turn returns the nth scripted answer.
-    let (work, iterate, advance, route) = (
-        "done",
-        r#"{"decision":"iterate","summary":"More to do","reason":null}"#,
-        r#"{"decision":"advance","summary":"Proof observed","reason":null}"#,
-        r#"{"path":"alpha"}"#,
-    );
+    let (work, iterate, advance, route) = (WORK, ITERATE, ADVANCE, r#"{"path":"alpha"}"#);
     let answers = [
         work, iterate, work, iterate, work, advance, route, iterate, work, advance, route, advance,
     ];
-    fs::write(
-        home.path().join("answers"),
-        answers
-            .map(|answer| serde_json::to_string(answer).unwrap() + "\n")
-            .concat(),
-    )
-    .unwrap();
-    let provider = codex_app_server_script("@answer@", "if [ \"$1\" = --version ]; then exit 0; fi")
-        .replace(
-            "read -r turn_start",
-            "read -r turn_start\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
-        )
-        .replace("\"@answer@\"", "'\"$answer\"'");
-    assert!(
-        provider.contains("$answer\"'"),
-        "the stand-in takes a script"
-    );
-    register_codex_account(home.path());
-    let bin = TempDir::new().unwrap();
-    write_executable(&bin.path().join("codex"), &provider);
-    let path = format!(
-        "{}:{}",
-        bin.path().display(),
-        std::env::var("PATH").unwrap()
-    );
+    let (_bin, path) = scripted_provider(home.path(), &answers);
     let ran = run_lf(
         repo.path(),
         home.path(),
@@ -1967,11 +1973,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     );
 
     // Its YAML changed since: the past Flow keeps the graph it launched with.
-    write_flow(
-        repo.path(),
-        "two-loops",
-        "- step:\n    id: implement\n    name: implement-proof\n",
-    );
+    write_flow(repo.path(), "two-loops", "- implement-proof\n");
     let redrawn = lf_json(
         repo.path(),
         home.path(),
@@ -1987,6 +1989,104 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     assert_eq!(
         roadmap_flow(repo.path(), home.path())["record"]["current"],
         7
+    );
+}
+
+#[test]
+fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
+    let repo = loopflow_test_support::TestRepo::new();
+    support::bind_task_planning(&repo);
+    let home = TempDir::new().unwrap();
+    let checkout = repo.path().canonicalize().unwrap();
+    let task =
+        support::register_unrun_task(home.path(), &checkout, "nested-loops", &repo.head_sha());
+    observe_planning(&task, &checkout);
+    repo.create_branch("nested-loops");
+    write_skill(repo.path(), "work-proof", "Fixture step.");
+    // One skill three times, so each loop names its occurrence; the default
+    // decider closes the inner region first and the outer one last.
+    write_flow(
+        repo.path(),
+        "nested",
+        "- step: {name: work-proof, id: outer}\n- step: {name: work-proof, id: middle}\n- step: {name: work-proof, id: inner}\n- loop: inner\n- loop: middle\n- loop: outer\n",
+    );
+    let catalog = lf_json(repo.path(), home.path(), &["flow", "list", "--json"]);
+    let preview = catalog
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "nested")
+        .unwrap();
+    assert_eq!(
+        labels(&preview["graph"]),
+        [
+            "work-proof",
+            "work-proof",
+            "work-proof",
+            "loop-or-next",
+            "loop-or-next",
+            "loop-or-next"
+        ]
+    );
+    assert_eq!(
+        step_fields(&preview["graph"], "returns_to"),
+        [None, None, None, Some(2), Some(1), Some(0)].map(serde_json::Value::from)
+    );
+
+    // Each loop returns once: the inner alone, then inside the middle's pass,
+    // then all three inside the outer's.
+    let (w, i, a) = (WORK, ITERATE, ADVANCE);
+    let answers = [w, w, w, i, w, a, i, w, w, a, a, i, w, w, w, a, a, a];
+    let (_bin, path) = scripted_provider(home.path(), &answers);
+    let ran = run_lf(
+        repo.path(),
+        home.path(),
+        &[
+            "--task",
+            "INF-123",
+            "flow",
+            "nested",
+            "--batch",
+            "--no-loopflow",
+        ],
+        Some(&path),
+    );
+    assert!(
+        ran.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+
+    let status = lf_json(
+        repo.path(),
+        home.path(),
+        &["task", "status", "INF-123", "--json"],
+    );
+    let flows = status["execution"]["work"]["flows"].as_array().unwrap();
+    assert_eq!(flows.len(), 1, "{status}");
+    assert_eq!(flows[0]["state"], "completed");
+    let shown = lf_json(
+        repo.path(),
+        home.path(),
+        &[
+            "flow",
+            "show",
+            flows[0]["id"].as_str().unwrap(),
+            "--sessions",
+            "--json",
+        ],
+    );
+    assert_eq!(
+        step_fields(&shown, "key"),
+        [0, 1, 2, 3, 2, 3, 4, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5]
+    );
+    assert_eq!(
+        shown["returns"],
+        serde_json::json!([
+            {"decider": 3, "traversals": 1},
+            {"decider": 4, "traversals": 1},
+            {"decider": 5, "traversals": 1}
+        ])
     );
 }
 

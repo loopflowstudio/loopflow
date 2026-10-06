@@ -569,7 +569,7 @@ private actor FlowSource {
             (0...2).map { index -> [String: Any] in
                 let target = prefix.isEmpty ? "implement" : "fix-implement"
                 return ["key": (prefix.isEmpty ? 0 : 4) + index, "id": NSNull(),
-                 "label": index == 0 ? target : "loop-decide", "kind": "skill",
+                 "label": index == 0 ? target : "loop-or-next", "kind": "skill",
                  "human": false, "returns_to": index == 0 ? NSNull() : (prefix.isEmpty ? 0 : 4) as Any,
                  "sources": ["feature"], "paths": []]
             }

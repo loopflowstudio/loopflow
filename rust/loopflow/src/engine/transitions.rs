@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use anyhow::{anyhow, bail, ensure, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +24,8 @@ pub struct FlowVerdict {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowProgress {
-    /// Backward traversals by deciding occurrence, retained for the invocation.
+    /// Backward traversals by the deciding step's index in its body, retained
+    /// for the invocation.
     pub repeats: BTreeMap<String, u32>,
     pub direction: Option<String>,
     pub verdict: Option<FlowVerdict>,
@@ -42,7 +43,7 @@ pub enum FlowTransition {
 ///
 /// # Errors
 /// Returns an error for an invalid cursor or backward-edge definition, or a
-/// repeat decision at a step without a backward edge. Errors and blocked
+/// iterate decision at a step without a backward edge. Errors and blocked
 /// outcomes leave progress unchanged.
 pub fn finish_step(
     steps: &[ConcreteStep],
@@ -53,30 +54,17 @@ pub fn finish_step(
         .get(index)
         .ok_or_else(|| anyhow!("flow cursor {index} is outside {} steps", steps.len()))?;
     let edge = match step {
-        ConcreteStep::Skill(skill) => match &skill.repeat {
-            Some(repeat) => {
-                let id = skill
-                    .id
-                    .as_deref()
-                    .filter(|id| !id.trim().is_empty())
-                    .ok_or_else(|| anyhow!("repeat at step {index} requires an occurrence id"))?;
-                ensure!(
-                    !repeat.from.trim().is_empty(),
-                    "repeat at {id:?} requires a target"
-                );
-                let target = steps[..index]
-                    .iter()
-                    .position(|step| {
-                        matches!(step, ConcreteStep::Skill(target)
-                            if target.id.as_deref() == Some(&repeat.from))
+        ConcreteStep::Skill(skill) => match skill.returns {
+            Some(back) => {
+                let target = index
+                    .checked_sub(back)
+                    .filter(|target| {
+                        *target < index && matches!(steps[*target], ConcreteStep::Skill(_))
                     })
                     .ok_or_else(|| {
-                        anyhow!(
-                            "repeat from {:?} at {id:?} must name a preceding node",
-                            repeat.from
-                        )
+                        anyhow!("loop at step {index} must return to a preceding step")
                     })?;
-                Some((id, target))
+                Some((index.to_string(), target))
             }
             None => None,
         },
@@ -94,7 +82,7 @@ pub fn finish_step(
         }
         None if edge.is_some() => {
             return Ok(FlowTransition::Blocked(format!(
-                "repeat at step {index} requires a decision"
+                "loop at step {index} requires a decision"
             )));
         }
         None => FlowDecision::Advance,
@@ -111,12 +99,10 @@ pub fn finish_step(
         )),
         FlowDecision::Iterate => {
             let Some((id, target)) = edge else {
-                bail!("repeat decision at step {index} has no declared backward edge");
+                bail!("iterate decision at step {index} has no declared backward edge");
             };
-            let traversals = progress.repeats.get(id).copied().unwrap_or(0);
-            progress
-                .repeats
-                .insert(id.to_owned(), traversals.saturating_add(1));
+            let traversals = progress.repeats.entry(id).or_default();
+            *traversals = traversals.saturating_add(1);
             progress.direction = Some(
                 progress
                     .verdict
@@ -141,21 +127,17 @@ pub fn finish_step(
 
 #[cfg(test)]
 mod tests {
-    use crate::engine::flow::{
-        Command, ConcreteCommand, ConcreteSkill, ConcreteStep, RepeatPolicy, Skill,
-    };
+    use crate::engine::flow::{Command, ConcreteCommand, ConcreteSkill, ConcreteStep, Skill};
     use crate::engine::transitions::{
         finish_step, FlowDecision, FlowProgress, FlowTransition, FlowVerdict,
     };
 
-    fn step(id: &str, edge: Option<&str>) -> ConcreteStep {
+    fn step(id: &str, returns: Option<usize>) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(id),
             id: Some(id.to_owned()),
             human: false,
-            repeat: edge.map(|from| RepeatPolicy {
-                from: from.to_owned(),
-            }),
+            returns,
             sources: vec![],
         })
     }
@@ -216,7 +198,7 @@ mod tests {
 
     #[test]
     fn repeated_visits_carry_direction_then_finish_forward() {
-        let steps = [step("work", None), step("review", Some("work"))];
+        let steps = [step("work", None), step("review", Some(1))];
         let mut progress = FlowProgress::default();
         for (count, direction) in [(1, "repair behavior"), (2, "prove recovery")] {
             decide(&mut progress, FlowDecision::Iterate, direction);
@@ -224,7 +206,7 @@ mod tests {
                 finish_step(&steps, 1, &mut progress).unwrap(),
                 FlowTransition::Repeat(0)
             );
-            assert_eq!(progress.repeats["review"], count);
+            assert_eq!(progress.repeats["1"], count);
             assert_eq!(progress.direction.as_deref(), Some(direction));
             assert_eq!(progress.verdict, None);
             assert_eq!(
@@ -238,7 +220,7 @@ mod tests {
             finish_step(&steps, 1, &mut progress).unwrap(),
             FlowTransition::Finished
         );
-        assert_eq!(progress.repeats["review"], 2);
+        assert_eq!(progress.repeats["1"], 2);
         assert_eq!(progress.verdict, None);
         assert_eq!(progress.direction, None);
     }
@@ -247,9 +229,9 @@ mod tests {
     fn independent_edges_keep_separate_counts() {
         let steps = [
             step("first", None),
-            step("first-review", Some("first")),
+            step("first-review", Some(1)),
             step("second", None),
-            step("second-review", Some("second")),
+            step("second-review", Some(1)),
         ];
         let mut progress = FlowProgress::default();
         for (review, target) in [(1, 0), (3, 2)] {
@@ -263,8 +245,8 @@ mod tests {
             finish_step(&steps, review, &mut progress).unwrap();
         }
         assert_eq!(progress.repeats.len(), 2);
-        assert_eq!(progress.repeats["first-review"], 1);
-        assert_eq!(progress.repeats["second-review"], 1);
+        assert_eq!(progress.repeats["1"], 1);
+        assert_eq!(progress.repeats["3"], 1);
     }
 
     #[test]
@@ -272,8 +254,8 @@ mod tests {
         let steps = [
             step("start", None),
             step("middle", None),
-            step("inner-review", Some("start")),
-            step("outer-review", Some("middle")),
+            step("inner-review", Some(2)),
+            step("outer-review", Some(2)),
         ];
         let mut progress = FlowProgress::default();
         decide(&mut progress, FlowDecision::Iterate, "first edge");
@@ -300,13 +282,13 @@ mod tests {
             FlowTransition::Repeat(0)
         );
         assert_eq!(progress.direction.as_deref(), Some("revisit first edge"));
-        assert_eq!(progress.repeats["inner-review"], 2);
-        assert_eq!(progress.repeats["outer-review"], 1);
+        assert_eq!(progress.repeats["2"], 2);
+        assert_eq!(progress.repeats["3"], 1);
     }
 
     #[test]
     fn missing_and_empty_decisions_preserve_all_progress() {
-        let steps = [step("work", None), step("review", Some("work"))];
+        let steps = [step("work", None), step("review", Some(1))];
         let verdicts = [
             None,
             Some((FlowDecision::Advance, " \n")),
@@ -314,7 +296,7 @@ mod tests {
         ];
         for verdict in verdicts {
             let mut progress = FlowProgress {
-                repeats: [("review".to_owned(), 1)].into(),
+                repeats: [("1".to_owned(), 1)].into(),
                 direction: Some("preserved direction".to_owned()),
                 verdict: verdict.map(|(decision, summary)| FlowVerdict {
                     decision,
@@ -331,9 +313,9 @@ mod tests {
     #[test]
     fn observed_pass_count_never_prevents_iteration() {
         for traversals in [0, 7, 100, u32::MAX] {
-            let steps = [step("work", None), step("review", Some("work"))];
+            let steps = [step("work", None), step("review", Some(1))];
             let mut progress = FlowProgress {
-                repeats: [("review".to_owned(), traversals)].into(),
+                repeats: [("1".to_owned(), traversals)].into(),
                 direction: Some("retained".to_owned()),
                 verdict: None,
             };
@@ -352,10 +334,9 @@ mod tests {
         let invalid = [
             (vec![], 0),
             (vec![step("work", None)], 1),
-            (vec![step("review", Some("review"))], 0),
-            (vec![step("review", Some("later")), step("later", None)], 0),
-            (vec![step("work", None), step("review", Some("missing"))], 1),
-            (vec![step("work", None), step("", Some("work"))], 1),
+            (vec![step("review", Some(0))], 0),
+            (vec![step("review", Some(1)), step("later", None)], 0),
+            (vec![step("work", None), step("review", Some(2))], 1),
             (vec![step("work", None)], 0),
         ];
         for (steps, index) in invalid {
@@ -384,9 +365,9 @@ mod tests {
 
     #[test]
     fn persisted_pending_decision_recovers_the_same_transition() {
-        let steps = [step("work", None), step("review", Some("work"))];
+        let steps = [step("work", None), step("review", Some(1))];
         let mut original = FlowProgress {
-            repeats: [("review".to_owned(), 1)].into(),
+            repeats: [("1".to_owned(), 1)].into(),
             ..FlowProgress::default()
         };
         decide(
@@ -402,37 +383,10 @@ mod tests {
             finish_step(&steps, 1, &mut recovered).unwrap()
         );
         assert_eq!(original, recovered);
-        assert_eq!(recovered.repeats["review"], 2);
+        assert_eq!(recovered.repeats["1"], 2);
         assert_eq!(
             recovered.direction.as_deref(),
             Some("recover this direction")
         );
-    }
-
-    #[test]
-    fn saved_definition_discards_retired_limit_without_losing_the_pending_iteration() {
-        let steps = [step("work", None), step("review", Some("work"))];
-        let mut saved = serde_json::to_value(&steps).unwrap();
-        saved[1]["Skill"]["policy"]["repeat"]["max_iterations"] = 1.into();
-        let recovered: Vec<ConcreteStep> = serde_json::from_value(saved).unwrap();
-        assert_eq!(recovered, steps);
-        let mut progress = FlowProgress {
-            repeats: [("review".into(), 20)].into(),
-            direction: None,
-            verdict: Some(FlowVerdict {
-                decision: FlowDecision::Iterate,
-                summary: "continue the saved work".into(),
-            }),
-        };
-        assert_eq!(
-            finish_step(&recovered, 1, &mut progress).unwrap(),
-            FlowTransition::Repeat(0)
-        );
-        assert_eq!(
-            progress.direction.as_deref(),
-            Some("continue the saved work")
-        );
-        assert_eq!(progress.repeats["review"], 21);
-        assert!(progress.verdict.is_none());
     }
 }

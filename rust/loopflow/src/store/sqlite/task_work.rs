@@ -55,14 +55,19 @@ pub(super) fn session_tasks(session: &str) -> String {
 }
 
 fn exec_ids(selector: &str, unfinished: bool) -> String {
-    // The filter sits inside the checkout arm so it reads `execs_unfinished`
-    // instead of comparing every retained Exec's cwd.
+    // SQLite can prefer primary-key order for the UNION and scan all history.
+    // This arm only needs unfinished Execs; retain that partial-index bound.
+    let index = if unfinished {
+        "INDEXED BY execs_unfinished"
+    } else {
+        ""
+    };
     let unfinished = if unfinished {
         "ae.completed_at IS NULL AND "
     } else {
         ""
     };
-    format!("SELECT ae.id FROM execs ae JOIN ({}) tw ON ({unfinished}{})
+    format!("SELECT ae.id FROM execs ae {index} JOIN ({}) tw ON ({unfinished}{})
         UNION SELECT se.exec_id FROM session_events se WHERE se.session_id IN ({}) AND se.exec_id IS NOT NULL
         UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN ({}) AND a.driver_exec_id IS NOT NULL
         UNION SELECT fe.exec_id FROM flow_events fe WHERE fe.flow_id IN ({}) AND fe.exec_id IS NOT NULL",
@@ -188,6 +193,53 @@ mod tests {
     use crate::id::{ExecId, TraceId, WaveId};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn unfinished_exec_lookup_cost_does_not_grow_with_completed_checkout_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        let live = ExecId::new();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+            [&wave],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
+        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1','/repo/task',1)", params![task.as_str(), project.as_str()]).unwrap();
+        conn.execute(
+            "INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo/task',1)",
+            params![live, TraceId::new()],
+        )
+        .unwrap();
+        let read = || {
+            let mut query = conn
+                .prepare(&format!(
+                "{} WHERE e.completed_at IS NULL AND e.id IN ({}) ORDER BY e.started_at DESC,e.id",
+                super::super::execs::EXEC_SELECT, super::exec_ids("?1", true)
+            ))
+                .unwrap();
+            let ids = query
+                .query_map([task.as_str()], |row| row.get::<_, ExecId>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(ids, std::slice::from_ref(&live));
+            query.get_status(rusqlite::StatementStatus::VmStep)
+        };
+        let before = read();
+        for _ in 0..2_000 {
+            conn.execute("INSERT INTO execs(id,trace_id,cwd,started_at,completed_at,outcome) VALUES(?1,?2,'/repo/task',1,2,'succeeded')", params![ExecId::new(), TraceId::new()]).unwrap();
+        }
+        let after = read();
+        assert!(
+            after <= before * 2,
+            "Completed history increased query work: {before} → {after}"
+        );
+    }
 
     #[tokio::test]
     async fn task_and_orphan_filters_resolve_aliases_before_pagination() {

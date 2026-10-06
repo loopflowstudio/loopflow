@@ -792,8 +792,26 @@ still miss 300 ms; native reopen p95 worsened 1704→1854 ms. Growth failed both
 (+58.9/+45.8 MiB). Faster refreshes increased CLI counts; quietness is unproved.
 Bitmap/OCR is not compositor paint. Load, coverage gaps and unavailable comments remain explicit. Release/Swift attribution and both hours
 remain open; storage cannot hold ~94 GiB/hour traces. Capture attribution and
-read/refresh profiling have actionable paths. No speculative patch, budget
+read/refresh profiling have actionable paths. No speculative memory patch, budget
 revision, merge or Task completion follows.
+
+Jack Heart's subsequent release-profile pair passed 84/84 endpoints each with
+unchanged fixture/Swift/lf3. Bundled SQLite 3.53.2 chose a full Exec primary-key
+scan for UNION order; Python 3.50.4 did not. Diagnose with the actual engine.
+Explicit existing partial-index selection bounds unfinished lookup cost without
+changing history or schema; a 2,000-completed-Exec VM-step regression passes.
+Alternating release reads (twenty warm each) reduced roadmap median 4334→1910 ms;
+Session reads stayed 309→315 ms. Both miss 300 ms. Remaining roadmap samples
+identify Flow Exec membership and repeated repository discovery.
+
+The repaired rendered run passed 83/84, failing its final native reopen before
+any new connect read. Retain its pixels/journal and investigate cached readiness
+versus surface closure; no native p95 from nineteen warm successes. New growth
+results (+60.9/+53.5/+47.6 MiB) all fail. Variable concurrent load limits causal
+latency claims; exact distributions and remaining acceptance belong in the same
+[report](../../scripts/benchmarks/desktop-performance/20261006-matched-rust/README.md#release-profile-follow-through-and-query-repair--october-6).
+Publication only is authorized; Swift attribution, native repair and both full
+hours remain open. No high-volume trace or installed-Home operation occurred.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 
@@ -912,39 +930,16 @@ commands belong in docs/lf.md and TESTING.md.
 
 ## Installation and checkout closure (LOO-292, 2026-10-04)
 
-Jack Heart requested closing LOO-292 on actual machine evidence. Install updates
-published machine artifacts only; `lf task sync` (which replaced `lf rebase` in
-#1367) owns checkout updates. The schedule is opt-in login plus weekly, Monday
-09:00 local, with positional daily/hourly/5min. The separate daemon is retired.
-
-Observed October 4 with published 0.13.0:
-
-- **Natural login catch-up.** v0.13.0 published at 00:20 PDT while the laptop
-  was asleep, then off after a 1% battery shutdown. `com.loopflow.refresh` ran
-  at the 12:04 login and promoted 0.12.32 → 0.13.0 with exact-store preflight
-  and no migration (refresh.log, switch-49b58550 receipt).
-- **Real calendar firing.** The 5min cadence fired at 20:10 and 20:15 through
-  launchd itself (runs 1 → 3); weekly was then restored byte-identical and
-  idempotent. No Monday 09:00 firing or sleep-coalesced wake run has been
-  observed; neither is Loopflow code. Read refresh.log after October 5 09:00.
-- **Complete artifacts.** Receipt CLI/app/helper hashes, the entry gate, the
-  notarized signature and /Applications 0.13.0 all match. Repeat `lf install`
-  changes no receipt, Task, PR, Flow or Wave identity.
-- **Fresh published path.** Ubuntu 24.04 container without Git: public installer,
-  repeat without download, and missing-entry repair retain the Home identity.
-- **Checkout updates.** Sandbox with the installed binary: stale main with an
-  unpublished commit plus staged/modified/untracked bytes catches up, repeats
-  as a no-op, picks up advanced upstream, bases a sibling on it, and a sibling
-  sync refreshes canonical main first. Clean main fast-forwards. The real main
-  checkout was already current; its incident path was not replayed there.
-
-Unresolved, not blocking: the currency probe (`--version` plus a 30 s preflight)
-returned not-current once at load ~14, starting a redundant download; preflight
-measured 6–13 s then, so timeout is a hypothesis. Reloading the schedule killed
-that run mid-install and the installation stayed intact. A hand-truncated entry
-gate is not healed by reinstall (gate writes are atomic, so only tampering
-produces it). Interactive app acceptance was not exercised beyond the running
-0.13.0 app.
+Jack Heart closed LOO-292 on actual machine evidence. Published v0.13.0 passed
+natural login catch-up, two launchd 5min firings, matching public/installed
+artifacts, fresh Ubuntu installation without Git, and isolated dirty-checkout
+sync preservation. Weekly Monday 09:00 was restored unchanged. Install owns
+machine artifacts; Task sync owns checkouts. Detailed receipts and counterevidence
+remain at `3a5ea2ffe19ce02d4373afecda4f179db14268a7:wave/infrastructure/MEMORY.md`
+under this heading; no Monday/wake-coalescing proof or interactive app acceptance
+follows. A one-off false currency probe, interrupted redundant download and
+hand-truncated entry gate remain unresolved, nonblocking observations. No new
+installation claim is made by this curation.
 
 ## Shipped history
 

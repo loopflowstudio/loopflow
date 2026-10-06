@@ -101,10 +101,9 @@ leak diagnosis nor a successful memory repair.
 
 ## Remaining work and disposition
 
-- Rust steady-state attribution now has a matched rendered pair. Release-profile
-  timing is still missing. Next read profiling should separate remaining roadmap
-  Git/status work, Task reads and refresh cadence; this debug pair does not prove
-  the production latency ceiling.
+- Rust steady-state attribution now has a matched rendered pair. The release-profile follow-through below resolves that measurement gap,
+  repairs one demonstrated query-plan regression and names the remaining costs.
+  Neither pair establishes the production latency ceiling.
 - Swift attribution remains missing. Candidate Swift was intentionally constant,
   including direct-open routing, joined Session reads, projection changes and
   unchanged-error publication suppression. The historical Swift tree lacks the
@@ -127,3 +126,120 @@ coverage and endpoint distinctions. Existing contained proofs remain applicable;
 this pass changed no production or measurement code. Checks: both Cargo builds
 and Swift test build PASS; sequential matched runner PASS 84/84 each, comparison
 available; memory FAIL both; full-hour/stall acceptance unavailable.
+
+## Release-profile follow-through and query repair — October 6
+
+Jack Heart requested identical release builds of the historical baseline and
+candidate, followed by a measured repair if reads still exceeded 300 ms.
+[Release measurements](release-summary.json) retain all three runs and the
+alternating direct-read check. Private receipts are in
+`/tmp/loo304-release-20261006/`; the earlier debug pair was not repeated.
+
+The baseline archive remains `501073137` plus the same measurement hooks and
+fixture index. A fresh archive audit found no backported production optimization.
+Candidate source is `3a5ea2ffe19ce02d4373afecda4f179db14268a7` (production-identical
+to the debug candidate). Both used Cargo release defaults: opt-level 3, no debug
+info or incremental compilation, no LTO, 16 codegen units. No profile/Rust flags
+were inherited. Candidate Swift, harness, published lf3 and the compatible
+39-table fixture were unchanged. Both builds completed before measurement.
+The original fixture hash still matches; no schema, copied identity, live Home,
+provider authority or containment change was needed.
+
+Both original release variants passed **84/84 endpoints**, including 21 native
+preservation rounds. Each scenario has one separate first observation and twenty
+successful warm observations. The later repaired run passed **83/84**: its last
+native reopen timed out, leaving nineteen successful warm native observations
+and no native p95. Its Task-opening scenarios each retain twenty warm successes.
+The failed comparison is not promoted to complete by the successful read check.
+
+The table separates all-repository roadmap from exact Task lookup; the earlier
+debug report's aggregate roadmap category combines them. These are transport
+latencies, including adapter/owned-fixture reads, not single-process startup.
+Cells are n; median / nearest-rank p95 milliseconds.
+
+| Read | Historical release | Candidate release | Repaired release (incomplete journey) |
+| --- | ---: | ---: | ---: |
+| session list | 74; 1733 / 3099 | 90; 539 / 1028 | 88; 989 / 1453 |
+| roadmap --all | 30; 4800 / 11726 | 31; 3782 / 4595 | 32; 2485 / 4017 |
+| roadmap --task | 22; 516 / 928 | 22; 613 / 817 | 21; 794 / 1076 |
+| task status | 43; 1125 / 2571 | 43; 1084 / 1229 | 43; 1090 / 1446 |
+| wave list | 30; 862 / 1440 | 31; 970 / 1337 | 32; 1191 / 1971 |
+
+The host also had other workers, including LOO-366. One-minute load median/max
+was 20.6/46.5, 15.8/28.1 and 21.3/28.4 respectively. Sequential timing differences
+alone do not establish causality. All read budgets remain 300 ms; these transport
+reads fail it. Source/config/CLI hashes stayed stable, and all three runs used the
+same test executable and measurement-source hashes.
+
+### Supported cause and effect
+
+A separate candidate stack sample placed 1,588 of 2,337 main-thread samples in
+`read_task_work`'s Exec query, mostly SQLite page reads. Bundled SQLite **3.53.2**
+selected `SCAN ae USING INDEX sqlite_autoindex_execs_1` to supply UNION order,
+scanning 218,637 retained Execs despite the unfinished predicate. Python SQLite
+3.50.4 selected the partial index, obscuring the cause in the first diagnostic.
+Use the actual bundled engine for query-plan evidence. An experimental covering
+index in a separate diagnostic copy was not adopted.
+
+The unfinished checkout arm now explicitly selects the existing `execs_unfinished`
+index (118 unfinished rows in this fixture). Full history keeps its original
+query. No index/schema addition or fixture mutation is involved. The regression
+adds 2,000 completed Execs, verifies the unfinished identity, and bounds SQLite VM
+steps independently of wall-clock load. Existing membership tests preserve
+Sessions, Flows, explicit binding, missing checkout history and authority.
+
+After the rendered attempt, fresh fixture copies supplied an alternating
+candidate/repair CLI-only check: one first plus twenty warm reads per path/variant,
+all successful, same sandbox and counters. This excludes the Swift adapter and
+owned fixture, so it must not be substituted for the transport table or UI time.
+
+| Direct CLI | Before median / p95 ms | After median / p95 ms |
+| --- | ---: | ---: |
+| roadmap | 4334 / 6777 | 1910 / 2874 |
+| sessions | 309 / 437 | 315 / 406 |
+
+Roadmap median fell 56%; Session-list timing was effectively unchanged. Roadmap
+load medians were both 34.8 (max 57.6/56.3); Session medians both 21.0. This measured
+effect agrees with the bounded-query regression and bundled plan, but the 300 ms
+budget remains unmet. Post-repair sampling reduced the Exec-query branch to
+41/1,035 main-thread samples. Remaining concrete costs were `flow_exec_ids`
+(341/1,035) and repeated repository/Git discovery. Next: profile that exact
+Flow-membership join with bundled SQLite and batch same-repository discovery
+without weakening process/Flow settlement. Short Session samples do not identify
+a single dominant query; isolate startup/transport and refresh duplication next.
+
+### Retained failures and acceptance limits
+
+The repaired run's final native round showed “Not running here.” Round 19 had
+closed its surface; round 20 emitted no new `session connect` read before timeout.
+The next diagnostic is Desktop's cached readiness/reopen/refresh transition before
+launch, not a speculative provider or memory patch. Its final pixels, journal,
+owned database and prior successful rounds remain private and intact. No retry
+was used to erase this failure. Twenty preservation rounds passed; the last did not.
+
+Fourth-round growth failed in all three runs: **+60.9/+53.5/+47.6 MiB**. Earlier
++58.9/+45.8 and +54.5 MiB failures remain. App CPU median/p95/max was
+0.7/21.6/88.7%, 0.8/35.3/92.8%, and 1.1/47.7/98.1%, with 150 samples per run,
+excluding children. Recording covered 150 seconds; successful baseline/candidate
+navigation lasted 184/186 seconds. The repaired journey has no successful end.
+
+CLI starts/ends were 509/509, 550/550 and 545/545; statements
+251,304/264,672/267,064; emitted rows 3,017,860/3,165,218/3,196,622. Counts exclude
+setup, Git/providers and other SQLite connections. Faster reads did not establish
+quietness. All recorded Task-opening transitions retained one visible window;
+key-window identity remained unavailable. Refused comments and canceled activity
+remain reported. Warm bitmap/OCR distributions, first observations and CPU/counter
+limits are in the JSON. Bitmap-ready is not compositor presentation; no time was
+subtracted for OCR. The 100 ms interaction budget remains unmet.
+
+Both full hours, hitch/hang/one-frame glyph evidence and independent Swift
+attribution remain open. No 94 GiB/hour trace was attempted; measured storage still
+cannot safely hold it. No historical trace/store was removed. Review retained the
+worse Session/UI observations, missing repaired-native p95 and failed end state.
+Release's current installation/publication memory supplies no Desktop acceptance;
+older release incident sections were not reread in this pass.
+
+Checks: release builds PASS; Task-membership suite PASS 4; cargo fmt and all-target
+Clippy PASS after fixing a test-only clone warning; original release pair PASS
+84/84 each; repaired journey FAIL 83/84; alternating reads PASS 84/84. Publication
+is authorized with these limits; neither merge nor Task completion is requested.

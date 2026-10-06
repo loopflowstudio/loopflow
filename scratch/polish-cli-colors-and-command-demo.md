@@ -84,6 +84,34 @@ left accent bar. Everything else in the table is absent. The design already
 defers per-part copy, multi-selection, bookmarks, sharing and
 exit-code/duration badges until the core interaction is accepted.
 
+## Jack's Warp reference screenshot
+
+Jack supplied `~/Desktop/Screenshot 2026-10-05 at 8.02.17 PM.png` (Warp, `ls`
+then a failing `kill -9`). Observed in it:
+
+- **Header line**: smaller and dimmer than everything else, grey. Holds
+  directory, `git:(branch)`, file and line counts, PR number and the duration
+  in parentheses, all as they were at submission.
+- **Command line**: bold and brighter than output, at the body size.
+- **Output**: regular weight, with a gap of roughly half a row below the
+  command.
+- **Padding**: about half a row inside each block above the header and below
+  the last output row, so adjacent blocks are separated by about a full row
+  with a hairline in the middle.
+- **Failure**: the whole block, padding included, has a dark red background,
+  and a brighter red bar runs down its **left** edge. The successful `ls` block
+  has no bar and no fill.
+- **Live prompt**: separate from the blocks; context shown as outlined chips.
+
+No right-side bar is visible in this screenshot. Jack wrote "the bar on the
+right"; the only bar shown is the failed block's left edge. Unresolved which he
+meant.
+
+Differences from the branch as demoed: Loopflow's header is at body size and
+carries the branch; the command is not bold; there is no gap between command
+and output; the blank row sits wholly above the header, not split around the
+hairline; every block has a left accent bar, not only failed or selected ones.
+
 ## What Jack wants from Warp's blocks
 
 Jack's list: the directory in the header, the bar on the right, the spacing,
@@ -102,7 +130,19 @@ Proposals that follow (mine, not agreed):
   carry spacing that is not a whole row.
 - **Drop the branch from the header**, leaving the directory. Not done yet:
   Jack said it is not needed, not that it must go.
-- **The right-side bar** needs Jack to say what it is before it is designed.
+- **The bar**: draw the left accent only on failed and selected blocks, as in
+  the screenshot, unless Jack means something else on the right.
+- **Half-row padding**: with the header drawn by the overlay, shift each block's
+  fill and hairline by half a row so the blank row is shared between the block
+  above and the block below, and a failed block is red evenly top and bottom.
+- **Bold command**: the Loopflow prompt can end with `%B` and reset in `preexec`;
+  zsh's `zle_highlight` default region does the same without touching output.
+  Half-row space under the command is not available in a cell grid; skip it.
+
+Proof for that pass: the headless block-layout and zsh-hook tests extended for
+the stored directory and the shifted frames, the patch's Zig tests for the
+directory surviving reflow, and Jack comparing a Desktop shell with this
+screenshot.
 
 ## Unresolved
 

@@ -242,7 +242,7 @@ enum MockWaveFixture {
               }
             ]
           },
-          "runs": {
+          "history": {
             "state": "ok",
             "truncated": false,
             "items": [

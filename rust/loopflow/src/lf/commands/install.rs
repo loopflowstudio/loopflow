@@ -1174,7 +1174,7 @@ fn read_binary_preflight(binary: &Path) -> Result<BinaryPreflight> {
 fn isolate_candidate_command(command: &mut Command) {
     for name in [
         crate::machine_install::INSTALL_SWITCH_ENV,
-        crate::durable::RUN_ID_ENV,
+        crate::session_record::CAPTURE_KEY_ENV,
         "LF_BIN",
         "LF_HOME",
     ] {

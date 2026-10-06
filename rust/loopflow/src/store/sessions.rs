@@ -15,13 +15,13 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.session_summaries(&filter)).await
     }
 
-    pub async fn reserve_review_run(
+    pub async fn reserve_review_capture(
         &self,
         expected: &FlowSession,
     ) -> StoreResult<(FlowSession, AgentSession)> {
         let expected = expected.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.reserve_review_run(&expected)
+            store.reserve_review_capture(&expected)
         })
         .await
     }
@@ -30,10 +30,13 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.session(&id)).await
     }
 
-    pub async fn session_for_artifact(&self, run_id: &str) -> StoreResult<Option<AgentSession>> {
-        let run_id = run_id.to_owned();
+    pub async fn session_for_artifact(
+        &self,
+        artifact_key: &str,
+    ) -> StoreResult<Option<AgentSession>> {
+        let artifact_key = artifact_key.to_owned();
         run_sqlite(&self.sqlite, move |store| {
-            store.session_for_artifact(&run_id)
+            store.session_for_artifact(&artifact_key)
         })
         .await
     }
@@ -76,32 +79,17 @@ impl Store {
         .await
     }
 
-    pub async fn fill_run_provider(
+    pub async fn retarget_unpublished_capture(
         &self,
-        run: &str,
+        artifact_key: &str,
         provider: &str,
         model: Option<&str>,
     ) -> StoreResult<()> {
-        let run = run.to_owned();
+        let artifact_key = artifact_key.to_owned();
         let provider = provider.to_string();
         let model = model.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
-            store.fill_run_provider(&run, &provider, model.as_deref())
-        })
-        .await
-    }
-
-    pub async fn retarget_unpublished_run(
-        &self,
-        run: &str,
-        provider: &str,
-        model: Option<&str>,
-    ) -> StoreResult<()> {
-        let run = run.to_owned();
-        let provider = provider.to_string();
-        let model = model.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| {
-            store.retarget_unpublished_run(&run, &provider, model.as_deref())
+            store.retarget_unpublished_capture(&artifact_key, &provider, model.as_deref())
         })
         .await
     }
@@ -153,14 +141,13 @@ impl Store {
     pub async fn rename_session(
         &self,
         id: &str,
-        expected_capture: Option<i64>,
         title: &str,
         source: TitleSource,
     ) -> StoreResult<()> {
         let id = id.to_string();
         let title = title.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.rename_session(&id, expected_capture, &title, source)
+            store.rename_session(&id, &title, source)
         })
         .await
     }

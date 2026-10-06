@@ -482,7 +482,7 @@ struct TaskFlowView: View {
             if task.runtime?.started == true {
                 return "No Flow recorded"
             }
-            return "Not started · No runs yet."
+            return "Not started · No execution history yet."
         }
     }
 

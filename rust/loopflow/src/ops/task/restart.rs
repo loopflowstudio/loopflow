@@ -69,7 +69,7 @@ pub(super) async fn stop_review(store: &SharedStore, flow: &FlowSession) -> OpsR
     // A matching input owns its native clients. Neither ancestry nor the Task's
     // checkout grants authority over arbitrary processes in the same group.
     let clients = if let Some(harness) = session.provider.as_deref() {
-        let dir = crate::ops::human_session::local_session_run_dir(&session.artifact_key)
+        let dir = crate::ops::human_session::local_capture_dir(&session.artifact_key)
             .ok_or_else(|| task_error("review has an invalid capture"))?;
         let clients = crate::lf::commands::util::active_provider_clients(&dir, harness)
             .map_err(task_error)?;

@@ -434,7 +434,7 @@ Read this conversation's native start, usage and completion receipts
 
 | Argument | What it does |
 |---|---|
-| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
+| `<id>` | Session ID or provider conversation ID |
 | `--json` | json Default: false. |
 | `--after` | Continue after an observed event sequence Default: 0. |
 | `--limit` | limit Default: 100. |
@@ -466,7 +466,7 @@ Connect to the live conversation, or resume its saved history
 
 | Argument | What it does |
 |---|---|
-| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
+| `<id>` | Session ID or provider conversation ID |
 | `--json` | json Default: false. |
 | `--replace` | Stop Loopflow-owned clients before resuming here Default: false. |
 | `--try` | Ask the provider to resume even when another client is active Default: false. |
@@ -498,7 +498,7 @@ Complete a review or interactive session
 
 | Argument | What it does |
 |---|---|
-| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
+| `<id>` | Session ID or provider conversation ID |
 | `--help / -h` | Print help |
 
 ## lf session rename
@@ -507,7 +507,7 @@ Rename a Session; a human name is never replaced by a suggestion
 
 | Argument | What it does |
 |---|---|
-| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
+| `<id>` | Session ID or provider conversation ID |
 | `<name>` | name |
 | `--suggest` | Propose an agent-generated name; keeps a human-assigned name Default: false. |
 | `--json` | json Default: false. |
@@ -519,7 +519,7 @@ Assign a Task to a Session that has none; the Task never changes after
 
 | Argument | What it does |
 |---|---|
-| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
+| `<id>` | Session ID or provider conversation ID |
 | `--task` | The Task, by its issue identifier (e.g. INF-123) or stable Task ID |
 | `--dry-run` | Resolve the exact target without assigning the Session Default: false. |
 | `--json` | json Default: false. |

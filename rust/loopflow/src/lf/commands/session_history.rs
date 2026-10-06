@@ -1,15 +1,15 @@
 //! Read retained Session inputs and observe provider conversations.
 
-use std::{io::Read, path::PathBuf};
+use std::io::Read;
 
 use anyhow::{anyhow, Result};
 
 use crate::lf::commands::WorkFilter;
-pub use crate::session_record::active::{ActiveSession, ActiveSessionsSnapshot, DiscoveryState};
-pub use crate::session_record::{SessionHistory, SessionUsage};
+pub use crate::session_record::active::{ActiveSessionsSnapshot, DiscoveryState};
+pub use crate::session_record::SessionHistory;
 
 const WINDOW_DAYS: i64 = 7;
-const MAX_RUNS: usize = 50;
+const MAX_SESSIONS: usize = 50;
 
 pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
@@ -30,7 +30,7 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
         Ok::<_, anyhow::Error>((home, store, task))
     })?;
     if watch {
-        return super::runs_watch::run(&home, &store, task, &runtime);
+        return super::session_watch::run(&home, &store, task, &runtime);
     }
     runtime.block_on(async {
         let snapshot = crate::session_record::active::snapshot(&home, &store, task).await;
@@ -53,7 +53,7 @@ pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
 
 /// Shared Session history, newest input first. SQL selects the recent budget
 /// before decoding; exact Task and caller-input drills remain complete.
-pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<SessionHistory>, bool)> {
+pub(crate) fn collect_recent_history(filter: WorkFilter) -> Result<(Vec<SessionHistory>, bool)> {
     let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 24 * 3600;
     let database = crate::store::database_path_from_env()?;
     if !database.exists() {
@@ -65,7 +65,7 @@ pub(crate) fn collect_runs(filter: WorkFilter) -> Result<(Vec<SessionHistory>, b
         filter.project,
         filter.task,
         since,
-        MAX_RUNS,
+        MAX_SESSIONS,
     )?)
 }
 
@@ -92,9 +92,9 @@ pub(crate) fn collect_history(
 
 /// Record a provider callback against its owning Session capture.
 pub fn observe_provider_session() -> Result<()> {
-    let run_dir = std::env::var_os(crate::session_record::RUN_DIR_ENV)
-        .map(PathBuf::from)
+    let key = crate::session_record::inherited_capture_key()?
         .ok_or_else(|| anyhow!("provider session callback has no active Session capture"))?;
+    let capture_dir = crate::session_record::capture_dir(&key)?;
     let mut payload = String::new();
     std::io::stdin().read_to_string(&mut payload)?;
     let payload: serde_json::Value = serde_json::from_str(&payload)
@@ -109,7 +109,7 @@ pub fn observe_provider_session() -> Result<()> {
         .map(|value| crate::store::ProviderAccountId::parse(&value))
         .transpose()
         .map_err(|error| anyhow!("invalid provider account in session callback: {error}"))?;
-    crate::session_record::write_provider_session(&run_dir, provider_session_id, account_id)
+    crate::session_record::write_provider_session(&capture_dir, provider_session_id, account_id)
         .map_err(|error| anyhow!("cannot preserve provider session: {error}"))
 }
 
@@ -187,7 +187,11 @@ pub fn inspect(
     println!("Status: {}", snapshot.status());
     println!(
         "Agent: {}",
-        format_agent(Some(&snapshot.harness), snapshot.model.as_deref())
+        snapshot
+            .model
+            .as_ref()
+            .map(|model| format!("{}:{model}", snapshot.harness))
+            .unwrap_or_else(|| snapshot.harness.clone())
     );
     println!(
         "Working directory: {}",
@@ -210,15 +214,6 @@ pub fn inspect(
         crate::context_usage::render_step(&crate::context_usage::step_context(&home, &snapshot))
     );
     Ok(())
-}
-
-fn format_agent(provider: Option<&str>, model: Option<&str>) -> String {
-    match (provider, model) {
-        (Some(provider), Some(model)) => format!("{provider}:{model}"),
-        (Some(provider), None) => provider.to_string(),
-        (None, Some(model)) => model.to_string(),
-        (None, None) => "-".to_string(),
-    }
 }
 
 pub(crate) fn format_tokens(value: i64) -> String {

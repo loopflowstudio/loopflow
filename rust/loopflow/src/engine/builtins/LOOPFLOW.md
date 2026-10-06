@@ -89,7 +89,7 @@ output, logs, and chat; follow the repository's secret-management policy.
 
 ## Context and durable knowledge
 
-Keep agent progress in local working notes and the final Run response. Do not
+Keep agent progress in local working notes and the final Session response. Do not
 post routine progress to Linear: Task comments are for new direction from people.
 Agent comments published through `lf comment` carry a progress marker and
 are excluded from steers. Use `--steer` only for deliberate new direction.

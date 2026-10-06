@@ -52,7 +52,10 @@ proof items.
 
 ## Jack's review
 
-October 6, Desktop (dev app at `4f2860658`, private Home): "this is kinda
-yucky", then the layout now recorded as slice 14 in
-[the design](focus-on-your-own-work.md). Rebuilt at `d32c95122`; awaiting his
-second look. The command line was not reviewed.
+October 6, Desktop (dev app, private Home). First build at `4f2860658`:
+"this is kinda yucky", then the layout recorded as slice 14 in
+[the design](focus-on-your-own-work.md). Rebuild at `975d9f727`, after
+looking at it running: "good enough. approved. make whatever cleanups yyou
+want". The approval is of the Task view as demonstrated on the fixture Task;
+it does not cover landing, the unmerged main, a real provider or the
+migration.

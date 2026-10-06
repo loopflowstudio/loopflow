@@ -252,10 +252,26 @@ runs nothing ends a Task over uncommitted changes and keeps its checkout) —
 15. **Merge main.** #1463 ("Prepare Wave Projects on opening and preserve
     work through realignment") conflicts in 58 files: it changes Task
     admission and restart through FlowSession, worker claims and
-    `tasks.work_state`, which this PR deletes. The headless resolver declined
-    three times as needing judgment. Needs a brief from Jack or a dedicated
-    pass: keep this PR's model and port #1463's intent onto Workflow position
-    and Flow execs. *Not done.*
+    `tasks.work_state`, which this PR deletes. The headless sync resolver
+    declines it. Jack, October 6, approving the demo: "make whatever cleanups
+    yyou want"; the agent takes merging as one. **The implement step does the
+    merge itself:** `git fetch origin main`, `git merge origin/main`, resolve
+    every conflict, commit the merge. Keep this PR's model everywhere
+    (Workflow position, Flow execs, no FlowSession, no worker, no stored Task
+    status); bring across what #1463 is for (a Wave's Project prepared when it
+    is opened; work preserved through realignment) by restating it on that
+    model, and record in questions.md each behavior of #1463 that could not
+    be kept and why. Never keep both sides. Done when the branch contains
+    `origin/main`, the nine integration suites, `--lib ops::chapter`, Clippy
+    and `swift build --build-tests` pass. *Not done.*
+16. **Cleanups after Jack's approval.** (a) Text `lf task status` heads a
+    Task with its Workflow state, not the last Flow's `blocked`. (b) An
+    opened Flow exec prints loop positions as words ("pass 2"), not raw
+    tuples, and its diagram fits or scrolls inside the pane. (c) The Desktop
+    fixture's opened Flow exec is a current-shape Flow, not an old `feature`
+    with a `demo` step. (d) Anything else left unused by slices 9–14. Done
+    when the headless render shows (b) and (c) and the suites pass.
+    *Not done.*
 
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task

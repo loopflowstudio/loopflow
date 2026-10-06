@@ -272,19 +272,11 @@ backlog preservation, Desktop and installed Intelligence repair remain unfinishe
 
 ### Reteam relationship acceptance — October 5 implementation
 
-The original cached-reteam operation failed after Team expansion/narrowing because
-ordinary ingestion correctly refused unordered relationship replacement. Its
-counterexample is retained in the prior design and `/tmp/loo366-implementation-preserved/`.
-`reconcile_pm_project_teams` now accepts exact provider readback under explicit
-reteam authority, replacing only Team relationships in the normalized owner.
-It preserves Initiative validation and independently newer entity facts. Ordinary
-refresh still rejects external relationship drift.
-
-Reteam takes all participating Wave locks in stable ID order before provider
-acquisition. Full issue readbacks replace both identifier-only writers. Local
-operation tests cover cached recovery, interruption around issue moves, and
-expansion/narrowing response loss. These fixtures
-establish no configured Linear or installed acceptance.
+Full exact readbacks and explicit Team acceptance are implemented, preserving
+Initiative ownership and independently newer facts. Stable-ID Wave guards survive
+cancellation through commit. Cached recovery and response-loss evidence remains in
+`719226ef4:scratch/keep-every-wave-ready-for.md` under this heading and the acquisition
+section below; these local proofs establish no configured or installed acceptance.
 
 ### Preservation boundary — October 5
 
@@ -318,6 +310,16 @@ executed provider-rotation proof:
   work. Unknown unregistered backlog would block rotation; this example relies
   on provider Started. The unused generic `update_task` relocation writer is now deleted.
   New-issue `pm_create_task_idempotent` already holds the Wave lock.
+
+October 5: the executed `input_replacement_retains_workspace_and_task_membership`
+regression exposed another writer. `replace_session_input` locked only the supplied
+destination and `replace_input_in` changed `cwd`; an unbound conversation vanished
+from its Task while the source checkout lock was held (expected one Session, got
+zero). Production callers replace input without relocating the conversation.
+The unused relocation write is now deleted: replacement locks the stored workspace
+and uses it in the new capture. Primary workspace admission keeps its separate
+writer and excludes bound Tasks. The regression covers exclusion, retry and retained
+unbound membership. This is a Session-store proof, not rotation/start acceptance.
 
 The proposed exclusion has one order: Wave planning locks, stable Task/checkout
 population, checkout admission locks in canonical-path order, then SQLite writes.
@@ -718,6 +720,8 @@ rotation remain. Keep this one delivery boundary.
   assertions use accepted ingestion; placement fixtures seed their own rows.
   Generic runtime `update_project` and its SQL are also deleted. Fixture setup
   remains local; behavioral updates use accepted observations.
+- Deleted: `sessions::replace_input_in`'s generic `cwd` update. Input replacement
+  retains the stored workspace; explicit primary workspace admission remains.
 - Rotation's automatic backlog expiration: preserve unreviewed Tasks until
   explicit disposition. Retain start fencing, unknown-work protection and
   confirmation for explicitly requested cancellation.
@@ -883,4 +887,5 @@ created-successor failure remains an explicit replacement target. Membership
 fencing, shared binding/ensure, KR-first rotation, Desktop and configured acceptance
 remain unfinished. No installed Home or designated Intelligence Project was mutated.
 
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b ops::pm::planning_lookup_tests repository_team_reteam interrupted_reteam_preserves_confirmed_identifier rotation_persists_confirmed_transfer_before_final_refresh --test-threads=4` passed (24); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed; broader/configured acceptance remains with gate. Realign: `git diff --check` passed; source review reused those checks without rerunning behavioral suites.
+Prior acquisition/reteam checks remain at `719226ef4:scratch/keep-every-wave-ready-for.md`.
+Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b store::sqlite::sessions::metadata_tests review_session_retains_feedback_and_history_across_replacement_and_corrupt_neighbors --test-threads=4` passed (9, including the previously failing membership regression); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed; rotation/start and configured acceptance remain unproved.

@@ -302,6 +302,13 @@ must preserve #1447's cached plans and independent Session reads, outside pollin
 #1446's ongoing procedures retain started-Task follow-through; reads never provision.
 Installed and configured acceptance remain unproved.
 
+Input replacement also affected membership: its generic `cwd` writer could
+remove an unbound Session while the source checkout lock was held. October 5's
+regression reproduced that loss. Source now retains the stored workspace in both
+Session and capture; primary workspace admission keeps its separate authority.
+This deletes an unused relocation path, not a binding or historical-association
+rule. Rotation exclusion and configured readiness remain unproved.
+
 Collection preserves issue-reported ownership; listing Project IDs cannot override
 it. October 5’s failing loopback regression prompted removal; installed acceptance
 remains unproved.
@@ -878,12 +885,10 @@ Wave learning stays with its identified owner, never miscellaneous .lf notes.
 
 ## Prompt reduction boundary (2026-09-24)
 
-The task-viewer reduction and owner distinctions remain at
-`cf0804aab:wave/infrastructure/MEMORY.md#prompt-reduction-boundary-2026-09-24`
-and in [Intelligence memory](../intelligence/MEMORY.md#prompt-assembly-reduction-branch-evidence-2026-09-24).
+`719226ef4:wave/infrastructure/MEMORY.md` retains the source references.
 Historical identity, execution eligibility and consumed launch evidence remain
-separate responsibilities. LOO-287's broader architecture pass and real weekly
-observations remain unproved; local deletion and checks establish no KR.
+separate. LOO-287's architecture pass and weekly observations remain unproved;
+local deletion and checks establish no KR. Intelligence owns prompt assembly.
 
 ## Installation and command scope (curated 2026-10-02)
 
@@ -1046,15 +1051,11 @@ command drift, avoidable agent rebases and post-land repairs before tuning polic
 the proposed synthetic workload harness remains unbuilt. Jack Heart's July 6
 “up/down 5ths” referent remains unresolved and deferred, not dropped.
 
-## Direct invocation and large inputs (2026-09-25)
+## Direct invocation and large inputs (curated 2026-10-05)
 
-The historical dispatch/Run implementation is retained at
-`9e283244352fd0dd030803f0edef5be5d4ef76fa:wave/infrastructure/MEMORY.md` under this
-heading; the current Session ownership contract supersedes its Started writer.
-Direct bound contributions retain caller-owned checkpointing and use the common
-invocation loader; reads and unopened reviews never establish execution.
-
-Recursive scratch exceeded argv and provider limits. Claude batch input uses
-file-backed stdin with system instructions in its context file. Curate scratch
-rather than truncate it. Codex's rejected `turn/start` remaining waiting is still
-unresolved; Claude's successful input path proves no repair there.
+`719226ef4:wave/infrastructure/MEMORY.md` retains the September 25 evidence.
+Direct bound contributions retain caller-owned checkpointing and the common
+invocation loader; reads and unopened reviews establish no execution. The current
+Session model supersedes the historical Run/Started writer. Claude's file-backed
+stdin avoids argv limits; curate scratch rather than truncate it. Codex's rejected
+`turn/start` remaining waiting is unresolved; Claude success proves no repair.

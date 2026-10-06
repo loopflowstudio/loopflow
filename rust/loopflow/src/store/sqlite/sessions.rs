@@ -938,14 +938,15 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Replace captured input under the existing conversation. Native history,
-    /// title, feedback and assignment remain on their owners.
+    /// Replace captured input, retaining the conversation's workspace, native
+    /// history, title, feedback and assignment.
     pub fn replace_session_input(
         &self,
         expected_input: Option<i64>,
         mut session: AgentSession,
     ) -> StoreResult<AgentSession> {
-        let _admission = self.lock_checkout(&session.cwd)?;
+        let cwd = self.session(&session.id)?.ok_or(StoreError::NotFound)?.cwd;
+        let _admission = self.lock_checkout(&cwd)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
@@ -1486,6 +1487,14 @@ pub(super) fn replace_input_in(
     session: &mut AgentSession,
     exec: Option<&crate::id::ExecId>,
 ) -> StoreResult<()> {
+    // Workspace admission owns location; replacing input cannot move Task membership.
+    session.cwd = conn
+        .query_row(
+            "SELECT cwd FROM agent_sessions WHERE id=?1",
+            [&session.id],
+            |row| row.get::<_, String>(0),
+        )?
+        .into();
     if conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM session_events WHERE kind='captured' AND receipt_key=?1)",
         [&session.artifact_key],
@@ -1501,9 +1510,9 @@ pub(super) fn replace_input_in(
         crate::store::rows::now_unix(),
         exec,
     )?);
-    conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,cwd=?4,skill=?5,provider=?6,model=?7
+    conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,skill=?4,provider=?5,model=?6
         WHERE id=?1 AND completed_at IS NULL",
-        params![session.id,session.captured,session.input_published,session.cwd.to_string_lossy(),
+        params![session.id,session.captured,session.input_published,
             session.skill,session.provider,session.model])?;
     Ok(())
 }
@@ -1591,6 +1600,46 @@ mod metadata_tests {
     use super::SqliteStore;
 
     use crate::session::{FlowSummaryState, SessionFilter};
+
+    #[test]
+    fn input_replacement_retains_workspace_and_task_membership() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let session = store.test_session("moving", &crate::session_record::new_artifact_key());
+        let wave = crate::id::WaveId::new();
+        let project = crate::work::project::ProjectId::new();
+        let task = crate::durable::TaskId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1',?3,1)", params![task.as_str(), project.as_str(), session.cwd.to_str().unwrap()]).unwrap();
+        }
+        assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
+        let exclusion = store.lock_checkout(&session.cwd).unwrap();
+        let mut next = session.clone();
+        next.cwd = home.path().join("destination");
+        next.artifact_key = crate::session_record::new_artifact_key();
+        assert!(store
+            .replace_session_input(session.captured, next.clone())
+            .is_err());
+        let retained = store.task_work(&task).unwrap().sessions;
+        drop(exclusion);
+        assert_eq!(
+            retained.len(),
+            1,
+            "input replacement removed Task work while its source checkout was excluded"
+        );
+        let replacement = store.replace_session_input(session.captured, next).unwrap();
+        assert_eq!(replacement.cwd, session.cwd);
+        assert_eq!(replacement.task_id, None);
+        assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
+        assert_ne!(replacement.captured, session.captured);
+    }
 
     #[test]
     fn resume_candidates_keep_completed_conversations_and_original_opening_times() {

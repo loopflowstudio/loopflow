@@ -16,13 +16,14 @@ original draft file is not present in this checkout. Jack authorized launching
 only the combined dependency Task. This launch supplies no evidence that the
 LLM cost/performance or restricted-agent/bank work has started.
 
-LOO-389 kickoff selected DigitalOcean as the first proposed compute importer,
-based on its documented narrow billing scope and invoice/resource detail;
-this is an engineering choice, not Jack's account-connection approval. Account
-availability and live billing acceptance remain unverified. Invoice items lack
-a documented stable line ID: use complete invoice revisions and preserve
-corrections, rather than inventing cross-revision line identity. See the
-[billing API](https://docs.digitalocean.com/platform/billing/reference/api/).
+During LOO-389 review on October 6, Jack Heart placed the feature under `lf auth`
+and directed the starting inventory to cover all accounts currently tracked in
+Doppler. Jack named Anthropic, OpenAI, Mercury, AWS, GitHub, Fly.io and Runpod as
+major services, not an exhaustive list. This supersedes the kickoff's proposed
+DigitalOcean-first importer. Begin with metadata-only inventory and explicit
+coverage, then choose the first compute billing source from existing accounts.
+Mercury is included in account/access inventory; bank connectivity remains outside
+LOO-389's existing scope. No live connection or real rotation was authorized.
 
 Restricted reporting must not inherit the general SSH credential bundle.
 Environment scrubbing alone does not isolate host credential files. Prefer

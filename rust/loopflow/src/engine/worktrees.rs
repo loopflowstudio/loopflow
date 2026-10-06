@@ -171,16 +171,6 @@ pub struct AgentWorktree {
 }
 
 pub fn git_common_dir(repo: &Path) -> Result<PathBuf, GitError> {
-    // Git's own answer for a directory that is gone, without starting Git.
-    if !repo.is_dir() {
-        return Err(GitError::CommandFailed {
-            command: "git rev-parse --git-common-dir".to_string(),
-            stderr: format!(
-                "fatal: cannot change to '{}': No such file or directory\n",
-                repo.display()
-            ),
-        });
-    }
     let output = crate::engine::git::retained_output(
         repo,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],

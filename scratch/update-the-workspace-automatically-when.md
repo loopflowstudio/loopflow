@@ -67,9 +67,11 @@ Numbers are from the copy with a release `lf`; load is the one-minute average.
    from it. The index and join order are pinned, because the bundled SQLite
    otherwise scans every Exec (350 ms against 23 ms).
 2. **Cold reading: 4.2–4.6 s** at load 17–30 (five starts, one 7.0 s), against
-   6.5–7.1 s. No caller asks Git about a repository or checkout that is gone
-   (`wave_main_repo`, `task_reference`, `git_common_dir`). The last of those
-   changed no timing: Git already failed fast there. What is left, sampled:
+   6.5–7.1 s. The reading does not ask Git about a Wave's repository or a
+   Task's checkout that is gone (`wave_main_repo`, `task_reference`). The
+   same test inside `git_common_dir` changed no timing, since Git fails fast
+   there, and was removed in compress; other callers still start Git for a
+   missing directory. What is left, sampled:
    about 1.7 s of Git on the 32 checkouts that exist, five commands each, one
    after another; 0.9 s process admission; 0.6 s of foreign-key checking that
    a development build runs twice on every open. Not built: asking Git about
@@ -562,6 +564,8 @@ costs seconds. This plan earns no KR by itself.
 
 ## Check results
 
+- 2026-10-05 compress: `cargo test -p loopflow --lib -- lf::commands::waves
+  engine::worktrees` 35/35; clippy `--all-targets -D warnings` clean.
 - 2026-10-05 slices 2–5: `cargo test -p loopflow --test workspace_watch`
   8/8; `--test dto_fixtures` 19/19; `--lib -- lf::commands::waves` 14/14;
   `--lib -- workspace_watch` 3/3; clippy `--all-targets -D warnings` clean;

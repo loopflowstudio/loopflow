@@ -11,8 +11,9 @@ status and evidence; earlier review notes remain at
   The prior iteration’s reteam repair request is satisfied locally;
   registration now respects checkout exclusion; accepted facts and population
   stability remain next. A Home-wide population guard was rejected after it
-  blocked unrelated registration; the design records the executed counterexample. Configuration-switch interleavings
-  depend on the later binding/transition replacement. Created-successor recovery stays with
+  blocked unrelated registration. Source review also confirms that root revalidation
+  needs ordering through commit, including taskless starts with no known Wave.
+  Configuration-switch and created-successor recovery proofs depend on the later
   binding/transition replacement; name selection cannot recover preserved names.
 - Chapter metadata representation and projection. Cross-Wave historical inspection
   remains proposed; Wave-scoped chapter creation is requested.

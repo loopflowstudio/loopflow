@@ -1302,20 +1302,30 @@ mod durable_store_tests {
         assert!(!store.task_started(&task_id).unwrap());
     }
 
-    #[test]
-    fn unrelated_checkout_exclusion_does_not_block_task_registration() {
-        let (dir, store, existing) = store_with_task();
-        let mut task = store.task(&existing).unwrap().unwrap();
-        let mut pr = store.task_prs(&existing).unwrap().remove(0);
+    fn unregistered_task(
+        store: &SqliteStore,
+        existing: &TaskId,
+        checkout: PathBuf,
+    ) -> (Task, TaskPr) {
+        let mut task = store.task(existing).unwrap().unwrap();
+        let mut pr = store.task_prs(existing).unwrap().remove(0);
         task.id = TaskId::new();
-        task.plan.id = LinearIssueId::new("independent-issue").unwrap();
+        task.plan.id = LinearIssueId::new("later-issue").unwrap();
         task.plan.identifier = "PROBE-2".into();
-        task.worktree = dir.path().join("independent-checkout");
-        task.workspace_slug = "independent-checkout".into();
+        task.worktree = checkout;
+        task.workspace_slug = "later-checkout".into();
         pr.id = TaskPrId::new();
         pr.task_id = task.id.clone();
         pr.slug = task.workspace_slug.clone();
         pr.branch = task.workspace_slug.clone();
+        (task, pr)
+    }
+
+    #[test]
+    fn unrelated_checkout_exclusion_does_not_block_task_registration() {
+        let (dir, store, existing) = store_with_task();
+        let (task, pr) =
+            unregistered_task(&store, &existing, dir.path().join("independent-checkout"));
 
         let _unrelated = store
             .lock_checkout(&dir.path().join("unrelated-checkout"))
@@ -1332,17 +1342,8 @@ mod durable_store_tests {
     fn checkout_exclusion_preserves_registration_and_retry() {
         for initializing in [false, true] {
             let (dir, store, existing) = store_with_task();
-            let mut task = store.task(&existing).unwrap().unwrap();
-            let mut pr = store.task_prs(&existing).unwrap().remove(0);
-            task.id = TaskId::new();
-            task.plan.id = LinearIssueId::new("later-issue").unwrap();
-            task.plan.identifier = "PROBE-2".into();
-            task.worktree = dir.path().join("missing-checkout");
-            task.workspace_slug = "later-checkout".into();
-            pr.id = TaskPrId::new();
-            pr.task_id = task.id.clone();
-            pr.slug = task.workspace_slug.clone();
-            pr.branch = task.workspace_slug.clone();
+            let (task, pr) =
+                unregistered_task(&store, &existing, dir.path().join("missing-checkout"));
 
             let mut conversation = unpublished_conversation(None, None, 1);
             conversation.cwd = task.worktree.join("src");
@@ -1375,17 +1376,7 @@ mod durable_store_tests {
     #[test]
     fn task_registration_retains_earlier_checkout_conversations_without_binding() {
         let (dir, store, existing) = store_with_task();
-        let mut task = store.task(&existing).unwrap().unwrap();
-        let mut pr = store.task_prs(&existing).unwrap().remove(0);
-        task.id = TaskId::new();
-        task.plan.id = LinearIssueId::new("later-issue").unwrap();
-        task.plan.identifier = "PROBE-2".into();
-        task.worktree = dir.path().join("later-checkout");
-        task.workspace_slug = "later-checkout".into();
-        pr.id = TaskPrId::new();
-        pr.task_id = task.id.clone();
-        pr.slug = task.workspace_slug.clone();
-        pr.branch = task.workspace_slug.clone();
+        let (task, pr) = unregistered_task(&store, &existing, dir.path().join("later-checkout"));
 
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = task.worktree.join("src");

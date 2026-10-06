@@ -702,7 +702,28 @@ impl SqliteStore {
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute(
             PROJECT_INSERT,
-            rusqlite::params_from_iter(project_params(project).iter().map(|value| value.as_ref())),
+            params![
+                project.id.as_str(),
+                project.wave_id,
+                project.plan.id.as_str(),
+                project.plan.slug,
+                project.plan.name,
+                project.plan.prompt_context,
+                project.plan.pm_snapshot_synced_at,
+                project
+                    .abandon_intent
+                    .as_ref()
+                    .map(|intent| intent.requested_at.unix_timestamp()),
+                project
+                    .abandon_intent
+                    .as_ref()
+                    .map(|intent| intent.reason.as_str()),
+                project.created_at.unix_timestamp(),
+                project.updated_at.unix_timestamp(),
+                project.iteration,
+                project.plan.flow,
+                project.plan.status.as_str(),
+            ],
         )?;
         inherit_project_placement(&transaction, &project.id)?;
         transaction.commit()?;
@@ -976,11 +997,29 @@ fn insert_initial_task(
         ));
     }
 
-    let mut parameters = task_params(task);
-    parameters.push(Box::new(task.agent.clone()));
     conn.execute(
         TASK_INSERT,
-        rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
+        params![
+            task.id.as_str(),
+            task.project_id.as_str(),
+            task.plan.id.as_str(),
+            task.plan.identifier,
+            task.plan.title,
+            task.plan.description,
+            task.plan.pm_snapshot_synced_at,
+            serde_json::to_string(&task.pm_writeback)?,
+            task.worktree.display().to_string(),
+            task.workspace_slug,
+            task.abandon_intent
+                .as_ref()
+                .map(|intent| intent.requested_at.unix_timestamp()),
+            task.abandon_intent
+                .as_ref()
+                .map(|intent| intent.reason.as_str()),
+            task.created_at.unix_timestamp(),
+            task.updated_at.unix_timestamp(),
+            task.agent,
+        ],
     )?;
     inherit_task_placement(conn, task)?;
     insert_task_pr(conn, pr)?;
@@ -1105,36 +1144,6 @@ fn ingest_linear_comment(
     } else {
         Ok(None)
     }
-}
-
-fn task_params(task: &Task) -> Vec<Box<dyn ToSql>> {
-    vec![
-        Box::new(task.id.as_str().to_string()),
-        Box::new(task.project_id.as_str().to_string()),
-        Box::new(task.plan.id.as_str().to_string()),
-        Box::new(task.plan.identifier.clone()),
-        Box::new(task.plan.title.clone()),
-        Box::new(task.plan.description.clone()),
-        Box::new(task.plan.pm_snapshot_synced_at),
-        Box::new(
-            serde_json::to_string(&task.pm_writeback)
-                .expect("Task PM writeback state must serialize"),
-        ),
-        Box::new(task.worktree.display().to_string()),
-        Box::new(task.workspace_slug.clone()),
-        Box::new(
-            task.abandon_intent
-                .as_ref()
-                .map(|intent| intent.requested_at.unix_timestamp()),
-        ),
-        Box::new(
-            task.abandon_intent
-                .as_ref()
-                .map(|intent| intent.reason.clone()),
-        ),
-        Box::new(task.created_at.unix_timestamp()),
-        Box::new(task.updated_at.unix_timestamp()),
-    ]
 }
 
 fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
@@ -1688,35 +1697,6 @@ pub(super) const PROJECT_SELECT: &str = "SELECT
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
     created_at, updated_at, iteration, flow, status
     FROM projects WHERE id=?1";
-fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
-    vec![
-        Box::new(project.id.as_str().to_string()),
-        Box::new(project.wave_id.clone()),
-        Box::new(project.plan.id.as_str().to_string()),
-        Box::new(project.plan.slug.clone()),
-        Box::new(project.plan.name.clone()),
-        Box::new(project.plan.prompt_context.clone()),
-        Box::new(project.plan.pm_snapshot_synced_at),
-        Box::new(
-            project
-                .abandon_intent
-                .as_ref()
-                .map(|intent| intent.requested_at.unix_timestamp()),
-        ),
-        Box::new(
-            project
-                .abandon_intent
-                .as_ref()
-                .map(|intent| intent.reason.clone()),
-        ),
-        Box::new(project.created_at.unix_timestamp()),
-        Box::new(project.updated_at.unix_timestamp()),
-        Box::new(project.iteration),
-        Box::new(project.plan.flow.clone()),
-        Box::new(project.plan.status.as_str().to_string()),
-    ]
-}
-
 pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     let abandon_intent = match (
         row.get::<_, Option<i64>>(7)?,

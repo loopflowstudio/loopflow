@@ -132,12 +132,8 @@ Wave acceptance.
 
 ## Remaining coherent cut
 
-October 5 realignment at `972a253559`: cancellation/cold-detail/reteam repair,
-single Task insertion and Session/binding/mechanical-start checkout admission
-are implemented. Compression retains registered Wave identity through refresh
-and shares Session admission without changing its boundary. The recorded build,
-13 focused tests and Clippy cover that checkpoint; no behavioral suite was rerun
-for this reconciliation.
+Earlier acquisition/admission repairs and their 13-test checkpoint remain at
+`972a253559:scratch/keep-every-wave-ready-for.md`.
 
 Step 2 remains next. Both registration APIs now acquire existing checkout
 admission before SQLite and retain it through commit. The focused regression
@@ -154,14 +150,21 @@ prevented a new Task; rotation retaining that guard across provider work would
 extend the failure across Waves. The retained test prevents this regression.
 No Home-wide guard ships in this tree. The narrower checkout repair remains.
 
-Population exclusion needs a shorter or narrower owner than the checkout guard.
-A revised implementation must coordinate registration with its Wave's planning
-boundary and revalidate admission's discovered roots before writing; a taskless
-Session below a not-yet-registered, missing root still exposes the lookup race.
-This is a proposed mechanism, not implemented safety. Keep acquisition outside
-SQLite and avoid reacquiring a caller-held Wave guard. Cancellation-safe queued
-workers must retain every guard needed by their writes. The old name selector
-and created-successor recovery remain coupled to shared binding in steps 3–5.
+October 5 source review confirms `lock_task_checkouts` reads the Task population
+once, then acquires paths without revalidation. A taskless Session under a missing,
+unregistered root can lock only its descendant path while registration locks the
+future root. These different locks permit both writes. Re-reading roots alone
+still leaves a gap before commit: membership-changing registration and admission
+need an atomic ordering through their writes. Wave serialization alone cannot
+cover a taskless Session whose Wave is not yet known. The mechanism remains open;
+it must preserve unrelated-checkout progress and cancellation-safe guard lifetime.
+
+`create_prepared_task` holds a Git worktree lease; registration acquires its own
+checkout admission inside the SQLite worker. These are separate locks. Integrate
+Wave planning before checkout admission without reacquiring a caller-held Wave
+guard. Registration must select accepted issue ownership/content/age in its
+transaction. Steps 3–5 still own the configured selector and created-successor
+recovery.
 
 The branch is not releasable: shared binding, exact-ID ensure, transition recovery,
 KR-first rotation, backlog preservation, Desktop activation and configured
@@ -751,6 +754,8 @@ rotation remain. Keep this one delivery boundary.
   assertions use accepted ingestion; placement fixtures seed their own rows.
   Generic runtime `update_project` and its SQL are also deleted. Fixture setup
   remains local; behavioral updates use accepted observations.
+- Deleted: `project_params` and `task_params`, allocating parameter builders left
+  behind by the generic update APIs; each insertion binds values beside its SQL.
 - Deleted: `create_task_work`'s duplicate Task lookup/insert and fallback identity.
   Registration inserts the Task once; `inherit_task_placement` only inherits its
   Project placement in the same transaction.
@@ -868,12 +873,8 @@ one Task insertion, registered-Wave refresh identity, cancellation-safe acquisit
 and shared Session admission remain implemented. CI repair owns outer admission
 without reacquiring it inside reservation. These prove no rotation exclusion.
 
-The selection deletion targets require configured identity and exact-ID transitions;
-the old name selector remains unchanged. Rotation still holds only Wave locks.
-Registration still inserts supplied planning under the Started-count selector.
-Migration adoption proves no ordinary ensure. First-error collection, shared
-membership and migration-slice boundaries remain required.
-Earlier review detail remains at
+First-error collection, shared membership and migration-slice boundaries remain
+required. Earlier review detail remains at
 `661622ee2a22386e1e51f192132116e36b1b46c8:scratch/keep-every-wave-ready-for.md`;
 pre-pass local notes are preserved in `/tmp/loo366-compress-preserved/`.
 
@@ -888,16 +889,12 @@ Review rejected bootstrap chapters, creation during status reads and name-derive
 permanent Project IDs. Keep recovery receipts confined to mutation recovery;
 provider status/content and configured selection retain their respective owners.
 
-Release's October 5 publication/install evidence belongs in its memory and proves
-no Project readiness. Keep the materialized name-cutover fixture's same-batch
-boundary with #1451's pending-version behavior; no release-tree gate ran here.
+#1451's pending-version behavior retains the name-cutover fixture's same-batch
+boundary; no release-tree gate ran here.
 
-### Retained acquisition evidence
+Compression only inlines insertion parameters and shares Task/PR fixture setup;
+registration transactions and preservation assertions remain. Earlier checks and
+the failed Home-wide fence remain at
+`37fe75cd9d13b969ab1d01cb6cd40d4fcc13f521:scratch/keep-every-wave-ready-for.md`.
 
-Cancellation-safe acquisition, cold-detail ownership, reteam and the earlier
-input-replacement checks remain at
-`b06e17d3c:scratch/keep-every-wave-ready-for.md`. They establish neither
-rotation/start exclusion nor installed readiness. Release's entry-point recovery
-lesson still applies; its publication/installation evidence proves no readiness.
-
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b checkout_exclusion task_registration_retains_earlier_checkout_conversations_without_binding input_replacement_retains_workspace_and_task_membership session_binding_retains_a_task_in_completed_project_history --test-threads=4` passed (9); `cargo fmt --all`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed. Experimental Home-wide fencing failed unrelated registration and was removed; population/accepted-fact selection, operation-entry rotation and configured acceptance remain unfinished.
+Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b checkout_exclusion_preserves_registration_and_retry unrelated_checkout_exclusion_does_not_block_task_registration task_registration_retains_earlier_checkout_conversations_without_binding project_projection planning_projection confirmed_project_preserves_full_refresh_age_and_rejects_another_wave task_requires_an_existing_project_in_its_wave --test-threads=4` passed (10, rebuilt binary); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed. Realign reused these recorded checks; `git diff --check` passed. Gate owns operation-entry and configured acceptance.

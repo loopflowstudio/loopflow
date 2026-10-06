@@ -43,7 +43,7 @@ impl StoreChanges {
         }
     }
 
-    /// Without a vnode watch, reading four revisions is cheap enough to do on a
+    /// Without a vnode watch, reading the revisions is cheap enough to do on a
     /// short clock.
     #[cfg(not(target_os = "macos"))]
     pub(crate) fn wait(&mut self, timeout: Duration) {

@@ -298,8 +298,6 @@ final class TaskFilesStore {
     private var observation: TaskFileObservation?
     private var invalidation: Task<Void, Never>?
     private var changedPaths: Set<String> = []
-    /// A commit, checkout or staging moved what the comparison reads.
-    private var comparisonChanged = false
     private var autosaves: [String: Task<Void, Never>] = [:]
     var autosave = true {
         didSet { for document in documents.values { scheduleSave(document) } }
@@ -315,6 +313,8 @@ final class TaskFilesStore {
     }
 
     private func invalidate(_ paths: [String]) {
+        // A commit, checkout or staging moved what the comparison reads.
+        var comparisonChanged = false
         for path in paths {
             if path == ".git" || path.hasPrefix(".git/") {
                 // Git and lf write other files here on every read; these move with the comparison.
@@ -333,7 +333,6 @@ final class TaskFilesStore {
             guard let self else { return }
             let changed = self.changedPaths
             self.changedPaths.removeAll()
-            self.comparisonChanged = false
             defer { if Task.isCancelled { self.changedPaths.formUnion(changed) } }
             // Re-read retained documents even when another file or terminal is visible.
             for (path, document) in self.documents where changed.contains(where: {

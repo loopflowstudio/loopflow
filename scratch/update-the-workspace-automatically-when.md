@@ -207,7 +207,7 @@ decides `lf task complete`; not a clear win), and stored derived rows.
 4. **The explicit one-shot reads survive.** `PodiumModel.refresh`,
    `refreshPlanning`, `refreshSessions`, `refreshProcessActivity` and
    `refreshWorkActivity` still spawn `lf` when no reader is open: session
-   fixtures and about sixty call sites in four test suites. With a reader
+   fixtures and about 140 call sites in twenty test suites. With a reader
    open they send a request. `roadmapGeneration` and `sessionsGeneration`
    guard those reads. Moving the suites onto scripted frames deletes both.
 5. **Swift coverage gaps.** A scripted feed proves in-place updates, an
@@ -522,6 +522,11 @@ Earlier passes are at commit `018083656`.
 - 2026-10-05 compress: clippy `--all-targets -D warnings` clean; `cargo test
   -p loopflow --test workspace_watch` 10/10; `--lib -- workspace_watch
   engine::git` 30/30. Not re-measured; gate owns the suites.
+- 2026-10-06 compress: the reader's request, output and burst-wait loops are
+  named functions; the Task-files comparison flag is a local. Clippy
+  `--all-targets -D warnings` clean; `--test workspace_watch` 10/10; `swift
+  test --filter TaskFiles` 19/19. Remaining work 4 untouched: about 140 test
+  call sites in twenty suites still use the one-shot reads.
 - 2026-10-05 sync: `cargo test -p loopflow --lib accepted_historical_uncertainty_completes_without_releasing_execution_protection` 1/1; bulk unfinished-Exec reads retain main's completion acceptance and Session-history API.
 - 2026-10-05 realign after the second round: every function, constant and
   deletion the plan names was found by `grep` in the tree; no code changed

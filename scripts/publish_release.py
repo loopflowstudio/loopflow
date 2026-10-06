@@ -164,15 +164,15 @@ def _find_native_archives(artifact_dir: Path) -> tuple[Path, ...]:
     return tuple(archives)
 
 
-def _extract_arm_binary(archives: tuple[Path, ...], output_dir: Path) -> Path:
-    arm_archive = next(path for path in archives if "aarch64-apple-darwin" in path.name)
-    with tarfile.open(arm_archive, "r:gz") as package:
+def _extract_binary(archives: tuple[Path, ...], output_dir: Path, target: str) -> Path:
+    archive = next(path for path in archives if path.name == f"lf-{target}.tar.gz")
+    with tarfile.open(archive, "r:gz") as package:
         members = package.getmembers()
         if len(members) != 1 or members[0].name != "lf" or not members[0].isfile():
-            raise RuntimeError(f"unexpected archive contents in {arm_archive.name}")
+            raise RuntimeError(f"unexpected archive contents in {archive.name}")
         source = package.extractfile(members[0])
         if source is None:
-            raise RuntimeError(f"could not read lf from {arm_archive.name}")
+            raise RuntimeError(f"could not read lf from {archive.name}")
         binary = output_dir / "lf"
         with binary.open("wb") as destination:
             shutil.copyfileobj(source, destination)
@@ -180,15 +180,13 @@ def _extract_arm_binary(archives: tuple[Path, ...], output_dir: Path) -> Path:
     return binary
 
 
-def _validate_release_candidate(binary: Path, scratch: Path) -> None:
-    home = scratch / "preflight-home"
-    home.mkdir()
-    result = _run(
-        [str(binary), "install", "preflight", "--json"],
-        capture=True,
-        check=False,
-        env={**os.environ, "LF_HOME": str(home)},
-    )
+def _validate_release_candidate(archives: tuple[Path, ...]) -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        proof = Path(temp)
+        _extract_binary(archives, proof, "aarch64-unknown-linux-gnu")
+        result = _run_release_container(
+            proof, ["/proof/lf", "install", "preflight", "--json"], network=False
+        )
     try:
         preview = json.loads(result.stdout)
         candidate = preview["candidate"]
@@ -252,10 +250,7 @@ def inspect_source(commit: str, tag: str, *, check_publication: bool) -> dict[st
 
 
 def _validate_archives(artifact_dir: Path) -> None:
-    with tempfile.TemporaryDirectory() as temp:
-        scratch = Path(temp)
-        binary = _extract_arm_binary(_find_native_archives(artifact_dir), scratch)
-        _validate_release_candidate(binary, scratch)
+    _validate_release_candidate(_find_native_archives(artifact_dir))
 
 
 def _sha256(path: Path) -> str:
@@ -417,8 +412,8 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
     stages: list[str] = [CANDIDATE_STAGES[0]]
     with tempfile.TemporaryDirectory() as temp:
         scratch = Path(temp)
-        arm_binary = _extract_arm_binary(archives, scratch)
-        _validate_release_candidate(arm_binary, scratch)
+        arm_binary = _extract_binary(archives, scratch, "aarch64-apple-darwin")
+        _validate_release_candidate(archives)
         _run(["sh", "-n", str(installer)])
         stages.append(CANDIDATE_STAGES[1])
         env = {
@@ -561,49 +556,56 @@ def _check_public_hashes(directory: Path, expected: dict[str, str]) -> None:
             raise RuntimeError(f"public artifact hash mismatch or missing asset: {name}")
 
 
-def _verify_public_installer(artifacts: Path, tag: str) -> dict[str, str]:
-    # Installation resolves getpwuid's Home, so environment overrides cannot
-    # isolate promotion. Copy only public inputs into a disposable OS container.
+def _run_release_container(
+    proof: Path, command: list[str], *, network: bool
+) -> subprocess.CompletedProcess[str]:
+    # No mounts or forwarded environment: getpwuid must resolve a disposable account.
     _run(["docker", "info", "--format", "{{.ServerVersion}}"], capture=True, timeout=10)
     _run(["docker", "pull", "--platform", "linux/arm64", "ubuntu:24.04"], timeout=300)
-    command = """set -eu
-apt-get update >&2
-apt-get install -y --no-install-recommends ca-certificates curl python3 >&2
-sh /proof/install.sh --version "$1" --cli-only >&2
-python3 /proof/release_install_smoke.py "$1"
-"""
     container = _run(
         [
             "docker",
             "create",
             "--platform",
             "linux/arm64",
+            *([] if network else ["--network", "none"]),
             "ubuntu:24.04",
             "timeout",
             "900",
-            "sh",
-            "-ec",
-            command,
-            "installer-smoke",
-            tag,
+            *command,
         ],
         capture=True,
         timeout=30,
     ).stdout.strip()
     try:
-        with tempfile.TemporaryDirectory() as temp:
-            proof = Path(temp)
-            for name in ("install.sh", "lf-aarch64-unknown-linux-gnu.tar.gz"):
-                shutil.copy2(artifacts / name, proof / name)
-            shutil.copy2(CONTROL_ROOT / "scripts/release_install_smoke.py", proof)
-            _run(["docker", "cp", str(proof), f"{container}:/proof"], timeout=60)
-        result = _run(["docker", "start", "--attach", container], capture=True, timeout=930)
-        versions = json.loads(result.stdout)
-        if versions != {"lf-linux": f"lf {tag.removeprefix('v')}"}:
-            raise RuntimeError("isolated installer returned mismatched smoke evidence")
-        return versions
+        _run(["docker", "cp", str(proof), f"{container}:/proof"], timeout=60)
+        return _run(
+            ["docker", "start", "--attach", container], capture=True, check=False, timeout=930
+        )
     finally:
         _run(["docker", "rm", "--force", container], timeout=30)
+
+
+def _verify_public_installer(artifacts: Path, tag: str) -> dict[str, str]:
+    command = """set -eu
+apt-get update >&2
+apt-get install -y --no-install-recommends ca-certificates curl python3 >&2
+sh /proof/install.sh --version "$1" --cli-only >&2
+python3 /proof/release_install_smoke.py "$1"
+"""
+    with tempfile.TemporaryDirectory() as temp:
+        proof = Path(temp)
+        for name in ("install.sh", "lf-aarch64-unknown-linux-gnu.tar.gz"):
+            shutil.copy2(artifacts / name, proof / name)
+        shutil.copy2(CONTROL_ROOT / "scripts/release_install_smoke.py", proof)
+        result = _run_release_container(
+            proof, ["sh", "-ec", command, "installer-smoke", tag], network=True
+        )
+    result.check_returncode()
+    versions = json.loads(result.stdout)
+    if versions != {"lf-linux": f"lf {tag.removeprefix('v')}"}:
+        raise RuntimeError("isolated installer returned mismatched smoke evidence")
+    return versions
 
 
 def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
@@ -718,7 +720,7 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
                 raise RuntimeError("publication repair did not pass public read-back")
         native = scratch / "native"
         native.mkdir()
-        binary = _extract_arm_binary(_find_native_archives(scratch), native)
+        binary = _extract_binary(_find_native_archives(scratch), native, "aarch64-apple-darwin")
         smoke_env = {
             "PATH": "/usr/bin:/bin",
             "HOME": str(scratch),

@@ -194,8 +194,9 @@ although promotion resolves the OS account Home, then hashed the entry gate as
 if it were the executable. The follow-up isolates promotion in a disposable
 container and verifies selected CLI bytes; native macOS smoke stays separate.
 Docker was unavailable locally; real container and public acceptance remain open.
-Candidate preflight still reads OS-account installation state despite LF_HOME;
-its fresh-Home claim is unproved. Isolated candidate validation remains work.
+Candidate preflight now uses the packaged Linux CLI in a fresh container for
+preparation, cached reuse and publication. Real container acceptance remains open;
+simulated checks do not establish macOS installation or automatic settlement.
 
 Release's September 28 incident proves entry points need operation-level recovery:
 an agent reported failure successfully, producing a misleading green cron receipt.

@@ -196,10 +196,12 @@ from the rejected commit; earlier preparation commits remain in history.
 Unknown or partial publication blocks replacement. Release history retains the
 rejected candidate and inspection on the same opportunity's attempt.
 A valid interrupted candidate resumes unchanged. Cached packaged binaries must
-still pass candidate installation preflight before reuse or publication. That
-read-only helper resolves the OS account installation despite `LF_HOME`; it does
-not currently prove fresh-Home acceptance. Isolated candidate validation remains
-unfinished.
+still pass candidate installation preflight before reuse or publication. Each
+check runs the exact packaged ARM64 Linux CLI in a new Ubuntu 24.04 container,
+with networking disabled and no host mounts or forwarded credentials. Preparation
+uses the same check. Docker must be running; rejection or failed cleanup stops
+preparation/publication. This proves fresh Linux-account preflight, not macOS
+installation; native macOS packaging and smoke checks remain separate.
 
 Required headless Desktop checks remain in gate and CI; the optional UI-host
 exercise is not a publication prerequisite.

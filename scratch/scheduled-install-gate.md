@@ -17,8 +17,8 @@ version/help smoke separately. Docker failure remains a failed verification.
 No scheduler, settlement, receipt schema or installation routing change is needed.
 
 Delete — do not maintain: host installer invocation with fake HOME; entry-gate
-hash comparison; singleton binary loops and their obsolete host-install fixture.
-These paths are removed. Preserve pinned public downloads, complete asset hashes, native
+hash comparison; singleton binary loops and their obsolete host-install fixture;
+candidate preflight on the host with an LF_HOME override. These paths are removed. Preserve pinned public downloads, complete asset hashes, native
 smoke, exact product identity and failed-publication evidence.
 
 Counterexamples: installer selects wrong bytes; correct gate selects wrong version;
@@ -35,12 +35,15 @@ Supported installed accounting, current telemetry, public proof and two adjacent
 original configured dues with distinct automatic executions (one publication,
 no manual repair) remain unproved. All 36 dated telemetry failures survive.
 No production release, installation, trigger or schedule change is authorized here.
-The candidate-preflight helper also uses LF_HOME while reading OS-account
-installation state; it is read-only, but cannot prove fresh-Home acceptance.
-That preparation path remains an implementation gap: isolate candidate preflight
-at the OS-account boundary and prove both preparation and cached-candidate reuse
-without reading the release host installation. Public installer smoke cannot
-substitute for this prepublication check.
+Candidate preflight now extracts the exact ARM64 Linux archive into a disposable
+Ubuntu 24.04 container with networking disabled, no mounts and no forwarded
+environment. Preparation, cached reuse and publication share this path. The
+container lifecycle also owns public installer smoke; cleanup failure propagates.
+Focused simulated-service checks cover preparation, reuse, rejected authority,
+failed/malformed preflight, unavailable Docker and cleanup failure without issuing
+host preflight. Real candidate/container acceptance remains for gate/CI. This
+establishes no macOS fresh-account installation proof; native macOS packaging and
+smoke remain separate. Public smoke cannot substitute for prepublication checks.
 
 Release child memory (October 5) records v0.13.3 shipping #1441 and installed
 jobs repaired to use the machine gate at unchanged times. Installed history still
@@ -57,4 +60,7 @@ Compression keeps archive extraction and native smoke explicit about their one
 `lf` binary. The publisher fixture no longer pretends to install on the host;
 selected-artifact and entry-gate behavior stays in the isolated smoke test.
 
-Check: `git diff --check` passed; prior `uv run pytest python/tests/test_release_publisher.py -q` — 37 passed (unchanged code); real Docker installer execution deferred to gate/CI (daemon unavailable), not public proof.
+Simulated review retained separate native macOS packaging and Linux-account
+preflight evidence, and confirmed cached receipts cannot bypass a new preflight.
+
+Check: `uv run pytest python/tests/test_release_publisher.py -q` — 42 passed; Ruff and `git diff --check` passed; real Docker candidate/installer execution deferred to gate/CI (daemon unavailable), not public proof.

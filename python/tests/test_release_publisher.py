@@ -39,7 +39,7 @@ def test_publisher_rejects_unexpected_archive_contents(tmp_path: Path):
         package.addfile(member, io.BytesIO(b"nope"))
 
     with pytest.raises(RuntimeError, match="unexpected archive contents"):
-        publish_release._extract_arm_binary((archive,), tmp_path)
+        publish_release._extract_binary((archive,), tmp_path, "aarch64-apple-darwin")
 
 
 def test_publisher_extracts_the_arm_cli(tmp_path: Path):
@@ -50,47 +50,45 @@ def test_publisher_extracts_the_arm_cli(tmp_path: Path):
     output = tmp_path / "extracted"
     output.mkdir()
 
-    cli = publish_release._extract_arm_binary(archives, output)
+    cli = publish_release._extract_binary(archives, output, "aarch64-apple-darwin")
 
     assert cli.read_bytes() == b"loopflow release lf"
     assert cli.stat().st_mode & 0o111
 
 
-def test_publisher_rejects_validation_only_control_plane(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("code", "output", "error"),
+    [
+        (0, '{"candidate":{"authority":"validation_only"}}', "validation-only"),
+        (
+            1,
+            '{"candidate":{"authority":"published"},"verdict":{"kind":"reject"}}',
+            "cannot install into a fresh Home",
+        ),
+        (0, "not JSON", "did not emit a promotion identity"),
+        (
+            1,
+            '{"candidate":{"authority":"published"},"verdict":{"kind":"promote"}}',
+            "cannot install into a fresh Home",
+        ),
+    ],
+)
+def test_publisher_rejects_invalid_candidate_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, output: str, error: str
 ):
-    binary = tmp_path / "lf"
-    binary.touch()
+    _native_artifacts(tmp_path)
     monkeypatch.setattr(
         publish_release,
-        "_run",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            [], 0, '{"candidate":{"authority":"validation_only"}}', ""
-        ),
+        "_run_release_container",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], code, output, "refused"),
     )
-
-    with pytest.raises(RuntimeError, match="validation-only"):
-        publish_release._validate_release_candidate(binary, tmp_path)
-
-
-def test_publisher_rejects_published_identity_when_home_preflight_refuses(tmp_path: Path):
-    binary = tmp_path / "lf"
-    binary.write_text(
-        "#!/bin/sh\n"
-        'echo \'{"candidate":{"authority":"published"},'
-        '"verdict":{"kind":"reject"}}\'\n'
-        "echo 'Error: promotion preflight refused' >&2\n"
-        "exit 1\n"
-    )
-    binary.chmod(0o755)
-
-    with pytest.raises(RuntimeError, match="cannot install into a fresh Home"):
-        publish_release._validate_release_candidate(binary, tmp_path)
+    with pytest.raises(RuntimeError, match=error):
+        publish_release._validate_release_candidate(publish_release._find_native_archives(tmp_path))
 
 
-@pytest.mark.parametrize("rejected_on_retry", [False, True])
+@pytest.mark.parametrize("rejection", [None, "prepare", "reuse", "cleanup", "unavailable"])
 def test_publisher_prepares_exact_artifacts_before_marking_release_published(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rejected_on_retry: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rejection: str | None
 ):
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
@@ -101,7 +99,7 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
     (tmp_path / "RELEASE_NOTES.md").write_text("# v1.2.3\n")
     (tmp_path / "swift/dist").mkdir(parents=True)
     commands: list[list[str]] = []
-    reject_candidate = False
+    reject_candidate = rejection == "prepare"
 
     def fake_run(
         command: list[str],
@@ -110,6 +108,7 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         capture: bool = False,
         env: dict[str, str] | None = None,
         check: bool = True,
+        timeout: int | None = None,
     ) -> subprocess.CompletedProcess[str]:
         if "--ui-host" in command:
             raise RuntimeError("UI host unavailable")
@@ -118,7 +117,20 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
             return subprocess.CompletedProcess(command, 0, "v1.2.3\n", "")
         if command[:3] == ["git", "rev-parse", "HEAD"]:
             return subprocess.CompletedProcess(command, 0, "abc123\n", "")
-        if command[1:] == ["install", "preflight", "--json"]:
+        if command[0] != "docker" and "preflight" in command:
+            pytest.fail("candidate preflight escaped OS-account isolation")
+        if command[:2] == ["docker", "info"] and rejection == "unavailable":
+            raise RuntimeError("Docker unavailable")
+        if command[:2] == ["docker", "rm"] and rejection == "cleanup":
+            raise RuntimeError("container cleanup failed")
+        if command[:2] == ["docker", "create"]:
+            assert "--network" in command and "none" in command
+            assert "--volume" not in command and "--mount" not in command
+            assert "--env" not in command and env is None
+            return subprocess.CompletedProcess(command, 0, "candidate-container", "")
+        if command[:2] == ["docker", "cp"]:
+            assert (Path(command[2]) / "lf").read_bytes() == b"loopflow release lf"
+        if command[:2] == ["docker", "start"]:
             if reject_candidate:
                 return subprocess.CompletedProcess(
                     command,
@@ -145,10 +157,19 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
     monkeypatch.setenv("LF_RELEASE_WORKFLOW_RUN_ID", "42")
 
     prepared_dir = tmp_path / "prepared"
+    if rejection in {"prepare", "cleanup", "unavailable"}:
+        with pytest.raises(
+            RuntimeError, match="pending migration draft|cleanup failed|Docker unavailable"
+        ):
+            publish_release.prepare_release("v1.2.3", artifact_dir, prepared_dir)
+        assert not prepared_dir.exists()
+        assert not (tmp_path / ".lf/logs/release.v1.2.3.candidate.json").exists()
+        assert not (tmp_path / ".lf/logs/release.v1.2.3.json").exists()
+        return
     candidate = publish_release.prepare_release("v1.2.3", artifact_dir, prepared_dir)
     (prepared_dir / "Loopflow.dmg").write_bytes(b"corrupt")
     candidate = publish_release.prepare_release("v1.2.3", artifact_dir, prepared_dir)
-    if rejected_on_retry:
+    if rejection == "reuse":
         reject_candidate = True
         with pytest.raises(RuntimeError, match="pending migration draft"):
             publish_release.prepare_release("v1.2.3", artifact_dir, prepared_dir)
@@ -156,6 +177,7 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
             publish_release.publish_release("v1.2.3", prepared_dir)
         assert not (tmp_path / ".lf/logs/release.v1.2.3.json").exists()
         return
+    assert publish_release.prepare_release("v1.2.3", artifact_dir, prepared_dir) == candidate
     prepare_commands = len(commands)
     receipt = publish_release.publish_release("v1.2.3", prepared_dir)
 

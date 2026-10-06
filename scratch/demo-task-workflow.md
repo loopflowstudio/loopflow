@@ -52,6 +52,7 @@ proof items.
 
 ## Jack's review
 
-October 6, Desktop Task page (dev app at `4f2860658`, private Home): "this is
-kinda yucky". What his screenshot shows, and the rebuild, are slice 14 in
-[the design](focus-on-your-own-work.md). The command line was not reviewed.
+October 6, Desktop (dev app at `4f2860658`, private Home): "this is kinda
+yucky", then the layout now recorded as slice 14 in
+[the design](focus-on-your-own-work.md). Rebuilt at `d32c95122`; awaiting his
+second look. The command line was not reviewed.

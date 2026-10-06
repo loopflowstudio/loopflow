@@ -231,7 +231,7 @@ runs nothing ends a Task over uncommitted changes and keeps its checkout) —
     "Start → pursue → End End", Start); the failure shown twice; the "Work"
     list of raw Execs (to Debug); Desktop reads that write Execs (`lf flow
     list --json`, a failing `lf task comment`).
-    **Built and compressed, not yet realigned.** The header, the one **+**
+    ****Done** at `975d9f727`; the Flow stopped at sync, so marked by the managing conversation after rerunning nine suites and looking at the render.
     menu and the two panes are in; the Sessions list, sidebar toggle, file
     toggle, Monitor (pane, button, palette action and its second reader),
     toolbar Flow chip, old Flow card with its picker, position text and the
@@ -248,6 +248,14 @@ runs nothing ends a Task over uncommitted changes and keeps its checkout) —
     Choices: [questions.md](questions.md). Demo items: the window on screen;
     a real `lf session ensure` starting a provider; label widths at small
     window sizes (the graph stops shrinking at 60% and scrolls).
+
+15. **Merge main.** #1463 ("Prepare Wave Projects on opening and preserve
+    work through realignment") conflicts in 58 files: it changes Task
+    admission and restart through FlowSession, worker claims and
+    `tasks.work_state`, which this PR deletes. The headless resolver declined
+    three times as needing judgment. Needs a brief from Jack or a dedicated
+    pass: keep this PR's model and port #1463's intent onto Workflow position
+    and Flow execs. *Not done.*
 
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task

@@ -773,17 +773,16 @@ failure evidence, not binding policy: current Session rows own attribution and
 write-once bind permits done/landed Tasks. Preserve current ownership through the
 one-machine conversion; discarded historical attribution needs no importer.
 
-LOO-304 retains Jack Heart's budgets and separate observational/owned
-Homes. October 6 probes on `Jacks-MacBook-Pro-2.local` produced bitmap/OCR pixels,
-then exposed Foundation temporary-file and PTY sandbox assumptions. The branch
-repairs those paths; four contained checks preserve Task membership, drafts,
-native history and external-effect denial. Mounted Ghostty still reports login
-exec PermissionDenied; no completed journey, matched p95 or hour soak follows.
-The benchmark guide records receipts and the isolated-host requirement.
-CI's headless/compile jobs are not rendered acceptance. Jack's October 6 direction authorizes source
-publication with these obligations open, not merge or Task completion. Preserve
-all budgets and private snapshots; do not count denied work as a speedup. The
-earlier evidence remains at `d8f1214b0:wave/infrastructure/MEMORY.md`.
+LOO-304 retains Jack Heart's budgets and separate observational/owned Homes.
+October 6 contained proofs preserve membership, drafts, history and external-effect
+denial. A PTY probe isolated login: cat and Bash exec-cat passed; both login forms
+failed at execvp despite an exact allowance. Setuid remains a causal hypothesis. Pinned Ghostty forces
+embedded commands into shell mode and wraps both modes in login; `direct:` cannot
+bypass it. A different host alone does not fix this policy boundary. A supported
+upstream option or production GhosttyKit launch repair remains needed before
+mounted acceptance. The benchmark guide owns evidence. Journey, matched p95 and soak remain unproved. Jack's October 6 direction
+authorizes source publication, not merge/completion. Preserve private snapshots
+and budgets; denied work is not a speedup. Earlier evidence: `d8f1214b0:wave/infrastructure/MEMORY.md`.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

@@ -266,9 +266,32 @@ removed. No renderer or latency budget passed. Local raw receipts remain under
 
 The four contained `verify-fixture` checks pass, including external-effect denial
 and owned PTY allocation. They do not exercise Ghostty's mounted login path.
-A disposable macOS rendering account or VM must demonstrate contained terminal
-startup before running the matched snapshot pair (21 samples and 3,600 seconds
-each). Keep snapshots local to that isolated host. No such remotely callable host
+A four-case PTY probe isolates the launch boundary: `/bin/cat` and
+`/bin/bash --noprofile --norc -c 'exec /bin/cat'` both returned the input marker
+and exited 0. Both `/usr/bin/login -flp jack /bin/cat` and the captured
+login/Bash form failed before login started: `execvp` returned Operation not
+permitted (sandbox-exec exit 71). All four used the same inherited policy,
+with only an exact login executable allowance added to a private probe copy.
+The repository policy remains unchanged. `/usr/bin/login` is root-owned setuid;
+the observation establishes rejection of that executable, not an independently
+proved kernel explanation for the rejection. Receipts: `/tmp/loo304-login-diagnosis-20261006/probe.json`.
+
+Pinned Ghostty `4c838723173da757a16a2f3afd4c94f16732ef6a` has two relevant contracts:
+[embedded surface commands](https://github.com/ghostty-org/ghostty/blob/4c838723173da757a16a2f3afd4c94f16732ef6a/src/apprt/embedded.zig#L519)
+are always shell strings, and
+[macOS execution](https://github.com/ghostty-org/ghostty/blob/4c838723173da757a16a2f3afd4c94f16732ef6a/src/termio/Exec.zig#L1416)
+wraps both shell and direct modes in login. A `direct:` prefix in the surface
+string would not select config direct mode; even config direct mode retains
+login. Loopflow's command-block patch does not change this path.
+
+The remaining repair requires a supported upstream launch option or a production
+GhosttyKit change separating explicit child commands from login-shell startup,
+with command/environment/cwd and ordinary shell regressions. A benchmark-only
+launcher or unconfined terminal would change the measured path. No such binary
+change was made or verified here. A disposable rendering host alone does not
+remove the wrapper under this policy. Contained mounted startup must pass before
+the matched snapshot pair (21 samples and 3,600 seconds each).
+Keep snapshots local to the isolated host. No such remotely callable host
 or performance job is configured in this checkout. Hosted `ci.yml` jobs
 `swift-test` and `loopflow-ui-test` on `macos-15` own headless tests and the Xcode
 compile check only; checkpoint PRs defer that matrix while scratch remains.

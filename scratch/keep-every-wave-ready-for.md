@@ -132,10 +132,11 @@ Wave acceptance.
 
 ## Remaining coherent cut
 
-October 5 realignment: the previous iteration's cancellation/cold-detail/reteam
-repair request is implemented in `2cac145295a5d94a9517d8ee5298c255bc15cce0`.
-Subsequent compression retains those paths and the recorded focused checks.
-The earlier reteam repair request is satisfied; step 2 remains next.
+October 5 realignment at `530513d4d`: cancellation/cold-detail/reteam repair,
+single Task insertion and Session/binding/mechanical-start checkout admission
+are implemented. The retained compression edits reuse the Store during refresh
+and resolve the admission directory before acquiring locks. Step 2 remains next:
+registration/population stability and rotation's use of checkout exclusion.
 
 The branch is not releasable: shared binding, exact-ID ensure, transition recovery,
 KR-first rotation, backlog preservation, Desktop activation and configured
@@ -260,14 +261,6 @@ Flow alone do not count. Its tests prove membership, not rotation exclusion.
 No new product decision is required. Shared binding, ensure, KR-first rotation,
 backlog preservation, Desktop and installed Intelligence repair remain unfinished.
 
-### Reteam relationship acceptance — October 5 implementation
-
-Full exact readbacks and explicit Team acceptance are implemented, preserving
-Initiative ownership and independently newer facts. Stable-ID Wave guards survive
-cancellation through commit. Cached recovery and response-loss evidence remains in
-`719226ef4:scratch/keep-every-wave-ready-for.md` under this heading and the acquisition
-section below; these local proofs establish no configured or installed acceptance.
-
 ### Preservation boundary — October 5
 
 Stabilize Task/checkout membership before changing selection. The earlier locking
@@ -315,12 +308,15 @@ and uses it in the new capture. Primary workspace admission keeps its separate
 writer and excludes bound Tasks. The regression covers exclusion, retry and retained
 unbound membership. This is a Session-store proof, not rotation/start acceptance.
 
-October 5 admission proofs cover unchanged Session/Flow bytes while excluded and
-successful retry after release, missing checkout subdirectories, explicit binding
-from elsewhere, and Session membership through both bound and taskless Flows.
-The historical completed-Project binding proof still passes. These exercise store
-entry points, not rotation. Registration can still change the population between
-path discovery and the transaction; the lock set alone does not close that race.
+October 5 admission proofs cover unchanged Session/Flow bytes while excluded,
+retry, missing paths, binding from elsewhere and bound/taskless Flow membership.
+Historical completed-Project binding still passes. These are store proofs, not
+rotation. Registration can still change the population after path discovery.
+Source audit at `530513d4d` also retains `reserve_task_review`, `claim_task_worker`
+and CI repair in the admission inventory: they lock by cwd; separately bound Task
+roots need coverage. `admit_ci_fix` holds its checkout lock through `reserve_repair`;
+adding another acquisition inside that reservation would reacquire the same lock.
+No operation-level race was executed in this reconciliation.
 
 The proposed exclusion has one order: Wave planning locks, stable Task/checkout
 population, checkout admission locks in canonical-path order, then SQLite writes.
@@ -833,15 +829,18 @@ remain required; full-refresh freshness differs from partial acceptance.
 
 October 5 compression retains one Task insertion and tests exact identity plus
 Project placement inheritance. Reteam reads cached identifiers only for issues
-already on the destination Team; moved issues use full readbacks. Production tests
-replace the archived cancellation experiment. These changes leave step 2 open.
+already on the destination Team; moved issues use full readbacks. Its final refresh
+now reuses `refresh_pm_snapshot_locked` with the existing Store and acquisition
+guard through acceptance; held-lock refresh no longer reopens the Store. Checkout admission resolves its lock directory once, before
+acquiring the sorted checkout locks, avoiding store-mutex reads between acquisitions.
+Production tests replace the archived cancellation experiment. Step 2 stays
+open; no name-selector repair or configured readiness is implied.
 
-The remaining selection deletion targets require configured identity and exact-ID
-transitions. Reteam readbacks and cancellation-safe acceptance are implemented;
-registration, start exclusion and created-successor recovery remain unfinished.
-Do not repair the name selector. Team expansion/narrowing
-already share one provider API. Migration adoption proves no ordinary ensure.
-Retain first-error collection, shared membership and migration-slice boundaries.
+The selection deletion targets require configured identity and exact-ID transitions;
+the old name selector remains unchanged. Rotation still holds only Wave locks.
+Registration still inserts supplied planning under the Started-count selector.
+Migration adoption proves no ordinary ensure. First-error collection, shared
+membership and migration-slice boundaries remain required.
 Earlier review detail remains at
 `661622ee2a22386e1e51f192132116e36b1b46c8:scratch/keep-every-wave-ready-for.md`;
 pre-pass local notes are preserved in `/tmp/loo366-compress-preserved/`.
@@ -872,7 +871,9 @@ acquired inside SQLite. The operation tests pause real acceptance workers,
 cancel their callers, and show competing reteam preview blocked until release,
 then able to read the accepted result. Separate apply/re-entry fixtures cover
 cached membership and response loss during Team expansion, issue moves and
-narrowing. These do not yet prove rotation/start exclusion.
+narrowing. Earlier reteam detail remains at
+`719226ef4:scratch/keep-every-wave-ready-for.md` under “Reteam relationship acceptance”.
+These do not yet prove rotation/start exclusion.
 
 Cold detail discovers its Wave, locks, then reads provider ownership again.
 Changed ownership reports retry without acquiring another Wave out of order.
@@ -889,4 +890,4 @@ remain unfinished. No installed Home or designated Intelligence Project was muta
 
 Prior acquisition/registration/reteam checks remain at
 `f2b127d87bc0bb99654ba66118fb91a77099b73f:scratch/keep-every-wave-ready-for.md`.
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b checkout_exclusion session_binding_retains_a_task_in_completed_project_history an_interrupted_operation_blocks_for_inspection_instead_of_replaying input_replacement_retains_workspace_and_task_membership --test-threads=4` passed (6); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed; rotation/start and configured acceptance remain with implementation/gate.
+Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b repository_team_reteam cancelled_detail_acceptance cancelled_snapshot_acceptance checkout_exclusion session_binding_retains_a_task_in_completed_project_history an_interrupted_operation_blocks_for_inspection_instead_of_replaying input_replacement_retains_workspace_and_task_membership --test-threads=4` passed (13); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed; realign: `git diff --check` passed, prior behavioral results retained without rerun; rotation/start and configured acceptance remain with implementation/gate.

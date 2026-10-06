@@ -1,9 +1,9 @@
 //! Provider planning operations shared by Task, Wave, and repository commands.
 //!
-//! Linear owns authored chapter content and Tasks; the durable chapter binding
-//! identifies the current Project. `lf repo refresh` projects provider state into
-//! SQLite; reads serve that snapshot and only reach Linear through a bounded
-//! staleness policy (see `load_show_snapshot`).
+//! Linear owns authored Project content and Tasks. `lf repo refresh` accepts
+//! provider facts and projects them into SQLite atomically. Reads serve that
+//! snapshot and only reach Linear through a bounded staleness policy
+//! (see `load_show_snapshot`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
@@ -901,25 +901,25 @@ pub(crate) async fn refresh_pm_snapshot(
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let acquisition = super::chapter::rotation_lock(&registered).await?;
-    refresh_pm_snapshot_locked(repo, wave, ctx, acquisition).await
+    refresh_pm_snapshot_locked(repo, wave, ctx, &store, acquisition).await
 }
 
 pub(crate) async fn refresh_pm_snapshot_locked(
     repo: &Path,
     wave: &str,
     ctx: &PmContext,
+    store: &Store,
     acquisition: Arc<File>,
 ) -> OpsResult<PmSnapshot> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    let store = pm_store().await?;
-    let snapshot = fetch_pm_snapshot_with_store(repo, wave, ctx, &store).await?;
+    let snapshot = fetch_pm_snapshot_with_store(repo, wave, ctx, store).await?;
     store_pm_snapshot(
         repo,
         wave,
         ctx,
         &snapshot,
         observed_at,
-        &store,
+        store,
         Some(acquisition),
     )
     .await?;
@@ -1205,7 +1205,7 @@ where
     super::chapter::require_chapter_home(&store, &registered).await?;
     let acquisition = super::chapter::rotation_lock(&registered).await?;
     let ctx = resolve_context(repo, wave).await?;
-    refresh_pm_snapshot_locked(repo, wave, &ctx, acquisition.clone()).await?;
+    refresh_pm_snapshot_locked(repo, wave, &ctx, &store, acquisition.clone()).await?;
     let project = super::chapter::current_project(&store, &registered).await?;
     let find_existing = |items: Vec<PmItem>| {
         items
@@ -2367,19 +2367,8 @@ async fn apply_or_plan_repository_reteam(
                 repository: resolved.repository.clone(),
                 initiative,
             };
-            let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-            let projects = checked_projects_with_store(repo, &ctx, wave, store).await?;
-            let snapshot = fetch_pm_snapshot_for_projects(&ctx, projects).await?;
-            store_pm_snapshot(
-                repo,
-                wave,
-                &ctx,
-                &snapshot,
-                observed_at,
-                store,
-                Some(locked_waves[wave].1.clone()),
-            )
-            .await?;
+            refresh_pm_snapshot_locked(repo, wave, &ctx, store, locked_waves[wave].1.clone())
+                .await?;
         }
         remove_legacy_pm_sentinels(repo, &waves)?;
         if repo.join(".git").exists() {

@@ -65,13 +65,6 @@ impl SqliteStore {
         }
         paths.sort();
         paths.dedup();
-        paths
-            .iter()
-            .map(|path| self.lock_checkout_path(path))
-            .collect()
-    }
-
-    fn lock_checkout_path(&self, cwd: &Path) -> StoreResult<File> {
         let database = self
             .conn
             .lock()
@@ -82,6 +75,13 @@ impl SqliteStore {
             .with_extension("admission");
         std::fs::create_dir_all(&root)
             .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        paths
+            .iter()
+            .map(|path| Self::lock_checkout_path(&root, path))
+            .collect()
+    }
+
+    fn lock_checkout_path(root: &Path, cwd: &Path) -> StoreResult<File> {
         let name = hex::encode(Sha256::digest(cwd.as_os_str().as_encoded_bytes()));
         let file = OpenOptions::new()
             .create(true)

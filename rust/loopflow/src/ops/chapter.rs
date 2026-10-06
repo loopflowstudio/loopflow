@@ -87,7 +87,8 @@ pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) ->
                 .update_project(&provider.id, &provider.name, content)
                 .await
                 .map_err(error)?;
-            refresh_pm_snapshot_locked(repo, wave.slug(), &ctx, acquisition).await?;
+            refresh_pm_snapshot_locked(repo, wave.slug(), &ctx, &pm_store().await?, acquisition)
+                .await?;
             Ok(())
         })
 }
@@ -299,7 +300,7 @@ pub(crate) async fn rotate(repo: &Path, name: &str, dry_run: bool) -> OpsResult<
         apply_rotation(repo, &store, wave, ctx, name, entry, acquisition)
             .await
             .map_err(|cause| error(format!("{cause}; retry `lf repo new-chapter {name}`")))?;
-        refresh_pm_snapshot_locked(repo, wave.slug(), ctx, acquisition.clone()).await?;
+        refresh_pm_snapshot_locked(repo, wave.slug(), ctx, &store, acquisition.clone()).await?;
     }
     for (wave, ctx) in &contexts {
         let projects = checked_projects(repo, ctx, wave.slug()).await?;

@@ -321,19 +321,18 @@ This explicit ID supplies bootstrap selection, not a candidate heuristic.
 The active-Project adoption test proves no Backlog activation or installed repair.
 
 Preservation includes unbound checkout Sessions and Flow associations, excluding
-primary scopes. Session binding and mechanical Flow starts bypass chapter admission;
-registration changes membership without a Session write. October 5 source audit
-finds a separate Started-count selector in `insert_initial_task`, which inserts
-caller-supplied planning without rereading accepted issue ownership. Removing the
-duplicate placement-time Task insertion preserves identity, not registration
-freshness or rotation exclusion. Shared selection must replace this check too.
-Store proofs retain historical binding, transfer and registration bytes. October 5
-admission now locks execution/Flow workspaces and explicit or inherited Task
-checkouts in canonical order, including missing paths. Six focused proofs retain
-bytes during exclusion and succeed after release; completed-history binding stays
-allowed. Population fencing, both rotation/start orderings and failed-reset re-entry
-remain unproved. Pending receipts cannot deny starts indefinitely; Release's
-operation-entry recovery lesson still applies. Installation proves no readiness.
+primary scopes. At `530513d4d`, registration still changes membership without a
+Session write: `insert_initial_task` inserts supplied planning under a Started-count
+selector without rereading accepted ownership. Session creation/binding and mechanical
+starts lock execution/Flow workspaces and explicit/inherited Task roots in canonical
+order, including missing paths. Six focused proofs preserve bytes under exclusion
+and retry; historical binding stays allowed. Rotation still holds only Wave locks.
+Population stability, both rotation/start orderings and failed-reset re-entry remain
+unproved. Audit admission at its operation boundary: CI repair already holds checkout
+exclusion outside its Session reservation; reacquiring it internally would conflict.
+Resolve lock storage before checkout acquisition; retain Store and Wave guard
+through refresh acceptance. Pending receipts cannot indefinitely deny
+starts; Release's operation-entry recovery lesson applies. Installation proves no readiness.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 

@@ -95,6 +95,7 @@ lf usage --task LOO-265 --context   # each step's input by source, flagged over 
 lf mon show SESSION --context       # one step: instructions, memory, scratch, goal, steers, carried, tools
 lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
+lf --task EXP-12 skill task/session # an ongoing conversation about one Task
 lf session connect SESSION         # continue a conversation
 lf session replace SESSION         # fresh conversation for the same scope
 lf session complete SESSION         # return review feedback
@@ -110,6 +111,20 @@ stops that conversation, keeps it as history, and starts a fresh one.
 Session connect, rename, bind and complete take the durable Session ID shown by
 `lf session list`. Capture keys and history prefixes select retained inputs for
 inspection and replay; they do not select these Session actions.
+
+| Scope | One finite pass | Ongoing conversation |
+| --- | --- | --- |
+| Repository | `lf operate` | `lf session ensure` |
+| Wave | `lf --wave growth wave/operate` | `lf session ensure -w growth` |
+| Task | `lf task/operate EXP-12` | `lf --task EXP-12 skill task/session` |
+
+Each conversation is its scope's operator and carries the matching operate
+procedure. It continues every started Task that has Flow steps left and no live
+worker, reads failures before retrying them, and names what waits on you.
+Unstarted backlog stays unstarted. A conversation acts only during a turn:
+between turns, Task workers and any installed background checks run on their own.
+An open conversation keeps the instructions it launched with; `replace` it
+after an upgrade.
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
 Its overview explains each item's state and next action. A mechanical Exec has

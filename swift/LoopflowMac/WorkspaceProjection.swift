@@ -49,9 +49,15 @@ struct WorkspaceProjection {
     init(roadmaps: [WaveRoadmap], sessions: [SessionRecord]) {
         var matched = Set<String>()
         let visibleTaskIds = Set(roadmaps.flatMap { $0.tasks.items.compactMap { $0.runtime?.workId } })
+        // One pass over the Sessions, so a plan of many Tasks costs no more.
+        var byTask: [String: [SessionRecord]] = [:]
+        for session in sessions where session.primaryScope == nil {
+            var ids = Set(session.taskIds)
+            if let id = session.workspace?.taskId { ids.insert(id) }
+            for id in ids { byTask[id, default: []].append(session) }
+        }
         func attached(to taskId: String?) -> [SessionRecord] {
-            guard let taskId else { return [] }
-            let records = sessions.filter { $0.primaryScope == nil && ($0.workspace?.taskId == taskId || $0.taskIds.contains(taskId)) }
+            guard let taskId, let records = byTask[taskId] else { return [] }
             matched.formUnion(records.map(\.id))
             return records
         }

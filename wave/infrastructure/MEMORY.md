@@ -1,5 +1,49 @@
 # infrastructure wave memory
 
+## Retained capture storage and autonomous cleanup (2026-10-05)
+
+Jack Heart requested that Infrastructure resolve LOO-370 without another
+interactive Session. Infrastructure chose to retain one opaque `~/.lf/runs`
+physical capture root and finish the semantic/runtime cleanup against existing
+paths. This explicitly changes the earlier physical-layout replacement
+requirement; it does not satisfy or prove a migration. The Task brief was updated
+and the decision delivered in comment `3829b49e-2ade-4bee-8850-2ae2297399a8`
+on [LOO-370](https://linear.app/loopflow/issue/LOO-370/finish-removing-the-retired-run-model-from-runtime-and-tooling).
+Preserve populated history and one storage owner, remove unnecessary offline
+conversion machinery, and retain the alias/recovery counterevidence in history.
+Source delivery is authorized; installed-Home migration, live interruption and
+release are not authorized by this cleanup decision.
+
+## Project configuration and review direction (2026-10-05)
+
+Jack Heart selected one shared local Wave configuration as the owner of the
+current Project binding for LOO-366. Checkout-local Git files must not reverse
+that binding or create duplicate Projects. This resolves the implementation's
+shared-file versus publication/synchronization question; retain exact-ID ensure,
+authored content, ongoing work, optional chapter creation with KRs and separate
+Task admission. The decision was delivered to LOO-366 as new direction; source
+implementation and configured acceptance remain unfinished.
+
+Jack also approved the one-time cached-name cutover: fresh Linear names replace
+historical cached display names, with original values and acquisition/revision
+evidence retained. This accepts that the old projected-name and genuine
+same-revision name histories cannot be distinguished. Keep the exception confined
+to that conversion; ordinary equal-revision conflict rejection remains strict.
+The decision was delivered to LOO-366 and its saved Flow resumed.
+
+The current Infrastructure Project now recommends `code` (pursue, then PR review),
+following Jack's accepted review direction and installation of v0.13.3. Its KRs
+and targets are unchanged. Existing captured Flows retain their review boundaries.
+
+The October 5 operation retired LOO-326's two stopped recovery Flows and closed
+its finished independent conversation through supported commands. Completion
+still rejects unfinished read-only Exec `5f239ead-89f9-49c4-92c4-4c2f8b97ca94`;
+shipped PRs #1413/#1435 do not resolve that remaining lifecycle evidence gap.
+LOO-367's saved loop-decide failed on a native-thread mismatch; do not replace
+its conversation or replay on unchanged evidence. LOO-370's earlier disk blocker
+has cleared; its physical conversion requirement is superseded by the explicit
+opaque-root decision above, without permission to migrate the installed Home.
+
 ## Release follow-through (reconciled 2026-10-05)
 
 Jack Heart directed Infrastructure to take responsibility for finishing every

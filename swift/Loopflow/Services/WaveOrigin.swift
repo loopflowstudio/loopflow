@@ -16,6 +16,15 @@ import Foundation
 public enum WaveOrigin {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var cache: [String: String] = [:]
+    nonisolated(unsafe) private static var changes = 0
+
+    /// Counts recorded origins. A caller that derives values from `cached` can
+    /// keep them until this moves.
+    public static var revision: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return changes
+    }
 
     public static func resolve(_ repoPath: String) -> String {
         let key = cacheKey(repoPath)
@@ -28,6 +37,7 @@ public enum WaveOrigin {
         let origin = resolveUncached(repoPath)
         lock.lock()
         cache[key] = origin
+        changes += 1
         lock.unlock()
         return origin
     }
@@ -49,6 +59,7 @@ public enum WaveOrigin {
         lock.lock()
         defer { lock.unlock() }
         cache[cacheKey(origin)] = origin
+        changes += 1
     }
 
     private static func cacheKey(_ repoPath: String) -> String {

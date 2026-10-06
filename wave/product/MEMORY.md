@@ -5,6 +5,43 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 (CLI, Mac, iOS, agent turns, workers). Older notes below still say "Concerto" where
 they mean the Mac surface.
 
+## Session and operate pairs (2026-10-05)
+
+Jack Heart's decisions on [LOO-383](https://linear.app/loopflow/issue/LOO-383):
+the Wave conversation is operations, and “reliably finishing stuff ive started
+and isnt blocked on me” is the goal.
+
+- Operators keep every started Task moving and leave unstarted backlog alone
+  “for now at least.” A defined Flow with steps left proceeds without asking.
+  A Task whose Flow ended before landing waits on Jack; how a Task changes its
+  Flow is wanted and undesigned.
+- Each session carries its operate procedure inline (“just make it work
+  reliably”). The branch composes session file plus operate body at build time.
+- `task/session` is a plain skill; a primary Task Session is “just a smaller
+  wrapper around this that saves that id in a field” (LOO-364).
+
+Lessons: the observed failure copied `next_move.owner: wave` into the reply, so
+the operator reported its own queue as a handoff. A status label naming the
+reader's own scope must say so in the prompt. Nothing re-invokes a
+conversation; `lf task reconcile` resumes only enrolled Tasks with an unfinished
+captured Flow. On Jack's Home that day the minute check was disabled and
+Product's declared `wave/operate` cron was not installed. `lf wave status`
+describes only the managed Flow: before continuing, check every Flow and
+unfinished Exec against `lf ps --json`, or a second driver starts.
+
+Jack approved the branch in demo review and asked for the operator report
+grouped as waiting on him, moving and stuck, with PR links. Leaving an unarmed
+merge to the person is the branch's choice; Jack did not answer.
+
+Open PR #1439 (LOO-353, `32f42bffe`) changes the contract: `lf task run`
+always starts a fresh Flow, nothing continues a stopped one, reconcile never
+resumes, and review moves into the Task conversation. “A defined Flow proceeds”
+then needs a new mechanism; whichever lands second rewrites the other's prompts.
+
+Limits: the [review](../../docs/reviews/session-operate-prompts.md) holds
+simulated walk-throughs and two read-only model runs. Installed behavior is
+unshown; an open conversation keeps its old text until `lf session replace`.
+
 ## Capture and configurable New Session (2026-10-03 UTC)
 
 Jack Heart accepted capture on October 1, then selected New Session and the
@@ -252,7 +289,8 @@ investigate and act independently; one shared pass note carries evidence forward
 Repository scope remains the default despite ambient Wave attribution, unless
 the request narrows it. Whether `wave/operate` uses that sequence remains open;
 its separate operation is retained. Jack's “soften, dont harden” correction
-rejects turning “one or two useful moves” into a numeric cap. No action is valid.
+rejects a numeric cap on moves. The October 5 pairs decision above replaces
+“one or two useful moves”: no action is valid only once started work is covered.
 Task findings can challenge Wave purpose and Wave findings repository direction;
 accepted decisions return to affected owners without acquiring another control
 authority or making operation a prerequisite for independent Tasks.
@@ -312,11 +350,8 @@ acceptance state. AGENTS.md and operating guidance already own Jack's naming rul
   Recorded scope retained Session code and background tmux process wrappers.
   Fixture renders do not prove tab/window interaction or native recovery.
 
-The prior name-attribution gate passed 799 affected Rust tests, 229 Python tests,
-78 website checks (three skips), 112 focused Swift tests, static checks and the
-Mac build. A full Swift package run stopped completing and was terminated;
-focused stream checks passed later, but full-package and native-rendering proof
-remain absent. Fresh real CLI generations demonstrated Jack/Maya/unknown prose,
+The prior name-attribution gate passed its affected suites; full Swift package
+and native-rendering proof remain absent. Fresh real CLI generations demonstrated Jack/Maya/unknown prose,
 not a live Task write or the review-bearing design Flow. Native review resume
 still needs anonymous → named → corrected → unknown participant acceptance on
 a differently named Home, preserving historical authors and review authority.
@@ -715,31 +750,10 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
 
 ### Earlier runtime findings (July–August evidence)
 
-- **Missing lifecycle flows must settle, not retry** (dogfood 2026-07-21).
-  LOO-167, LOO-193, and LOO-195 repeatedly alternated between `ready` and a
-  short-lived Run while `task` was absent from the installed flow catalog,
-  producing hundreds of identical resumable failures. The shared action
-  surfaces still recommended `resume` or `no_action`, and no non-destructive
-  pause exists for ready Task Work. Flow resolution failure must become one
-  durable blocked/failed boundary with bounded retry and a legal next action.
-- **Containment liveness is not provider-progress proof** (dogfood 2026-07-21).
-  LOO-207 and its owning Project reported `process_alive: true` while no exact
-  `lf ps` receipt existed and `lf top` recorded no completed output; interrupt
-  receipts contained no Turn ids and the residents immediately relaunched.
-  Supervisors must distinguish a live containment from an owned provider
-  process and an advancing Turn before recommending wait, interrupt, or retry.
-- Cross-Work questions need no parent resident or answer lane. The broader Home
-  server design remains open for automatic backlog dispatch, remote nudges, and
-  Ready work that has no blocking child command to trigger a wake.
-- The server design must assign one owner each for dispatch, liveness, retry,
-  streaming, and remote nudge before Wave, Project, and Task controls collapse
-  onto one host path.
-- Mid-turn Steer remains provider-dependent; queued durable Steers must still
-  survive provider and app exit.
-- Composite flow nodes still use the internal `__flow-step` fallback, and
-  Project-loop caps still need real dogfood data before changing.
-- Residency still reads Wave definitions from the main checkout; promotion
-  authored in a worker worktree requires landing first.
+Retired 2026-10-05: resident-era retry, containment-liveness and Home-server
+notes live at [commit 2e1074903](https://github.com/loopflowstudio/loopflow/blob/2e1074903/wave/product/MEMORY.md).
+Still applicable: a missing Flow settles as one blocker instead of retrying,
+and a live containment is not proof of an advancing provider turn.
 
 ## Model (design invariants)
 
@@ -835,15 +849,16 @@ no owning Task (LOO-375 owns `wt list` only).
 - One model owns refresh; views that each start a loop supersede each other's
   reads. A view that builds its own model reopens the blocking path.
 - The in-process replay (9.6 ms saved vs 13.2 s uncached, 20 samples) is
-  lower-level timing. Agent runs have no Aqua session: first frame, stalls,
-  CPU and the 400/1000 ms targets are unmeasured.
+  lower-level timing, not a rendered launch.
 - Jack's delivery contract (2026-10-04): land on autonomous checks and honest
   benchmark evidence; rendered startup is post-merge validation, not a gate.
-- Rendered receipt (`launch.py`, [20261004-launch-rendered](../../scripts/benchmarks/desktop-performance/20261004-launch-rendered/README.md)):
-  saved launch usable at 506 ms median / 540 p95, under load, never waiting on
-  a read. Still open on LOO-376: first frame misses 400 ms (~420 ms of first
-  render after an 89 ms restore); an unsaved launch waits 10–12 s; every `lf`
-  read costs 3.7 s or more; `session list` runs twice. Stalls unmeasured.
+- Rendered receipts (`launch.py`): [20261004](../../scripts/benchmarks/desktop-performance/20261004-launch-rendered/README.md)
+  saved launch usable at 506 ms median; [20261005](../../scripts/benchmarks/desktop-performance/20261005-first-render/README.md)
+  first frame 850 → 617 ms in alternating rounds under heavy load, never
+  waiting on a read. Profile before guessing: the cost was model getters
+  re-normalizing paths per render, not drawing. Still open on LOO-376: 400 ms
+  unproven on a quiet host; unsaved launch waits on `lf`; `session list` runs
+  2–3 times (refresh owner: LOO-382/LOO-304).
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 
@@ -974,10 +989,7 @@ no owning Task (LOO-375 owns `wt list` only).
 - The 2026-09-22 interactive demo confirmed retained Session switching, copy/image
   input, and explicit Warp handoff. A later demo exposed split paste misrouting;
   the automated real-PTY correction passes but its final reviewer confirmation is
-  still pending. Latest identity pass recorded 45 tests in four suites, then 24
-  affected tests after review. These are prior-run receipts, not fresh update-wave
-  validation or an all-provider matrix. Hosted UI initialization was canceled by
-  LocalAuthentication; it supplied no behavioral result. JSON prepare-without-kill
+  still pending. No all-provider matrix exists. JSON prepare-without-kill
   has source/Swift contract coverage but no focused Rust behavioral proof yet.
 
 ### Shell command blocks and build fidelity (2026-09-22)
@@ -1054,14 +1066,6 @@ comparison. This branch does not establish any Project's week/month evidence
 window; definitions and KRs remain unchanged. No open Task had enough evidence
 to close during this reconciliation.
 
-## Historical remote client
-
-The June HTTP-to-lfd, bearer-token, and Concerto build recipes are superseded by
-shared `lf` projections and explicit Home transport. Their dated observations are
-preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md)
-and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
-They explain the topology change; they are not current setup instructions.
-
 ## Learnings
 
 - **Reshape proven code; don't rebuild beside it** (code only — a rewrite loses
@@ -1086,6 +1090,6 @@ They explain the topology change; they are not current setup instructions.
 - **Historical migrations demonstrated the shared-store blast radius.** Product
   and Intelligence collided on `061`; editing an already-applied migration left
   existing databases without a required column. Preserve released migrations and
-  test upgrades from the released frontier. The specific 057/061 incident and
-  proposed remedies are retained in the prior memory linked above; they are not
-  current repair instructions. AGENTS.md owns the current one-draft-per-Task rule.
+  test upgrades from the released frontier. The incident detail and June's
+  superseded remote-client recipes are in the
+  [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md). AGENTS.md owns the current one-draft-per-Task rule.

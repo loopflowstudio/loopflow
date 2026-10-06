@@ -315,7 +315,10 @@ async fn reconcile_task(
         return Ok(reason);
     }
     let Some(flow) = store.task_flow(&task.id).await.map_err(error)? else {
-        return Ok("no unfinished captured Flow; select a Flow with lf task run".into());
+        return Ok(
+            "no unfinished captured Flow; select a Flow with lf --task <issue> flow start <flow>"
+                .into(),
+        );
     };
     if let Some(failure) = &flow.failure {
         return Ok(format!(

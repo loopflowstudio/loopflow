@@ -982,7 +982,7 @@ pub(crate) fn release_run_with_cron(
                     .find(|a| Some(a.receipt_id.as_str()) == cron_receipt)
             })
             .and_then(|a| a.selection.as_ref());
-        let mut successor_version = None;
+        let mut replacement_version = None;
         if let Some(selection) = saved.filter(|_| !target.publisher.is_empty()) {
             let candidate = ReleaseCandidate::new(&target, &selection.tag, &selection.commit);
             checked_candidate_tag(&main_repo, &candidate)?;
@@ -996,19 +996,22 @@ pub(crate) fn release_run_with_cron(
             verification.push(proof.clone());
             if !inspection.preparation_required.is_empty() {
                 inspection.ensure_unpublished(&candidate.tag)?;
+                if remote_tag_sha(&main_repo, &candidate.tag)?.is_some() {
+                    return Err(OpsError::Message(format!(
+                        "unfinished tagged release {} needs preparation; recover that version before starting another",
+                        candidate.tag
+                    )));
+                }
                 accounting::authorize_replacement(
                     &home,
                     cron_receipt.expect("saved selection has receipt"),
                     selection,
                     proof,
                 )?;
-                successor_version = Some(bump_version(
-                    &version_from_tag(&candidate.tag, &target)?,
-                    "patch",
-                )?);
+                replacement_version = Some(version_from_tag(&candidate.tag, &target)?);
             }
         }
-        let result = if let Some(selection) = saved.filter(|_| successor_version.is_none()) {
+        let result = if let Some(selection) = saved.filter(|_| replacement_version.is_none()) {
             let candidate = ReleaseCandidate::new(&target, &selection.tag, &selection.commit);
             finish_candidate(
                 &main_repo,
@@ -1022,7 +1025,7 @@ pub(crate) fn release_run_with_cron(
         } else {
             release_run_inner(
                 &main_repo,
-                successor_version.as_deref().unwrap_or(version_input),
+                replacement_version.as_deref().unwrap_or(version_input),
                 target_name,
                 progress,
                 &lock,
@@ -1102,6 +1105,7 @@ fn release_run_inner(
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
     let default_branch = get_default_branch(&main_repo)?;
     let mut requested_version = version_input.to_string();
+    let mut rejected_candidate = replacing.map(|selection| selection.commit.clone());
     loop {
         let version_input = requested_version.as_str();
         fetch_inheriting(
@@ -1125,8 +1129,7 @@ fn release_run_inner(
             progress,
             lock,
         )?);
-        let mut failed_latest_build = None;
-        let mut unprepared_latest = replacing.is_some();
+        let unprepared_latest = replacing.is_some();
 
         if let Some(tag) = latest_tag.as_deref().filter(|_| replacing.is_none()) {
             if !target.publisher.is_empty()
@@ -1143,15 +1146,9 @@ fn release_run_inner(
                 )?);
                 if !inspection.preparation_required.is_empty() {
                     inspection.ensure_unpublished(tag)?;
-                    unprepared_latest = true;
-                    let invalid_version = version_from_tag(tag, &target)?;
-                    if normalize_version(version_input) == invalid_version {
-                        requested_version = bump_version(&invalid_version, "patch")?;
-                        continue;
-                    }
-                    progress.status(&format!(
-                        "Preserving invalid {tag}; preparing a complete successor..."
-                    ));
+                    return Err(OpsError::Message(format!(
+                        "unfinished tagged release {tag} needs preparation; recover that version before starting another"
+                    )));
                 } else {
                     let run =
                         find_workflow_run(&main_repo, &candidate, &target)?.ok_or_else(|| {
@@ -1165,7 +1162,9 @@ fn release_run_inner(
                         .unwrap_or("unknown")
                         .to_lowercase();
                     if run.status == "completed" && conclusion != "success" {
-                        failed_latest_build = Some((conclusion, run.url));
+                        return Err(OpsError::Message(format!(
+                            "unfinished release {tag} build failed ({conclusion}); retry its build before starting another version"
+                        )));
                     } else {
                         progress.status(&format!("Resuming incomplete release {tag}..."));
                         return resume_existing_release(
@@ -1215,25 +1214,11 @@ fn release_run_inner(
 
         let changes = collect_release_changes_at(&main_repo, &target, &source_commit)?;
         if changes.commits.is_empty() && minor.is_none() && !unprepared_latest {
-            if let Some((conclusion, url)) = failed_latest_build {
-                let url = url.unwrap_or_else(|| "workflow URL unavailable".to_string());
-                let tag = latest_tag.as_deref().unwrap_or("latest tag");
-                return Err(OpsError::Message(format!(
-                "latest release build failed for {tag}: {conclusion} ({url}); no merged fix is available"
-            )));
-            }
             return Ok(ReleaseRunOutcome::NoChanges {
                 target: target.name,
                 latest_tag: changes.previous_tag,
                 origin_commit: source_commit,
             });
-        }
-
-        if let Some((conclusion, _)) = failed_latest_build.as_ref() {
-            let tag = latest_tag.as_deref().unwrap_or("latest tag");
-            progress.status(&format!(
-                "Advancing past failed {tag} build ({conclusion}) with merged fixes..."
-            ));
         }
 
         let version = resolve_version(changes.previous_tag.as_deref(), version_input, &target)?;
@@ -1266,8 +1251,8 @@ fn release_run_inner(
 
         let latest_candidate = find_latest_candidate_workflow(&main_repo, &new_tag, &target)?;
         let mut resumed_candidate = None;
-        let mut retry_after = None;
-        if let Some(run) = latest_candidate {
+        let mut retry_after = rejected_candidate.clone();
+        if let Some(run) = latest_candidate.filter(|_| rejected_candidate.is_none()) {
             let commit = run
                 .head_sha
                 .clone()
@@ -1424,8 +1409,8 @@ fn release_run_inner(
         }
         let tag = target_tag(&target, &version);
         let candidate = ReleaseCandidate::new(&target, &tag, &merged_commit);
-        if cron_receipt.is_none() && !target.publisher.is_empty() {
-            let inspection = inspect_release_source(&main_repo, &target, &candidate, false, lock)?;
+        if !target.publisher.is_empty() {
+            let inspection = inspect_release_source(&main_repo, &target, &candidate, true, lock)?;
             if !inspection.preparation_required.is_empty() {
                 if minor.is_some() {
                     return Err(OpsError::Message(format!(
@@ -1433,7 +1418,16 @@ fn release_run_inner(
                         inspection.preparation_required.join(", ")
                     )));
                 }
-                requested_version = bump_version(&version, "patch")?;
+                inspection.ensure_unpublished(&tag)?;
+                if rejected_candidate.as_deref() == Some(&merged_commit) {
+                    return Err(OpsError::Message(format!(
+                        "corrected release {tag} still needs preparation at {merged_commit}: {}",
+                        inspection.preparation_required.join(", ")
+                    )));
+                }
+                progress.status(&format!("Repairing unpublished {tag} from {merged_commit} without changing its version..."));
+                requested_version = version;
+                rejected_candidate = Some(merged_commit);
                 continue;
             }
         }

@@ -766,27 +766,28 @@ write-once bind permits done/landed Tasks. Preserve current ownership through th
 one-machine conversion; discarded historical attribution needs no importer.
 
 LOO-304 retains Jack Heart's budgets and observational/owned Home separation.
-Jack authorized future verified GhosttyKit publications; Infrastructure published
-lf3 with public checksum proof, now selected here. The original snapshot stays
-unchanged; separate fixture construction proves all 39 tables equivalent with
-only the candidate index added. Exact authored configs are read-only inputs;
-copied Sessions acquire no execution authority. Configured-repository fixtures
-must honor Team identity and resolve Task links from the Wave repository.
+Jack authorized verified GhosttyKit updates; published lf3 has checksum proof.
+The immutable snapshot's separate fixture preserves all 39 tables, adding only
+the candidate index. Authored configs stay read-only; copied Sessions gain no
+authority. Fixtures retain configured Team identity and Wave-repository Task links.
 
-October 6's twenty warm Task-opening samples survive, but the attempted hour
-failed on disk exhaustion after seven rounds. The 78.6 GiB trace has timestamp
-attribution only and stays intact; benchmark guidance retains recorder receipts.
-Contained replay preserved endpoints but failed RSS (+52.6/+54.5 MiB). Allocation
-maps support capture pressure, not a proven production leak or oversized atlas.
-Buffer reuse/autorelease repairs failed and were removed; altered no-capture
-reopening also failed. Exact evidence remains in benchmark guidance and
-`3c931cc4d:wave/infrastructure/MEMORY.md`.
+The [matched report](../../scripts/benchmarks/desktop-performance/20261006-matched-rust/README.md)
+and `cc0d22bc90b9611da569a5048a7ac308a0bcad5e:wave/infrastructure/MEMORY.md`
+retain twenty-warm/84-endpoint pairs, worsened native p95, failed growth,
+unavailable comments, unequal load and increased CLI counts. The failed hour's
+78.6 GiB trace has timestamp attribution only and remains intact. Bitmap/OCR is
+not compositor paint. Buffer reuse/autorelease repairs failed and were removed;
+allocation maps never proved a product leak or oversized atlas. Swift attribution,
+latency/growth and both hours remain open; ~94 GiB/hour tracing exceeds storage.
 
-Jack Heart requested matched baseline and release comparisons. The [report](../../scripts/benchmarks/desktop-performance/20261006-matched-rust/README.md)
-retains 84/84 pairs, twenty warm samples, unequal load, worsened native p95,
-unavailable comments and failed growth. Faster refreshes increased CLI counts;
-quietness is unproved. Bitmap/OCR is not compositor paint. Swift attribution and
-both hours remain open; ~94 GiB/hour traces exceed storage. No budget changed.
+Jack Heart's subsequent memory investigation reproduced +51.6 MiB with capture;
+five preserved native rounds without native capture grew +7.8 MiB. That diagnostic
+omits required observation and cannot pass acceptance or exclude every product
+leak. Shared OCR handlers exceeded 512 MiB; CPU-only OCR still failed mounted
+growth (+51.2 MiB). Both were rejected; original capture/recognizers remain.
+No observer subtraction or budget change is accepted. The report owns receipts.
+Git cwd selection now avoids 31 absent-checkout launches (67→36); matched mounted
+preservation passed, memory still failed +43.8/+41.1 MiB. Publication only.
 
 Bundled SQLite 3.53.2 needed indexed Exec/Flow selection; Python's plan differed.
 Earlier matched repairs and all preservation evidence remain in the report above.
@@ -799,19 +800,15 @@ Repository discovery and Task-work reads remain measured costs; aliases, config
 validation, freshness, history and authority are unchanged. Original latency,
 failed growth, compositor and both hour obligations remain. Publication only.
 
-The repaired rendered run remains 83/84: nineteen warm native successes, no
-native p95. Growth (+60.9/+53.5/+47.6 MiB) failed. Jack Heart requested reopening
-repair. Cached unavailable-client state suppressed connect after exit; selection
-now revalidates through connect, preserving fresh refusal and explicit takeover.
-Realistic repaired runs still failed at 5/21 and 20/21, the latter after connect.
-
-The observer repair waits for independent native readiness before main-actor
-capture/OCR, retaining the five-second deadline and preservation checks. Focused
-21/21 and full 84/84 passed; the historical failed predicate remains unknown.
-The [report](../../scripts/benchmarks/desktop-performance/20261006-matched-rust/README.md#native-reopen-diagnosis--october-6)
-retains failures and limits. This is observation repair, not production latency
-proof. Matched Swift attribution, latency/growth, both hours and compositor proof
-remain open; publication only is authorized.
+Reopening history retains 83/84, 5/21 and 20/21 failures, nineteen-warm cohorts
+without p95, and failed growth (+60.9/+53.5/+47.6 MiB). Jack Heart requested repair.
+Selection now revalidates cached unavailable-client observations through connect,
+preserving fresh refusal and explicit takeover. The observer then waits for native
+readiness before capture/OCR, retaining its five-second deadline and preservation
+checks. Focused 21/21 and full 84/84 passed; the historical failed predicate remains
+unknown. The report retains exact evidence; observation repair proves no product
+latency improvement. Swift attribution, latency/growth, both hours and compositor
+proof remain open; publication only is authorized.
 
 October 6 recorder decomposition retained owned ten-second probes: Hitches alone
 projected 13.2 GiB/hour, Hangs 103.0; neither exports both required tables. The 2 GiB guard remains; no full hour ran. Actual TOCs put clocks under `info/summary`; the reader's synthetic

@@ -662,3 +662,111 @@ immediate goal and current schedule/publication/installation memory were inspect
 older incidents were not reread and provide no Desktop performance proof.
 Check: focused recorder/runner pytest PASS 60; Ruff/diff PASS; two bounded actual
 record/export probes PASS; full-hour acceptance remains unavailable.
+
+## Capture attribution and missing-checkout reads — October 6
+
+Jack Heart requested a repair of the original four-round memory failure, preserving
+all bitmap/input endpoints and the <32 MiB budget. The original observer at
+`cc0d22bc90b9611da569a5048a7ac308a0bcad5e` reproduced **+51.6 MiB**, with 20/20
+endpoints and five preserved rounds over 150 seconds. Private receipts remain at
+`/tmp/loo304-memory-current-20261006/`. Its first native capture moved RSS from
+240.4 to 291.6 MiB before OCR, then 324.0 MiB after OCR. An intrusive process map
+found 35.2 MiB live default-zone allocations, 89.9 MiB resident in that zone,
+35.9 MiB empty large allocations and 17.2 MiB resident IOSurfaces. These categories
+are not additive allocation ownership or proof that every retained byte belongs
+to capture.
+
+A separate fresh-Home diagnostic retained all five native launches, input replies,
+focus, navigation, drafts, selection, pane layout and history checks, but omitted
+native bitmap/OCR. Four-round growth was **+7.8 MiB**; all fifteen non-native
+capture endpoints remained. `/tmp/loo304-native-no-capture-20261006/` and the exact
+experimental source in `/tmp/loo304-handler-memory-20261006/` retain the proof.
+Both diagnostic runs included a process map. This supports capture-dependent
+allocation pressure in this bounded workflow, not a general absence-of-leaks
+claim. The omitted observation makes the diagnostic **ineligible for acceptance**;
+no observer cost is subtracted from the original failure.
+
+### Rejected observer changes
+
+Fixed-image probes retained the identical image and both fast/accurate recognizers.
+All completed observations returned the same text hash. Reusing one image handler
+for both passes exceeded the 512 MiB guard at observation 18 in both trials;
+the original completed 40/40 twice. The background-processing hint produced no
+useful reduction. CPU-only processing completed 40/40 and reduced fixed-image
+residency, including through the current compute-device API, but the fully restored
+mounted workflow still failed at **+51.2 MiB** despite 20/20 endpoints and five
+preserved rounds (`/tmp/loo304-native-cpu-ocr-20261006/`). All experiments were
+removed. Bitmap capture, recognizers, deadlines and measurement endpoints remain
+unchanged. Earlier buffer-reuse/autorelease failures remain rejected too.
+
+The next memory investigation belongs at the AppKit capture allocation boundary:
+compare equivalent-pixel capture implementations or obtain allocation stacks for
+that phase. These observations support no production cache purge, renderer patch
+or budget revision. They do not establish compositor paint or one-frame input.
+
+### Supported read repair
+
+Investigation continued with the measured roadmap cost. Sharing repository Team
+configuration across Waves did not reduce the 67 Git processes or improve latency;
+that patch was rejected. Its 84 successful reads, worsened tail and complete row
+preservation remain in `/tmp/loo304-portfolio-read-20261006/`.
+
+Trace receipts instead showed **31 of 49 common-directory Git launches targeting
+absent historical checkouts**. `git_common_dir` now sets `Command.current_dir(repo)`
+instead of passing `git -C repo`. The OS reports missing cwd before Git executes;
+existing repositories still use Git's resolver. No filesystem resolver, existence
+cache, configuration bypass or authority change was added. The regression covers
+nested directories, linked worktrees, symlinks, removal and recreation at the same
+path; the existing alias/fresh-read regression also passes.
+
+Normal release builds completed before the alternating pair on fresh isolated
+copies of the unchanged 39-table snapshot. The retained pre-change binary has the
+same Rust sources as `cc0d22bc9`; the candidate adds only the working-directory
+change. [Exact hashes, samples and preservation](capture-cwd-summary.json) accompany
+private receipts at `/tmp/loo304-cwd-read-20261006/`.
+
+| Direct CLI, twenty warm successes each | Before median / p95 | After median / p95 |
+| --- | ---: | ---: |
+| Roadmap wall time, ms | 682 / 1761 | 548 / 764 |
+| Roadmap child CPU, ms | 643 / 768 | 529 / 624 |
+| Git launches per roadmap | 67 / 67 | 36 / 36 |
+| Common-directory launches per roadmap | 49 / 49 | 18 / 18 |
+| Session-list wall time, ms | 363 / 414 | 389 / 557 |
+
+All 84 reads passed. Roadmap load medians matched at 22.4 (maximum 33.2), while
+Session load medians were 31.5; host activity remained variable. Session timing
+worsened and both paths still miss 300 ms. First reads remain separate in the JSON.
+All retained rows, identities and storage types across 39 tables matched; each
+copy appended 42 inspection Execs. Responses differed only in fresh timestamps and
+525 verified age comparisons. Snapshot/config hashes stayed unchanged. Fewer Git
+launches establish a targeted read reduction, not overall idle Desktop quietness.
+
+### Unchanged-observer four-round comparison
+
+Both normal mounted runs passed **20/20 endpoints and five preserved rounds** over
+150 seconds, using identical Swift test-binary and measurement-source hashes.
+No process-map inspection, builds or row audit overlapped this pair. Both memory
+results **failed**: **+43.8 → +41.1 MiB** after four full rounds. That difference
+does not establish a memory repair. Native reopening warm medians worsened
+**926 → 1184 ms**; each scenario has only four warm samples, so no p95 is reported.
+The accepted comparison contract remained available, and source/CLI/config hashes
+were stable. One visible window, focus, input, history/native identity, drafts,
+selection and pane layout survived; key-window identity stayed unavailable (-1).
+
+Each side retained 150 CPU samples. App CPU median/p95/max was
+0.9/11.8/55.3% → 1.0/15.3/72.7%, excluding children. CLI starts/ends were
+258/258 → 252/252; SQLite statements 120,020 → 118,538 and emitted rows
+1,446,699 → 1,428,896. Eleven unavailable comment reads per side remain visible.
+These sequential short runs and variable load establish no overall CPU, native
+latency or memory improvement. Bitmap/OCR still is not compositor paint.
+
+Review rejected the ineffective configuration cache and every unproved observer
+repair. The installed Home, historical unknown Execs, original snapshot, retained
+traces and release controller were untouched. Checks: resolver and existing
+alias/fresh-read regressions PASS; formatting/all-target Clippy/release build PASS;
+84/84 matched reads and 39-table preservation PASS; mounted 20/20 each PASS
+preservation / FAIL memory. Recorder readiness, faithful full-interval tracing,
+compositor/input proof, independent Swift attribution and both original full-hour
+variants remain open. The next measured read costs are the remaining existing-
+checkout Git resolution and Task-work reads; preserve fresh configuration and
+exact execution authority when investigating them. Publication only.

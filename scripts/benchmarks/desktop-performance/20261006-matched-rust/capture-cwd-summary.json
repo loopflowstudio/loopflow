@@ -1,0 +1,3660 @@
+{
+  "source_base": "cc0d22bc90b9611da569a5048a7ac308a0bcad5e",
+  "provenance": {
+    "before_source": "cc0d22bc90b9611da569a5048a7ac308a0bcad5e",
+    "before_binary_sha256": "fbbcf04f35206730311fd941681901d80e874cb88efed2c02ecf28f139d85528",
+    "configs": [
+      {
+        "path": "/Users/jack/src/cadenza/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/Users/jack/src/cadenza/wave/core/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/Users/jack/src/cadenza/wave/ear/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/Users/jack/src/cadenza/wave/feedback/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/Users/jack/src/cadenza/wave/theory/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/Users/jack/src/etude/.lf/config.yaml",
+        "sha256": "4f45716275c9c04b2d0950077ff889491c7c9fc2ede74a86e6ecbc1d26047158"
+      },
+      {
+        "path": "/Users/jack/src/etude/wave/game/GOAL.md",
+        "sha256": "8dec26afb4d95262d912f504ece713feba5261f578327d8f4961483c6481d9fa"
+      },
+      {
+        "path": "/Users/jack/src/etude/wave/intelligence/GOAL.md",
+        "sha256": "804ca54269532a025fa770d9c9b6079f0f17da481d5322d828ea73f86777181e"
+      },
+      {
+        "path": "/Users/jack/src/etude/wave/rules/GOAL.md",
+        "sha256": "5f1635b9bca94acccc168b806c9e0369ac24cd83a8725c957db2730b5b06c497"
+      },
+      {
+        "path": "/Users/jack/src/etude/wave/study/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/Users/jack/src/hootro/.lf/config.yaml",
+        "sha256": "aa61737599e45311de60d3ee23057d4f79ea066d1eb4537f778c282f5780a746"
+      },
+      {
+        "path": "/Users/jack/src/hootro/wave/survival/GOAL.md",
+        "sha256": "d54882bd076e5f9716791ba89b9b95d987c02043e6d6366ae53cc7afcfc8667a"
+      },
+      {
+        "path": "/Users/jack/src/kata/.lf/config.yaml",
+        "sha256": "1c77ce2da3f1472dca35f021897f156a1799da27744463da2aa5e86c18145040"
+      },
+      {
+        "path": "/Users/jack/src/kata/wave/core/GOAL.md",
+        "sha256": "f405dd62a5a452915e06225d1c5a6dd3434cd6aca6daf4cbc34117fa9cc9172f"
+      },
+      {
+        "path": "/Users/jack/src/kata/wave/dj/GOAL.md",
+        "sha256": "1708a3f4a4249115ea4ec64a180a5177978f4e5daa641101691f116961730af1"
+      },
+      {
+        "path": "/Users/jack/src/kata/wave/ear/GOAL.md",
+        "sha256": "10114595f2e78d7a49b1e8b7db9500f24566fc3bb03fce48f9c513e20040cc47"
+      },
+      {
+        "path": "/Users/jack/src/kata/wave/release/GOAL.md",
+        "sha256": "4ffd75251155a3b9d6405bbeb40d4ba41e411596261005c690951f22d964e4c2"
+      },
+      {
+        "path": "/Users/jack/src/kata/wave/scores/GOAL.md",
+        "sha256": "e6a1218552ff8ab389b9d13903d0a4aa34297234027140b8c459123205abd174"
+      },
+      {
+        "path": "/Users/jack/src/kata/wave/teacher/GOAL.md",
+        "sha256": "69d71fd15bbfd32381cbf0f3c15d04aab460f47bab37bfec73b86d42ebc64cbe"
+      },
+      {
+        "path": "/Users/jack/src/kata/wave/theory/GOAL.md",
+        "sha256": "5f902d9665fad6c36bed72e9a6ce70e28f70f063f3e7e5233ed4bb2a3557ee4c"
+      },
+      {
+        "path": "/Users/jack/src/loopflow/.lf/config.yaml",
+        "sha256": "a7686e37cd4252fadd7e45f1904259df46298aa20fba3b5ab88b3a5a203ab140"
+      },
+      {
+        "path": "/Users/jack/src/loopflow/wave/engbot/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/Users/jack/src/loopflow/wave/growth/GOAL.md",
+        "sha256": "888b5176846e7f169e3da85026111a2d6b8aebc0fefa7c6bbb2dab605681e5b1"
+      },
+      {
+        "path": "/Users/jack/src/loopflow/wave/infrastructure/GOAL.md",
+        "sha256": "53bbd986fecefca71c9289fe8b3aeefd2842057c8834dfc39d9f9613cebbaeda"
+      },
+      {
+        "path": "/Users/jack/src/loopflow/wave/intelligence/GOAL.md",
+        "sha256": "14085cf2c221d0e7c81d9d7a40cae2776f0c5802c69324437fd15c6b98b00291"
+      },
+      {
+        "path": "/Users/jack/src/loopflow/wave/list/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/Users/jack/src/loopflow/wave/product/GOAL.md",
+        "sha256": "5e304488e827b05bea0e30dd5a4ea8f072c51616cbfccd4905954925e14da809"
+      },
+      {
+        "path": "/private/tmp/loopflow-discord-product-demo.hNzflh/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/tmp/loopflow-discord-product-demo.hNzflh/wave/discord-demo/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp4vBdIq/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp4vBdIq/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp71s02r/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp71s02r/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp7EOEXV/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp7EOEXV/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp93Huf0/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp93Huf0/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp9JKbHH/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp9JKbHH/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpAPE7Sc/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpAPE7Sc/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpEele6e/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpEele6e/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpGTdPYn/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpGTdPYn/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpLLMQaS/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpLLMQaS/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpMUvGsI/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpMUvGsI/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpOKU207/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpOKU207/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpOjfefK/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpOjfefK/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpRLEMOP/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpRLEMOP/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpSS8qR9/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpSS8qR9/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpUcnpHd/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpUcnpHd/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpX8iZld/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpX8iZld/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpXGszxD/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpXGszxD/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpY00GWw/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpY00GWw/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpYHW8MY/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpYHW8MY/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpdGCgPv/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpdGCgPv/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpeJjgrq/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpeJjgrq/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpgclK7g/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpgclK7g/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmphy5N3g/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmphy5N3g/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpkWwQHV/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpkWwQHV/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmppLIZ5F/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmppLIZ5F/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmprTtP6q/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmprTtP6q/wave/context/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmps6KYVL/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmps6KYVL/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpuKR4st/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpuKR4st/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpyfdv34/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpyfdv34/wave/ship/GOAL.md",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpywRW0n/.lf/config.yaml",
+        "sha256": null
+      },
+      {
+        "path": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpywRW0n/wave/ship/GOAL.md",
+        "sha256": null
+      }
+    ],
+    "scope": "Select Git working directory before process launch; unchanged resolver and observer",
+    "after_binary_sha256": "20d509f1bb367f72e3e724a970c55eed7889c75da53c4a8240a7c153e8d5dc1f",
+    "patch_sha256": "32995d924067c3fded4aaec3e2a2409ca15ff0873cc23ecfad1362f79d33ae01"
+  },
+  "read_pair": {
+    "source_sha256": "d9dc08b5d7d241294b78bf5035d47e8e9069aa58c13808d04d31cd8a0f8230e4",
+    "binaries": {
+      "before": "fbbcf04f35206730311fd941681901d80e874cb88efed2c02ecf28f139d85528",
+      "after": "20d509f1bb367f72e3e724a970c55eed7889c75da53c4a8240a7c153e8d5dc1f"
+    },
+    "reads": {
+      "roadmap": {
+        "before": {
+          "first": {
+            "path": "roadmap",
+            "variant": "before",
+            "sample": 0,
+            "ms": 3925.8717499906197,
+            "exit": 0,
+            "load": [
+              22.68798828125,
+              23.80078125,
+              22.255859375
+            ],
+            "bytes": 263928,
+            "child_cpu_ms": 1060.327,
+            "git_processes": 67,
+            "git_common_dir": 49
+          },
+          "ms": {
+            "n": 20,
+            "median": 681.5006874967366,
+            "p95": 1761.2738750176504
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 642.8910000000001,
+            "p95": 767.7160000000018
+          },
+          "git_processes": {
+            "n": 20,
+            "median": 67.0,
+            "p95": 67
+          },
+          "git_common_dir": {
+            "n": 20,
+            "median": 49.0,
+            "p95": 49
+          },
+          "load_median": 22.39501953125,
+          "load_max": 33.24169921875
+        },
+        "after": {
+          "first": {
+            "path": "roadmap",
+            "variant": "after",
+            "sample": 0,
+            "ms": 1824.7857920068782,
+            "exit": 0,
+            "load": [
+              22.68798828125,
+              23.80078125,
+              22.255859375
+            ],
+            "bytes": 263926,
+            "child_cpu_ms": 605.018,
+            "git_processes": 36,
+            "git_common_dir": 18
+          },
+          "ms": {
+            "n": 20,
+            "median": 547.5414579996141,
+            "p95": 763.6517919891048
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 529.4750000000001,
+            "p95": 624.0809999999985
+          },
+          "git_processes": {
+            "n": 20,
+            "median": 36.0,
+            "p95": 36
+          },
+          "git_common_dir": {
+            "n": 20,
+            "median": 18.0,
+            "p95": 18
+          },
+          "load_median": 22.39501953125,
+          "load_max": 33.24169921875
+        }
+      },
+      "sessions": {
+        "before": {
+          "first": {
+            "path": "sessions",
+            "variant": "before",
+            "sample": 0,
+            "ms": 272.6355830091052,
+            "exit": 0,
+            "load": [
+              33.24169921875,
+              25.86962890625,
+              23.03662109375
+            ],
+            "bytes": 64458,
+            "child_cpu_ms": 250.0059999999955,
+            "git_processes": 3,
+            "git_common_dir": 1
+          },
+          "ms": {
+            "n": 20,
+            "median": 362.66868698294275,
+            "p95": 413.59229100635275
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 327.45199999999966,
+            "p95": 366.7619999999996
+          },
+          "git_processes": {
+            "n": 20,
+            "median": 3.0,
+            "p95": 3
+          },
+          "git_common_dir": {
+            "n": 20,
+            "median": 1.0,
+            "p95": 1
+          },
+          "load_median": 31.541015625,
+          "load_max": 31.62060546875
+        },
+        "after": {
+          "first": {
+            "path": "sessions",
+            "variant": "after",
+            "sample": 0,
+            "ms": 280.2502090053167,
+            "exit": 0,
+            "load": [
+              33.24169921875,
+              25.86962890625,
+              23.03662109375
+            ],
+            "bytes": 64458,
+            "child_cpu_ms": 257.67500000000433,
+            "git_processes": 3,
+            "git_common_dir": 1
+          },
+          "ms": {
+            "n": 20,
+            "median": 388.70552099251654,
+            "p95": 556.703792011831
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 338.63149999999865,
+            "p95": 395.7069999999989
+          },
+          "git_processes": {
+            "n": 20,
+            "median": 3.0,
+            "p95": 3
+          },
+          "git_common_dir": {
+            "n": 20,
+            "median": 1.0,
+            "p95": 1
+          },
+          "load_median": 31.541015625,
+          "load_max": 31.62060546875
+        }
+      }
+    }
+  },
+  "read_samples": [
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 0,
+      "ms": 3925.8717499906197,
+      "exit": 0,
+      "load": [
+        22.68798828125,
+        23.80078125,
+        22.255859375
+      ],
+      "bytes": 263928,
+      "child_cpu_ms": 1060.327,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 0,
+      "ms": 1824.7857920068782,
+      "exit": 0,
+      "load": [
+        22.68798828125,
+        23.80078125,
+        22.255859375
+      ],
+      "bytes": 263926,
+      "child_cpu_ms": 605.018,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 1,
+      "ms": 516.187125002034,
+      "exit": 0,
+      "load": [
+        21.751953125,
+        23.587890625,
+        22.189453125
+      ],
+      "bytes": 263922,
+      "child_cpu_ms": 496.53199999999975,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 1,
+      "ms": 596.2237500061747,
+      "exit": 0,
+      "load": [
+        21.751953125,
+        23.587890625,
+        22.189453125
+      ],
+      "bytes": 263928,
+      "child_cpu_ms": 569.2120000000002,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 2,
+      "ms": 636.2572910147719,
+      "exit": 0,
+      "load": [
+        21.751953125,
+        23.587890625,
+        22.189453125
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 593.6530000000004,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 2,
+      "ms": 513.8588749978226,
+      "exit": 0,
+      "load": [
+        21.751953125,
+        23.587890625,
+        22.189453125
+      ],
+      "bytes": 263931,
+      "child_cpu_ms": 497.19299999999953,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 3,
+      "ms": 522.3758750071283,
+      "exit": 0,
+      "load": [
+        21.751953125,
+        23.587890625,
+        22.189453125
+      ],
+      "bytes": 263925,
+      "child_cpu_ms": 498.9540000000001,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 3,
+      "ms": 671.5348340221681,
+      "exit": 0,
+      "load": [
+        21.751953125,
+        23.587890625,
+        22.189453125
+      ],
+      "bytes": 263931,
+      "child_cpu_ms": 632.3020000000001,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 4,
+      "ms": 745.937916013645,
+      "exit": 0,
+      "load": [
+        21.751953125,
+        23.587890625,
+        22.189453125
+      ],
+      "bytes": 263926,
+      "child_cpu_ms": 689.4739999999997,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 4,
+      "ms": 582.9859999939799,
+      "exit": 0,
+      "load": [
+        23.212890625,
+        23.8603515625,
+        22.29345703125
+      ],
+      "bytes": 263929,
+      "child_cpu_ms": 556.1660000000002,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 5,
+      "ms": 562.7770839782897,
+      "exit": 0,
+      "load": [
+        23.212890625,
+        23.8603515625,
+        22.29345703125
+      ],
+      "bytes": 263925,
+      "child_cpu_ms": 543.0250000000003,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 5,
+      "ms": 691.3342500047293,
+      "exit": 0,
+      "load": [
+        23.212890625,
+        23.8603515625,
+        22.29345703125
+      ],
+      "bytes": 263923,
+      "child_cpu_ms": 660.5720000000001,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 6,
+      "ms": 686.5617499861401,
+      "exit": 0,
+      "load": [
+        23.212890625,
+        23.8603515625,
+        22.29345703125
+      ],
+      "bytes": 263928,
+      "child_cpu_ms": 657.9909999999995,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 6,
+      "ms": 547.257250000257,
+      "exit": 0,
+      "load": [
+        23.212890625,
+        23.8603515625,
+        22.29345703125
+      ],
+      "bytes": 263923,
+      "child_cpu_ms": 532.21,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 7,
+      "ms": 532.9502919921651,
+      "exit": 0,
+      "load": [
+        23.212890625,
+        23.8603515625,
+        22.29345703125
+      ],
+      "bytes": 263927,
+      "child_cpu_ms": 517.0560000000006,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 7,
+      "ms": 653.8582500070333,
+      "exit": 0,
+      "load": [
+        23.212890625,
+        23.8603515625,
+        22.29345703125
+      ],
+      "bytes": 263922,
+      "child_cpu_ms": 622.4149999999988,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 8,
+      "ms": 647.5379169860389,
+      "exit": 0,
+      "load": [
+        23.212890625,
+        23.8603515625,
+        22.29345703125
+      ],
+      "bytes": 263925,
+      "child_cpu_ms": 620.0549999999998,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 8,
+      "ms": 549.5877909997944,
+      "exit": 0,
+      "load": [
+        22.39501953125,
+        23.6796875,
+        22.23876953125
+      ],
+      "bytes": 263920,
+      "child_cpu_ms": 533.6020000000001,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 9,
+      "ms": 547.8256659989711,
+      "exit": 0,
+      "load": [
+        22.39501953125,
+        23.6796875,
+        22.23876953125
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 526.7400000000002,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 9,
+      "ms": 673.0308749829419,
+      "exit": 0,
+      "load": [
+        22.39501953125,
+        23.6796875,
+        22.23876953125
+      ],
+      "bytes": 263926,
+      "child_cpu_ms": 635.8360000000011,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 10,
+      "ms": 684.6717500011437,
+      "exit": 0,
+      "load": [
+        22.39501953125,
+        23.6796875,
+        22.23876953125
+      ],
+      "bytes": 263923,
+      "child_cpu_ms": 655.6950000000002,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 10,
+      "ms": 515.1137920038309,
+      "exit": 0,
+      "load": [
+        22.39501953125,
+        23.6796875,
+        22.23876953125
+      ],
+      "bytes": 263926,
+      "child_cpu_ms": 499.22600000000017,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 11,
+      "ms": 501.121332985349,
+      "exit": 0,
+      "load": [
+        22.39501953125,
+        23.6796875,
+        22.23876953125
+      ],
+      "bytes": 263922,
+      "child_cpu_ms": 481.73499999999916,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 11,
+      "ms": 626.3722919975407,
+      "exit": 0,
+      "load": [
+        22.39501953125,
+        23.6796875,
+        22.23876953125
+      ],
+      "bytes": 263929,
+      "child_cpu_ms": 598.8750000000014,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 12,
+      "ms": 651.436583022587,
+      "exit": 0,
+      "load": [
+        22.39501953125,
+        23.6796875,
+        22.23876953125
+      ],
+      "bytes": 263927,
+      "child_cpu_ms": 622.8330000000009,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 12,
+      "ms": 554.2810420156457,
+      "exit": 0,
+      "load": [
+        22.39501953125,
+        23.6796875,
+        22.23876953125
+      ],
+      "bytes": 263927,
+      "child_cpu_ms": 534.2349999999998,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 13,
+      "ms": 532.6059169892687,
+      "exit": 0,
+      "load": [
+        21.72265625,
+        23.5185546875,
+        22.1904296875
+      ],
+      "bytes": 263929,
+      "child_cpu_ms": 515.6249999999991,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 13,
+      "ms": 1328.4779170062393,
+      "exit": 0,
+      "load": [
+        21.72265625,
+        23.5185546875,
+        22.1904296875
+      ],
+      "bytes": 263928,
+      "child_cpu_ms": 658.332999999999,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 14,
+      "ms": 668.4153329988476,
+      "exit": 0,
+      "load": [
+        21.72265625,
+        23.5185546875,
+        22.1904296875
+      ],
+      "bytes": 263922,
+      "child_cpu_ms": 641.3040000000008,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 14,
+      "ms": 510.4833749937825,
+      "exit": 0,
+      "load": [
+        21.72265625,
+        23.5185546875,
+        22.1904296875
+      ],
+      "bytes": 263928,
+      "child_cpu_ms": 496.28300000000183,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 15,
+      "ms": 1019.897291000234,
+      "exit": 0,
+      "load": [
+        21.72265625,
+        23.5185546875,
+        22.1904296875
+      ],
+      "bytes": 263921,
+      "child_cpu_ms": 614.0150000000002,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 15,
+      "ms": 904.2089580034371,
+      "exit": 0,
+      "load": [
+        21.72265625,
+        23.5185546875,
+        22.1904296875
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 742.5150000000018,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 16,
+      "ms": 1761.2738750176504,
+      "exit": 0,
+      "load": [
+        23.42626953125,
+        23.841796875,
+        22.31201171875
+      ],
+      "bytes": 263930,
+      "child_cpu_ms": 767.7160000000018,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 16,
+      "ms": 763.6517919891048,
+      "exit": 0,
+      "load": [
+        23.42626953125,
+        23.841796875,
+        22.31201171875
+      ],
+      "bytes": 263929,
+      "child_cpu_ms": 624.0809999999985,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 17,
+      "ms": 713.5743329999968,
+      "exit": 0,
+      "load": [
+        23.42626953125,
+        23.841796875,
+        22.31201171875
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 639.9740000000005,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 17,
+      "ms": 1790.7779160013888,
+      "exit": 0,
+      "load": [
+        23.42626953125,
+        23.841796875,
+        22.31201171875
+      ],
+      "bytes": 263928,
+      "child_cpu_ms": 782.7220000000015,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 18,
+      "ms": 863.0969160003588,
+      "exit": 0,
+      "load": [
+        33.24169921875,
+        25.86962890625,
+        23.03662109375
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 749.2409999999978,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 18,
+      "ms": 663.004500005627,
+      "exit": 0,
+      "load": [
+        33.24169921875,
+        25.86962890625,
+        23.03662109375
+      ],
+      "bytes": 263928,
+      "child_cpu_ms": 574.4710000000008,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 19,
+      "ms": 628.8599999970756,
+      "exit": 0,
+      "load": [
+        33.24169921875,
+        25.86962890625,
+        23.03662109375
+      ],
+      "bytes": 263918,
+      "child_cpu_ms": 536.7189999999997,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 19,
+      "ms": 739.6683330007363,
+      "exit": 0,
+      "load": [
+        33.24169921875,
+        25.86962890625,
+        23.03662109375
+      ],
+      "bytes": 263922,
+      "child_cpu_ms": 644.4779999999994,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 20,
+      "ms": 678.3296249923296,
+      "exit": 0,
+      "load": [
+        33.24169921875,
+        25.86962890625,
+        23.03662109375
+      ],
+      "bytes": 263929,
+      "child_cpu_ms": 632.9450000000021,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 20,
+      "ms": 540.214916021796,
+      "exit": 0,
+      "load": [
+        33.24169921875,
+        25.86962890625,
+        23.03662109375
+      ],
+      "bytes": 263926,
+      "child_cpu_ms": 523.8200000000006,
+      "git_processes": 36,
+      "git_common_dir": 18
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 0,
+      "ms": 272.6355830091052,
+      "exit": 0,
+      "load": [
+        33.24169921875,
+        25.86962890625,
+        23.03662109375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 250.0059999999955,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 0,
+      "ms": 280.2502090053167,
+      "exit": 0,
+      "load": [
+        33.24169921875,
+        25.86962890625,
+        23.03662109375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 257.67500000000433,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 1,
+      "ms": 254.76341601461172,
+      "exit": 0,
+      "load": [
+        31.62060546875,
+        25.65576171875,
+        22.9775390625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 248.92299999999955,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 1,
+      "ms": 262.48954198672436,
+      "exit": 0,
+      "load": [
+        31.62060546875,
+        25.65576171875,
+        22.9775390625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 254.37100000000078,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 2,
+      "ms": 354.276750003919,
+      "exit": 0,
+      "load": [
+        31.62060546875,
+        25.65576171875,
+        22.9775390625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 324.9500000000003,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 2,
+      "ms": 395.4560410056729,
+      "exit": 0,
+      "load": [
+        31.62060546875,
+        25.65576171875,
+        22.9775390625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 345.27500000000265,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 3,
+      "ms": 453.58437500544824,
+      "exit": 0,
+      "load": [
+        31.62060546875,
+        25.65576171875,
+        22.9775390625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 395.7069999999989,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 3,
+      "ms": 424.31087500881404,
+      "exit": 0,
+      "load": [
+        31.62060546875,
+        25.65576171875,
+        22.9775390625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 367.3499999999983,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 4,
+      "ms": 413.59229100635275,
+      "exit": 0,
+      "load": [
+        31.62060546875,
+        25.65576171875,
+        22.9775390625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 366.7619999999996,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 4,
+      "ms": 429.649875004543,
+      "exit": 0,
+      "load": [
+        31.62060546875,
+        25.65576171875,
+        22.9775390625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 377.25600000000003,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 5,
+      "ms": 447.09183400846086,
+      "exit": 0,
+      "load": [
+        31.62060546875,
+        25.65576171875,
+        22.9775390625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 369.6409999999979,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 5,
+      "ms": 399.35237501049414,
+      "exit": 0,
+      "load": [
+        31.62060546875,
+        25.65576171875,
+        22.9775390625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 347.99899999999974,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 6,
+      "ms": 395.3146249987185,
+      "exit": 0,
+      "load": [
+        31.62060546875,
+        25.65576171875,
+        22.9775390625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 362.56299999999976,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 6,
+      "ms": 356.1538749781903,
+      "exit": 0,
+      "load": [
+        31.62060546875,
+        25.65576171875,
+        22.9775390625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 335.3849999999996,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 7,
+      "ms": 369.0167080203537,
+      "exit": 0,
+      "load": [
+        31.62060546875,
+        25.65576171875,
+        22.9775390625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 339.8360000000009,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 7,
+      "ms": 352.9144579952117,
+      "exit": 0,
+      "load": [
+        30.36962890625,
+        25.4951171875,
+        22.9365234375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 334.3489999999996,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 8,
+      "ms": 377.28000001516193,
+      "exit": 0,
+      "load": [
+        30.36962890625,
+        25.4951171875,
+        22.9365234375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 357.4230000000007,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 8,
+      "ms": 384.4165419868659,
+      "exit": 0,
+      "load": [
+        30.36962890625,
+        25.4951171875,
+        22.9365234375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 351.09899999999783,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 9,
+      "ms": 392.99449999816716,
+      "exit": 0,
+      "load": [
+        30.36962890625,
+        25.4951171875,
+        22.9365234375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 357.88300000000106,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 9,
+      "ms": 378.62466598744504,
+      "exit": 0,
+      "load": [
+        30.36962890625,
+        25.4951171875,
+        22.9365234375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 347.6660000000038,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 10,
+      "ms": 370.38883299101144,
+      "exit": 0,
+      "load": [
+        30.36962890625,
+        25.4951171875,
+        22.9365234375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 343.4289999999969,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 10,
+      "ms": 624.4405839825049,
+      "exit": 0,
+      "load": [
+        30.36962890625,
+        25.4951171875,
+        22.9365234375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 403.2590000000038,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 11,
+      "ms": 494.2985000088811,
+      "exit": 0,
+      "load": [
+        30.36962890625,
+        25.4951171875,
+        22.9365234375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 357.59299999999604,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 11,
+      "ms": 375.0582500069868,
+      "exit": 0,
+      "load": [
+        30.36962890625,
+        25.4951171875,
+        22.9365234375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 322.36000000000155,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 12,
+      "ms": 349.37258399440907,
+      "exit": 0,
+      "load": [
+        30.36962890625,
+        25.4951171875,
+        22.9365234375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 300.35999999999774,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 12,
+      "ms": 368.895916006295,
+      "exit": 0,
+      "load": [
+        30.36962890625,
+        25.4951171875,
+        22.9365234375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 309.5240000000015,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 13,
+      "ms": 368.09245799668133,
+      "exit": 0,
+      "load": [
+        30.36962890625,
+        25.4951171875,
+        22.9365234375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 308.9510000000022,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 13,
+      "ms": 331.0276250122115,
+      "exit": 0,
+      "load": [
+        30.36962890625,
+        25.4951171875,
+        22.9365234375
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 301.2590000000017,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 14,
+      "ms": 374.2183330177795,
+      "exit": 0,
+      "load": [
+        31.541015625,
+        25.81884765625,
+        23.0654296875
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 303.7949999999956,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 14,
+      "ms": 510.75208399561234,
+      "exit": 0,
+      "load": [
+        31.541015625,
+        25.81884765625,
+        23.0654296875
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 337.4269999999964,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 15,
+      "ms": 318.9435839885846,
+      "exit": 0,
+      "load": [
+        31.541015625,
+        25.81884765625,
+        23.0654296875
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 293.59899999999686,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 15,
+      "ms": 323.0522499943618,
+      "exit": 0,
+      "load": [
+        31.541015625,
+        25.81884765625,
+        23.0654296875
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 294.705000000004,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 16,
+      "ms": 306.8327090004459,
+      "exit": 0,
+      "load": [
+        31.541015625,
+        25.81884765625,
+        23.0654296875
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 285.41999999999666,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 16,
+      "ms": 354.3205829919316,
+      "exit": 0,
+      "load": [
+        31.541015625,
+        25.81884765625,
+        23.0654296875
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 313.3239999999997,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 17,
+      "ms": 330.84608300123364,
+      "exit": 0,
+      "load": [
+        31.541015625,
+        25.81884765625,
+        23.0654296875
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 297.2520000000003,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 17,
+      "ms": 325.86291601182893,
+      "exit": 0,
+      "load": [
+        31.541015625,
+        25.81884765625,
+        23.0654296875
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 307.35000000000133,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 18,
+      "ms": 323.13004101160914,
+      "exit": 0,
+      "load": [
+        31.541015625,
+        25.81884765625,
+        23.0654296875
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 299.61299999999903,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 18,
+      "ms": 556.703792011831,
+      "exit": 0,
+      "load": [
+        31.541015625,
+        25.81884765625,
+        23.0654296875
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 341.96399999999903,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 19,
+      "ms": 405.9618749888614,
+      "exit": 0,
+      "load": [
+        31.541015625,
+        25.81884765625,
+        23.0654296875
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 324.2829999999976,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 19,
+      "ms": 370.04808298661374,
+      "exit": 0,
+      "load": [
+        31.541015625,
+        25.81884765625,
+        23.0654296875
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 332.6029999999989,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 20,
+      "ms": 355.28929097927175,
+      "exit": 0,
+      "load": [
+        31.541015625,
+        25.81884765625,
+        23.0654296875
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 329.953999999999,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 20,
+      "ms": 342.1035829815082,
+      "exit": 0,
+      "load": [
+        31.25732421875,
+        25.85498046875,
+        23.09423828125
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 319.657000000003,
+      "git_processes": 3,
+      "git_common_dir": 1
+    }
+  ],
+  "preservation": {
+    "source_sha256": "d9dc08b5d7d241294b78bf5035d47e8e9069aa58c13808d04d31cd8a0f8230e4",
+    "configs_unchanged": true,
+    "response_differences": {
+      "roadmap": [
+        ".generated_at",
+        ".waves[1].tasks.items[0].condition.observed_at",
+        ".waves[1].tasks.items[1].condition.observed_at",
+        ".waves[1].tasks.items[2].condition.observed_at",
+        ".waves[1].tasks.items[3].condition.observed_at",
+        ".waves[1].tasks.items[4].condition.observed_at",
+        ".waves[1].tasks.items[5].condition.evidence_age_secs",
+        ".waves[1].tasks.items[5].condition.observed_at",
+        ".waves[3].tasks.items[0].condition.observed_at",
+        ".waves[3].tasks.items[1].condition.observed_at",
+        ".waves[3].tasks.items[2].condition.observed_at",
+        ".waves[3].tasks.items[3].condition.observed_at",
+        ".waves[3].tasks.items[4].condition.observed_at",
+        ".waves[3].tasks.items[5].condition.evidence_age_secs",
+        ".waves[3].tasks.items[5].condition.observed_at",
+        ".waves[43].tasks.items[0].condition.observed_at",
+        ".waves[43].tasks.items[1].condition.observed_at",
+        ".waves[43].tasks.items[2].condition.observed_at",
+        ".waves[43].tasks.items[3].condition.observed_at",
+        ".waves[43].tasks.items[4].condition.observed_at",
+        ".waves[43].tasks.items[5].condition.observed_at",
+        ".waves[43].tasks.items[6].condition.evidence_age_secs",
+        ".waves[43].tasks.items[6].condition.observed_at",
+        ".waves[43].tasks.items[7].condition.evidence_age_secs",
+        ".waves[43].tasks.items[7].condition.observed_at",
+        ".waves[44].tasks.items[0].condition.observed_at",
+        ".waves[44].tasks.items[1].condition.evidence_age_secs",
+        ".waves[44].tasks.items[1].condition.observed_at",
+        ".waves[44].tasks.items[2].condition.observed_at",
+        ".waves[44].tasks.items[3].condition.observed_at",
+        ".waves[4].tasks.items[0].condition.evidence_age_secs",
+        ".waves[4].tasks.items[0].condition.observed_at",
+        ".waves[4].tasks.items[1].condition.observed_at",
+        ".waves[4].tasks.items[2].condition.observed_at",
+        ".waves[4].tasks.items[3].condition.evidence_age_secs",
+        ".waves[4].tasks.items[3].condition.observed_at",
+        ".waves[6].tasks.items[0].condition.observed_at",
+        ".waves[6].tasks.items[10].condition.observed_at",
+        ".waves[6].tasks.items[11].condition.observed_at",
+        ".waves[6].tasks.items[12].condition.observed_at",
+        ".waves[6].tasks.items[1].condition.observed_at",
+        ".waves[6].tasks.items[2].condition.observed_at",
+        ".waves[6].tasks.items[3].condition.observed_at",
+        ".waves[6].tasks.items[4].condition.observed_at",
+        ".waves[6].tasks.items[5].condition.observed_at",
+        ".waves[6].tasks.items[6].condition.evidence_age_secs",
+        ".waves[6].tasks.items[6].condition.observed_at",
+        ".waves[6].tasks.items[7].condition.observed_at",
+        ".waves[6].tasks.items[8].condition.observed_at",
+        ".waves[6].tasks.items[9].condition.evidence_age_secs",
+        ".waves[6].tasks.items[9].condition.observed_at",
+        ".waves[9].tasks.items[0].condition.observed_at",
+        ".waves[9].tasks.items[10].condition.evidence_age_secs",
+        ".waves[9].tasks.items[10].condition.observed_at",
+        ".waves[9].tasks.items[11].condition.evidence_age_secs",
+        ".waves[9].tasks.items[11].condition.observed_at",
+        ".waves[9].tasks.items[12].condition.evidence_age_secs",
+        ".waves[9].tasks.items[12].condition.observed_at",
+        ".waves[9].tasks.items[13].condition.evidence_age_secs",
+        ".waves[9].tasks.items[13].condition.observed_at",
+        ".waves[9].tasks.items[14].condition.evidence_age_secs",
+        ".waves[9].tasks.items[14].condition.observed_at",
+        ".waves[9].tasks.items[15].condition.evidence_age_secs",
+        ".waves[9].tasks.items[15].condition.observed_at",
+        ".waves[9].tasks.items[16].condition.evidence_age_secs",
+        ".waves[9].tasks.items[16].condition.observed_at",
+        ".waves[9].tasks.items[17].condition.evidence_age_secs",
+        ".waves[9].tasks.items[17].condition.observed_at",
+        ".waves[9].tasks.items[18].condition.evidence_age_secs",
+        ".waves[9].tasks.items[18].condition.observed_at",
+        ".waves[9].tasks.items[19].condition.evidence_age_secs",
+        ".waves[9].tasks.items[19].condition.observed_at",
+        ".waves[9].tasks.items[1].condition.observed_at",
+        ".waves[9].tasks.items[20].condition.evidence_age_secs",
+        ".waves[9].tasks.items[20].condition.observed_at",
+        ".waves[9].tasks.items[21].condition.evidence_age_secs",
+        ".waves[9].tasks.items[21].condition.observed_at",
+        ".waves[9].tasks.items[2].condition.observed_at",
+        ".waves[9].tasks.items[3].condition.observed_at",
+        ".waves[9].tasks.items[4].condition.evidence_age_secs",
+        ".waves[9].tasks.items[4].condition.observed_at",
+        ".waves[9].tasks.items[5].condition.evidence_age_secs",
+        ".waves[9].tasks.items[5].condition.observed_at",
+        ".waves[9].tasks.items[6].condition.observed_at",
+        ".waves[9].tasks.items[7].condition.observed_at",
+        ".waves[9].tasks.items[8].condition.evidence_age_secs",
+        ".waves[9].tasks.items[8].condition.observed_at",
+        ".waves[9].tasks.items[9].condition.evidence_age_secs",
+        ".waves[9].tasks.items[9].condition.observed_at"
+      ],
+      "sessions": []
+    },
+    "storage": {
+      "before": {
+        "access_profiles": {
+          "retained_rows": 4,
+          "identical": true,
+          "added_rows": 0
+        },
+        "agent_sessions": {
+          "retained_rows": 604,
+          "identical": true,
+          "added_rows": 0
+        },
+        "auth_browser_bindings": {
+          "retained_rows": 7,
+          "identical": true,
+          "added_rows": 0
+        },
+        "blob_tokens": {
+          "retained_rows": 1401,
+          "identical": true,
+          "added_rows": 0
+        },
+        "ci_incidents": {
+          "retained_rows": 212,
+          "identical": true,
+          "added_rows": 0
+        },
+        "execs": {
+          "retained_rows": 218637,
+          "identical": true,
+          "added_rows": 42
+        },
+        "flow_events": {
+          "retained_rows": 901,
+          "identical": true,
+          "added_rows": 0
+        },
+        "flow_sessions": {
+          "retained_rows": 104,
+          "identical": true,
+          "added_rows": 0
+        },
+        "homes": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_instruments": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_observations": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_issue_changes": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_items": {
+          "retained_rows": 163,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_sync": {
+          "retained_rows": 21,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pr_landings": {
+          "retained_rows": 142,
+          "identical": true,
+          "added_rows": 0
+        },
+        "project_events": {
+          "retained_rows": 30536,
+          "identical": true,
+          "added_rows": 0
+        },
+        "projects": {
+          "retained_rows": 49,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_limits": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_switches": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_accounts": {
+          "retained_rows": 6,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_routes": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_session_accounts": {
+          "retained_rows": 3724,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_tokens": {
+          "retained_rows": 5,
+          "identical": true,
+          "added_rows": 0
+        },
+        "schema_migrations": {
+          "retained_rows": 62,
+          "identical": true,
+          "added_rows": 0
+        },
+        "session_events": {
+          "retained_rows": 521637,
+          "identical": true,
+          "added_rows": 0
+        },
+        "sqlite_sequence": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_deletions": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_events": {
+          "retained_rows": 66836,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_issue_identities": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_ingested_comments": {
+          "retained_rows": 611,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_observations": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_pr_repair_incidents": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_prs": {
+          "retained_rows": 449,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tasks": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tool_responses": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "waves": {
+          "retained_rows": 53,
+          "identical": true,
+          "added_rows": 0
+        },
+        "work_placements": {
+          "retained_rows": 441,
+          "identical": true,
+          "added_rows": 0
+        }
+      },
+      "after": {
+        "access_profiles": {
+          "retained_rows": 4,
+          "identical": true,
+          "added_rows": 0
+        },
+        "agent_sessions": {
+          "retained_rows": 604,
+          "identical": true,
+          "added_rows": 0
+        },
+        "auth_browser_bindings": {
+          "retained_rows": 7,
+          "identical": true,
+          "added_rows": 0
+        },
+        "blob_tokens": {
+          "retained_rows": 1401,
+          "identical": true,
+          "added_rows": 0
+        },
+        "ci_incidents": {
+          "retained_rows": 212,
+          "identical": true,
+          "added_rows": 0
+        },
+        "execs": {
+          "retained_rows": 218637,
+          "identical": true,
+          "added_rows": 42
+        },
+        "flow_events": {
+          "retained_rows": 901,
+          "identical": true,
+          "added_rows": 0
+        },
+        "flow_sessions": {
+          "retained_rows": 104,
+          "identical": true,
+          "added_rows": 0
+        },
+        "homes": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_instruments": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_observations": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_issue_changes": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_items": {
+          "retained_rows": 163,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_sync": {
+          "retained_rows": 21,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pr_landings": {
+          "retained_rows": 142,
+          "identical": true,
+          "added_rows": 0
+        },
+        "project_events": {
+          "retained_rows": 30536,
+          "identical": true,
+          "added_rows": 0
+        },
+        "projects": {
+          "retained_rows": 49,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_limits": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_switches": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_accounts": {
+          "retained_rows": 6,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_routes": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_session_accounts": {
+          "retained_rows": 3724,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_tokens": {
+          "retained_rows": 5,
+          "identical": true,
+          "added_rows": 0
+        },
+        "schema_migrations": {
+          "retained_rows": 62,
+          "identical": true,
+          "added_rows": 0
+        },
+        "session_events": {
+          "retained_rows": 521637,
+          "identical": true,
+          "added_rows": 0
+        },
+        "sqlite_sequence": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_deletions": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_events": {
+          "retained_rows": 66836,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_issue_identities": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_ingested_comments": {
+          "retained_rows": 611,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_observations": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_pr_repair_incidents": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_prs": {
+          "retained_rows": 449,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tasks": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tool_responses": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "waves": {
+          "retained_rows": 53,
+          "identical": true,
+          "added_rows": 0
+        },
+        "work_placements": {
+          "retained_rows": 441,
+          "identical": true,
+          "added_rows": 0
+        }
+      }
+    },
+    "counters": {
+      "before": {
+        "starts": 42,
+        "ends": 42,
+        "connections": 315,
+        "statements": 65711,
+        "rows": 1093976
+      },
+      "after": {
+        "starts": 42,
+        "ends": 42,
+        "connections": 315,
+        "statements": 65711,
+        "rows": 1093976
+      }
+    }
+  },
+  "responses": {
+    "pairs": 42,
+    "identical_except_fresh_timestamps_and_verified_ages": true,
+    "age_checks": 525
+  },
+  "diagnostics": {
+    "loo304-memory-current-20261006": {
+      "receipt": "/tmp/loo304-memory-current-20261006",
+      "mode": "original observer",
+      "receipt_sha256": {
+        "run.json": "3757daccb0d328935844f3b551ecdb5428a2a5183cb6315fe150b3e111b0449f",
+        "report.json": "2eea765d10a35b8d20c8b5ae35eb4695b92e12c21a31a097acbb165d8b4e904c",
+        "attempts.jsonl": "9a4773ee9e2764ce266402048958b75f1c83670542d9e9eda96c81ceab483d5e"
+      },
+      "source_before": "0c09729e8bd99f10358626792b947688bd34c0cc619bb429a7ff33391950c03c",
+      "source_after": "0c09729e8bd99f10358626792b947688bd34c0cc619bb429a7ff33391950c03c",
+      "measurement_source": "2b49d7dffa2ec0230ad0fab0673037c62f12c662b11dde7000b1ef4d7db39ac7",
+      "test_binary_sha256": "38afba05e92aba57d1c3bd85b02210e584cf54a1b3515504b66c4ad70416a378",
+      "cli_sha256": "fbbcf04f35206730311fd941681901d80e874cb88efed2c02ecf28f139d85528",
+      "cli_sha256_after": "fbbcf04f35206730311fd941681901d80e874cb88efed2c02ecf28f139d85528",
+      "snapshot_sha256": "d9dc08b5d7d241294b78bf5035d47e8e9069aa58c13808d04d31cd8a0f8230e4",
+      "repository_configs_unchanged": true,
+      "exit_code": 0,
+      "groups": [
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 1176.91475,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "cold_workspace",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 995.23975,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "cold_workspace",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 883.308167,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "native_session_reopen",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 924.9801044999999,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "native_session_reopen",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 264.529416,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "reopen_task",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 297.1838125,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "reopen_task",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 280.261292,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "warm_task",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 275.425687,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "warm_task",
+          "state": "warm"
+        }
+      ],
+      "rss_begin_mib": 228.484375,
+      "rss_rounds_mib": [
+        275.859375,
+        280.046875,
+        279.96875,
+        280.078125,
+        276.546875
+      ],
+      "four_round_growth_mib": 51.59375,
+      "memory_budget_pass": false,
+      "preserved_rounds": 5,
+      "key_windows": [
+        -1
+      ],
+      "windows": [
+        1
+      ],
+      "cpu": {
+        "max_percent": 51.5,
+        "p50_percent": 0.9,
+        "p95_percent": 13.6,
+        "samples": 150
+      },
+      "sampled_memory": {
+        "end_mib": 275.9,
+        "growth_mib": 45.8,
+        "max_mib": 344.4,
+        "samples": 150,
+        "start_mib": 230.2
+      },
+      "trace_coverage": {
+        "end_gap_seconds": null,
+        "start_gap_seconds": null,
+        "status": "unmeasured"
+      },
+      "cli_volume": {
+        "processes_started": 256,
+        "processes_ended": 256,
+        "observed_totals": {
+          "connections": 1398,
+          "rows": 1440766,
+          "statements": 119526
+        }
+      },
+      "read_failures": 11,
+      "comparison": null
+    },
+    "loo304-native-no-capture-20261006": {
+      "receipt": "/tmp/loo304-native-no-capture-20261006",
+      "mode": "native capture omitted; diagnostic only",
+      "receipt_sha256": {
+        "run.json": "f881445ad971ffb5321649d5dcb178a8c482b850894bbc09cd9805c8d9aa15ec",
+        "report.json": "e6293d46bbb0bb410366f2ba1d302a7734e43cf40aa4729a831eccb32693071c",
+        "attempts.jsonl": "24f413a4720c82ff9e5001a6701d68ae18ea75a83cf9a82536aa2a49c163bc3c"
+      },
+      "source_before": "2783549fc3499bcef2efa0f1243d97c6bf9712c8dc9eec6b27426208af12f53a",
+      "source_after": "2783549fc3499bcef2efa0f1243d97c6bf9712c8dc9eec6b27426208af12f53a",
+      "measurement_source": "58dc640e1a4413f0f286abeca73194721b9ccd0ecc46072434cc44dd13a58dd0",
+      "test_binary_sha256": "dfd9da1709e5d7ae80e4b428bf31fe3db7197c84d049328a85a1ab7fcf47928b",
+      "cli_sha256": "fbbcf04f35206730311fd941681901d80e874cb88efed2c02ecf28f139d85528",
+      "cli_sha256_after": "fbbcf04f35206730311fd941681901d80e874cb88efed2c02ecf28f139d85528",
+      "snapshot_sha256": "d9dc08b5d7d241294b78bf5035d47e8e9069aa58c13808d04d31cd8a0f8230e4",
+      "repository_configs_unchanged": true,
+      "exit_code": 0,
+      "groups": [
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 1300.410542,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "cold_workspace",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 1090.93875,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "cold_workspace",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 579.85475,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "native_session_reopen",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 541.5873955,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "native_session_reopen",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 259.763583,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "reopen_task",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 293.441208,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "reopen_task",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 373.046042,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "warm_task",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 299.8534375,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "warm_task",
+          "state": "warm"
+        }
+      ],
+      "rss_begin_mib": 232.5,
+      "rss_rounds_mib": [
+        240.90625,
+        240.125,
+        240.28125,
+        240.265625,
+        240.3125
+      ],
+      "four_round_growth_mib": 7.765625,
+      "memory_budget_pass": false,
+      "preserved_rounds": 5,
+      "key_windows": [
+        -1
+      ],
+      "windows": [
+        1
+      ],
+      "cpu": {
+        "max_percent": 32.0,
+        "p50_percent": 0.8,
+        "p95_percent": 4.8,
+        "samples": 150
+      },
+      "sampled_memory": {
+        "end_mib": 240.2,
+        "growth_mib": 2.5,
+        "max_mib": 245.1,
+        "samples": 150,
+        "start_mib": 237.7
+      },
+      "trace_coverage": {
+        "end_gap_seconds": null,
+        "start_gap_seconds": null,
+        "status": "unmeasured"
+      },
+      "cli_volume": {
+        "processes_started": 256,
+        "processes_ended": 256,
+        "observed_totals": {
+          "connections": 1398,
+          "rows": 1440764,
+          "statements": 119525
+        }
+      },
+      "read_failures": 11,
+      "comparison": null
+    },
+    "loo304-native-cpu-ocr-20261006": {
+      "receipt": "/tmp/loo304-native-cpu-ocr-20261006",
+      "mode": "CPU OCR experiment; rejected",
+      "receipt_sha256": {
+        "run.json": "43e1b58aac161244376eb66dd72e3aa4bce5bb41f8fcd7cdec853c52b41e23fd",
+        "report.json": "2e4ddd2c8d75a4a08390b8e28529c97a790ed7453eff2717bc46bfdae1f62cb4",
+        "attempts.jsonl": "03b601fa0401f1ffac6f9c886cae5181e403be5528a2513353c2172d25553f76"
+      },
+      "source_before": "6409c68251b64ed87890e156afe775e9140df664585504b1421884b1c66ccc08",
+      "source_after": "6409c68251b64ed87890e156afe775e9140df664585504b1421884b1c66ccc08",
+      "measurement_source": "8cef9cadc83f258733ed9d15f9922504f90e1a71e46fdeafe3a627d170a15b20",
+      "test_binary_sha256": "4cf35b35fe4b4a62a507e23b5516d54e3b5b392a6d48ce73a96d118d0bc6c35a",
+      "cli_sha256": "fbbcf04f35206730311fd941681901d80e874cb88efed2c02ecf28f139d85528",
+      "cli_sha256_after": "fbbcf04f35206730311fd941681901d80e874cb88efed2c02ecf28f139d85528",
+      "snapshot_sha256": "d9dc08b5d7d241294b78bf5035d47e8e9069aa58c13808d04d31cd8a0f8230e4",
+      "repository_configs_unchanged": true,
+      "exit_code": 0,
+      "groups": [
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 1665.861417,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "cold_workspace",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 1243.293271,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "cold_workspace",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 982.609458,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "native_session_reopen",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 925.9557915,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "native_session_reopen",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 242.475125,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "reopen_task",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 311.4669585,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "reopen_task",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 368.939625,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "warm_task",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 331.7154795,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "warm_task",
+          "state": "warm"
+        }
+      ],
+      "rss_begin_mib": 233.90625,
+      "rss_rounds_mib": [
+        280.9375,
+        285.046875,
+        289.53125,
+        285.140625,
+        286.25
+      ],
+      "four_round_growth_mib": 51.234375,
+      "memory_budget_pass": false,
+      "preserved_rounds": 5,
+      "key_windows": [
+        -1
+      ],
+      "windows": [
+        1
+      ],
+      "cpu": {
+        "max_percent": 74.7,
+        "p50_percent": 0.8,
+        "p95_percent": 14.6,
+        "samples": 150
+      },
+      "sampled_memory": {
+        "end_mib": 285.6,
+        "growth_mib": 46.2,
+        "max_mib": 344.8,
+        "samples": 150,
+        "start_mib": 239.4
+      },
+      "trace_coverage": {
+        "end_gap_seconds": null,
+        "start_gap_seconds": null,
+        "status": "unmeasured"
+      },
+      "cli_volume": {
+        "processes_started": 255,
+        "processes_ended": 255,
+        "observed_totals": {
+          "connections": 1393,
+          "rows": 1436190,
+          "statements": 118926
+        }
+      },
+      "read_failures": 12,
+      "comparison": null
+    }
+  },
+  "fixed_image": {
+    "0-unpooled.jsonl": {
+      "receipt": "/tmp/loo304-handler-memory-20261006/0-unpooled.jsonl",
+      "sha256": "c2c3574e1095714cecdd110df715cfbd685640d02b64657e8dde8e2344f306b8",
+      "observations": 40,
+      "labels_sha256": [
+        "SHA256 digest: 4466e1ea76cbe53edae44738daff5437ef6c520850d2a9ab86eae7cfa94ee4c7"
+      ],
+      "peak_mib": 134.28125,
+      "drained_mib": 117.1875,
+      "warm_median_ms": 201.332208
+    },
+    "1-shared.jsonl": {
+      "receipt": "/tmp/loo304-handler-memory-20261006/1-shared.jsonl",
+      "sha256": "34f84ddcb2dca54d13b4d0cdd7f82b8b60c1e5bb80a24c300821fc7d12ac21ff",
+      "observations": 18,
+      "labels_sha256": [
+        "SHA256 digest: 4466e1ea76cbe53edae44738daff5437ef6c520850d2a9ab86eae7cfa94ee4c7"
+      ],
+      "peak_mib": 513.984375,
+      "drained_mib": 113.6875,
+      "warm_median_ms": 204.200167
+    },
+    "2-shared.jsonl": {
+      "receipt": "/tmp/loo304-handler-memory-20261006/2-shared.jsonl",
+      "sha256": "57667c08b863092b07099c4d031305f1cf3fe13ac7111201312cfbba5ad53fdb",
+      "observations": 18,
+      "labels_sha256": [
+        "SHA256 digest: 4466e1ea76cbe53edae44738daff5437ef6c520850d2a9ab86eae7cfa94ee4c7"
+      ],
+      "peak_mib": 513.34375,
+      "drained_mib": 113.046875,
+      "warm_median_ms": 205.364875
+    },
+    "3-unpooled.jsonl": {
+      "receipt": "/tmp/loo304-handler-memory-20261006/3-unpooled.jsonl",
+      "sha256": "dbdd983187763c0cb24bf258c8a750343e9a049f8d7b0cac07d487a301456873",
+      "observations": 40,
+      "labels_sha256": [
+        "SHA256 digest: 4466e1ea76cbe53edae44738daff5437ef6c520850d2a9ab86eae7cfa94ee4c7"
+      ],
+      "peak_mib": 154.890625,
+      "drained_mib": 132.109375,
+      "warm_median_ms": 213.847
+    },
+    "device-0-unpooled.jsonl": {
+      "receipt": "/tmp/loo304-handler-memory-20261006/device-0-unpooled.jsonl",
+      "sha256": "36d66483ee2e5da8026e01be9d5eaddaad106c1b88ae0545931b3b0c7d129771",
+      "observations": 40,
+      "labels_sha256": [
+        "SHA256 digest: 4466e1ea76cbe53edae44738daff5437ef6c520850d2a9ab86eae7cfa94ee4c7"
+      ],
+      "peak_mib": 158.671875,
+      "drained_mib": 135.125,
+      "warm_median_ms": 283.565125
+    },
+    "device-1-background.jsonl": {
+      "receipt": "/tmp/loo304-handler-memory-20261006/device-1-background.jsonl",
+      "sha256": "bc4321f7743c0592ff9f5318ecd3e6e2a5d89e0986ebbe3a13abf2d78b380279",
+      "observations": 40,
+      "labels_sha256": [
+        "SHA256 digest: 4466e1ea76cbe53edae44738daff5437ef6c520850d2a9ab86eae7cfa94ee4c7"
+      ],
+      "peak_mib": 158.390625,
+      "drained_mib": 135.015625,
+      "warm_median_ms": 295.018833
+    },
+    "device-2-cpu.jsonl": {
+      "receipt": "/tmp/loo304-handler-memory-20261006/device-2-cpu.jsonl",
+      "sha256": "05b9eb78010d622e5cc8d3ee34d7098e43e3b634f566c939ef8cd10555d6733a",
+      "observations": 40,
+      "labels_sha256": [
+        "SHA256 digest: 4466e1ea76cbe53edae44738daff5437ef6c520850d2a9ab86eae7cfa94ee4c7"
+      ],
+      "peak_mib": 142.015625,
+      "drained_mib": 121.3125,
+      "warm_median_ms": 206.249458
+    },
+    "device-3-unpooled.jsonl": {
+      "receipt": "/tmp/loo304-handler-memory-20261006/device-3-unpooled.jsonl",
+      "sha256": "a663f1b2d8a1787c54cfd5cd2108fff84e2039c3cd01a0db4844012279cf7293",
+      "observations": 40,
+      "labels_sha256": [
+        "SHA256 digest: 4466e1ea76cbe53edae44738daff5437ef6c520850d2a9ab86eae7cfa94ee4c7"
+      ],
+      "peak_mib": 150.890625,
+      "drained_mib": 128.15625,
+      "warm_median_ms": 214.960167
+    },
+    "modern-cpu.jsonl": {
+      "receipt": "/tmp/loo304-handler-memory-20261006/modern-cpu.jsonl",
+      "sha256": "ba9f14dd7df0f11492be8a09b2935a27a8ac7593916a9e5974be355c88ba910a",
+      "observations": 40,
+      "labels_sha256": [
+        "SHA256 digest: 4466e1ea76cbe53edae44738daff5437ef6c520850d2a9ab86eae7cfa94ee4c7"
+      ],
+      "peak_mib": 139.6875,
+      "drained_mib": 118.9375,
+      "warm_median_ms": 209.3245
+    }
+  },
+  "mounted_pair": {
+    "before": {
+      "receipt": "/tmp/loo304-cwd-read-20261006/desktop-before",
+      "mode": "original observer",
+      "receipt_sha256": {
+        "run.json": "5d18e00e84b8dc687305e78c40043a9bd211bbd3ed64c965aab6c56f9cb951f3",
+        "report.json": "98bf5aa4fa89e044243e48f732b633e02b5afed5c9325ef98033ad7608d50d6a",
+        "attempts.jsonl": "dc19a386ffa1b62913f4065ef2e1fed7b62b4012eae576d6943a7098113e877f"
+      },
+      "source_before": "0c09729e8bd99f10358626792b947688bd34c0cc619bb429a7ff33391950c03c",
+      "source_after": "0c09729e8bd99f10358626792b947688bd34c0cc619bb429a7ff33391950c03c",
+      "measurement_source": "2b49d7dffa2ec0230ad0fab0673037c62f12c662b11dde7000b1ef4d7db39ac7",
+      "test_binary_sha256": "38afba05e92aba57d1c3bd85b02210e584cf54a1b3515504b66c4ad70416a378",
+      "cli_sha256": "fbbcf04f35206730311fd941681901d80e874cb88efed2c02ecf28f139d85528",
+      "cli_sha256_after": "fbbcf04f35206730311fd941681901d80e874cb88efed2c02ecf28f139d85528",
+      "snapshot_sha256": "d9dc08b5d7d241294b78bf5035d47e8e9069aa58c13808d04d31cd8a0f8230e4",
+      "repository_configs_unchanged": true,
+      "exit_code": 0,
+      "groups": [
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 1541.509375,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "cold_workspace",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 1825.726771,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "cold_workspace",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 1208.326584,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "native_session_reopen",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 925.9437915,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "native_session_reopen",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 346.603917,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "reopen_task",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 427.446125,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "reopen_task",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 467.27025,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "warm_task",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 405.2658125,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "warm_task",
+          "state": "warm"
+        }
+      ],
+      "rss_begin_mib": 234.078125,
+      "rss_rounds_mib": [
+        280.46875,
+        284.6875,
+        273.546875,
+        277.875,
+        288.03125
+      ],
+      "four_round_growth_mib": 43.796875,
+      "memory_budget_pass": false,
+      "preserved_rounds": 5,
+      "key_windows": [
+        -1
+      ],
+      "windows": [
+        1
+      ],
+      "cpu": {
+        "max_percent": 55.3,
+        "p50_percent": 0.9,
+        "p95_percent": 11.8,
+        "samples": 150
+      },
+      "sampled_memory": {
+        "end_mib": 287.3,
+        "growth_mib": 47.5,
+        "max_mib": 330.8,
+        "samples": 150,
+        "start_mib": 239.8
+      },
+      "trace_coverage": {
+        "end_gap_seconds": null,
+        "start_gap_seconds": null,
+        "status": "unmeasured"
+      },
+      "cli_volume": {
+        "processes_started": 258,
+        "processes_ended": 258,
+        "observed_totals": {
+          "connections": 1408,
+          "rows": 1446699,
+          "statements": 120020
+        }
+      },
+      "read_failures": 11,
+      "comparison": null
+    },
+    "after": {
+      "receipt": "/tmp/loo304-cwd-read-20261006/desktop-after",
+      "mode": "original observer",
+      "receipt_sha256": {
+        "run.json": "671a9433902dbd5f0cd237c6698fe12732d68e6c61a286136e3e56feedd13fa1",
+        "report.json": "a5c119cb595a67424c6385e103c81246cbd4751ecd592fba56ea624b4413fc58",
+        "attempts.jsonl": "7e90c29de2058449df5e54856239b9c4c8d4a1bb66b1649bd90a390b55398268"
+      },
+      "source_before": "0c09729e8bd99f10358626792b947688bd34c0cc619bb429a7ff33391950c03c",
+      "source_after": "0c09729e8bd99f10358626792b947688bd34c0cc619bb429a7ff33391950c03c",
+      "measurement_source": "2b49d7dffa2ec0230ad0fab0673037c62f12c662b11dde7000b1ef4d7db39ac7",
+      "test_binary_sha256": "38afba05e92aba57d1c3bd85b02210e584cf54a1b3515504b66c4ad70416a378",
+      "cli_sha256": "20d509f1bb367f72e3e724a970c55eed7889c75da53c4a8240a7c153e8d5dc1f",
+      "cli_sha256_after": "20d509f1bb367f72e3e724a970c55eed7889c75da53c4a8240a7c153e8d5dc1f",
+      "snapshot_sha256": "d9dc08b5d7d241294b78bf5035d47e8e9069aa58c13808d04d31cd8a0f8230e4",
+      "repository_configs_unchanged": true,
+      "exit_code": 0,
+      "groups": [
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 1518.62675,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "cold_workspace",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 1020.9658335,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "cold_workspace",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 989.309417,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "native_session_reopen",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 1183.713729,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "native_session_reopen",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 279.38125,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "reopen_task",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 334.990292,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "reopen_task",
+          "state": "warm"
+        },
+        {
+          "attempted": 1,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 1
+          },
+          "p50_ms": 398.728541,
+          "p95_ms": null,
+          "passed": 1,
+          "population": "snapshot",
+          "scenario": "warm_task",
+          "state": "first_interaction"
+        },
+        {
+          "attempted": 4,
+          "failure_rate": 0.0,
+          "metric": "task_workspace_ready_ms",
+          "outcomes": {
+            "passed": 4
+          },
+          "p50_ms": 371.866146,
+          "p95_ms": null,
+          "passed": 4,
+          "population": "snapshot",
+          "scenario": "warm_task",
+          "state": "warm"
+        }
+      ],
+      "rss_begin_mib": 230.09375,
+      "rss_rounds_mib": [
+        269.140625,
+        270.796875,
+        274.921875,
+        271.21875,
+        275.109375
+      ],
+      "four_round_growth_mib": 41.125,
+      "memory_budget_pass": false,
+      "preserved_rounds": 5,
+      "key_windows": [
+        -1
+      ],
+      "windows": [
+        1
+      ],
+      "cpu": {
+        "max_percent": 72.7,
+        "p50_percent": 1.0,
+        "p95_percent": 15.3,
+        "samples": 150
+      },
+      "sampled_memory": {
+        "end_mib": 274.6,
+        "growth_mib": 38.8,
+        "max_mib": 332.6,
+        "samples": 150,
+        "start_mib": 235.8
+      },
+      "trace_coverage": {
+        "end_gap_seconds": null,
+        "start_gap_seconds": null,
+        "status": "unmeasured"
+      },
+      "cli_volume": {
+        "processes_started": 252,
+        "processes_ended": 252,
+        "observed_totals": {
+          "connections": 1378,
+          "rows": 1428896,
+          "statements": 118538
+        }
+      },
+      "read_failures": 11,
+      "comparison": {
+        "available": true,
+        "baseline_source": "0c09729e8bd99f10358626792b947688bd34c0cc619bb429a7ff33391950c03c",
+        "deltas": [
+          {
+            "after_failure_rate": 0.0,
+            "before_failure_rate": 0.0,
+            "metric": "task_workspace_ready_ms",
+            "p50_delta_ms": -22.88262500000019,
+            "p95_delta_ms": null,
+            "population": "snapshot",
+            "scenario": "cold_workspace",
+            "state": "first_interaction"
+          },
+          {
+            "after_failure_rate": 0.0,
+            "before_failure_rate": 0.0,
+            "metric": "task_workspace_ready_ms",
+            "p50_delta_ms": -804.7609375000001,
+            "p95_delta_ms": null,
+            "population": "snapshot",
+            "scenario": "cold_workspace",
+            "state": "warm"
+          },
+          {
+            "after_failure_rate": 0.0,
+            "before_failure_rate": 0.0,
+            "metric": "task_workspace_ready_ms",
+            "p50_delta_ms": -219.01716699999986,
+            "p95_delta_ms": null,
+            "population": "snapshot",
+            "scenario": "native_session_reopen",
+            "state": "first_interaction"
+          },
+          {
+            "after_failure_rate": 0.0,
+            "before_failure_rate": 0.0,
+            "metric": "task_workspace_ready_ms",
+            "p50_delta_ms": 257.7699375000001,
+            "p95_delta_ms": null,
+            "population": "snapshot",
+            "scenario": "native_session_reopen",
+            "state": "warm"
+          },
+          {
+            "after_failure_rate": 0.0,
+            "before_failure_rate": 0.0,
+            "metric": "task_workspace_ready_ms",
+            "p50_delta_ms": -67.222667,
+            "p95_delta_ms": null,
+            "population": "snapshot",
+            "scenario": "reopen_task",
+            "state": "first_interaction"
+          },
+          {
+            "after_failure_rate": 0.0,
+            "before_failure_rate": 0.0,
+            "metric": "task_workspace_ready_ms",
+            "p50_delta_ms": -92.45583299999998,
+            "p95_delta_ms": null,
+            "population": "snapshot",
+            "scenario": "reopen_task",
+            "state": "warm"
+          },
+          {
+            "after_failure_rate": 0.0,
+            "before_failure_rate": 0.0,
+            "metric": "task_workspace_ready_ms",
+            "p50_delta_ms": -68.54170899999997,
+            "p95_delta_ms": null,
+            "population": "snapshot",
+            "scenario": "warm_task",
+            "state": "first_interaction"
+          },
+          {
+            "after_failure_rate": 0.0,
+            "before_failure_rate": 0.0,
+            "metric": "task_workspace_ready_ms",
+            "p50_delta_ms": -33.39966649999997,
+            "p95_delta_ms": null,
+            "population": "snapshot",
+            "scenario": "warm_task",
+            "state": "warm"
+          }
+        ]
+      }
+    }
+  },
+  "limits": [
+    "Native no-capture run is diagnostic, not acceptance.",
+    "Initial capture and no-capture runs included vmmap inspection.",
+    "No growth is subtracted and the original observer is unchanged.",
+    "150-second RSS-only runs do not replace either full hour or measure hitches, hangs, compositor paint or one-frame input.",
+    "Four warm samples cannot supply a p95; key-window identity remains unavailable.",
+    "Sequential Desktop runs and variable host load limit causal latency attribution."
+  ],
+  "rejected_configuration_cache": {
+    "receipt": "/tmp/loo304-portfolio-read-20261006",
+    "reads": {
+      "roadmap": {
+        "before": {
+          "first": {
+            "path": "roadmap",
+            "variant": "before",
+            "sample": 0,
+            "ms": 2008.8300839997828,
+            "exit": 0,
+            "load": [
+              12.25244140625,
+              17.77294921875,
+              19.11474609375
+            ],
+            "bytes": 263926,
+            "child_cpu_ms": 664.3919999999999,
+            "git_processes": 67,
+            "git_common_dir": 49
+          },
+          "ms": {
+            "n": 20,
+            "median": 578.865562507417,
+            "p95": 601.981165993493
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 549.6044999999993,
+            "p95": 568.2080000000001
+          },
+          "git_processes": {
+            "n": 20,
+            "median": 67.0,
+            "p95": 67
+          },
+          "git_common_dir": {
+            "n": 20,
+            "median": 49.0,
+            "p95": 49
+          },
+          "load_median": 30.7861328125,
+          "load_max": 32.77001953125
+        },
+        "after": {
+          "first": {
+            "path": "roadmap",
+            "variant": "after",
+            "sample": 0,
+            "ms": 1779.1887090133969,
+            "exit": 0,
+            "load": [
+              12.25244140625,
+              17.77294921875,
+              19.11474609375
+            ],
+            "bytes": 263925,
+            "child_cpu_ms": 658.4459999999999,
+            "git_processes": 67,
+            "git_common_dir": 49
+          },
+          "ms": {
+            "n": 20,
+            "median": 583.1494169979123,
+            "p95": 1429.5021670113783
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 554.387,
+            "p95": 589.602
+          },
+          "git_processes": {
+            "n": 20,
+            "median": 67.0,
+            "p95": 67
+          },
+          "git_common_dir": {
+            "n": 20,
+            "median": 49.0,
+            "p95": 49
+          },
+          "load_median": 30.7861328125,
+          "load_max": 32.77001953125
+        }
+      },
+      "sessions": {
+        "before": {
+          "first": {
+            "path": "sessions",
+            "variant": "before",
+            "sample": 0,
+            "ms": 251.50862502050586,
+            "exit": 0,
+            "load": [
+              29.84814453125,
+              21.68896484375,
+              20.49609375
+            ],
+            "bytes": 64458,
+            "child_cpu_ms": 230.027999999999,
+            "git_processes": 3,
+            "git_common_dir": 1
+          },
+          "ms": {
+            "n": 20,
+            "median": 235.4950830049347,
+            "p95": 247.17854199116118
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 230.15899999999957,
+            "p95": 242.08800000000164
+          },
+          "git_processes": {
+            "n": 20,
+            "median": 3.0,
+            "p95": 3
+          },
+          "git_common_dir": {
+            "n": 20,
+            "median": 1.0,
+            "p95": 1
+          },
+          "load_median": 27.93798828125,
+          "load_max": 29.84814453125
+        },
+        "after": {
+          "first": {
+            "path": "sessions",
+            "variant": "after",
+            "sample": 0,
+            "ms": 249.3990000220947,
+            "exit": 0,
+            "load": [
+              29.84814453125,
+              21.68896484375,
+              20.49609375
+            ],
+            "bytes": 64458,
+            "child_cpu_ms": 227.00500000000278,
+            "git_processes": 3,
+            "git_common_dir": 1
+          },
+          "ms": {
+            "n": 20,
+            "median": 234.49464599252678,
+            "p95": 244.64904100750573
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 229.6459999999989,
+            "p95": 239.57500000000385
+          },
+          "git_processes": {
+            "n": 20,
+            "median": 3.0,
+            "p95": 3
+          },
+          "git_common_dir": {
+            "n": 20,
+            "median": 1.0,
+            "p95": 1
+          },
+          "load_median": 27.93798828125,
+          "load_max": 29.84814453125
+        }
+      }
+    },
+    "disposition": "No process reduction or latency improvement; removed."
+  }
+}

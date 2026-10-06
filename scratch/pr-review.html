@@ -1,5 +1,5 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Workflow Concept Review</title><style>
+<title>Workflow Review</title><style>
 :root{--bg:#fbfaf7;--fg:#1f1d1a;--mute:#6b665e;--rule:#e2ded5;--code:#f3f1ea;--term:#22201d;--termfg:#ece7dc;--accent:#7a2e2e}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#181715;--fg:#e9e5dc;--mute:#9a9489;--rule:#33302b;--code:#211f1c;--term:#0f0e0d;--termfg:#e3ded2;--accent:#d49a8f}}
 :root[data-theme=dark]{--bg:#181715;--fg:#e9e5dc;--mute:#9a9489;--rule:#33302b;--code:#211f1c;--term:#0f0e0d;--termfg:#e3ded2;--accent:#d49a8f}
@@ -42,12 +42,9 @@ svg .t{fill:none;stroke:var(--mute);stroke-width:1.2}
 svg .e{fill:none;stroke:var(--accent);stroke-width:1.4}
 svg .ah{fill:var(--accent)}
 </style></head><body><main>
-<h1>Concept review: a Task's Workflow</h1>
-<p class="meta">LOO-353 · <a href="https://github.com/loopflowstudio/loopflow/pull/1439">PR #1439</a> · built behavior is from <code>74a738f72</code> (published head <code>ac91bf9e1</code> plus scratch notes) · October 6, 2026 · for Jack Heart. Each claim is marked <span class="tag">built</span> or <span class="tag p">proposed</span>. A pass is building the proposed parts now; nothing proposed here is approved.</p>
-<nav><a href="#experience">Experience</a><a href="#concepts">Concepts</a><a href="#loop">The demo loop</a><a href="#layers">Four layers</a><a href="#friction">Friction</a><a href="#choices">Choices</a></nav>
-
-<h2 id="experience">The experience</h2>
-<p>From Jack's words: you work in Desktop with one open primary Task conversation. Work runs in the background. At certain points the Task comes back to you; you look, and you say where it goes next: back for another pass, or on toward landing. You and the conversation have the same direct control over that choice. Nothing you do there ends the conversation. The graph is fixed when the Task takes it up; to change the graph you start over on a new one.</p>
+<h1>A Task's Workflow as live state</h1>
+<p class="meta"><a href="https://github.com/loopflowstudio/loopflow/pull/1439">PR #1439</a> “Steer Task workflows from one conversation and inspect every Flow run” · LOO-353 · base <code>e177eafe6</code> → published head <code>76f176fac</code> · 310 files changed, 14332 insertions(+), 25878 deletions(-). The local branch is ahead by scratch notes only, and a repair pass is editing the worktree; excerpts are read from the published commit.</p>
+<p>Since the last review Jack Heart's October 6 decisions were built: the Workflow's position is stored and can be set; one Task run may start its Flow several times; a Workflow has nodes and edges; a Project has a workflow; a Task's state is read from its Workflow; Desktop draws the graph beside a Flow exec log and is fed by LOO-382's stream. <b>Three tests fail on this head</b>; they are listed under <a href="#broken">Known broken</a>.</p>
 <svg viewBox="0 0 900 190" role="img" aria-label="The feature workflow: start, design, demo, end, joined by Flows">
 <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="ah" d="M0,0L10,5L0,10z"/></marker></defs>
 <circle class="t" cx="50" cy="100" r="22"/><text x="50" y="104" text-anchor="middle">start</text>
@@ -59,136 +56,274 @@ svg .ah{fill:var(--accent)}
 <path class="e" d="M690,100H826" marker-end="url(#a)"/><text class="m" x="758" y="92" text-anchor="middle">ship</text>
 <path class="e" d="M275,74C255,20 355,20 335,72" marker-end="url(#a)"/><text class="m" x="305" y="22" text-anchor="middle">task-design (revise)</text>
 <path class="e" d="M585,74C565,20 665,20 645,72" marker-end="url(#a)"/><text class="m" x="615" y="22" text-anchor="middle">pursue (another pass)</text>
-<text class="m" x="305" y="160" text-anchor="middle">stages: where a person takes part</text><text class="m" x="615" y="160" text-anchor="middle">arrows: lf flows that run in the background</text>
+<text class="m" x="305" y="160" text-anchor="middle">nodes: where a person takes part</text><text class="m" x="615" y="160" text-anchor="middle">edges: Flows that run in the background</text>
 </svg>
-<p class="meta">The builtin <code>feature</code> definition, as built. A loop back is just a way out that returns to the same stage.</p>
+<nav><a href="#run">Run an edge</a><a href="#retry">Retry</a><a href="#move">Set a node</a><a href="#state">Task state</a><a href="#desktop">Desktop</a><a href="#broken">Known broken</a><a href="#proof">Proof</a></nav>
+<table><thead><tr><th>When you…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody><tr><td data-l="When you…"><a href="#run">Tell a Task to go on</a></td><td data-l="What happens"><code>lf task run ISSUE [edge]</code> takes the Task along an edge of its Workflow and runs that edge's Flow. With one edge out of the current node you name nothing; with several you name the Flow; a name that is not an edge out is refused. A Task with no Workflow takes up its Project's the first time.</td><td data-l="Where the code controls this">The Workflow is one row per Task holding the graph it took up and where the Task stands. Choosing an edge is a single guarded update of that row.</td></tr><tr><td data-l="When you…"><a href="#retry">Have the edge's Flow fail</a></td><td data-l="What happens">The same <code>lf task run</code> starts the Flow again, up to three times. Each attempt is its own Flow exec. If all fail, the Task stays on the edge, shown as stopped.</td><td data-l="Where the code controls this"><code>run_for_task</code> runs the Flow as a child <code>lf run</code> and loops; only the process that carried the edge can record arriving.</td></tr><tr><td data-l="When you…"><a href="#move">Put a Task somewhere by hand</a></td><td data-l="What happens"><code>lf task move ISSUE NODE --reason …</code> sets the node without running anything. Every move, chosen, arrived or set, is kept in the Task's history with who made it and why.</td><td data-l="Where the code controls this">Two store calls and an append-only moves table.</td></tr><tr><td data-l="When you…"><a href="#state">Ask whether a Task is done</a></td><td data-l="What happens">A Task is ready at <code>start</code>, active anywhere between, done at <code>end</code>. Nothing stores that separately, and <code>lf task complete</code> is gone: reaching <code>end</code> is completion.</td><td data-l="Where the code controls this">One SQL expression over the Workflow row.</td></tr><tr><td data-l="When you…"><a href="#desktop">Open the Task in Desktop</a></td><td data-l="What happens">The Workflow is drawn as a graph with the current position marked, beside a log of every Flow exec in the Task. The edges out of the current node are the buttons.</td><td data-l="Where the code controls this">Desktop reads only the workspace stream that LOO-382 added; nothing on the Task page calls <code>lf</code> to read.</td></tr></tbody></table>
 
-<h2 id="concepts">The concepts, on one screen</h2>
-<table><thead><tr><th>Concept</th><th>What you see</th><th>Record</th><th>What changes it</th></tr></thead><tbody><tr><td data-l='Concept'><b>Task</b></td><td data-l='What you see'>A piece of work with a worktree.</td><td data-l='Record'>unchanged</td><td data-l='What changes it'>—</td></tr><tr><td data-l='Concept'><b>Workflow</b></td><td data-l='What you see'>Where the Task is on its path from start to end, and the ways out of where it stands.</td><td data-l='Record'>one row per Task: the graph it took up and its position; a history of moves</td><td data-l='What changes it'><code>lf task run ISSUE [choice]</code> · <span class='tag p'>proposed</span><code>lf task move ISSUE STAGE</code></td></tr><tr><td data-l='Concept'><b>Stage</b></td><td data-l='What you see'>A point where you take part, in the Task conversation.</td><td data-l='Record'>part of the graph</td><td data-l='What changes it'>none: you leave a stage by choosing a way out</td></tr><tr><td data-l='Concept'><b>Way out (edge)</b></td><td data-l='What you see'>A choice at a stage. Most run a Flow; one into <code>end</code> may run nothing.</td><td data-l='Record'>part of the graph</td><td data-l='What changes it'>chosen by name</td></tr><tr><td data-l='Concept'><b>Flow run</b></td><td data-l='What you see'>One background run of a Flow: its steps and how far it got.</td><td data-l='Record'>FlowExec, written by the Flow's own process, append-only</td><td data-l='What changes it'><code>lf run FLOW</code>; ended by ending its process</td></tr><tr><td data-l='Concept'><b>Conversation</b></td><td data-l='What you see'>The ongoing Task conversation; one is the Task's primary.</td><td data-l='Record'>Session</td><td data-l='What changes it'><code>lf session ensure --task ISSUE</code></td></tr></tbody></table>
-<p>Jack, October 6: “lets just call TaskWorkflow Workflow.” The Task's live thing is a <b>Workflow</b>; the YAML it takes up is a workflow definition. The code still says TaskWorkflow.</p>
-<p>Jack, later on October 6: “lets use Edge and node instead of Stage and Way OUt.” This page was written before that; read <b>node</b> for stage and <b>edge</b> for way out. The code and YAML still say <code>stages</code>.</p>
+<h2 id="run">1 · Running an edge</h2>
+<figure class="term"><figcaption>Captured October 6 · branch build of <code>76f176fac</code> plus scratch notes · private Home, fixture Task whose Project's workflow is <code>feature</code>; its Flows are provider-free stand-ins · agent run, output trimmed</figcaption><pre><code>$ lf task status INF-123
+INF-123  not ready                         # no Workflow yet
 
-<h2 id="loop">One interaction: the demo loop</h2>
-<h3><span class="tag">built</span> When everything succeeds</h3>
-<figure class="term"><figcaption>Commands and status lines are as observed in the private Home on October 6, with a fixture Task standing in for LOO-353; the spoken lines are illustrative</figcaption><pre><code>you       &quot;Send it back — the empty state is wrong.&quot;
-session   $ lf task run LOO-353 pursue --reason &quot;the empty state is wrong&quot; &amp;
-          $ lf task status LOO-353
-            Workflow feature: running pursue (demo → demo)
-          … the Flow ends …
-            Workflow feature: at demo
-you       &quot;Good enough. Land it.&quot;
-session   $ lf task run LOO-353 ship
-            Workflow feature: at end</code></pre></figure>
-<p>This already matches the experience: choosing a way out is the whole interaction, and the reason travels to the Flow as Task direction.</p>
-<h3><span class="tag">built</span> When something stops</h3>
-<figure class="term"><figcaption>Expected from source, not captured: position is computed from how each edge's process exited</figcaption><pre><code>session   $ lf task run LOO-353 pursue --reason &quot;…&quot; &amp;
-          … pursue fails at its fourth step …
-          $ lf task status LOO-353
-            Workflow feature: at demo          # identical to never having sent it back
-
-session   $ lf task run LOO-353 ship
-          … ship exits while GitHub is still checking; the PR merges ten minutes later …
-            Workflow feature: at demo          # and nothing will ever move it to end</code></pre></figure>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/74a738f72e078fb25cee53a8a7e9f90f42c4e5d7/rust/loopflow/src/ops/task_workflow.rs#L47-L72"><code>rust/loopflow/src/ops/task_workflow.rs</code></a> · <code>position is derived, never stored</code> · 74a738f72 · lines 47–72</figcaption><pre><code>impl TaskWorkflowRecord {
-    /// `running` says whether an Exec with no recorded exit still has its process.
-    pub(crate) fn position(&amp;self, running: impl Fn(&amp;Exec) -&gt; bool) -&gt; WorkflowPosition {
-        let mut stage = START;
-        for (index, (edge, exec)) in self.traversals.iter().enumerate() {
-            let Some(authored) = self.workflow.edges.get(*edge as usize) else {
-                continue;
-            };
-            if exec.outcome.as_deref() == Some(&quot;succeeded&quot;) {
-                stage = &amp;authored.to;
-            } else if index + 1 == self.traversals.len()
-                &amp;&amp; exec.completed_at.is_none()
-                &amp;&amp; running(exec)
-            {
-                return WorkflowPosition::Edge {
-                    edge: *edge,
-                    exec_id: exec.id.to_string(),
-                };
-            }
-        }
-        WorkflowPosition::Stage {
-            stage: stage.to_string(),
-        }
-    }
-
-    /// The stage whose outgoing edges a new traversal chooses among: where the</code></pre></figure>
-<div class="note"><b>The most consequential mismatch.</b> A stage means “waiting on you”. But today “at demo” also means “the last thing failed” and “the landing is still settling”. Because position is computed and nothing can set it, the Workflow cannot tell these apart and nobody can correct it. Jack: “the data model and the basic data API should be well thought out … live states in the LFDB.”</div>
-<h3><span class="tag p">proposed</span> The same loop on live state</h3>
-<figure class=""><figcaption>Illustrative. Proposed usage; the names revise, land and lf task move are the agent's</figcaption><pre><code>$ lf task status LOO-353
-  Workflow feature: at demo
-  ways out: revise (runs pursue, back to demo) · land (runs ship, to end)
-
-$ lf task run LOO-353 revise --reason &quot;the empty state is wrong&quot; &amp;
-$ lf task status LOO-353
-  Workflow feature: on revise — pursue running, step 2 of 5
-
-  … pursue fails …
-  Workflow feature: on revise — pursue stopped at pr-publish
-  ways out: revise again · back to demo
-
-$ lf task move LOO-353 demo --reason &quot;published by hand&quot;     # set a stage; runs nothing
-$ lf task move LOO-353 end  --reason &quot;merged after ship exited&quot;
-
-  history
-  09:14  Jack           chose revise     &quot;the empty state is wrong&quot;
-  09:52  pursue ended   stopped
-  09:55  Jack           set demo         &quot;published by hand&quot;</code></pre></figure>
-
-<h2 id="layers">Following it through four layers</h2>
-<p><span class="tag p">proposed</span> Jack asked for “the core data model at the center of this, what is the data model ↔ db API, db ↔ cli, db ↔ swiftui”.</p>
-<table><thead><tr><th>Layer</th><th>Surface</th><th>Rule</th></tr></thead><tbody><tr><td data-l='Layer'><b>Model</b></td><td data-l='Surface'>Workflow definition (stages, edges). Workflow: graph + position. Move: who, what, from, to, note.</td><td data-l='Rule'>Position is at a stage, or on an edge with the process running it. Running or stopped is read from that process.</td></tr><tr><td data-l='Layer'><b>Model ↔ database</b></td><td data-l='Surface'>Read · take up · choose an edge · arrive · set a stage.</td><td data-l='Rule'>Choosing is one transaction and only legal from the edge's own stage, so two choosers cannot both leave. Only the process that ran an edge can arrive from it.</td></tr><tr><td data-l='Layer'><b>Database ↔ CLI</b></td><td data-l='Surface'>Read: <code>lf task status ISSUE --json</code>. Write: <code>lf task run</code>, <code>lf task move</code>.</td><td data-l='Rule'>The CLI calls the store; no other code writes these tables. Who made a move comes from the calling conversation, else the person.</td></tr><tr><td data-l='Layer'><b>CLI ↔ SwiftUI</b></td><td data-l='Surface'>Desktop reads the same JSON and runs the same two commands.</td><td data-l='Rule'>Desktop never opens the database. Its Swift types mirror the JSON with no defaults and are checked against one shared fixture.</td></tr></tbody></table>
-<div class="note"><b>There is no database ↔ SwiftUI layer, by design.</b> Desktop's one reader runs <code>lf … --json</code>. That rule predates this work and it is what keeps buttons and the conversation on the same API.</div>
-<h3><span class="tag">built</span> What the tables are today</h3>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/74a738f72e078fb25cee53a8a7e9f90f42c4e5d7/rust/loopflow/src/store/migrations/drafts/task_flow_observations.sql#L125-L148"><code>rust/loopflow/src/store/migrations/drafts/task_flow_observations.sql</code></a> · <code>append-only, no position column</code> · 74a738f72 · lines 125–148</figcaption><pre><code>CREATE TABLE task_workflows (
-    id INTEGER PRIMARY KEY,
-    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+$ lf -b task run INF-123                   # takes up the Project&#x27;s workflow; runs the edge out of start
+INF-123  active
+  Workflow feature: at design</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/76f176facd0b73dbd2757f574a80457aef3378e7/rust/loopflow/src/store/migrations/drafts/task_flow_observations.sql#L124-L154"><code>rust/loopflow/src/store/migrations/drafts/task_flow_observations.sql</code></a> · <code>the Workflow row and its history</code> · 76f176fac · lines 124–154</figcaption><pre><code>-- Task took it up, never edited, and where the Task stands on it. `node` is
+-- where it waits; with `edge` set the Task is on that edge, which left `node`,
+-- carried by the Task run `exec_id`. Whether that run still runs is its Exec&#x27;s.
+-- Taking up a workflow replaces the row.
+CREATE TABLE task_workflows (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     graph TEXT NOT NULL CHECK (json_valid(graph)),
-    started_at INTEGER NOT NULL
+    node TEXT NOT NULL,
+    edge INTEGER,
+    exec_id TEXT REFERENCES execs(id),
+    updated_at INTEGER NOT NULL,
+    CHECK ((edge IS NULL) = (exec_id IS NULL))
 ) STRICT;
-CREATE INDEX task_workflows_task ON task_workflows(task_id, id);
 
--- One row per edge `lf task run` set out on, and the Exec that ran it: the
--- driver of that edge&#x27;s Flow. Position is read from these and their Execs.
-CREATE TABLE task_workflow_traversals (
+-- Every change to a Task&#x27;s position, oldest first. `exec_id` is the `lf`
+-- process that made it; who asked is that Exec&#x27;s caller. A move no registered
+-- process made, such as this migration&#x27;s, names none.
+CREATE TABLE task_workflow_moves (
     seq INTEGER PRIMARY KEY,
-    task_workflow_id INTEGER NOT NULL REFERENCES task_workflows(id) ON DELETE CASCADE,
-    edge INTEGER NOT NULL,
-    exec_id TEXT NOT NULL UNIQUE REFERENCES execs(id)
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    workflow TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN (&#x27;took_up&#x27;, &#x27;chose&#x27;, &#x27;arrived&#x27;, &#x27;set&#x27;)),
+    from_node TEXT NOT NULL,
+    to_node TEXT NOT NULL,
+    edge INTEGER,
+    exec_id TEXT REFERENCES execs(id),
+    note TEXT,
+    at INTEGER NOT NULL
 ) STRICT;
-CREATE INDEX task_workflow_traversals_workflow ON task_workflow_traversals(task_workflow_id, seq);
+CREATE INDEX task_workflow_moves_task ON task_workflow_moves(task_id, seq);
+</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/76f176facd0b73dbd2757f574a80457aef3378e7/rust/loopflow/src/store/sqlite/task_work.rs#L183-L225"><code>rust/loopflow/src/store/sqlite/task_work.rs</code></a> · <code>choose_edge_in</code> · 76f176fac · lines 183–225</figcaption><pre><code>fn choose_edge_in(
+    tx: &amp;rusqlite::Transaction&lt;&#x27;_&gt;,
+    task: &amp;TaskId,
+    workflow: &amp;Workflow,
+    edge: u32,
+    by: Option&lt;&amp;ExecId&gt;,
+    note: Option&lt;&amp;str&gt;,
+) -&gt; StoreResult&lt;bool&gt; {
+    let chosen = &amp;workflow.definition.edges[edge as usize];
+    let stopped = match &amp;workflow.position {
+        WorkflowPosition::Node { .. } =&gt; None,
+        WorkflowPosition::Edge { exec_id, .. } =&gt; Some(exec_id.as_str()),
+    };
+    let carried = chosen.flow.is_some();
+    let left = tx.execute(
+        &quot;UPDATE task_workflows SET node=?2,edge=?3,exec_id=?4,updated_at=?5
+         WHERE task_id=?1 AND node=?6 AND exec_id IS ?7&quot;,
+        rusqlite::params![
+            task.as_str(),
+            if carried { &amp;chosen.from } else { &amp;chosen.to },
+            carried.then_some(edge),
+            by.filter(|_| carried),
+            crate::store::rows::now_unix(),
+            chosen.from,
+            stopped
+        ],
+    )?;
+    if left == 0 {
+        return Ok(false);
+    }
+    append_workflow_move(
+        tx,
+        task,
+        &amp;workflow.definition.name,
+        WorkflowMoveKind::Chose,
+        (&amp;chosen.from, &amp;chosen.to),
+        Some(edge),
+        by,
+        note,
+    )?;
+    Ok(true)
+}
+</code></pre></figure>
+<p>The <code>WHERE</code> clause is the rule: the update only lands if the Task still stands at the edge's own node and, if it is on a stopped edge, on that same run. Two callers choosing at once cannot both leave. An edge that runs nothing moves straight to its target.</p>
+<div class="note"><b>Fits the decisions.</b> Jack: “live states in the LFDB”; “the graph is fixed upfront when it's loaded and never mutated” (a trigger refuses any update of <code>graph</code>); each edge is “a unique step (flow/skill)”, so an edge is named by what it runs.</div>
 
-CREATE TRIGGER task_workflows_are_append_only BEFORE UPDATE ON task_workflows BEGIN
-    SELECT RAISE(ABORT,&#x27;A Task workflow record is append-only&#x27;);
-END;
-CREATE TRIGGER task_workflow_traversals_are_append_only BEFORE UPDATE ON task_workflow_traversals BEGIN
-    SELECT RAISE(ABORT,&#x27;A Task workflow record is append-only&#x27;);
-END;</code></pre></figure>
-<p>The proposal keeps one row per Task that is updated in place (graph, position) and turns the second table into the history of moves.</p>
+<h2 id="retry">2 · One run, several Flow execs</h2>
+<figure class="term"><figcaption>Captured October 6 · branch build of <code>76f176fac</code> plus scratch notes · private Home, fixture Task whose Project's workflow is <code>feature</code>; its Flows are provider-free stand-ins · agent run, output trimmed</figcaption><pre><code>$ lf -b task run INF-123 pursue            # pursue is rigged to fail
+Error: task wait NOPE-1 --timeout 1 process exited with exit status: 1
+Flow pursue failed 3 times; this Task run stops here.
 
-<h2 id="friction">Distinctions you must learn today, and whether they earn it</h2>
+$ lf task status INF-123
+  Workflow feature: stopped on pursue (design → demo)
+
+$ lf flow list --sessions --for-task INF-123
+5ca5fe9f-…  Completed  task-design
+85e18f7f-…  Stopped    pursue
+b707a4eb-…  Stopped    pursue
+dea8caec-…  Stopped    pursue</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/76f176facd0b73dbd2757f574a80457aef3378e7/rust/loopflow/src/lf/commands/flow.rs#L101-L162"><code>rust/loopflow/src/lf/commands/flow.rs</code></a> · <code>TASK_RUN_ATTEMPTS, run_for_task</code> · 76f176fac · lines 101–162</figcaption><pre><code>/// How many times one `lf task run` starts its Flow before giving up.
+const TASK_RUN_ATTEMPTS: u32 = 3;
+
+/// Carry one Task run: start `flow` as the plain `lf --task ISSUE run FLOW`
+/// child, and again while a Flow exec fails. Each attempt is its own FlowExec
+/// beneath this process. A Flow held for a person or a watcher, an interrupted
+/// one, and a launch refused before any Flow started are returned as they
+/// ended.
+pub fn run_for_task(cli: &amp;Cli, issue: &amp;str, flow: &amp;str) -&gt; Result&lt;()&gt; {
+    let mut args = cli.step_args();
+    if !cli.batch {
+        args.retain(|arg| arg != &quot;--batch&quot;);
+    }
+    if let Some(wave) = &amp;cli.wave {
+        args.extend([&quot;--wave&quot;.to_owned(), wave.clone()]);
+    }
+    args.extend([&quot;--task&quot;, issue, &quot;run&quot;, flow].map(str::to_owned));
+    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
+    let store = block_on(open_flow_store())?;
+    let store = &amp;store.sqlite;
+    let exec = journal::current_exec_id().context(&quot;a Task run requires a registered Exec&quot;)?;
+    // An interrupted Task run takes its running attempt with it.
+    static ATTEMPT_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    crate::engine::agent::register_interrupt_cleanup(|| {
+        let pid = ATTEMPT_PID.load(std::sync::atomic::Ordering::Acquire);
+        if pid != 0 {
+            crate::engine::platform::kill_process(pid);
+        }
+    });
+    let mut attempt = 1;
+    loop {
+        let mark = store.exec_mark()?;
+        let mut child = std::process::Command::new(&amp;lf)
+            .args(&amp;args)
+            .spawn()
+            .context(&quot;could not start the Task&#x27;s Flow&quot;)?;
+        ATTEMPT_PID.store(child.id(), std::sync::atomic::Ordering::Release);
+        let status = child.wait();
+        ATTEMPT_PID.store(0, std::sync::atomic::Ordering::Release);
+        let status = status.context(&quot;could not wait for the Task&#x27;s Flow&quot;)?;
+        if status.success() {
+            return Ok(());
+        }
+        // Only a Flow exec that failed is started again.
+        let failed = status.code() == Some(1)
+            &amp;&amp; store
+                .child_exec_after(&amp;exec, mark)?
+                .is_some_and(|child| matches!(store.flow_exec(child.as_str()), Ok(Some(_))));
+        if !failed || attempt == TASK_RUN_ATTEMPTS {
+            if failed {
+                eprintln!(&quot;Flow {flow} failed {attempt} times; this Task run stops here.&quot;);
+            }
+            let code = status.code().and_then(|code| u8::try_from(code).ok());
+            return Err(crate::exec::CommandExit(code.unwrap_or(130)).into());
+        }
+        eprintln!(
+            &quot;Flow {flow} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again.&quot;
+        );
+        attempt += 1;
+    }
+}
+</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/76f176facd0b73dbd2757f574a80457aef3378e7/rust/loopflow/src/store/sqlite/task_work.rs#L226-L248"><code>rust/loopflow/src/store/sqlite/task_work.rs</code></a> · <code>arrive_in — only the carrier arrives</code> · 76f176fac · lines 226–248</figcaption><pre><code>fn arrive_in(tx: &amp;rusqlite::Transaction&lt;&#x27;_&gt;, task: &amp;TaskId, by: &amp;ExecId) -&gt; StoreResult&lt;()&gt; {
+    let Some((definition, _, Some((edge, carrier)))) = workflow_row(tx, task)? else {
+        return Ok(());
+    };
+    if &amp;carrier.id != by {
+        return Ok(());
+    }
+    let arrived = &amp;definition.edges[edge as usize];
+    tx.execute(
+        &quot;UPDATE task_workflows SET node=?2,edge=NULL,exec_id=NULL,updated_at=?3 WHERE task_id=?1&quot;,
+        rusqlite::params![task.as_str(), arrived.to, crate::store::rows::now_unix()],
+    )?;
+    append_workflow_move(
+        tx,
+        task,
+        &amp;definition.name,
+        WorkflowMoveKind::Arrived,
+        (&amp;arrived.from, &amp;arrived.to),
+        Some(edge),
+        Some(by),
+        None,
+    )
+}</code></pre></figure>
+<div class="note"><b>Fits the decisions.</b> Jack: “lf task run should … also have some amount of retry”; “run is one conceptual attempt, exec is one lf invocation”. The count of three, retrying with no pause, and not retrying a Flow that ended blocked or was interrupted are the agent's.</div>
+<div class="note"><b>Changed from the last review.</b> A stopped edge now holds the Task on the edge. Before, a failure returned it silently to its node.</div>
+
+<h2 id="move">3 · Setting a node, and the history</h2>
+<figure class="term"><figcaption>Captured October 6 · branch build of <code>76f176fac</code> plus scratch notes · private Home, fixture Task whose Project's workflow is <code>feature</code>; its Flows are provider-free stand-ins · agent run, output trimmed · history rows reformatted from JSON</figcaption><pre><code>$ lf task move INF-123 demo --reason &quot;published by hand&quot;
+Task INF-123 is at demo of workflow feature
+
+$ lf task status INF-123 --json     # execution.work.workflow.history, last entries
+  chose    start  → design   edge 0   person
+  arrived  start  → design   edge 0   edge
+  chose    design → demo     edge 2   person
+  set      design → demo     edge 2   person   &quot;published by hand&quot;</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/76f176facd0b73dbd2757f574a80457aef3378e7/rust/loopflow/src/store/sqlite/task_work.rs#L250-L275"><code>rust/loopflow/src/store/sqlite/task_work.rs</code></a> · <code>set_node_in</code> · 76f176fac · lines 250–275</figcaption><pre><code>fn set_node_in(
+    tx: &amp;rusqlite::Transaction&lt;&#x27;_&gt;,
+    task: &amp;TaskId,
+    node: &amp;str,
+    by: Option&lt;&amp;ExecId&gt;,
+    note: Option&lt;&amp;str&gt;,
+) -&gt; StoreResult&lt;bool&gt; {
+    let Some((definition, from, edge)) = workflow_row(tx, task)? else {
+        return Ok(false);
+    };
+    tx.execute(
+        &quot;UPDATE task_workflows SET node=?2,edge=NULL,exec_id=NULL,updated_at=?3 WHERE task_id=?1&quot;,
+        rusqlite::params![task.as_str(), node, crate::store::rows::now_unix()],
+    )?;
+    append_workflow_move(
+        tx,
+        task,
+        &amp;definition.name,
+        WorkflowMoveKind::Set,
+        (&amp;from, node),
+        edge.map(|(edge, _)| edge),
+        by,
+        note,
+    )?;
+    Ok(true)
+}</code></pre></figure>
+<div class="note"><b>Unguarded on purpose.</b> <code>lf task move</code> accepts any node from a node or from an edge, and stops nothing that is running. It is the correction tool for hand work and late merges. Desktop shows the position but not this history.</div>
+
+<h2 id="state">4 · A Task's state</h2>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/76f176facd0b73dbd2757f574a80457aef3378e7/rust/loopflow/src/store/sqlite/durable.rs#L568-L582"><code>rust/loopflow/src/store/sqlite/durable.rs</code></a> · <code>task_state_sql, task_open_sql</code> · 76f176fac · lines 568–582</figcaption><pre><code>/// SQL for the state of Task row `t`, read from its Workflow position.
+pub(crate) fn task_state_sql(t: &amp;str) -&gt; String {
+    format!(
+        &quot;CASE WHEN {t}.abandoned_at IS NOT NULL THEN &#x27;abandoned&#x27; ELSE COALESCE((
+            SELECT CASE WHEN wf.edge IS NOT NULL THEN &#x27;active&#x27; WHEN wf.node=&#x27;start&#x27; THEN &#x27;ready&#x27;
+                WHEN wf.node=&#x27;end&#x27; THEN &#x27;done&#x27; ELSE &#x27;active&#x27; END
+            FROM task_workflows wf WHERE wf.task_id={t}.id),&#x27;not_ready&#x27;) END&quot;
+    )
+}
+
+/// SQL: Task row `t` is neither done nor abandoned.
+pub(crate) fn task_open_sql(t: &amp;str) -&gt; String {
+    format!(&quot;({}) NOT IN (&#x27;done&#x27;,&#x27;abandoned&#x27;)&quot;, task_state_sql(t))
+}
+</code></pre></figure>
+<figure class="term"><figcaption>Captured October 6 · branch build of <code>76f176fac</code> plus scratch notes · private Home, fixture Task whose Project's workflow is <code>feature</code>; its Flows are provider-free stand-ins · agent run, output trimmed</figcaption><pre><code>$ lf task move INF-123 end
+Error: Task worktree has uncommitted changes; publish or explicitly abandon them first
+
+$ lf task complete INF-123
+error: unrecognized subcommand &#x27;complete&#x27;</code></pre></figure>
+<div class="note"><b>Fits the decisions.</b> Jack: “no separate Task is ready state; that is derived from where it is in the graph”; “active”; “abandoned/deleted bool should still stay”. <code>tasks.work_state</code> is dropped by the draft migration. When Linear calls an active Task complete, <code>end</code> is refused without <code>--force</code>, which Jack preferred to a separate clear command.</div>
+<div class="note"><b>Existing Tasks.</b> On an existing Home every done Task is placed at the end of an empty graph named <code>unplanned</code>. Every started, unfinished Task has no Workflow and reads <code>not ready</code> until its next <code>lf task run</code>. Jack allowed either treatment; this is the agent's pick.</div>
+
+<h2 id="desktop">5 · Desktop</h2>
+<p>Built and covered by 43 headless tests; not seen on a screen. The Task page draws the graph above with the position marked, the edges out of the current node as buttons and <b>Move to</b> as a menu, beside a log of every Flow exec whether or not an edge started it. Jack: “it is *NOT* a workflow log.” The page is fed only by the <code>task</code> part of LOO-382's workspace stream, which now carries the Task's work and each Flow exec's steps; after a button runs <code>lf task run</code> or <code>lf task move</code>, Desktop asks the stream to refresh and ignores older frames.</p>
+<div class="note"><b>To look at when you run it.</b> Edge label widths are estimated from character counts. A node's one-line description falls back to its skill's first line of prose. A single headless skill with no Flow is not in the log.</div>
+
+<h2 id="broken">Known broken at this head</h2>
 <ul>
-<li><b>Three spellings, two meanings.</b> <code>lf task run X pursue</code> moves the Workflow. <code>lf --task X run pursue</code> and <code>lf run pursue</code> in the worktree run the same Flow and do not. The difference is real (ad hoc work should not move the Task) but nothing in the words says which is which.</li>
-<li><b>A way out is named by the Flow it runs.</b> At <code>demo</code> you say <code>pursue</code> to mean “send it back” and <code>ship</code> to mean “land it”. Two ways out of one stage cannot run the same Flow. <code>end</code> is a special word for the one edge that runs nothing. Naming edges for the decision (<code>revise</code>, <code>land</code>) would read as the choice you are making.</li>
-<li><b>“Workflow” and “Flow” share a catalog and a namespace.</b> <code>lf flow list</code> shows both; <code>feature</code> is a workflow definition and <code>lf run feature</code> fails; a repository file <code>.lf/flows/feature.yaml</code> hides the builtin definition.</li>
-<li><b>Three kinds of “done”.</b> The Workflow is at <code>end</code>, the Task is still <code>ready</code>, and a “PR 1: working” slot remains. Deferred to LOO-385.</li>
-<li><b>Waiting does not cover your primary conversation.</b> Deferred to LOO-384.</li>
-<li><b>Four process words.</b> Exec, Flow run (FlowExec), Session and Run all appear in status. You need two: the Flow run and the conversation.</li>
+<li><b>A Workflow with no landing edge cannot end.</b> <code>flow_tests the_research_workflow_ends_on_its_edge_that_runs_nothing</code> fails: reaching <code>end</code> is now completion, and completion refuses uncommitted changes, as the transcript in stop 4 shows.</li>
+<li><b><code>land_tests lf_pr_land_returns_before_later_checks_repair_and_observe_merge</code></b> fails; cause not yet identified.</li>
+<li><b><code>pr_tests repeated_status_of_merged_task_never_completes_work</code></b> fails; cause not yet identified.</li>
+<li><b>Status headline.</b> After a Task run stops and a node is set, text status heads the Task <code>blocked</code> while JSON says <code>active</code>.</li>
 </ul>
-<p>Jack, October 6: “should we call the inner flows pipelines or something? we dont need to do a whole rename now but worth filing an architectural task to do another round of data model and naming alignment.” Filed as <b>LOO-386</b>, which carries the list above as its questions. Nothing here is renamed in this PR beyond TaskWorkflow → Workflow.
+<p>A repair pass is running on these. The first is being fixed on the agent's default: a Workflow with no landing edge reaches <code>end</code> without PR or clean-worktree refusals and keeps its checkout.</p>
 
-<h2 id="choices">Choices that change what the product is</h2>
-<ol>
-<li><b>Does a stopped edge hold the Task on the edge, or return it to the stage?</b> The pass is building “holds, shown as stopped”, so retry and go-back are both visible. Returning is simpler and is what is built.</li>
-<li><b>Who tells the conversation an edge finished?</b> Today only its own background tool, or reading status. A Desktop button's edge finishes unnoticed by the conversation. The alternatives are Desktop speaking into your session, which you ruled out, or the conversation being the only thing that ever starts an edge.</li>
-<li><b>Buttons, the conversation, or both?</b> Both call the same two commands, so this can stay open. It decides whether Desktop must manage background processes at all.</li>
-<li><b>Are ways out named for the decision or the Flow?</b> See friction above. Not in the pass.</li>
-<li><b>One verb or two?</b> Choosing-and-running is <code>lf task run</code>, confirmed by Jack. Setting a stage needs a name; the pass is using <code>lf task move</code>.</li>
-</ol>
-<h3>What would invalidate the proposal</h3>
-<p>A stored position that disagrees with the world: the Workflow says “on revise” while no process exists. The rule that covers it is that running or stopped is never stored, only read from the process, and anyone may then choose or set. If a case appears where the stored stage itself must be recomputed from evidence, derived position was right and this should be reversed.</p>
-<h3>Next proof</h3>
-<p>In a private Home: a stopped edge shown as stopped, then retried, then abandoned with a set; a late landing corrected with a set; two ways out that run the same Flow chosen by name; the same JSON decoded by Desktop's fixture test.</p>
+<h2 id="proof">Proof and limits</h2>
+<details open><summary>Checks</summary>
+<p><b>Run for this page at <code>76f176fac</code>, inherited <code>LF_*</code> cleared:</b> passing whole — <code>task_flow_launch_tests</code> 13, <code>session_lifecycle_tests</code> 18, <code>session_cli_tests</code> 11, <code>dto_fixtures</code> 20, <code>cli_discovery</code> 18; with one failure each — <code>flow_tests</code> 26 of 27, <code>land_tests</code> 24 of 25, <code>pr_tests</code> 30 of 31. Clippy on all targets, format and the architecture check clean. 43 headless Desktop tests pass. The transcripts above. The library suite was not rerun at this head.</p>
+<p><b>PR CI:</b> not rechecked for this head.</p>
+<p><b>Unverified:</b> any real provider step, including a deciding step answering without structured output; Desktop on screen; the migration on a populated Home; a real Linear completion against an active Task; the stream under a real window.</p></details>
+<details><summary>Choices not yet reviewed by Jack</summary><p><code>scratch/questions.md</code> has one section per slice. Most likely to matter that are not above: a Project that names a plain Flow refuses a bare <code>lf task run</code>; an empty unpublished PR is retired at <code>end</code>; a reopened Task has no active PR and cannot run; if Linear's GitHub integration completes an issue before <code>lf</code> settles the landing, the Task stays active and flagged until forced.</p></details>
 </main></body></html>

@@ -208,28 +208,67 @@ Linear completion against an active Task.
       screen following a Flow started in a terminal; a Session turning
       Waiting after two quiet minutes.
 
-Every slice in this list is done. What is left is review and the demo items.
+13. **Repair three failing tests** is **done**, `29b586dba`. Found October 6
+    by rerunning whole suites at `76f176fac`; each slice had run only its
+    focused tests. An edge that runs nothing now ends the Task over
+    uncommitted changes and keeps the checkout (a Flow leaves `.gitignore`
+    uncommitted); PR refusals are unchanged. The other two were stale tests:
+    exit 3 from a Flow stopped at a watched landing (slice 9a) and the
+    dropped `tasks.work_state` (slice 10a, also in `exec_ownership_tests`).
+    Check, October 6: `cargo test -p loopflow --no-fail-fast --test
+    flow_tests --test land_tests --test pr_tests --test
+    task_flow_launch_tests --test session_lifecycle_tests --test
+    session_cli_tests --test dto_fixtures --test cli_discovery --test
+    exec_ownership_tests` 173 passed, 0 failed; Clippy and format clean.
+    Choices: [questions.md](questions.md).
 
-13. **Repair three failing tests.** Found October 6 by rerunning whole suites
-    at `76f176fac`; each slice had run only its focused tests.
-    - `flow_tests the_research_workflow_ends_on_its_edge_that_runs_nothing`:
-      `lf task run INF-123 end` now answers "Task worktree has uncommitted
-      changes; publish or explicitly abandon them first". Slice 10a made
-      reaching `end` completion, so a Workflow with no landing edge cannot
-      end once its Flow has written anything. Agent's default, for Jack's
-      review: a Workflow with no edge that lands reaches `end` without PR or
-      clean-worktree refusals and keeps its checkout, so nothing is lost.
-    - `land_tests lf_pr_land_returns_before_later_checks_repair_and_observe_merge`
-      and `pr_tests repeated_status_of_merged_task_never_completes_work`:
-      find which slice broke each. Fix the code where the test states
-      behavior Jack still wants (a status read never moves a Workflow; a
-      landing returns before later checks). Change the test only where
-      slice 10a's rule (reaching `end` is completion) replaces what it
-      asserted, and record that in questions.md.
-    Done when `cargo test -p loopflow --no-fail-fast --test flow_tests --test
-    land_tests --test pr_tests --test task_flow_launch_tests --test
-    session_lifecycle_tests --test session_cli_tests --test dto_fixtures
-    --test cli_discovery` passes whole, with Clippy clean. *Not done.*
+14. **Task view: the Workflow in the header, a multiplexer below.** Jack
+    Heart, October 6, looking at the dev app at `4f2860658` (INF-123 at
+    `demo`, three stopped `pursue` execs). His words, in order:
+    - on the Task sheet: "this is kinda yucky";
+    - on the workspace's Sessions sidebar: "dont need hte Sessions chrome
+      after we have the main Task Session"; "thers just your Session and then
+      you have your shells";
+    - "and i want the graph in the header o this main view";
+    - the Flow exec log: "should eventually go into this header, but that one
+      i feel like should probably start hidden. put it behind a button in the
+      header chrome"; then "maybe the runlog is more of a multiplexer entry
+      than part of the header";
+    - the worktree file browser: "i would like to add that as well";
+      "another thing we need a button for in the chrome is the file viewer";
+      "yes, its also a multiplexer plane";
+    - summing up: "the workflow grpah is aprt of the header, and tehn a bunch
+      of chrome for changing whats in the multipleer";
+    - on the toolbar's Monitor button and its pane ("No active Sessions in
+      this observation"): "this monitor button seems like its an older
+      attempt at the runlog?" It is: the Flow exec log pane replaces Monitor;
+    - on the sidebar toggle: "session hider goes away. merge the + button
+      with the file and then whatever for run log": one **+** menu adds a
+      shell, the file viewer or the Flow exec log; no separate file, Monitor
+      or sidebar buttons;
+    - on the toolbar's Flow chip ("task wait NOPE-1 --timeout 1"): "this is
+      replaced with the much bigger flow graph";
+    - on the worktree chip reading `.tmp5q776G`: "this .tmp is weird ?" It is
+      the checkout's directory name, odd only because the fixture lives in a
+      temporary directory; no change.
+    **Build.** The Task workspace header holds the Workflow graph, scaled to
+    fit, current node or running edge marked, the edges out of the current
+    node as buttons on it and **Move to** beside them; then one **+** menu
+    that changes what the multiplexer shows. The multiplexer holds the Task's one
+    Session (opening a Task calls `lf session ensure --task`), shells, the
+    Flow exec log as a pane (hidden until opened; one line per exec: Flow,
+    state, when, how long; id in the opened row) and the file browser. No
+    Sessions list.
+    **Remove,** as seen in his screenshot (agent's reading): the half-width
+    clipped graph panel; "Waiting on you at demo · demo"; UUIDs wrapping in
+    rows headed "Flow runs"; the old Flow card ("feature ▾ Latest: pursue",
+    "Start → pursue → End End", Start); the failure shown twice; the "Work"
+    list of raw Execs (to Debug); Desktop reads that write Execs (`lf flow
+    list --json`, a failing `lf task comment`).
+    **Proof.** Render the workspace header and an opened exec-log pane to a
+    PNG from the shared fixture in a headless test (the capture hook in
+    `TaskFlowProofTests`), look at the image and fix what it shows; commit
+    no image. *Not done.*
 
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task
@@ -261,7 +300,3 @@ Clear inherited `LF_*`/`LOOPFLOW_*` before Rust tests. Gate owns the full run.
 Configured demo, still separate: in a private Home, `lf -b task run INF-123
 proof` prints and blocks; `lf monitor` and `lf flow show ID --sessions` show a
 looping Flow's driver, step and iteration; a real provider step; Desktop.
-
-October 6 sync onto main `5c0ca983a`: `cargo test -p loopflow --test session_lifecycle_tests` — 17 passed, 1 installation-only ignored; Session identity, caller provenance and historical-Exec acceptance reconciled with FlowExec.
-
-October 6 sync onto `c787c7530`: Task association tests 3 passed; Swift `TaskHistoryFilterTests|RegistryQueryTests` 23 passed. Reconciled workspace observation with FlowExec and Workflow; migration revision coverage, format and Clippy passed.

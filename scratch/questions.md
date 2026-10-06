@@ -121,15 +121,10 @@ only control is ending the driver process.
 13. On keeping this PR to the inner record and leaving the outer one as the
     next Task: "Yeah i think so." On the name: "FlowExec works fine".
 
-Where the outer model already appears (searched October 5): the September 30
-design (`bc78c27c0:scratch/growth-thoughts.md`: "interactive skills are
-nodes; background Flows are the edges"), the October 4 kickoff
-(`5090f672e:scratch/focus-on-your-own-work.md`), and open Tasks LOO-317 (Mac
-shows a flow as only the steps that need you), LOO-297 (design or prototype
-review paths), LOO-322 (reach demo and landing unattended) and LOO-367. No
-Task owns TaskWorkflow. Conflict to resolve there: the September 30 design
-and LOO-367 both record Jack saying there is no separate "Task workflow"
-concept.
+Where the outer model already appeared, and its conflict with LOO-367 (Jack
+saying there is no separate "Task workflow" concept), is at
+`29b586dba:scratch/questions.md` under this heading. No Task owned
+TaskWorkflow before this one.
 
 Resolution, centered on that table (the names TaskWorkflow, from Jack, and
 FlowExec, the agent's, postdate it): the outer thing is TaskWorkflow and
@@ -215,30 +210,29 @@ nodes sit on one row and extra edges take lanes below it; each choosable
 edge's label is its button and **Move to** stays a menu; a single headless
 skill Run with no Flow is not in the Flow run log.
 
+## Choices the test repair pass made without Jack
+
+The agent's, October 6, slice 13. None is confirmed by Jack Heart.
+
+- **An edge that runs nothing keeps the checkout.** `lf task run ISSUE end`
+  on such an edge skips the clean-worktree refusal and the checkout cleanup,
+  and says the checkout was retained. `lf task move ISSUE end` and an edge
+  whose Flow lands still refuse uncommitted changes. The rule follows the
+  edge taken, not the whole definition: a workflow with both a landing edge
+  and an empty edge into `end` gets it on the empty one.
+- **PR refusals stay.** The plan's default also waived them; this pass did
+  not. A no-PR Task whose Flow committed must publish or `lf pr abandon`
+  before `end`. Left with 0-PR completion to LOO-385.
+- **Tests changed, not code,** for the other two; the plan names them.
+
 ## Choices the stream alignment pass made without Jack
 
-The agent's, October 6, slice 12. None is confirmed by Jack Heart.
-
-- **Flow runs ride in the `task` part** as `flow_runs`, one
-  `lf flow show --sessions` body per Flow in `work.flows`, read again
-  whenever the part is. Every run of the shown Task is read, opened or not.
-- **Which readings count.** A replaced `session_activity` row moves
-  `sessions` when its driver, question state, open-tool state or hand-back
-  changes, or when it arrives 120 seconds or more after the last one with
-  no tool open. The 120 is written in the trigger and in
-  `WAITING_QUIET_SECONDS`; changing one means changing both.
-- **Quiet.** The reader asks the store for the earliest moment a Session
-  becomes Waiting by quiet and reads Sessions again then. A Session still
-  streaming makes that reading find nothing new, at most once per Session
-  every two minutes.
-- **Without a reader the Task page shows no work.** The one-shot
-  `lf task status` and `lf flow show` reads are deleted from Desktop; only
-  tests run without a reader.
-- **Definitions are files,** so no revision follows them. The window re-reads
-  the catalogue it already shows when the app becomes active; opening the
-  workflow picker no longer re-reads. A `definitions` part in the stream
-  would remove this last read.
-- **Refresh and Retry** on the Task page ask the reader again.
+The agent's, October 6, slice 12; none is confirmed by Jack Heart. The list
+is at `4f2860658:scratch/questions.md` under this heading. Most likely to
+matter: Flow runs ride in the `task` part, read whenever it is; the 120
+seconds of quiet is written in both the trigger and `WAITING_QUIET_SECONDS`;
+without a reader the Task page shows no work; definitions are files, so the
+window re-reads the catalogue when the app becomes active.
 
 ## Choices the Workflow live-state pass made without Jack
 

@@ -60,4 +60,6 @@ on a populated Home; the September 30 workspace proof items.
 
 ## Jack's review
 
-Not yet recorded.
+October 6, Desktop Task page (dev app at `4f2860658`, private Home): "this is
+kinda yucky". What his screenshot shows, and the rebuild, are slice 14 in
+[the design](focus-on-your-own-work.md). The command line was not reviewed.

@@ -21,24 +21,7 @@ final class PaneHover {
 @MainActor
 @Observable
 final class SessionsWorkspace {
-    private var filesExpanded = false
-    // Focus hides files without changing the retained layout preference.
-    var showsFiles: Bool {
-        get { filesExpanded && multiplexer.zoomedPaneId == nil }
-        set { filesExpanded = newValue }
-    }
-    var fileWidth: CGFloat = 700
     var showsDetails = false
-    private var materialsPreference: Bool?
-    var showsMaterials: Bool {
-        get { materialsPreference ?? true }
-        set { materialsPreference = newValue }
-    }
-
-    func initializeMaterials(sessionCount: Int) {
-        guard materialsPreference == nil, sessionCount > 0 else { return }
-        materialsPreference = sessionCount > 1
-    }
 
     func toggleFocus(_ paneId: String) {
         Perf.begin(Perf.retainedWorkspaceAction, multiplexer.zoomedPaneId == nil ? "focus" : "restore", id: "workspace")
@@ -184,7 +167,7 @@ final class SessionsStore: ObservableObject {
     let surfaces: GhosttySurfacePool
 
     let repoPath: String
-    private let query: RegistryQuery
+    let query: RegistryQuery
     private let metrics: SessionsLatencyMetrics
     private var hasRecordedSessionsLoad = false
 
@@ -398,7 +381,6 @@ struct SessionsContentView: View {
         return taskIdentity ?? worktreeLayout.focusedPath ?? rootIdentity
     }
     private var workspace: SessionsWorkspace { workspaces.workspace(for: currentIdentity) }
-    private var showsFiles: Bool { workspace.showsFiles }
     @Bindable var model: PodiumModel
     private let workspaces: SessionsWorkspaceRegistry
     private let query: RegistryQuery
@@ -407,6 +389,8 @@ struct SessionsContentView: View {
     @State private var layoutRevision = 0
     @State private var restorePaletteFocus = true
     @State private var launchError: String?
+    /// Tasks this window already asked `lf session ensure --task` about.
+    @State private var ensuredTasks: Set<String> = []
     @State private var launchErrorTitle = "Could not start conversation"
     @Environment(\.palette) private var palette
 
@@ -473,19 +457,10 @@ struct SessionsContentView: View {
                         WorkspaceBreadcrumbBar(
                             model: model,
                             crumb: model.breadcrumb,
-                            onOpenSession: openSession, onMonitor: showMonitor,
+                            onOpenSession: openSession,
                             onTaskDetails: { workspace.showsDetails = true }
                         ) {
-                            if taskPath != nil && !navigation.showsRetainedTerminals {
-                                taskStage
-                                WorkspaceGlyphButton("sidebar.left",
-                                    label: workspace.showsMaterials ? "Hide Sessions" : "Show Sessions",
-                                    identifier: "workspace-toggle-materials") { workspace.showsMaterials.toggle() }
-                                workspaceCreation
-                                WorkspaceGlyphButton("doc",
-                                    label: showsFiles ? "Hide Files" : "Show Files",
-                                    identifier: "workspace-toggle-files") { workspace.showsFiles.toggle() }
-                            }
+                            if taskPath != nil && !navigation.showsRetainedTerminals { workspaceCreation }
                             if terminalsVisible {
                                 if usesWorktreeLayout { worktreeChip }
                                 else if let taskPath {
@@ -502,15 +477,17 @@ struct SessionsContentView: View {
                                 }
                             }
                         }
+                        if terminalsVisible, !navigation.showsRetainedTerminals, let task = fileTask,
+                           let wave = model.task(id: task.task.id)?.wave.wave {
+                            TaskWorkflowHeader(model: model, task: task.task, wave: wave)
+                            if taskPath != nil { missingCheckout }
+                        }
                         ZStack {
                             Group {
                                 if let taskPath, !navigation.showsRetainedTerminals {
-                                    HStack(spacing: 0) {
-                                        if workspace.showsMaterials && multiplexer.zoomedPaneId == nil { taskMaterials }
-                                        WorktreeTerminalsView(workspace: workspace,
-                                            path: taskPath, isFocused: terminalsVisible, sessions: store)
-                                            .id(taskIdentity)
-                                    }
+                                    WorktreeTerminalsView(workspace: workspace,
+                                        path: taskPath, isFocused: terminalsVisible, sessions: store)
+                                        .id(taskIdentity)
                                 } else if fileTask != nil && !navigation.showsRetainedTerminals {
                                     VStack(spacing: Spacing.md) {
                                         if let task = fileTask { Text(task.task.task.description) }
@@ -532,16 +509,9 @@ struct SessionsContentView: View {
                             .accessibilityHidden(!terminalsVisible)
                             VStack(spacing: 0) {
                                 HSplitView {
-                                    ScrollViewReader { reader in
-                                        WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask,
-                                                        onNewSession: newTaskSession)
-                                            .onChange(of: navigation.content == .details
-                                                ? navigation.flowDrafts[model.selection?.id ?? ""]?.selectedNode : nil,
-                                                      initial: true) { _, selected in
-                                                if selected != nil { reader.scrollTo("task-flow-anchor", anchor: .top) }
-                                            }
-                                    }
-                                    .frame(minWidth: 300, maxWidth: .infinity)
+                                    WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask,
+                                                    onNewSession: newTaskSession)
+                                        .frame(minWidth: 300, maxWidth: .infinity)
                                     if navigation.showsActivity {
                                         WorkActivityView(model: model)
                                             .frame(minWidth: 230, idealWidth: 280, maxWidth: 360)
@@ -555,19 +525,6 @@ struct SessionsContentView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .clipped()
-                    }
-                    if showsFiles, !navigation.showsRetainedTerminals, let taskId = fileTaskId, let taskPath {
-                        TaskFilesView(
-                            store: workspace.files(
-                                taskId: taskId, issue: taskId, cwd: taskPath, query: query),
-                            prURL: fileTask?.task.activePr?.publication?.github?.url,
-                            prBase: fileTask?.task.activePr?.baseCommit
-                        )
-                        .id(taskIdentity)
-                        .frame(minWidth: 480, idealWidth: workspace.fileWidth)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
-                            if width > 0, multiplexer.zoomedPaneId == nil { workspace.fileWidth = width }
-                        }
                     }
                 }
             }
@@ -666,125 +623,43 @@ struct SessionsContentView: View {
         .accessibilityIdentifier("sessions-surface")
     }
 
-    @ViewBuilder
-    private var taskStage: some View {
-        if let task = fileTask, case .latest(let latest) = task.task.flow.record,
-           let current = latest.current, let node = latest.graph.node(current) {
-            Button { workspace.showsDetails = true } label: {
-                Label(node.label, systemImage: node.human ? "bubble.left" : "arrow.triangle.branch")
-                    .font(Typography.meta).lineLimit(1)
-            }
-            .buttonStyle(.plain).help(latest.reason)
-            .accessibilityIdentifier("workspace-current-stage")
-        }
-    }
-
+    /// One menu changes what the multiplexer shows: a shell, the Task's files
+    /// or its Flow exec log.
     private var workspaceCreation: some View {
         Menu {
-            Button("New conversation", systemImage: "bubble.left") { prepareTaskWorkspace(conversation: true) }
             Button("New shell", systemImage: "terminal") { multiplexer.newShell() }
                 .disabled(taskIdentity?.homeId != homeId)
+                .accessibilityIdentifier("workspace-add-shell")
+            if let task = fileTask?.task.id {
+                Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task)) }
+                    .accessibilityIdentifier("workspace-add-files")
+                Button("Flow execs", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task)) }
+                    .accessibilityIdentifier("workspace-add-flow-log")
+            }
         } label: { Image(systemName: "plus") }
         .menuStyle(.borderlessButton).fixedSize()
-        .help("New conversation or shell")
-        .accessibilityLabel("New conversation or shell")
+        .help("Add a shell, files or the Flow exec log")
+        .accessibilityLabel("Add a shell, files or the Flow exec log")
         .accessibilityIdentifier("workspace-create")
     }
 
-    private var visibleSessionItems: [SessionItem] {
-        let ids = Set(model.visibleSessions.map(\.id))
-        return store.sessions.filter { ids.contains($0.id) }
-    }
-
-    private var taskMaterials: some View {
-        // Read once: asking per Session rebuilds the workspace for each row.
-        let taskIdentity = taskIdentity
-        return VStack(alignment: .leading, spacing: 12) {
-            Text("Sessions").font(Typography.meta.weight(.semibold))
-                .foregroundStyle(palette.textSecondary)
-                .padding(.horizontal, 8)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(visibleSessionItems.filter { $0.record.primaryScope == nil && $0.record.workspace?.identity == taskIdentity }) { item in
-                        HStack(alignment: .top, spacing: 6) {
-                            Button {
-                                if NSEvent.modifierFlags.contains(.command) { toggleSessionVisibility(item.record) }
-                                else if NSEvent.modifierFlags.contains(.option) { openSession(item.record, alongside: true) }
-                                else { openSession(item.record) }
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.record.title).font(Typography.body(13)).lineLimit(2)
-                                    Text(item.error == nil ? item.record.statusLabel : "Needs recovery")
-                                        .font(Typography.meta).foregroundStyle(palette.textSecondary)
-                                    if let reason = item.record.workspace?.unavailable {
-                                        Text(reason).font(Typography.meta).foregroundStyle(Color.statusWarning)
-                                    }
-                                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                            }.buttonStyle(.plain)
-                                .help("Click to open; ⌘-click to show or hide alongside")
-                            Menu {
-                                if let pane = sessionPane(item.record) {
-                                    if !multiplexer.collapsedPaneIds.contains(pane.id) {
-                                        Button("Hide pane") { workspace.setCollapsed(paneId: pane.id, collapsed: true) }
-                                        Button("Focus") { workspace.toggleFocus(pane.id) }
-                                    } else {
-                                        Button("Open alongside") { openSession(item.record, alongside: true) }
-                                    }
-                                } else { Button("Open alongside") { openSession(item.record, alongside: true) } }
-                            } label: { Image(systemName: "ellipsis") }
-                            .menuStyle(.borderlessButton).fixedSize().help("Conversation actions")
-                            .accessibilityLabel("Actions for \(item.record.title)")
-                        }
-                        .padding(8)
-                        .background(sessionIsVisible(item.record) ? palette.surfaceMuted : Color.clear,
-                                    in: RoundedRectangle(cornerRadius: 6))
-                        .overlay(alignment: .leading) {
-                            if navigation.selectedSessionId == item.id {
-                                RoundedRectangle(cornerRadius: 2).fill(palette.accent).frame(width: 3).padding(.vertical, 6)
-                            }
-                        }
-                        .accessibilityIdentifier("workspace-material-\(item.id)")
-                    }
-                    ForEach(multiplexer.layout.allPanes.filter { $0.content == .shell }) { pane in
-                        HStack {
-                            Button {
-                                workspace.setCollapsed(paneId: pane.id, collapsed: false)
-                                multiplexer.setFocusedPane(pane.id)
-                            } label: {
-                                Label("Shell", systemImage: "terminal")
-                                    .font(Typography.body(13)).frame(maxWidth: .infinity, alignment: .leading)
-                            }.buttonStyle(.plain)
-                            Menu {
-                                Button(multiplexer.collapsedPaneIds.contains(pane.id) ? "Expand" : "Collapse") {
-                                    workspace.setCollapsed(paneId: pane.id, collapsed: !multiplexer.collapsedPaneIds.contains(pane.id))
-                                }
-                                Button("Focus") { workspace.toggleFocus(pane.id) }
-                                Button("Terminate", role: .destructive) {
-                                    store.surfaces.release(.shell(pane.id)); multiplexer.close(pane.id)
-                                }
-                            } label: { Image(systemName: "ellipsis") }
-                            .menuStyle(.borderlessButton).fixedSize().help("Shell actions")
-                            .accessibilityLabel("Shell actions")
-                        }.padding(8)
-                    }
-                }
-            }
-            if fileTask?.task.reference.workspace?.localExists == false,
-               navigation.preparedTaskWorktrees[fileTask?.task.id ?? ""] == nil {
-                Text("Recorded checkout is missing").font(Typography.meta)
-                if let runtime = fileTask?.task.runtime, runtime.status.isTerminal {
-                    Text("This Task is \(runtime.status.label). Checkout restoration is unavailable.")
-                        .font(Typography.meta).foregroundStyle(palette.textSecondary)
-                    Button("View Task details") { workspace.showsDetails = true }
+    @ViewBuilder
+    private var missingCheckout: some View {
+        if let task = fileTask, task.task.reference.workspace?.localExists == false,
+           navigation.preparedTaskWorktrees[task.task.id] == nil {
+            HStack(spacing: Spacing.sm) {
+                if let runtime = task.task.runtime, runtime.status.isTerminal {
+                    Text("Recorded checkout is missing. This Task is \(runtime.status.label); it cannot be restored.")
                 } else {
+                    Text("Recorded checkout is missing")
                     Button("Restore checkout") { prepareTaskWorkspace(conversation: false) }
                 }
+                Spacer()
             }
+            .font(Typography.meta).foregroundStyle(palette.textSecondary)
+            .padding(.horizontal, 14).padding(.vertical, 6)
+            .accessibilityIdentifier("workspace-missing-checkout")
         }
-        .padding(.horizontal, 8).padding(.vertical, 14).frame(width: 224)
-        .background(palette.background)
-        .overlay(alignment: .trailing) { Rectangle().fill(palette.border).frame(width: 1) }
-        .accessibilityIdentifier("workspace-materials")
     }
 
     private func prepareTaskWorkspace(conversation: Bool) {
@@ -799,7 +674,6 @@ struct SessionsContentView: View {
                         try LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
                     }.value
                     navigation.preparedTaskWorktrees[task.task.id] = path
-                    workspace.showsFiles = true
                 }
             } catch {
                 launchErrorTitle = conversation ? "Could not start conversation" : "Could not prepare checkout"
@@ -822,10 +696,6 @@ struct SessionsContentView: View {
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             openSession(record)
         case .flow(let name): navigation.palette = .flow(name)
-        case .chooseFlow(let id):
-            guard let found = model.task(id: id) else { return }
-            model.select(.task(id: id))
-            navigation.flowDrafts[id, default: TaskFlowDraft()].picking = true
         case .rename(let id):
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             openSession(record)
@@ -833,36 +703,14 @@ struct SessionsContentView: View {
         case .bind(let id):
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             model.beginSessionBinding(record)
-        case .monitor(let id): showMonitor(id)
+        case .flowLog(let id):
+            openTask(.task(id: id))
+            multiplexer.show(.flowLog(taskId: id))
         }
         model.remember(destination)
     }
 
     private func openSession(_ record: SessionRecord) {
-        openSession(record, alongside: false)
-    }
-
-    private func sessionPane(_ record: SessionRecord) -> PaneState? {
-        if case .shell(let id) = store.localTerminal(for: record) {
-            return multiplexer.layout.pane(for: id)
-        }
-        return multiplexer.pane(forSessionId: record.id)
-    }
-
-    private func sessionIsVisible(_ record: SessionRecord) -> Bool {
-        guard let pane = sessionPane(record) else { return false }
-        return !multiplexer.collapsedPaneIds.contains(pane.id)
-    }
-
-    private func toggleSessionVisibility(_ record: SessionRecord) {
-        if let pane = sessionPane(record), sessionIsVisible(record) {
-            workspace.setCollapsed(paneId: pane.id, collapsed: true)
-        } else {
-            openSession(record, alongside: true)
-        }
-    }
-
-    private func openSession(_ record: SessionRecord, alongside: Bool) {
         let subject = model.workspace.subject(for: record.id)
         model.select(subject)
         Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id)
@@ -873,21 +721,12 @@ struct SessionsContentView: View {
         if case .shell(let id) = store.localTerminal(for: record),
            let path = workspaces.path(containingShell: id) {
             worktreeLayout.select(path)
-            if alongside, let zoomed = multiplexer.zoomedPaneId { multiplexer.toggleZoom(zoomed) }
             multiplexer.setCollapsed(paneId: id, collapsed: false)
             multiplexer.setFocusedPane(id)
             store.surfaces.focus(.shell(id))
         } else {
             worktreeLayout.select(record.workspace?.identity ?? rootIdentity)
-            if model.sessions.errorMessage == nil {
-                workspace.initializeMaterials(sessionCount: model.visibleSessions.filter {
-                    $0.primaryScope == nil && $0.workspace?.identity == record.workspace?.identity
-                }.count)
-            }
-            if alongside {
-                if let zoomed = multiplexer.zoomedPaneId { multiplexer.toggleZoom(zoomed) }
-                multiplexer.reveal(sessionId: record.id)
-            } else { multiplexer.load(sessionId: record.id) }
+            multiplexer.load(sessionId: record.id)
             store.surfaces.focus(.session(record.id))
         }
         store.beginPaneLoad(record.id)
@@ -900,33 +739,38 @@ struct SessionsContentView: View {
         enterTask(work)
     }
 
+    /// A Task opens on its one Session. The store names the primary once
+    /// `lf session ensure --task` has chosen or started it; until then this
+    /// asks, once per Task in this window.
     private func enterTask(_ work: WorkReference) {
-        guard let identity = taskIdentity else { return }
-        let taskWorkspace = workspaces.workspace(for: identity)
-        let panes = taskWorkspace.multiplexer
-        let sessions = model.visibleSessions.filter { $0.primaryScope == nil && $0.workspace?.identity == identity }
-        if model.sessions.errorMessage == nil { taskWorkspace.initializeMaterials(sessionCount: sessions.count) }
+        guard let identity = taskIdentity, let task = fileTask else { return }
+        let panes = workspaces.workspace(for: identity).multiplexer
         if let session = focusedPaneSessions.first {
             navigation.selectedSessionId = session.id
             return
         }
         guard panes.layout.allPanes.allSatisfy({ $0.content == .empty }) else { return }
-        if let session = TaskSessionGroups(sessions).entry { openSession(session) }
-    }
-
-    private func showMonitor(_ taskId: String) {
-        let workspace = model.task(id: taskId)?.task.reference.workspace
-        let existing = workspaces.paths.first { path in
-            workspaces.workspace(for: path).multiplexer.layout.allPanes.contains {
-                $0.content == .monitor(taskId: taskId)
+        let sessions = model.visibleSessions.filter { $0.primaryScope == nil && $0.workspace?.identity == identity }
+        if let primary = sessions.first(where: { $0.taskPrimary && $0.state != .closed }) {
+            openSession(primary)
+            return
+        }
+        guard identity.homeId == homeId, model.sessions.errorMessage == nil, model.sessions.value != nil,
+              ensuredTasks.insert(task.task.id).inserted else { return }
+        let (taskId, issue, origin) = (task.task.id, task.task.task.identifier, navigation)
+        Task { @MainActor in
+            do {
+                let ensured = try await query.ensureTaskSession(issue: issue, cwd: identity.worktree)
+                origin.taskSessionErrors[taskId] = nil
+                await model.refresh()
+                guard model.selection == work, origin.selectedSessionId == nil,
+                      panes.layout.allPanes.allSatisfy({ $0.content == .empty }),
+                      let record = model.sessions.value?.first(where: { $0.id == ensured.id }) else { return }
+                openSession(record)
+            } catch {
+                origin.taskSessionErrors[taskId] = error.localizedDescription
             }
         }
-        let path = existing ?? workspace?.identity ?? rootIdentity
-        worktreeLayout.select(path)
-        navigation.selectedSessionId = nil
-        navigation.content = .terminals
-        multiplexer.showMonitor(taskId: taskId)
-        model.observeActiveSessions()
     }
 
     private func launchSessionSkill(_ launch: SessionSkillLaunch) {
@@ -1038,14 +882,14 @@ struct SessionsContentView: View {
             return store.sessions.filter { store.localTerminal(for: $0.record) == .shell(pane.id) }
         case .session(let id):
             return store.sessions.filter { $0.id == id }
-        case .empty, .monitor:
+        case .empty, .flowLog, .files:
             return []
         }
     }
 
     private func _destroySurface(in pane: PaneState) {
         switch pane.content {
-        case .empty, .monitor:
+        case .empty, .flowLog, .files:
             return
         case .shell:
             store.surfaces.release(.shell(pane.id))
@@ -1157,9 +1001,10 @@ private struct WorktreeTerminalsView: View {
         )
         } else {
             ContentUnavailableView("Panes collapsed", systemImage: "rectangle.compress.vertical",
-                description: Text("Expand a conversation or shell from the list."))
+                description: Text("Open the Task's Session from the outline, or add a shell."))
         }
         }
+        .environment(workspace)
         .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
             if let source = notification.object as? MultiplexerStore, source === store {
                 revision += 1
@@ -1324,6 +1169,7 @@ private struct SplitDivider: View {
 
 private struct SessionPaneView: View {
     @Environment(PodiumModel.self) private var model
+    @Environment(SessionsWorkspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let pane: PaneState
     let isFocused: Bool
@@ -1464,7 +1310,7 @@ private struct SessionPaneView: View {
         .accessibilityIdentifier(id)
     }
 
-    /// The conversation's shared state, or nothing for a plain shell or Monitor.
+    /// The conversation's shared state, or nothing for a shell, files or the Flow exec log.
     private var stateDot: Color {
         guard let state = paneSessions.first?.record.state else { return TerminalPalette.divider }
         switch state {
@@ -1519,10 +1365,20 @@ private struct SessionPaneView: View {
                 onFocus: focusPane
             )
             .id(pane.id)
-        case .monitor(let taskId):
-            TaskMonitorView(taskId: taskId, model: model)
-                .background(MonitorFocusTarget(isFocused: isFocused))
+        case .flowLog(let taskId):
+            FlowExecLog(model: model, taskId: taskId)
+                .background(PaneFocusTarget(isFocused: isFocused))
                 .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
+        case .files(let taskId):
+            let task = model.task(id: taskId)?.task
+            let key = task?.runtime?.workId ?? task?.task.identifier ?? taskId
+            TaskFilesView(
+                store: workspace.files(taskId: key, issue: key, cwd: workingDirectory, query: sessions.query),
+                prURL: task?.activePr?.publication?.github?.url,
+                prBase: task?.activePr?.baseCommit
+            )
+            .environment(\.colorScheme, .light)
+            .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
         }
     }
 
@@ -1530,7 +1386,7 @@ private struct SessionPaneView: View {
         ContentUnavailableView {
             Label("No session open", systemImage: "terminal")
         } description: {
-            Text("Choose a session from the sidebar or open a shell.")
+            Text("Choose a session from the outline or open a shell.")
         } actions: {
             Button {
                 store.newShell()
@@ -1658,7 +1514,8 @@ private struct SessionPaneView: View {
         case .empty: "Workspace"
         case .session: item?.record.detail ?? "Workspace"
         case .shell: "Shell"
-        case .monitor: "Monitor"
+        case .flowLog: "Flow execs"
+        case .files: "Files"
         }
     }
 
@@ -1668,7 +1525,7 @@ private struct SessionPaneView: View {
             item?.surface.map { .session($0.id) }
         case .shell:
             .shell(pane.id)
-        case .empty, .monitor:
+        case .empty, .flowLog, .files:
             nil
         }
     }
@@ -1711,7 +1568,7 @@ private struct PaneHoverRegion: NSViewRepresentable {
 
 // Giving AppKit an observation responder prevents clearing terminal focus from
 // advancing straight to another visible terminal in the same key-view loop.
-private struct MonitorFocusTarget: NSViewRepresentable {
+private struct PaneFocusTarget: NSViewRepresentable {
     let isFocused: Bool
 
     func makeNSView(context: Context) -> FocusView { FocusView() }

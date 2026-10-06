@@ -1198,9 +1198,10 @@ final class PodiumModel {
     }
 
     /// Launch a fresh Flow for the Task, then refresh the shared reading.
+    /// Without `flow`, Rust takes up the Project's workflow or the only edge.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
-    func startFlow(_ flow: String, task: RoadmapTask, wave: WaveSnapshot) async {
+    func startFlow(_ flow: String?, task: RoadmapTask, wave: WaveSnapshot) async {
         let owner = navigation
         let taskId = task.id
         guard owner.flowDrafts[taskId]?.acting != true else { return }

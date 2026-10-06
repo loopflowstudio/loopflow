@@ -11,11 +11,9 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
     @Bindable var model: PodiumModel
     let crumb: WorkspaceBreadcrumb?
     let onOpenSession: (SessionRecord) -> Void
-    let onMonitor: (String) -> Void
     var onTaskDetails: (() -> Void)? = nil
     @ViewBuilder var trailing: Trailing
     @Environment(\.palette) private var palette
-    @State private var showsMembershipDetails = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -28,11 +26,6 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
                     label: model.navigation.showsActivity ? "Hide Activity" : "Show Activity",
                     identifier: "workspace-toggle-activity"
                 ) { model.navigation.showsActivity.toggle() }
-            }
-            if let task = crumb?.task {
-                WorkspaceGlyphButton(
-                    "waveform.path.ecg", label: "Monitor", identifier: "task-show-monitor-\(task.task.id)"
-                ) { onMonitor(task.task.id) }
             }
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -170,32 +163,9 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
                         set: { if !$0 { model.cancelSessionBinding() } }
                     )) { bindingForm }
             }
-            if case .step = session.flowMembership {
-                Button {
-                    if let target = flowTarget(session) {
-                        model.select(target.task.id.work)
-                        var draft = model.navigation.flowDrafts[target.task.task.id] ?? TaskFlowDraft()
-                        draft.selectedNode = target.node
-                        model.navigation.flowDrafts[target.task.task.id] = draft
-                    } else {
-                        showsMembershipDetails = true
-                    }
-                } label: { membershipChip(session) }
-                    .buttonStyle(.plain)
-                    .help(flowTarget(session) == nil ? membershipHelp(session.flowMembership) : "Show this step in the Flow")
-                    .accessibilityIdentifier("session-flow-membership")
-                    .popover(isPresented: $showsMembershipDetails) {
-                        Text(membershipUnavailable(session))
-                            .font(Typography.body(13))
-                            .padding(14)
-                            .frame(maxWidth: 320)
-                            .accessibilityIdentifier("session-flow-unavailable")
-                    }
-            } else {
-                membershipChip(session)
-                    .help(membershipHelp(session.flowMembership))
-                    .accessibilityIdentifier("session-flow-membership")
-            }
+            membershipChip(session)
+                .help(membershipHelp(session.flowMembership))
+                .accessibilityIdentifier("session-flow-membership")
         }
     }
 
@@ -247,27 +217,6 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
             .layoutPriority(-1)
     }
 
-    // Numeric node IDs are local to the captured invocation; keep this fence
-    // before resolving a Session into the current diagram.
-    private func flowTarget(_ session: SessionRecord) -> (task: WorkspaceTask, node: FlowNodeSelection)? {
-        guard let task = crumb?.task,
-              case let .step(_, invocation, _, node?, _, occurrence) = session.flowMembership,
-              occurrence != .past,
-              case .latest(let latest) = task.task.flow.record,
-              latest.invocationId == invocation,
-              latest.graph.node(node) != nil else { return nil }
-        return (task, FlowNodeSelection(invocationId: invocation, node: node))
-    }
-
-    private func membershipUnavailable(_ session: SessionRecord) -> String {
-        guard case let .step(_, _, _, node, _, occurrence) = session.flowMembership else {
-            return membershipHelp(session.flowMembership)
-        }
-        if node == nil { return "This Session predates recorded Flow step locations." }
-        if occurrence == .past { return "This Session belongs to an earlier Flow exec. Its diagram is no longer available here." }
-        return "This Session's Flow diagram is unavailable in the current Task reading."
-    }
-
     private func membershipColor(_ membership: SessionFlowMembership) -> Color {
         if case .step = membership { return palette.textSecondary }
         return palette.textTertiary
@@ -293,8 +242,8 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
 
 extension WorkspaceBreadcrumbBar where Trailing == EmptyView {
     init(model: PodiumModel, crumb: WorkspaceBreadcrumb?,
-         onOpenSession: @escaping (SessionRecord) -> Void, onMonitor: @escaping (String) -> Void) {
-        self.init(model: model, crumb: crumb, onOpenSession: onOpenSession, onMonitor: onMonitor) { EmptyView() }
+         onOpenSession: @escaping (SessionRecord) -> Void) {
+        self.init(model: model, crumb: crumb, onOpenSession: onOpenSession) { EmptyView() }
     }
 }
 

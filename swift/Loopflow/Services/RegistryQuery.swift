@@ -316,6 +316,14 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionPage.self, from: stdout)
     }
 
+    /// The Task's one ongoing conversation: the one already chosen, else its
+    /// only or most recently used one, else a new one in its checkout. The
+    /// choice is remembered as the Task's primary.
+    public func ensureTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
+        let stdout = try await run(["session", "ensure", "--task", issue, "--json"], cwd)
+        return try Self.decode(SessionRecord.self, from: stdout)
+    }
+
     /// Open one Session and return its terminal command.
     public func openSession(
         id: String,

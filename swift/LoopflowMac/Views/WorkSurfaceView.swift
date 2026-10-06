@@ -266,25 +266,9 @@ struct WorkSurfaceView: View {
                     .tint(palette.accentInk)
                     .foregroundStyle(palette.accentInk)
                 }
-                // The Workflow beside every Flow run of the Task.
-                HStack(alignment: .top, spacing: Spacing.lg) {
-                    if let workflow = model.taskWork[task.id].value?.workflow {
-                        WorkflowView(model: model, task: task, wave: found.wave.wave, workflow: workflow)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        FlowRunLog(model: model, task: task).frame(width: 340)
-                    } else {
-                        FlowRunLog(model: model, task: task)
-                    }
-                }
                 if let unavailable = found.wave.unavailableTasks.first(where: { $0.taskId == task.id }) {
                     evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)
-                    if case .latest = task.flow.record {
-                        TaskFlowView(model: model, task: task, wave: found.wave.wave).id(task.id)
-                    }
-                } else {
-                    TaskFlowView(model: model, task: task, wave: found.wave.wave).id(task.id)
                 }
-                TaskWorkView(model: model, task: task)
                 TaskHistoryView(model: model, task: task, wave: found.wave.wave)
                     .id(task.id)
                 if let sessions, !sessions.isEmpty {

@@ -353,22 +353,8 @@ struct SessionRenameDraft: Equatable {
     var submitting = false
 }
 
-/// A diagram selection keeps the invocation and occurrence together.
-struct FlowNodeSelection: Equatable {
-    /// nil identifies the unstarted preview, never an old invocation.
-    let invocationId: String?
-    let node: UInt32
-}
-
-/// One Task's Flow selection and in-flight control. Presentation only: the
-/// latest Flow and its saved position stay with Rust.
+/// One Task's in-flight `lf task run` or `lf task move` and its refusal.
 struct TaskFlowDraft: Equatable {
-    /// Flow chosen for the next Start; `nil` follows the recommendation.
-    var preview: String?
-    var selectedNode: FlowNodeSelection?
-    /// The catalogue search is open.
-    var picking = false
-    var search = ""
     var acting = false
     var error: String?
 }

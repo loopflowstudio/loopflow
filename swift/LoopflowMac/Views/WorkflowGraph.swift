@@ -154,13 +154,28 @@ struct WorkflowGraph: View {
     var choices: [Int] = []
     /// Why no edge can be chosen now.
     var unavailable: String?
+    /// Shrink to the width offered instead of scrolling: the workspace header.
+    var fits = false
     var hint: (Workflow.Edge) -> String = { _ in "" }
     var choose: (Workflow.Edge) -> Void = { _ in }
     @Environment(\.palette) private var palette
+    @State private var offered: CGFloat?
+    /// Below this the labels stop being readable; the header scrolls instead.
+    private static let smallest: CGFloat = 0.6
 
     var body: some View {
         let layout = WorkflowGraphLayout(nodes: nodes, edges: edges)
+        let scale = fits ? min(1, max(Self.smallest, (offered ?? layout.size.width) / max(layout.size.width, 1))) : 1
         ScrollView(.horizontal, showsIndicators: false) {
+            drawing(layout)
+                .scaleEffect(scale, anchor: .topLeading)
+                .frame(width: layout.size.width * scale, height: layout.size.height * scale, alignment: .topLeading)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { offered = $0 }
+        .accessibilityIdentifier("task-workflow-graph")
+    }
+
+    private func drawing(_ layout: WorkflowGraphLayout) -> some View {
             ZStack(alignment: .topLeading) {
                 Canvas { context, _ in
                     for arrow in layout.arrows {
@@ -176,8 +191,6 @@ struct WorkflowGraph: View {
                 ForEach(layout.arrows, id: \.index) { arrow in label(arrow) }
             }
             .frame(width: layout.size.width, height: layout.size.height, alignment: .topLeading)
-        }
-        .accessibilityIdentifier("task-workflow-graph")
     }
 
     /// Whether the Task is on `edge` with its Flow still running; `nil` when it is not on it.

@@ -327,13 +327,14 @@ and unset Started; primary scopes remain excluded and historical binding allowed
 Both APIs still insert supplied planning under the Started-count selector.
 Accepted issue selection remains unfinished; rotation holds only Wave guards.
 
-The October 5 Home-wide population lock experiment blocked unrelated registration
-and was removed. Source review confirms admission discovers Task roots only once:
-a taskless Session below an unregistered missing root and registration can lock
-different paths. Revalidation needs ordering through commit; a Wave lock cannot
-cover taskless work before its Wave is known. Preserve unrelated-checkout progress
-and queued-worker guard lifetime. Git worktree leases and checkout admission are
-separate owners. The plan retains the mechanism and operation-entry proof gaps.
+October 5's missing-root regressions failed in both admission orderings. The repair
+locks canonical workspace/explicit Task paths exclusively and ancestors shared,
+through SQLite commit. Ancestor exclusion covers future roots without a Task
+population scan; siblings progress independently. The rejected Home-wide guard
+remains at `2d96630b3:wave/infrastructure/MEMORY.md`. Registration still needs
+accepted facts and Wave serialization; rotation exclusion remains unimplemented.
+Git checkout leases and admission remain separate. Store proofs establish neither
+rotation recovery nor configured readiness.
 
 `b06e17d3c:wave/infrastructure/MEMORY.md` retains the prior build/13-test/Clippy
 record and acquisition details. CI repair, both rotation/start orderings and

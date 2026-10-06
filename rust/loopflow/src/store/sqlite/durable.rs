@@ -1322,13 +1322,68 @@ mod durable_store_tests {
     }
 
     #[test]
+    fn descendant_admission_excludes_registration_of_a_missing_root() {
+        for initializing in [false, true] {
+            let (dir, store, existing) = store_with_task();
+            let (task, pr) = unregistered_task(&store, &existing, dir.path().join("missing-root"));
+            let cwd = task.worktree.join("src/nested");
+            let admission = store.lock_checkout(&cwd).unwrap();
+            let mut earlier = unpublished_conversation(None, None, 1);
+            earlier.cwd = cwd;
+            earlier.work_source = None;
+            let register = || {
+                if initializing {
+                    store.insert_task_with_worktree(&task, &pr)
+                } else {
+                    store.insert_task(&task, &pr)
+                }
+            };
+            assert!(register().is_err());
+            assert!(store.task(&task.id).unwrap().is_none());
+            assert!(store.task_prs(&task.id).unwrap().is_empty());
+            drop(admission);
+            let earlier = store.create_session(earlier, None, None).unwrap();
+            register().unwrap();
+            assert_eq!(
+                store.session_task_ids(&earlier.id).unwrap(),
+                vec![task.id.clone()]
+            );
+            assert_eq!(store.session(&earlier.id).unwrap().unwrap(), earlier);
+            assert!(!store.task_started(&task.id).unwrap());
+        }
+    }
+
+    #[test]
+    fn missing_root_exclusion_preserves_taskless_session_admission() {
+        let (dir, store, existing) = store_with_task();
+        let (task, pr) = unregistered_task(&store, &existing, dir.path().join("missing-root"));
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = task.worktree.join("src/nested");
+        conversation.work_source = None;
+        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        assert!(store
+            .create_session(conversation.clone(), None, None)
+            .is_err());
+        assert!(store.session(&conversation.id).unwrap().is_none());
+        drop(exclusion);
+        let session = store.create_session(conversation, None, None).unwrap();
+        store.insert_task_with_worktree(&task, &pr).unwrap();
+        assert_eq!(
+            store.session_task_ids(&session.id).unwrap(),
+            vec![task.id.clone()]
+        );
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+        assert!(!store.task_started(&task.id).unwrap());
+    }
+
+    #[test]
     fn unrelated_checkout_exclusion_does_not_block_task_registration() {
         let (dir, store, existing) = store_with_task();
         let (task, pr) =
             unregistered_task(&store, &existing, dir.path().join("independent-checkout"));
 
         let _unrelated = store
-            .lock_checkout(&dir.path().join("unrelated-checkout"))
+            .lock_checkout(&dir.path().join("unrelated-checkout/missing/src"))
             .unwrap();
         store.insert_task_with_worktree(&task, &pr).unwrap();
         assert_eq!(

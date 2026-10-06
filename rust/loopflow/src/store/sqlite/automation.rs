@@ -1,4 +1,5 @@
 //! Automation selection belongs to Task; repair admission belongs to its CI incident.
+use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
@@ -42,29 +43,30 @@ impl SqliteStore {
             crate::store::canonicalize_with_missing_tail(path)
                 .map_err(|error| StoreError::InvalidData(error.to_string()))
         };
-        let workspaces = workspaces
-            .iter()
-            .map(|path| canonical(path))
-            .collect::<StoreResult<Vec<_>>>()?;
         let mut paths = Vec::<PathBuf>::new();
-        for checkout in self.task_checkouts()? {
-            if checkout.worktree.as_os_str().is_empty() {
-                continue;
-            }
-            let path = canonical(&checkout.worktree)?;
-            if workspaces.iter().any(|cwd| cwd.starts_with(&path))
-                || task == Some(&checkout.task_id)
-            {
-                paths.push(path);
+        if let Some(task) = task {
+            if let Some(task) = self.task(task)? {
+                if !task.worktree.as_os_str().is_empty() {
+                    paths.push(canonical(&task.worktree)?);
+                }
             }
         }
         for cwd in workspaces {
+            let cwd = canonical(cwd)?;
             paths.push(canonical(
                 &crate::engine::git::worktree_root(&cwd).unwrap_or(cwd),
             )?);
         }
-        paths.sort();
-        paths.dedup();
+        // Ancestor intent survives registration of a previously unknown Task root.
+        // Siblings share ancestors; an exclusive root excludes every descendant.
+        // Merge modes before locking so overlapping workspaces never upgrade a lock.
+        let mut locks = BTreeMap::new();
+        for path in paths {
+            for ancestor in path.ancestors().skip(1) {
+                locks.entry(ancestor.to_path_buf()).or_insert(false);
+            }
+            locks.insert(path, true);
+        }
         let database = self
             .conn
             .lock()
@@ -75,13 +77,13 @@ impl SqliteStore {
             .with_extension("admission");
         std::fs::create_dir_all(&root)
             .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        paths
+        locks
             .iter()
-            .map(|path| Self::lock_checkout_path(&root, path))
+            .map(|(path, exclusive)| Self::lock_checkout_path(&root, path, *exclusive))
             .collect()
     }
 
-    fn lock_checkout_path(root: &Path, cwd: &Path) -> StoreResult<File> {
+    fn lock_checkout_path(root: &Path, cwd: &Path, exclusive: bool) -> StoreResult<File> {
         let name = hex::encode(Sha256::digest(cwd.as_os_str().as_encoded_bytes()));
         let file = OpenOptions::new()
             .create(true)
@@ -92,7 +94,12 @@ impl SqliteStore {
             .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         loop {
-            match file.try_lock_exclusive() {
+            let acquired = if exclusive {
+                FileExt::try_lock_exclusive(&file)
+            } else {
+                FileExt::try_lock_shared(&file)
+            };
+            match acquired {
                 Ok(()) => break,
                 Err(error)
                     if error.kind() == std::io::ErrorKind::WouldBlock
@@ -102,7 +109,8 @@ impl SqliteStore {
                 }
                 Err(error) => {
                     return Err(StoreError::InvalidData(format!(
-                        "checkout admission unavailable: {error}"
+                        "checkout admission unavailable for {}: {error}",
+                        cwd.display()
                     )))
                 }
             }

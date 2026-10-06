@@ -9,10 +9,10 @@ status and evidence; earlier review notes remain at
   acquisition guards through SQLite commit; cold detail re-reads ownership under
   its guard, and reteam uses full readbacks and authorized Team reconciliation.
   The prior iteration’s reteam repair request is satisfied locally;
-  registration now respects checkout exclusion; accepted facts and population
-  stability remain next. A Home-wide population guard was rejected after it
-  blocked unrelated registration. Source review also confirms that root revalidation
-  needs ordering through commit, including taskless starts with no known Wave.
+  hierarchical checkout admission now excludes registration at an unregistered
+  missing ancestor, preserving sibling progress. Its Task-population scan is gone.
+  Accepted registration facts and the Wave planning boundary remain next; rotation
+  still holds no checkout exclusion. The rejected global guard remains in history.
   Configuration-switch and created-successor recovery proofs depend on the later
   binding/transition replacement; name selection cannot recover preserved names.
 - Chapter metadata representation and projection. Cross-Wave historical inspection

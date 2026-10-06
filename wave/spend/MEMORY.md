@@ -25,6 +25,15 @@ coverage, then choose the first compute billing source from existing accounts.
 Mercury is included in account/access inventory; bank connectivity remains outside
 LOO-389's existing scope. No live connection or real rotation was authorized.
 
+The local October 6 approval record records Jack Heart's design approval and
+instruction to continue the existing Flow; it preserves the live-execution
+boundaries. Metadata-only discovery subsequently reached six visible Doppler
+projects and 25 configs with no failed listed scope. Secret names revealed more
+service hints than the seven-item starting list, but did not establish account
+identities, shared-account relationships, permissions or costs. In particular,
+AWS-named keys may address S3-compatible services; a billing config or admin-key
+name is not evidence of read-only authority. No secret values were requested.
+
 Restricted reporting must not inherit the general SSH credential bundle.
 Environment scrubbing alone does not isolate host credential files. Prefer
 isolated report tools without provider/Doppler access. Doppler service tokens

@@ -1,6 +1,6 @@
 import re,sys
 txt=open(sys.argv[1]).read().split("\n")
-start=next(i for i,l in enumerate(txt) if "Thread_" in l and "main" in l)
+start=next(i for i,l in enumerate(txt) if "Thread_" in l and "main" in l.lower())
 end=next(i for i,l in enumerate(txt) if i>start and re.match(r"\s+\d+ Thread_",l))
 lo=int(sys.argv[2]) if len(sys.argv)>2 else 25
 maxd=int(sys.argv[3]) if len(sys.argv)>3 else 90

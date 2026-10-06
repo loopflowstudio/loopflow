@@ -729,12 +729,45 @@ struct SharedTaskReads {
 
 impl SharedTaskReads {
     async fn read(store: &SharedStore) -> Result<Self> {
+        let checkouts = store.task_checkouts().await?;
+        ask_checkouts_ahead(&checkouts);
         Ok(Self {
-            checkouts: store.task_checkouts().await?,
+            checkouts,
             local_home: store.local_home().await?.id,
             open: store.sqlite.open_execs()?,
         })
     }
+}
+
+/// Git is asked about each existing checkout in turn by the Task details. A
+/// process that retains answers asks about several checkouts at once first,
+/// so the details find them waiting; any other process would only ask twice.
+fn ask_checkouts_ahead(checkouts: &[crate::store::sqlite::TaskCheckout]) {
+    const AT_ONCE: usize = 8;
+    if !crate::engine::git::retains_reads() {
+        return;
+    }
+    let existing = checkouts
+        .iter()
+        .map(|checkout| checkout.worktree.as_path())
+        .filter(|worktree| worktree.is_dir())
+        .collect::<Vec<_>>();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..AT_ONCE.min(existing.len()) {
+            scope.spawn(|| {
+                while let Some(worktree) =
+                    existing.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+                {
+                    // The answers are kept by Git's reader; failures are the details' to report.
+                    let _ = crate::engine::git::is_clean(worktree);
+                    let _ = crate::engine::git::rev_parse(worktree, "HEAD");
+                    let _ = crate::engine::git::worktree_root(worktree);
+                    let _ = crate::engine::worktrees::git_common_dir(worktree);
+                }
+            });
+        }
+    });
 }
 
 #[derive(Debug)]

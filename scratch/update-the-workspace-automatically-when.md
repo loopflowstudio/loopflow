@@ -111,13 +111,17 @@ started Tasks only; no follow-up Tasks are needed. Each slice below is
 implemented, compressed and realigned in turn, measured with the recipe
 above, and dropped with its evidence if it turns out not to be a clear win.
 
-6. **Cold reading.** Git is about 3.2 s of a 6.7 s first reading at load 20
-   (flame chart: `scratch/cold-reading-flame.html`, made by
-   `scratch/measure/cold-sample.py` and `flame.py`): five commands per
-   existing checkout, one after another. Ask about the checkouts
-   concurrently. Then re-profile and take the next clear win; check whether
-   an installed build pays the 0.75 s store-open check and the 1.4 s
-   admission before touching either.
+6. **Cold reading: built.** A reading in the watch first asks Git about
+   eight existing checkouts at a time (`ask_checkouts_ahead`), so the Task
+   details find the answers retained. First reading **1.4–2.3 s at load
+   32–36 (five starts), 1.1–1.2 s at load 23 (two)**, against 4.2–4.6 s.
+   Sampled after: the asking is under 0.1 s; what Git is left is the
+   completion gate's ancestry check on a few Tasks (about 0.27 s at load 30,
+   arguments come from each PR). Left alone. The store-open foreign-key
+   check is gone on main (`store/MIGRATIONS.md`), and `lf home id` on this
+   build takes 0.25 s, so admission is not 1.4 s here; neither was touched.
+   An installed build was not measured. One-shot commands retain nothing
+   and ask in turn as before.
 7. **Git-only changes show promptly.** A dirty or newly committed checkout
    shows within seconds, not one to five minutes: watch the existing
    checkouts for changes and re-read only what changed. No tighter clock.
@@ -436,19 +440,6 @@ re-render. Rules:
   answers it.
 - Wake from sleep sends `refresh` (the hook exists for active Sessions).
 
-## Alternatives considered
-
-| Route | Verdict |
-| --- | --- |
-| Poll faster | Rejected. Reads take 8–23 s and each poll writes an Exec; faster polling makes both worse. |
-| Refresh after Desktop's own Create | Rejected by the Task: misses `lf`, workers and other windows. |
-| File-watch then spawn `lf` reads | Rejected. Still pays 2 s+ admission per read and self-triggers (finding 4). |
-| Recompute everything on any commit, compare bytes | Rejected as the only filter. Exec noise during agent work would run the planning projection continuously. Byte comparison is kept as the last filter. |
-| Writers bump revisions in Rust | Rejected. Hand discipline at every write site; older installed binaries would miss it. Triggers make the omission unspellable. |
-| Swift reads SQLite directly | Rejected. A second schema reader beside `lf`; breaks the single-reader rule. |
-| Darwin notifications from writers | Rejected. Same discipline problem; no catch-up after a missed post. |
-| Restore a Home server | Rejected. Jack deleted listeners and `lfd` on 2026-09-27. The watch is a foreground child of the window and dies with it. |
-
 ## Contract
 
 **User-visible outcome.** A committed change to Tasks, Waves, Sessions or Flow
@@ -520,58 +511,11 @@ that drifts from `--json`. Any refresh path that writes an Exec per read. A
 revision bump implemented at call sites. Activity shown from a frame whose
 liveness was not observed.
 
-## Internal slices
+## Retired to git
 
-1. Built: store revisions, `StoreChanges`, the watch's planning part and the
-   completion-gate read.
-2. Built: Desktop cutover for planning with request/answer ordering.
-3. Built: `sessions`, `task`, `wave` and `work_activity` parts with scope
-   requests; the Session and Wave-detail loops are gone.
-4. Partly built: `activity` is a part and its loop is gone; `active` is still
-   the second watch process (remaining work 2).
-5. Built and run for 3 samples: the rendered benchmark scenario. Not done:
-   the 20-sample release run and the installed-app demo.
-
-Slices 1–4 land together (Jack's decision); they were ordered for building,
-not for separate delivery.
-
-## Done when
-
-The acceptance below is unchanged. Where the branch falls short of it, the
-gap is in Remaining work (5, 6 and 9), not removed here. The recreated
-`-wal` and wrong-Home cases are met in the forms those items describe.
-
-- `cargo test -p loopflow --test workspace_watch` passes, covering: a Task
-  created by a second process appears exactly once in the next planning frame
-  within 2 s; 200 writes across 20 transactions yield a final frame equal to a
-  fresh one-shot read and no more than 5 frames; an Exec insert alone yields no
-  planning frame; 2,000 transcript-line inserts over 10 s run zero projections
-  of any part (heartbeat counts, not absence of frames); a Task created during
-  that transcript stream still appears within 2 s; a writer committing every
-  50 ms to `planning` gets a frame within 500 ms, not after it stops; a
-  stopped-then-continued watch and a recreated `-wal` both
-  converge; after `scope` no frame for the previous repository is emitted;
-  5 idle seconds emit no part frames and add no Exec rows.
-- `cargo test -p loopflow store_revisions` passes: every table has a domain or
-  an explicit exemption; rollback does not bump; upgrade from the released
-  frontier creates the triggers.
-- `swift test --filter PodiumModel` passes with a scripted feed: selection,
-  drafts and Session panes survive frames; an older `sequence` and a
-  wrong-Home frame are ignored; no `.loading` appears between frames; a
-  completed Task leaves the working set and remains under Completed; stream
-  end shows last good as unavailable and recovers.
-- `cargo test -p loopflow --test dto_fixtures` and `swift test --filter
-  DTOFixtureTests` cover the frame envelope.
-- `uv run python scripts/desktop_performance.py run` gains a write-to-visible
-  scenario; 20 comparable samples are recorded against the budget table, with
-  failed attempts retained. A miss after the time-boxed pursuit is reported
-  with its numbers and a filed follow-up Task, not held back from landing.
-- Demo/review (people, not gate): the create → rename → bind → complete
-  sequence on the installed app on Jack's Home, with evidence limits stated.
-
-Toward the chapter KRs: three working days and three two-hour sessions on
-Desktop are not credible while successful work looks missing and every read
-costs seconds. This plan earns no KR by itself.
+Alternatives considered, the build-order slices and the full "Done when"
+list are at commit `018083656`. The acceptance is unchanged; where the branch
+falls short of it, the gap is in Remaining work.
 
 ## Risks
 

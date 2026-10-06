@@ -93,6 +93,13 @@ pub(crate) fn retain_reads() {
     *RETAINED_READS.lock().expect("git read cache poisoned") = Some(HashMap::new());
 }
 
+pub(crate) fn retains_reads() -> bool {
+    RETAINED_READS
+        .lock()
+        .expect("git read cache poisoned")
+        .is_some()
+}
+
 /// `git -C repo args`, reusing a retained answer when this process keeps them.
 pub(crate) fn retained_output(repo: &Path, args: &[&str]) -> std::io::Result<Output> {
     let run = || Command::new("git").arg("-C").arg(repo).args(args).output();

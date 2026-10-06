@@ -114,17 +114,21 @@ suites prove decisions, correction, routing and loop passes; a real provider
 step, a driver killed mid-turn and a populated-store migration remain unproven.
 Every slice has headless tests only.
 
-Desktop (October 6, unreviewed by Jack) draws the Workflow and every Flow
-run from FlowExec, lists Waiting first, and matches no conversation to a Flow
-step. `INSERT OR REPLACE` fires no update trigger: a revision rule comparing
+Desktop draws the Workflow and every Flow run from FlowExec. Jack, October
+6, on that Task sheet: "this is kinda yucky"; he wants the graph in the
+workspace header, one Task Session plus shells, and the Flow exec log and
+files as multiplexer panes (unbuilt). `INSERT OR REPLACE` fires no update trigger: a revision rule comparing
 old and new rows needs an upsert. Waiting by quiet is no write, so no
-trigger sees it; the stream's reader keeps that clock. All twelve slices
-are built (`a1b4ca012`). Lessons: `lf` allows a second `lf task run` while an edge runs, so only
-Desktop's disabled Start keeps two drivers out of a checkout; a killed driver
-has no exit record and its run reads as running forever. `lf flow list` now
-lists workflows, so an unstarted Task previews its default. `lf wave
-update-plan --workflow` saves a name without loading it; Desktop shows it
-invalid, Start disabled.
+trigger sees it; the stream's reader keeps that clock. Lessons: `lf` allows
+a second `lf task run` while an edge runs, so only Desktop's disabled Start
+keeps two drivers out of a checkout; a killed driver has no exit record and
+its run reads as running forever.
+
+Twelve slices passed focused tests; whole suites then failed three. A
+dropped column or changed exit code breaks tests outside a slice's
+filter: run touched suites whole first. The agent's
+repair, unreviewed: an edge that runs nothing ends a Task over uncommitted
+changes and keeps its checkout; PR refusals stay (LOO-385).
 
 ## Session and operate pairs (2026-10-05)
 
@@ -537,9 +541,8 @@ Wave → Task UI is a scope limit, not a prohibition on a Chapter object.
 The [scope handoff](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/deferred-work.md)
 records the split. Local proof does not establish merger or Jack's acceptance.
 
-Deleting the colored pane borders left their allocator and undo color fields
-unused: trace removed visual features through their state and undo model.
-See [the reduction receipt](https://github.com/loopflowstudio/loopflow/blob/536b0fd56/scratch/compress-pane-state.md).
+Trace removed visual features through their state and undo model
+(`536b0fd56:scratch/compress-pane-state.md`).
 
 ## Task files beside the conversation (2026-09-28)
 

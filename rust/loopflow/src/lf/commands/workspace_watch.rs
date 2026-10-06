@@ -33,6 +33,8 @@ const BURST: Duration = Duration::from_millis(250);
 const HEARTBEAT: Duration = Duration::from_secs(2);
 /// Revisions are read again on this clock in case a filesystem event was lost.
 const CHECK: Duration = Duration::from_secs(1);
+/// A part that keeps failing is read again after 1 s, 2 s, 4 s… up to this.
+const RETRY_CAP: Duration = Duration::from_secs(60);
 /// Git and filesystem facts in planning are not store commits. Checkout
 /// contents are re-read at most once a minute, so this is their worst case.
 const PLANNING_CLOCK: Duration = Duration::from_secs(300);
@@ -215,7 +217,20 @@ struct PartState {
     read_on: Option<Instant>,
     sent: Option<[u8; 32]>,
     force: bool,
-    stale: bool,
+    /// Consecutive failed readings.
+    failures: u32,
+}
+
+impl PartState {
+    /// A failed reading is retried without a change, each time after twice
+    /// the wait, so a part that cannot be read does not hold the one loop.
+    fn retry_due(&self, read_on: Instant, now: Instant) -> bool {
+        self.failures > 0
+            && now - read_on
+                >= CHECK
+                    .saturating_mul(1 << (self.failures - 1).min(16))
+                    .min(RETRY_CAP)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -398,7 +413,7 @@ impl Reader {
             return true;
         };
         state.force
-            || state.stale
+            || state.retry_due(read_on, now)
             || match (state.read_at, revisions) {
                 (Some(old), Some(new)) => part.changed(old, new),
                 (None, None) => false,
@@ -711,8 +726,11 @@ pub(super) fn run(watch: bool) -> Result<()> {
                 state.read_at = revisions;
                 state.read_on = Some(now);
                 state.force = false;
-                // A failed reading is retried on the next look, not held.
-                state.stale = reason.is_some();
+                state.failures = if reason.is_some() {
+                    state.failures.saturating_add(1)
+                } else {
+                    0
+                };
                 state.sent = Some(identity);
                 let mut mailbox = lock(&shared);
                 *mailbox.projections.entry(part.name().into()).or_default() += 1;
@@ -750,7 +768,9 @@ pub(super) fn run(watch: bool) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{fingerprint, Part, StoreRevisions, WorkspaceContent};
+    use std::time::{Duration, Instant};
+
+    use super::{fingerprint, Part, PartState, StoreRevisions, WorkspaceContent};
     use crate::lf::commands::top::ActivitySnapshot;
 
     fn revisions(planning: i64, sessions: i64, flows: i64, execs: i64) -> StoreRevisions {
@@ -769,6 +789,24 @@ mod tests {
         assert!(Part::Planning.changed(old, revisions(1, 1, 1, 2)));
         assert!(Part::Sessions.changed(old, revisions(2, 1, 1, 1)));
         assert!(!Part::Activity.changed(old, revisions(2, 2, 2, 1)));
+    }
+
+    #[test]
+    fn a_failing_part_waits_longer_before_each_retry() {
+        let read_on = Instant::now();
+        let due = |failures, secs| {
+            PartState {
+                failures,
+                ..Default::default()
+            }
+            .retry_due(read_on, read_on + Duration::from_secs(secs))
+        };
+        assert!(!due(0, 3600));
+        assert!(due(1, 1));
+        assert!(!due(3, 3));
+        assert!(due(3, 4));
+        assert!(!due(40, 59));
+        assert!(due(40, 60));
     }
 
     #[test]

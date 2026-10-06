@@ -413,7 +413,9 @@ clocks, is the next prerequisite. Shortening the soak or retaining only a final
 time window would not satisfy it. The prepared `501073137` baseline source
 archive has identical CLI instrumentation and fixture schema; current Swift
 would stay constant, so that pair isolates Rust changes only. Compilation and
-baseline recording were not started after the capacity failure.
+baseline recording were not started after that capacity failure. The later
+[matched Rust pair](20261006-matched-rust/README.md) completes twenty warm
+observations per scenario with short RSS diagnostics; full hours remain open.
 
 A matched realistic pair (21 samples and 3,600 seconds each), all original
 budgets, and complete journey coverage remain required. Neither these focused

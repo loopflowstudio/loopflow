@@ -1,0 +1,959 @@
+{
+  "contract": {
+    "base": "50107313717557a1a2d44adbbcd7150b7d16a990",
+    "candidate": "3c931cc4d8aff396770b97d42fce032248bac7d2",
+    "rust_build_mode": "cargo dev, debug=1, incremental=false",
+    "swift_build_mode": "SwiftPM debug -gnone",
+    "scope": "Rust CLI paths only; candidate Swift and harness constant",
+    "binaries": {
+      "candidate-lf": "f44b4262b1916780ad2d014fe1a114e327128d5eecbd9e10c3cb4b549e9c0ae0",
+      "baseline-lf": "e0bedcc906424fea04f95ed60d7b1a799cd7bad7fd5296ca60396f99b48750f1"
+    },
+    "baseline_prerequisites": {
+      "base": "50107313717557a1a2d44adbbcd7150b7d16a990",
+      "common_prerequisites": {
+        "rust/loopflow/Cargo.toml": "40134a7c36d29c445f761c444b13c74b388b966e25fa0bd327164e1c5daf83b4",
+        "rust/loopflow/src/bin/lf.rs": "2c5b8458f538d9f72f7da0ba92af0a7d33dc74f5ff3fffe6bec5c8e242088c09",
+        "rust/loopflow/src/lib.rs": "d4808c29e1d7ba1fe51a70f7d2b20db7c4a29133d57e441843956bfffe206d4b",
+        "rust/loopflow/src/store/sqlite.rs": "ee284f0d16ac0a10d64fe0f87daae4d0f4933514e270260415ef1ec19c47838c",
+        "rust/loopflow/src/performance.rs": "61485f9960eec7a51a3e7db5d480707f15bc627ffdbac9637bf2f43a8d6eea75",
+        "rust/loopflow/src/store/migrations/drafts/index_unfinished_execs.sql": "459a075a314d8f1873a5df2bcae6fac812d9383d515e9cbb3e3d01fa4af18ff5"
+      },
+      "scope": "Historical Rust CLI with identical measurement hooks and fixture schema. Current Swift workspace/harness stays constant; this pair does not isolate Swift improvements."
+    }
+  },
+  "variants": {
+    "baseline": {
+      "status": "complete",
+      "not_started": 0,
+      "scenarios": [
+        {
+          "scenario": "cold_workspace",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 2582.430583,
+            "p95": null,
+            "max": 2582.430583
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 2206.576416,
+            "p95": null,
+            "max": 2206.576416
+          },
+          "bitmap_ms": {
+            "n": 2,
+            "median": 6.255812499999999,
+            "p95": null,
+            "max": 7.9025
+          },
+          "ocr_ms": {
+            "n": 2,
+            "median": 433.1558755,
+            "p95": null,
+            "max": 490.565042
+          }
+        },
+        {
+          "scenario": "warm_task",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 580.869417,
+            "p95": null,
+            "max": 580.869417
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 209.535417,
+            "p95": null,
+            "max": 209.535417
+          },
+          "bitmap_ms": {
+            "n": 1,
+            "median": 9.51625,
+            "p95": null,
+            "max": 9.51625
+          },
+          "ocr_ms": {
+            "n": 1,
+            "median": 371.218875,
+            "p95": null,
+            "max": 371.218875
+          }
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 426.041791,
+            "p95": null,
+            "max": 426.041791
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 48.655916,
+            "p95": null,
+            "max": 48.655916
+          },
+          "bitmap_ms": {
+            "n": 1,
+            "median": 7.908125,
+            "p95": null,
+            "max": 7.908125
+          },
+          "ocr_ms": {
+            "n": 1,
+            "median": 377.281292,
+            "p95": null,
+            "max": 377.281292
+          }
+        },
+        {
+          "scenario": "cold_workspace",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 1703.7418539999999,
+            "p95": 1998.594917,
+            "max": 2501.160375
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 1406.798146,
+            "p95": 1678.00975,
+            "max": 2136.490667
+          },
+          "bitmap_ms": {
+            "n": 60,
+            "median": 4.0387085,
+            "p95": 7.352292,
+            "max": 8.31575
+          },
+          "ocr_ms": {
+            "n": 60,
+            "median": 245.377458,
+            "p95": 328.538,
+            "max": 366.510833
+          }
+        },
+        {
+          "scenario": "warm_task",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 446.8742295,
+            "p95": 568.100292,
+            "max": 658.026375
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 168.258771,
+            "p95": 195.010166,
+            "max": 211.852
+          },
+          "bitmap_ms": {
+            "n": 20,
+            "median": 8.522375,
+            "p95": 10.236792,
+            "max": 10.311708
+          },
+          "ocr_ms": {
+            "n": 20,
+            "median": 280.5094375,
+            "p95": 356.125709,
+            "max": 467.826125
+          }
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 354.796458,
+            "p95": 437.660416,
+            "max": 497.149875
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 46.249604,
+            "p95": 54.538166,
+            "max": 54.676875
+          },
+          "bitmap_ms": {
+            "n": 20,
+            "median": 6.923792000000001,
+            "p95": 7.852542,
+            "max": 8.226417
+          },
+          "ocr_ms": {
+            "n": 20,
+            "median": 308.946646,
+            "p95": 382.875083,
+            "max": 444.654167
+          }
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 2083.2515,
+            "p95": null,
+            "max": 2083.2515
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 1729.162458,
+            "p95": null,
+            "max": 1729.162458
+          },
+          "bitmap_ms": {
+            "n": 3,
+            "median": 145.707833,
+            "p95": null,
+            "max": 149.603583
+          },
+          "ocr_ms": {
+            "n": 3,
+            "median": 302.46125,
+            "p95": null,
+            "max": 346.381542
+          }
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 1468.7294375000001,
+            "p95": 1703.948125,
+            "max": 1907.200166
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 1122.9262294999999,
+            "p95": 1305.263292,
+            "max": 1471.5555
+          },
+          "bitmap_ms": {
+            "n": 60,
+            "median": 111.982792,
+            "p95": 139.410834,
+            "max": 148.345708
+          },
+          "ocr_ms": {
+            "n": 60,
+            "median": 325.63,
+            "p95": 410.012709,
+            "max": 493.519708
+          }
+        }
+      ],
+      "reads": [
+        {
+          "verb": "activity",
+          "outcome": "passed",
+          "n": 10,
+          "median": 311.812042,
+          "p95": null,
+          "max": 540.104
+        },
+        {
+          "verb": "activity",
+          "outcome": "unavailable",
+          "n": 20,
+          "median": 0.6981045,
+          "p95": 1.745458,
+          "max": 2.001708
+        },
+        {
+          "verb": "flow list",
+          "outcome": "passed",
+          "n": 42,
+          "median": 432.45793749999996,
+          "p95": 570.729459,
+          "max": 666.584292
+        },
+        {
+          "verb": "home id",
+          "outcome": "passed",
+          "n": 21,
+          "median": 546.879667,
+          "p95": 628.1555,
+          "max": 727.765375
+        },
+        {
+          "verb": "roadmap",
+          "outcome": "passed",
+          "n": 52,
+          "median": 5139.659521,
+          "p95": 7518.532458,
+          "max": 7870.066083
+        },
+        {
+          "verb": "session connect",
+          "outcome": "passed",
+          "n": 21,
+          "median": 459.327,
+          "p95": 562.409416,
+          "max": 565.711083
+        },
+        {
+          "verb": "session list",
+          "outcome": "passed",
+          "n": 65,
+          "median": 2335.100875,
+          "p95": 3156.334917,
+          "max": 3454.678292
+        },
+        {
+          "verb": "task comment",
+          "outcome": "unavailable",
+          "n": 43,
+          "median": 67.236958,
+          "p95": 441.673333,
+          "max": 517.525375
+        },
+        {
+          "verb": "task file",
+          "outcome": "passed",
+          "n": 22,
+          "median": 326.00120849999996,
+          "p95": 397.763958,
+          "max": 478.789334
+        },
+        {
+          "verb": "task files",
+          "outcome": "passed",
+          "n": 21,
+          "median": 337.365542,
+          "p95": 414.878625,
+          "max": 416.763625
+        },
+        {
+          "verb": "task status",
+          "outcome": "passed",
+          "n": 43,
+          "median": 1335.731708,
+          "p95": 1673.32275,
+          "max": 1736.651167
+        },
+        {
+          "verb": "wave list",
+          "outcome": "passed",
+          "n": 30,
+          "median": 1051.040208,
+          "p95": 1562.144167,
+          "max": 1708.9475
+        }
+      ],
+      "cli_volume": {
+        "errors": [],
+        "limits": [
+          "Only instrumented lf processes; excludes Git, providers and other executables",
+          "SQLite statement starts (including PRAGMAs, writes and triggers), not only SELECTs",
+          "Rows emitted by SQLite, not underlying rows scanned; main store connections only",
+          "Cumulative one-second samples; missing end means counts are lower bounds",
+          "Counters and a writer add overhead; use the same instrumentation in both builds"
+        ],
+        "observed_totals": {
+          "connections": 2817,
+          "rows": 2973494,
+          "statements": 247495
+        },
+        "processes_ended": 495,
+        "processes_started": 495,
+        "status": "complete"
+      },
+      "cpu": {
+        "max_percent": 101.7,
+        "p50_percent": 1.2,
+        "p95_percent": 31.8,
+        "samples": 150
+      },
+      "memory": {
+        "end_mib": 298.8,
+        "growth_mib": 61.5,
+        "max_mib": 346.7,
+        "samples": 150,
+        "start_mib": 237.3
+      },
+      "round4_growth_mib": 58.890625,
+      "rounds": 21,
+      "soak_elapsed_seconds": 190,
+      "requested_resource_seconds": 150,
+      "hitches": {
+        "count": null,
+        "hangs": null,
+        "hitch_ms_per_second": null,
+        "recorded": false,
+        "worst_hang_ms": null,
+        "worst_ms": null
+      },
+      "idle": {
+        "covered_seconds": null,
+        "hangs": null,
+        "hitch_ms_per_second": null,
+        "requested_seconds": 137.10567903518677
+      },
+      "host_load_1min": {
+        "n": 66,
+        "median": 14.787353515625,
+        "p95": 16.57568359375,
+        "max": 16.88720703125
+      },
+      "min_free_gib": 13.043354034423828,
+      "window_counts": {
+        "1": 84
+      },
+      "key_window_unknown": 84,
+      "source_stable": true,
+      "cli_stable": true,
+      "test_binary_sha256": "18f10a5b2b72a7ee49b5f6bf41ecaf7f5ffa2c4a9cf271e5d74aed1b00c7f3f5",
+      "measurement_source": "38d59d8f8d1aa1ce480a63bbc85eaec790678559e43fc6bc74f6605d6bd9f855",
+      "repository_configs_unchanged": true,
+      "receipt_hashes": {
+        "run.json": "c258b6806fff86849f22c14e1fec8f771d5c87052a15c6bc08407d8f2f677dfc",
+        "report.json": "93a1a1650c78553ddd1e8c31c9391f8ff335472807ecf61adb803595e3dab8fc",
+        "attempts.jsonl": "56ada64f2b5e68f1b5924b7c323b532347275c9d434186927617eed1d9a6b885",
+        "soak-resources/report.json": "c793e9439bd5da83bbb2e66599d6e4f8bc50a9db8d27fb250ef36d26786e614f"
+      }
+    },
+    "candidate": {
+      "status": "complete",
+      "not_started": 0,
+      "scenarios": [
+        {
+          "scenario": "cold_workspace",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 1633.702209,
+            "p95": null,
+            "max": 1633.702209
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 1366.243084,
+            "p95": null,
+            "max": 1366.243084
+          },
+          "bitmap_ms": {
+            "n": 2,
+            "median": 4.8205005,
+            "p95": null,
+            "max": 6.326167
+          },
+          "ocr_ms": {
+            "n": 2,
+            "median": 302.591083,
+            "p95": null,
+            "max": 337.809666
+          }
+        },
+        {
+          "scenario": "warm_task",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 436.820125,
+            "p95": null,
+            "max": 436.820125
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 181.557,
+            "p95": null,
+            "max": 181.557
+          },
+          "bitmap_ms": {
+            "n": 1,
+            "median": 7.742125,
+            "p95": null,
+            "max": 7.742125
+          },
+          "ocr_ms": {
+            "n": 1,
+            "median": 255.168666,
+            "p95": null,
+            "max": 255.168666
+          }
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 271.469875,
+            "p95": null,
+            "max": 271.469875
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 43.542208,
+            "p95": null,
+            "max": 43.542208
+          },
+          "bitmap_ms": {
+            "n": 1,
+            "median": 6.701583,
+            "p95": null,
+            "max": 6.701583
+          },
+          "ocr_ms": {
+            "n": 1,
+            "median": 227.850584,
+            "p95": null,
+            "max": 227.850584
+          }
+        },
+        {
+          "scenario": "cold_workspace",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 1548.217417,
+            "p95": 1841.049083,
+            "max": 2166.6005
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 1283.4335415,
+            "p95": 1572.168542,
+            "max": 1825.459625
+          },
+          "bitmap_ms": {
+            "n": 60,
+            "median": 3.6847295,
+            "p95": 6.660042,
+            "max": 8.272541
+          },
+          "ocr_ms": {
+            "n": 60,
+            "median": 221.8611665,
+            "p95": 294.769667,
+            "max": 341.04025
+          }
+        },
+        {
+          "scenario": "warm_task",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 400.196375,
+            "p95": 496.891375,
+            "max": 584.408584
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 153.072104,
+            "p95": 191.383375,
+            "max": 194.0365
+          },
+          "bitmap_ms": {
+            "n": 20,
+            "median": 7.403437,
+            "p95": 9.261542,
+            "max": 9.524833
+          },
+          "ocr_ms": {
+            "n": 20,
+            "median": 249.9525835,
+            "p95": 305.399583,
+            "max": 390.255709
+          }
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 300.76547949999997,
+            "p95": 369.442459,
+            "max": 405.94275
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 41.1395835,
+            "p95": 50.690583,
+            "max": 57.178083
+          },
+          "bitmap_ms": {
+            "n": 20,
+            "median": 6.404583499999999,
+            "p95": 7.585833,
+            "max": 7.687208
+          },
+          "ocr_ms": {
+            "n": 20,
+            "median": 256.6699375,
+            "p95": 320.941542,
+            "max": 348.672083
+          }
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 1539.31775,
+            "p95": null,
+            "max": 1539.31775
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 1256.798042,
+            "p95": null,
+            "max": 1256.798042
+          },
+          "bitmap_ms": {
+            "n": 3,
+            "median": 103.085625,
+            "p95": null,
+            "max": 114.194125
+          },
+          "ocr_ms": {
+            "n": 3,
+            "median": 233.917042,
+            "p95": null,
+            "max": 237.731333
+          }
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 1408.844979,
+            "p95": 1853.61275,
+            "max": 2372.109167
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 1075.9956455000001,
+            "p95": 1562.334208,
+            "max": 1843.517792
+          },
+          "bitmap_ms": {
+            "n": 60,
+            "median": 104.5739375,
+            "p95": 141.014167,
+            "max": 164.454125
+          },
+          "ocr_ms": {
+            "n": 60,
+            "median": 325.2745625,
+            "p95": 521.594625,
+            "max": 745.361375
+          }
+        }
+      ],
+      "reads": [
+        {
+          "verb": "activity",
+          "outcome": "passed",
+          "n": 10,
+          "median": 294.1758125,
+          "p95": null,
+          "max": 508.302917
+        },
+        {
+          "verb": "activity",
+          "outcome": "unavailable",
+          "n": 20,
+          "median": 0.013896,
+          "p95": 1.804208,
+          "max": 90.184833
+        },
+        {
+          "verb": "flow list",
+          "outcome": "passed",
+          "n": 42,
+          "median": 372.41077099999995,
+          "p95": 490.428541,
+          "max": 591.663084
+        },
+        {
+          "verb": "home id",
+          "outcome": "passed",
+          "n": 21,
+          "median": 480.801291,
+          "p95": 539.696709,
+          "max": 641.353666
+        },
+        {
+          "verb": "roadmap",
+          "outcome": "passed",
+          "n": 52,
+          "median": 3759.3926255,
+          "p95": 5309.252709,
+          "max": 6606.227375
+        },
+        {
+          "verb": "session connect",
+          "outcome": "passed",
+          "n": 21,
+          "median": 421.585375,
+          "p95": 728.503209,
+          "max": 859.91825
+        },
+        {
+          "verb": "session list",
+          "outcome": "passed",
+          "n": 89,
+          "median": 704.845375,
+          "p95": 1384.236833,
+          "max": 2268.247958
+        },
+        {
+          "verb": "task comment",
+          "outcome": "unavailable",
+          "n": 43,
+          "median": 63.482708,
+          "p95": 381.812958,
+          "max": 425.786416
+        },
+        {
+          "verb": "task file",
+          "outcome": "passed",
+          "n": 22,
+          "median": 336.5127715,
+          "p95": 475.101334,
+          "max": 717.062541
+        },
+        {
+          "verb": "task files",
+          "outcome": "passed",
+          "n": 21,
+          "median": 359.772375,
+          "p95": 481.603917,
+          "max": 558.75
+        },
+        {
+          "verb": "task status",
+          "outcome": "passed",
+          "n": 43,
+          "median": 1163.866584,
+          "p95": 1447.062833,
+          "max": 1618.438125
+        },
+        {
+          "verb": "wave list",
+          "outcome": "passed",
+          "n": 30,
+          "median": 936.86625,
+          "p95": 1588.115542,
+          "max": 2620.346792
+        }
+      ],
+      "cli_volume": {
+        "errors": [],
+        "limits": [
+          "Only instrumented lf processes; excludes Git, providers and other executables",
+          "SQLite statement starts (including PRAGMAs, writes and triggers), not only SELECTs",
+          "Rows emitted by SQLite, not underlying rows scanned; main store connections only",
+          "Cumulative one-second samples; missing end means counts are lower bounds",
+          "Counters and a writer add overhead; use the same instrumentation in both builds"
+        ],
+        "observed_totals": {
+          "connections": 3057,
+          "rows": 3097988,
+          "statements": 259358
+        },
+        "processes_ended": 543,
+        "processes_started": 543,
+        "status": "complete"
+      },
+      "cpu": {
+        "max_percent": 83.0,
+        "p50_percent": 1.2,
+        "p95_percent": 19.4,
+        "samples": 150
+      },
+      "memory": {
+        "end_mib": 282.8,
+        "growth_mib": 42.9,
+        "max_mib": 344.0,
+        "samples": 150,
+        "start_mib": 239.9
+      },
+      "round4_growth_mib": 45.75,
+      "rounds": 21,
+      "soak_elapsed_seconds": 194,
+      "requested_resource_seconds": 150,
+      "hitches": {
+        "count": null,
+        "hangs": null,
+        "hitch_ms_per_second": null,
+        "recorded": false,
+        "worst_hang_ms": null,
+        "worst_ms": null
+      },
+      "idle": {
+        "covered_seconds": null,
+        "hangs": null,
+        "hitch_ms_per_second": null,
+        "requested_seconds": 138.76073718070984
+      },
+      "host_load_1min": {
+        "n": 59,
+        "median": 14.53271484375,
+        "p95": 18.48974609375,
+        "max": 20.27392578125
+      },
+      "min_free_gib": 11.670608520507812,
+      "window_counts": {
+        "1": 84
+      },
+      "key_window_unknown": 84,
+      "source_stable": true,
+      "cli_stable": true,
+      "test_binary_sha256": "18f10a5b2b72a7ee49b5f6bf41ecaf7f5ffa2c4a9cf271e5d74aed1b00c7f3f5",
+      "measurement_source": "38d59d8f8d1aa1ce480a63bbc85eaec790678559e43fc6bc74f6605d6bd9f855",
+      "repository_configs_unchanged": true,
+      "receipt_hashes": {
+        "run.json": "dd39d9075976182c15fc7cb971d6c2b503329676ca2ae7620e54c3d1a8b77ee3",
+        "report.json": "d054084a90955913433d3162bc30bd3474ef6e7a35ed9541e5f08100b36ec719",
+        "attempts.jsonl": "a42c82dec3c78a4e5d972e51a275a6855f57fd4bffa0e3b178c4985e34c01825",
+        "soak-resources/report.json": "1c1b158a5f24ef71fab1d465eb4dae7054ff7435415954ea06e591b9f7b9e11f"
+      }
+    }
+  },
+  "comparison": {
+    "available": true,
+    "baseline_source": "8df71251d4c91315822766435f76b195cfde4322dc919473fa84fa81e38b78fa",
+    "deltas": [
+      {
+        "after_failure_rate": 0.0,
+        "before_failure_rate": 0.0,
+        "metric": "task_workspace_ready_ms",
+        "p50_delta_ms": -948.7283739999998,
+        "p95_delta_ms": null,
+        "population": "snapshot",
+        "scenario": "cold_workspace",
+        "state": "first_interaction"
+      },
+      {
+        "after_failure_rate": 0.0,
+        "before_failure_rate": 0.0,
+        "metric": "task_workspace_ready_ms",
+        "p50_delta_ms": -155.5244369999998,
+        "p95_delta_ms": -157.5458339999998,
+        "population": "snapshot",
+        "scenario": "cold_workspace",
+        "state": "warm"
+      },
+      {
+        "after_failure_rate": 0.0,
+        "before_failure_rate": 0.0,
+        "metric": "task_workspace_ready_ms",
+        "p50_delta_ms": -543.9337499999999,
+        "p95_delta_ms": null,
+        "population": "snapshot",
+        "scenario": "native_session_reopen",
+        "state": "first_interaction"
+      },
+      {
+        "after_failure_rate": 0.0,
+        "before_failure_rate": 0.0,
+        "metric": "task_workspace_ready_ms",
+        "p50_delta_ms": -59.884458500000164,
+        "p95_delta_ms": 149.66462500000011,
+        "population": "snapshot",
+        "scenario": "native_session_reopen",
+        "state": "warm"
+      },
+      {
+        "after_failure_rate": 0.0,
+        "before_failure_rate": 0.0,
+        "metric": "task_workspace_ready_ms",
+        "p50_delta_ms": -154.571916,
+        "p95_delta_ms": null,
+        "population": "snapshot",
+        "scenario": "reopen_task",
+        "state": "first_interaction"
+      },
+      {
+        "after_failure_rate": 0.0,
+        "before_failure_rate": 0.0,
+        "metric": "task_workspace_ready_ms",
+        "p50_delta_ms": -54.0309785,
+        "p95_delta_ms": -68.21795700000001,
+        "population": "snapshot",
+        "scenario": "reopen_task",
+        "state": "warm"
+      },
+      {
+        "after_failure_rate": 0.0,
+        "before_failure_rate": 0.0,
+        "metric": "task_workspace_ready_ms",
+        "p50_delta_ms": -144.04929199999998,
+        "p95_delta_ms": null,
+        "population": "snapshot",
+        "scenario": "warm_task",
+        "state": "first_interaction"
+      },
+      {
+        "after_failure_rate": 0.0,
+        "before_failure_rate": 0.0,
+        "metric": "task_workspace_ready_ms",
+        "p50_delta_ms": -46.677854500000024,
+        "p95_delta_ms": -71.20891699999999,
+        "population": "snapshot",
+        "scenario": "warm_task",
+        "state": "warm"
+      }
+    ]
+  }
+}

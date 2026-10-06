@@ -776,24 +776,25 @@ must honor Team identity and resolve Task links from the Wave repository.
 
 October 6 retained twenty warm Task-opening samples, but the hour soak failed
 on disk exhaustion after seven rounds. The 78.6 GiB historical trace has timestamp
-attribution only and stays intact. Bounded recording retains exact child-open
-paths and failures; even a smaller Hitches/Hangs probe used 799 MB in thirty
-seconds and ignored TMPDIR. Full matched hours remain storage-limited.
+attribution only and stays intact. Bounded-recording receipts and failed lower-volume probes remain in benchmark
+guidance; full hours remain storage-limited.
 
-Contained replay proved rendering available: 20/20 endpoints, five rounds over
-150 seconds, preserved state, failed RSS (+52.6/+54.5 MiB). In-process checkpoints
-retain first-round growth; RSS-only diagnostics omit hitch/hang coverage.
-Earlier detailed evidence remains at `98f6f13c4:wave/infrastructure/MEMORY.md`.
+Contained replay passed endpoints but failed RSS (+52.6/+54.5 MiB). Allocation
+maps support capture pressure, not a proven production leak or oversized atlas.
+Buffer reuse/autorelease repairs failed and were removed; altered no-capture
+reopening also failed. Exact evidence remains in benchmark guidance and
+`3c931cc4d:wave/infrastructure/MEMORY.md`.
 
-Jack Heart requested subcomponent experiments. Process
-maps now separate terminal rendering, capture and OCR: workspace native input
-without capture added 15.4 MiB; capture/OCR then added 81.2 MiB transiently, with
-only 0.8 MiB more live default-zone allocations and 25.1 MiB more empty large
-allocations. This supports capture pressure, not a proven production leak or
-oversized atlas. Bitmap reuse and capture autorelease scopes both preserved 20/20
-endpoints but failed growth (+48.4/+53.0 MiB); both were removed. The altered
-no-capture variant's later reopen timeout remains failed evidence. Benchmark
-guidance owns receipts and equivalent-pixel capture/allocation experiments. No repair or budget revision is justified; matched p95/hours remain open.
+Jack Heart requested the missing matched baseline. October 6's
+[Rust comparison](../../scripts/benchmarks/desktop-performance/20261006-matched-rust/README.md)
+passed 84/84 endpoints per side, twenty warm samples each, with Swift/harness/lf3
+constant. Session-list median fell 2335→705 ms; roadmap 5140→3759 ms. Debug reads
+still miss 300 ms; native reopen p95 worsened 1704→1854 ms. Growth failed both
+(+58.9/+45.8 MiB). Faster refreshes increased CLI counts; quietness is unproved.
+Bitmap/OCR is not compositor paint. Load, coverage gaps and unavailable comments remain explicit. Release/Swift attribution and both hours
+remain open; storage cannot hold ~94 GiB/hour traces. Capture attribution and
+read/refresh profiling have actionable paths. No speculative patch, budget
+revision, merge or Task completion follows.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

@@ -774,34 +774,32 @@ only the candidate index added. Exact authored configs are read-only inputs;
 copied Sessions acquire no execution authority. Configured-repository fixtures
 must honor Team identity and resolve Task links from the Wave repository.
 
-October 6 retained twenty warm Task-opening samples, but the hour soak failed
-on disk exhaustion after seven rounds. The 78.6 GiB historical trace has timestamp
-attribution only and stays intact. Benchmark guidance retains recorder receipts.
-
-Contained replay passed endpoints but failed RSS (+52.6/+54.5 MiB). Allocation
+October 6's twenty warm Task-opening samples survive, but the attempted hour
+failed on disk exhaustion after seven rounds. The 78.6 GiB trace has timestamp
+attribution only and stays intact; benchmark guidance retains recorder receipts.
+Contained replay preserved endpoints but failed RSS (+52.6/+54.5 MiB). Allocation
 maps support capture pressure, not a proven production leak or oversized atlas.
 Buffer reuse/autorelease repairs failed and were removed; altered no-capture
 reopening also failed. Exact evidence remains in benchmark guidance and
 `3c931cc4d:wave/infrastructure/MEMORY.md`.
 
-Jack Heart requested October 6's matched baseline. The
-[Rust comparison](../../scripts/benchmarks/desktop-performance/20261006-matched-rust/README.md)
-passed 84/84 endpoints per side, twenty warm samples each, with Swift/harness/lf3
-constant. Session-list median fell 2335→705 ms; roadmap 5140→3759 ms. Debug reads
-still miss 300 ms; native reopen p95 worsened 1704→1854 ms. Growth failed both
-(+58.9/+45.8 MiB). Faster refreshes increased CLI counts; quietness is unproved.
-Bitmap/OCR is not compositor paint. Load, unavailable comments and coverage gaps
-remain explicit. Swift attribution and both hours remain open; storage cannot
-hold ~94 GiB/hour traces. No budget revision or memory patch was selected.
+Jack Heart requested matched baseline and release comparisons. The [report](../../scripts/benchmarks/desktop-performance/20261006-matched-rust/README.md)
+retains 84/84 pairs, twenty warm samples, unequal load, worsened native p95,
+unavailable comments and failed growth. Faster refreshes increased CLI counts;
+quietness is unproved. Bitmap/OCR is not compositor paint. Swift attribution and
+both hours remain open; ~94 GiB/hour traces exceed storage. No budget changed.
 
-Jack Heart's subsequent release-profile pair passed 84/84 endpoints each with
-unchanged fixture/Swift/lf3. Bundled SQLite 3.53.2 chose a full Exec primary-key
-scan for UNION order; Python 3.50.4 did not. Diagnose with the actual engine.
-Explicit existing partial-index selection bounds unfinished lookup cost without
-changing history or schema; a 2,000-completed-Exec VM-step regression passes.
-Alternating release reads (twenty warm each) reduced roadmap median 4334→1910 ms;
-Session reads stayed 309→315 ms. Both miss 300 ms. Remaining roadmap samples
-identify Flow Exec membership and repeated repository discovery.
+Bundled SQLite 3.53.2 scanned full Exec history for UNION order; Python 3.50.4
+did not. Existing partial-index selection repaired that cost. Jack Heart's next
+bounded repair found Flow joins scanning unrelated Session events; Session-first
+selection preserved all 104 Flows' membership while reducing VM steps 163.7M→1.94M.
+Repository paths now resolve once per command, shared by validation/display;
+subsequent reads remain fresh. Matched release roadmap median/p95 fell
+1135/1922→602/812 ms, Git launches 137→67 (twenty warm each). All 84 reads passed;
+39 tables' retained rows and freshness evidence survived. Session timing stayed
+unchanged. Roadmap still misses 300 ms: distinct repository resolution and
+per-Task membership/pending-turn reads remain actionable. These CLI-only results
+supply no new rendered, memory or soak proof; source publication only is authorized.
 
 The repaired rendered run remains 83/84: nineteen warm native successes, no
 native p95. Growth (+60.9/+53.5/+47.6 MiB) failed. Jack Heart requested reopening

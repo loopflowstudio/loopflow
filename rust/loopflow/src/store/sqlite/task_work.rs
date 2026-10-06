@@ -10,6 +10,13 @@ use super::SqliteStore;
 // Bound Flows inherit their Task's checkout instead of storing a second path.
 const FLOW_CWD: &str = "COALESCE(af.cwd,(SELECT worktree FROM tasks WHERE id=af.task_id))";
 
+// Select the Flow's Sessions before reading events. Joining events to Sessions
+// lets SQLite scan unrelated history once per Flow instead of using the index.
+const FLOW_EXEC_IDS: &str = "SELECT exec_id FROM flow_events WHERE flow_id=?1 AND exec_id IS NOT NULL
+    UNION SELECT exec_id FROM session_events WHERE session_id IN
+        (SELECT id FROM agent_sessions WHERE flow_session_id=?1) AND exec_id IS NOT NULL
+    UNION SELECT driver_exec_id FROM agent_sessions WHERE flow_session_id=?1 AND driver_exec_id IS NOT NULL";
+
 fn tasks(selector: &str) -> String {
     format!("SELECT id,worktree FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
 }
@@ -160,10 +167,7 @@ impl SqliteStore {
     /// its own completion gate. Causal ancestry does not establish membership.
     pub(crate) fn flow_exec_ids(&self, flow: &str) -> StoreResult<Vec<crate::id::ExecId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT exec_id FROM flow_events WHERE flow_id=?1 AND exec_id IS NOT NULL
-            UNION SELECT e.exec_id FROM session_events e JOIN agent_sessions s ON s.id=e.session_id
-                WHERE s.flow_session_id=?1 AND e.exec_id IS NOT NULL
-            UNION SELECT driver_exec_id FROM agent_sessions WHERE flow_session_id=?1 AND driver_exec_id IS NOT NULL")?;
+        let mut query = conn.prepare(FLOW_EXEC_IDS)?;
         let rows = query.query_map([flow], |row| row.get(0))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
@@ -193,6 +197,81 @@ mod tests {
     use crate::id::{ExecId, TraceId, WaveId};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn flow_exec_membership_excludes_unrelated_history_without_scanning_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let event_exec = ExecId::new();
+        let driver = ExecId::new();
+        let mechanical = ExecId::new();
+        let unrelated = ExecId::new();
+        let conn = store.conn.lock().unwrap();
+        for id in ["flow", "other"] {
+            conn.execute("INSERT INTO flow_sessions(id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state)
+                VALUES(?1,json_object('id',?1),0,0,1,0,1,'current')", [id]).unwrap();
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,flow_session_id,cwd)
+                VALUES(?1,?1,'human',1,0,?1,'/same-checkout')", [id]).unwrap();
+        }
+        for id in [&event_exec, &driver, &mechanical, &unrelated] {
+            conn.execute(
+                "INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?1,?2,'/same-checkout',1)",
+                params![id, TraceId::new()],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "UPDATE agent_sessions SET driver_exec_id=?1,completed_at=2 WHERE id='flow'",
+            [&driver],
+        )
+        .unwrap();
+        // Repeated evidence and closed Sessions retain membership; sharing a
+        // checkout or causal parent never grants exact Flow authority.
+        conn.execute(
+            "UPDATE execs SET parent_exec_id=?1 WHERE id=?2",
+            params![event_exec, unrelated],
+        )
+        .unwrap();
+        for (key, id) in [
+            ("first", &event_exec),
+            ("again", &event_exec),
+            ("driver", &driver),
+        ] {
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload)
+                VALUES('flow','started',?1,?2,1,'{}')", params![key, id]).unwrap();
+        }
+        conn.execute(
+            "INSERT INTO flow_events(flow_id,node,iterations,kind,exec_id,observed_at,payload)
+            VALUES('flow',0,'[]','operation_started',?1,1,'{}')",
+            [&mechanical],
+        )
+        .unwrap();
+        let mut expected = vec![event_exec, driver, mechanical];
+        expected.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        let read = || {
+            let mut query = conn.prepare(super::FLOW_EXEC_IDS).unwrap();
+            let ids = query
+                .query_map(["flow"], |row| row.get::<_, ExecId>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(ids, expected);
+            query.get_status(rusqlite::StatementStatus::VmStep)
+        };
+        let before = read();
+        for n in 0..2_000 {
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload)
+                VALUES('other','started',?1,?2,1,'{}')", params![n.to_string(), unrelated]).unwrap();
+        }
+        let after = read();
+        assert!(
+            after <= before * 2,
+            "Unrelated history increased query work: {before} → {after}"
+        );
+        drop(conn);
+        assert_eq!(store.flow_exec_ids("flow").unwrap(), expected);
+        assert!(store.flow_exec_ids("missing").unwrap().is_empty());
+    }
 
     #[test]
     fn unfinished_exec_lookup_cost_does_not_grow_with_completed_checkout_history() {

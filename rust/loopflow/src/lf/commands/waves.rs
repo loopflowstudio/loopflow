@@ -10,8 +10,9 @@
 //! audit surface that renders "I could not look" as "nothing happened" is worse
 //! than one that says nothing at all.
 
+use std::collections::HashMap;
 use std::io::IsTerminal;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -490,9 +491,10 @@ pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
             .await
             .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
         let waves = scope_waves_to_repo(waves, all)?;
+        let mut repositories = HashMap::new();
         let mut snapshots = Vec::with_capacity(waves.len());
         for wave in waves {
-            let snapshot = snapshot_wave(&store, &wave).await?;
+            let snapshot = snapshot_wave(&store, &wave, &mut repositories).await?;
             if !current || current_wave(&snapshot) {
                 snapshots.push(snapshot);
             }
@@ -523,8 +525,9 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             .list_waves(Some(wave.repo()))
             .await
             .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
-        validate_pm_portfolio(&store, &repository_waves).await?;
-        let snapshot = snapshot_wave(&store, &wave).await?;
+        let mut repositories = HashMap::new();
+        validate_pm_portfolio(&store, &repository_waves, &mut repositories).await?;
+        let snapshot = snapshot_wave(&store, &wave, &mut repositories).await?;
         let task_snapshots = wave_tasks(&store, &wave, true, None).await?;
         let metric_portfolio =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, now()).await?;
@@ -626,10 +629,11 @@ pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) ->
         } else {
             waves.clone()
         };
-        validate_pm_portfolio(&store, &ownership_waves).await?;
+        let mut repositories = HashMap::new();
+        validate_pm_portfolio(&store, &ownership_waves, &mut repositories).await?;
         let mut roadmaps = Vec::with_capacity(waves.len());
         for wave in &waves {
-            let snapshot = snapshot_wave(&store, wave).await?;
+            let snapshot = snapshot_wave(&store, wave, &mut repositories).await?;
             if !include_history && !current_wave(&snapshot) {
                 continue;
             }
@@ -818,12 +822,25 @@ fn now() -> time::OffsetDateTime {
     time::OffsetDateTime::now_utc()
 }
 
-/// Build the registry snapshot for one wave, probing its discovery endpoint
-/// for liveness.
-pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot> {
+// Resolve each recorded repository once per read. Sharing across validation and
+// display avoids one Git process per Wave without retaining facts across reads.
+fn wave_repository(wave: &Wave, repositories: &mut HashMap<String, PathBuf>) -> PathBuf {
+    repositories
+        .entry(wave.repo().to_string())
+        .or_insert_with(|| {
+            crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
+                .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf())
+        })
+        .clone()
+}
+
+async fn snapshot_wave(
+    store: &SharedStore,
+    wave: &Wave,
+    repositories: &mut HashMap<String, PathBuf>,
+) -> Result<WaveSnapshot> {
     let repo = wave.repo().to_string();
-    let goal_repo = crate::engine::worktrees::main_repo_root(Path::new(&repo))
-        .unwrap_or_else(|_| Path::new(&repo).to_path_buf());
+    let goal_repo = wave_repository(wave, repositories);
     let tasks = store
         .list_tasks(Some(wave.id()))
         .await
@@ -910,11 +927,14 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
     Ok(Some(planning))
 }
 
-async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()> {
+async fn validate_pm_portfolio(
+    store: &SharedStore,
+    waves: &[Wave],
+    repositories: &mut HashMap<String, PathBuf>,
+) -> Result<()> {
     let mut ownership = std::collections::HashMap::<_, PmPortfolioValidator>::new();
     for wave in waves {
-        let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
-            .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
+        let repo = wave_repository(wave, repositories);
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
         let row = match store.pm_snapshot(wave.id()).await {
             Ok(Some(row)) => row,
@@ -2277,6 +2297,26 @@ mod tests {
         assert_eq!(serde_json::to_value(rows).unwrap(), expected);
     }
 
+    #[test]
+    fn repository_resolution_preserves_aliases_missing_paths_and_fresh_reads() {
+        let first = loopflow_test_support::TestRepo::new();
+        let second = loopflow_test_support::TestRepo::new();
+        let directory = tempfile::tempdir().unwrap();
+        let alias = directory.path().join("repo");
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "proof".into(),
+            alias.display().to_string(),
+        );
+        let resolve = || super::wave_repository(&wave, &mut Default::default());
+        assert_eq!(resolve(), alias);
+        std::os::unix::fs::symlink(first.path(), &alias).unwrap();
+        assert_eq!(resolve(), first.path().canonicalize().unwrap());
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(second.path(), &alias).unwrap();
+        assert_eq!(resolve(), second.path().canonicalize().unwrap());
+    }
+
     #[tokio::test]
     async fn portfolio_ownership_is_scoped_to_repository() {
         let directory = tempfile::tempdir().unwrap();
@@ -2312,10 +2352,10 @@ mod tests {
                 .unwrap();
             waves.push(wave);
         }
-        super::validate_pm_portfolio(&store, &waves[..2])
+        super::validate_pm_portfolio(&store, &waves[..2], &mut Default::default())
             .await
             .unwrap();
-        let error = super::validate_pm_portfolio(&store, &waves)
+        let error = super::validate_pm_portfolio(&store, &waves, &mut Default::default())
             .await
             .unwrap_err();
         assert!(error.to_string().contains("bound by both"), "{error}");

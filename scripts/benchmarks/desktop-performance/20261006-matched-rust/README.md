@@ -397,3 +397,98 @@ focus patch. Checks: Swift build PASS; full realistic sequence PASS 84/84; focus
 before/after PASS 21/21 each; SessionsStoreTests PASS 11; headless verify-fixture
 PASS 5 (`/tmp/loo304-readiness-contained-20261006/`); diff PASS. No merge or Task
 completion follows.
+
+## Flow membership and repository discovery repair — October 6
+
+Jack Heart requested a bounded repair of the remaining roadmap read cost, followed
+by publication to PR #1460 without merge or Task completion. The final observer
+and its successful 84/84 replay above are unchanged. This pass measures direct
+CLI reads; it does not replace that replay or establish rendered acceptance.
+[Read measurements](flow-read-summary.json) retain all 84 samples, binary/source
+hashes, counters, preservation checks and private receipt hashes. Raw outputs,
+profiles and reproducible scripts remain at `/tmp/loo304-flow-read-20261006/`.
+
+A fresh pre-change roadmap profile reproduced the old lead: Flow membership took
+498 of 2,479 main-thread samples; portfolio validation and Wave display also
+repeated repository discovery. Bundled SQLite 3.53.2 chose `SCAN e` for the
+Session-event join, scanning 521,637 events for each Flow. Selecting matching
+Sessions with `IN (SELECT id …)` instead uses `session_events_history`. Across all
+104 Flows, both queries returned the same 495 Exec memberships. Total VM steps
+fell 163,669,123 → 1,942,478; measured query CPU was 18.366 → 0.276 seconds.
+This diagnostic exercises every Flow, not the smaller current-roadmap subset.
+
+The production query preserves event, driver and mechanical membership, deduplication,
+closed history and causal-parent exclusion. No schema or fixture index changed.
+A second small change shares repository resolution between validation and display
+within one command. Each subsequent command resolves fresh paths; configuration,
+portfolio validation, aliases and missing-path fallback retain their existing rules.
+
+### Matched release reads
+
+The retained baseline binary is the preceding partial-index repair (`9aa94bfab`),
+whose Rust/Cargo sources are identical to this contribution's starting `c12aae56d`.
+Its hash matches the earlier `repair-lf` receipt. The candidate was built with the
+same release defaults and no profile/Rust flag overrides. Both variants used fresh
+copies of the unchanged compatible snapshot: 39 tables, 342 Tasks, 604 Sessions,
+218,637 Execs. No live Home, copied execution authority or provider was used.
+
+All builds finished before measurement. Order alternated for each sample, using
+the same sandbox, CLI instrumentation and Git Trace2 receipts. One first read is
+reported separately; cells below are median / nearest-rank p95, **20 warm successes
+each**. All **84/84** reads passed, without timeouts.
+
+| Direct CLI measurement | Before | After |
+| --- | ---: | ---: |
+| Roadmap elapsed, ms | 1135 / 1922 | 602 / 812 |
+| Roadmap child CPU, ms | 1067 / 1310 | 576 / 663 |
+| Roadmap Git processes per read | 137 / 137 | 67 / 67 |
+| Roadmap `--git-common-dir` processes | 119 / 119 | 49 / 49 |
+| Session list elapsed, ms | 237 / 245 | 239 / 248 |
+| Session list child CPU, ms | 231 / 237 | 233 / 242 |
+
+Roadmap median fell 47%, p95 58%; the **300 ms budget remains unmet**. Session
+listing stayed essentially unchanged and was below 300 ms on both sides in this
+cohort. First roadmap reads were 2412/1103 ms, Session reads 240/236 ms. Roadmap
+load median/max was 17.6/19.0 on both sides; Session load medians were 17.5/17.4.
+Earlier 1910/2874 ms results had different load and must not be used as this
+comparison's baseline. Child CPU includes the command's waited-for children,
+not Desktop CPU, interval utilization or app memory.
+
+Each side recorded 42/42 CLI starts/ends, 315 SQLite connections, 65,711 statements
+and 1,093,976 emitted rows. Statement and returned-row counts are unchanged: the
+repair reduces scanned work and Git launches, not record density or endpoint
+coverage. These figures do not establish idle Desktop quietness.
+
+Session responses matched exactly. Roadmap differed only in fresh `generated_at`,
+condition observation times and corresponding evidence ages (525 age checks).
+Every pre-existing row, row identity and storage type across all 39 tables matched;
+each copy appended exactly 42 inspection Execs. Snapshot/config hashes stayed
+unchanged. The three historical unknown Execs were untouched. The initial private
+measurement script used `/tmp` instead of canonical `/private/tmp` for its exact
+executable allowance; sandbox launch failed before any CLI receipt. That failed
+attempt remains intact, and the successful pair has a separate directory with
+canonical paths and the unchanged containment policy.
+
+### Remaining disposition
+
+A short candidate profile retained 306 main-thread samples: Flow lookup appeared
+in seven; distinct repository resolution in portfolio validation in 85; Task-work
+reads in 40; pending-turn checks in 18. Sampling began after process launch and
+covers different durations/load from the earlier profile, so these counts are
+leads, not an end-to-end time decomposition. Next useful work is resolving distinct
+linked/retired repository paths without serial Git subprocesses and attributing
+per-Task membership/pending-turn queries with the bundled engine. Preserve the
+existing fallback, freshness and authority counterexamples when selecting either.
+
+Review rejected persistent repository caching and dropping historical membership.
+Focused checks passed: five Task-membership tests, fourteen Wave tests, four
+Task-work matches plus the historical-uncertainty acceptance regression; formatting,
+all-target Clippy and release build passed. Early new-fixture failures (missing
+required fields and macOS canonical-path expectations) were corrected in tests;
+no production precondition was relaxed. No new whole-tree gate is claimed.
+
+App CPU/RSS, window/focus, main-thread stalls, compositor, one-frame glyphs and
+hitch/hang endpoints were not measured here. Historical failed memory results,
+full matched Swift/observer attribution, cold startup and both full-hour soaks
+remain open. No high-volume trace ran; its capacity blocker remains. This bounded
+read repair is verified for publication only.

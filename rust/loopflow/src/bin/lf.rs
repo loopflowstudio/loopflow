@@ -1393,6 +1393,11 @@ fn run() -> anyhow::Result<()> {
                 Commands::Home {
                     cmd: loopflow::lf::HomeCommand::Screenshot { .. }
                 } | Commands::ScreenshotSupervisor { .. }
+                    | Commands::Auth {
+                        cmd: loopflow::lf::commands::spend::AuthCommand::Access {
+                            cmd: loopflow::lf::commands::spend::AccessCommand::Consume { .. },
+                        },
+                    }
             )
         )
     {
@@ -1431,6 +1436,18 @@ fn run() -> anyhow::Result<()> {
             return loopflow::lf::commands::screenshot::run_supervisor(screenshot);
         }
         _ => {}
+    }
+
+    // Designated consumption receives only an export; it needs no Home admission,
+    // account selection or administrative database, even on an incompatible Home.
+    if let Some(Commands::Auth {
+        cmd:
+            cmd @ loopflow::lf::commands::spend::AuthCommand::Access {
+                cmd: loopflow::lf::commands::spend::AccessCommand::Consume { .. },
+            },
+    }) = &cli.command
+    {
+        return loopflow::lf::commands::spend::run(cmd);
     }
 
     // Machine diagnosis must reach incompatible or uninitialized Homes without

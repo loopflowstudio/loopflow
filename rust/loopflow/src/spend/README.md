@@ -38,6 +38,13 @@ items is idempotent; identical lines retain their multiplicity. A repeated old
 revision does not undo a later correction. Decimal amounts are strings, with no
 currency conversion. Reconciliation differences remain visible.
 
+CLI source imports retain dated success/failure outcomes, including unreadable or
+malformed input. Reports expose this history in `imports` and flag a source whose
+latest attempt for the period failed. Last-good invoices remain available. A later
+success clears that latest-attempt warning, not historical failures or other
+coverage gaps; it does not establish completeness across the source. Observations
+contain no paths, input content or raw error text.
+
 Explicit rules assign charges to repositories, Waves or dependencies. Allocations
 use basis points and the charge's decimal precision, truncate each share toward
 zero, and assign the residual to the final recipient of a complete allocation.
@@ -57,21 +64,37 @@ lf auth access verify laptop --period 2026-09 --json
 
 Verification binds observations to the executing Home, requirement revision and
 available credential version and exact Doppler reference. Dependency inspection
-includes the same current evidence and dated observations. The implemented probe reads the local `auth.report`
-tool only when the environment names this Home. It does not certify isolation or
-provider-enforced permissions. Remote environments and provider credential probes
-return unavailable evidence. Previous observations remain as dated history.
+includes the same current evidence and dated observations. `auth.report` reads the
+local administrative Store; `auth.export` verifies the designated container path
+below. Both require the environment to name this Home. Previous observations
+remain as dated history.
+
+Set a requirement's `billing_probe` to `runpod` and `credential` to the inventory
+credential ID holding its Doppler reference. Running `access verify`
+for that local environment performs an online Doppler lookup and a fixed GET to
+`https://api.runpod.io/v2/billing` for the requested calendar month. Only run this
+operation with authorization for that account, reference and period. Inventory
+imports and report commands never execute it.
+
+The probe disables redirects and ambient HTTP proxies, caps responses at 1 MiB,
+uses 30-second requests with at most three attempts and a 100-second HTTP deadline.
+Doppler lookup has its own 30-second bound. HTTP 401/403 records denied; lookup,
+transport, rate-limit, malformed-response and unavailable-provider failures record
+unavailable with fixed messages. Raw bodies, headers, errors and keys are never
+persisted or printed. Remote Homes and other provider probes remain unavailable.
+A successful read does not establish account identity, current provider key version
+or provider-enforced read-only permissions; scope evidence stays absent. Runpod
+buckets are not imported as invoices. AWS CUR remains the billed-export reader.
+The [Runpod API contract](https://api.runpod.io/v2/openapi.json) defines this read;
+no caller-supplied URL or command is accepted.
 
 `dependency history` reads effective intervals from committed inventory snapshots.
-Each version contains the dependency's consumers, accounts, resources, sources and
-requirement links, with provenance. Omitted dependencies retain their previous
-relationships. For same-date corrections the last import wins in the effective
-view; original import snapshots remain stored. `dependency show` uses current
-metadata regardless of the billing period; history does not restate invoices.
-Each interval includes the account, resource,
-source, access requirement, credential and environment metadata then in effect.
-Changes to linked records create intervals even when the dependency itself is omitted.
-Same-date imports use the last supplied record; original snapshots remain retained.
+Each interval contains the dependency's consumer and service links, their account,
+resource, source, requirement, credential and environment metadata, and provenance.
+Omitted records retain their previous values; linked metadata changes create intervals
+even when the dependency itself is omitted. For same-date corrections the last
+supplied record wins; original snapshots remain stored. `dependency show` uses
+current metadata regardless of the billing period; history does not restate invoices.
 
 Report filters narrow totals but retain administrative invoice evidence. Use
 `auth export` for a designated consumer: it requires a repository and optionally a
@@ -81,15 +104,57 @@ credential metadata and unrelated coverage. Its totals are partial attribution;
 reconciliation and completeness still require administrative inspection.
 
 ```sh
+lf auth access consume --file report.json --repo example/one --period 2026-09
+lf auth access verify report-agent --period 2026-09 --export report.json --json
 uv run python scripts/check_spend_isolation.py
+uv run python scripts/check_spend_remote_delivery.py
 ```
+
+Declare the agent requirement with `tool: "auth.export"`, `credential: null` and
+`report_consumer: {"repo": "example/one", "wave_id": null}`. Other requirements
+use `report_consumer: null`. Bind the environment to the executing `lf home id`.
+Changing the designated scope requires a new requirement revision. Verification
+uses that scope, never a recipient supplied by the probe caller.
+
+`consume` opens no Store. It sends at most 8 MiB of export bytes over stdin to a
+read-only, network-disabled container with no host mounts or inherited credentials.
+Supply `--wave` when the export selects a Wave. The trusted operator exposes the
+returned JSON to the consumer; this does not grant a host shell or Store access.
+
+Install Docker at a standard system location and preinstall the trusted
+`rust:bookworm` image with `/usr/bin/python3`. The probe resolves the configured
+Docker context with inherited variables cleared,
+pins its local Unix socket for the invocation, and never pulls an image. Remote
+TCP/SSH contexts cannot certify a local Home and remain unavailable. The local
+administrator trusts that daemon and image.
+A private child-process pipe collects a fresh invocation-bound receipt containing
+the export SHA256, recipient and period. `verify` persists it against the Home and
+requirement revision only after matching the returned receipt. Uploaded receipts
+are not accepted. Wrong scope is denied; absent files or runtime remain unavailable.
+
+For a remote environment, register its Home with `lf home observe <home-id>
+ssh://user@host` and bind that Home in inventory. `verify --export` uses its stored
+route through system SSH with strict host-key checking, batch authentication and
+no config, agent, environment or port forwarding. Provision the SSH identity and
+known-host entry separately; verification never enrolls a host or retrieves keys.
+The trusted destination needs `/usr/bin/python3`, `lf` in `~/.local/bin`,
+`/usr/local/bin` or `/usr/bin`, and Docker in the system path. Its controller reads
+`lf home id --json` with inherited authority cleared. The sender checks that
+identity before sending export bytes on the same authenticated connection.
+Only the isolated container receives the export request; it receives no Store,
+Doppler credentials or SSH socket. Receipts bind Home, requirement and revision
+alongside invocation, recipient, period and hash. Mismatches, replay, failed SSH
+or unavailable Docker cannot establish success. Trust includes the destination
+administrator, installed tools, daemon and image. This does not authenticate the
+export issuer, provider permissions or the billing data.
 
 The headless check seeds synthetic invoices in a temporary Home, exports one
 recipient and mounts only that read-only JSON into a container. It checks the
 amount, denied writes and absence of administrative paths, Doppler, SSH sockets
 and inherited authority. It requires Docker and a Python-equipped image
 (`rust:bookworm` by default). This fixture demonstrates the export boundary;
-production agent provisioning remains separate work.
+the remote-controller fixture additionally checks delivery with a synthetic Home.
+SSH server authentication remains a separate gate integration check.
 
 ```sh
 lf auth access rotate key --replacement candidate
@@ -129,7 +194,7 @@ reconciliation; reconciliation never switches keys or revokes them.
 Synthetic endpoint tests demonstrate creation, provisioning, failed replacement,
 all-consumer verification, restart, cutover and failed/successful retirement, with
 runtime secrets absent from persisted records and command output. Provider permission
-probes, production provisioning and live acceptance remain open. No CLI operation
+probes, authenticated remote delivery and live acceptance remain open. No CLI operation
 creates or revokes provider keys.
 
 

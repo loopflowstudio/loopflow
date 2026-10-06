@@ -142,7 +142,9 @@
       "permissions": [
         "read"
       ],
-      "revision": "1"
+      "revision": "1",
+      "billing_probe": null,
+      "report_consumer": null
     }
   ],
   "rules": [

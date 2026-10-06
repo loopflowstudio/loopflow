@@ -66,6 +66,22 @@ fn check_consumer(conn: &Connection, consumer: &Consumer) -> StoreResult<()> {
 }
 
 impl SqliteStore {
+    pub(crate) fn record_spend_import(
+        &self,
+        observation: &spend::ImportObservation,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO spend_import_observations(source,period,payload) VALUES (?1,?2,?3)",
+            params![
+                observation.source.0,
+                observation.period,
+                encode(observation)?
+            ],
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn import_spend_inventory(&self, inventory: &Inventory) -> StoreResult<()> {
         spend::date(&inventory.effective_from)?;
         for ids in [
@@ -168,6 +184,14 @@ impl SqliteStore {
                 return Err(spend::invalid(
                     "requirement must name exactly one credential or tool",
                 ));
+            }
+            if requirement.billing_probe.is_some() && requirement.credential.is_none() {
+                return Err(spend::invalid("billing probe requires a credential"));
+            }
+            if (requirement.tool.as_deref() == Some("auth.export"))
+                != requirement.report_consumer.is_some()
+            {
+                return Err(spend::invalid("auth.export requires a designated report consumer; other requirements cannot have one"));
             }
             tx.execute("INSERT INTO spend_requirements(id,environment,credential,payload) VALUES (?1,?2,?3,?4) ON CONFLICT(id) DO UPDATE SET environment=excluded.environment,credential=excluded.credential,payload=excluded.payload", params![requirement.id.0, requirement.environment.0, requirement.credential.as_ref().map(|c| &c.0), encode(requirement)?])?;
         }
@@ -439,7 +463,19 @@ impl SqliteStore {
             .query_map([period], |r| r.get::<_, String>(0))?
             .map(|r| Ok(serde_json::from_str(&r?)?))
             .collect::<StoreResult<_>>()?;
+        let mut statement = conn
+            .prepare("SELECT payload FROM spend_import_observations WHERE period=?1 ORDER BY id")?;
+        let imports: Vec<spend::ImportObservation> = statement
+            .query_map([period], |row| row.get::<_, String>(0))?
+            .map(|row| Ok(serde_json::from_str(&row?)?))
+            .collect::<StoreResult<_>>()?;
         let mut coverage = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for observation in imports.iter().rev() {
+            if seen.insert(&observation.source.0) && !observation.succeeded {
+                coverage.push(format!("source {} import failed at {}; last-good invoices retained, freshness unverified", observation.source.0, observation.observed_at));
+            }
+        }
         for source in records::<BillingSource>(&conn, "spend_sources")? {
             coverage.extend(source.coverage);
             for account in &source.accounts {
@@ -482,6 +518,7 @@ impl SqliteStore {
         }
         coverage.push("Session usage covers inputs captured in this period, not apportioned monthly usage; estimates are separate from bills and provider-key linkage is unknown".into());
         Ok(Report {
+            imports,
             session_usage,
             period: period.into(),
             repo: repo.map(str::to_owned),
@@ -604,6 +641,31 @@ impl SqliteStore {
                 return Err(spend::invalid(
                     "access requirement changed during verification",
                 ));
+            }
+            let environment: AccessEnvironment =
+                record(&tx, "spend_environments", &observation.environment.0)?
+                    .ok_or_else(|| spend::invalid("access environment not found"))?;
+            if observation.outcome == AccessOutcome::Success
+                && environment.home_id.as_ref() != Some(&observation.executed_home)
+            {
+                return Err(spend::invalid(
+                    "environment Home changed during verification",
+                ));
+            }
+            if let Some(receipt) = &observation.report_receipt {
+                let binding = receipt
+                    .binding
+                    .as_ref()
+                    .ok_or_else(|| spend::invalid("report receipt requires a Home binding"))?;
+                if binding.home != observation.executed_home
+                    || binding.requirement != requirement.id
+                    || binding.revision != requirement.revision
+                    || requirement.report_consumer.as_ref() != Some(&receipt.consumer)
+                {
+                    return Err(spend::invalid(
+                        "report receipt does not match access requirement",
+                    ));
+                }
             }
             if let Some(credential) = &observation.credential {
                 let credential: Credential = record(&tx, "spend_credentials", &credential.0)?
@@ -766,6 +828,7 @@ impl SqliteStore {
         let mut history: Vec<_> = versions.into_values().collect();
         let mut previous = None;
         history.retain(|version| {
+            // Wire equality preserves declared money precision (1.0 versus 1.00).
             let projection = serde_json::to_value((
                 &version.dependency,
                 &version.accounts,
@@ -857,6 +920,46 @@ mod tests {
             .unwrap()
             .session_usage
             .is_empty());
+    }
+
+    #[test]
+    fn session_report_uses_half_open_period_and_retained_repository() {
+        let home = tempfile::tempdir().unwrap();
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
+                .unwrap();
+        let template = store.test_session("seed", "run_000000000000000000000000000000ff");
+        for (index, at, repo) in [
+            (1, 1788220799, "example/one"),
+            (2, 1788220800, "example/one"),
+            (3, 1790812799, "example/one"),
+            (4, 1790812800, "example/one"),
+            (5, 1788220800, "example/two"),
+        ] {
+            let mut session = template.clone();
+            session.id = format!("boundary-{index}");
+            session.artifact_key = format!("run_{index:032x}");
+            session.captured = None;
+            session.created_at = at;
+            session.repo = Some(repo.into());
+            store.create_session(session, None, None).unwrap();
+        }
+        let report = store
+            .spend_report("2026-09", Some("example/one"), None)
+            .unwrap();
+        let mut sessions: Vec<_> = report
+            .session_usage
+            .iter()
+            .map(|usage| usage.session_id.as_str())
+            .collect();
+        sessions.sort();
+        assert_eq!(sessions, ["boundary-2", "boundary-3"]);
+        let other = store
+            .spend_report("2026-09", Some("example/two"), None)
+            .unwrap();
+        assert_eq!(other.session_usage.len(), 1);
+        assert_eq!(other.session_usage[0].session_id, "boundary-5");
+        assert!(report.totals.is_empty());
     }
 
     #[test]

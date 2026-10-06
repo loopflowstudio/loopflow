@@ -1,17 +1,21 @@
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use super::{encode, record, records, upsert_record};
-use crate::spend::{self, AccessEnvironment, AccessRequirement, Credential, Inventory};
+use crate::spend::rotation::{
+    Rotation, RotationConsumer, RotationId, RotationOperation, RotationReceipt, RotationState,
+};
+use crate::spend::{
+    self, AccessEnvironment, AccessRequirement, Credential, CredentialId, Inventory,
+};
 use crate::store::{sqlite::SqliteStore, StoreResult};
 
 impl SqliteStore {
     pub(crate) fn begin_spend_rotation(
         &self,
-        old: &crate::spend::CredentialId,
-        candidate: &crate::spend::CredentialId,
+        old: &CredentialId,
+        candidate: &CredentialId,
         consumer_inventory_evidence: Option<String>,
-    ) -> StoreResult<crate::spend::rotation::Rotation> {
-        use crate::spend::rotation::{Rotation, RotationConsumer, RotationId, RotationState};
+    ) -> StoreResult<Rotation> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let pending: Option<String> = tx
@@ -47,22 +51,7 @@ impl SqliteStore {
         {
             return Err(spend::invalid("rotation requires a distinct replacement reference and trustworthy candidate version"));
         }
-        let requirements: Vec<AccessRequirement> =
-            records::<AccessRequirement>(&tx, "spend_requirements")?
-                .into_iter()
-                .filter(|r| {
-                    r.credential.as_ref() == Some(&old.id)
-                        || r.credential.as_ref() == Some(&candidate.id)
-                })
-                .collect();
-        let consumers = records::<AccessEnvironment>(&tx, "spend_environments")?
-            .into_iter()
-            .filter(|e| requirements.iter().any(|r| r.environment == e.id))
-            .map(|e| RotationConsumer {
-                environment: e.id,
-                home_id: e.home_id,
-            })
-            .collect();
+        let (requirements, consumers) = rotation_consumers(&tx, &old.id, &candidate.id)?;
         let rotation = Rotation {
             inventory_revision: 1,
             id: RotationId(uuid::Uuid::new_v4().to_string()),
@@ -82,10 +71,7 @@ impl SqliteStore {
         Ok(rotation)
     }
 
-    pub(crate) fn spend_rotation(
-        &self,
-        id: &crate::spend::rotation::RotationId,
-    ) -> StoreResult<Option<crate::spend::rotation::Rotation>> {
+    pub(crate) fn spend_rotation(&self, id: &RotationId) -> StoreResult<Option<Rotation>> {
         record(
             &self.conn.lock().expect("store mutex poisoned"),
             "spend_rotations",
@@ -95,10 +81,9 @@ impl SqliteStore {
 
     pub(crate) fn record_spend_rotation(
         &self,
-        id: &crate::spend::rotation::RotationId,
-        receipt: crate::spend::rotation::RotationReceipt,
-    ) -> StoreResult<crate::spend::rotation::Rotation> {
-        use crate::spend::rotation::{Rotation, RotationOperation, RotationState};
+        id: &RotationId,
+        receipt: RotationReceipt,
+    ) -> StoreResult<Rotation> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut rotation: Rotation = record(&tx, "spend_rotations", &id.0)?
@@ -168,11 +153,7 @@ impl SqliteStore {
         Ok(rotation)
     }
 
-    pub(crate) fn activate_spend_rotation(
-        &self,
-        id: &crate::spend::rotation::RotationId,
-    ) -> StoreResult<crate::spend::rotation::Rotation> {
-        use crate::spend::rotation::{Rotation, RotationOperation, RotationState};
+    pub(crate) fn activate_spend_rotation(&self, id: &RotationId) -> StoreResult<Rotation> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut rotation: Rotation = record(&tx, "spend_rotations", &id.0)?
@@ -222,11 +203,7 @@ impl SqliteStore {
     }
 }
 
-fn write_rotation(
-    conn: &Connection,
-    rotation: &crate::spend::rotation::Rotation,
-) -> StoreResult<()> {
-    use crate::spend::rotation::RotationState;
+fn write_rotation(conn: &Connection, rotation: &Rotation) -> StoreResult<()> {
     let state = match rotation.state {
         RotationState::Candidate => "candidate",
         RotationState::RetirementPending => "retirement_pending",
@@ -240,11 +217,31 @@ fn write_rotation(
     Ok(())
 }
 
-fn validate_rotation_inventory(
+// Both credential IDs can have consumers, including after activation.
+fn rotation_consumers(
     conn: &Connection,
-    rotation: &crate::spend::rotation::Rotation,
-) -> StoreResult<()> {
-    use crate::spend::rotation::RotationState;
+    old: &CredentialId,
+    candidate: &CredentialId,
+) -> StoreResult<(Vec<AccessRequirement>, Vec<RotationConsumer>)> {
+    let requirements: Vec<AccessRequirement> =
+        records::<AccessRequirement>(conn, "spend_requirements")?
+            .into_iter()
+            .filter(|r| {
+                r.credential.as_ref() == Some(old) || r.credential.as_ref() == Some(candidate)
+            })
+            .collect();
+    let consumers = records::<AccessEnvironment>(conn, "spend_environments")?
+        .into_iter()
+        .filter(|e| requirements.iter().any(|r| r.environment == e.id))
+        .map(|e| RotationConsumer {
+            environment: e.id,
+            home_id: e.home_id,
+        })
+        .collect();
+    Ok((requirements, consumers))
+}
+
+fn validate_rotation_inventory(conn: &Connection, rotation: &Rotation) -> StoreResult<()> {
     let mut expected_active = if rotation.state == RotationState::Candidate {
         rotation.old.clone()
     } else {
@@ -264,37 +261,23 @@ fn validate_rotation_inventory(
             ));
         }
     }
-    let current: Vec<AccessRequirement> = records::<AccessRequirement>(conn, "spend_requirements")?
-        .into_iter()
-        .filter(|r| {
-            r.credential.as_ref() == Some(&rotation.old.id)
-                || r.credential.as_ref() == Some(&rotation.candidate.id)
-        })
-        .collect();
-    if current != rotation.requirements {
+    let (requirements, consumers) =
+        rotation_consumers(conn, &rotation.old.id, &rotation.candidate.id)?;
+    if requirements != rotation.requirements {
         return Err(spend::invalid(
             "rotation consumer requirements changed; reconcile before continuing",
         ));
     }
-    for consumer in &rotation.consumers {
-        let environment: AccessEnvironment =
-            record(conn, "spend_environments", &consumer.environment.0)?
-                .ok_or_else(|| spend::invalid("rotation environment missing"))?;
-        if environment.home_id != consumer.home_id {
-            return Err(spend::invalid(
-                "rotation environment changed; fresh verification required",
-            ));
-        }
+    if consumers != rotation.consumers {
+        return Err(spend::invalid(
+            "rotation environment changed; fresh verification required",
+        ));
     }
     Ok(())
 }
 
 impl SqliteStore {
-    pub(crate) fn cancel_spend_rotation(
-        &self,
-        id: &crate::spend::rotation::RotationId,
-    ) -> StoreResult<crate::spend::rotation::Rotation> {
-        use crate::spend::rotation::{Rotation, RotationState};
+    pub(crate) fn cancel_spend_rotation(&self, id: &RotationId) -> StoreResult<Rotation> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut rotation: Rotation = record(&tx, "spend_rotations", &id.0)?
@@ -317,10 +300,9 @@ impl SqliteStore {
 impl SqliteStore {
     pub(crate) fn reconcile_spend_rotation(
         &self,
-        id: &crate::spend::rotation::RotationId,
+        id: &RotationId,
         consumer_inventory_evidence: Option<String>,
-    ) -> StoreResult<crate::spend::rotation::Rotation> {
-        use crate::spend::rotation::{Rotation, RotationConsumer, RotationState};
+    ) -> StoreResult<Rotation> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut rotation: Rotation = record(&tx, "spend_rotations", &id.0)?
@@ -357,22 +339,8 @@ impl SqliteStore {
         {
             return Err(spend::invalid("candidate must retain the activated reference or be a distinct versioned replacement before activation"));
         }
-        let requirements: Vec<AccessRequirement> =
-            records::<AccessRequirement>(&tx, "spend_requirements")?
-                .into_iter()
-                .filter(|r| {
-                    r.credential.as_ref() == Some(&rotation.old.id)
-                        || r.credential.as_ref() == Some(&rotation.candidate.id)
-                })
-                .collect();
-        let consumers = records::<AccessEnvironment>(&tx, "spend_environments")?
-            .into_iter()
-            .filter(|e| requirements.iter().any(|r| r.environment == e.id))
-            .map(|e| RotationConsumer {
-                environment: e.id,
-                home_id: e.home_id,
-            })
-            .collect::<Vec<_>>();
+        let (requirements, consumers) =
+            rotation_consumers(&tx, &rotation.old.id, &rotation.candidate.id)?;
         let mut expected = rotation.candidate.clone();
         expected.id = rotation.old.id.clone();
         let changed = rotation.requirements != requirements

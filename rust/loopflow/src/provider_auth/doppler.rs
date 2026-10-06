@@ -71,7 +71,7 @@ async fn read_secret(command: &mut Command) -> Result<SecretString, DopplerError
         .kill_on_drop(true);
     let mut child = command.spawn().map_err(|_| DopplerError::Unavailable)?;
     let stdout = child.stdout.take().ok_or(DopplerError::Unavailable)?;
-    let result = tokio::time::timeout(Duration::from_secs(30), async {
+    tokio::time::timeout(Duration::from_secs(30), async {
         let mut bytes = Vec::new();
         stdout
             .take(65537)
@@ -97,8 +97,7 @@ async fn read_secret(command: &mut Command) -> Result<SecretString, DopplerError
         Ok(SecretString::new(value.to_owned()))
     })
     .await
-    .map_err(|_| DopplerError::Unavailable)?;
-    result
+    .map_err(|_| DopplerError::Unavailable)?
 }
 
 fn valid_name(name: &str) -> bool {

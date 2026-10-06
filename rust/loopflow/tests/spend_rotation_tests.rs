@@ -513,3 +513,88 @@ async fn concurrent_candidates_serialize_and_cancelled_rotation_survives_restart
     assert!(next.receipts.is_empty());
     assert!(resumed.activate_spend_rotation(next.id).await.is_err());
 }
+
+#[tokio::test]
+async fn changed_home_or_candidate_reference_requires_fresh_verification() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = open_ephemeral_store(&StorageConfig::sqlite(directory.path().join("loopflow.db")))
+        .await
+        .unwrap();
+    let mut inventory: Inventory = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/inventory.json"
+    ))
+    .unwrap();
+    inventory.environments[0].home_id = Some(store.local_home().await.unwrap().id);
+    let mut candidate = inventory.credentials[0].clone();
+    candidate.id = CredentialId("candidate".into());
+    candidate.reference.name = "CANDIDATE".into();
+    candidate.version = Some("replacement".into());
+    inventory.credentials.push(candidate.clone());
+    store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .unwrap();
+    let mut rotation = store
+        .begin_spend_rotation(CredentialId("key".into()), candidate.id, None)
+        .await
+        .unwrap();
+    for change_home in [true, false] {
+        let receipt = RotationReceipt {
+            inventory_revision: rotation.inventory_revision,
+            operation: RotationOperation::CandidateRead,
+            environment: Some(inventory.environments[0].id.clone()),
+            executed_home: inventory.environments[0].home_id.clone(),
+            candidate_version: "replacement".into(),
+            success: true,
+            observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+            evidence: "synthetic administrative observation".into(),
+        };
+        store
+            .record_spend_rotation(rotation.id.clone(), receipt.clone())
+            .await
+            .unwrap();
+        if change_home {
+            inventory.environments[0].home_id = Some(loopflow::durable::HomeId::new());
+        } else {
+            // Equal version strings at different references cannot reuse verification.
+            inventory.credentials[1].reference.name = "CHANGED_CANDIDATE".into();
+        }
+        store
+            .import_spend_inventory(inventory.clone())
+            .await
+            .unwrap();
+        assert!(store
+            .activate_spend_rotation(rotation.id.clone())
+            .await
+            .is_err());
+        rotation = store
+            .reconcile_spend_rotation(rotation.id.clone(), None)
+            .await
+            .unwrap();
+        assert!(!rotation.consumers_ready(RotationOperation::CandidateRead));
+        assert!(store
+            .record_spend_rotation(rotation.id.clone(), receipt)
+            .await
+            .is_err());
+        assert!(store
+            .activate_spend_rotation(rotation.id.clone())
+            .await
+            .is_err());
+    }
+    assert_eq!(rotation.inventory_revision, 3);
+    assert_eq!(rotation.receipts.len(), 2);
+    assert_eq!(
+        rotation.consumers[0].home_id,
+        inventory.environments[0].home_id
+    );
+    assert_eq!(rotation.candidate.reference.name, "CHANGED_CANDIDATE");
+    let access = store
+        .spend_access(inventory.environments[0].id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        access.credentials[0].reference,
+        inventory.credentials[0].reference
+    );
+}

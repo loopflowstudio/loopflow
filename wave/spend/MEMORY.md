@@ -39,7 +39,7 @@ local inventory/report implementation. Missing integration is distinct from a
 provider-unsupported capability; only provider evidence establishes the latter.
 LOO-389 now has a tested local inventory/invoice core and dated access observations
 under `lf auth`. Synthetic rotation and Docker export-isolation proofs now exist;
-live provider billing, production provisioning and live acceptance remain outstanding. Shared account links do not allocate charges. Each stored
+live provider billing and live acceptance remain outstanding; remote delivery is described below. Shared account links do not allocate charges. Each stored
 invoice revision retains its evaluated attribution; a new correction evaluates
 the rules present at import, while repeat imports reuse the stored evaluation.
 
@@ -70,8 +70,8 @@ totals but retain all period invoices. Presentation filters are not authorizatio
 designated report exports must enforce their intended data scope independently.
 Infrastructure's managed-account evidence also shows that an isolated Home alone
 does not isolate fixtures: executable selection and inherited `LF_*` authority
-must be controlled. These lessons apply to the pending test-provider and report
-consumer demonstrations. The subsequent Docker fixture proves designated export
+must be controlled. The synthetic provider and report-consumer demonstrations
+now exist. The Docker fixture proves designated export
 consumption without inherited authority; it does not establish production agent
 provisioning. Exports expose only the selected recipient's evaluated amounts and
 source references, while administrative reports retain full invoice evidence.
@@ -101,6 +101,61 @@ retroactively. Reports separately link existing Session input usage and retain i
 historical ownership. A captured event ID is not a timestamp: period selection
 uses the history reader's observation time. Neither those links nor their estimated
 USD values establish invoice attribution or provider-key identity.
+
+October 6 reconciliation distinguishes local administrative report access from
+designated-consumer access. The Home-bound `auth.report` probe proves a
+local Store read. `auth.export` requirements now own recipient scope and collect
+local isolated-container receipts, bound to Home, requirement revision, fresh
+invocation and export hash. No uploaded receipt establishes success; remote
+Homes remain unavailable. Consumer execution dispatches before Home admission
+and receives only export bytes, never the administrative Store or credentials.
+The trusted local Docker daemon/image and private child-process pipe establish
+local process provenance, not remote delivery, provider permissions or export
+authenticity. A configured local Unix socket supports Desktop/OrbStack without
+inheriting Docker overrides; remote contexts cannot certify the local Home.
+The local designated-consumer observation integration is implemented in the
+working tree, superseding the earlier standalone-consumer gap. Its process receipt
+establishes neither the export issuer's identity nor authenticity of billing data;
+those claims require their own evidence even when recipient and period match.
+
+Declared decimal precision is evidence in dependency history. Snapshot comparison
+must preserve `1.0` versus `1.00`, even though their numeric amounts are equal;
+compression must not erase that distinction through ordinary decimal equality.
+
+Dated CLI import outcomes now coexist with last-good invoices. Latest-attempt
+success clears a latest-failure warning, not source completeness gaps. Outcomes
+cover completed CLI attempts; crashes and direct Store imports remain outside
+that evidence. Invoice publication and outcome recording are separate writes:
+an outcome-recording error cannot imply rollback of a committed invoice. Outcomes
+exclude raw errors and file paths and stay outside designated exports. A reusable
+container export consumer verifies recipient and period without mounting the
+administrative Store or credentials; remote delivery and authenticated environment
+receipts remain distinct evidence. The isolation check covers this consumption
+path as well as the fixture boundary.
+
+October 6 implementation adds the explicit local `billing_probe: runpod` read probe through
+the narrow Doppler resolver and a fixed, bounded HTTP read. Its billing-history
+response establishes read access only, with no imported amounts, verified account
+identity, key version or read-only scope. AWS CUR remains the invoice reader;
+Runpod buckets remain distinct evidence. No live credential was resolved or provider
+account connected. Live acceptance remains open; remote delivery is described below.
+
+October 6 reconciliation carries Infrastructure's distinction between service
+unavailability and credential rejection into Spend: transport or lookup failure
+is unavailable evidence; a provider 401/403 is denied access. Neither establishes
+read-only enforcement. The Runpod probe's component proofs separately cover HTTP
+outcomes, secret capture and Store observations; they do not establish successful
+end-to-end CLI execution or live account access.
+
+October 6 remote export implementation reuses Home routes and authenticates the
+SSH host before a same-channel Home identity handshake releases any export bytes.
+The isolated reader receives only the report request; administration remains in
+the trusted controller. Receipts bind Home, requirement revision, invocation,
+recipient, period and hash. Headless pipe/receipt fixtures and a real-Docker
+controller fixture with synthetic Home identity cover the protocol and isolation;
+SSH server authentication still needs integration coverage. This supersedes the
+remote-export implementation gap above, without claiming live remote access or
+provider permissions. Missing transport/identity/runtime remains unavailable.
 
 ## Founding direction — October 6, 2026
 

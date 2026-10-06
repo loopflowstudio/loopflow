@@ -18,3 +18,4 @@ CREATE TABLE spend_invoice_revisions (source TEXT NOT NULL, account TEXT NOT NUL
 CREATE TABLE spend_access_observations (id INTEGER PRIMARY KEY, environment TEXT NOT NULL REFERENCES spend_environments(id), requirement TEXT NOT NULL REFERENCES spend_requirements(id), observed_at INTEGER NOT NULL, payload TEXT NOT NULL);
 CREATE TABLE spend_rotations (id TEXT PRIMARY KEY, old_credential TEXT NOT NULL REFERENCES spend_credentials(id), candidate_credential TEXT NOT NULL REFERENCES spend_credentials(id), state TEXT NOT NULL, payload TEXT NOT NULL);
 CREATE UNIQUE INDEX spend_rotation_pending ON spend_rotations(old_credential) WHERE state NOT IN ('retired', 'cancelled');
+CREATE TABLE spend_import_observations (id INTEGER PRIMARY KEY, source TEXT NOT NULL, period TEXT NOT NULL, payload TEXT NOT NULL);

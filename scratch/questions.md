@@ -19,8 +19,14 @@ CLI placement, discovery evidence and acceptance. Remaining inputs:
 The local core now includes dependency relationship history, access evidence,
 designated exports and administrative rotation receipts, with synthetic provider
 and Docker isolation proofs. Remaining local work is listed in the design:
-provider probes/execution, production provisioning, broader acceptance coverage
-and dated failed-import observations. Rotation reconciliation, historical linked
+additional provider probes/execution, SSH server integration coverage,
+and broader acceptance coverage. Dated CLI import outcomes and a reusable isolated
+export consumer now exist. `access verify --export` now binds a directly collected
+local container receipt to the Home and requirement scope. `auth.report` remains
+administrative-only. The previous iteration's local integration request is
+implemented; SSH server integration coverage and additional provider probes remain
+separate work, not prerequisites for repeating that completed local integration.
+Rotation reconciliation, historical linked
 metadata, project/tag rules, separate Session usage links and a local AWS export
 reader now exist. No live financial import exists. Mercury
 connectivity remains outside this Task.
@@ -44,3 +50,35 @@ or connection authorization. Its descriptor supplies the independent bill total;
 no downloaded assembly or operator receipt is independently authenticated. Session
 links select captured inputs, not monthly usage slices. Historical access metadata
 does not assert historical read success.
+
+Import outcomes describe completed CLI attempts at source/period scope; latest
+success does not prove every document in a source is complete. Raw errors and
+paths are deliberately excluded. Recording failure after invoice commit is
+reported explicitly, without claiming the invoice rolled back. The shared Rust
+container reader is an operator-run designated tool; its local
+process receipt is not a remote agent's authenticated receipt or authorization to
+connect a provider. The reversible local choice trusts the administrator's Docker
+daemon and preinstalled image, pins a configured Unix socket and uses a private
+child-process pipe. No uploaded receipt can establish success.
+
+The reversible first access-probe choice is Runpod billing history: its documented
+fixed GET can establish read access without importing buckets as settled invoices.
+AWS CUR remains the selected invoice reader. `billing_probe: runpod` requires an explicit
+Doppler credential reference and local Home; it accepts no endpoint override.
+No account/reference/period authorization is inferred from this implementation.
+A successful read retains unknown account identity, read-only scope and actual key
+version; inventory versions are declarations until independently verified.
+
+October 6 reconciliation closes the preceding billing-read implementation request.
+Its recorded component checks do not establish a successful Doppler-to-provider
+CLI run. Broader integration coverage belongs to gate; SSH server authentication remains an integration-check gap and live billing acceptance still requires
+the explicit inputs above.
+
+The remote export implementation uses stored Home routes and preprovisioned SSH
+identity/known-host entries, never the general credential-forwarding bundle.
+A same-channel Home handshake precedes export transmission. The administrator
+trusts the remote controller and Docker host; only its isolated reader receives
+report data. The headless controller fixture proves consumption with synthetic
+Home identity and real Docker, not actual SSH server authentication or live access.
+Default OpenSSH identity locations are the reversible initial choice; no new
+credential registry, SSH config inheritance or enrollment authority was added.

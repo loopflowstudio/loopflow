@@ -1,6 +1,8 @@
 //! Dependency metadata and exact billed evidence. Provider credentials never enter these records.
 pub mod aws_cur;
+pub mod consumer;
 pub mod rotation;
+pub(crate) mod runpod;
 
 use std::collections::BTreeMap;
 use std::str::FromStr;
@@ -134,12 +136,21 @@ pub struct AccessEnvironment {
     pub home_id: Option<crate::durable::HomeId>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum BillingProbe {
+    Runpod,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AccessRequirement {
     pub id: RequirementId,
     pub environment: EnvironmentId,
     pub credential: Option<CredentialId>,
+    pub billing_probe: Option<BillingProbe>,
     pub tool: Option<String>,
+    pub report_consumer: Option<Consumer>,
     pub purpose: String,
     pub permissions: Vec<String>,
     pub revision: String,
@@ -254,6 +265,7 @@ pub struct InvoiceRevision {
     pub difference: Money,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CurrencyTotal {
     pub currency: String,
     pub billed: Money,
@@ -276,7 +288,16 @@ pub struct SessionUsageLink {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportObservation {
+    pub source: SourceId,
+    pub period: String,
+    pub observed_at: i64,
+    pub succeeded: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
+    pub imports: Vec<ImportObservation>,
     pub session_usage: Vec<SessionUsageLink>,
     pub period: String,
     pub repo: Option<String>,
@@ -510,6 +531,7 @@ pub struct AccessObservation {
     pub outcome: AccessOutcome,
     /// A read response never proves read-only enforcement.
     pub scope_evidence: Option<String>,
+    pub report_receipt: Option<consumer::ConsumptionReceipt>,
     pub gap: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -562,6 +584,7 @@ pub struct DependencyHistory {
 /// A designated consumer receives only its evaluated amounts and opaque source references.
 /// Free-form descriptions, account totals, other recipients and inventory are not exported.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReportExport {
     pub period: String,
     pub repo: String,
@@ -572,6 +595,7 @@ pub struct ReportExport {
     pub coverage: Vec<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExportAmount {
     pub source: SourceId,
     pub document_id: String,

@@ -50,7 +50,9 @@
             "permissions": [
               "read"
             ],
-            "revision": "1"
+            "revision": "1",
+            "billing_probe": null,
+            "report_consumer": null
           }
         ],
         "credentials": [
@@ -308,7 +310,9 @@
         "permissions": [
           "read"
         ],
-        "revision": "1"
+        "revision": "1",
+        "billing_probe": null,
+        "report_consumer": null
       }
     ],
     "credentials": [
@@ -329,7 +333,42 @@
         "rotation_evidence": null
       }
     ],
-    "observations": [],
+    "observations": [
+      {
+        "environment": "laptop",
+        "executed_home": "fixture-home",
+        "requirement": "laptop-key",
+        "requirement_revision": "1",
+        "credential": null,
+        "credential_version": null,
+        "credential_reference": null,
+        "operation": "billing_read",
+        "observed_at": 1791244800,
+        "outcome": "unavailable",
+        "scope_evidence": null,
+        "gap": "remote probe unavailable",
+        "report_receipt": null
+      },
+      {
+        "environment": "laptop",
+        "executed_home": "fixture-home",
+        "requirement": "laptop-key",
+        "requirement_revision": "1",
+        "credential": "key",
+        "credential_version": null,
+        "credential_reference": {
+          "project": "fixture",
+          "config": "test",
+          "name": "BILLING_KEY"
+        },
+        "operation": "billing_read",
+        "observed_at": 1791244800,
+        "outcome": "success",
+        "scope_evidence": null,
+        "gap": "successful read; provider-enforced scope remains unverified",
+        "report_receipt": null
+      }
+    ],
     "coverage": [
       "laptop-key: current access unverified",
       "laptop-key: credential version unknown",
@@ -576,6 +615,14 @@
         },
         "evidence_gaps": 0
       }
+    ],
+    "imports": [
+      {
+        "source": "fixture",
+        "period": "2026-09",
+        "observed_at": 1791244800,
+        "succeeded": false
+      }
     ]
   },
   "history": [
@@ -626,7 +673,9 @@
           "permissions": [
             "read"
           ],
-          "revision": "1"
+          "revision": "1",
+          "billing_probe": null,
+          "report_consumer": null
         }
       ],
       "credentials": [
@@ -736,7 +785,9 @@
         "permissions": [
           "read"
         ],
-        "revision": "1"
+        "revision": "1",
+        "billing_probe": null,
+        "report_consumer": null
       }
     ],
     "consumers": [
@@ -760,5 +811,19 @@
       }
     ],
     "activated_at": null
+  },
+  "consumption_receipt": {
+    "invocation": "fixture-invocation",
+    "consumer": {
+      "repo": "example/two",
+      "wave_id": null
+    },
+    "period": "2026-09",
+    "export_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "binding": {
+      "home": "home_00000000000000000000000000000001",
+      "requirement": "report-reader",
+      "revision": "1"
+    }
   }
 }

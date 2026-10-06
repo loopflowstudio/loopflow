@@ -462,8 +462,14 @@ periods and unknown dependency costs remain gaps. Decimal string amounts preserv
 source precision and currencies stay separate. Access observations bind the
 executing Home, requirement revision, exact reference and credential version where
 known. Dependency inspection joins that access evidence; effective dependency
-relationship history derives from dated inventory imports. The only implemented
-access probe reads a local report tool; provider verification remains open.
+relationship history derives from dated inventory imports. Local access probes
+read the administrative report, consume a designated export in isolation, or read
+Runpod billing history through the narrow Doppler resolver. Read success does not
+establish provider-enforced permissions or invoice evidence. Remote designated
+exports use the Home's stored SSH route, strict host-key checking and a Home
+identity handshake before transmitting data. The remote controller launches the
+same isolated reader. Receipts bind Home, requirement revision, invocation,
+recipient, period and export hash; remote credential probes remain unavailable.
 
 Designated report exports contain only the selected repository/Wave's evaluated
 amounts and source references, excluding administrative invoices and inventory.

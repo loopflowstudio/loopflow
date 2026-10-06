@@ -5,6 +5,20 @@ use loopflow::spend::{Inventory, Invoice};
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 use serde_json::{json, Value};
 
+fn inventory_fixture<T: serde::de::DeserializeOwned>() -> T {
+    serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/inventory.json"
+    ))
+    .unwrap()
+}
+
+fn invoice_fixture<T: serde::de::DeserializeOwned>() -> T {
+    serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/invoice.json"
+    ))
+    .unwrap()
+}
+
 fn cli(home: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
@@ -43,14 +57,8 @@ fn dependency_cost_round_trip() {
             home.path().join("loopflow.db"),
         )))
         .unwrap();
-    let mut inventory: Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/inventory.json"
-    ))
-    .unwrap();
-    let mut invoice: Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/invoice.json"
-    ))
-    .unwrap();
+    let mut inventory: Value = inventory_fixture();
+    let mut invoice: Value = invoice_fixture();
     // Same-named Waves remain distinct through their existing registered IDs.
     for (index, repo) in ["example/one", "example/two"].iter().enumerate() {
         let id = loopflow::id::WaveId::new();
@@ -228,14 +236,8 @@ fn dependency_cost_round_trip() {
 
 #[test]
 fn spend_dto_fixtures_round_trip() {
-    let inventory: Inventory = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/inventory.json"
-    ))
-    .unwrap();
-    let invoice: Invoice = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/invoice.json"
-    ))
-    .unwrap();
+    let inventory: Inventory = inventory_fixture();
+    let invoice: Invoice = invoice_fixture();
     for (encoded, fixture) in [
         (
             serde_json::to_value(inventory).unwrap(),
@@ -251,15 +253,64 @@ fn spend_dto_fixtures_round_trip() {
 }
 
 #[tokio::test]
+async fn billing_probe_records_unavailable_without_claiming_scope_or_remote_access() {
+    let home = tempfile::tempdir().unwrap();
+    let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
+        .await
+        .unwrap();
+    let mut inventory: Inventory = inventory_fixture();
+    inventory.environments[0].home_id = Some(store.local_home().await.unwrap().id);
+    inventory.requirements[0].billing_probe = Some(loopflow::spend::BillingProbe::Runpod);
+    inventory.requirements[0].revision = "runpod-probe".into();
+    let id = inventory.environments[0].id.clone();
+    store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .unwrap();
+    // Invalid period returns before lookup; this test never contacts Doppler or Runpod.
+    let local = store
+        .verify_spend_access(id.clone(), "invalid".into(), None)
+        .await
+        .unwrap();
+    let observation = &local.observations[0];
+    assert_eq!(
+        observation.outcome,
+        loopflow::spend::AccessOutcome::Unavailable
+    );
+    assert!(observation.scope_evidence.is_none());
+    assert!(observation
+        .gap
+        .as_ref()
+        .unwrap()
+        .contains("invalid billing period"));
+    assert_eq!(
+        observation.credential_reference.as_ref(),
+        Some(&inventory.credentials[0].reference)
+    );
+    inventory.environments[0].home_id = None;
+    store.import_spend_inventory(inventory).await.unwrap();
+    let remote = store
+        .verify_spend_access(id, "2026-09".into(), None)
+        .await
+        .unwrap();
+    assert!(remote.observations.iter().any(|o| o
+        .gap
+        .as_ref()
+        .is_some_and(|gap| gap.contains("no remote probe"))));
+    assert!(remote
+        .observations
+        .iter()
+        .all(|o| o.scope_evidence.is_none()));
+    assert_eq!(remote.observations.len(), 2);
+}
+
+#[tokio::test]
 async fn access_observations_cannot_certify_a_different_home() {
     let home = tempfile::tempdir().unwrap();
     let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
         .await
         .unwrap();
-    let mut inventory: Inventory = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/inventory.json"
-    ))
-    .unwrap();
+    let mut inventory: Inventory = inventory_fixture();
     inventory.environments[0].home_id = Some(store.local_home().await.unwrap().id);
     inventory.requirements[0].credential = None;
     inventory.requirements[0].tool = Some("auth.report".into());
@@ -269,7 +320,7 @@ async fn access_observations_cannot_certify_a_different_home() {
         .unwrap();
     let id = loopflow::spend::EnvironmentId("laptop".into());
     let local = store
-        .verify_spend_access(id.clone(), "2026-09".into())
+        .verify_spend_access(id.clone(), "2026-09".into(), None)
         .await
         .unwrap();
     assert_eq!(
@@ -280,7 +331,7 @@ async fn access_observations_cannot_certify_a_different_home() {
     inventory.environments[0].home_id = None;
     store.import_spend_inventory(inventory).await.unwrap();
     let remote = store
-        .verify_spend_access(id, "2026-09".into())
+        .verify_spend_access(id, "2026-09".into(), None)
         .await
         .unwrap();
     assert_eq!(
@@ -303,15 +354,9 @@ async fn invoice_completeness_multiplicity_and_unknown_periods() {
     let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
         .await
         .unwrap();
-    let inventory: Inventory = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/inventory.json"
-    ))
-    .unwrap();
+    let inventory: Inventory = inventory_fixture();
     store.import_spend_inventory(inventory).await.unwrap();
-    let mut invoice: Invoice = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/invoice.json"
-    ))
-    .unwrap();
+    let mut invoice: Invoice = invoice_fixture();
     invoice.charges.push(invoice.charges[2].clone());
     let duplicated = store.import_spend_invoice(invoice.clone()).await.unwrap();
     assert_eq!(duplicated.billed.0.to_string(), "190.00");
@@ -354,15 +399,9 @@ async fn designated_export_excludes_other_recipients_and_inventory() {
     let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
         .await
         .unwrap();
-    let inventory: Inventory = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/inventory.json"
-    ))
-    .unwrap();
+    let inventory: Inventory = inventory_fixture();
     store.import_spend_inventory(inventory).await.unwrap();
-    let mut invoice: Invoice = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/invoice.json"
-    ))
-    .unwrap();
+    let mut invoice: Invoice = invoice_fixture();
     invoice.charges[0].description = "unrelated confidential annotation".into();
     store.import_spend_invoice(invoice).await.unwrap();
     let output = home.path().join("report.json");
@@ -410,10 +449,7 @@ async fn dependency_inspection_shows_only_its_access_and_dated_relationships() {
     let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
         .await
         .unwrap();
-    let mut inventory: Inventory = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/inventory.json"
-    ))
-    .unwrap();
+    let mut inventory: Inventory = inventory_fixture();
     inventory.environments[0].home_id = Some(store.local_home().await.unwrap().id);
     inventory.requirements[0].credential = None;
     inventory.requirements[0].tool = Some("auth.report".into());
@@ -425,7 +461,7 @@ async fn dependency_inspection_shows_only_its_access_and_dated_relationships() {
         .await
         .unwrap();
     store
-        .verify_spend_access(inventory.environments[0].id.clone(), "2026-09".into())
+        .verify_spend_access(inventory.environments[0].id.clone(), "2026-09".into(), None)
         .await
         .unwrap();
     let id = loopflow::spend::DependencyId("workers".into());
@@ -493,14 +529,8 @@ async fn corrected_invoice_uses_new_rules_without_rewriting_older_revision() {
     let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
         .await
         .unwrap();
-    let mut inventory: Inventory = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/inventory.json"
-    ))
-    .unwrap();
-    let mut invoice: Invoice = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/invoice.json"
-    ))
-    .unwrap();
+    let mut inventory: Inventory = inventory_fixture();
+    let mut invoice: Invoice = invoice_fixture();
     store
         .import_spend_inventory(inventory.clone())
         .await
@@ -560,6 +590,7 @@ fn inspection_output_fixtures_round_trip() {
         assert_eq!(serde_json::to_value(parsed).unwrap(), *value);
     }
     round_trip::<AccessInspection>(&fixture["access"]);
+    round_trip::<loopflow::spend::consumer::ConsumptionReceipt>(&fixture["consumption_receipt"]);
     round_trip::<DependencyInspection>(&fixture["dependency"]);
     round_trip::<Report>(&fixture["report"]);
     round_trip::<ReportExport>(&fixture["export"]);
@@ -573,14 +604,8 @@ async fn source_scope_can_shrink_without_losing_billed_evidence() {
     let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
         .await
         .unwrap();
-    let mut inventory: Inventory = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/inventory.json"
-    ))
-    .unwrap();
-    let mut invoice: Invoice = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/invoice.json"
-    ))
-    .unwrap();
+    let mut inventory: Inventory = inventory_fixture();
+    let mut invoice: Invoice = invoice_fixture();
     store
         .import_spend_inventory(inventory.clone())
         .await
@@ -636,14 +661,8 @@ async fn historical_metadata_controls_project_and_tag_attribution() {
     let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
         .await
         .unwrap();
-    let mut inventory: Inventory = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/inventory.json"
-    ))
-    .unwrap();
-    let mut invoice: Invoice = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/invoice.json"
-    ))
-    .unwrap();
+    let mut inventory: Inventory = inventory_fixture();
+    let mut invoice: Invoice = invoice_fixture();
     inventory.dependencies[0]
         .resources
         .push(inventory.resources[0].id.clone());
@@ -737,10 +756,7 @@ async fn aws_cur_manifest_import_reconciles_and_preserves_last_good_invoice() {
     let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
         .await
         .unwrap();
-    let mut inventory: Inventory = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/spend/inventory.json"
-    ))
-    .unwrap();
+    let mut inventory: Inventory = inventory_fixture();
     inventory.accounts[0].provider = "aws".into();
     inventory.accounts[0].native_id = Some("000000000001".into());
     store.import_spend_inventory(inventory).await.unwrap();
@@ -799,12 +815,33 @@ async fn aws_cur_manifest_import_reconciles_and_preserves_last_good_invoice() {
         report(home.path())["invoices"][0]["revision"],
         original["revision"]
     );
+    let failed = report(home.path());
+    assert_eq!(failed["totals"][0]["billed"], "90.00");
+    let observations = failed["imports"].as_array().unwrap();
+    assert_eq!(observations.len(), 5);
+    assert_eq!(observations.last().unwrap()["succeeded"], false);
+    assert!(
+        observations.last().unwrap()["observed_at"]
+            .as_i64()
+            .unwrap()
+            > 0
+    );
+    assert!(failed["coverage"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|gap| gap.as_str().unwrap().contains("import failed")));
     let mut correction = descriptor.clone();
     correction["invoice_total"] = json!("70.00");
     document(&file, &correction);
     let corrected: Value = serde_json::from_str(&success(home.path(), &args)).unwrap();
     assert_ne!(corrected["revision"], original["revision"]);
     assert_eq!(report(home.path())["totals"][0]["billed"], "70.00");
+    assert!(!report(home.path())["coverage"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|gap| gap.as_str().unwrap().contains("import failed")));
     // A not-yet-finalized row is never substituted for a billed document.
     std::fs::write(
         home.path().join("usage.csv"),
@@ -816,4 +853,151 @@ async fn aws_cur_manifest_import_reconciles_and_preserves_last_good_invoice() {
         report(home.path())["invoices"][0]["revision"],
         corrected["revision"]
     );
+    std::fs::write(&file, "malformed-import-sentinel").unwrap();
+    let rejected = cli(home.path(), &args);
+    assert!(!rejected.status.success());
+    assert!(!String::from_utf8_lossy(&rejected.stderr).contains("malformed-import-sentinel"));
+    let final_report = report(home.path());
+    assert_eq!(final_report["totals"][0]["billed"], "70.00");
+    assert_eq!(final_report["imports"].as_array().unwrap().len(), 8);
+    assert_eq!(final_report["imports"][7]["succeeded"], false);
+    assert!(!serde_json::to_string(&final_report)
+        .unwrap()
+        .contains("malformed-import-sentinel"));
+}
+
+#[tokio::test]
+async fn currencies_remain_separate_and_failed_inventory_is_atomic() {
+    let home = tempfile::tempdir().unwrap();
+    let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
+        .await
+        .unwrap();
+    let inventory: Inventory = inventory_fixture();
+    store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .unwrap();
+    let invoice: Invoice = invoice_fixture();
+    store.import_spend_invoice(invoice.clone()).await.unwrap();
+    let mut euro = invoice;
+    euro.currency = "EUR".into();
+    euro.document_id = "euro-document".into();
+    store.import_spend_invoice(euro).await.unwrap();
+    let before = store
+        .spend_dependency(inventory.dependencies[0].id.clone(), "2026-09".into())
+        .await
+        .unwrap()
+        .unwrap();
+    let history = store
+        .spend_dependency_history(inventory.dependencies[0].id.clone())
+        .await
+        .unwrap();
+    let mut invalid = inventory.clone();
+    invalid.credentials[0].purpose = "must roll back".into();
+    invalid.accounts[0].evidence = "must roll back".into();
+    invalid.dependencies[0].name = "must roll back".into();
+    invalid.dependencies[0]
+        .accounts
+        .push(loopflow::spend::ServiceAccountId("missing".into()));
+    assert!(store.import_spend_inventory(invalid).await.is_err());
+    let after = store
+        .spend_dependency(inventory.dependencies[0].id.clone(), "2026-09".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(before).unwrap(),
+        serde_json::to_value(after).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(history).unwrap(),
+        serde_json::to_value(
+            store
+                .spend_dependency_history(inventory.dependencies[0].id.clone())
+                .await
+                .unwrap()
+        )
+        .unwrap()
+    );
+    let report = store
+        .spend_report("2026-09".into(), None, None)
+        .await
+        .unwrap();
+    assert_eq!(report.totals.len(), 2);
+    for total in report.totals {
+        assert!(matches!(total.currency.as_str(), "USD" | "EUR"));
+        assert_eq!(total.billed.0.to_string(), "170.00");
+    }
+}
+
+#[tokio::test]
+async fn designated_access_requires_its_scope_and_keeps_unavailable_evidence() {
+    use loopflow::spend::{AccessOutcome, Consumer, EnvironmentId};
+
+    let home = tempfile::tempdir().unwrap();
+    let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
+        .await
+        .unwrap();
+    let mut inventory: Inventory = inventory_fixture();
+    inventory.environments[0].home_id = Some(store.local_home().await.unwrap().id);
+    inventory.requirements[0].credential = None;
+    inventory.requirements[0].tool = Some("auth.export".into());
+    assert!(store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .is_err());
+    inventory.requirements[0].report_consumer = Some(Consumer {
+        repo: "example/two".into(),
+        wave_id: None,
+    });
+    store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .unwrap();
+    let id = EnvironmentId("laptop".into());
+    let missing = store
+        .verify_spend_access(id.clone(), "2026-09".into(), None)
+        .await
+        .unwrap();
+    assert_eq!(missing.observations[0].outcome, AccessOutcome::Unavailable);
+    assert!(missing.observations[0].report_receipt.is_none());
+
+    store.import_spend_invoice(invoice_fixture()).await.unwrap();
+    let report = store
+        .spend_report("2026-09".into(), None, None)
+        .await
+        .unwrap();
+    let wrong = report.export("example/one".into(), None).unwrap();
+    let path = home.path().join("wrong.json");
+    std::fs::write(&path, serde_json::to_vec(&wrong).unwrap()).unwrap();
+    let denied = store
+        .verify_spend_access(id.clone(), "2026-09".into(), Some(path.clone()))
+        .await
+        .unwrap();
+    assert_eq!(denied.observations[0].outcome, AccessOutcome::Denied);
+    assert!(denied.observations[0].report_receipt.is_none());
+    assert_eq!(denied.observations.len(), 2);
+
+    // Scope changes cannot reuse a prior requirement revision.
+    inventory.requirements[0]
+        .report_consumer
+        .as_mut()
+        .unwrap()
+        .repo = "example/one".into();
+    assert!(store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .is_err());
+    inventory.requirements[0].revision = "2".into();
+    inventory.environments[0].home_id = None;
+    store.import_spend_inventory(inventory).await.unwrap();
+    let remote = store
+        .verify_spend_access(id, "2026-09".into(), Some(path))
+        .await
+        .unwrap();
+    assert_eq!(remote.observations[0].outcome, AccessOutcome::Unavailable);
+    assert!(remote.observations[0].report_receipt.is_none());
+    assert!(remote
+        .current_observation(&remote.requirements[0])
+        .is_none());
 }

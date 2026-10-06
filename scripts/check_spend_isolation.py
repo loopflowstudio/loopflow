@@ -39,7 +39,6 @@ print("Designated report: USD 30.00; administrative paths and inherited authorit
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lf", type=Path, default=Path("target/debug/lf"))
-    parser.add_argument("--image", default="rust:bookworm")
     args = parser.parse_args()
     executable = args.lf.resolve(strict=True)
     docker = shutil.which("docker")
@@ -50,16 +49,17 @@ def main() -> None:
         home = Path(directory)
         environment = {"PATH": os.defpath, "LF_HOME": str(home)}
 
-        def run_lf(*arguments: str) -> None:
+        def run_lf(*arguments: str, administrative: bool = True) -> str:
             result = subprocess.run(
                 [str(executable), *arguments],
-                env=environment,
+                env=environment if administrative else {"PATH": os.defpath},
                 capture_output=True,
-                timeout=60,
+                timeout=75,
                 check=False,
             )
             if result.returncode:
                 raise RuntimeError("isolated fixture CLI failed")
+            return result.stdout.decode()
 
         run_lf("auth", "inventory", "import", str(root / "tests/fixtures/dto/spend/inventory.json"))
         run_lf(
@@ -122,7 +122,7 @@ def main() -> None:
                 f"FORBIDDEN_PATHS={json.dumps(forbidden)}",
                 "--entrypoint",
                 "/usr/bin/python3",
-                args.image,
+                "rust:bookworm",
                 "-I",
                 "-",
             ],
@@ -136,7 +136,89 @@ def main() -> None:
             raise SystemExit(
                 "Container isolation check failed; verify Docker and the Python-equipped image"
             )
+
+        def consume(repo: str) -> str:
+            return run_lf(
+                "auth",
+                "access",
+                "consume",
+                "--file",
+                str(report),
+                "--repo",
+                repo,
+                "--period",
+                "2026-09",
+                administrative=False,
+            )
+
+        consumed = json.loads(consume("example/two"))
+        assert consumed["totals"][0]["billed"] == "30.00"
+        try:
+            consume("example/one")
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("wrong recipient accepted")
+        inventory = json.loads((root / "tests/fixtures/dto/spend/inventory.json").read_text())
+        local_home = json.loads(run_lf("home", "id", "--json"))["id"]
+        inventory["environments"][0]["home_id"] = local_home
+        requirement = inventory["requirements"][0]
+        requirement.update(
+            credential=None,
+            tool="auth.export",
+            revision="2",
+            report_consumer={"repo": "example/two", "wave_id": None},
+        )
+        inventory_path = home / "consumer-inventory.json"
+
+        def import_inventory() -> None:
+            inventory_path.write_text(json.dumps(inventory))
+            run_lf("auth", "inventory", "import", str(inventory_path))
+
+        def verify(export: Path) -> dict:
+            return json.loads(
+                run_lf(
+                    "auth",
+                    "access",
+                    "verify",
+                    "laptop",
+                    "--period",
+                    "2026-09",
+                    "--export",
+                    str(export),
+                    "--json",
+                )
+            )
+
+        import_inventory()
+        verified = verify(report)
+        observation = verified["observations"][0]
+        assert observation["outcome"] == "success"
+        assert observation["executed_home"] == local_home
+        assert observation["scope_evidence"] is None
+        receipt = observation["report_receipt"]
+        assert receipt["consumer"] == requirement["report_consumer"]
+        assert receipt["period"] == "2026-09"
+        assert len(receipt["export_sha256"]) == 64
+        again = verify(report)["observations"][0]["report_receipt"]
+        assert again["invocation"] != receipt["invocation"]
+        assert again["export_sha256"] == receipt["export_sha256"]
+        wrong = home / "wrong.json"
+        run_lf(
+            "auth", "export", "--period", "2026-09", "--repo", "example/one", "--output", str(wrong)
+        )
+        denied = verify(wrong)["observations"][0]
+        assert denied["outcome"] == "denied" and denied["report_receipt"] is None
+        inspection = json.loads(run_lf("auth", "access", "show", "laptop", "--json"))
+        assert any(o["report_receipt"] == receipt for o in inspection["observations"])
+        inventory["environments"][0]["home_id"] = None
+        import_inventory()
+        remote = verify(report)["observations"][0]
+        assert remote["outcome"] == "unavailable" and remote["report_receipt"] is None
         print(result.stdout.strip())
+        print(
+            "Environment-bound receipts: local success, wrong-recipient denial, remote unavailable"
+        )
 
 
 if __name__ == "__main__":

@@ -56,6 +56,17 @@ pub enum AuthCommand {
 }
 #[derive(Debug, Subcommand)]
 pub enum AccessCommand {
+    /// Consume a designated export in isolation, without opening the administrative Store
+    Consume {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        repo: String,
+        #[arg(long)]
+        wave: Option<crate::id::WaveId>,
+        #[arg(long)]
+        period: String,
+    },
     /// Record a candidate; no provider credentials are created or revoked
     Rotate {
         credential: String,
@@ -76,6 +87,8 @@ pub enum AccessCommand {
     },
     Verify {
         environment: String,
+        #[arg(long)]
+        export: Option<PathBuf>,
         #[arg(long)]
         period: String,
         #[arg(long)]
@@ -162,8 +175,33 @@ pub fn run(command: &AuthCommand) -> Result<()> {
     tokio::runtime::Runtime::new()?.block_on(run_async(command))
 }
 async fn run_async(command: &AuthCommand) -> Result<()> {
+    if let AuthCommand::Access {
+        cmd:
+            AccessCommand::Consume {
+                file,
+                repo,
+                wave,
+                period,
+            },
+    } = command
+    {
+        let (report, _) = crate::spend::consumer::consume(
+            file,
+            &crate::spend::Consumer {
+                repo: repo.clone(),
+                wave_id: wave.clone(),
+            },
+            period,
+        )
+        .await?;
+        println!("{}", serde_json::to_string(&report)?);
+        return Ok(());
+    }
     let config = storage_config_from_env()?;
     match command {
+        AuthCommand::Access {
+            cmd: AccessCommand::Consume { .. },
+        } => unreachable!("handled without Store access"),
         AuthCommand::Access {
             cmd:
                 AccessCommand::Rotate {
@@ -241,6 +279,7 @@ async fn run_async(command: &AuthCommand) -> Result<()> {
             cmd:
                 AccessCommand::Verify {
                     environment,
+                    export,
                     period,
                     json,
                 },
@@ -250,6 +289,7 @@ async fn run_async(command: &AuthCommand) -> Result<()> {
                 .verify_spend_access(
                     crate::spend::EnvironmentId(environment.clone()),
                     period.clone(),
+                    export.clone(),
                 )
                 .await?;
             print_access_output(&inspection, *json)?;
@@ -267,54 +307,56 @@ async fn run_async(command: &AuthCommand) -> Result<()> {
         }
         AuthCommand::Source {
             cmd:
-                SourceCommand::ImportAwsCur {
+                cmd @ (SourceCommand::ImportAwsCur {
                     source,
                     period,
                     file,
                     json,
-                },
-        } => {
-            let mut export: crate::spend::aws_cur::AwsCurExport = read(file)?;
-            let parent = file.parent().context("export descriptor has no parent")?;
-            export.manifest = parent.join(export.manifest);
-            export.directory = parent.join(export.directory);
-            let revision = open_store(&config)
-                .await?
-                .import_spend_aws_cur(
-                    export,
-                    crate::spend::SourceId(source.clone()),
-                    period.clone(),
-                )
-                .await?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&revision)?);
-            } else {
-                println!(
-                    "{} {} {} · revision {}",
-                    revision.invoice.document_id,
-                    revision.invoice.currency,
-                    revision.billed.0,
-                    revision.revision
-                );
-            }
-        }
-        AuthCommand::Source {
-            cmd:
-                SourceCommand::Import {
+                }
+                | SourceCommand::Import {
                     source,
                     period,
                     file,
                     json,
-                },
+                }),
         } => {
-            let invoice: Invoice = read(file)?;
-            if invoice.source.0 != *source || invoice.period != *period {
-                bail!("export source or period does not match the requested import");
+            let store = open_store(&config).await?;
+            let result: Result<_> = async {
+                match cmd {
+                    SourceCommand::ImportAwsCur { .. } => {
+                        let mut export: crate::spend::aws_cur::AwsCurExport = read(file)?;
+                        let parent = file.parent().context("export descriptor has no parent")?;
+                        export.manifest = parent.join(export.manifest);
+                        export.directory = parent.join(export.directory);
+                        Ok(store
+                            .import_spend_aws_cur(
+                                export,
+                                crate::spend::SourceId(source.clone()),
+                                period.clone(),
+                            )
+                            .await?)
+                    }
+                    SourceCommand::Import { .. } => {
+                        let invoice: Invoice = read(file)?;
+                        if invoice.source.0 != *source || invoice.period != *period {
+                            bail!("export source or period does not match the requested import");
+                        }
+                        Ok(store.import_spend_invoice(invoice).await?)
+                    }
+                }
             }
-            let revision = open_store(&config)
-                .await?
-                .import_spend_invoice(invoice)
-                .await?;
+            .await;
+            // Record every completed attempt, including parse errors, without raw error text.
+            store
+                .record_spend_import(crate::spend::ImportObservation {
+                    source: crate::spend::SourceId(source.clone()),
+                    period: period.clone(),
+                    observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                    succeeded: result.is_ok(),
+                })
+                .await
+                .context("could not record import outcome")?;
+            let revision = result?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&revision)?);
             } else {
@@ -484,6 +526,12 @@ fn print_access(inspection: &crate::spend::AccessInspection) {
             requirement.purpose,
             requirement.permissions.join(", ")
         );
+        if let Some(consumer) = &requirement.report_consumer {
+            println!(
+                "Designated recipient: {} · Wave {:?}",
+                consumer.repo, consumer.wave_id
+            );
+        }
         match inspection.current_observation(requirement) {
             Some(observation) => println!(
                 "Current read: {:?} · {} · scope evidence {:?}",
@@ -505,6 +553,12 @@ fn print_access(inspection: &crate::spend::AccessInspection) {
         );
     }
     for observation in &inspection.observations {
+        if let Some(receipt) = &observation.report_receipt {
+            println!(
+                "Container receipt: {} · {} · {} · SHA256 {}",
+                receipt.invocation, receipt.consumer.repo, receipt.period, receipt.export_sha256
+            );
+        }
         println!(
             "History: {} · {:?} · {} · Home {} · {:?}",
             observation.requirement.0,

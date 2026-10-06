@@ -70,11 +70,15 @@ pub(crate) fn read_export(
     account: &ServiceAccount,
     resources: &[Resource],
 ) -> StoreResult<Invoice> {
-    if account.provider != "aws" || account.id != export.account || account.native_id.is_none() {
+    if account.provider != "aws" || account.id != export.account {
         return Err(invalid(
             "AWS CUR import requires a declared native AWS account identity",
         ));
     }
+    let native_account = account
+        .native_id
+        .as_deref()
+        .ok_or_else(|| invalid("AWS CUR import requires a declared native AWS account identity"))?;
     if export.invoice_id.trim().is_empty() {
         return Err(invalid("AWS CUR invoice identity is required"));
     }
@@ -146,16 +150,8 @@ pub(crate) fn read_export(
             if field("bill/InvoiceId")? != export.invoice_id {
                 continue;
             }
-            if field("bill/PayerAccountId")?
-                != account
-                    .native_id
-                    .as_deref()
-                    .expect("checked native identity")
-                || field("lineItem/UsageAccountId")?
-                    != account
-                        .native_id
-                        .as_deref()
-                        .expect("checked native identity")
+            if field("bill/PayerAccountId")? != native_account
+                || field("lineItem/UsageAccountId")? != native_account
             {
                 return Err(invalid("AWS CUR account mismatch; consolidated member-account billing is not implemented"));
             }

@@ -113,18 +113,6 @@ public struct Workflow: Codable, Sendable, Equatable {
         guard case .edge(let index, _, let running) = position, edges.indices.contains(index) else { return nil }
         return (index, edges[index], running)
     }
-
-    /// Edges a person can choose next, as Rust lists them.
-    public var choices: [(index: Int, edge: Edge)] {
-        outgoing.filter(edges.indices.contains).map { ($0, edges[$0]) }
-    }
-}
-
-extension Array where Element == Workflow.Edge {
-    /// Edges leaving `node`, each with its place among the workflow's edges.
-    public func leaving(_ node: String) -> [(index: Int, edge: Workflow.Edge)] {
-        enumerated().filter { $0.element.from == node }.map { ($0.offset, $0.element) }
-    }
 }
 
 public struct TaskSession: Codable, Sendable, Equatable, Identifiable {

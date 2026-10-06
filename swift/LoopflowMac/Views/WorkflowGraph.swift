@@ -31,7 +31,10 @@ struct WorkflowGraphLayout {
         let label: CGPoint
         let labelWidth: CGFloat
 
-        var text: String { edge.flow ?? "finish" }
+        /// An edge is named by what it runs.
+        var text: String { Self.text(edge) }
+
+        static func text(_ edge: Workflow.Edge) -> String { edge.flow ?? "finish" }
     }
 
     static let nodeHeight: CGFloat = 44
@@ -64,7 +67,7 @@ struct WorkflowGraphLayout {
                 lanes += 1
             }
         }
-        func labelWidth(_ index: Int) -> CGFloat { CGFloat((edges[index].flow ?? "finish").count) * 7 + 26 }
+        func labelWidth(_ index: Int) -> CGFloat { CGFloat(Arrow.text(edges[index]).count) * 7 + 26 }
 
         let top = (loops.values.max()).map { Self.loopRise + Self.loopStep * CGFloat($0 - 1) + Self.labelHeight + 4 } ?? 4
         var boxes: [Box] = []
@@ -141,14 +144,12 @@ struct WorkflowGraphLayout {
 }
 
 /// A workflow as a graph. Given a Task's position it marks the node the Task
-/// waits at or the edge it is on, and the edges that can be chosen now are
-/// its buttons.
+/// waits at or the edge it is on, running or stopped, and the edges that can
+/// be chosen now are its buttons.
 struct WorkflowGraph: View {
     let nodes: [Workflow.Node]
     let edges: [Workflow.Edge]
-    var current: String?
-    var running: Int?
-    var stopped: Int?
+    var position: Workflow.Position?
     /// Edges that can be chosen now, by their place among `edges`.
     var choices: [Int] = []
     /// Why no edge can be chosen now.
@@ -179,12 +180,17 @@ struct WorkflowGraph: View {
         .accessibilityIdentifier("task-workflow-graph")
     }
 
+    /// Whether the Task is on `edge` with its Flow still running; `nil` when it is not on it.
+    private func running(_ edge: Int) -> Bool? {
+        if case .edge(edge, _, let running) = position { running } else { nil }
+    }
+
     private func tone(_ edge: Int) -> WorkspaceTone? {
-        running == edge ? .running : stopped == edge ? .blocked : nil
+        running(edge).map { $0 ? .running : .blocked }
     }
 
     private func node(_ box: WorkflowGraphLayout.Box) -> some View {
-        let marked = current == box.name
+        let marked = position == .node(box.name)
         let shape = box.terminal ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: 7))
         return VStack(spacing: 1) {
             Text(box.name)
@@ -209,7 +215,7 @@ struct WorkflowGraph: View {
 
     @ViewBuilder
     private func label(_ arrow: WorkflowGraphLayout.Arrow) -> some View {
-        let state = running == arrow.index ? "Running" : stopped == arrow.index ? "Stopped" : ""
+        let state = running(arrow.index).map { $0 ? "Running" : "Stopped" } ?? ""
         Group {
             if choices.contains(arrow.index) {
                 Button(arrow.text) { choose(arrow.edge) }

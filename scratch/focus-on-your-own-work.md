@@ -190,12 +190,13 @@ Linear completion against an active Task.
     filtered or grouped by it. Open: whether a single headless skill Run
     with no Flow also belongs in that log.
     Done when the headless Desktop tests render `feature` and a no-PR
-    definition from the shared fixture with the position marked. **Built,
-    not yet compressed or realigned.** `WorkflowGraph` replaces the text row
+    definition from the shared fixture with the position marked. **Built and
+    compressed, not yet realigned.** `WorkflowGraph` replaces the text row
     on the Task page, the Wave page, the Flow preview and the catalogue
     inspector; **Flow runs** sits beside it. A node is `name: skill` or
     `name: {skill, description}`. Check: `swift test --filter
-    "DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests"` 36 passed;
+    "DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests"` 36 passed
+    (rerun after compress);
     `cargo test -p loopflow --lib engine::workflow` 3 passed. Choices:
     [questions.md](questions.md). Demo item: how it looks, in particular
     label widths, which are estimated from character counts.

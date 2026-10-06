@@ -21,10 +21,7 @@ struct WorkflowView: View {
             }
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 WorkflowGraph(
-                    nodes: workflow.nodes, edges: workflow.edges,
-                    current: { if case .node(let node) = workflow.position { node } else { nil } }(),
-                    running: workflow.onEdge.flatMap { $0.running ? $0.index : nil },
-                    stopped: workflow.onEdge.flatMap { $0.running ? nil : $0.index },
+                    nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
                     choices: workflow.outgoing, unavailable: unavailable,
                     hint: { "lf task run \(task.task.identifier) \($0.launchName) · to \($0.to)" },
                     choose: { edge in Task { await model.startFlow(edge.launchName, task: task, wave: wave) } })

@@ -267,14 +267,14 @@ struct DesktopPerformanceTests {
                 model.navigation.flowDrafts[selected.task.id]?.selectedNode?.node == 2
                     && window.allText.contains { $0.contains("realign") }
             })
-            model.navigation.expandedRuns.remove(selected.task.id)
+            model.navigation.expandedHistory.remove(selected.task.id)
             try await sample("task_history", population, attempt, journal, window, action: {
-                try pressElement("task-runs-toggle", in: window)
-                try await wait(window) { model.recentRuns[selected.task.id].value?.count == taskCount }
-                try revealElement("task-runs-list", in: window)
+                try pressElement("task-history-toggle", in: window)
+                try await wait(window) { model.sessionHistory[selected.task.id].value?.count == taskCount }
+                try revealElement("task-history-list", in: window)
             }, ready: {
-                model.navigation.expandedRuns.contains(selected.task.id)
-                    && model.recentRuns[selected.task.id].value?.count == taskCount
+                model.navigation.expandedHistory.contains(selected.task.id)
+                    && model.sessionHistory[selected.task.id].value?.count == taskCount
                     && window.allText.contains { $0.contains("implement") }
             })
             workspace.showsDetails = false
@@ -365,12 +365,7 @@ struct DesktopPerformanceTests {
                                "rounds": round, "preserved": true, "reads": planning.reads, "time": Date().timeIntervalSince1970])
             // Let the recorder finish its fixed-duration attachment before this
             // test process exits. The tail is outside the measured soak.
-            let finished = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["LF_DESKTOP_PERF_OUTPUT"]))
-                .deletingLastPathComponent().appendingPathComponent("resources-finished")
-            let deadline = ContinuousClock.now + .seconds(60)
-            while !FileManager.default.fileExists(atPath: finished.path), ContinuousClock.now < deadline {
-                try await Task.sleep(for: .milliseconds(100))
-            }
+            try await waitForResourceRecorder()
         }
         await model.stopActiveSessions()
     }
@@ -476,12 +471,16 @@ struct DesktopPerformanceTests {
         if seconds > 0 {
             try journal.write(["event": "soak_end", "elapsed_seconds": Double(start.duration(to: .now).components.seconds),
                                "rounds": round, "preserved": true, "time": Date().timeIntervalSince1970])
-            let finished = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["LF_DESKTOP_PERF_OUTPUT"]))
-                .deletingLastPathComponent().appendingPathComponent("resources-finished")
-            let deadline = ContinuousClock.now + .seconds(60)
-            while !FileManager.default.fileExists(atPath: finished.path), ContinuousClock.now < deadline {
-                try await Task.sleep(for: .milliseconds(100))
-            }
+            try await waitForResourceRecorder()
+        }
+    }
+
+    private func waitForResourceRecorder() async throws {
+        let finished = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["LF_DESKTOP_PERF_OUTPUT"]))
+            .deletingLastPathComponent().appendingPathComponent("resources-finished")
+        let deadline = ContinuousClock.now + .seconds(60)
+        while !FileManager.default.fileExists(atPath: finished.path), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(100))
         }
     }
 
@@ -739,9 +738,9 @@ struct DesktopPerformanceFixtureTests {
         #expect(model.flowCatalog.errorMessage == nil)
         #expect(model.taskWork[task.task.id].errorMessage == nil)
         #expect(model.taskContext[task.task.id].errorMessage == nil)
-        await model.loadRecentRuns(task: task.task, wave: task.wave.wave)
-        #expect(model.recentRuns[task.task.id].value?.count == 256)
-        #expect(model.recentRuns[task.task.id].errorMessage == nil)
+        await model.loadSessionHistory(task: task.task, wave: task.wave.wave)
+        #expect(model.sessionHistory[task.task.id].value?.count == 256)
+        #expect(model.sessionHistory[task.task.id].errorMessage == nil)
         let store = TaskFilesStore(issue: "PERF-0", cwd: NSTemporaryDirectory(), query: query)
         store.autosave = false
         store.selection = "notes.txt"

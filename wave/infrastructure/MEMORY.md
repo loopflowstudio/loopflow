@@ -255,47 +255,25 @@ remain evidence of their own versions, not instructions to restore those owners.
 
 ## Installed worker recovery (2026-10-02 PDT)
 
-Jack Heart authorized recovery of blocked workers and publication/installation
-of the prepared patch. [PR #1415](https://github.com/loopflowstudio/loopflow/pull/1415)
-merged as bfc681ee8; [v0.12.32](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.32)
-published from 8c72e591e78a68227255fd86bfff6a939ded5e8b after release
-[workflow 37099938065](https://github.com/loopflowstudio/loopflow/actions/runs/37099938065).
-The published installer promoted CLI/app after preflight recognized the existing
-Home exactly, with all 33 executable references resolving and no migration.
-GitHub's API identified v0.12.32 while its public latest redirect still selected
-v0.12.31; the checksum-verified published installer with --version v0.12.32
-completed installation. No source build was promoted or runtime data hand-edited.
+Jack Heart authorized worker recovery and publication/installation of v0.12.32.
+The exact installer, CI, file-preservation and recovery receipts remain at
+`569956c21a5494c4b844f929092f6bc67a135cdf:wave/infrastructure/MEMORY.md`
+under this heading. Published artifacts recognized the existing Home without
+migration; no source build was promoted or runtime data hand-edited.
 
-Installed readback confirms LOO-367 resumed the same saved Flow, passed
-loop-decide and entered implementation iteration 1. Historical unowned Execs no
-longer block resumption; actual current process/Session/Flow ownership still does.
-LOO-285's integrated CI-repair child ownership fix passed focused tests and its
-saved Flow resumed beyond sync. Cross-segment continuation implementation and
-the two distinct automatic settlements remain, including retained telemetry
-failures; this operator-triggered release supplies none of that automatic proof.
-LOO-292 retains its demo review. LOO-370 owns retired Run-name cleanup.
+Installed readback showed LOO-367 resuming its saved Flow and LOO-285 progressing
+beyond sync. This manual recovery supplies neither automatic settlement nor
+cross-segment continuation proof. LOO-295's existing merged PR #1283 was associated
+with its original PR row while preserving eight unrelated scratch files. Its
+later acceptance, and LOO-292's, are recorded in the October 4 entries.
 
-LOO-295's installed reconciliation attached existing merged
-[PR #1283](https://github.com/loopflowstudio/loopflow/pull/1283) to the original
-PR row, recording merge 5bcc40fdff810c39885a31b3fbfd6557f49fde93. The Task stayed
-open and all eight unrelated scratch/loc-explorer files were byte-identical.
-Its current-runtime review/repeat/final-demo acceptance remains unresolved.
-
-A separate retained-data defect remains: `invalid stored landing placement: home`
-from store/sqlite/pr_landings.rs::map_landing fails repository reconciliation,
-including after LOO-295's successful association, and degrades the CI watcher.
-It also interrupted release settlement after #1417 merged. Supported re-entry
-recognized that existing merge and completed the same v0.12.32; no manual
-record/ref/worktree deletion occurred. The old placement reader/migration needs
-repair with preserved ownership evidence. This is not an empty/healthy backlog.
-
-Jack questioned serial releases. The operator committed to collecting further
-recovery defects into one repair batch, with installed-state preflight, instead
-of starting another immediate release for each discovery; this is an operating
-adjustment, not a claim that Jack approved a new release policy.
-
-Checks: PR and merge-queue CI, candidate workflow and publisher passed; installed
-LOO-367 progression and LOO-295 association/file-preservation readback passed.
+`invalid stored landing placement: home` still interrupted repository/CI-watcher
+reconciliation and release settlement after #1417. Supported re-entry completed
+the same v0.12.32 without deleting records, refs or worktrees. LOO-373 owns the
+reader/migration repair with preserved ownership evidence; this observation is
+not an empty/healthy backlog. After Jack questioned serial releases, the operator
+committed to batching recovery defects with installed-state preflight. That was
+an operating adjustment, not Jack's approval of a new release policy.
 
 ## Optional chapters and Task workflows (2026-10-02)
 

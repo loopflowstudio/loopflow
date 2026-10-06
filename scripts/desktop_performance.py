@@ -655,12 +655,7 @@ def _seed_native_task(home: Path, checkout: Path, repo: Path, session: str) -> t
             "VALUES(?,?,?,?,?,?,?)",
             (str(repo), "linear", task, issue, project, now, json.dumps(item)),
         )
-        db.execute(
-            "INSERT INTO work_placements(wave_id,home_id,placed_at) "
-            "SELECT ?,id,? FROM homes WHERE route='local'",
-            (wave, now),
-        )
-        for column, identity in (("project_id", project), ("task_id", task)):
+        for column, identity in (("wave_id", wave), ("project_id", project), ("task_id", task)):
             db.execute(
                 f"INSERT INTO work_placements({column},home_id,placed_at) "
                 "SELECT ?,id,? FROM homes WHERE route='local'",
@@ -725,8 +720,6 @@ def _native_command(test_filter: str, environment: dict[str, str]) -> list[str]:
         "--filter",
         test_filter,
     ]
-    if "LOOPFLOW_TEST_NATIVE_FIXTURE" not in environment:
-        return command
     fixture_path = Path(environment["LOOPFLOW_TEST_NATIVE_FIXTURE"])
     fixture = json.loads(fixture_path.read_text())
     output = fixture_path.parent.resolve()

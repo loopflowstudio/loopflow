@@ -93,6 +93,7 @@ public struct StoreRevisions: Decodable, Equatable, Sendable {
     public let sessions: Int64
     public let flows: Int64
     public let execs: Int64
+    public let usage: Int64
 }
 
 /// One line of the stream. Mirrors Rust `WorkspaceFrame`: the body is the same

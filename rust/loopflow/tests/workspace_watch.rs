@@ -761,3 +761,41 @@ fn a_checkout_changed_on_disk_is_shown() {
     git(&worktree, &["commit", "--quiet", "-m", "note"]);
     watch.checkout((false, true));
 }
+
+/// Agents record usage every few seconds. Only the part showing token totals
+/// follows it, and however often it moves that part is read once per rest.
+#[test]
+fn usage_rereads_only_wave_detail_and_not_for_every_row() {
+    let home = Home::new();
+    let mut watch = home.watch();
+    watch.planning(Duration::from_secs(30), |_| true);
+    let conn = home.raw();
+    home.conversation();
+    watch.request(
+        serde_json::json!({"action": "scope", "id": 1, "repo": home.wave.repo(),
+        "headless": true, "task": null, "wave": home.wave.id().as_str(),
+        "activity": {"wave": home.wave.id().as_str(), "project": null, "task": null}}),
+    );
+    watch.session(|_| true);
+    watch.parts(Duration::from_secs(1));
+    let before = watch.heartbeat();
+
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(13) {
+        conn.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+             VALUES('conversation','usage',?1,1,'{}')",
+            [format!("turn-{}", started.elapsed().as_millis())],
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    // Heartbeats sent while writing are still waiting to be received.
+    watch.parts(Duration::from_millis(200));
+    let after = watch.heartbeat();
+    for part in ["planning", "sessions", "task", "work_activity"] {
+        assert_eq!(before.get(part), after.get(part), "{part} was read again");
+    }
+    let readings = after["wave"] - before["wave"];
+    assert!((1..=2).contains(&readings), "wave read {readings} times");
+}

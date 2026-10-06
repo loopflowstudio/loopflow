@@ -122,12 +122,27 @@ above, and dropped with its evidence if it turns out not to be a clear win.
    build takes 0.25 s, so admission is not 1.4 s here; neither was touched.
    An installed build was not measured. One-shot commands retain nothing
    and ask in turn as before.
-7. **Git-only changes show promptly.** A dirty or newly committed checkout
-   shows within seconds, not one to five minutes: watch the existing
-   checkouts for changes and re-read only what changed. No tighter clock.
-8. **Token totals follow usage.** Usage moves its own revision that
-   invalidates only the part showing totals, coalesced so agents writing
-   usage do not re-read it continuously.
+7. **Git-only changes: built.** The watch follows each existing Task
+   checkout and, for a linked worktree, its Git metadata directory, with one
+   FSEvents stream (`engine/fs_events.rs`, the binding the active-Session
+   reader already used, moved and shared). A changed checkout is asked about
+   again at most every 3 s (`reread_retained`); planning and Wave detail are
+   read again only when an answer differs, so a build writing ignored files
+   costs four Git commands per 3 s and no reading. **A file written in this
+   Task's checkout reached the planning frame in 2.0–2.7 s, and its removal
+   in 1.3–2.2 s, at load 46 (five each, `measure/checkout.py`)**, against one
+   to five minutes. The watch's Git reads set `GIT_OPTIONAL_LOCKS=0`. The
+   clocks are unchanged. macOS only; elsewhere the clocks still stand.
+   CPU of the watch while a checkout builds is unmeasured.
+8. **Token totals: built.** A fifth revision, `usage`, moves on each usage
+   event or `events.jsonl` usage line (one insert trigger). Only Wave detail
+   follows it, and a change that is usage alone waits until the part was
+   last read 10 s ago. **145 usage rows written over 30 s to the copy read
+   Wave detail 3 times and planning 0 times** (load 25, `measure/usage.py`),
+   against a lag of up to five minutes. `StoreRevisions` gained the field on
+   the wire, in Swift and in the frame fixture. The cost of one Wave-detail
+   reading on Jack's store is unmeasured. The copy's draft was re-applied by
+   hand (table recreated, trigger added).
 9. **The Task-files comparison stops polling.** Its 10 s `lf` loop goes;
    it follows the same checkout changes as slice 7.
 10. **One reader per window.** `active` becomes a part of the workspace

@@ -2,13 +2,14 @@
 -- workspace surface reads bumps its domain here, inside the writer's own
 -- transaction, so any reader can ask "what changed" without scanning history.
 -- A domain follows what a write can change on screen, not which table it
--- lands in: provider transcript lines and usage events bump nothing.
+-- lands in: provider transcript lines bump nothing, and usage moves only its
+-- own domain.
 CREATE TABLE store_revisions (
-    domain TEXT PRIMARY KEY NOT NULL CHECK (domain IN ('planning', 'sessions', 'flows', 'execs')),
+    domain TEXT PRIMARY KEY NOT NULL CHECK (domain IN ('planning', 'sessions', 'flows', 'execs', 'usage')),
     revision INTEGER NOT NULL
 ) WITHOUT ROWID;
 INSERT INTO store_revisions(domain, revision)
-VALUES ('planning', 0), ('sessions', 0), ('flows', 0), ('execs', 0);
+VALUES ('planning', 0), ('sessions', 0), ('flows', 0), ('execs', 0), ('usage', 0);
 
 -- The completion gate asks only about unfinished execution. One statement
 -- pairs the few unfinished Execs with their Sessions and Flows, and these
@@ -317,7 +318,6 @@ END;
 -- sessions: every Session event except usage and transcript lines. A transcript
 -- line is an `events.jsonl` observation of a type no summary reader selects;
 -- provider attempts and identities share that receipt key and are displayed.
--- Token totals therefore follow the next displayed change, not each usage row.
 CREATE TRIGGER store_revision_session_events_insert AFTER INSERT ON session_events
 WHEN NOT (NEW.kind = 'usage' OR (NEW.kind = 'observed' AND instr(NEW.receipt_key, ':events.jsonl:') > 0
     AND CASE WHEN json_valid(NEW.payload) THEN COALESCE(json_extract(NEW.payload, '$.evidence.schema_version'), 0) = 1
@@ -349,4 +349,15 @@ WHEN NOT (OLD.kind = 'usage' OR (OLD.kind = 'observed' AND instr(OLD.receipt_key
         ELSE 0 END))
 BEGIN
     UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
+END;
+
+-- usage: token counts, recorded as a `usage` event or an `events.jsonl` usage
+-- line. Rows are only appended. Agents write these every few seconds, so a
+-- reader showing totals follows this domain alone and rests between readings.
+CREATE TRIGGER store_revision_usage_insert AFTER INSERT ON session_events
+WHEN NEW.kind = 'usage' OR (NEW.kind = 'observed' AND instr(NEW.receipt_key, ':events.jsonl:') > 0
+    AND CASE WHEN json_valid(NEW.payload) THEN COALESCE(json_extract(NEW.payload, '$.evidence.type'), '') = 'usage'
+        ELSE 0 END)
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'usage';
 END;

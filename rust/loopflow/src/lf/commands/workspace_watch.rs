@@ -42,6 +42,9 @@ const RETRY_CAP: Duration = Duration::from_secs(60);
 const PLANNING_CLOCK: Duration = Duration::from_secs(300);
 /// Process liveness is observed, never committed.
 const ACTIVITY_CLOCK: Duration = Duration::from_secs(2);
+/// Agents record usage every few seconds. Token totals are read this often
+/// at most, however often they move.
+const USAGE_REST: Duration = Duration::from_secs(10);
 const MAX_FRAME: usize = 64 * 1024 * 1024;
 const MAX_REQUEST: usize = 16 * 1024;
 const WORK_ACTIVITY_WINDOW: i64 = 7 * 24 * 3600;
@@ -182,15 +185,34 @@ impl Part {
     }
 
     /// Whether a commit that moved revisions from `old` to `new` can change
-    /// this part. Planning conditions read Sessions, Flows and unfinished Execs.
+    /// this part. Planning conditions read Sessions, Flows and unfinished
+    /// Execs; only a Wave's Session history shows token totals.
     fn changed(self, old: StoreRevisions, new: StoreRevisions) -> bool {
+        let displayed = |revisions| StoreRevisions {
+            usage: 0,
+            ..revisions
+        };
         match self {
             Part::Sessions => {
-                StoreRevisions { execs: 0, ..old } != StoreRevisions { execs: 0, ..new }
+                StoreRevisions {
+                    execs: 0,
+                    ..displayed(old)
+                } != StoreRevisions {
+                    execs: 0,
+                    ..displayed(new)
+                }
             }
             Part::Activity => old.execs != new.execs,
-            Part::Planning | Part::Task | Part::Wave | Part::WorkActivity => old != new,
+            Part::Wave => old != new,
+            Part::Planning | Part::Task | Part::WorkActivity => displayed(old) != displayed(new),
         }
+    }
+
+    /// Whether the only thing that moved is one the part can wait for.
+    fn rests(self, old: StoreRevisions, new: StoreRevisions) -> bool {
+        self == Part::Wave
+            && old.usage != new.usage
+            && StoreRevisions { usage: 0, ..old } == StoreRevisions { usage: 0, ..new }
     }
 
     fn clock(self) -> Option<Duration> {
@@ -457,7 +479,9 @@ impl Reader {
             || state.stale
             || state.retry_due(read_on, now)
             || match (state.read_at, revisions) {
-                (Some(old), Some(new)) => part.changed(old, new),
+                (Some(old), Some(new)) => {
+                    part.changed(old, new) && (!part.rests(old, new) || now - read_on >= USAGE_REST)
+                }
                 (None, None) => false,
                 _ => true,
             }
@@ -827,6 +851,7 @@ mod tests {
             sessions,
             flows,
             execs,
+            usage: 0,
         }
     }
 
@@ -837,6 +862,23 @@ mod tests {
         assert!(Part::Planning.changed(old, revisions(1, 1, 1, 2)));
         assert!(Part::Sessions.changed(old, revisions(2, 1, 1, 1)));
         assert!(!Part::Activity.changed(old, revisions(2, 2, 2, 1)));
+    }
+
+    #[test]
+    fn usage_alone_rereads_only_wave_detail_and_lets_it_rest() {
+        let old = revisions(1, 1, 1, 1);
+        let used = StoreRevisions { usage: 5, ..old };
+        for part in Part::ALL {
+            assert_eq!(part.changed(old, used), part == Part::Wave, "{part:?}");
+        }
+        assert!(Part::Wave.rests(old, used));
+        assert!(!Part::Wave.rests(
+            old,
+            StoreRevisions {
+                sessions: 2,
+                ..used
+            }
+        ));
     }
 
     #[test]

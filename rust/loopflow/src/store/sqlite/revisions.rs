@@ -16,6 +16,8 @@ pub struct StoreRevisions {
     pub sessions: i64,
     pub flows: i64,
     pub execs: i64,
+    /// Token counts. Moves every few seconds while agents work.
+    pub usage: i64,
 }
 
 impl SqliteStore {
@@ -26,6 +28,7 @@ impl SqliteStore {
             sessions: 0,
             flows: 0,
             execs: 0,
+            usage: 0,
         };
         let mut query = conn.prepare("SELECT domain,revision FROM store_revisions")?;
         let mut rows = query.query([])?;
@@ -36,6 +39,7 @@ impl SqliteStore {
                 "sessions" => revisions.sessions = revision,
                 "flows" => revisions.flows = revision,
                 "execs" => revisions.execs = revision,
+                "usage" => revisions.usage = revision,
                 _ => {}
             }
         }
@@ -168,11 +172,11 @@ mod tests {
     }
 
     #[test]
-    fn store_revisions_ignore_transcript_lines_and_usage() {
+    fn transcript_lines_move_nothing_and_usage_moves_only_its_own_revision() {
         let (_dir, store) = store();
         session(&store, "conversation");
         let before = store.revisions().unwrap();
-        // The types every summary reader skips, and usage.
+        // The types every summary reader skips.
         for (line, kind) in [
             "activity",
             "handoff",
@@ -182,7 +186,6 @@ mod tests {
             "tool_use",
             "result",
             "provider_output",
-            "usage",
         ]
         .into_iter()
         .enumerate()
@@ -196,8 +199,22 @@ mod tests {
                 &evidence(kind),
             );
         }
-        event(&store, "conversation", "usage", "turn", "{}");
         assert_eq!(store.revisions().unwrap(), before);
+        event(&store, "conversation", "usage", "turn", "{}");
+        event(
+            &store,
+            "conversation",
+            "observed",
+            "input:events.jsonl:9",
+            &evidence("usage"),
+        );
+        assert_eq!(
+            store.revisions().unwrap(),
+            StoreRevisions {
+                usage: before.usage + 2,
+                ..before
+            }
+        );
         // Lifecycle facts share the `observed` kind with transcript lines, and
         // provider attempts share their receipt key. Unreadable evidence counts.
         for (kind, receipt, payload) in [

@@ -564,6 +564,7 @@ fn inspection_output_fixtures_round_trip() {
     round_trip::<Report>(&fixture["report"]);
     round_trip::<ReportExport>(&fixture["export"]);
     round_trip::<Vec<DependencyHistory>>(&fixture["history"]);
+    round_trip::<loopflow::spend::rotation::Rotation>(&fixture["rotation"]);
 }
 
 #[tokio::test]
@@ -626,5 +627,193 @@ async fn source_scope_can_shrink_without_losing_billed_evidence() {
             .invoices[0]
             .revision,
         original.revision
+    );
+}
+
+#[tokio::test]
+async fn historical_metadata_controls_project_and_tag_attribution() {
+    let home = tempfile::tempdir().unwrap();
+    let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
+        .await
+        .unwrap();
+    let mut inventory: Inventory = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/inventory.json"
+    ))
+    .unwrap();
+    let mut invoice: Invoice = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/invoice.json"
+    ))
+    .unwrap();
+    inventory.dependencies[0]
+        .resources
+        .push(inventory.resources[0].id.clone());
+    inventory.resources[0].observed_at = 1788220800; // 2026-09-01 UTC
+    inventory.resources[0].project = Some("build".into());
+    inventory.resources[0]
+        .tags
+        .insert("owner".into(), "one".into());
+    inventory.rules[0].project = Some("build".into());
+    inventory.rules[0].tags.insert("owner".into(), "one".into());
+    // Avoid applying the project rule to resources whose historical metadata is unknown.
+    inventory.rules[0].resource = Some(inventory.resources[0].id.clone());
+    store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .unwrap();
+    let original = store.import_spend_invoice(invoice.clone()).await.unwrap();
+    assert!(original
+        .charges
+        .iter()
+        .filter(|c| c.charge.resource.as_ref() == Some(&inventory.resources[0].id))
+        .all(|c| c.attribution[0].kind == loopflow::spend::AssignmentKind::Direct));
+    inventory.effective_from = "2026-10-01".into();
+    inventory.resources[0].observed_at = 1790812800;
+    inventory.resources[0]
+        .tags
+        .insert("owner".into(), "two".into());
+    inventory.accounts[0].evidence = "updated account observation".into();
+    inventory.credentials[0].reference.name = "UPDATED_KEY".into();
+    inventory.requirements[0].purpose = "updated purpose".into();
+    inventory.requirements[0].revision = "2".into();
+    inventory.environments[0].name = "renamed laptop".into();
+    inventory.dependencies.clear(); // linked metadata alone must create a historical interval
+    store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .unwrap();
+    let history = store
+        .spend_dependency_history(loopflow::spend::DependencyId("workers".into()))
+        .await
+        .unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].resources[0].tags["owner"], "one");
+    assert_eq!(history[1].resources[0].tags["owner"], "two");
+    assert_eq!(history[0].credentials[0].reference.name, "BILLING_KEY");
+    assert_eq!(history[1].credentials[0].reference.name, "UPDATED_KEY");
+    assert_eq!(history[1].requirements[0].purpose, "updated purpose");
+    assert_eq!(history[1].environments[0].name, "renamed laptop");
+    assert_eq!(
+        history[1].accounts[0].evidence,
+        "updated account observation"
+    );
+    // A correction still uses September metadata, never October's tags.
+    invoice.charges[0].amount = loopflow::spend::Money::parse("90.00").unwrap();
+    invoice.total = loopflow::spend::Money::parse("160.00").unwrap();
+    let corrected = store.import_spend_invoice(invoice.clone()).await.unwrap();
+    assert!(corrected
+        .charges
+        .iter()
+        .filter(|c| c.charge.resource.as_ref() == Some(&inventory.resources[0].id))
+        .all(|c| c.attribution[0].kind == loopflow::spend::AssignmentKind::Direct));
+    // A newly supplied dated change within September makes a whole-month charge unresolved.
+    inventory.effective_from = "2026-09-15".into();
+    inventory.resources[0].observed_at = 1789430400;
+    store.import_spend_inventory(inventory).await.unwrap();
+    invoice.document_id = "crosses-boundary".into();
+    let crossed = store.import_spend_invoice(invoice).await.unwrap();
+    assert!(crossed
+        .charges
+        .iter()
+        .filter(|c| c.charge.resource.as_ref().is_some_and(|r| r.0 == "direct"))
+        .all(
+            |c| c.attribution[0].kind == loopflow::spend::AssignmentKind::Unassigned
+                && c.gap.is_some()
+        ));
+    assert_eq!(
+        serde_json::to_value(
+            store
+                .import_spend_invoice(original.invoice.clone())
+                .await
+                .unwrap()
+        )
+        .unwrap(),
+        serde_json::to_value(original).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn aws_cur_manifest_import_reconciles_and_preserves_last_good_invoice() {
+    let home = tempfile::tempdir().unwrap();
+    let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
+        .await
+        .unwrap();
+    let mut inventory: Inventory = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/inventory.json"
+    ))
+    .unwrap();
+    inventory.accounts[0].provider = "aws".into();
+    inventory.accounts[0].native_id = Some("000000000001".into());
+    store.import_spend_inventory(inventory).await.unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/spend/aws-cur");
+    for name in ["manifest.json", "usage.csv", "credits.csv"] {
+        std::fs::copy(root.join(name), home.path().join(name)).unwrap();
+    }
+    let descriptor = json!({
+        "account":"shared", "invoice_id":"fixture-invoice", "currency":"USD",
+        "invoice_total":"90.00", "fetched_at":1791244800_i64, "generated_at":null,
+        "manifest":"manifest.json", "directory":"."
+    });
+    let file = home.path().join("export.json");
+    document(&file, &descriptor);
+    let args = [
+        "auth",
+        "source",
+        "import-aws-cur",
+        "fixture",
+        "--period",
+        "2026-09",
+        "--file",
+        file.to_str().unwrap(),
+        "--json",
+    ];
+    let original: Value = serde_json::from_str(&success(home.path(), &args)).unwrap();
+    assert_eq!(original["billed"], "90.00");
+    assert_eq!(original["difference"], "0.00");
+    assert_eq!(original["invoice"]["charges"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        serde_json::from_str::<Value>(&success(home.path(), &args)).unwrap(),
+        original
+    );
+    // Reordering manifest parts cannot create another revision.
+    let manifest_path = home.path().join("manifest.json");
+    let mut manifest: Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["reportKeys"].as_array_mut().unwrap().reverse();
+    document(&manifest_path, &manifest);
+    assert_eq!(
+        serde_json::from_str::<Value>(&success(home.path(), &args)).unwrap(),
+        original
+    );
+    // Missing parts and reconciliation failure cannot replace good evidence.
+    std::fs::remove_file(home.path().join("credits.csv")).unwrap();
+    assert!(!cli(home.path(), &args).status.success());
+    std::fs::copy(root.join("credits.csv"), home.path().join("credits.csv")).unwrap();
+    let usage = std::fs::read_to_string(home.path().join("usage.csv")).unwrap();
+    std::fs::write(
+        home.path().join("usage.csv"),
+        usage.replace("100.00", "80.00"),
+    )
+    .unwrap();
+    assert!(!cli(home.path(), &args).status.success());
+    assert_eq!(
+        report(home.path())["invoices"][0]["revision"],
+        original["revision"]
+    );
+    let mut correction = descriptor.clone();
+    correction["invoice_total"] = json!("70.00");
+    document(&file, &correction);
+    let corrected: Value = serde_json::from_str(&success(home.path(), &args)).unwrap();
+    assert_ne!(corrected["revision"], original["revision"]);
+    assert_eq!(report(home.path())["totals"][0]["billed"], "70.00");
+    // A not-yet-finalized row is never substituted for a billed document.
+    std::fs::write(
+        home.path().join("usage.csv"),
+        usage.replace("fixture-invoice", ""),
+    )
+    .unwrap();
+    assert!(!cli(home.path(), &args).status.success());
+    assert_eq!(
+        report(home.path())["invoices"][0]["revision"],
+        corrected["revision"]
     );
 }

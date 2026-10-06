@@ -39,7 +39,7 @@ local inventory/report implementation. Missing integration is distinct from a
 provider-unsupported capability; only provider evidence establishes the latter.
 LOO-389 now has a tested local inventory/invoice core and dated access observations
 under `lf auth`. Synthetic rotation and Docker export-isolation proofs now exist;
-provider billing, production provisioning and live acceptance remain outstanding. Shared account links do not allocate charges. Each stored
+live provider billing, production provisioning and live acceptance remain outstanding. Shared account links do not allocate charges. Each stored
 invoice revision retains its evaluated attribution; a new correction evaluates
 the rules present at import, while repeat imports reuse the stored evaluation.
 
@@ -53,7 +53,7 @@ access or inventory scope must not erase prior spending or rewrite its attributi
 October 6 public-provider research found that Runpod's current billing API returns
 time-bucketed spending with resource detail and reconciliation totals, without an
 invoice identity/finality contract. Usage-ledger evidence must remain distinct
-from settled invoices. Reader selection remains open; the discovered key's scope
+from settled invoices. The later local AWS export reader does not settle live account selection; the discovered Runpod key's scope
 and account have not been verified. This is an evidence-model constraint, not an
 authorization to connect an account.
 
@@ -83,6 +83,24 @@ synthetic endpoint test proves failed replacement preservation and retirement
 retry, with runtime keys absent from stored records and command output. Exact
 Doppler reference identity matters alongside version: equal version strings at
 different references must not reuse an old successful observation.
+
+October 6 local implementation selects finalized legacy AWS CUR exports as the
+first documented billing reader, using all manifest parts and an independent
+invoice total. This does not establish an AWS account from discovered secret names
+or authorize a connection. Initial support is standalone accounts and daily/monthly
+CSV or gzip exports; hourly/consolidated billing and ZIP/Parquet remain explicit
+gaps. Runpod buckets remain usage-ledger evidence. Local export provenance is
+operator-supplied, not independently authenticated.
+
+Rotation reconciliation now invalidates stale receipts through an inventory
+revision while retaining their history and the original retirement reference.
+Changes to consumers or Home bindings require fresh verification and a fresh
+complete-inventory attestation. Project/tag attribution uses dated resource
+observations across the whole charge interval; it never applies current tags
+retroactively. Reports separately link existing Session input usage and retain its
+historical ownership. A captured event ID is not a timestamp: period selection
+uses the history reader's observation time. Neither those links nor their estimated
+USD values establish invoice attribution or provider-key identity.
 
 ## Founding direction — October 6, 2026
 

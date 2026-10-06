@@ -27,7 +27,7 @@ dependency access observations, designated exports and administrative rotation
 receipts. One `computing_dependencies.sql` draft owns the schema. These are local
 implementation results; full Task acceptance and publication remain outstanding.
 
-The uncommitted compression changes separate current source/account membership
+Checkpoint `4f5c3f21f` and the preserved compression changes separate current source/account membership
 from durable invoice identity. Inventory imports replace a source's current
 account links; removed accounts retain their historical invoices. Replaying a
 stored revision returns its original evaluation even outside the current scope;
@@ -39,8 +39,9 @@ does not yet prove rollback of every earlier inventory mutation.
 `lf auth dependency history` derives half-open effective intervals from existing
 inventory snapshots, preserving consumers/account/resource/source/requirement
 links and provenance. Same-date corrections use the last import; omitted
-records remain effective. It does not yet provide historical account, resource,
-credential or environment projections. `dependency show` uses current metadata
+records remain effective. History now projects linked account, resource, source, requirement, credential and
+environment metadata at every effective change, including changes supplied without
+the dependency itself. `dependency show` uses current metadata
 and the requested billing period, and now displays only its own access requirements
 and observations. Text and JSON use the same Home, requirement revision, exact
 Doppler reference and version matching. Recurring estimates appear separately in
@@ -62,9 +63,12 @@ ID's active reference switches transactionally. Separate post-activation cutover
 receipts and an explicit complete-consumer-inventory attestation gate retirement.
 Failure retains the old reference before activation, and retains retirement-pending
 state afterward. Restart preserves receipts; pre-activation cancellation releases
-a failed candidate. Concurrent candidates serialize through the Store. Changed
-consumer/credential metadata requires reconciliation; automatic recovery of that
-inventory drift remains unfinished.
+a failed candidate. Concurrent candidates serialize through the Store. `rotation reconcile` now refreshes changed consumers, Home bindings and candidate
+metadata. Changed snapshots advance an inventory revision, invalidate earlier
+receipts without deleting history and require a fresh completeness attestation.
+Both credential IDs contribute consumers. Active reference changes outside the
+rotation remain explicit conflicts; reconciliation cannot silently select a key.
+The original retirement identity survives post-activation reconciliation.
 
 The synthetic HTTP provider/Doppler test creates and provisions runtime keys,
 rejects a failed candidate, verifies both required consumers, restarts after
@@ -78,7 +82,7 @@ Focused coverage additionally proves the USD 170→160 correction, USD 110/30/20
 attribution, duplicate lines, unknown/zero costs, preserved rule evaluations,
 and a later correction evaluated under a changed rule. Output DTO fixtures and a
 released-frontier migration test are present. Shared account links never allocate
-charges. No Session usage reader changed.
+charges. The existing Session history reader is reused without changing its attribution semantics.
 
 `provider_auth/doppler.rs` remains the narrow bounded resolver extracted from SSH;
 no real secret was fetched. `discovered-inventory.json` contains the seven starting
@@ -107,9 +111,46 @@ invoice. Keep the implemented invoice core for actual normalized documents.
 Before the provider-reader cut, choose an invoice/export source or extend the
 records with distinct provider usage-ledger evidence, without passing bucket sums
 off as settled bills. The October 6 implementation re-fetched the public contract and confirmed the
-same distinction. No invoice reader is selected; adding provider usage-ledger
+same distinction. The local reader described below now selects an AWS invoice/export contract; adding provider usage-ledger
 evidence would require an explicit design revision and cannot replace billed
 acceptance. It does not block local metadata, test rotation or isolation work.
+
+### Local recovery and export reader — October 6
+
+The implementation now accepts finalized legacy AWS CUR assemblies through
+`lf auth source import-aws-cur`. AWS's documented
+[bill/InvoiceId](https://docs.aws.amazon.com/cur/latest/userguide/billing-columns.html)
+is absent before finality; the
+[manifest](https://docs.aws.amazon.com/cur/latest/userguide/understanding-report-versions.html)
+identifies all report parts. A local descriptor selects an invoice, account and
+independent bill total. The reader consumes every manifest part, selects that
+invoice and reconciles its unblended ledger before atomic publication. Synthetic
+fixtures prove replay, reordered parts, correction, missing parts, provisional
+rows and total mismatch. This is an implementation choice based on the public
+contract, not evidence that discovered AWS-named secrets identify an AWS account,
+that an account is authorized, or that a live invoice has been imported.
+
+Initial support is daily/monthly UTC CSV or gzip CSV, standalone accounts and a
+64 MiB decompressed budget. Hourly intervals, consolidated member accounts,
+ZIP/Parquet and network import are explicit integration gaps. Dates are not rounded
+to force hourly evidence into the existing daily attribution model. Unsupported
+charge types and unexplained invoice differences do not replace good evidence.
+AWS CUR billed refunds are signed bill corrections, not separate bank payments.
+
+Rules now select dated resource projects/tags. A charge must match throughout its
+interval; unknown metadata or an intervening ownership change stays unresolved.
+Resource observation time and inventory effective date both bound applicability.
+Original evaluated invoice revisions remain immutable. Historical inspection now
+includes linked records; read observations themselves remain separate dated access
+evidence, not inferred historical verification.
+
+Review corrected a captured-event-ID/timestamp confusion: period selection uses
+the existing history reader's observation time, preserving the event ID as a link.
+Administrative reports separately link retained Session inputs captured during
+the month, with their existing usage evidence and historical attribution. This is
+not a monthly usage allocation, invoice money or proof of provider-key identity.
+Designated exports exclude those links. Production access probes and provisioning
+remain outstanding; local export parsing needs neither provider nor Doppler access.
 
 ## Experience and demo
 
@@ -250,7 +291,7 @@ after checking available billing evidence, narrow read scopes and an authorized
 period/export. DigitalOcean is no longer an implementation target. Research the
 selected provider's current official API/export contract before implementing its
 reader; do not carry over DigitalOcean-specific invoice UUID, currency, pagination
-or scope assumptions. Full revision replacement remains the proposed approach
+or scope assumptions. Full revision replacement is implemented
 where a source supplies complete invoices without stable line identities.
 
 ### Discovery evidence — October 6, 2026
@@ -409,22 +450,23 @@ an inventory-only replacement milestone and is not ready to publish.
 
 1. Expand inventory/access/report coverage: reconcile discovery relationships from
    non-secret evidence; retain last-good source evidence and dated failed-import
-   observations; extend output DTO fixtures to observed-access and rotation outcomes and add
-   edge tests for concurrency, mixed currencies, rule boundaries and invalid
-   inventory rollback. Add dated project/tag observations and mapping resolution;
-   current rules select account/resource only. Link existing Session usage evidence without converting it to invoice money.
-   Extend effective dependency-link history to historical account/resource/access
-   projections and dated project/tag attribution. No existing usage reader has changed.
-2. Resolve the provider contract distinction above, select the initial compute
-   reader and implement its bounded fetch/export normalization and fixture corpus.
-   Do not claim a provider-unsupported capability merely because a reader is absent.
-   Unknown account identity does not authorize inventing an account or using a key.
+   observations; extend observed-access DTO coverage and edge tests for mixed
+   currencies and invalid inventory rollback. Rotation DTO fixtures are present.
+   The dated project/tag and linked-record projections now exist, as do separate
+   Session usage links. Expand boundary and DTO coverage without changing the
+   existing usage reader's authority.
+2. Extend the selected AWS export reader where an authorized account's evidence
+   requires hourly intervals, consolidated accounts or other formats; no live
+   reader/account is authorized. Keep unsupported source formats explicit and
+   preserve the Runpod usage-ledger distinction. Record dated failed-import
+   observations alongside last-good evidence; failures currently preserve the
+   prior invoice and report a command error.
 3. Implement provider access probes and production provisioning. Administrative
    rotation persistence and synthetic endpoint/isolated-export demonstrations now
    exist; production provider execution and authenticated receipt collection do not.
-   Complete recovery when required consumers or credential metadata change during
-   an active rotation. Expand tests for concurrent candidates, unknown consumers,
-   stale receipts and cancelled-candidate restart. The Docker script proves only
+   Reconciliation and stale-receipt recovery are implemented and tested across
+   activation/restart. Concurrent candidates and cancelled-candidate restart have
+   behavioral coverage; changed Home/candidate references need additional coverage. The Docker script proves only
    the designated fixture export boundary; deploy no general shell as a restricted
    reporting agent. Keep all provider/administrative authority outside consumers.
 4. Complete documentation and headless acceptance, then perform the authorized
@@ -489,4 +531,4 @@ analysis, general security policy, fleet-wide sandbox design, Desktop UI,
 automatic provider purchases and live resource mutations. Chapter metric targets
 are empty; no new KR is represented as accepted.
 
-Check: recorded `cargo test -p loopflow --test spend_tests --test spend_rotation_tests` (10), released-frontier migration test (1), `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; realign's prose-only reconciliation passed `git diff --check`, without rerunning those checks; SSH and broader acceptance remain with gate, authorized live evidence missing.
+Check: `cargo test -p loopflow --test spend_tests --test spend_rotation_tests` (14), `cargo test -p loopflow --lib spend_links_retained_session_usage_without_turning_it_into_bills` (1), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; unchanged released-frontier migration retains its prior pass, SSH/broader acceptance remain with gate, authorized live evidence missing.

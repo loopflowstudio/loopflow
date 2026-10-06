@@ -347,10 +347,31 @@ impl SqliteStore {
             ));
         }
         let rules = records(&tx, "spend_rules")?;
+        let mut statement = tx.prepare(
+            "SELECT payload FROM spend_inventory_history ORDER BY effective_from, revision",
+        )?;
+        let mut observations = std::collections::BTreeMap::new();
+        for row in statement.query_map([], |row| row.get::<_, String>(0))? {
+            let inventory: Inventory = serde_json::from_str(&row?)?;
+            let effective = spend::date(&inventory.effective_from)?
+                .and_hms_opt(0, 0, 0)
+                .expect("midnight")
+                .and_utc()
+                .timestamp();
+            for resource in inventory.resources {
+                let at = effective.max(resource.observed_at);
+                observations.insert((resource.id.clone(), at), resource);
+            }
+        }
+        drop(statement);
+        let observations: Vec<_> = observations
+            .into_iter()
+            .map(|((_, at), resource)| (at, resource))
+            .collect();
         let charges = normalized
             .charges
             .iter()
-            .map(|c| spend::evaluate(c, &invoice.account, &rules))
+            .map(|c| spend::evaluate(c, &invoice.account, &rules, &observations))
             .collect::<StoreResult<Vec<_>>>()?;
         let billed = charges
             .iter()
@@ -377,7 +398,41 @@ impl SqliteStore {
         repo: Option<&str>,
         wave: Option<&crate::id::WaveId>,
     ) -> StoreResult<Report> {
-        spend::date(&format!("{period}-01"))?;
+        let start = spend::date(&format!("{period}-01"))?;
+        let end = start
+            .checked_add_months(chrono::Months::new(1))
+            .ok_or_else(|| spend::invalid("period overflow"))?;
+        let start = start
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight")
+            .and_utc()
+            .timestamp();
+        let end = end
+            .and_hms_opt(0, 0, 0)
+            .expect("midnight")
+            .and_utc()
+            .timestamp();
+        let session_usage = self
+            .conversation_history(wave.map(|w| w.as_str()), None, None, None, start, true)?
+            .into_iter()
+            .filter(|history| {
+                history.captured.is_some()
+                    && history.observed_at >= start
+                    && history.observed_at < end
+                    && repo.is_none_or(|repo| history.repo.as_deref() == Some(repo))
+            })
+            .map(|history| spend::SessionUsageLink {
+                session_id: history.session_id,
+                artifact_key: history.artifact_key,
+                captured: history.captured.expect("filtered captured inputs"),
+                observed_at: history.observed_at,
+                repo: history.repo,
+                wave_id: history.wave_id,
+                task_id: history.task_id,
+                usage: history.usage,
+                evidence_gaps: history.evidence_gaps,
+            })
+            .collect();
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut stmt = conn.prepare("SELECT r.payload FROM spend_invoices i JOIN spend_invoice_revisions r ON r.source=i.source AND r.account=i.account AND r.document_id=i.document_id AND r.revision=i.current_revision WHERE r.period=?1 ORDER BY r.source,r.account,r.document_id")?;
         let invoices: Vec<InvoiceRevision> = stmt
@@ -425,7 +480,9 @@ impl SqliteStore {
         if totals.is_empty() && (repo.is_some() || wave.is_some()) {
             coverage.push("attributed cost unknown for the requested repository/Wave".into());
         }
+        coverage.push("Session usage covers inputs captured in this period, not apportioned monthly usage; estimates are separate from bills and provider-key linkage is unknown".into());
         Ok(Report {
+            session_usage,
             period: period.into(),
             repo: repo.map(str::to_owned),
             wave_id: wave.cloned(),
@@ -632,21 +689,97 @@ impl SqliteStore {
         )?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
         let mut versions = std::collections::BTreeMap::new();
+        let mut dependency = None;
+        let mut accounts = std::collections::BTreeMap::new();
+        let mut resources = std::collections::BTreeMap::new();
+        let mut sources = std::collections::BTreeMap::new();
+        let mut requirements = std::collections::BTreeMap::new();
+        let mut credentials = std::collections::BTreeMap::new();
+        let mut environments = std::collections::BTreeMap::new();
         for row in rows {
             let inventory: Inventory = serde_json::from_str(&row?)?;
-            if let Some(dependency) = inventory.dependencies.into_iter().find(|d| &d.id == id) {
-                versions.insert(
-                    inventory.effective_from.clone(),
-                    crate::spend::DependencyHistory {
-                        dependency,
-                        effective_from: inventory.effective_from,
-                        effective_to: None,
-                        provenance: inventory.provenance,
-                    },
-                );
+            if let Some(updated) = inventory.dependencies.into_iter().find(|d| &d.id == id) {
+                dependency = Some(updated);
             }
+            accounts.extend(inventory.accounts.into_iter().map(|v| (v.id.clone(), v)));
+            resources.extend(inventory.resources.into_iter().map(|v| (v.id.clone(), v)));
+            sources.extend(inventory.sources.into_iter().map(|v| (v.id.clone(), v)));
+            requirements.extend(
+                inventory
+                    .requirements
+                    .into_iter()
+                    .map(|v| (v.id.clone(), v)),
+            );
+            credentials.extend(inventory.credentials.into_iter().map(|v| (v.id.clone(), v)));
+            environments.extend(
+                inventory
+                    .environments
+                    .into_iter()
+                    .map(|v| (v.id.clone(), v)),
+            );
+            let Some(dependency) = dependency.as_ref() else {
+                continue;
+            };
+            let selected: Vec<_> = requirements
+                .values()
+                .filter(|r| dependency.requirements.contains(&r.id))
+                .cloned()
+                .collect();
+            let version = crate::spend::DependencyHistory {
+                dependency: dependency.clone(),
+                accounts: accounts
+                    .values()
+                    .filter(|a| dependency.accounts.contains(&a.id))
+                    .cloned()
+                    .collect(),
+                resources: resources
+                    .values()
+                    .filter(|r| dependency.resources.contains(&r.id))
+                    .cloned()
+                    .collect(),
+                sources: sources
+                    .values()
+                    .filter(|s| dependency.sources.contains(&s.id))
+                    .cloned()
+                    .collect(),
+                credentials: credentials
+                    .values()
+                    .filter(|c| {
+                        selected
+                            .iter()
+                            .any(|r| r.credential.as_ref() == Some(&c.id))
+                    })
+                    .cloned()
+                    .collect(),
+                environments: environments
+                    .values()
+                    .filter(|e| selected.iter().any(|r| r.environment == e.id))
+                    .cloned()
+                    .collect(),
+                requirements: selected,
+                effective_from: inventory.effective_from.clone(),
+                effective_to: None,
+                provenance: inventory.provenance,
+            };
+            versions.insert(inventory.effective_from, version);
         }
         let mut history: Vec<_> = versions.into_values().collect();
+        let mut previous = None;
+        history.retain(|version| {
+            let projection = serde_json::to_value((
+                &version.dependency,
+                &version.accounts,
+                &version.resources,
+                &version.sources,
+                &version.requirements,
+                &version.credentials,
+                &version.environments,
+            ))
+            .expect("inventory records serialize");
+            let changed = previous.as_ref() != Some(&projection);
+            previous = Some(projection);
+            changed
+        });
         for index in 1..history.len() {
             history[index - 1].effective_to = Some(history[index].effective_from.clone());
         }
@@ -654,9 +787,77 @@ impl SqliteStore {
     }
 }
 
+impl SqliteStore {
+    pub(crate) fn import_spend_aws_cur(
+        &self,
+        export: &crate::spend::aws_cur::AwsCurExport,
+        source: crate::spend::SourceId,
+        period: &str,
+    ) -> StoreResult<InvoiceRevision> {
+        let (account, resources) = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            let account: ServiceAccount = record(&conn, "spend_accounts", &export.account.0)?
+                .ok_or_else(|| spend::invalid("AWS billing account not found"))?;
+            (account, records::<Resource>(&conn, "spend_resources")?)
+        };
+        let invoice = spend::aws_cur::read_export(export, source, period, &account, &resources)?;
+        self.import_spend_invoice(&invoice)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+
+    #[test]
+    fn spend_links_retained_session_usage_without_turning_it_into_bills() {
+        let home = tempfile::tempdir().unwrap();
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
+                .unwrap();
+        let mut session = store.test_session("seed", "run_00000000000000000000000000000001");
+        session.id = "september".into();
+        session.artifact_key = "run_00000000000000000000000000000002".into();
+        session.captured = None;
+        session.created_at = 1788220800;
+        session.repo = Some("example/one".into());
+        let session = store.create_session(session, None, None).unwrap();
+        let source = "events.jsonl:1";
+        let evidence = serde_json::json!({
+            "schema_version":1,"seq":1,"observed_at":"2026-09-29T00:00:00Z",
+            "type":"usage","provider":"codex","model":null,"attempt_key":"attempt","turn_key":"turn",
+            "usage_stream_id":"recorder","observation_seq":1,"counter_kind":"cumulative","start_known":true,
+            "final_receipt":true,"usage":{"input_tokens":18,"output_tokens":5,"cost_usd":0.2}
+        });
+        store.retain_session_observation(&session, &crate::session::SessionObservation {
+            artifact_key: session.artifact_key.clone(), source: source.into(), observed_at: 1790640000,
+            task_id: None, wave_id: None,
+            payload: serde_json::json!({"input_id":session.artifact_key,"source":source,"evidence":evidence}),
+        }).unwrap();
+        let history = store.input_history(&session.artifact_key).unwrap();
+        let report = store
+            .spend_report("2026-09", Some("example/one"), None)
+            .unwrap();
+        assert_eq!(report.session_usage.len(), 1);
+        assert_eq!(report.session_usage[0].usage, history.usage);
+        assert_eq!(report.session_usage[0].usage.cost_usd, Some(0.2));
+        assert_eq!(
+            report.session_usage[0].artifact_key.as_ref(),
+            Some(&session.artifact_key)
+        );
+        assert!(report.totals.is_empty());
+        assert!(report.invoices.is_empty());
+        assert!(store
+            .spend_report("2026-10", None, None)
+            .unwrap()
+            .session_usage
+            .is_empty());
+        assert!(store
+            .spend_report("2026-09", Some("example/two"), None)
+            .unwrap()
+            .session_usage
+            .is_empty());
+    }
 
     #[test]
     fn dependency_schema_upgrades_released_frontier_without_changing_wave_identity() {

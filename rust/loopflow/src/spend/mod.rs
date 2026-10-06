@@ -1,4 +1,5 @@
 //! Dependency metadata and exact billed evidence. Provider credentials never enter these records.
+pub mod aws_cur;
 pub mod rotation;
 
 use std::collections::BTreeMap;
@@ -179,6 +180,8 @@ pub struct Assignment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AttributionRule {
+    pub project: Option<String>,
+    pub tags: BTreeMap<String, String>,
     pub id: RuleId,
     pub revision: String,
     pub account: ServiceAccountId,
@@ -260,7 +263,21 @@ pub struct CurrencyTotal {
     pub unassigned: Money,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionUsageLink {
+    pub session_id: String,
+    pub artifact_key: Option<String>,
+    pub captured: i64,
+    pub observed_at: i64,
+    pub repo: Option<String>,
+    pub wave_id: Option<crate::id::WaveId>,
+    pub task_id: Option<crate::durable::TaskId>,
+    pub usage: crate::session_record::SessionUsage,
+    pub evidence_gaps: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
+    pub session_usage: Vec<SessionUsageLink>,
     pub period: String,
     pub repo: Option<String>,
     pub wave_id: Option<crate::id::WaveId>,
@@ -298,7 +315,48 @@ pub(crate) fn evaluate(
     charge: &Charge,
     account: &ServiceAccountId,
     rules: &[AttributionRule],
+    observations: &[(i64, Resource)],
 ) -> StoreResult<EvaluatedCharge> {
+    let start = date(&charge.start)?
+        .and_hms_opt(0, 0, 0)
+        .expect("midnight")
+        .and_utc()
+        .timestamp();
+    let end = date(&charge.end)?
+        .and_hms_opt(0, 0, 0)
+        .expect("midnight")
+        .and_utc()
+        .timestamp();
+    let prior = observations
+        .iter()
+        .filter(|(at, resource)| *at <= start && Some(&resource.id) == charge.resource.as_ref())
+        .max_by_key(|(at, _)| *at);
+    let mut resources = Vec::new();
+    if let Some((_, resource)) = prior {
+        resources.push(resource);
+    }
+    resources.extend(
+        observations
+            .iter()
+            .filter(|(at, resource)| {
+                *at > start && *at < end && Some(&resource.id) == charge.resource.as_ref()
+            })
+            .map(|(_, resource)| resource),
+    );
+    let complete = prior.is_some()
+        && resources
+            .iter()
+            .all(|r| r.deleted_at.is_none_or(|at| at >= end));
+    let uses_metadata = |rule: &AttributionRule| rule.project.is_some() || !rule.tags.is_empty();
+    let matches_metadata = |rule: &AttributionRule, resource: &Resource| {
+        rule.project
+            .as_ref()
+            .is_none_or(|p| resource.project.as_ref() == Some(p))
+            && rule
+                .tags
+                .iter()
+                .all(|(key, value)| resource.tags.get(key) == Some(value))
+    };
     let matching: Vec<_> = rules
         .iter()
         .filter(|r| {
@@ -306,6 +364,11 @@ pub(crate) fn evaluate(
                 && (r.resource.is_none() || r.resource == charge.resource)
                 && r.effective_from < charge.end
                 && charge.start < r.effective_to
+                && (!uses_metadata(r)
+                    || !complete
+                    || resources
+                        .iter()
+                        .any(|resource| matches_metadata(r, resource)))
         })
         .collect();
     let mut attribution = Vec::new();
@@ -314,6 +377,11 @@ pub(crate) fn evaluate(
     if matching.len() == 1
         && matching[0].effective_from <= charge.start
         && matching[0].effective_to >= charge.end
+        && (!uses_metadata(matching[0])
+            || (complete
+                && resources
+                    .iter()
+                    .all(|resource| matches_metadata(matching[0], resource))))
     {
         let rule = matching[0];
         let total_weight: u32 = rule.assignments.iter().map(|a| a.weight).sum();
@@ -347,7 +415,10 @@ pub(crate) fn evaluate(
             });
         }
     } else if !matching.is_empty() {
-        gap = Some("conflicting mapping or charge crosses an effective boundary".into());
+        gap = Some(
+            "conflicting mapping, missing dated metadata, or charge crosses an effective boundary"
+                .into(),
+        );
     }
     if assigned != charge.amount.0 || attribution.is_empty() {
         attribution.push(AttributedAmount {
@@ -477,6 +548,12 @@ impl AccessInspection {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DependencyHistory {
     pub dependency: Dependency,
+    pub accounts: Vec<ServiceAccount>,
+    pub resources: Vec<Resource>,
+    pub sources: Vec<BillingSource>,
+    pub requirements: Vec<AccessRequirement>,
+    pub credentials: Vec<Credential>,
+    pub environments: Vec<AccessEnvironment>,
     pub effective_from: String,
     pub effective_to: Option<String>,
     pub provenance: String,

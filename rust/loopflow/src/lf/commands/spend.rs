@@ -84,6 +84,12 @@ pub enum AccessCommand {
 }
 #[derive(Debug, Subcommand)]
 pub enum RotationCommand {
+    /// Refresh changed consumers or candidate metadata; requires fresh receipts
+    Reconcile {
+        id: String,
+        #[arg(long)]
+        consumer_inventory_evidence: Option<String>,
+    },
     /// Discard a candidate before activation; does not revoke its provider key
     Cancel {
         id: String,
@@ -123,6 +129,16 @@ pub enum DependencyCommand {
 }
 #[derive(Debug, Subcommand)]
 pub enum SourceCommand {
+    /// Import a finalized daily/monthly AWS CUR assembly with an invoice control total
+    ImportAwsCur {
+        source: String,
+        #[arg(long)]
+        period: String,
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     Import {
         source: String,
         #[arg(long)]
@@ -170,6 +186,18 @@ async fn run_async(command: &AuthCommand) -> Result<()> {
             cmd: AccessCommand::Rotation { cmd },
         } => {
             let rotation = match cmd {
+                RotationCommand::Reconcile {
+                    id,
+                    consumer_inventory_evidence,
+                } => {
+                    open_store(&config)
+                        .await?
+                        .reconcile_spend_rotation(
+                            crate::spend::rotation::RotationId(id.clone()),
+                            consumer_inventory_evidence.clone(),
+                        )
+                        .await?
+                }
                 RotationCommand::Cancel { id } => {
                     open_store(&config)
                         .await?
@@ -239,6 +267,39 @@ async fn run_async(command: &AuthCommand) -> Result<()> {
         }
         AuthCommand::Source {
             cmd:
+                SourceCommand::ImportAwsCur {
+                    source,
+                    period,
+                    file,
+                    json,
+                },
+        } => {
+            let mut export: crate::spend::aws_cur::AwsCurExport = read(file)?;
+            let parent = file.parent().context("export descriptor has no parent")?;
+            export.manifest = parent.join(export.manifest);
+            export.directory = parent.join(export.directory);
+            let revision = open_store(&config)
+                .await?
+                .import_spend_aws_cur(
+                    export,
+                    crate::spend::SourceId(source.clone()),
+                    period.clone(),
+                )
+                .await?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&revision)?);
+            } else {
+                println!(
+                    "{} {} {} · revision {}",
+                    revision.invoice.document_id,
+                    revision.invoice.currency,
+                    revision.billed.0,
+                    revision.revision
+                );
+            }
+        }
+        AuthCommand::Source {
+            cmd:
                 SourceCommand::Import {
                     source,
                     period,
@@ -300,7 +361,7 @@ async fn run_async(command: &AuthCommand) -> Result<()> {
                         version.effective_to.as_deref().unwrap_or("open"),
                         version.provenance
                     );
-                    println!("{}", serde_json::to_string_pretty(&version.dependency)?);
+                    println!("{}", serde_json::to_string_pretty(&version)?);
                 }
             }
         }
@@ -318,6 +379,15 @@ async fn run_async(command: &AuthCommand) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 println!("Billed evidence · {period}");
+                for usage in &report.session_usage {
+                    println!(
+                        "Session {} · input {} · estimated USD {:?} · evidence gaps {}",
+                        usage.session_id,
+                        usage.artifact_key.as_deref().unwrap_or("unknown"),
+                        usage.usage.cost_usd,
+                        usage.evidence_gaps
+                    );
+                }
                 for total in &report.totals {
                     println!(
                         "{} {} · direct {} · allocated {} · shared {} · unassigned {}",

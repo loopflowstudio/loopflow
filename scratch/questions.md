@@ -6,11 +6,11 @@ CLI placement, discovery evidence and acceptance. Remaining inputs:
 - Reconcile account identities, duplicate-account relationships and service gaps
   from metadata. Visibility outside the six discovered Doppler projects is unknown;
   secret names alone establish neither accounts nor permissions.
-- Resolve the researched provider contract before selecting the first reader:
-  Runpod's current public API provides usage buckets, not invoice identity/finality.
-  Choose a provider invoice/export contract or represent usage-ledger evidence
-  separately; never label those buckets settled invoices. The design records
-  official sources and the exact missing evidence.
+- The local reader selects finalized AWS CUR exports with manifest completeness
+  and an independent invoice control total. Discovery has not established an AWS
+  billing account. Initial integration gaps include hourly/consolidated billing
+  and ZIP/Parquet; match any authorized evidence to supported semantics before
+  import. Runpod usage buckets remain distinct from settled invoices.
 - Live acceptance requires an explicitly authorized provider account, exact Doppler
   reference and billing period, or an authorized billing export with account and
   period. `loopflow/dev_billing` and admin-key names confer no authorization to
@@ -19,9 +19,10 @@ CLI placement, discovery evidence and acceptance. Remaining inputs:
 The local core now includes dependency relationship history, access evidence,
 designated exports and administrative rotation receipts, with synthetic provider
 and Docker isolation proofs. Remaining local work is listed in the design:
-provider probes/execution, production provisioning, inventory-drift recovery during
-rotation, historical linked-record projections, project/tag attribution and Session
-usage linkage. No provider reader or live financial import exists. Mercury
+provider probes/execution, production provisioning, broader acceptance coverage
+and dated failed-import observations. Rotation reconciliation, historical linked
+metadata, project/tag rules, separate Session usage links and a local AWS export
+reader now exist. No live financial import exists. Mercury
 connectivity remains outside this Task.
 
 Reversible choices in this implementation: dependency relationship intervals are
@@ -37,3 +38,9 @@ transports; repeated superseded revisions do not reactivate them. Allocations us
 the charge's declared decimal precision and deterministic residual assignment.
 Available local paths resolve through CanonicalRepo; external identities use RepoId.
 These choices preserve historical attribution and do not relax Task acceptance.
+
+The AWS reader is a reversible local implementation choice, not account selection
+or connection authorization. Its descriptor supplies the independent bill total;
+no downloaded assembly or operator receipt is independently authenticated. Session
+links select captured inputs, not monthly usage slices. Historical access metadata
+does not assert historical read success.

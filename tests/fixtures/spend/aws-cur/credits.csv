@@ -1,0 +1,2 @@
+identity/LineItemId,bill/InvoiceId,bill/PayerAccountId,bill/BillingPeriodStartDate,bill/BillingPeriodEndDate,lineItem/UsageAccountId,lineItem/CurrencyCode,lineItem/LineItemType,lineItem/UnblendedCost,lineItem/ResourceId,lineItem/UsageStartDate,lineItem/UsageEndDate,lineItem/ProductCode,lineItem/UsageAmount,pricing/unit
+credit-1,fixture-invoice,000000000001,2026-09-01T00:00:00Z,2026-10-01T00:00:00Z,000000000001,USD,Credit,-10.00,,2026-09-01T00:00:00Z,2026-10-01T00:00:00Z,AmazonEC2,0,

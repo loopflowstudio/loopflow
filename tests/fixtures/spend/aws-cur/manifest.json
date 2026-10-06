@@ -1,0 +1,5 @@
+{
+  "assemblyId": "synthetic-assembly",
+  "billingPeriod": {"start": "2026-09-01T00:00:00.000Z", "end": "2026-10-01T00:00:00.000Z"},
+  "reportKeys": ["usage.csv", "credits.csv"]
+}

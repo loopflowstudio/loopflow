@@ -164,7 +164,9 @@
           "dependency": "workers",
           "weight": 10000
         }
-      ]
+      ],
+      "project": null,
+      "tags": {}
     },
     {
       "id": "shared-rule",
@@ -193,7 +195,9 @@
           "dependency": "workers",
           "weight": 5000
         }
-      ]
+      ],
+      "project": null,
+      "tags": {}
     }
   ],
   "discovery_gaps": [

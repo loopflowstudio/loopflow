@@ -550,6 +550,32 @@
     ],
     "coverage": [
       "fixture only; no live account verified"
+    ],
+    "session_usage": [
+      {
+        "session_id": "fixture-session",
+        "artifact_key": "00000000000000000000000000000002",
+        "captured": 2,
+        "observed_at": 1788220800,
+        "repo": "example/one",
+        "wave_id": null,
+        "task_id": null,
+        "usage": {
+          "streams": 1,
+          "final_streams": 1,
+          "gaps": 0,
+          "input_tokens": 18,
+          "output_tokens": 5,
+          "total_input_tokens": null,
+          "peak_input_tokens": null,
+          "context_window_tokens": null,
+          "reasoning_tokens": null,
+          "cache_read_tokens": null,
+          "cache_write_tokens": null,
+          "cost_usd": 0.2
+        },
+        "evidence_gaps": 0
+      }
     ]
   },
   "history": [
@@ -578,7 +604,56 @@
       },
       "effective_from": "2026-09-01",
       "effective_to": null,
-      "provenance": "synthetic integration fixture"
+      "provenance": "synthetic integration fixture",
+      "accounts": [
+        {
+          "id": "shared",
+          "provider": "fixture",
+          "native_id": "account-1",
+          "managed_account": null,
+          "evidence": "synthetic account"
+        }
+      ],
+      "resources": [],
+      "sources": [],
+      "requirements": [
+        {
+          "id": "laptop-key",
+          "environment": "laptop",
+          "credential": "key",
+          "tool": null,
+          "purpose": "read billed evidence",
+          "permissions": [
+            "read"
+          ],
+          "revision": "1"
+        }
+      ],
+      "credentials": [
+        {
+          "id": "key",
+          "reference": {
+            "project": "fixture",
+            "config": "test",
+            "name": "BILLING_KEY"
+          },
+          "provider_key_id": null,
+          "version": null,
+          "purpose": "billing read",
+          "declared_permissions": [
+            "read"
+          ],
+          "expires_at": null,
+          "rotation_evidence": null
+        }
+      ],
+      "environments": [
+        {
+          "id": "laptop",
+          "name": "test laptop",
+          "home_id": null
+        }
+      ]
     }
   ],
   "export": {
@@ -615,5 +690,75 @@
       "designated attribution export; excludes invoice totals, other consumers, shared and unassigned costs",
       "source completeness and reconciliation require administrative inspection"
     ]
+  },
+  "rotation": {
+    "id": "fixture-rotation",
+    "inventory_revision": 1,
+    "old": {
+      "id": "key",
+      "reference": {
+        "project": "fixture",
+        "config": "test",
+        "name": "BILLING_KEY"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "billing read",
+      "declared_permissions": [
+        "read"
+      ],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    "candidate": {
+      "id": "candidate",
+      "reference": {
+        "project": "fixture",
+        "config": "test",
+        "name": "CANDIDATE"
+      },
+      "provider_key_id": null,
+      "version": "2",
+      "purpose": "billing read",
+      "declared_permissions": [
+        "read"
+      ],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    "requirements": [
+      {
+        "id": "laptop-key",
+        "environment": "laptop",
+        "credential": "key",
+        "tool": null,
+        "purpose": "read billed evidence",
+        "permissions": [
+          "read"
+        ],
+        "revision": "1"
+      }
+    ],
+    "consumers": [
+      {
+        "environment": "laptop",
+        "home_id": null
+      }
+    ],
+    "consumer_inventory_evidence": null,
+    "state": "candidate",
+    "receipts": [
+      {
+        "inventory_revision": 1,
+        "operation": "candidate_read",
+        "environment": "laptop",
+        "executed_home": null,
+        "candidate_version": "2",
+        "success": false,
+        "observed_at": 1791244800,
+        "evidence": "synthetic unavailable Home"
+      }
+    ],
+    "activated_at": null
   }
 }

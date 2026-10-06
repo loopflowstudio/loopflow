@@ -28,6 +28,7 @@ pub enum RotationOperation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RotationReceipt {
+    pub inventory_revision: u64,
     pub operation: RotationOperation,
     pub environment: Option<EnvironmentId>,
     pub executed_home: Option<HomeId>,
@@ -37,13 +38,14 @@ pub struct RotationReceipt {
     /// Non-secret provider/operator evidence, never a response body or credential value.
     pub evidence: String,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RotationConsumer {
     pub environment: EnvironmentId,
     pub home_id: Option<HomeId>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rotation {
+    pub inventory_revision: u64,
     pub id: RotationId,
     pub old: Credential,
     pub candidate: Credential,
@@ -62,7 +64,8 @@ impl Rotation {
                 self.receipts
                     .iter()
                     .filter(|receipt| {
-                        receipt.operation == operation
+                        receipt.inventory_revision == self.inventory_revision
+                            && receipt.operation == operation
                             && receipt.environment.as_ref() == Some(&consumer.environment)
                             && receipt.executed_home == consumer.home_id
                             && consumer.home_id.is_some()

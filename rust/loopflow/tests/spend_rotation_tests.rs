@@ -147,6 +147,7 @@ async fn rotation_preserves_old_access_until_every_consumer_cuts_over_and_retire
         .unwrap();
     let receipt =
         |operation: RotationOperation, index: Option<usize>, success: bool| RotationReceipt {
+            inventory_revision: 1,
             operation,
             environment: index.map(|i| inventory.environments[i].id.clone()),
             executed_home: index.and_then(|i| inventory.environments[i].home_id.clone()),
@@ -311,4 +312,204 @@ async fn rotation_preserves_old_access_until_every_consumer_cuts_over_and_retire
         }
     }
     server.abort();
+}
+
+#[tokio::test]
+async fn inventory_reconciliation_invalidates_receipts_and_recovers_after_activation() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = StorageConfig::sqlite(directory.path().join("loopflow.db"));
+    let store = open_ephemeral_store(&config).await.unwrap();
+    let mut inventory: Inventory = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/inventory.json"
+    ))
+    .unwrap();
+    inventory.environments[0].home_id = Some(store.local_home().await.unwrap().id);
+    inventory.credentials[0].version = Some("old".into());
+    let mut candidate = inventory.credentials[0].clone();
+    candidate.id = CredentialId("candidate".into());
+    candidate.reference.name = "CANDIDATE".into();
+    candidate.version = Some("replacement".into());
+    inventory.credentials.push(candidate.clone());
+    store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .unwrap();
+    let rotation = store
+        .begin_spend_rotation(
+            CredentialId("key".into()),
+            candidate.id.clone(),
+            Some("known consumers".into()),
+        )
+        .await
+        .unwrap();
+    let receipt = |revision, operation, index: usize| RotationReceipt {
+        inventory_revision: revision,
+        operation,
+        environment: Some(inventory.environments[index].id.clone()),
+        executed_home: inventory.environments[index].home_id.clone(),
+        candidate_version: "replacement".into(),
+        success: true,
+        observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+        evidence: "synthetic administrative observation".into(),
+    };
+    let original = receipt(1, RotationOperation::CandidateRead, 0);
+    store
+        .record_spend_rotation(rotation.id.clone(), original.clone())
+        .await
+        .unwrap();
+    // A changed purpose/permission requires verification even when Home and key version match.
+    let mut changed = inventory.clone();
+    changed.requirements[0]
+        .permissions
+        .push("new-read-scope".into());
+    changed.requirements[0].revision = "revised".into();
+    store.import_spend_inventory(changed.clone()).await.unwrap();
+    assert!(store
+        .activate_spend_rotation(rotation.id.clone())
+        .await
+        .is_err());
+    let reconciled = store
+        .reconcile_spend_rotation(rotation.id.clone(), None)
+        .await
+        .unwrap();
+    assert_eq!(reconciled.inventory_revision, 2);
+    assert!(reconciled.consumer_inventory_evidence.is_none());
+    assert_eq!(reconciled.receipts.len(), 1); // historical evidence remains inspectable
+    assert!(!reconciled.consumers_ready(RotationOperation::CandidateRead));
+    assert!(store
+        .record_spend_rotation(rotation.id.clone(), original)
+        .await
+        .is_err());
+    store
+        .record_spend_rotation(
+            rotation.id.clone(),
+            receipt(2, RotationOperation::CandidateRead, 0),
+        )
+        .await
+        .unwrap();
+    store
+        .activate_spend_rotation(rotation.id.clone())
+        .await
+        .unwrap();
+    // A consumer introduced after activation blocks retirement until the new inventory is verified.
+    changed.credentials[0] = candidate;
+    changed.credentials[0].id = CredentialId("key".into());
+    let mut environment = changed.environments[0].clone();
+    environment.id = loopflow::spend::EnvironmentId("new-agent".into());
+    changed.environments.push(environment.clone());
+    let mut requirement = changed.requirements[0].clone();
+    requirement.id = loopflow::spend::RequirementId("new-agent-key".into());
+    requirement.environment = environment.id.clone();
+    // Consumers using the candidate ID directly must also be acknowledged.
+    requirement.credential = Some(CredentialId("candidate".into()));
+    changed.requirements.push(requirement);
+    store.import_spend_inventory(changed).await.unwrap();
+    let reconciled = store
+        .reconcile_spend_rotation(rotation.id.clone(), None)
+        .await
+        .unwrap();
+    assert_eq!(reconciled.inventory_revision, 3);
+    assert_eq!(reconciled.consumers.len(), 2);
+    assert_eq!(
+        reconciled.old.reference.name,
+        inventory.credentials[0].reference.name
+    );
+    assert_eq!(reconciled.state, RotationState::RetirementPending);
+    store
+        .record_spend_rotation(
+            rotation.id.clone(),
+            receipt(3, RotationOperation::ConsumerCutover, 0),
+        )
+        .await
+        .unwrap();
+    let mut new_receipt = receipt(3, RotationOperation::ConsumerCutover, 0);
+    new_receipt.environment = Some(environment.id);
+    new_receipt.executed_home = environment.home_id;
+    store
+        .record_spend_rotation(rotation.id.clone(), new_receipt)
+        .await
+        .unwrap();
+    let mut retirement = receipt(3, RotationOperation::Retirement, 0);
+    retirement.environment = None;
+    retirement.executed_home = None;
+    assert!(store
+        .record_spend_rotation(rotation.id.clone(), retirement.clone())
+        .await
+        .is_err());
+    drop(store);
+    let store = open_ephemeral_store(&config).await.unwrap();
+    let reconciled = store
+        .reconcile_spend_rotation(
+            rotation.id.clone(),
+            Some("updated consumer inventory confirmed".into()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(reconciled.inventory_revision, 3); // retries preserve fresh receipts
+    assert!(reconciled.consumers_ready(RotationOperation::ConsumerCutover));
+    assert_eq!(
+        store
+            .record_spend_rotation(rotation.id, retirement)
+            .await
+            .unwrap()
+            .state,
+        RotationState::Retired
+    );
+}
+
+#[tokio::test]
+async fn concurrent_candidates_serialize_and_cancelled_rotation_survives_restart() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = StorageConfig::sqlite(directory.path().join("loopflow.db"));
+    let first = open_ephemeral_store(&config).await.unwrap();
+    let second = open_ephemeral_store(&config).await.unwrap();
+    let mut inventory: Inventory = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/inventory.json"
+    ))
+    .unwrap();
+    for name in ["candidate-a", "candidate-b"] {
+        let mut candidate = inventory.credentials[0].clone();
+        candidate.id = CredentialId(name.into());
+        candidate.reference.name = name.into();
+        candidate.version = Some("replacement".into());
+        inventory.credentials.push(candidate);
+    }
+    first.import_spend_inventory(inventory).await.unwrap();
+    let (a, b) = tokio::join!(
+        first.begin_spend_rotation(
+            CredentialId("key".into()),
+            CredentialId("candidate-a".into()),
+            None
+        ),
+        second.begin_spend_rotation(
+            CredentialId("key".into()),
+            CredentialId("candidate-b".into()),
+            None
+        )
+    );
+    assert_ne!(a.is_ok(), b.is_ok());
+    let winner = a.or(b).unwrap();
+    first
+        .cancel_spend_rotation(winner.id.clone())
+        .await
+        .unwrap();
+    drop(first);
+    drop(second);
+    let resumed = open_ephemeral_store(&config).await.unwrap();
+    assert_eq!(
+        resumed
+            .spend_rotation(winner.id.clone())
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        RotationState::Cancelled
+    );
+    let next = resumed
+        .begin_spend_rotation(CredentialId("key".into()), winner.candidate.id, None)
+        .await
+        .unwrap();
+    assert_ne!(next.id, winner.id);
+    assert!(next.receipts.is_empty());
+    assert!(resumed.activate_spend_rotation(next.id).await.is_err());
 }

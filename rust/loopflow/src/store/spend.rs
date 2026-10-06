@@ -190,3 +190,30 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.cancel_spend_rotation(&id)).await
     }
 }
+
+impl Store {
+    pub async fn reconcile_spend_rotation(
+        &self,
+        id: crate::spend::rotation::RotationId,
+        consumer_inventory_evidence: Option<String>,
+    ) -> StoreResult<crate::spend::rotation::Rotation> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.reconcile_spend_rotation(&id, consumer_inventory_evidence)
+        })
+        .await
+    }
+}
+
+impl Store {
+    pub async fn import_spend_aws_cur(
+        &self,
+        export: crate::spend::aws_cur::AwsCurExport,
+        source: crate::spend::SourceId,
+        period: String,
+    ) -> StoreResult<InvoiceRevision> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.import_spend_aws_cur(&export, source, &period)
+        })
+        .await
+    }
+}

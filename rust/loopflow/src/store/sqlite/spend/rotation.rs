@@ -50,7 +50,10 @@ impl SqliteStore {
         let requirements: Vec<AccessRequirement> =
             records::<AccessRequirement>(&tx, "spend_requirements")?
                 .into_iter()
-                .filter(|r| r.credential.as_ref() == Some(&old.id))
+                .filter(|r| {
+                    r.credential.as_ref() == Some(&old.id)
+                        || r.credential.as_ref() == Some(&candidate.id)
+                })
                 .collect();
         let consumers = records::<AccessEnvironment>(&tx, "spend_environments")?
             .into_iter()
@@ -61,6 +64,7 @@ impl SqliteStore {
             })
             .collect();
         let rotation = Rotation {
+            inventory_revision: 1,
             id: RotationId(uuid::Uuid::new_v4().to_string()),
             old,
             candidate,
@@ -106,6 +110,11 @@ impl SqliteStore {
             return Err(spend::invalid("rotation already closed"));
         }
         validate_rotation_inventory(&tx, &rotation)?;
+        if receipt.inventory_revision != rotation.inventory_revision {
+            return Err(spend::invalid(
+                "receipt belongs to an obsolete rotation inventory revision",
+            ));
+        }
         if Some(&receipt.candidate_version) != rotation.candidate.version.as_ref()
             || receipt.evidence.trim().is_empty()
         {
@@ -245,7 +254,11 @@ fn validate_rotation_inventory(
     for expected in [&expected_active, &rotation.candidate] {
         let actual: Credential = record(conn, "spend_credentials", &expected.id.0)?
             .ok_or_else(|| spend::invalid("rotation credential missing"))?;
-        if &actual != expected {
+        if actual.reference != expected.reference
+            || actual.version != expected.version
+            || ((rotation.state == RotationState::Candidate || expected.id == rotation.old.id)
+                && &actual != expected)
+        {
             return Err(spend::invalid(
                 "rotation credential changed; reconcile before continuing",
             ));
@@ -253,7 +266,10 @@ fn validate_rotation_inventory(
     }
     let current: Vec<AccessRequirement> = records::<AccessRequirement>(conn, "spend_requirements")?
         .into_iter()
-        .filter(|r| r.credential.as_ref() == Some(&rotation.old.id))
+        .filter(|r| {
+            r.credential.as_ref() == Some(&rotation.old.id)
+                || r.credential.as_ref() == Some(&rotation.candidate.id)
+        })
         .collect();
     if current != rotation.requirements {
         return Err(spend::invalid(
@@ -292,6 +308,98 @@ impl SqliteStore {
             ));
         }
         rotation.state = RotationState::Cancelled;
+        write_rotation(&tx, &rotation)?;
+        tx.commit()?;
+        Ok(rotation)
+    }
+}
+
+impl SqliteStore {
+    pub(crate) fn reconcile_spend_rotation(
+        &self,
+        id: &crate::spend::rotation::RotationId,
+        consumer_inventory_evidence: Option<String>,
+    ) -> StoreResult<crate::spend::rotation::Rotation> {
+        use crate::spend::rotation::{Rotation, RotationConsumer, RotationState};
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut rotation: Rotation = record(&tx, "spend_rotations", &id.0)?
+            .ok_or_else(|| spend::invalid("rotation not found"))?;
+        if matches!(
+            rotation.state,
+            RotationState::Retired | RotationState::Cancelled
+        ) {
+            return Err(spend::invalid("rotation already closed"));
+        }
+        let active: Credential = record(&tx, "spend_credentials", &rotation.old.id.0)?
+            .ok_or_else(|| spend::invalid("active credential missing"))?;
+        let candidate: Credential = record(&tx, "spend_credentials", &rotation.candidate.id.0)?
+            .ok_or_else(|| spend::invalid("candidate credential missing"))?;
+        let expected_active = if rotation.state == RotationState::Candidate {
+            &rotation.old
+        } else {
+            &rotation.candidate
+        };
+        // Reconciliation never silently switches a consumer's active key or the key to retire.
+        if active.reference != expected_active.reference
+            || active.version != expected_active.version
+        {
+            return Err(spend::invalid("active reference changed outside rotation; restore its recorded reference before reconciliation"));
+        }
+        if candidate
+            .version
+            .as_ref()
+            .is_none_or(|v| v.trim().is_empty())
+            || (rotation.state == RotationState::Candidate
+                && candidate.reference == active.reference)
+            || (rotation.state != RotationState::Candidate
+                && (candidate.reference != active.reference || candidate.version != active.version))
+        {
+            return Err(spend::invalid("candidate must retain the activated reference or be a distinct versioned replacement before activation"));
+        }
+        let requirements: Vec<AccessRequirement> =
+            records::<AccessRequirement>(&tx, "spend_requirements")?
+                .into_iter()
+                .filter(|r| {
+                    r.credential.as_ref() == Some(&rotation.old.id)
+                        || r.credential.as_ref() == Some(&rotation.candidate.id)
+                })
+                .collect();
+        let consumers = records::<AccessEnvironment>(&tx, "spend_environments")?
+            .into_iter()
+            .filter(|e| requirements.iter().any(|r| r.environment == e.id))
+            .map(|e| RotationConsumer {
+                environment: e.id,
+                home_id: e.home_id,
+            })
+            .collect::<Vec<_>>();
+        let mut expected = rotation.candidate.clone();
+        expected.id = rotation.old.id.clone();
+        let changed = rotation.requirements != requirements
+            || rotation.consumers != consumers
+            || (rotation.state == RotationState::Candidate
+                && (rotation.candidate != candidate || rotation.old != active))
+            || (rotation.state != RotationState::Candidate && expected != active);
+        if changed {
+            rotation.inventory_revision = rotation
+                .inventory_revision
+                .checked_add(1)
+                .ok_or_else(|| spend::invalid("rotation inventory revision overflow"))?;
+            rotation.consumer_inventory_evidence = None;
+            rotation.requirements = requirements;
+            rotation.consumers = consumers;
+            // After activation, preserve the original key's retirement identity.
+            if rotation.state == RotationState::Candidate {
+                rotation.old = active;
+                rotation.candidate = candidate;
+            } else {
+                rotation.candidate = active;
+                rotation.candidate.id = candidate.id;
+            }
+        }
+        if let Some(evidence) = consumer_inventory_evidence.filter(|e| !e.trim().is_empty()) {
+            rotation.consumer_inventory_evidence = Some(evidence);
+        }
         write_rotation(&tx, &rotation)?;
         tx.commit()?;
         Ok(rotation)

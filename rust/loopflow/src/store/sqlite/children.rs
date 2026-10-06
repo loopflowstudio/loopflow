@@ -1040,18 +1040,7 @@ fn insert_initial_task(
     validate_initial_task_pr(task, pr)?;
     validate_task_project(conn, task)?;
     require_task_not_deleted(conn, task)?;
-    let expired: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM projects p WHERE p.id=?1 AND
-         (p.status != 'started' OR (SELECT count(*) FROM projects current
-          WHERE current.wave_id=p.wave_id AND current.status='started') != 1))",
-        [task.project_id.as_str()],
-        |row| row.get(0),
-    )?;
-    if expired {
-        return Err(StoreError::InvalidData(
-            "cannot prepare a new Task in chapter history; refresh the Wave".into(),
-        ));
-    }
+    super::durable::require_selected_project(conn, &task.project_id)?;
 
     conn.execute(
         TASK_INSERT,

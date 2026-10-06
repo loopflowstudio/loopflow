@@ -598,23 +598,43 @@ pub(super) fn require_task_worker_eligible(conn: &Connection, work: &WorkRef) ->
             ));
         }
     }
-    require_current_task_chapter(conn, work)
+    require_current_task_project(conn, work)
 }
 
-pub(super) fn require_current_task_chapter(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
+pub(super) fn require_current_task_project(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
     let WorkRef::Task(task) = work else {
         return Ok(());
     };
-    let expired: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM tasks t JOIN projects p ON p.id=t.project_id
-         WHERE t.id=?1 AND t.started_at IS NULL AND
-         (p.status != 'started' OR (SELECT count(*) FROM projects current
-          WHERE current.wave_id=p.wave_id AND current.status='started') != 1))",
+    let (project, started): (String, bool) = conn.query_row(
+        "SELECT project_id, started_at IS NOT NULL FROM tasks WHERE id=?1",
         [task.as_str()],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    if expired {
-        return Err(StoreError::InvalidAuthority("this Task belongs to chapter history; resume the chapter transition before starting work".into()));
+    if started {
+        return Ok(());
+    }
+    require_selected_project(conn, &ProjectId::from_raw(project))
+}
+
+pub(super) fn require_selected_project(conn: &Connection, project: &ProjectId) -> StoreResult<()> {
+    let (wave, provider_id, status): (WaveId, String, String) = conn.query_row(
+        "SELECT wave_id, external_project_id, status FROM projects WHERE id=?1",
+        [project.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    let selected =
+        crate::work::wave::project_binding::read_project_binding(&super::home_dir_in(conn)?, &wave)
+            .map_err(invalid_durable)?;
+    if selected.as_deref() != Some(provider_id.as_str()) {
+        return Err(StoreError::InvalidAuthority(
+            "Task Project is not the Wave's configured Project; ensure the Wave before starting new work".into(),
+        ));
+    }
+    if status != "started" {
+        return Err(StoreError::InvalidAuthority(
+            "configured Project is not In Progress; ensure the Wave before starting new work"
+                .into(),
+        ));
     }
     Ok(())
 }
@@ -819,7 +839,7 @@ mod durable_store_tests {
             plan: ProjectPlan {
                 flow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
-                id: LinearProjectId::new("project-uuid").unwrap(),
+                id: LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap(),
                 slug: "probe".to_string(),
                 name: "Probe".to_string(),
                 prompt_context: "Probe Task execution".to_string(),
@@ -832,6 +852,14 @@ mod durable_store_tests {
             updated_at: now,
         };
         store.insert_project(&project).unwrap();
+        crate::work::wave::project_binding::write_project_binding(
+            dir.path(),
+            &wave_id,
+            None,
+            project.plan.id.as_str(),
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
         let task = Task {
             id: task_id.clone(),
             plan: TaskPlan {
@@ -873,6 +901,127 @@ mod durable_store_tests {
         };
         store.insert_task(task.clone(), &pr, false).unwrap();
         (dir, store, task_id)
+    }
+
+    #[test]
+    fn configured_project_admission_preserves_started_continuation() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut other = store.project(&task.project_id).unwrap().unwrap();
+        other.id = ProjectId::new();
+        other.plan.id = LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap();
+        other.plan.name = "An unrelated ordinary plan".into();
+        store.insert_project(&other).unwrap();
+        // Another Started Project does not compete with the configured identity.
+        let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
+        store.insert_task(new_task.clone(), &pr, false).unwrap();
+        let initial = store
+            .start_task_flow(&task_id, &autonomous_position(&task_id))
+            .unwrap();
+        assert!(!store.task_started(&task_id).unwrap());
+        let mut input = unpublished_conversation(Some(new_task.id.clone()), None, 1);
+        input.cwd = new_task.worktree.clone();
+        store.create_session(input, None, None).unwrap();
+        assert!(store.task_started(&new_task.id).unwrap());
+        let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
+        crate::work::wave::project_binding::write_project_binding(
+            dir.path(),
+            &task.wave_id,
+            Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3"),
+            other.plan.id.as_str(),
+            &guard,
+        )
+        .unwrap();
+        let (mut rejected, mut rejected_pr) =
+            unregistered_task(&store, &task_id, dir.path().join("rejected"));
+        rejected.plan.id = LinearIssueId::new("third-issue").unwrap();
+        rejected.plan.identifier = "PROBE-3".into();
+        rejected.workspace_slug = "rejected".into();
+        rejected_pr.slug = "rejected".into();
+        rejected_pr.branch = "rejected".into();
+        assert!(store
+            .insert_task(rejected.clone(), &rejected_pr, false)
+            .is_err());
+        assert!(store.task(&rejected.id).unwrap().is_none());
+        assert!(store.task_prs(&rejected.id).unwrap().is_empty());
+        assert!(store
+            .claim_task_worker(
+                &task_id,
+                initial.id(),
+                initial.version,
+                &owner(41001),
+                time::OffsetDateTime::now_utc(),
+            )
+            .is_err());
+        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), initial);
+        // An established start remains eligible after its Project becomes history.
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE projects SET status='completed' WHERE id=?1",
+                [task.project_id.as_str()],
+            )
+            .unwrap();
+        }
+        let continued = store
+            .start_task_flow(&new_task.id, &autonomous_position(&new_task.id))
+            .unwrap();
+        claim(&store, &new_task.id, &continued, 41002);
+        assert!(store.task_started(&new_task.id).unwrap());
+        assert_eq!(
+            store.task(&task_id).unwrap().unwrap().worktree,
+            task.worktree
+        );
+    }
+
+    #[test]
+    fn configured_project_admission_requires_a_readable_active_binding() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let config = dir
+            .path()
+            .join("waves")
+            .join(task.wave_id.as_str())
+            .join("config.yaml");
+        let bound = std::fs::read_to_string(&config).unwrap();
+        let flow = autonomous_position(&task_id);
+        for content in [
+            None,
+            Some("pm: ["),
+            Some("pm: {linear_project: 218967b6-a760-4b7c-9a46-11d9d61a42c2}"),
+        ] {
+            match content {
+                Some(content) => std::fs::write(&config, content).unwrap(),
+                None => std::fs::remove_file(&config).unwrap(),
+            }
+            assert!(store.start_task_flow(&task_id, &flow).is_err());
+            assert!(store.task_flow(&task_id).unwrap().is_none());
+            assert!(!store.task_started(&task_id).unwrap());
+        }
+        std::fs::write(&config, bound).unwrap();
+        for status in ["backlog", "planned", "paused", "completed", "canceled"] {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE projects SET status=?2 WHERE id=?1",
+                    rusqlite::params![task.project_id.as_str(), status],
+                )
+                .unwrap();
+            assert!(store.start_task_flow(&task_id, &flow).is_err());
+            assert!(store.task_flow(&task_id).unwrap().is_none());
+        }
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE projects SET status='started', flow='' WHERE id=?1",
+                [task.project_id.as_str()],
+            )
+            .unwrap();
+        store.start_task_flow(&task_id, &flow).unwrap();
     }
 
     #[test]

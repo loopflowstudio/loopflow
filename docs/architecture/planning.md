@@ -15,8 +15,8 @@ Project owns Tasks, KRs, targets and an optional default Flow. A Chapter is the 
 name of those current Projects across the repository. The rotation below describes
 the current implementation. LOO-366 replaces status/name selection with an explicit
 shared Project binding and preserves unreviewed backlog. Binding setup, operation
-routing and reader selection exist; SQLite admission and rotation recovery remain
-unfinished. [Cutover status](../architecture-reference.md#cutover-status) records
+routing, reader selection and SQLite admission exist; ensure and rotation recovery
+remain unfinished. [Cutover status](../architecture-reference.md#cutover-status) records
 other implementation and proof gaps.
 
 ```bash
@@ -29,8 +29,10 @@ a different existing binding is left unchanged. Setup preserves provider status,
 content and identity, including a Backlog Project without a Flow. It does not
 activate the Project. Operation routing and status select this exact ID; the JSON
 Project summary carries a required `current` boolean for Desktop. Status and
-roadmap retain predecessor Projects and Tasks. SQLite admission still has its old
-status/count check; ensure and rotation recovery must finish before release.
+roadmap retain predecessor Projects and Tasks. Registration and unstarted managed
+work require that exact Project to be In Progress; another In Progress Project
+does not compete with the binding. Already-started Tasks retain continuation in
+predecessor Projects. Ensure and rotation recovery must finish before release.
 
 ## Rotate the plan, preserve the work
 

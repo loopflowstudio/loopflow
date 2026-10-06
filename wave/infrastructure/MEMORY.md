@@ -333,8 +333,7 @@ publication, checkout finishing and execution. Existing accepted issue facts win
 transactionally, preserving their own acquisition age and reserved placement.
 Both registration APIs now share one insertion transaction, including optional
 initialization evidence and committed readback; downstream effects use that Task.
-Initial supplied facts remain usable without an accepted observation; the old
-Started-count Project selector still awaits shared configured identity.
+Initial supplied facts remain usable without an accepted observation; configured identity now owns registration selection.
 
 Rotation now gathers exact Task roots under ordered Wave locks and acquires one
 checkout lock set. Queued planning writers retain both scopes after cancellation;
@@ -347,11 +346,13 @@ remain open. Focused operation proofs pass; publication proves no readiness.
 October 5 binding preserves YAML bytes and committed ownership; delayed Backlog
 cannot bind newer completed history. Routing, metrics and Project editing use its
 exact ID; status/roadmap retain predecessor Tasks. Decode bodies before
-membership filtering: SQL hid malformed content as an empty plan. SQLite still
-counts Started Projects at registration and first start, exempting already-started
-work from the latter. Preserve continuation in the binding cut. Reader proofs
-establish no activation or switch recovery; ensure and configured Intelligence
-repair remain open. Release’s operation-entry recovery lesson still applies.
+membership filtering: SQL hid malformed content as an empty plan. SQLite registration and first managed start now share exact binding validation,
+requiring Started status without counting other Projects. Already-started Tasks
+retain continuation even when their Project becomes history. Five focused checks
+pass; the continuation test reports an unresolved leaked output handle. These
+store proofs establish no activation or switch recovery; operation fixtures, ensure
+and configured Intelligence repair remain open. Release’s operation-entry recovery
+lesson still applies.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 
@@ -434,15 +435,12 @@ and is integrated here. Installed timing remains unproved. Numbers and method:
 
 ## Environment variables (LOO-341, branch evidence 2026-10-01)
 
-Jack Heart requested an audit of every `LF_*` variable against the policy it
-implements. The inventory is [Environment](../../docs/architecture/environment.md).
-`LF_HOME` is the only Home selector and its database is always
-`$LF_HOME/loopflow.db`; `LF_DB_PATH` and the `LF_CONTROL_*` trio are removed, with
-the other names nothing read. One list of Exec-context names drives both the
-session shell's `unset` and the tmux client's environment, because a tmux server
-copies its first client's environment into every later session. Fixtures open
-their store at the Home's fixed path. Not reviewed by Jack; branch evidence only.
-`LF_RUN_ID` presence still decides three behaviours without validating the Run.
+Jack Heart requested the audit in [Environment](../../docs/architecture/environment.md).
+`LF_HOME` alone selects the Home; its database is `loopflow.db`. Shared Exec-context
+names drive shell and tmux clearing. The unreviewed branch evidence and retired
+variable inventory remain at
+`c31279995a4ea0eec09c053e39c2f71a81d26034:wave/infrastructure/MEMORY.md`.
+The `LF_RUN_ID` presence-based behavior remains unresolved.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 

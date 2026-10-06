@@ -64,11 +64,15 @@ pub struct SqliteStore {
 impl SqliteStore {
     pub(crate) fn home_dir(&self) -> StoreResult<PathBuf> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.path()
-            .and_then(|path| Path::new(path).parent())
-            .map(Path::to_path_buf)
-            .ok_or_else(|| StoreError::InvalidData("store has no owning Home path".into()))
+        home_dir_in(&conn)
     }
+}
+
+fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
+    conn.path()
+        .and_then(|path| Path::new(path).parent())
+        .map(Path::to_path_buf)
+        .ok_or_else(|| StoreError::InvalidData("store has no owning Home path".into()))
 }
 
 /// Recorded checkout evidence remains usable without chapter metadata.

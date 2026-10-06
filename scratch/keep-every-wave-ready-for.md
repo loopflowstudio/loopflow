@@ -69,7 +69,7 @@ Operation routing, metrics and Project editing now select the shared ID through
 `project::current_project`/`select_project`. Status/roadmap retain all Project/Task
 planning; Rust/Swift summaries carry required `current` selection rather than
 Desktop inferring it from Started status. Retained Task navigation uses the latest
-Wave even during a selection switch. SQLite admission and rotation still use status/count and name selectors.
+Wave even during a selection switch. SQLite admission now validates the binding; rotation still uses name selectors.
 Ensure, transitions and Desktop activation remain unfinished;
 Intelligence has not been bound or activated on the installed Home.
 
@@ -164,12 +164,15 @@ separate. Detailed registration, rotation and admission evidence remains at
 `7e7204ddad0092beb1a633676f5d44af0853a9a8:scratch/keep-every-wave-ready-for.md`.
 These proofs establish neither configuration-switch recovery nor readiness.
 
-The branch is not releasable. Steps 3–7 still own SQLite admission, ensure,
+The branch is not releasable. Steps 4–7 still own ensure,
 transition recovery, KR-first rotation, Desktop activation and configured acceptance.
-The remaining selectors are `sqlite/children.rs::insert_initial_task`,
-`durable::require_current_task_chapter` (both status/count checks), and rotation's
-`chapter::select_current`/name inference. Replace them with shared binding and
-exact transitions under the existing admission boundary.
+Registration and first managed start now share `durable::require_selected_project`: the
+configured provider ID and Started status are required; other Started Projects do
+not compete. `require_current_task_project` preserves the Started exemption. Both
+use the existing database's Home, including inside queued SQLite transactions.
+Rotation still owns `chapter::select_current`/name inference and needs exact
+transitions under the existing admission boundary. Operation fixtures still need
+explicit bindings as their callers move to ensure and exact-ID rotation.
 
 Reader/DTO evidence and the malformed-body failure remain at
 `ff458672407194236da0ad04705b23006d6db5bf:scratch/keep-every-wave-ready-for.md`.
@@ -320,7 +323,7 @@ The retained counterexamples shaped the admission and rotation boundary:
   Registration retains the Wave planning lock and
   selects accepted issue facts transactionally. Earlier taskless conversations
   become Task work on registration; rotation enumerates roots under the same Wave
-  boundary. The old Project status/count selector remains for step 3. New-issue
+  boundary. Registration now selects by shared binding. New-issue
   `pm_create_task_idempotent` holds the Wave lock.
 
 October 5: the executed `input_replacement_retains_workspace_and_task_membership`
@@ -333,23 +336,13 @@ and uses it in the new capture. Primary workspace admission keeps its separate
 writer and excludes bound Tasks. The regression covers exclusion, retry and retained
 unbound membership. This is a Session-store proof, not rotation/start acceptance.
 
-October 5 admission proofs cover unchanged Session/Flow bytes while excluded,
-retry, missing paths, binding from elsewhere and bound/taskless Flow membership.
-Historical completed-Project binding still passes. These are store proofs, not
-rotation; the new operation test adds both orderings and failed-reset retry.
-October 5's admission audit corrects the Flow concern: `insert_flow_in` omits
-cwd for Task-bound Flows, and `FLOW_SELECT` resolves the Task checkout. Claims,
-agent-step reservations and review reservations therefore already exclude that
-checkout. A temporary four-case probe passed; no production Flow repair was needed.
-
-The separate bound-Session regression failed: input replacement changed a capture
-while the Task checkout was excluded. Replacement now uses stored Session and Flow
-workspaces plus its bound Task root. Tests retain unchanged captures while excluded
-and successful retry for explicit Task binding, Task-bound Flows and taskless Flows
-whose workspace associates them with a Task. CI repair's outer admission now also
-includes its explicitly bound Task root; `reserve_repair` does not reacquire it.
-The CI operation-entry proof remains with gate. These earlier repairs alone did not establish rotation exclusion; the new operation
-regression exercises both orderings with an unbound checkout conversation.
+Detailed Session/Flow admission evidence remains at
+`c31279995a4ea0eec09c053e39c2f71a81d26034:scratch/keep-every-wave-ready-for.md`.
+Input replacement retains stored workspace and bound Task roots; CI repair retains
+outer admission without reacquisition. Task-bound Flow cwd derives from the Task.
+Managed-Flow setup does not itself mark Started; worker claims already acquire
+checkout exclusion. No new setup lock was added. Rotation proofs still require the
+configuration switch, and CI repair's operation-entry proof remains with gate.
 
 The operation order is Wave planning locks, checkout admission locks
 in canonical-path order, then SQLite writes. Registration and rotation share the Wave
@@ -693,12 +686,12 @@ cases below own requirements; this list identifies each next cut:
    operation regressions cover newer accepted facts, stale-owner refusal, both
    start/rotation orderings and failed-reset retry. Final before/after-configuration-
    switch proofs and created-successor recovery depend on steps 3–5.
-3. Shared binding, routing, Project editing and Rust/Swift reader selection exist.
-   Replace both SQLite admission selectors under the existing guard boundary:
-   registration rejects a second Started Project today; first-start admission
-   skips its status/count check once Started is set. Preserve that continuation
-   distinction and predecessor visibility while selecting by binding. Migrate
-   fixtures to explicit IDs; preserve the designated Intelligence Project.
+3. Shared binding, routing, Project editing, Rust/Swift readers and SQLite admission
+   now select the exact configured ID. New registration and unstarted managed work
+   require Started status; already-started work continues in a predecessor. Focused
+   proofs retain Task/PR identity, rollback and queued guard lifetime. Store fixtures
+   now configure IDs; operation/CLI fixtures remain with the ensure/rotation cut.
+   Preserve the designated Intelligence Project.
 4. Add transition persistence and ensure, exercising concurrency and uncertain
    responses through operations with a stateful fake provider. Test this Task's
    single migration draft from the released frontier.
@@ -721,7 +714,7 @@ cases below own requirements; this list identifies each next cut:
 
 Apply the remaining cuts with their replacement consumers under the selected
 shared local configuration owner. Empty-Flow, names and reader selection are implemented
-locally; SQLite admission and rotation remain. Keep this one delivery boundary.
+locally; rotation remains. Keep this one delivery boundary.
 
 - Deleted: `ops/chapter.rs::update_plan`; ordinary Project editing now lives in
   `ops/project.rs` and shares one store across validation, selection and refresh.
@@ -864,7 +857,7 @@ CI repair retains outer admission without reacquiring it in reservation.
 The recorded nextest pass also reports a leaky projectless-Task case. Its cause
 is unknown; gate retains output-handle investigation, not an assumed harmless leak.
 Cached-name conversion and shared selection must land together. The approved
-historical name-only exception is implemented; SQLite and rotation selectors remain.
+historical name-only exception is implemented; rotation selectors remain.
 
 Reserve identity before provider effects so a timeout cannot create another UUID.
 Use status-only writes and byte-preservation tests to protect authored content.
@@ -892,7 +885,7 @@ and cancellation-safe acceptance remain required.
 
 Reconciliation October 5: inspected Release’s complete child goal/memory; its
 operation-entry recovery lesson remains applicable. No new product decision or
-acceptance evidence changes steps 3–7. Migration-marked adoption remains distinct
+acceptance evidence changes steps 4–7. Migration-marked adoption remains distinct
 from ordinary ensure; it does not supply configuration selection.
 
-Checks: `git diff --check` passed; retained prior `cargo nextest run -p loopflow --lib -E 'test(shared_portfolio_joins_persisted_evidence_without_changing_krs) | test(configured_project_selection) | test(shared_project_binding)' --no-fail-fast`: 5 passed. Fmt/all-target Clippy passed. Prior reader/DTO checks: `ff458672407194236da0ad04705b23006d6db5bf`; gate retains admission/rotation, CI repair and configured acceptance.
+Checks: network-isolated `cargo nextest run -p loopflow --lib -E 'test(configured_project_admission) | test(registration_returns_accepted_planning) | test(registration_rejects) | test(registration_retains)' --no-fail-fast`: 5 passed (continuation reported an unresolved output-handle leak); `-E 'test(store::tests::)'`: 52 passed. Fmt, all-target Clippy and diff checks passed. Implementation retains operation/CLI fixture migration and ensure/rotation; gate retains leak investigation, CI repair and configured acceptance.

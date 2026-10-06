@@ -812,7 +812,7 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let work = WorkRef::Task(task_id.clone());
         super::durable::require_ready_work(&tx, &work)?;
-        super::durable::require_current_task_chapter(&tx, &work)?;
+        super::durable::require_current_task_project(&tx, &work)?;
         if flow_in(&tx, flow.id())?.is_some() {
             return Err(StoreError::InvalidAuthority(format!(
                 "Flow invocation {} already exists",

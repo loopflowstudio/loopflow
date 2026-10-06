@@ -1559,6 +1559,21 @@ mod tests {
         }
     }
 
+    fn select_project(store: &super::Store, project: &Project) {
+        let home = store.sqlite.home_dir().unwrap();
+        let previous =
+            crate::work::wave::project_binding::read_project_binding(&home, &project.wave_id)
+                .unwrap();
+        crate::work::wave::project_binding::write_project_binding(
+            &home,
+            &project.wave_id,
+            previous.as_deref(),
+            project.plan.id.as_str(),
+            &super::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
+    }
+
     fn make_project(wave: &Wave) -> Project {
         let now = OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp())
             .expect("current unix time");
@@ -1567,7 +1582,7 @@ mod tests {
             plan: ProjectPlan {
                 flow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
-                id: LinearProjectId::new("project-uuid").unwrap(),
+                id: LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap(),
                 slug: "developer-efficiency".to_string(),
                 name: "Developer Efficiency".to_string(),
                 prompt_context: "Definition:\nKeep local work fast.".to_string(),
@@ -1622,6 +1637,7 @@ mod tests {
             let (directory, store, wave) = planning_store().await;
             let project = make_project(&wave);
             store.create_project(&project).await.unwrap();
+            select_project(&store, &project);
             let mut task = make_task(&wave, &project);
             task.worktree = directory.path().join("checkout");
             let pr = make_task_pr(&task);
@@ -1669,6 +1685,7 @@ mod tests {
                 let (directory, store, wave) = planning_store().await;
                 let project = make_project(&wave);
                 store.create_project(&project).await.unwrap();
+                select_project(&store, &project);
                 let mut task = make_task(&wave, &project);
                 task.worktree = directory.path().join("checkout");
                 let pr = make_task_pr(&task);
@@ -1693,6 +1710,7 @@ mod tests {
         let (directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let mut task = make_task(&wave, &project);
         task.worktree = directory.path().join("checkout");
         store
@@ -1754,6 +1772,7 @@ mod tests {
             let (directory, store, wave) = planning_store().await;
             let project = make_project(&wave);
             store.create_project(&project).await.unwrap();
+            select_project(&store, &project);
             let mut task = make_task(&wave, &project);
             task.worktree = directory.path().join("checkout");
             let pr = make_task_pr(&task);
@@ -1816,6 +1835,7 @@ mod tests {
         let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let mut task = make_task(&wave, &project);
         task.plan.pm_snapshot_synced_at = 1;
         let pr = make_task_pr(&task);
@@ -1869,6 +1889,7 @@ mod tests {
         let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr, None).await.unwrap();
@@ -1913,6 +1934,7 @@ mod tests {
         let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr, None).await.unwrap();
@@ -1972,6 +1994,7 @@ mod tests {
         let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr, None).await.unwrap();
@@ -2004,6 +2027,7 @@ mod tests {
         let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.synced_at = 10;
@@ -2026,6 +2050,7 @@ mod tests {
         let (_directory, store, wave) = planning_store().await;
         let predecessor = make_project(&wave);
         store.create_project(&predecessor).await.unwrap();
+        select_project(&store, &predecessor);
         let task = make_task(&wave, &predecessor);
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr, None).await.unwrap();
@@ -2089,6 +2114,7 @@ mod tests {
         let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr, None).await.unwrap();
@@ -2127,6 +2153,7 @@ mod tests {
         let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr, None).await.unwrap();
@@ -2208,6 +2235,7 @@ mod tests {
         let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let snapshot = task_planning_snapshot(&wave, &project, &task);
         store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
@@ -2280,6 +2308,7 @@ mod tests {
         let (_directory, store, wave) = planning_store().await;
         let predecessor = make_project(&wave);
         store.create_project(&predecessor).await.unwrap();
+        select_project(&store, &predecessor);
         let mut successor = make_project(&wave);
         successor.plan.id = crate::planning::LinearProjectId::new("successor-project").unwrap();
         let task = make_task(&wave, &predecessor);
@@ -2332,6 +2361,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let predecessor = make_project(&wave);
         store.create_project(&predecessor).await.unwrap();
+        select_project(&store, &predecessor);
         let task = make_task(&wave, &predecessor);
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr, None).await.unwrap();
@@ -2412,6 +2442,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         store
             .create_task(&task, &make_task_pr(&task), None)
@@ -2488,6 +2519,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         store
             .create_task(&task, &make_task_pr(&task), None)
@@ -2593,6 +2625,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         store
             .create_task(&task, &make_task_pr(&task), None)
@@ -2668,6 +2701,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         store
             .create_task(&task, &make_task_pr(&task), None)
@@ -2715,6 +2749,7 @@ mod tests {
         store.create_wave(&current).await.unwrap();
         let project = make_project(&current);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&current, &project);
         for wave in [&original, &current] {
             store
@@ -2764,6 +2799,7 @@ mod tests {
             store.create_wave(&wave).await.unwrap();
             let project = make_project(&wave);
             store.create_project(&project).await.unwrap();
+            select_project(&store, &project);
             let task = make_task(&wave, &project);
             let pr = make_task_pr(&task);
             if registration_first {
@@ -2809,6 +2845,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let home = crate::durable::HomeId::new();
         store.observe_home(&home, "ssh://fixture").await.unwrap();
         store
@@ -2884,6 +2921,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let target = make_task(&wave, &project);
         store
             .create_task(&target, &make_task_pr(&target), None)
@@ -2931,6 +2969,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         store
             .create_task(&task, &make_task_pr(&task), None)
@@ -3038,6 +3077,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         store
             .create_task(&task, &make_task_pr(&task), None)
@@ -3185,6 +3225,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         store
             .create_task(&task, &make_task_pr(&task), None)
@@ -3250,6 +3291,7 @@ mod tests {
         assert!(missing.to_string().contains("requires Project"));
 
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let other_wave = make_wave("/other-repo");
         store.create_wave(&other_wave).await.unwrap();
         let wrong_wave = make_task(&other_wave, &project);
@@ -3272,6 +3314,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         store
             .create_task(&task, &make_task_pr(&task), None)
@@ -3317,6 +3360,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let mut pr = make_task_pr(&task);
         store.create_task(&task, &pr, None).await.unwrap();
@@ -3374,6 +3418,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let mut pr = make_task_pr(&task);
         store.create_task(&task, &pr, None).await.unwrap();
@@ -3411,6 +3456,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let mut first = make_task_pr(&task);
         store.create_task(&task, &first, None).await.unwrap();
@@ -3533,6 +3579,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let mut pr = make_task_pr(&task);
         store.create_task(&task, &pr, None).await.unwrap();
@@ -3566,6 +3613,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let parent_task = make_task(&wave, &project);
         let mut parent = make_task_pr(&parent_task);
         store
@@ -3675,6 +3723,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let mut pr = make_task_pr(&task);
         store.create_task(&task, &pr, None).await.unwrap();
@@ -3715,6 +3764,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr, None).await.unwrap();
@@ -4161,6 +4211,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
         store.create_task(&task, &pr, None).await.unwrap();

@@ -110,6 +110,23 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
 @MainActor
 struct DesktopNativeSessionTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_TEST_CANARY"] != nil))
+    func ownedTemporaryFilesAndPTYRemainAvailable() throws {
+        let directory = terminalTemporaryDirectory()
+        let path = directory.appendingPathComponent("terminal-proof")
+        defer { try? FileManager.default.removeItem(at: path) }
+        try Data("owned".utf8).write(to: path)
+        #expect(try Data(contentsOf: path) == Data("owned".utf8))
+        var master: Int32 = -1
+        var slave: Int32 = -1
+        let result = openpty(&master, &slave, nil, nil, nil)
+        defer {
+            if master >= 0 { close(master) }
+            if slave >= 0 { close(slave) }
+        }
+        #expect(result == 0, "Owned PTY allocation failed: errno \(errno)")
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_TEST_CANARY"] != nil))
     func inheritedSandboxRejectsExternalEffects() throws {
         let canary = try #require(ProcessInfo.processInfo.environment["LOOPFLOW_TEST_CANARY"])
         for script in ["IFS= read -r line < \"$1\"", ": > \"$1\"", "exec \"$1\"", "exec /bin/launchctl list"] {

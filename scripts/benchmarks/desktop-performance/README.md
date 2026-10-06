@@ -199,8 +199,8 @@ snapshot reads running during idle. Fixture mode still covers the broader
 synthetic catalogue; it no longer opens a separate native-session window.
 
 `verify-fixture` builds the Swift tests and exercises real snapshot reads, Task
-routing, repeated native reopening and draft/pane preservation with WindowServer
-access denied. It also probes external file reads/writes, provider execution,
+routing, repeated native reopening, owned temporary files/PTY allocation and
+draft/pane preservation with WindowServer access denied. It also probes external file reads/writes, provider execution,
 scheduling-tool execution and network binding. This is a small synthetic snapshot
 proof, not a density, rendering, real-provider or hour-long acceptance receipt.
 
@@ -252,3 +252,33 @@ or the retained-cat soak. Snapshot mode records real refresh and Task-link CLI
 reads from both Homes throughout the combined soak. The combined path is
 implemented; a matched rendered comparison and hour-long acceptance receipt
 remain outstanding.
+
+### October 6 rendering capability
+
+The unattended one-sample probe on `Jacks-MacBook-Pro-2.local` produced native
+bitmap/OCR output, but no completed journey. After repairing owned journal/temp
+files and PTY allocation, the captured terminal reported that Ghostty's
+`/usr/bin/login` launch was denied by the inherited sandbox. Explicitly allowing
+that executable did not resolve the rejection; the ineffective permission was
+removed. No renderer or latency budget passed. Local raw receipts remain under
+`/tmp/loo304-render-probe-*-20261006/`; the final policy reproduces the denial in
+`/tmp/loo304-render-final-20261006/`.
+
+The four contained `verify-fixture` checks pass, including external-effect denial
+and owned PTY allocation. They do not exercise Ghostty's mounted login path.
+A disposable macOS rendering account or VM must demonstrate contained terminal
+startup before running the matched snapshot pair (21 samples and 3,600 seconds
+each). Keep snapshots local to that isolated host. No such remotely callable host
+or performance job is configured in this checkout. Hosted `ci.yml` jobs
+`swift-test` and `loopflow-ui-test` on `macos-15` own headless tests and the Xcode
+compile check only; checkpoint PRs defer that matrix while scratch remains.
+This remaining performance obligation does not prevent source publication under
+Jack Heart's October 6 direction, and does not authorize merge or Task completion.
+
+Source gate on October 6: the affected runner passed 2,250 Rust tests (20 skipped),
+370 Python, 78 website (three skipped), 377 headless Swift tests, formatting,
+Clippy and architecture/boundary checks. The separate standard Xcode
+`build-for-testing` passed. The rebuilt source CLI passed all four contained
+proofs at `/tmp/loo304-final-source-contained-20261006/`. Gate and Xcode logs:
+`/tmp/loo304-gate-20261006.log` and `/tmp/loo304-xcode-fallback-20261006.log`.
+These checks establish source behavior, not rendered responsiveness or installation.

@@ -66,7 +66,9 @@ struct DesktopPerformanceTests {
 
 #if canImport(GhosttyKit)
     private func measure(population: String, taskCount: Int, samples: Int, soakSeconds: Double, journal: PerformanceJournal) async throws {
-        let checkout = FileManager.default.temporaryDirectory.appendingPathComponent("desktop-perf-\(UUID().uuidString)")
+        let output = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["LF_DESKTOP_PERF_OUTPUT"]))
+            .deletingLastPathComponent()
+        let checkout = output.appendingPathComponent("desktop-perf-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
         try Data("Original notes".utf8).write(to: checkout.appendingPathComponent("notes.txt"))
         defer { try? FileManager.default.removeItem(at: checkout) }
@@ -95,7 +97,7 @@ struct DesktopPerformanceTests {
         defer { for identity in identities { registry.surfaces.release(identity) } }
         for terminal in terminals {
             terminal.frame = CGRect(x: 0, y: 0, width: 450, height: 350)
-            terminal.workingDirectory = NSTemporaryDirectory()
+            terminal.workingDirectory = checkout.path
             terminal.command = buildGhosttyShellCommand(argv: ["/bin/cat"], env: [:])
             terminal.createSurface(manager: GhosttyManager.shared)
         }
@@ -554,7 +556,7 @@ struct DesktopPerformanceTests {
             if ready() { return }
             try await Task.sleep(for: .milliseconds(5))
         } while ContinuousClock.now < deadline
-        throw PerformanceFailure("timeout", "Captured native content/input endpoint not reached in 5 seconds")
+        throw PerformanceFailure("timeout", "Captured native content/input endpoint not reached in 5 seconds; outline: \(window.outlineText); content: \(window.contentText)")
     }
 
     private func hasRendered(_ window: PerformanceWindow, _ id: String) -> Bool {
@@ -825,9 +827,7 @@ private struct PerformanceFailure: Error, CustomStringConvertible {
 private final class PerformanceJournal {
     private let file: FileHandle
     init(url: URL) throws {
-        guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
-            throw PerformanceFailure("failed", "Cannot create benchmark journal")
-        }
+        try Data().write(to: url)
         file = try FileHandle(forWritingTo: url)
     }
     deinit { try? file.close() }

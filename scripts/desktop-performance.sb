@@ -18,7 +18,7 @@
     (literal (param "CLI")) (literal (param "HELPER")))
 (deny file-write*)
 (allow file-write* (subpath (param "HOME")) (subpath (param "RECEIPTS"))
-    (literal "/dev/null") (regex #"^/dev/(ttys|pty)"))
+    (literal "/dev/null") (literal "/dev/ptmx") (regex #"^/dev/(ttys|pty)"))
 ; Shells inherit these restrictions. Copied providers and scheduling tools
 ; cannot execute, even if a copied record or shell startup file names them.
 (deny process-exec)

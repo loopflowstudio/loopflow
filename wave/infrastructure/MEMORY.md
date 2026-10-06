@@ -773,19 +773,17 @@ failure evidence, not binding policy: current Session rows own attribution and
 write-once bind permits done/landed Tasks. Preserve current ownership through the
 one-machine conversion; discarded historical attribution needs no importer.
 
-LOO-304's October 6 reconciliation retains Jack Heart's original performance
-budgets. The combined snapshot workspace now keeps production refresh running
-while reopening an owned Task-bound Session; copied records grant no execution
-authority. Its contained proofs establish preservation and isolation, not rendered
-latency or an hour soak. Compare identical snapshot, sandbox and instrumentation
-costs; denied checkout reads cannot count as speedups. Source recovery at
-`f4ac1ae3a` repaired history API drift; later merge `99a3fbd83` changes terminal
-input and Session recovery, so earlier passes are not a final-tree gate. Remaining
-measurements belong to the Task plan, not another startup coordinator.
-
-The stale-bundle staging incident remains at
-`99a3fbd83:wave/infrastructure/MEMORY.md` under this heading; it grants no branch
-promotion authority.
+LOO-304 retains Jack Heart's budgets and separate observational/owned
+Homes. October 6 probes on `Jacks-MacBook-Pro-2.local` produced bitmap/OCR pixels,
+then exposed Foundation temporary-file and PTY sandbox assumptions. The branch
+repairs those paths; four contained checks preserve Task membership, drafts,
+native history and external-effect denial. Mounted Ghostty still reports login
+exec PermissionDenied; no completed journey, matched p95 or hour soak follows.
+The benchmark guide records receipts and the isolated-host requirement.
+CI's headless/compile jobs are not rendered acceptance. Jack's October 6 direction authorizes source
+publication with these obligations open, not merge or Task completion. Preserve
+all budgets and private snapshots; do not count denied work as a speedup. The
+earlier evidence remains at `d8f1214b0:wave/infrastructure/MEMORY.md`.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

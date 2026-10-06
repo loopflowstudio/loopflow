@@ -155,8 +155,8 @@ The existing cleanup assertion stays intact; this repair shipped with #1435.
 Syncing a Task's own remote branch must not make its remote tip the PR's base.
 That mistake stranded PR #1456 despite passing CI. PR #1459, installed in
 v0.13.5, repaired the retained base using exact remote-tracking reflog evidence;
-the subsequent landing completed sync and requested auto-merge without rewriting
-the feature history. Foreign sibling ancestry and missing evidence still refuse.
+PR #1456 merged October 6 at 13:53 UTC without rewriting feature history.
+Foreign sibling ancestry and missing evidence still refuse.
 
 ## Scheduled release accounting (LOO-285, source reconciliation October 2)
 
@@ -356,7 +356,8 @@ gap after the October 2 installed routing checks.
 ## Worktree listing and fenced dispatch (LOO-375, 2026-10-05)
 
 Jack Heart reported `lf wt list` at 44 s, 17 s after a deadlocked writer was
-killed. PR 1 shipped in v0.13.3; PR 2 is branch evidence. Numbers and method:
+killed. PR 1 shipped in v0.13.3; PR #1456 merged October 6, after v0.13.5,
+and awaits release/install validation. Numbers and method:
 [report](../../scripts/benchmarks/wt-list/README.md).
 
 - **Process count, not Git work, was the listing cost** (PR 1): about 370 serial

@@ -404,10 +404,11 @@ def _markdown(summary: dict, *, scoped: bool) -> str:
                 "|---|---|---|---:|---:|",
             ]
             for delta in comparison["deltas"]:
+                p50 = f"{delta['p50_delta_ms']:+.2f}" if delta["p50_delta_ms"] is not None else "—"
                 p95 = f"{delta['p95_delta_ms']:+.2f}" if delta["p95_delta_ms"] is not None else "—"
                 lines.append(
                     f"| {delta['population']} | {delta['scenario']} | {delta['state']} | "
-                    f"{delta['p50_delta_ms']:+.2f} | {p95} |"
+                    f"{p50} | {p95} |"
                 )
     if summary["soak"]["requested_seconds"]:
         soak = summary["soak"]
@@ -430,8 +431,7 @@ def _markdown(summary: dict, *, scoped: bool) -> str:
         "Scope and partial receipts are retained in report.json.",
         (
             "Fixture setup is excluded and reported separately in fixture_setup_cli_volume. "
-            "Scenario totals include native reopening; "
-            "synthetic planning reads emit no CLI receipts."
+            "Scenario totals cover only instrumented commands actually executed."
             if scoped
             else "No separate setup receipts; setup/scenario attribution is unmeasured."
         ),
@@ -447,14 +447,21 @@ def _markdown(summary: dict, *, scoped: bool) -> str:
 
 
 def _stop(process: subprocess.Popen) -> None:
-    if process.poll() is not None:
-        return
-    os.killpg(process.pid, signal.SIGTERM)
+    # Every caller creates an owned process group. Its leader can exit while
+    # descendants still hold pipes or write receipts, so poll() cannot settle it.
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
+        pass
+    try:
         os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
+    except ProcessLookupError:
+        pass
+    process.wait()
 
 
 def _prepare_native_fixture(output: Path, cli: Path) -> Path:
@@ -635,21 +642,7 @@ def _run_process(
         if interrupted:
             outcome = "interrupted"
         if outcome:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-            # The leader can exit before its children. Stop the remaining group
-            # even when wait() has already returned, so the journal stays frozen.
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            process.wait()
+            _stop(process)
         return process.returncode, outcome
     finally:
         signal.signal(signal.SIGTERM, previous)

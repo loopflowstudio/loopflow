@@ -15,6 +15,39 @@ import pytest
 from scripts import desktop_performance as performance
 
 
+@pytest.mark.parametrize("leader_exited", [False, True])
+def test_cleanup_closes_descendant_pipes_even_after_leader_exit(leader_exited: bool) -> None:
+    child = (
+        "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "print('ready', flush=True); time.sleep(60)"
+    )
+    leader = (
+        "import subprocess, sys, time; "
+        f"subprocess.Popen([sys.executable, '-c', {child!r}]); "
+        f"time.sleep({0 if leader_exited else 60})"
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-c", leader],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        assert process.stdout.readline() == "ready\n"
+        if leader_exited:
+            assert process.wait(timeout=5) == 0
+        performance._stop(process)
+        # EOF requires the surviving descendant to close its inherited pipes.
+        assert process.communicate(timeout=5) == ("", "")
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+
+
 @pytest.mark.parametrize("termination", ["signal", "timeout"])
 def test_interruption_stops_owned_benchmark_and_returns_outcome(
     tmp_path: Path, termination: str
@@ -109,6 +142,22 @@ def test_comparison_retains_observed_timeouts(tmp_path: Path) -> None:
     assert comparison["available"]
     assert comparison["deltas"][1]["before_failure_rate"] == 1 / 20
     assert comparison["deltas"][1]["after_failure_rate"] == 0
+
+
+def test_comparison_renders_without_latency_when_every_attempt_times_out(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline"
+    baseline.mkdir()
+    _report(baseline, _events())
+    events = _events()
+    for event in events:
+        if event["event"] == "end":
+            event.update(outcome="timeout", duration_ms=None)
+    _report(tmp_path, events)
+    report = performance._report(tmp_path, baseline)
+    assert report["status"] == "incomplete"
+    assert report["comparison"]["available"]
+    assert all(delta["p50_delta_ms"] is None for delta in report["comparison"]["deltas"])
+    assert "| small | full | warm | — | — |" in (tmp_path / "report.md").read_text()
 
 
 def _events(samples: int = 21) -> list[dict]:

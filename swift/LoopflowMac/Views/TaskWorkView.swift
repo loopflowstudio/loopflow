@@ -23,9 +23,8 @@ struct TaskWorkflowView: View {
                     HStack(spacing: Spacing.sm) {
                         ForEach(["start"] + workflow.stages.map(\.name) + ["end"], id: \.self) { stage in
                             stageChip(stage)
-                            ForEach(Array(workflow.edges.enumerated()).filter { $0.element.from == stage },
-                                    id: \.offset) { index, edge in
-                                edgeLabel(edge, running: workflow.runningEdge == index)
+                            ForEach(workflow.edges(from: stage), id: \.index) { index, edge in
+                                edgeLabel(edge, running: workflow.running?.index == index)
                                     .accessibilityIdentifier("task-workflow-edge-\(index)")
                             }
                         }
@@ -37,14 +36,13 @@ struct TaskWorkflowView: View {
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-workflow-position")
                 HStack(spacing: Spacing.sm) {
-                    ForEach(Array(workflow.edges.enumerated()).filter { $0.element.from == workflow.departure },
-                            id: \.offset) { index, edge in
+                    ForEach(workflow.outgoing, id: \.index) { index, edge in
                         Button(edge.flow.map { "Run \($0)" } ?? "Finish") {
-                            Task { await model.startFlow(workflow.launchName(edge), task: task, wave: wave) }
+                            Task { await model.startFlow(edge.launchName, task: task, wave: wave) }
                         }
                         .buttonStyle(WorkspaceOutlineButtonStyle())
                         .disabled(unavailable != nil)
-                        .help(unavailable ?? "lf task run \(task.task.identifier) \(workflow.launchName(edge)) · to \(edge.to)")
+                        .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.launchName) · to \(edge.to)")
                         .accessibilityIdentifier("task-workflow-run-\(index)")
                     }
                     if draft?.acting == true { ProgressView().controlSize(.small) }
@@ -66,9 +64,7 @@ struct TaskWorkflowView: View {
     /// would put two drivers in the checkout.
     private var unavailable: String? {
         if draft?.acting == true { return "Starting" }
-        if let index = workflow.runningEdge, workflow.edges.indices.contains(index) {
-            return "\(workflow.edges[index].flow ?? "An edge") is running"
-        }
+        if let running = workflow.running { return "\(running.edge.flow ?? "An edge") is running" }
         return task.flow.control(.start)?.unavailable
     }
 
@@ -80,9 +76,8 @@ struct TaskWorkflowView: View {
                 return "Waiting on you at \(stage) · \(skill)"
             }
             return "Not started"
-        case .edge(let index, _):
-            guard workflow.edges.indices.contains(index) else { return "Running" }
-            let edge = workflow.edges[index]
+        case .edge:
+            guard let edge = workflow.running?.edge else { return "Running" }
             return "Running \(edge.flow ?? "edge") · \(edge.from) to \(edge.to)"
         }
     }

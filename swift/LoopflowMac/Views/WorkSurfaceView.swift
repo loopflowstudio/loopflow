@@ -367,9 +367,7 @@ struct WorkSurfaceView: View {
                         Text(session.title)
                             .font(Typography.body(13).weight(.bold))
                             .foregroundStyle(palette.text)
-                        if session.taskPrimary {
-                            Text("primary").font(Typography.caption(10.5)).foregroundStyle(palette.textTertiary)
-                        }
+                        primaryTag(session)
                     }
                     HStack(spacing: Spacing.xs) {
                         if let provider = session.provider {
@@ -405,6 +403,13 @@ struct WorkSurfaceView: View {
         .accessibilityIdentifier("task-session-\(session.id)")
     }
 
+    @ViewBuilder
+    private func primaryTag(_ session: SessionRecord) -> some View {
+        if session.taskPrimary {
+            Text("primary").font(Typography.caption(10.5)).foregroundStyle(palette.textTertiary)
+        }
+    }
+
     /// One line for a conversation that is not waiting on anyone.
     private func compactSessionRow(_ session: SessionRecord) -> some View {
         Button { onOpenSession(session) } label: {
@@ -413,9 +418,7 @@ struct WorkSurfaceView: View {
                     .font(Typography.body(12.5))
                     .foregroundStyle(palette.text)
                     .lineLimit(1)
-                if session.taskPrimary {
-                    Text("primary").font(Typography.caption(10.5)).foregroundStyle(palette.textTertiary)
-                }
+                primaryTag(session)
                 Spacer(minLength: Spacing.sm)
                 Text(session.statusLabel)
                     .font(Typography.caption(11))

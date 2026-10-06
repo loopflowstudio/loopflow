@@ -20,6 +20,10 @@ public struct TaskWorkflow: Codable, Sendable, Equatable {
         public let from: String
         public let to: String
         public let flow: String?
+
+        /// What `lf task run ISSUE <name>` takes to traverse it: its Flow, or
+        /// the stage it enters when it runs nothing.
+        public var launchName: String { flow ?? to }
     }
 
     public struct Traversal: Codable, Sendable, Equatable {
@@ -77,23 +81,23 @@ public struct TaskWorkflow: Codable, Sendable, Equatable {
     public let position: Position
     public let traversals: [Traversal]
 
-    /// The stage the Task waits at, or the one its running edge left.
-    public var departure: String {
-        switch position {
-        case .stage(let stage): stage
-        case .edge(let index, _): edges.indices.contains(index) ? edges[index].from : "start"
-        }
+    /// The edge whose Flow runs now, with its place among `edges`.
+    public var running: (index: Int, edge: Edge)? {
+        guard case .edge(let index, _) = position, edges.indices.contains(index) else { return nil }
+        return (index, edges[index])
     }
 
-    /// Index of the edge whose Flow runs now.
-    public var runningEdge: Int? {
-        if case .edge(let index, _) = position { return index }
-        return nil
+    /// Edges leaving `stage`, each with its place among `edges`.
+    public func edges(from stage: String) -> [(index: Int, edge: Edge)] {
+        edges.enumerated().filter { $0.element.from == stage }.map { ($0.offset, $0.element) }
     }
 
-    /// What `lf task run ISSUE <name>` takes to traverse `edge`: its Flow, or
-    /// the stage it enters when it runs nothing.
-    public func launchName(_ edge: Edge) -> String { edge.flow ?? edge.to }
+    /// Edges a person can start next: those leaving the stage the Task waits
+    /// at, or the one its running edge left.
+    public var outgoing: [(index: Int, edge: Edge)] {
+        if case .stage(let stage) = position { return edges(from: stage) }
+        return edges(from: running?.edge.from ?? "start")
+    }
 }
 
 public struct TaskSession: Codable, Sendable, Equatable, Identifiable {

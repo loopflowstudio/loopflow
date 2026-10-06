@@ -8,6 +8,10 @@ import ViewInspector
 
 // Inspect production view bodies and invoke controls directly. No NSApplication,
 // NSWindow, window server connection, screenshot capture, or UI automation.
+private let fixtures = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("tests/fixtures/dto")
+
 private actor Recorder {
     private(set) var calls: [[String]] = []
     func add(_ args: [String]) { calls.append(args) }
@@ -18,9 +22,6 @@ private actor Recorder {
 struct DesktopHeadlessTests {
     @Test("Task work renders checkout conversations, Flows and mechanical Execs")
     func taskWorkInventory() async throws {
-        let fixtures = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto")
         let data = try Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))
         let work = try JSONDecoder().decode(TaskWork.self, from: data)
         let payload = "{\"execution\":{\"work\":\(String(decoding: data, as: UTF8.self))}}"
@@ -56,9 +57,6 @@ struct DesktopHeadlessTests {
 
     @Test("A Task's workflow shows its running edge, then offers the edges leaving the stage it waits at")
     func taskWorkflow() async throws {
-        let fixtures = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto")
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
         let wave = try #require(roadmap.waves.first)
@@ -95,9 +93,6 @@ struct DesktopHeadlessTests {
 
     @Test("A Task opens on its primary and lists waiting conversations before working ones")
     func taskSessions() throws {
-        let fixtures = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto")
         let base = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("session.json"))) as? [String: Any])
         func session(_ id: String, waiting: Bool = false, primary: Bool = false, state: String = "unknown") throws -> SessionRecord {
@@ -134,10 +129,7 @@ struct DesktopHeadlessTests {
             try view.inspect().find(viewWithAccessibilityIdentifier: "podium-work-empty")
         }
 
-        let fixture = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
-        let data = try Data(contentsOf: fixture)
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         wire["waves"] = []
         let empty = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))

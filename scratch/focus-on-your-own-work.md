@@ -241,8 +241,8 @@ Flow history below means FlowExec rows joined to their Execs.
    graph/progress/output view from FlowExec. Waiting first, working Sessions
    in a compact group, no completion controls; Start runs `lf -b task run` as
    an app-owned child. Done when `swift build --build-tests` and the headless
-   Desktop tests pass with shared DTO fixtures. **Built** at `e3ac73edb`, not yet compressed or
-   realigned: `swift build --build-tests` clean; `swift test --filter
+   Desktop tests pass with shared DTO fixtures. **Built** at `e3ac73edb` and compressed (the workflow model
+   answers running and outgoing edges once), not yet realigned: `swift build --build-tests` clean; `swift test --filter
    "DesktopHeadlessTests|DTOFixtureTests"` passed; `dto_fixtures` 19,
    `session_lifecycle_tests` 18, lib `store::` 182 and all-target Clippy
    pass. A full `swift test` has one failure, `ActiveSessionsLifetimeTests

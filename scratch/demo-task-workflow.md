@@ -56,5 +56,9 @@ October 6, Desktop (dev app, private Home). First build at `4f2860658`:
 [the design](focus-on-your-own-work.md). Rebuild at `975d9f727`, after
 looking at it running: "good enough. approved. make whatever cleanups yyou
 want". The approval is of the Task view as demonstrated on the fixture Task;
-it does not cover landing, the unmerged main, a real provider or the
-migration.
+it does not cover landing, a real provider or the migration.
+
+Third look, at `4fdea296d` with main merged and the cleanups in: "ok good
+enough". Open items he was shown and did not rule on: a reopened Task
+cannot run; an opened Flow exec's diagram clips; eleven chapter tests fail
+only in the full parallel library run; a Project may have no workflow.

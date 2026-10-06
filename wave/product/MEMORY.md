@@ -837,28 +837,30 @@ substitute for another merely because identifiers coincide.
 ## Performance — launch renders before any read (2026-10-04)
 
 Jack Heart requested Desktop open on a usable workspace with one loading
-vocabulary and one refresh path (LOO-376). On Jack's Home, installed `lf`
-0.12.32, single samples: `roadmap --all` 14.5 s, `session list` 12.4 s,
-`wave list` 2.4 s, `home id` and `ps` 1.2 s each. No read fits the 1000 ms
-budget, so a returning launch shows saved wire text first; that CLI latency has
-no owning Task (LOO-375 owns `wt list` only).
+vocabulary and one refresh path (LOO-376). On Jack's Home no `lf` read fits the
+1000 ms budget (`roadmap --all` 14.5 s), so a returning launch shows saved wire
+text first; that latency has no owning Task (LOO-375 owns `wt list` only).
 
 - Save the reads' wire text, restore through the live decoder, and strip
   liveness and legal actions before saving. Display evidence, never authority.
   Keep it inside the Home; a different `lf home id` drops content and selection.
 - One model owns refresh; views that each start a loop supersede each other's
   reads. A view that builds its own model reopens the blocking path.
-- The in-process replay (9.6 ms saved vs 13.2 s uncached, 20 samples) is
-  lower-level timing, not a rendered launch.
 - Jack's delivery contract (2026-10-04): land on autonomous checks and honest
   benchmark evidence; rendered startup is post-merge validation, not a gate.
-- Rendered receipts (`launch.py`): [20261004](../../scripts/benchmarks/desktop-performance/20261004-launch-rendered/README.md)
-  saved launch usable at 506 ms median; [20261005](../../scripts/benchmarks/desktop-performance/20261005-first-render/README.md)
-  first frame 850 → 617 ms in alternating rounds under heavy load, never
-  waiting on a read. Profile before guessing: the cost was model getters
-  re-normalizing paths per render, not drawing. Still open on LOO-376: 400 ms
-  unproven on a quiet host; unsaved launch waits on `lf`; `session list` runs
-  2–3 times (refresh owner: LOO-382/LOO-304).
+- Receipts: `scripts/benchmarks/desktop-performance/`. First frame went
+  850 → 617 ms under heavy load (20261005-first-render). Profile before
+  guessing: the cost was getters re-normalizing paths per render, not drawing.
+- A benchmark that reopens one bundle hides the launch Jack gets. Both recorded
+  real launches were first runs of a new version: 625–790 ms before `main`.
+  20261005-first-launch: the system charges a new binary about 390 ms, partly
+  by file size, so no post-update launch meets 400 ms through app work.
+  Stripping local symbols saves 40–100 ms but unnames crash-report frames;
+  shipping it with a retained dSYM is Jack's open choice. Reopened: 430 ms
+  first frame (4 samples, loaded host).
+- Still open on LOO-376: quiet-host proof of 400 ms; cold file cache and
+  selection/repository-change refresh scenarios; unsaved launch waits on `lf`;
+  `session list` runs 2–3 times (refresh owner: LOO-382/LOO-304).
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 

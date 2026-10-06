@@ -166,7 +166,7 @@ Jack Heart, October 5: "i want you to manage a looping lf flow that implemetns
 each pass builds the first slice not marked done, compresses, syncs and
 realigns; realign marks the slice **done** here with its commit and one-line
 check result; the deciding step iterates while any slice is not done and
-advances to publish only when all eight are; the list is the authority on how many there are. A proof that needs a person, a display
+advances to publish only when all are; the list is the authority on how many there are. A proof that needs a person, a display
 or a live provider is listed under the slice as a demo item and never keeps a
 slice open. A pass that cannot finish its slice records why and stops blocked.
 
@@ -273,6 +273,18 @@ Flow history below means FlowExec rows joined to their Execs.
    uv run python dev.py test` 78 passed, 3 skipped; prompt goldens
    regenerated. Demo items: the website's five building blocks as
    rendered; the two flow diagrams, unchanged, still say "flow".
+
+9. **Mutable TaskWorkflow.** The model under "Proposed mutable model" in
+   [task-workflow.md](task-workflow.md): position stored as live state and
+   written by the process running the edge; an append-only history of moves
+   with who and a note; one new command that sets the Task at a named stage
+   without running anything; a stopped edge holds the Task on the edge;
+   edges may carry their own name so two ways out can run the same Flow.
+   `lf task run` keeps the behavior Jack confirmed. Reshape the two tables in
+   the one draft. Done when tests cover: set to a stage; a stopped edge then
+   retry and then go back; a late-settled landing corrected by set; two
+   same-Flow edges chosen by name; status, JSON and the Swift decoder carry
+   stored position and history. *Not done.*
 
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task

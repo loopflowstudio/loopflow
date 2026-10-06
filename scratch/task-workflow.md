@@ -75,10 +75,15 @@ On the built record being append-only with derived position:
 - **Read.** Graph, position, the ways out and the history, for the
   conversation, `task status` and Desktop's buttons alike.
 
-Open for Jack: whether choosing and running stay one command; whether a
-stopped edge returns the Task to its stage or holds it on the edge; whether
-an edge finishing in the background should reach the conversation by any
-means other than the conversation's own background tool or reading status.
+Jack, October 6, on `lf task run` taking the only way out, erroring at a
+stage with several until one is named, erroring on a name that is not a way
+out, and running ad hoc for a Task with no workflow: "that talbe looks
+right". Choosing and running stay one command.
+
+Still open: whether a stopped edge returns the Task to its stage or holds it
+on the edge (default: holds, shown as stopped); whether a finishing edge
+should reach the conversation beyond its own background tool or reading
+status (default: no).
 
 ## Built — October 5, unreviewed by Jack
 

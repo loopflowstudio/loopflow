@@ -503,6 +503,14 @@ mod planning_tests {
         };
         store.create_wave(&wave).await.unwrap();
         store.create_project(&project).await.unwrap();
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
+            wave.id(),
+            None,
+            project.plan.id.as_str(),
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
         store.create_task(&task, &pr, None).await.unwrap();
         let mut flow = super::start_task_flow(&task, "task-design").unwrap();
         flow.cursor.index = 1;

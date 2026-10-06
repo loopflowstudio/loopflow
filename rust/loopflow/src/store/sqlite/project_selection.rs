@@ -194,6 +194,7 @@ impl SqliteStore {
         Ok(conn.query_row(
             "SELECT p.external_project_id, f.observed_at,
              CASE WHEN w.current_project_id IS NULL THEN 'unconfigured'
+                  WHEN NOT json_valid(f.body) THEN 'unavailable'
                   WHEN f.id IS NULL OR f.archived OR f.membership_unresolved OR p.pm_snapshot_synced_at!=f.observed_at
                     OR NOT EXISTS(SELECT 1 FROM pm_wave_projects m WHERE m.wave_id=w.id AND m.project_id=f.id)
                     OR (s.wave_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM json_each(f.body,'$.initiative_ids') WHERE value=s.initiative))

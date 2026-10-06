@@ -62,14 +62,11 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
 }
 
 fn select_project(home: &Path, wave: &Wave, project_id: &str) {
-    let directory = home.join("waves").join(wave.id().as_str());
-    std::fs::create_dir_all(&directory).unwrap();
-    std::fs::write(
-        directory.join("config.yaml"),
-        format!("pm:\n  linear_project: {project_id}\n"),
-    )
-    .unwrap();
     let connection = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    connection.execute(
+        "UPDATE waves SET current_project_id=(SELECT id FROM projects WHERE wave_id=?1 AND external_project_id=?2) WHERE id=?1",
+        rusqlite::params![wave.id().as_str(), project_id],
+    ).unwrap();
     connection.execute(
         "UPDATE projects SET status=CASE WHEN external_project_id=?2 THEN 'started' ELSE 'completed' END WHERE wave_id=?1",
         rusqlite::params![wave.id().as_str(), project_id],
@@ -226,6 +223,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
         updated_at: now,
     };
     store.insert_project(&stale).expect("seed stale Project");
+    select_project(home, &wave, stale.plan.id.as_str());
     let stale_task = Task {
         id: TaskId::parse(STALE_TASK_WORK_ID).expect("recorded Task Work id"),
         plan: TaskPlan {

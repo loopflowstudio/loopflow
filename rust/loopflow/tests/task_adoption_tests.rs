@@ -119,6 +119,13 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
         runtime.block_on(async {
             store.create_wave(&wave).await.unwrap();
             store.create_project(&project).await.unwrap();
+            rusqlite::Connection::open(home.path().join("loopflow.db"))
+                .unwrap()
+                .execute(
+                    "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                    rusqlite::params![wave.id(), project.id.as_str()],
+                )
+                .unwrap();
             let mut historical = snapshot.clone();
             historical.items[0].branch_name = None;
             store

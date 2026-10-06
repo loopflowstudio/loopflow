@@ -364,6 +364,13 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .unwrap();
     let project = project(&alpha);
     store.create_project(&project).await.unwrap();
+    rusqlite::Connection::open(&database)
+        .unwrap()
+        .execute(
+            "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+            rusqlite::params![project.wave_id, project.id.as_str()],
+        )
+        .unwrap();
     let (task, task_pr) = task(&alpha, &project, &repo_a);
     store.create_task(&task, &task_pr, None).await.unwrap();
     let placement = alpha_placement;
@@ -760,6 +767,13 @@ async fn relocation_refuses_meaningful_destination_history() {
     store.create_wave(&project_shadow).await.unwrap();
     let owned_project = project(&project_shadow);
     store.create_project(&owned_project).await.unwrap();
+    rusqlite::Connection::open(&database)
+        .unwrap()
+        .execute(
+            "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+            rusqlite::params![owned_project.wave_id, owned_project.id.as_str()],
+        )
+        .unwrap();
     let (owned_task, owned_pr) = task(&project_shadow, &owned_project, &target);
     store
         .create_task(&owned_task, &owned_pr, None)

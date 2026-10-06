@@ -371,6 +371,13 @@ fn register_task_fixture(
             .create_project(&project)
             .await
             .expect("create test project");
+        rusqlite::Connection::open(home.join("loopflow.db"))
+            .expect("open fixture database")
+            .execute(
+                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                rusqlite::params![wave.id(), project.id.as_str()],
+            )
+            .expect("select fixture Project");
         let pm_payload = serde_json::json!({
             "projects": [{
                 "id": project.plan.id.as_str(),

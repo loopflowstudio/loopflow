@@ -147,7 +147,7 @@ struct WavesView: View {
                 model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave))
             }
         }
-        // Registered Waves arrive with every planning frame.
+        // Waves arrive with every planning frame.
         .onChange(of: model.planningSequence) { _, _ in
             Task {
                 await syncRepoStates()

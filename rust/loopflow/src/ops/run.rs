@@ -434,6 +434,14 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
+            wave.id(),
+            None,
+            project.plan.id.as_str(),
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
         store.create_task(&task, &pr, None).await.unwrap();
         task
     }

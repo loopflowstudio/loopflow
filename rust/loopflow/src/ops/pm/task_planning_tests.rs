@@ -20,6 +20,30 @@ use crate::work::task::{
     TaskEventKind, TaskId, TaskPr, TaskPrId,
 };
 
+async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) {
+    let (repo, wave) = fixture.planning_repo().await;
+    let project = serde_json::from_value(json!({
+        "id": "project-1", "slug": "Chapter", "name": "Chapter", "summary": "",
+        "metric_targets": [], "flow": "feature", "status": "started", "krs": [],
+        "initiative_ids": ["initiative-1"], "team_ids": ["team-1"]
+    }))
+    .unwrap();
+    fixture
+        .store
+        .sqlite
+        .put_pm_project(wave.id(), "linear", "initiative-1", &project, now())
+        .unwrap();
+    crate::store::sqlite::project_selection::write_project_binding(
+        &fixture.store.sqlite,
+        wave.id(),
+        None,
+        "project-1",
+        &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+    )
+    .unwrap();
+    (repo, wave)
+}
+
 async fn serve(
     state: Arc<tokio::sync::Mutex<PlanningState>>,
 ) -> (String, tokio::task::JoinHandle<()>) {
@@ -55,6 +79,7 @@ struct PlanningState {
     extra_projects: Vec<serde_json::Value>,
     fail_confirmation: bool,
     fail_snapshot: bool,
+    // Discovery and confirmation under the Wave lock consume two reads before mutation.
     fail_issue_read_after: Option<usize>,
     fail_completion: bool,
     lose_completion: bool,
@@ -277,7 +302,7 @@ async fn planning_graphql(
 async fn task_creation_refusal_preserves_inventory_and_marker_retry_reuses_provider_title() {
     let fixture = Fixture::new().await;
     fixture.seed(now() + 86_400).await;
-    let (repo, _wave) = fixture.planning_repo().await;
+    let (repo, _wave) = planning_repo(&fixture).await;
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = serve(state.clone()).await;
     PM_TEST_CONTEXT
@@ -411,7 +436,7 @@ fn task_creation_and_edit_do_not_require_a_post_write_wave_snapshot() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
-    let (repo, _wave) = runtime.block_on(fixture.planning_repo());
+    let (repo, _wave) = runtime.block_on(planning_repo(&fixture));
     runtime.block_on(fixture.seed(now() + 86_400));
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState {
         // The initial Project read works, but after creation a Wave snapshot
@@ -462,7 +487,7 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
-    let (repo, _wave) = runtime.block_on(fixture.planning_repo());
+    let (repo, _wave) = runtime.block_on(planning_repo(&fixture));
     // Deliberately no commit, Project Work, agent route or execution credential.
     std::fs::write(repo.join("authored.txt"), "keep this unfinished work").unwrap();
     runtime.block_on(fixture.seed(now() + 86_400));
@@ -509,7 +534,7 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
         };
         {
             runtime.block_on(async {
-                state.lock().await.fail_issue_read_after = Some(1);
+                state.lock().await.fail_issue_read_after = Some(2);
             });
             let error = edit().unwrap_err().to_string();
             assert!(
@@ -620,7 +645,7 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
-    let (repo, wave) = runtime.block_on(fixture.planning_repo());
+    let (repo, wave) = runtime.block_on(planning_repo(&fixture));
     runtime.block_on(fixture.seed(now() + 86_400));
     std::fs::write(repo.join("authored.txt"), "keep authored work").unwrap();
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
@@ -870,7 +895,7 @@ fn assert_task_completion_retry(registered: bool, lose_response: bool, merge: Op
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
-    let (repo, wave) = runtime.block_on(fixture.planning_repo());
+    let (repo, wave) = runtime.block_on(planning_repo(&fixture));
     if merge.is_some() {
         let bin = fixture.directory.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -1160,7 +1185,7 @@ fi
             }));
             runtime.block_on(async {
                 let mut provider = state.lock().await;
-                provider.fail_issue_read_after = Some(1);
+                provider.fail_issue_read_after = Some(2);
                 provider.lose_comment = true;
             });
             assert!(complete("Delivered the requested outcome")
@@ -1171,7 +1196,7 @@ fi
         if registered {
             runtime.block_on(async {
                 let mut provider = state.lock().await;
-                provider.fail_issue_read_after = Some(1);
+                provider.fail_issue_read_after = Some(2);
                 provider.issues[0]["title"] = json!("Updated before completion retry");
                 provider.issues[0]["description"] = json!("Retain the provider's latest notes");
                 mark_issue_updated(&mut provider.issues[0]);
@@ -1312,7 +1337,7 @@ fn task_abandon_and_delete_compose_cancellation_pr_and_git_from_anywhere() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let fixture = runtime.block_on(Fixture::new());
         std::env::set_var("LF_HOME", fixture.directory.path());
-        let (repo, wave) = runtime.block_on(fixture.planning_repo());
+        let (repo, wave) = runtime.block_on(planning_repo(&fixture));
         runtime.block_on(fixture.seed(now() + 86_400));
         let remote = fixture.directory.path().join("loopflowstudio/fixture.git");
         std::fs::create_dir_all(&remote).unwrap();
@@ -1619,7 +1644,7 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let fixture = runtime.block_on(Fixture::new());
     std::env::set_var("LF_HOME", fixture.directory.path());
-    let (repo, wave) = runtime.block_on(fixture.planning_repo());
+    let (repo, wave) = runtime.block_on(planning_repo(&fixture));
     runtime.block_on(fixture.seed(now() + 86_400));
     let foreign = json!({
         "id":"foreign-project", "name":"Other Repository — Technical Architecture",

@@ -957,6 +957,12 @@ mod tests {
         ] {
             sqlite.apply_migration_for_test(name).unwrap();
         }
+        sqlite
+            .place_work(
+                &crate::durable::WorkRef::Wave(wave.clone()),
+                &sqlite.local_home().unwrap().id,
+            )
+            .unwrap();
         let store = Store { sqlite };
         let observation = store
             .pm_task_observation("/repo", "linear", "fix-1")

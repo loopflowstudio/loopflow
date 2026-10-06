@@ -228,8 +228,7 @@ sqlite&gt; select substr(flow_exec_id,1,8), seq, substr(exec_id,1,8), node, iter
 2927673f|1|131c89ce|0|[[]]
 0e0f46b7|2|d495b06c|0|[[]]
 0e0f46b7|3|c435c0e8|1|[[]]</code></pre></figure>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/32f42bffed1bf3915d67cebd1e4d87e68f620d7c/rust/loopflow/src/store/sqlite/flow_inventory.rs#L212-L239"><code>rust/loopflow/src/store/sqlite/flow_inventory.rs</code></a> · <code>the driver's two writes</code> · 32f42bffe · lines 212–239</figcaption><pre><code>
-    /// A driver&#x27;s one write about its Flow: the name and graph it launched with.
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/32f42bffed1bf3915d67cebd1e4d87e68f620d7c/rust/loopflow/src/store/sqlite/flow_inventory.rs#L213-L242"><code>rust/loopflow/src/store/sqlite/flow_inventory.rs</code></a> · <code>the driver's two writes</code> · 32f42bffe · lines 213–242</figcaption><pre><code>    /// A driver&#x27;s one write about its Flow: the name and graph it launched with.
     pub(crate) fn record_flow_exec(
         &amp;self,
         driver: &amp;ExecId,
@@ -255,7 +254,10 @@ sqlite&gt; select substr(flow_exec_id,1,8), seq, substr(exec_id,1,8), node, iter
         let conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
         conn.execute(
             &quot;INSERT INTO flow_exec_steps(flow_exec_id,exec_id,node,iterations) VALUES(?1,?2,?3,?4)&quot;,
-            params![driver, step, key, serde_json::to_string(iterations)?],</code></pre></figure>
+            params![driver, step, key, serde_json::to_string(iterations)?],
+        )?;
+        Ok(())
+    }</code></pre></figure>
 <div class="note"><b>Fits the decision.</b> “the flow driver should be responsible for maintaining the state”; “FlowExec works fine”. The record is keyed by the driver's Exec, holds no state of its own, and triggers refuse any update. No column on a Task points at a Flow.</div>
 <div class="note"><b>Regained since the last review.</b> A past Flow is drawn on the graph it launched with, not on today's YAML.</div>
 

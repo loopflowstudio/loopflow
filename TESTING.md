@@ -1026,6 +1026,9 @@ For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
 Verify the repair in that same environment. A pass under a developer's installed
 Loopflow can hide the CI failure.
+Include direct provider-harness startup tests in this check: even an expected
+spawn failure first resolves the conversation's `lf`. Pin a fixture executable
+under the environment lock and restore the pin afterward.
 
 Release repair checks must cover completion before inherited checkout locks close.
 Use the public release path with a delayed repair launcher; a terminal Exec receipt

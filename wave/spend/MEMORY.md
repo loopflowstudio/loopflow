@@ -38,9 +38,10 @@ Unresolved account identities remain explicit discovery gaps and do not block
 local inventory/report implementation. Missing integration is distinct from a
 provider-unsupported capability; only provider evidence establishes the latter.
 LOO-389 now has a tested local inventory/invoice core and dated access observations
-under `lf auth`; provider billing, test rotation, isolation and live acceptance
-remain outstanding. Shared account links do not allocate charges, and corrected
-invoices retain their earlier evaluated attribution.
+under `lf auth`. Synthetic rotation and Docker export-isolation proofs now exist;
+provider billing, production provisioning and live acceptance remain outstanding. Shared account links do not allocate charges. Each stored
+invoice revision retains its evaluated attribution; a new correction evaluates
+the rules present at import, while repeat imports reuse the stored evaluation.
 
 October 6 public-provider research found that Runpod's current billing API returns
 time-bucketed spending with resource detail and reconciliation totals, without an
@@ -56,6 +57,25 @@ are config-scoped and can have write permission; online verification must not
 mistake cached fallback secrets for current access. A successful provider read
 does not establish read-only permissions. These are design constraints, not
 completed isolation or rotation evidence.
+
+October 6 source reconciliation found that repository/Wave filters narrow report
+totals but retain all period invoices. Presentation filters are not authorization:
+designated report exports must enforce their intended data scope independently.
+Infrastructure's managed-account evidence also shows that an isolated Home alone
+does not isolate fixtures: executable selection and inherited `LF_*` authority
+must be controlled. These lessons apply to the pending test-provider and report
+consumer demonstrations. The subsequent Docker fixture proves designated export
+consumption without inherited authority; it does not establish production agent
+provisioning. Exports expose only the selected recipient's evaluated amounts and
+source references, while administrative reports retain full invoice evidence.
+
+Administrative rotation receipts now distinguish candidate verification, active
+reference selection, consumer cutover and provider retirement. Imported receipts
+record operator evidence; they cannot independently prove a provider action. A
+synthetic endpoint test proves failed replacement preservation and retirement
+retry, with runtime keys absent from stored records and command output. Exact
+Doppler reference identity matters alongside version: equal version strings at
+different references must not reuse an old successful observation.
 
 ## Founding direction — October 6, 2026
 

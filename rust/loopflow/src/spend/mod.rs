@@ -1,4 +1,6 @@
 //! Dependency metadata and exact billed evidence. Provider credentials never enter these records.
+pub mod rotation;
+
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
@@ -123,7 +125,7 @@ pub struct AccessEnvironment {
     pub name: String,
     pub home_id: Option<crate::durable::HomeId>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AccessRequirement {
     pub id: RequirementId,
@@ -265,8 +267,7 @@ pub struct DependencyInspection {
     pub accounts: Vec<ServiceAccount>,
     pub resources: Vec<Resource>,
     pub sources: Vec<BillingSource>,
-    pub requirements: Vec<AccessRequirement>,
-    pub credentials: Vec<Credential>,
+    pub access: Vec<AccessInspection>,
     pub attributed_cost: Option<Vec<CurrencyTotal>>,
     pub linked_invoices: Vec<InvoiceRevision>,
     pub coverage: Vec<String>,
@@ -372,21 +373,21 @@ pub(crate) fn totals(
 ) -> StoreResult<Vec<CurrencyTotal>> {
     let mut totals = BTreeMap::new();
     for revision in invoices {
-        let amounts: Vec<_> = revision
+        let mut amounts = revision
             .charges
             .iter()
             .flat_map(|c| &c.attribution)
             .filter(|a| {
-                !repo.is_some_and(|r| a.consumer.as_ref().is_none_or(|c| c.repo != r))
-                    && !wave.is_some_and(|w| {
+                repo.is_none_or(|r| a.consumer.as_ref().is_some_and(|c| c.repo == r))
+                    && wave.is_none_or(|w| {
                         a.consumer
                             .as_ref()
-                            .is_none_or(|c| c.wave_id.as_ref() != Some(w))
+                            .is_some_and(|c| c.wave_id.as_ref() == Some(w))
                     })
-                    && !dependency.is_some_and(|d| a.dependency.as_ref() != Some(d))
+                    && dependency.is_none_or(|d| a.dependency.as_ref() == Some(d))
             })
-            .collect();
-        if amounts.is_empty() && (repo.is_some() || wave.is_some() || dependency.is_some()) {
+            .peekable();
+        if amounts.peek().is_none() && (repo.is_some() || wave.is_some() || dependency.is_some()) {
             continue;
         }
         let t = totals
@@ -429,6 +430,7 @@ pub struct AccessObservation {
     pub requirement_revision: String,
     pub credential: Option<CredentialId>,
     pub credential_version: Option<String>,
+    pub credential_reference: Option<DopplerReference>,
     pub operation: String,
     pub observed_at: i64,
     pub outcome: AccessOutcome,
@@ -443,4 +445,113 @@ pub struct AccessInspection {
     pub credentials: Vec<Credential>,
     pub observations: Vec<AccessObservation>,
     pub coverage: Vec<String>,
+}
+
+impl AccessInspection {
+    pub fn current_observation(
+        &self,
+        requirement: &AccessRequirement,
+    ) -> Option<&AccessObservation> {
+        let credential = self
+            .credentials
+            .iter()
+            .find(|c| requirement.credential.as_ref() == Some(&c.id));
+        self.observations.iter().find(|o| {
+            o.requirement == requirement.id
+                && self.environment.home_id.as_ref() == Some(&o.executed_home)
+                && o.requirement_revision == requirement.revision
+                && o.credential == requirement.credential
+                && (requirement.tool.is_some()
+                    || credential.is_some_and(|c| {
+                        c.version.is_some()
+                            && c.version == o.credential_version
+                            && Some(&c.reference) == o.credential_reference.as_ref()
+                    }))
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependencyHistory {
+    pub dependency: Dependency,
+    pub effective_from: String,
+    pub effective_to: Option<String>,
+    pub provenance: String,
+}
+
+/// A designated consumer receives only its evaluated amounts and opaque source references.
+/// Free-form descriptions, account totals, other recipients and inventory are not exported.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReportExport {
+    pub period: String,
+    pub repo: String,
+    pub wave_id: Option<crate::id::WaveId>,
+    pub generated_at: i64,
+    pub amounts: Vec<ExportAmount>,
+    pub totals: Vec<CurrencyTotal>,
+    pub coverage: Vec<String>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportAmount {
+    pub source: SourceId,
+    pub document_id: String,
+    pub revision: String,
+    pub fetched_at: i64,
+    pub generated_at: Option<i64>,
+    pub currency: String,
+    pub kind: AssignmentKind,
+    pub amount: Money,
+    pub wave_id: Option<crate::id::WaveId>,
+    pub rule: Option<RuleId>,
+    pub rule_revision: Option<String>,
+}
+impl Report {
+    pub fn export(
+        &self,
+        repo: String,
+        wave_id: Option<crate::id::WaveId>,
+    ) -> StoreResult<ReportExport> {
+        let mut amounts = Vec::new();
+        for invoice in &self.invoices {
+            for attribution in invoice.charges.iter().flat_map(|c| &c.attribution) {
+                let Some(consumer) = &attribution.consumer else {
+                    continue;
+                };
+                if consumer.repo != repo
+                    || wave_id
+                        .as_ref()
+                        .is_some_and(|w| consumer.wave_id.as_ref() != Some(w))
+                {
+                    continue;
+                }
+                amounts.push(ExportAmount {
+                    source: invoice.invoice.source.clone(),
+                    document_id: invoice.invoice.document_id.clone(),
+                    revision: invoice.revision.clone(),
+                    fetched_at: invoice.invoice.fetched_at,
+                    generated_at: invoice.invoice.generated_at,
+                    currency: invoice.invoice.currency.clone(),
+                    kind: attribution.kind.clone(),
+                    amount: attribution.amount.clone(),
+                    wave_id: consumer.wave_id.clone(),
+                    rule: attribution.rule.clone(),
+                    rule_revision: attribution.rule_revision.clone(),
+                });
+            }
+        }
+        let mut coverage = vec!["designated attribution export; excludes invoice totals, other consumers, shared and unassigned costs".into(),
+            "source completeness and reconciliation require administrative inspection".into()];
+        if amounts.is_empty() {
+            coverage.push("attributed cost unknown for the requested repository/Wave".into());
+        }
+        Ok(ReportExport {
+            totals: totals(&self.invoices, Some(&repo), wave_id.as_ref(), None)?,
+            period: self.period.clone(),
+            repo,
+            wave_id,
+            generated_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+            amounts,
+            coverage,
+        })
+    }
 }

@@ -1,3 +1,5 @@
+mod rotation;
+
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use rust_decimal::Decimal;
 use serde::{de::DeserializeOwned, Serialize};
@@ -30,7 +32,12 @@ fn record<T: DeserializeOwned>(conn: &Connection, table: &str, id: &str) -> Stor
         .optional()?;
     value.map(|s| Ok(serde_json::from_str(&s)?)).transpose()
 }
-fn simple<T: Serialize>(conn: &Connection, table: &str, id: &str, value: &T) -> StoreResult<()> {
+fn upsert_record<T: Serialize>(
+    conn: &Connection,
+    table: &str,
+    id: &str,
+    value: &T,
+) -> StoreResult<()> {
     if id.trim().is_empty() {
         return Err(spend::invalid("record IDs must be nonempty"));
     }
@@ -90,10 +97,10 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         for credential in &inventory.credentials {
-            simple(&tx, "spend_credentials", &credential.id.0, credential)?;
+            upsert_record(&tx, "spend_credentials", &credential.id.0, credential)?;
         }
         for environment in &inventory.environments {
-            simple(&tx, "spend_environments", &environment.id.0, environment)?;
+            upsert_record(&tx, "spend_environments", &environment.id.0, environment)?;
         }
         for account in &inventory.accounts {
             let existing: Option<ServiceAccount> = record(&tx, "spend_accounts", &account.id.0)?;
@@ -144,9 +151,10 @@ impl SqliteStore {
         for requirement in &inventory.requirements {
             let existing: Option<AccessRequirement> =
                 record(&tx, "spend_requirements", &requirement.id.0)?;
-            if existing.as_ref().is_some_and(|r| {
-                r.revision == requirement.revision && encode(r).ok() != encode(requirement).ok()
-            }) {
+            if existing
+                .as_ref()
+                .is_some_and(|r| r.revision == requirement.revision && r != requirement)
+            {
                 return Err(spend::invalid(
                     "changed access requirements need a new revision",
                 ));
@@ -162,7 +170,7 @@ impl SqliteStore {
             for consumer in &dependency.consumers {
                 check_consumer(&tx, consumer)?;
             }
-            simple(&tx, "spend_dependencies", &dependency.id.0, dependency)?;
+            upsert_record(&tx, "spend_dependencies", &dependency.id.0, dependency)?;
             for (table, column, ids) in [
                 (
                     "spend_dependency_accounts",
@@ -293,14 +301,11 @@ impl SqliteStore {
         let mut normalized = invoice.clone();
         let mut items = normalized
             .charges
-            .iter()
-            .map(encode)
+            .into_iter()
+            .map(|charge| Ok((encode(&charge)?, charge)))
             .collect::<StoreResult<Vec<_>>>()?;
-        items.sort();
-        normalized.charges = items
-            .iter()
-            .map(|s| serde_json::from_str(s))
-            .collect::<Result<_, _>>()?;
+        items.sort_by(|a, b| a.0.cmp(&b.0));
+        normalized.charges = items.into_iter().map(|(_, charge)| charge).collect();
         let revision = hex::encode(Sha256::digest(
             encode(&(
                 &normalized.account,
@@ -447,31 +452,16 @@ impl SqliteStore {
             .into_iter()
             .filter(|s| dependency.sources.contains(&s.id))
             .collect();
-        let requirements: Vec<AccessRequirement> =
-            records::<AccessRequirement>(&conn, "spend_requirements")?
-                .into_iter()
-                .filter(|r| dependency.requirements.contains(&r.id))
-                .collect();
-        let credentials = records::<Credential>(&conn, "spend_credentials")?
-            .into_iter()
-            .filter(|c| {
-                requirements
-                    .iter()
-                    .any(|r| r.credential.as_ref() == Some(&c.id))
-            })
-            .collect();
-        let attributed = report.invoices.iter().any(|i| {
-            i.charges.iter().any(|c| {
-                c.attribution
-                    .iter()
-                    .any(|a| a.dependency.as_ref() == Some(id))
-            })
-        });
-        let attributed_cost = if attributed {
-            Some(spend::totals(&report.invoices, None, None, Some(id))?)
-        } else {
-            None
-        };
+        let environments = records::<AccessEnvironment>(&conn, "spend_environments")?;
+        let mut access = Vec::new();
+        for environment in environments {
+            let inspection = read_access(&conn, environment, Some(&dependency.requirements))?;
+            if !inspection.requirements.is_empty() {
+                access.push(inspection);
+            }
+        }
+        let totals = spend::totals(&report.invoices, None, None, Some(id))?;
+        let attributed_cost = (!totals.is_empty()).then_some(totals);
         let linked_invoices = report
             .invoices
             .into_iter()
@@ -482,7 +472,7 @@ impl SqliteStore {
             .collect();
         let mut coverage = dependency.coverage.clone();
         coverage.extend(report.coverage);
-        if !attributed {
+        if attributed_cost.is_none() {
             coverage.push("attributed cost unknown; account links confer no allocation".into());
         }
         Ok(Some(DependencyInspection {
@@ -490,8 +480,7 @@ impl SqliteStore {
             accounts,
             resources,
             sources,
-            requirements,
-            credentials,
+            access,
             attributed_cost,
             linked_invoices,
             coverage,
@@ -534,56 +523,7 @@ impl SqliteStore {
         else {
             return Ok(None);
         };
-        let requirements: Vec<AccessRequirement> =
-            records::<AccessRequirement>(&conn, "spend_requirements")?
-                .into_iter()
-                .filter(|r| r.environment == environment.id)
-                .collect();
-        let credentials: Vec<Credential> = records::<Credential>(&conn, "spend_credentials")?
-            .into_iter()
-            .filter(|c| {
-                requirements
-                    .iter()
-                    .any(|r| r.credential.as_ref() == Some(&c.id))
-            })
-            .collect();
-        let mut statement = conn.prepare(
-            "SELECT payload FROM spend_access_observations WHERE environment=?1 ORDER BY id DESC",
-        )?;
-        let observations: Vec<AccessObservation> = statement
-            .query_map([&environment.id.0], |r| r.get::<_, String>(0))?
-            .map(|r| Ok(serde_json::from_str(&r?)?))
-            .collect::<StoreResult<_>>()?;
-        let mut coverage = Vec::new();
-        for requirement in &requirements {
-            let credential = credentials
-                .iter()
-                .find(|c| requirement.credential.as_ref() == Some(&c.id));
-            let current = observations.iter().find(|o| {
-                o.requirement == requirement.id
-                    && environment.home_id.as_ref() == Some(&o.executed_home)
-                    && o.requirement_revision == requirement.revision
-                    && o.credential == requirement.credential
-                    && (requirement.tool.is_some()
-                        || credential.is_some_and(|c| {
-                            c.version.is_some() && c.version == o.credential_version
-                        }))
-            });
-            if !current.is_some_and(|o| o.outcome == AccessOutcome::Success) {
-                coverage.push(format!("{}: current access unverified", requirement.id.0));
-            }
-            if credential.is_some_and(|c| c.version.is_none()) {
-                coverage.push(format!("{}: credential version unknown", requirement.id.0));
-            }
-        }
-        coverage.push("declared permissions are not provider-enforced scope evidence".into());
-        Ok(Some(AccessInspection {
-            environment,
-            requirements,
-            credentials,
-            observations,
-            coverage,
-        }))
+        Ok(Some(read_access(&conn, environment, None)?))
     }
     pub(crate) fn record_spend_access(
         &self,
@@ -606,7 +546,9 @@ impl SqliteStore {
             if let Some(credential) = &observation.credential {
                 let credential: Credential = record(&tx, "spend_credentials", &credential.0)?
                     .ok_or_else(|| spend::invalid("credential not found"))?;
-                if credential.version != observation.credential_version {
+                if credential.version != observation.credential_version
+                    || Some(&credential.reference) != observation.credential_reference.as_ref()
+                {
                     return Err(spend::invalid("credential changed during verification"));
                 }
             }
@@ -614,5 +556,143 @@ impl SqliteStore {
         }
         tx.commit()?;
         Ok(())
+    }
+}
+
+fn read_access(
+    conn: &Connection,
+    environment: AccessEnvironment,
+    selected: Option<&[crate::spend::RequirementId]>,
+) -> StoreResult<AccessInspection> {
+    let requirements: Vec<AccessRequirement> =
+        records::<AccessRequirement>(conn, "spend_requirements")?
+            .into_iter()
+            .filter(|r| {
+                r.environment == environment.id && selected.is_none_or(|ids| ids.contains(&r.id))
+            })
+            .collect();
+    let credentials: Vec<Credential> = records::<Credential>(conn, "spend_credentials")?
+        .into_iter()
+        .filter(|c| {
+            requirements
+                .iter()
+                .any(|r| r.credential.as_ref() == Some(&c.id))
+        })
+        .collect();
+    let mut statement = conn.prepare(
+            "SELECT payload FROM spend_access_observations WHERE environment=?1 ORDER BY observed_at DESC, id DESC",
+        )?;
+    let observations: Vec<AccessObservation> = statement
+        .query_map([&environment.id.0], |r| r.get::<_, String>(0))?
+        .map(|r| Ok(serde_json::from_str(&r?)?))
+        .collect::<StoreResult<_>>()?;
+    let observations = observations
+        .into_iter()
+        .filter(|o| requirements.iter().any(|r| r.id == o.requirement))
+        .collect();
+    let mut inspection = AccessInspection {
+        environment,
+        requirements,
+        credentials,
+        observations,
+        coverage: Vec::new(),
+    };
+    let mut coverage = Vec::new();
+    for requirement in &inspection.requirements {
+        let credential = inspection
+            .credentials
+            .iter()
+            .find(|c| requirement.credential.as_ref() == Some(&c.id));
+        let current = inspection.current_observation(requirement);
+        if !current.is_some_and(|o| o.outcome == AccessOutcome::Success) {
+            coverage.push(format!("{}: current access unverified", requirement.id.0));
+        }
+        if credential.is_some_and(|c| c.version.is_none()) {
+            coverage.push(format!("{}: credential version unknown", requirement.id.0));
+        }
+    }
+    coverage.push("declared permissions are not provider-enforced scope evidence".into());
+    inspection.coverage = coverage;
+    Ok(inspection)
+}
+
+impl SqliteStore {
+    pub(crate) fn spend_dependency_history(
+        &self,
+        id: &DependencyId,
+    ) -> StoreResult<Vec<crate::spend::DependencyHistory>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT payload FROM spend_inventory_history ORDER BY effective_from, revision",
+        )?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        let mut versions = std::collections::BTreeMap::new();
+        for row in rows {
+            let inventory: Inventory = serde_json::from_str(&row?)?;
+            if let Some(dependency) = inventory.dependencies.into_iter().find(|d| &d.id == id) {
+                versions.insert(
+                    inventory.effective_from.clone(),
+                    crate::spend::DependencyHistory {
+                        dependency,
+                        effective_from: inventory.effective_from,
+                        effective_to: None,
+                        provenance: inventory.provenance,
+                    },
+                );
+            }
+        }
+        let mut history: Vec<_> = versions.into_values().collect();
+        for index in 1..history.len() {
+            history[index - 1].effective_to = Some(history[index].effective_from.clone());
+        }
+        Ok(history)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+
+    #[test]
+    fn dependency_schema_upgrades_released_frontier_without_changing_wave_identity() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        apply_before_current_draft(&conn, "computing_dependencies");
+        conn.execute("INSERT INTO waves(id,name,repo,created_at) VALUES('preserved','spend','example/one',1)", []).unwrap();
+        conn.execute_batch(&current_draft_sql("computing_dependencies"))
+            .unwrap();
+        let repo: String = conn
+            .query_row("SELECT repo FROM waves WHERE id='preserved'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(repo, "example/one");
+        conn.execute(
+            "INSERT INTO spend_credentials VALUES('old','{}'),('candidate','{}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO spend_rotations VALUES('first','old','candidate','candidate','{}')",
+            [],
+        )
+        .unwrap();
+        assert!(conn.execute("INSERT INTO spend_rotations VALUES('competing','old','candidate','candidate','{}')", []).is_err());
+        conn.execute(
+            "UPDATE spend_rotations SET state='cancelled' WHERE id='first'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO spend_rotations VALUES('retry','old','candidate','candidate','{}')",
+            [],
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "INSERT INTO spend_dependency_accounts VALUES('missing','missing')",
+                []
+            )
+            .is_err());
     }
 }

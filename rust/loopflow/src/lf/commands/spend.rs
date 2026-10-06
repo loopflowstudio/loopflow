@@ -31,6 +31,17 @@ pub enum AuthCommand {
         #[command(subcommand)]
         cmd: SourceCommand,
     },
+    /// Export only the designated repository/Wave amounts for a restricted consumer
+    Export {
+        #[arg(long)]
+        period: String,
+        #[arg(long)]
+        repo: String,
+        #[arg(long)]
+        wave: Option<crate::id::WaveId>,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
     /// Report billed evidence without fetching credentials or contacting providers
     Report {
         #[arg(long)]
@@ -45,6 +56,19 @@ pub enum AuthCommand {
 }
 #[derive(Debug, Subcommand)]
 pub enum AccessCommand {
+    /// Record a candidate; no provider credentials are created or revoked
+    Rotate {
+        credential: String,
+        #[arg(long)]
+        replacement: String,
+        #[arg(long)]
+        consumer_inventory_evidence: Option<String>,
+    },
+    /// Inspect or advance an administrative rotation using explicit evidence
+    Rotation {
+        #[command(subcommand)]
+        cmd: RotationCommand,
+    },
     Show {
         environment: String,
         #[arg(long)]
@@ -59,11 +83,36 @@ pub enum AccessCommand {
     },
 }
 #[derive(Debug, Subcommand)]
+pub enum RotationCommand {
+    /// Discard a candidate before activation; does not revoke its provider key
+    Cancel {
+        id: String,
+    },
+    Show {
+        id: String,
+    },
+    /// Switch the active reference after every required candidate read succeeds
+    Activate {
+        id: String,
+    },
+    /// Record non-secret provider/operator evidence; this does not execute revocation
+    Receipt {
+        id: String,
+        file: PathBuf,
+    },
+}
+#[derive(Debug, Subcommand)]
 pub enum InventoryCommand {
     Import { file: PathBuf },
 }
 #[derive(Debug, Subcommand)]
 pub enum DependencyCommand {
+    /// Inspect effective intervals of recorded dependency relationships
+    History {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
     Show {
         id: String,
         #[arg(long)]
@@ -99,7 +148,60 @@ pub fn run(command: &AuthCommand) -> Result<()> {
 async fn run_async(command: &AuthCommand) -> Result<()> {
     let config = storage_config_from_env()?;
     match command {
-        AuthCommand::Access { cmd } => {
+        AuthCommand::Access {
+            cmd:
+                AccessCommand::Rotate {
+                    credential,
+                    replacement,
+                    consumer_inventory_evidence,
+                },
+        } => {
+            let rotation = open_store(&config)
+                .await?
+                .begin_spend_rotation(
+                    crate::spend::CredentialId(credential.clone()),
+                    crate::spend::CredentialId(replacement.clone()),
+                    consumer_inventory_evidence.clone(),
+                )
+                .await?;
+            println!("{}", serde_json::to_string_pretty(&rotation)?);
+        }
+        AuthCommand::Access {
+            cmd: AccessCommand::Rotation { cmd },
+        } => {
+            let rotation = match cmd {
+                RotationCommand::Cancel { id } => {
+                    open_store(&config)
+                        .await?
+                        .cancel_spend_rotation(crate::spend::rotation::RotationId(id.clone()))
+                        .await?
+                }
+                RotationCommand::Show { id } => open_read_only_store(&config)
+                    .await?
+                    .spend_rotation(crate::spend::rotation::RotationId(id.clone()))
+                    .await?
+                    .context("rotation not found")?,
+                RotationCommand::Activate { id } => {
+                    open_store(&config)
+                        .await?
+                        .activate_spend_rotation(crate::spend::rotation::RotationId(id.clone()))
+                        .await?
+                }
+                RotationCommand::Receipt { id, file } => {
+                    open_store(&config)
+                        .await?
+                        .record_spend_rotation(
+                            crate::spend::rotation::RotationId(id.clone()),
+                            read(file)?,
+                        )
+                        .await?
+                }
+            };
+            println!("{}", serde_json::to_string_pretty(&rotation)?);
+        }
+        AuthCommand::Access {
+            cmd: cmd @ (AccessCommand::Show { .. } | AccessCommand::Verify { .. }),
+        } => {
             let (inspection, json) = match cmd {
                 AccessCommand::Show { environment, json } => (
                     open_read_only_store(&config)
@@ -123,31 +225,12 @@ async fn run_async(command: &AuthCommand) -> Result<()> {
                         .await?,
                     json,
                 ),
+                _ => unreachable!("show and verify matched above"),
             };
             if *json {
                 println!("{}", serde_json::to_string_pretty(&inspection)?);
             } else {
-                println!("{}", inspection.environment.name);
-                for requirement in inspection.requirements {
-                    println!(
-                        "{} · {} · permissions {}",
-                        requirement.id.0,
-                        requirement.purpose,
-                        requirement.permissions.join(", ")
-                    );
-                }
-                for observation in inspection.observations {
-                    println!(
-                        "{} · {:?} · {} · {:?}",
-                        observation.requirement.0,
-                        observation.outcome,
-                        observation.observed_at,
-                        observation.gap
-                    );
-                }
-                for gap in inspection.coverage {
-                    println!("Gap: {gap}");
-                }
+                print_access(&inspection);
             }
         }
 
@@ -189,6 +272,43 @@ async fn run_async(command: &AuthCommand) -> Result<()> {
                     revision.revision,
                     revision.difference.0
                 );
+            }
+        }
+        AuthCommand::Export {
+            period,
+            repo,
+            wave,
+            output,
+        } => {
+            let report = open_read_only_store(&config)
+                .await?
+                .spend_report(period.clone(), None, None)
+                .await?;
+            let export = report.export(repo.clone(), wave.clone())?;
+            fs::write(output, serde_json::to_vec_pretty(&export)?)
+                .context("could not write designated report export")?;
+            println!("Exported designated report");
+        }
+        AuthCommand::Dependency {
+            cmd: DependencyCommand::History { id, json },
+        } => {
+            let history = open_read_only_store(&config)
+                .await?
+                .spend_dependency_history(DependencyId(id.clone()))
+                .await?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&history)?);
+            } else {
+                for version in history {
+                    println!(
+                        "{} · {} until {} · {}",
+                        version.dependency.name,
+                        version.effective_from,
+                        version.effective_to.as_deref().unwrap_or("open"),
+                        version.provenance
+                    );
+                    println!("{}", serde_json::to_string_pretty(&version.dependency)?);
+                }
             }
         }
         AuthCommand::Report {
@@ -249,13 +369,13 @@ async fn run_async(command: &AuthCommand) -> Result<()> {
                 for consumer in &dependency.dependency.consumers {
                     println!("Consumer: {} · Wave {:?}", consumer.repo, consumer.wave_id);
                 }
-                for requirement in &dependency.requirements {
+                for access in &dependency.access {
+                    print_access(access);
+                }
+                if let Some(estimate) = &dependency.dependency.recurring_estimate {
                     println!(
-                        "Access: {} · {} · {} · permissions {} · unverified",
-                        requirement.environment.0,
-                        requirement.id.0,
-                        requirement.purpose,
-                        requirement.permissions.join(", ")
+                        "Estimate: {} {} / {} · {}",
+                        estimate.amount.0, estimate.currency, estimate.cadence, estimate.provenance
                     );
                 }
                 if let Some(totals) = dependency.attributed_cost {
@@ -281,4 +401,48 @@ async fn run_async(command: &AuthCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_access(inspection: &crate::spend::AccessInspection) {
+    println!("Environment: {}", inspection.environment.name);
+    for requirement in &inspection.requirements {
+        println!(
+            "Access: {} · {} · permissions {}",
+            requirement.id.0,
+            requirement.purpose,
+            requirement.permissions.join(", ")
+        );
+        match inspection.current_observation(requirement) {
+            Some(observation) => println!(
+                "Current read: {:?} · {} · scope evidence {:?}",
+                observation.outcome, observation.observed_at, observation.scope_evidence
+            ),
+            None => println!("Current read: unverified"),
+        }
+    }
+    for credential in &inspection.credentials {
+        println!(
+            "Credential: {} · {}/{}/{} · version {:?} · expires {:?} · rotation {:?}",
+            credential.id.0,
+            credential.reference.project,
+            credential.reference.config,
+            credential.reference.name,
+            credential.version,
+            credential.expires_at,
+            credential.rotation_evidence
+        );
+    }
+    for observation in &inspection.observations {
+        println!(
+            "History: {} · {:?} · {} · Home {} · {:?}",
+            observation.requirement.0,
+            observation.outcome,
+            observation.observed_at,
+            observation.executed_home,
+            observation.gap
+        );
+    }
+    for gap in &inspection.coverage {
+        println!("Gap: {gap}");
+    }
 }

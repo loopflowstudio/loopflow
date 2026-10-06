@@ -99,6 +99,7 @@ impl Store {
                 requirement_revision: requirement.revision.clone(),
                 credential: requirement.credential.clone(),
                 credential_version: credential.and_then(|c| c.version.clone()),
+                credential_reference: credential.map(|c| c.reference.clone()),
                 operation: "billing_read".into(),
                 observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
                 outcome,
@@ -128,4 +129,64 @@ fn normalize_consumer(consumer: &mut crate::spend::Consumer) -> StoreResult<()> 
             .to_string();
     }
     Ok(())
+}
+
+impl Store {
+    pub async fn spend_dependency_history(
+        &self,
+        id: DependencyId,
+    ) -> StoreResult<Vec<crate::spend::DependencyHistory>> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.spend_dependency_history(&id)
+        })
+        .await
+    }
+}
+
+impl Store {
+    pub async fn begin_spend_rotation(
+        &self,
+        old: crate::spend::CredentialId,
+        candidate: crate::spend::CredentialId,
+        consumer_inventory_evidence: Option<String>,
+    ) -> StoreResult<crate::spend::rotation::Rotation> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.begin_spend_rotation(&old, &candidate, consumer_inventory_evidence)
+        })
+        .await
+    }
+    pub async fn spend_rotation(
+        &self,
+        id: crate::spend::rotation::RotationId,
+    ) -> StoreResult<Option<crate::spend::rotation::Rotation>> {
+        run_sqlite(&self.sqlite, move |store| store.spend_rotation(&id)).await
+    }
+    pub async fn record_spend_rotation(
+        &self,
+        id: crate::spend::rotation::RotationId,
+        receipt: crate::spend::rotation::RotationReceipt,
+    ) -> StoreResult<crate::spend::rotation::Rotation> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.record_spend_rotation(&id, receipt)
+        })
+        .await
+    }
+    pub async fn activate_spend_rotation(
+        &self,
+        id: crate::spend::rotation::RotationId,
+    ) -> StoreResult<crate::spend::rotation::Rotation> {
+        run_sqlite(&self.sqlite, move |store| {
+            store.activate_spend_rotation(&id)
+        })
+        .await
+    }
+}
+
+impl Store {
+    pub async fn cancel_spend_rotation(
+        &self,
+        id: crate::spend::rotation::RotationId,
+    ) -> StoreResult<crate::spend::rotation::Rotation> {
+        run_sqlite(&self.sqlite, move |store| store.cancel_spend_rotation(&id)).await
+    }
 }

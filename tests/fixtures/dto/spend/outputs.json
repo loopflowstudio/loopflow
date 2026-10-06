@@ -1,0 +1,619 @@
+{
+  "dependency": {
+    "dependency": {
+      "id": "workers",
+      "name": "workers",
+      "consumers": [
+        {
+          "repo": "example/one",
+          "wave_id": null
+        }
+      ],
+      "accounts": [
+        "shared"
+      ],
+      "resources": [],
+      "sources": [],
+      "requirements": [
+        "laptop-key"
+      ],
+      "coverage": [
+        "account scope unverified"
+      ],
+      "recurring_estimate": null
+    },
+    "accounts": [
+      {
+        "id": "shared",
+        "provider": "fixture",
+        "native_id": "account-1",
+        "managed_account": null,
+        "evidence": "synthetic account"
+      }
+    ],
+    "resources": [],
+    "sources": [],
+    "access": [
+      {
+        "environment": {
+          "id": "laptop",
+          "name": "test laptop",
+          "home_id": null
+        },
+        "requirements": [
+          {
+            "id": "laptop-key",
+            "environment": "laptop",
+            "credential": "key",
+            "tool": null,
+            "purpose": "read billed evidence",
+            "permissions": [
+              "read"
+            ],
+            "revision": "1"
+          }
+        ],
+        "credentials": [
+          {
+            "id": "key",
+            "reference": {
+              "project": "fixture",
+              "config": "test",
+              "name": "BILLING_KEY"
+            },
+            "provider_key_id": null,
+            "version": null,
+            "purpose": "billing read",
+            "declared_permissions": [
+              "read"
+            ],
+            "expires_at": null,
+            "rotation_evidence": null
+          }
+        ],
+        "observations": [],
+        "coverage": [
+          "laptop-key: current access unverified",
+          "laptop-key: credential version unknown",
+          "declared permissions are not provider-enforced scope evidence"
+        ]
+      }
+    ],
+    "attributed_cost": [
+      {
+        "currency": "USD",
+        "billed": "150.00",
+        "direct": "90.00",
+        "allocated": "60.00",
+        "shared": "0",
+        "unassigned": "0"
+      }
+    ],
+    "linked_invoices": [
+      {
+        "revision": "876c301fd5ac58867c03b2f72a2d974312e11c01e1c7e10ee4279a867b87b6d0",
+        "invoice": {
+          "source": "fixture",
+          "account": "shared",
+          "document_id": "invoice-1",
+          "period": "2026-09",
+          "currency": "USD",
+          "total": "170.00",
+          "fetched_at": 1790812800,
+          "generated_at": null,
+          "complete": true,
+          "charges": [
+            {
+              "resource": "allocated",
+              "description": "fixture",
+              "kind": "usage",
+              "amount": "60.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            {
+              "resource": "direct",
+              "description": "fixture",
+              "kind": "credit",
+              "amount": "-10.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            {
+              "resource": "direct",
+              "description": "fixture",
+              "kind": "usage",
+              "amount": "100.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            {
+              "resource": null,
+              "description": "fixture",
+              "kind": "subscription",
+              "amount": "20.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            }
+          ]
+        },
+        "charges": [
+          {
+            "charge": {
+              "resource": "allocated",
+              "description": "fixture",
+              "kind": "usage",
+              "amount": "60.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            "attribution": [
+              {
+                "kind": "allocated",
+                "consumer": {
+                  "repo": "example/one",
+                  "wave_id": null
+                },
+                "dependency": "workers",
+                "amount": "30.00",
+                "rule": "shared-rule",
+                "rule_revision": "1"
+              },
+              {
+                "kind": "allocated",
+                "consumer": {
+                  "repo": "example/two",
+                  "wave_id": null
+                },
+                "dependency": "workers",
+                "amount": "30.00",
+                "rule": "shared-rule",
+                "rule_revision": "1"
+              }
+            ],
+            "gap": null
+          },
+          {
+            "charge": {
+              "resource": "direct",
+              "description": "fixture",
+              "kind": "credit",
+              "amount": "-10.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            "attribution": [
+              {
+                "kind": "direct",
+                "consumer": {
+                  "repo": "example/one",
+                  "wave_id": null
+                },
+                "dependency": "workers",
+                "amount": "-10.00",
+                "rule": "direct-rule",
+                "rule_revision": "1"
+              }
+            ],
+            "gap": null
+          },
+          {
+            "charge": {
+              "resource": "direct",
+              "description": "fixture",
+              "kind": "usage",
+              "amount": "100.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            "attribution": [
+              {
+                "kind": "direct",
+                "consumer": {
+                  "repo": "example/one",
+                  "wave_id": null
+                },
+                "dependency": "workers",
+                "amount": "100.00",
+                "rule": "direct-rule",
+                "rule_revision": "1"
+              }
+            ],
+            "gap": null
+          },
+          {
+            "charge": {
+              "resource": null,
+              "description": "fixture",
+              "kind": "subscription",
+              "amount": "20.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            "attribution": [
+              {
+                "kind": "unassigned",
+                "consumer": null,
+                "dependency": null,
+                "amount": "20.00",
+                "rule": null,
+                "rule_revision": null
+              }
+            ],
+            "gap": null
+          }
+        ],
+        "billed": "170.00",
+        "difference": "0.00"
+      }
+    ],
+    "coverage": [
+      "account scope unverified",
+      "fixture only; no live account verified"
+    ]
+  },
+  "access": {
+    "environment": {
+      "id": "laptop",
+      "name": "test laptop",
+      "home_id": null
+    },
+    "requirements": [
+      {
+        "id": "laptop-key",
+        "environment": "laptop",
+        "credential": "key",
+        "tool": null,
+        "purpose": "read billed evidence",
+        "permissions": [
+          "read"
+        ],
+        "revision": "1"
+      }
+    ],
+    "credentials": [
+      {
+        "id": "key",
+        "reference": {
+          "project": "fixture",
+          "config": "test",
+          "name": "BILLING_KEY"
+        },
+        "provider_key_id": null,
+        "version": null,
+        "purpose": "billing read",
+        "declared_permissions": [
+          "read"
+        ],
+        "expires_at": null,
+        "rotation_evidence": null
+      }
+    ],
+    "observations": [],
+    "coverage": [
+      "laptop-key: current access unverified",
+      "laptop-key: credential version unknown",
+      "declared permissions are not provider-enforced scope evidence"
+    ]
+  },
+  "report": {
+    "period": "2026-09",
+    "repo": null,
+    "wave_id": null,
+    "invoices": [
+      {
+        "revision": "876c301fd5ac58867c03b2f72a2d974312e11c01e1c7e10ee4279a867b87b6d0",
+        "invoice": {
+          "source": "fixture",
+          "account": "shared",
+          "document_id": "invoice-1",
+          "period": "2026-09",
+          "currency": "USD",
+          "total": "170.00",
+          "fetched_at": 1790812800,
+          "generated_at": null,
+          "complete": true,
+          "charges": [
+            {
+              "resource": "allocated",
+              "description": "fixture",
+              "kind": "usage",
+              "amount": "60.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            {
+              "resource": "direct",
+              "description": "fixture",
+              "kind": "credit",
+              "amount": "-10.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            {
+              "resource": "direct",
+              "description": "fixture",
+              "kind": "usage",
+              "amount": "100.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            {
+              "resource": null,
+              "description": "fixture",
+              "kind": "subscription",
+              "amount": "20.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            }
+          ]
+        },
+        "charges": [
+          {
+            "charge": {
+              "resource": "allocated",
+              "description": "fixture",
+              "kind": "usage",
+              "amount": "60.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            "attribution": [
+              {
+                "kind": "allocated",
+                "consumer": {
+                  "repo": "example/one",
+                  "wave_id": null
+                },
+                "dependency": "workers",
+                "amount": "30.00",
+                "rule": "shared-rule",
+                "rule_revision": "1"
+              },
+              {
+                "kind": "allocated",
+                "consumer": {
+                  "repo": "example/two",
+                  "wave_id": null
+                },
+                "dependency": "workers",
+                "amount": "30.00",
+                "rule": "shared-rule",
+                "rule_revision": "1"
+              }
+            ],
+            "gap": null
+          },
+          {
+            "charge": {
+              "resource": "direct",
+              "description": "fixture",
+              "kind": "credit",
+              "amount": "-10.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            "attribution": [
+              {
+                "kind": "direct",
+                "consumer": {
+                  "repo": "example/one",
+                  "wave_id": null
+                },
+                "dependency": "workers",
+                "amount": "-10.00",
+                "rule": "direct-rule",
+                "rule_revision": "1"
+              }
+            ],
+            "gap": null
+          },
+          {
+            "charge": {
+              "resource": "direct",
+              "description": "fixture",
+              "kind": "usage",
+              "amount": "100.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            "attribution": [
+              {
+                "kind": "direct",
+                "consumer": {
+                  "repo": "example/one",
+                  "wave_id": null
+                },
+                "dependency": "workers",
+                "amount": "100.00",
+                "rule": "direct-rule",
+                "rule_revision": "1"
+              }
+            ],
+            "gap": null
+          },
+          {
+            "charge": {
+              "resource": null,
+              "description": "fixture",
+              "kind": "subscription",
+              "amount": "20.00",
+              "start": "2026-09-01",
+              "end": "2026-10-01",
+              "quantity": null,
+              "unit": null,
+              "model": null,
+              "provider_key_id": null,
+              "locator": "fixture/invoice-1"
+            },
+            "attribution": [
+              {
+                "kind": "unassigned",
+                "consumer": null,
+                "dependency": null,
+                "amount": "20.00",
+                "rule": null,
+                "rule_revision": null
+              }
+            ],
+            "gap": null
+          }
+        ],
+        "billed": "170.00",
+        "difference": "0.00"
+      }
+    ],
+    "totals": [
+      {
+        "currency": "USD",
+        "billed": "170.00",
+        "direct": "90.00",
+        "allocated": "60.00",
+        "shared": "0",
+        "unassigned": "20.00"
+      }
+    ],
+    "coverage": [
+      "fixture only; no live account verified"
+    ]
+  },
+  "history": [
+    {
+      "dependency": {
+        "id": "workers",
+        "name": "workers",
+        "consumers": [
+          {
+            "repo": "example/one",
+            "wave_id": null
+          }
+        ],
+        "accounts": [
+          "shared"
+        ],
+        "resources": [],
+        "sources": [],
+        "requirements": [
+          "laptop-key"
+        ],
+        "coverage": [
+          "account scope unverified"
+        ],
+        "recurring_estimate": null
+      },
+      "effective_from": "2026-09-01",
+      "effective_to": null,
+      "provenance": "synthetic integration fixture"
+    }
+  ],
+  "export": {
+    "period": "2026-09",
+    "repo": "example/two",
+    "wave_id": null,
+    "generated_at": 1790812800,
+    "amounts": [
+      {
+        "source": "fixture",
+        "document_id": "invoice-1",
+        "revision": "876c301fd5ac58867c03b2f72a2d974312e11c01e1c7e10ee4279a867b87b6d0",
+        "fetched_at": 1790812800,
+        "generated_at": null,
+        "currency": "USD",
+        "kind": "allocated",
+        "amount": "30.00",
+        "wave_id": null,
+        "rule": "shared-rule",
+        "rule_revision": "1"
+      }
+    ],
+    "totals": [
+      {
+        "currency": "USD",
+        "billed": "30.00",
+        "direct": "0",
+        "allocated": "30.00",
+        "shared": "0",
+        "unassigned": "0"
+      }
+    ],
+    "coverage": [
+      "designated attribution export; excludes invoice totals, other consumers, shared and unassigned costs",
+      "source completeness and reconciliation require administrative inspection"
+    ]
+  }
+}

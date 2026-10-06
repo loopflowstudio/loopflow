@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 
 fn cli(home: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
         .env("LF_HOME", home)
         .env("PATH", "/nonexistent")
         .args(args)
@@ -325,4 +326,222 @@ async fn invoice_completeness_multiplicity_and_unknown_periods() {
             .to_string(),
         "0"
     );
+}
+
+#[tokio::test]
+async fn designated_export_excludes_other_recipients_and_inventory() {
+    let home = tempfile::tempdir().unwrap();
+    let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
+        .await
+        .unwrap();
+    let inventory: Inventory = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/inventory.json"
+    ))
+    .unwrap();
+    store.import_spend_inventory(inventory).await.unwrap();
+    let mut invoice: Invoice = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/invoice.json"
+    ))
+    .unwrap();
+    invoice.charges[0].description = "unrelated confidential annotation".into();
+    store.import_spend_invoice(invoice).await.unwrap();
+    let output = home.path().join("report.json");
+    success(
+        home.path(),
+        &[
+            "auth",
+            "export",
+            "--period",
+            "2026-09",
+            "--repo",
+            "example/two",
+            "--output",
+            output.to_str().unwrap(),
+        ],
+    );
+    let contents = std::fs::read_to_string(output).unwrap();
+    let export: loopflow::spend::ReportExport = serde_json::from_str(&contents).unwrap();
+    assert_eq!(export.totals[0].billed.0.to_string(), "30.00");
+    assert_eq!(export.amounts.len(), 1);
+    assert_eq!(export.amounts[0].document_id, "invoice-1");
+    for excluded in [
+        "example/one",
+        "unrelated confidential annotation",
+        "BILLING_KEY",
+        "170.00",
+        "60.00",
+        "account-1",
+    ] {
+        assert!(!contents.contains(excluded), "export contains {excluded}");
+    }
+    let report = store
+        .spend_report("2026-09".into(), None, None)
+        .await
+        .unwrap();
+    let unknown = report.export("example/missing".into(), None).unwrap();
+    assert!(unknown.amounts.is_empty());
+    assert!(unknown.totals.is_empty());
+    assert!(unknown.coverage.iter().any(|g| g.contains("unknown")));
+}
+
+#[tokio::test]
+async fn dependency_inspection_shows_only_its_access_and_dated_relationships() {
+    let home = tempfile::tempdir().unwrap();
+    let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
+        .await
+        .unwrap();
+    let mut inventory: Inventory = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/inventory.json"
+    ))
+    .unwrap();
+    inventory.environments[0].home_id = Some(store.local_home().await.unwrap().id);
+    inventory.requirements[0].credential = None;
+    inventory.requirements[0].tool = Some("auth.report".into());
+    let mut unrelated = inventory.requirements[0].clone();
+    unrelated.id = loopflow::spend::RequirementId("unrelated".into());
+    inventory.requirements.push(unrelated);
+    store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .unwrap();
+    store
+        .verify_spend_access(inventory.environments[0].id.clone(), "2026-09".into())
+        .await
+        .unwrap();
+    let id = loopflow::spend::DependencyId("workers".into());
+    let inspection = store
+        .spend_dependency(id.clone(), "2026-09".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(inspection.access.len(), 1);
+    let access = &inspection.access[0];
+    assert_eq!(access.requirements.len(), 1);
+    assert_eq!(access.observations.len(), 1);
+    assert_eq!(
+        access
+            .current_observation(&access.requirements[0])
+            .unwrap()
+            .outcome,
+        loopflow::spend::AccessOutcome::Success
+    );
+    let text = success(
+        home.path(),
+        &[
+            "auth",
+            "dependency",
+            "show",
+            "workers",
+            "--period",
+            "2026-09",
+        ],
+    );
+    assert!(text.contains("Current read: Success"));
+    assert!(!text.contains("unrelated"));
+    inventory.effective_from = "2026-10-01".into();
+    inventory.dependencies[0].consumers[0].repo = "example/changed".into();
+    inventory.dependencies[0].accounts.clear();
+    inventory.dependencies[0].requirements.clear();
+    store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .unwrap();
+    // An omitted dependency does not terminate its last effective relationships.
+    inventory.effective_from = "2026-11-01".into();
+    inventory.dependencies.clear();
+    store.import_spend_inventory(inventory).await.unwrap();
+    let history = store.spend_dependency_history(id.clone()).await.unwrap();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].effective_to.as_deref(), Some("2026-10-01"));
+    assert_eq!(history[0].dependency.consumers[0].repo, "example/one");
+    assert_eq!(history[0].dependency.accounts.len(), 1);
+    assert_eq!(history[1].dependency.consumers[0].repo, "example/changed");
+    assert!(history[1].dependency.accounts.is_empty());
+    assert!(history[1].effective_to.is_none());
+    assert!(store
+        .spend_dependency(id, "2026-09".into())
+        .await
+        .unwrap()
+        .unwrap()
+        .access
+        .is_empty());
+}
+
+#[tokio::test]
+async fn corrected_invoice_uses_new_rules_without_rewriting_older_revision() {
+    let home = tempfile::tempdir().unwrap();
+    let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
+        .await
+        .unwrap();
+    let mut inventory: Inventory = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/inventory.json"
+    ))
+    .unwrap();
+    let mut invoice: Invoice = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/invoice.json"
+    ))
+    .unwrap();
+    store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .unwrap();
+    let original = store.import_spend_invoice(invoice.clone()).await.unwrap();
+    inventory.rules[0].revision = "2".into();
+    inventory.rules[0].assignments[0]
+        .consumer
+        .as_mut()
+        .unwrap()
+        .repo = "example/changed".into();
+    store.import_spend_inventory(inventory).await.unwrap();
+    invoice.charges[0].amount = loopflow::spend::Money::parse("90.00").unwrap();
+    invoice.total = loopflow::spend::Money::parse("160.00").unwrap();
+    let correction = store.import_spend_invoice(invoice).await.unwrap();
+    let changed = store
+        .spend_report("2026-09".into(), Some("example/changed".into()), None)
+        .await
+        .unwrap();
+    assert_eq!(changed.totals[0].billed.0.to_string(), "80.00");
+    assert!(correction
+        .charges
+        .iter()
+        .flat_map(|c| &c.attribution)
+        .filter(|a| a.rule.as_ref().is_some_and(|r| r.0 == "direct-rule"))
+        .all(|a| a.rule_revision.as_deref() == Some("2")));
+    let previous = store
+        .import_spend_invoice(original.invoice.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(previous).unwrap(),
+        serde_json::to_value(original).unwrap()
+    );
+    assert_eq!(
+        store
+            .spend_report("2026-09".into(), None, None)
+            .await
+            .unwrap()
+            .invoices[0]
+            .revision,
+        correction.revision
+    );
+}
+
+#[test]
+fn inspection_output_fixtures_round_trip() {
+    use loopflow::spend::{
+        AccessInspection, DependencyHistory, DependencyInspection, Report, ReportExport,
+    };
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/outputs.json"
+    ))
+    .unwrap();
+    fn round_trip<T: serde::de::DeserializeOwned + serde::Serialize>(value: &Value) {
+        let parsed: T = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), *value);
+    }
+    round_trip::<AccessInspection>(&fixture["access"]);
+    round_trip::<DependencyInspection>(&fixture["dependency"]);
+    round_trip::<Report>(&fixture["report"]);
+    round_trip::<ReportExport>(&fixture["export"]);
+    round_trip::<Vec<DependencyHistory>>(&fixture["history"]);
 }

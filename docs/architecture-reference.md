@@ -460,9 +460,19 @@ An invoice's current revision points to an immutable normalized document and its
 evaluated rules. Dependency/account relationships do not assign charges. Missing
 periods and unknown dependency costs remain gaps. Decimal string amounts preserve
 source precision and currencies stay separate. Access observations bind the
-executing Home, requirement revision and credential version where known. The only
-implemented access probe reads a local report tool; provider verification,
-rotation, isolated provisioning and live billing acceptance remain open.
+executing Home, requirement revision, exact reference and credential version where
+known. Dependency inspection joins that access evidence; effective dependency
+relationship history derives from dated inventory imports. The only implemented
+access probe reads a local report tool; provider verification remains open.
+
+Designated report exports contain only the selected repository/Wave's evaluated
+amounts and source references, excluding administrative invoices and inventory.
+The Docker fixture consumes only that read-only export without inherited authority.
+Rotation records retain candidate, verification, activation, consumer cutover and
+retirement receipts. Activation switches the original credential ID's reference;
+receipt import records administrative evidence and never executes provider actions.
+Synthetic endpoint tests cover failed replacement, restart and retirement retry.
+Production provisioning, provider integration and live billing acceptance remain open.
 
 The shared `provider_auth/doppler.rs` resolver replaces SSH's private function.
 It fetches one named secret, supports explicit project/config references, bounds

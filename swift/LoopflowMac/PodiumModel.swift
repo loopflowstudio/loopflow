@@ -903,7 +903,8 @@ final class PodiumModel {
             guard sessionsGeneration == generation, self.repoPath == repoPath,
                   !Task.isCancelled else { return }
             LaunchJournal.home.refreshed("sessions", ms: started.elapsedMs, ok: false)
-            sessions = .unavailable(lastGood: sessions.value, reason: error.localizedDescription)
+            let next = PodiumReading.unavailable(lastGood: sessions.value, reason: error.localizedDescription)
+            if sessions != next { sessions = next }
         }
     }
 

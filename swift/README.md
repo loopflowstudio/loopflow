@@ -19,7 +19,9 @@ and shows **Updating…** until this launch's reads replace it. Saved rows open
 and navigate; Flow state, Task condition, Session state and every action except
 opening a Session wait for the fresh read. The Portfolio window opens from the
 same saved workspace. A failed refresh keeps what is shown under one
-**Couldn't update** line. Delete the file to start from **Loading workspace…**.
+**Couldn't update** line. Repeated identical Session errors leave the displayed
+reading unchanged; a new error or recovery updates it. Delete the file to start
+from **Loading workspace…**.
 
 ```sh
 uv run python scripts/benchmarks/desktop-performance/timings.py   # how long your launches took

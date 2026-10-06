@@ -778,19 +778,20 @@ The test transport joins observations from separate Homes without rewriting copi
 identities; only the owned Session can connect. Setup/scenario counters stay
 separate and retain partial receipts without SQL or values.
 
-One inherited OS sandbox covers app, shells and CLI children. macOS rejected
-nested sandbox application; kernel-canonical paths and pinned Git avoid path/cache
-escapes. Three retained headless proofs cover membership, copied-client refusal,
-preservation and external read/write/execute/network denial on a small synthetic
-snapshot. They establish neither rendered performance nor real-provider readiness.
-Additive fixture/sandbox overhead requires a fresh matched baseline/candidate pair;
-rendered repetitions and the hour soak remain with capable gate/CI.
+One inherited sandbox covers app, shells and CLI children; macOS rejects nesting.
+Canonical paths and pinned Git avoid path/cache escapes. Three synthetic headless
+proofs cover membership, copied-client refusal, preservation and external
+read/write/execute/network denial, not rendering or real-provider readiness.
+Added fixture/sandbox costs require matched measurements; capable gate/CI owns
+rendered repetitions and the hour soak.
 
-LOO-376's `c41895363` receipts separate first-after-update and repeat launches.
-Heavy load, warm caches, ad-hoc signing and render-server-commit endpoints limit
-inference. Benchmark stripping changes no release policy. Neither these receipts
-nor Release's retired publisher UI prerequisite revises Jack Heart's budgets or
-establishes LOO-304 rendered acceptance.
+LOO-376's `c41895363` separates first-after-update/repeat launches. Load, warm
+caches, ad-hoc signing and render-server-commit endpoints limit inference.
+Benchmark stripping and Release's retired publisher UI prerequisite change
+neither release policy, Jack Heart's budgets nor LOO-304 acceptance.
+Identical Session errors invalidated observers every two seconds. Equality
+suppression preserves new errors and recovery; headless proof establishes no
+latency or CPU improvement.
 
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)

@@ -176,7 +176,7 @@ Flow history below means FlowExec rows joined to their Execs.
 1. **TaskWorkflow.** Build order, defaults and tests are in
    [task-workflow.md](task-workflow.md). Done when its five planned tests pass and
    `task status --json` carries the workflow graph, position and running
-   edge. *Built, awaiting realign:*
+   edge. **Done** at `1f665b901` (the Flow stopped at sync before realign; marked by the managing conversation after rerunning the launch and workflow tests):
    `task_flow_launch_tests` 5 passed, lib `engine::workflow`/`ops::task_workflow`
    3 passed (stage guidance included), `dto_fixtures` 18 and Swift
    `DTOFixtureTests` 22 passed, all-target Clippy clean. Demo items: a real

@@ -102,6 +102,12 @@ and the GitHub Release. It deploys the website from the exact tag and requires
 image and leaves the release incomplete. Publishing the non-draft GitHub
 Release records an external effect. Scheduled settlement follows public artifact
 read-back and exact-version installer smoke, with every required check retained.
+Public installer smoke requires a running Docker engine. It installs the pinned
+release in a disposable Ubuntu 24.04 ARM64 container, copies only public inputs,
+and checks the selected CLI bytes plus the installed gate's version/help/list.
+No host Home or credentials enter the container. Native macOS version/help smoke
+and signing/notarization remain separate checks; Linux smoke does not prove Mac
+app installation. Missing Docker or failed cleanup prevents verified settlement.
 In history JSON, `attempts[].verification` holds those checks once; each attempt
 saves its checks and product outcome together. `attempts[].telemetry` retains
 original prerequisite associations with retained schedule/Home segments and the

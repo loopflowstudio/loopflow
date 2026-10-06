@@ -153,19 +153,19 @@ reacquire after dropping the parent's shared handle. Parent death and elapsed
 wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
-`a60ac0281` fixes retry timing; `02d6b3c00` atomically covers materialized dues
-across same-Home segments. Original ownership/provenance survives; firing segments
-own telemetry/retry, and Home changes break continuation. Synthetic tests cover
-interruption, late writers and recovery without republishing. `95643bd50` adds
-calendar/closure overlap continuation and retains old physical receipts. Save
-physical failure before accounting; an accounting error must not erase lock loss.
-Repeated overlap adds no settlement. Local interruption proofs at `d60d254ef` show
-public reconciliation retains target/checkout locks after controller death;
-retry preserves the failed cron receipt, candidate, coverage and caller bytes
-without republishing. Cron exit cannot establish orphaned verifier lock release.
-Candidate-ref/workflow lost acknowledgements, verifier materialization and
-post-arm Task compensation have focused synthetic proofs. Gate, Jack Heart's
-review and configured settlements remain open.
+Same-Home coverage, overlap, retry timing and interruption proofs remain at
+`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`
+and its referenced commits `a60ac0281`, `02d6b3c00`, `95643bd50`, `d60d254ef`.
+They retain original ownership, physical failure, frozen coverage, candidate,
+caller bytes and child-held locks without republishing or double settlement.
+Synthetic proofs do not establish configured automatic settlements.
+
+October 5 source inspection found public installer smoke used fake HOME/LF_HOME
+although promotion resolves the OS account Home, then hashed the entry gate as
+if it were the executable. The follow-up isolates promotion in a disposable
+container and verifies selected CLI bytes; native macOS smoke stays separate.
+Docker was unavailable locally; real container and public acceptance remain open.
+Candidate preflight's separate fresh-Home claim also needs reconciliation.
 
 Release's September 28 incident proves entry points need operation-level recovery:
 an agent reported failure successfully, producing a misleading green cron receipt.
@@ -179,8 +179,9 @@ from September 24. The missing `agent_turns` diagnosis is historical: integrated
 scorecard source consumes SessionHistory. The isolated doctor/scorecard Flow
 regression proves Recovery cannot replace natural Scheduled evidence. No installed
 pass or accepted Intelligence handoff is established; reproduce current failure
-before commissioning duplicate analytics repair. Required UI/public proof and
-actual automatic settlement observations remain outstanding. The working plan
+before commissioning duplicate analytics repair. Required headless Desktop/public proof and
+actual automatic settlement observations remain outstanding. LOO-357 retired
+the UI-host prerequisite; PR #1441 removed its scheduled validator requirement. The working plan
 owns remaining implementation; no production release, install, schedule change,
 Home transfer or review completion is authorized by local reconciliation.
 
@@ -727,64 +728,22 @@ the manually transferred Tasks, without importing old turns or driver authority.
   Synthetic second-Home proofs exercise retries and missing evidence; they do
   not imply a second deployed client or a distributed transaction.
 
-**Integrated gate, 2026-09-30.** [Gate repairs and evidence](https://github.com/loopflowstudio/loopflow/blob/5dee46ca8b8d8282a137b32c5b8d786af7c9cb91/scratch/integrated-gate.md)
-are checkpointed locally; publication/merge is not established by this entry.
-The release-materialized full Rust run recorded 2,004 passes, seven failures and
-17 skips. Focused repair runs cover all seven failures; the original receipt
-remains failed. Python passed 310 tests and website 78 (three skipped). Swift's
-291-case run had one obsolete import fixture; its eight-case observation repair,
-app/runner builds, boundary check and eight distinct fixture captures passed.
-Formatting, final all-target Clippy, architecture and immutable migration checks
-passed. Required hosted CI still owns the final landing candidate.
+The September 30 integrated gate, failed and repaired checks, density estimate,
+compression results and launch lessons remain at
+`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`
+under “Integrated gate, 2026-09-30.” Those local results did not establish
+installed conversion, configured provider continuity or a reusable final-tree gate.
+The recorded production-prefix estimate was +6,202 lines, not a reduction.
 
-The runtime finding was cursor order: stable-ID Session pages must retain ID
-order through projection, or renamed titles can repeat/skip records. Stacking
-fixtures must use the dedicated transaction and establish a published parent;
-generic PR updates intentionally cannot alter parentage. A bad saved-sync fixture
-launched a real conflict agent in its disposable repository before that repair;
-output reports no push, but native credential effects were not audited. Provider
-stubs now contain that failure path. This does not establish configured acceptance.
-
-At `5dee46ca8`, the integrated production-prefix estimate against `12013dae4`
-is **+6,202 lines** (+22,792 / −16,590), including SQL and excluding tests/docs;
-it is not a net reduction or a parsed statement count. The retained density
-measurement still names its earlier candidate. Installed conversion remains
-subject to the frozen-snapshot/quiescence obligations above; this gate neither
-migrates nor promotes.
-
-Lessons from implementing it (2026-09-29–30):
-
-- Hosted CI stops at the first failure; one round showed 907 of 2,010 tests
-  unrun. Jack's 2026-09-30 cadence supersedes per-publication full local runs:
-  use focused proofs plus hosted CI between items; run the full local Rust
-  matrix without fail-fast before the final gate.
-- Typed CLI discovery must preserve saved execution: inventory flags reach the
-  SQL reader, selected boundaries resolve captured Skills before the mutable
-  catalog, and Ask escapes reserved Skill names. The main integration has 13
-  focused passes for these paths; it is not configured-provider acceptance.
-- Automatic skill checkpointing must use the same Work binding reader as
-  execution: explicit command `--as`, then checkout, then inherited `LF_AS`.
-  Checking explicit flags alone can commit another contributor's edits in a
-  Task checkout. The repair retains the managed Flow and HEAD; its fixture must
-  establish shared skill content before changing branches, without relying on
-  an incidental checkpoint from another launch.
-- The pinned 0.12.23 worker's output classifier read a quoted sentence in a
-  scratch note as a capability denial. The source fix is on the branch; resume
-  with the actual cause until workers run a release carrying it.
-- Task workers had no transient retry or account failover, so one hitting a
-  provider limit stopped instead of switching accounts. Converging on the direct
-  path fixes it.
-- A worker's claim named the process that launched it, not the worker, so stop
-  and liveness targeted the wrong pid (fixed in `5bd311697`).
-
-Compression checkpoint `38d4e6d8a` retains one proof per final behavior. Its local
-logs record 44/46 affected passes, then both failed Session cases passing focused
-repairs, 17 Chapter passes, two native-ownership passes and build/final Clippy
-success. The direct SIGINT proof observes owned-child exit and Exec interruption;
-the retained Task-cancellation settlement case remains distinct. These observations
-are not a full final-tree gate, configured-provider acceptance or installed
-conversion. This realign reruns no behavioral suite. Dense cold/warm CLI timing
-and final documentation/gate reconciliation remain with the working plan.
+Retain the operational lessons: run the final Rust matrix without fail-fast;
+Session pagination must preserve stable-ID order; stacking uses its dedicated
+transaction; fixture providers must isolate conflict-agent launches. Captured
+execution boundaries resolve saved Skills before the mutable catalog. Skill
+checkpointing uses explicit binding, checkout, then inherited binding, matching
+execution. The pinned 0.12.23 classifier failure and worker account/claim repairs
+are dated source evidence, not installed acceptance. Conversion still requires
+the frozen-snapshot and quiescence obligations above. Dense CLI timing and
+configured continuity remain with their owning work.
 
 Performance (instrumentation implemented in LOO-291; LOO-300 continues): `os_signpost`
 intervals under `studio.loopflow`/`perf` for cold start, navigation, Wave/Task/

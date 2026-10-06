@@ -84,6 +84,7 @@ def _run(
     capture: bool = False,
     env: dict[str, str] | None = None,
     check: bool = True,
+    timeout: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     print(f"$ {shlex.join(cmd)}", file=sys.stderr, flush=True)
     return subprocess.run(
@@ -94,6 +95,7 @@ def _run(
         text=True,
         env=env,
         pass_fds=_release_fds(),
+        timeout=timeout,
     )
 
 
@@ -565,6 +567,51 @@ def _check_public_hashes(directory: Path, expected: dict[str, str]) -> None:
             raise RuntimeError(f"public artifact hash mismatch or missing asset: {name}")
 
 
+def _verify_public_installer(artifacts: Path, tag: str) -> dict[str, str]:
+    # Installation resolves getpwuid's Home, so environment overrides cannot
+    # isolate promotion. Copy only public inputs into a disposable OS container.
+    _run(["docker", "info", "--format", "{{.ServerVersion}}"], capture=True, timeout=10)
+    _run(["docker", "pull", "--platform", "linux/arm64", "ubuntu:24.04"], timeout=300)
+    command = """set -eu
+apt-get update >&2
+apt-get install -y --no-install-recommends ca-certificates curl python3 >&2
+sh /proof/install.sh --version "$1" --cli-only >&2
+python3 /proof/release_install_smoke.py "$1"
+"""
+    container = _run(
+        [
+            "docker",
+            "create",
+            "--platform",
+            "linux/arm64",
+            "ubuntu:24.04",
+            "timeout",
+            "900",
+            "sh",
+            "-ec",
+            command,
+            "installer-smoke",
+            tag,
+        ],
+        capture=True,
+        timeout=30,
+    ).stdout.strip()
+    try:
+        with tempfile.TemporaryDirectory() as temp:
+            proof = Path(temp)
+            for name in ("install.sh", "lf-aarch64-unknown-linux-gnu.tar.gz"):
+                shutil.copy2(artifacts / name, proof / name)
+            shutil.copy2(CONTROL_ROOT / "scripts/release_install_smoke.py", proof)
+            _run(["docker", "cp", str(proof), f"{container}:/proof"], timeout=60)
+        result = _run(["docker", "start", "--attach", container], capture=True, timeout=930)
+        versions = json.loads(result.stdout)
+        if versions != {"lf-linux": f"lf {tag.removeprefix('v')}"}:
+            raise RuntimeError("isolated installer returned mismatched smoke evidence")
+        return versions
+    finally:
+        _run(["docker", "rm", "--force", container], timeout=30)
+
+
 def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
     if platform.system() != "Darwin" or platform.machine() not in {"arm64", "aarch64"}:
         raise RuntimeError("public installer smoke requires the Apple Silicon release host")
@@ -678,33 +725,22 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
         native = scratch / "native"
         native.mkdir()
         expected_binaries = (_extract_arm_binary(_find_native_archives(scratch), native),)
-        home = scratch / "home"
-        home.mkdir()
-        install_dir = home / "bin"
         smoke_env = {
-            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-            "HOME": str(home),
-            "LF_HOME": str(home / ".lf"),
-            "LF_INSTALL_DIR": str(install_dir),
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(scratch),
+            "LF_HOME": str(scratch / "native-home"),
         }
-        _run(
-            ["sh", str(scratch / "install.sh"), "--version", tag, "--cli-only"],
-            cwd=scratch,
-            env=smoke_env,
-        )
-        for expected_binary in expected_binaries:
-            name = expected_binary.name
-            binary = install_dir / name
-            if _sha256(binary) != _sha256(expected_binary):
-                raise RuntimeError(f"installed {name} differs from the exact public artifact")
+        for binary in expected_binaries:
             reported = _run(
                 [str(binary), "--version"], cwd=scratch, env=smoke_env, capture=True
             ).stdout.strip()
-            smoke_versions[name] = reported
-            if reported != f"{name} {version}":
-                raise RuntimeError(f"public {name} reported {reported!r}, expected {version}")
+            smoke_versions[binary.name] = reported
+            if reported != f"{binary.name} {version}":
+                raise RuntimeError(
+                    f"public {binary.name} reported {reported!r}, expected {version}"
+                )
             _run([str(binary), "--help"], cwd=scratch, env=smoke_env, capture=True)
-        _run([str(install_dir / "lf"), "list", "--json"], cwd=scratch, env=smoke_env, capture=True)
+        smoke_versions.update(_verify_public_installer(scratch, tag))
     verified = PublicReleaseReceipt(
         verified_at=int(time.time()),
         asset_urls={asset["name"]: asset["url"] for asset in release["assets"]},

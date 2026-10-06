@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from botocore.exceptions import ClientError
 
-from scripts import deploy_website, publish_release
+from scripts import deploy_website, publish_release, release_install_smoke
 
 
 def _native_artifacts(directory: Path) -> None:
@@ -317,6 +317,11 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         remote["https://crates.io/api/v1/crates/loopflow/1.2.3"] = b'{"version":{"num":"1.2.3"}}'
 
     monkeypatch.setattr(publish_release, "_run", external_command)
+    monkeypatch.setattr(
+        publish_release,
+        "_verify_public_installer",
+        lambda artifacts, tag: {"lf-linux": "lf 1.2.3"},
+    )
     monkeypatch.setattr(publish_release, "_download", download)
     monkeypatch.setattr(publish_release, "_upload_dmg", upload)
     monkeypatch.setattr(publish_release, "_deploy_website", deploy)
@@ -372,7 +377,7 @@ def test_reconcile_repairs_missing_publication_stages_from_exact_artifacts(
     result = publish_release.verify_release("v1.2.3", repair=True)
     assert remote == expected
     assert result.artifact_sha256 == hashes
-    assert result.smoke_versions == {"lf": "lf 1.2.3"}
+    assert result.smoke_versions == {"lf": "lf 1.2.3", "lf-linux": "lf 1.2.3"}
     assert {
         "crate_published",
         "versioned_dmg_uploaded",
@@ -429,14 +434,11 @@ def test_smoke_failure_retains_repaired_external_publication_without_success_rec
     remote, _ = public_release
     expected = dict(remote)
     del remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"]
-    run = publish_release._run
 
-    def failing_installer(command, **kwargs):
-        if command[0] == "sh":
-            return run(["sh", "-c", "exit 19"], **kwargs)
-        return run(command, **kwargs)
+    def failing_installer(artifacts, tag):
+        raise subprocess.CalledProcessError(19, ["docker", "start", "--attach", "fixture"])
 
-    monkeypatch.setattr(publish_release, "_run", failing_installer)
+    monkeypatch.setattr(publish_release, "_verify_public_installer", failing_installer)
     with pytest.raises(subprocess.CalledProcessError) as error:
         publish_release.verify_release("v1.2.3", repair=True)
     assert error.value.returncode == 19
@@ -614,3 +616,57 @@ def test_source_inspection_uses_the_commit_not_the_working_tree(
         "rust/loopflow/src/store/migrations/drafts/incoming.sql"
     ]
     assert observed["publications"] is None
+
+
+@pytest.mark.parametrize("damage", [None, "bytes", "version", "manifest"])
+def test_installer_smoke_checks_selected_binary_behind_entry_gate(tmp_path: Path, damage):
+    home = tmp_path / "home"
+    entry = home / ".local/bin/lf"
+    entry.parent.mkdir(parents=True)
+    selected = home / "selected-lf"
+    selected.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        "  --version) echo 'lf 1.2.3' ;;\n"
+        "  --help) echo 'Usage: lf' ;;\n"
+        "  'list --json') echo '[]' ;;\n"
+        "  *) exit 2 ;;\n"
+        "esac\n"
+    )
+    selected.chmod(0o755)
+    with tarfile.open(tmp_path / "lf-aarch64-unknown-linux-gnu.tar.gz", "w:gz") as archive:
+        archive.add(selected, arcname="lf")
+    entry.write_text(f'#!/bin/sh\nexec "{selected}" "$@"\n')
+    entry.chmod(0o755)
+    manifest = home / ".lf-machine/install/active.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "selection": {
+                    "artifact_set": {
+                        "artifacts": [
+                            {
+                                "role": {"kind": "cli"},
+                                "path": str(selected),
+                                "sha256": publish_release._sha256(selected)
+                                if damage != "manifest"
+                                else "0" * 64,
+                            }
+                        ]
+                    }
+                }
+            }
+        )
+    )
+    if damage == "bytes":
+        selected.write_text("changed bytes")
+    elif damage == "version":
+        entry.write_text("#!/bin/sh\necho 'lf 9.9.9'\n")
+    if damage:
+        with pytest.raises(RuntimeError, match="differs|reported"):
+            release_install_smoke.verify_installation(tmp_path, home, "v1.2.3")
+    else:
+        assert release_install_smoke.verify_installation(tmp_path, home, "v1.2.3") == {
+            "lf-linux": "lf 1.2.3"
+        }

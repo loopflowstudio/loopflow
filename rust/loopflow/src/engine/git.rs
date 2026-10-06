@@ -356,7 +356,22 @@ pub fn checkout_new_branch_from(
 /// report a clean, named failure. Requires a clean index (stash first).
 pub fn cherry_pick_range(repo: &Path, from: &str, to: &str) -> Result<(), GitError> {
     let range = format!("{from}..{to}");
-    let output = run_git(repo, &["cherry-pick", &range])?;
+    // Follow the settled branch's history, not commits brought in by a sync.
+    // Replay each merge relative to that branch so its resolutions survive;
+    // changes already present on the new base need no additional commit.
+    let commits = git_stdout(repo, &["rev-list", "--reverse", "--first-parent", &range])?;
+    if commits.trim().is_empty() {
+        return Ok(());
+    }
+    let mut args = vec![
+        "cherry-pick",
+        "--mainline",
+        "1",
+        "--allow-empty",
+        "--empty=drop",
+    ];
+    args.extend(commits.lines());
+    let output = run_git(repo, &args)?;
     if output.status.success() {
         return Ok(());
     }
@@ -1609,6 +1624,84 @@ mod tests {
         fs::write(&path, content).expect("write file");
         git_stdout(repo, &["add", name]).expect("git add");
         git_stdout(repo, &["commit", "-m", &format!("add {}", name)]).expect("git commit");
+    }
+
+    #[test]
+    fn cherry_pick_follow_up_after_sync_preserves_merge_edits() {
+        for merge_edit in [false, true] {
+            let dir = init_repo();
+            let repo = dir.path();
+            commit_file(repo, "base", "base");
+            checkout_new_branch_from(repo, "follow-up", "HEAD").unwrap();
+            commit_file(repo, "feature", "landed feature");
+            let cut = rev_parse(repo, "HEAD").unwrap();
+            checkout(repo, "main").unwrap();
+            git_stdout(repo, &["merge", "--squash", "follow-up"]).unwrap();
+            git_stdout(repo, &["commit", "-m", "land feature"]).unwrap();
+            commit_file(repo, "upstream", "new main content");
+            let base = rev_parse(repo, "HEAD").unwrap();
+
+            checkout(repo, "follow-up").unwrap();
+            git_stdout(repo, &["merge", "--no-ff", "--no-commit", "main"]).unwrap();
+            if merge_edit {
+                fs::write(repo.join("resolution"), "edit recorded by the merge").unwrap();
+                git_stdout(repo, &["add", "resolution"]).unwrap();
+            }
+            git_stdout(repo, &["commit", "-m", "sync main"]).unwrap();
+            commit_file(repo, "repair", "follow-up repair");
+            git_stdout(
+                repo,
+                &["commit", "--allow-empty", "-m", "authored checkpoint"],
+            )
+            .unwrap();
+            let original = rev_parse(repo, "HEAD").unwrap();
+            checkout_new_branch_from(repo, "next", "main").unwrap();
+
+            cherry_pick_range(repo, &cut, "follow-up").unwrap();
+
+            assert_eq!(
+                fs::read_to_string(repo.join("feature")).unwrap(),
+                "landed feature"
+            );
+            assert_eq!(
+                fs::read_to_string(repo.join("upstream")).unwrap(),
+                "new main content"
+            );
+            assert_eq!(
+                fs::read_to_string(repo.join("repair")).unwrap(),
+                "follow-up repair"
+            );
+            assert_eq!(repo.join("resolution").exists(), merge_edit);
+            assert_eq!(rev_parse(repo, "follow-up").unwrap(), original);
+            let count =
+                git_stdout(repo, &["rev-list", "--count", &format!("{base}..HEAD")]).unwrap();
+            assert_eq!(count.trim(), if merge_edit { "3" } else { "2" });
+            assert!(is_clean(repo).unwrap());
+        }
+    }
+
+    #[test]
+    fn cherry_pick_follow_up_conflict_restores_the_entire_sequence() {
+        let dir = init_repo();
+        let repo = dir.path();
+        commit_file(repo, "shared", "base");
+        let cut = rev_parse(repo, "HEAD").unwrap();
+        checkout_new_branch_from(repo, "follow-up", "HEAD").unwrap();
+        commit_file(repo, "repair", "preserve on original branch");
+        commit_file(repo, "shared", "follow-up");
+        let original = rev_parse(repo, "HEAD").unwrap();
+        checkout(repo, "main").unwrap();
+        commit_file(repo, "shared", "upstream");
+        let base = rev_parse(repo, "HEAD").unwrap();
+
+        let error = cherry_pick_range(repo, &cut, "follow-up").unwrap_err();
+
+        assert!(error.to_string().contains("shared"));
+        assert_eq!(rev_parse(repo, "HEAD").unwrap(), base);
+        assert_eq!(rev_parse(repo, "follow-up").unwrap(), original);
+        assert!(!repo.join("repair").exists());
+        assert_eq!(fs::read_to_string(repo.join("shared")).unwrap(), "upstream");
+        assert!(is_clean(repo).unwrap());
     }
 
     #[test]

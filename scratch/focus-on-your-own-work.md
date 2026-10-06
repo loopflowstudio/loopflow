@@ -189,7 +189,11 @@ Flow history below means FlowExec rows joined to their Execs.
    disambiguates. Advance, Iterate or Blocked; malformed output never
    advances; shared and overlapping return edges are preserved. Done when
    `git grep -E "loop-decide|repeat:"` matches only released migrations and
-   dated reviews, and `flow_tests` covers three nested loops. *Not done.*
+   dated reviews, and `flow_tests` covers three nested loops. **Done** at
+   `1793a4ed0`, merged with main at `9d72242ce`: `flow_tests` 25 and
+   `task_flow_launch_tests` 5 passed, all-target Clippy clean. The old names
+   remain only in dated `performance/` baselines, `scripts/context_ablation.py`
+   and the loader's rejection of the old form.
 3. **Review repairs.** Two defects found on October 6. (a) Steers: Jack
    Heart, on every step now receiving all of its Task's steers: "This seems
    potentially bad as that was specifically added to address some runaway
@@ -278,3 +282,5 @@ all-target Clippy clean.
 Configured demo, still separate: in a private Home, `lf -b task run INF-123
 proof` prints and blocks; `lf monitor` and `lf flow show ID --sessions` show a
 looping Flow's driver, step and iteration; a real provider step; Desktop.
+
+October 6 sync onto main `5c0ca983a`: `cargo test -p loopflow --test session_lifecycle_tests` — 17 passed, 1 installation-only ignored; Session identity, caller provenance and historical-Exec acceptance reconciled with FlowExec.

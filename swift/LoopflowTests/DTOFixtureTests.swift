@@ -23,8 +23,10 @@ struct DTOFixtureTests {
         #expect(workflow.edges.last?.launchName == "end")
         #expect(workflow.position == .edge(index: 1, execId: work.flows[0].id, running: true))
         #expect(workflow.outgoing.isEmpty)
-        #expect(workflow.history.map(\.kind) == [.tookUp, .chose, .arrived, .chose])
-        #expect(workflow.history.map(\.actor) == [.person, .person, .edge, .conversation])
+        #expect(workflow.history.map(\.kind) == [.set, .tookUp, .chose, .arrived, .chose])
+        #expect(workflow.history.map(\.actor) == [.person, .person, .person, .edge, .conversation])
+        // A move no registered process made names no Exec.
+        #expect(workflow.history[0].execId == nil)
         #expect(workflow.history.last?.sessionId == work.sessions[0].id)
         #expect(workflow.history.last?.note == "take the smaller approach")
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)

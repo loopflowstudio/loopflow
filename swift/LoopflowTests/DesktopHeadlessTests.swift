@@ -149,6 +149,10 @@ struct DesktopHeadlessTests {
         // Going back is the same command a person would type.
         await model.moveTask(to: "design", task: task, wave: wave.wave)
         #expect(await started.calls.last == ["task", "move", task.task.identifier, "design"])
+
+        // Completing over Linear's own completion is the forced move.
+        await model.moveTask(to: "end", force: true, task: task, wave: wave.wave)
+        #expect(await started.calls.last == ["task", "move", task.task.identifier, "end", "--force"])
     }
 
     @Test("A Task opens on its primary and lists waiting conversations before working ones")

@@ -995,7 +995,7 @@ fi
             .as_ref()
             .map_or(item.identifier.as_str(), |task| task.id.as_str());
         let complete = |summary: &str| match merge {
-            None | Some(PrMergeMode::User) => crate::ops::task::task_complete(&repo, selector, summary.into(), &[]),
+            None | Some(PrMergeMode::User) => crate::ops::task::task_end(&repo, selector, Some(summary), &Default::default()),
             Some(PrMergeMode::Auto) => runtime.block_on(async {
                 let task = task.as_ref().unwrap();
                 let pr = fixture.store.task_prs(&task.id).await.unwrap().remove(0);
@@ -1141,7 +1141,7 @@ fi
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             let terminal: i64 = conn
                 .query_row(
-                    "SELECT work_terminal_at FROM tasks WHERE id=?1",
+                    "SELECT updated_at FROM task_workflows WHERE task_id=?1",
                     [task.id.as_str()],
                     |row| row.get(0),
                 )
@@ -1229,7 +1229,7 @@ fi
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             assert_eq!(
                 conn.query_row(
-                    "SELECT work_terminal_at FROM tasks WHERE id=?1",
+                    "SELECT updated_at FROM task_workflows WHERE task_id=?1",
                     [task.id.as_str()],
                     |row| row.get::<_, i64>(0)
                 )

@@ -182,47 +182,57 @@ The agent's, October 5, slice 1; none confirmed by Jack Heart. The list is at
 naming a workflow replaces the Task's current one at `start`; edges accept
 what `lf run` accepts, and only an edge into `end` may run nothing.
 
-## Choices the Task-run retry pass made without Jack
+## Choices the Task-run retry, and nodes and Project workflow passes made without Jack
 
-The agent's, October 6, slice 9a. None is confirmed by Jack Heart.
+The agent's, October 6, slices 9a and 10; none is confirmed by Jack Heart.
+Both lists are at `65f8ec42b:scratch/questions.md` under each pass's heading.
+Most likely to matter: every `lf task run` retries a failed Flow exec, three
+attempts, no pause; `lf run` exits 3 when blocked or stopped short, which is
+not retried; `lf` writes `workflow: NAME` and still reads a Project's
+`flow:` line until it is rewritten; a Project naming a plain Flow refuses a
+bare `lf task run`; `--workflow` does not check that the name loads; the
+draft renames `projects.flow` and the stage columns.
 
-- **Every `lf task run` retries,** on a Workflow or ad hoc: it starts
-  `lf --task ISSUE run FLOW` as a child, three attempts at most, each from
-  the Flow's first step with no pause between.
-- **What is retried:** only an attempt that recorded a FlowExec and exited 1.
-  A launch refused before any Flow started is not.
-- **Exit 3** is new: `lf run` exits 3 when its Flow is blocked or stopped
-  short of its last step (an interrupted step, a watched landing). The Task
-  run returns that code and does not retry; nor after 130 or a signal.
-- **A stopped edge's guidance** names `lf flow list --for-task ISSUE`; the
-  position's Exec is now the Task run, which `lf flow show` does not read.
-- **Seen, not fixed:** `land_tests lf_pr_land_returns` fails ("detached
-  repair did not finish") with and without this slice, at `77a376df0`.
+## Choices the state-from-position pass made without Jack
 
-## Choices the nodes and Project workflow pass made without Jack
+The agent's, October 6, slice 10a. None is confirmed by Jack Heart.
 
-The agent's, October 6, slice 10. None is confirmed by Jack Heart.
-
-- **Linear content.** `lf` writes `workflow: NAME` and still reads a Project
-  written with `flow: NAME`; `workflow:` wins when both appear. No live
-  Project is rewritten by this PR: the next `lf update-plan` or rotation
-  rewrites the line. The reader for `flow:` can go once every live Project
-  has been rewritten.
-- **A Project that names a plain Flow.** Bare `lf task run ISSUE` is refused,
-  naming `lf wave update-plan --workflow`. Naming a Flow still runs it ad hoc;
-  naming a workflow takes it up. `--workflow` does not check that the name
-  loads.
-- **Stored.** The draft renames `projects.flow` to `workflow` and the `flow`
-  key in each stored Project; `task_workflows.stage` and the moves' columns
-  become `node`, `from_node`, `to_node`.
-- **Wire.** Project `flow` is `workflow` in status, roadmap and the plan
-  JSON `--plan` reads; `position` is `{"kind":"node","node":…}`; a
-  definition lists `nodes`. A Task's `flow.recommended` keeps its name.
-- **Left alone.** A Flow graph's `interactions.stages` (the earlier
-  human-step projection) and Desktop's "flow-stage" rows that draw it; the
-  product word "Run" for a headless conversation (LOO-386).
-- **Desktop.** The Wave page's section is **Workflow** and lists workflows
-  only; a Project naming a plain Flow reads "names no workflow here".
+- **Stored.** `tasks.work_state` and `work_terminal_at` are dropped;
+  `tasks.abandoned_at` is the one mark. State is one SQL expression over
+  `task_workflows`. Waves and Projects keep their stored status.
+- **Migration.** A done Task is put at `end` of `unplanned`, a workflow with
+  nothing between, by a move with no Exec. Departure from the plan: a
+  never-started Task gets no Workflow (SQL cannot load a workflow's graph)
+  and reads `not_ready` until it first runs. So does every started,
+  unfinished Task on an existing Home.
+- **Words on the wire.** `not_ready`, `ready`, `active`, `done`,
+  `abandoned`; abandoned outranks position. A move's `exec_id` may be null.
+- **Completion.** `lf task complete` is gone. `lf task move ISSUE end
+  [--reason] [--force] [--accept-unknown-exec ID]` replaces it, also for a
+  planning-only Task and for a Task with no Workflow (`unplanned`). An edge
+  into `end` completes on arrival; refused, the Task stays on its edge.
+  `lf land -c` and a merged completing PR put the Task at `end` by a `set`
+  move. `--force` is on `task run` too.
+- **An empty unpublished PR no longer holds a Task from `end`:** it is
+  retired there, so a no-PR workflow can finish. A PR with commits or a
+  publication still refuses, as does a dirty worktree. This reverses part
+  of W2-151.
+- **Reopening.** `lf task move` away from `end` makes the Task active again;
+  `lf task run` on a done Task is refused, naming `task move`. A reopened
+  Task has no active PR and cannot run until it has one; not built.
+- **Linear.** Read from the cached plan, never fetched. Active and Linear
+  complete: `planning_conflict` on the Task, launches allowed, `end`
+  refused without `--force`, the note records the force. Ready or not
+  ready and Linear ended: launch refused before any move, listed under
+  Later. Canceled and duplicate keep refusing launches.
+- **Risk for Jack.** If Linear's GitHub integration completes an issue when
+  its PR merges, and the plan is refreshed before `lf` settles the landing,
+  that landing leaves the Task active and flagged until someone forces it.
+  A completion whose Linear write succeeded and whose store write did not
+  leaves the same flag.
+- **Creating a Task** takes up its Project's workflow when that loads.
+- **Desktop** shows the conflict with **Complete anyway** (`--force`). No
+  state badge was added.
 
 ## Choices the Workflow live-state pass made without Jack
 

@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::durable::TaskId;
-use crate::engine::workflow::{WorkflowDefinition, START};
+use crate::engine::workflow::{WorkflowDefinition, END, START};
 use crate::exec::Exec;
 use crate::id::ExecId;
 use crate::ops::workflow::{
@@ -107,7 +107,7 @@ fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Optio
 fn workflow_moves(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<WorkflowMove>> {
     conn.prepare(
         "SELECT m.workflow,m.kind,m.from_node,m.to_node,m.edge,m.exec_id,e.caller_session_id,m.note,m.at
-         FROM task_workflow_moves m JOIN execs e ON e.id=m.exec_id
+         FROM task_workflow_moves m LEFT JOIN execs e ON e.id=m.exec_id
          WHERE m.task_id=?1 ORDER BY m.seq",
     )?
     .query_and_then([task.as_str()], |row| {
@@ -147,7 +147,7 @@ fn append_workflow_move(
     kind: WorkflowMoveKind,
     (from, to): (&str, &str),
     edge: Option<u32>,
-    by: &crate::id::ExecId,
+    by: Option<&ExecId>,
     note: Option<&str>,
 ) -> StoreResult<()> {
     conn.execute(
@@ -166,6 +166,169 @@ fn append_workflow_move(
         ],
     )?;
     Ok(())
+}
+
+/// How a Task reaches `end`.
+#[derive(Debug, Clone)]
+pub(crate) enum EndMove {
+    /// The edge the calling process carried it along succeeded.
+    Arrive,
+    /// It leaves by an edge that runs nothing.
+    Choose { workflow: Workflow, edge: u32 },
+    /// It is put there. A Task with no Workflow is put at the end of one
+    /// with nothing between.
+    Set,
+}
+
+fn choose_edge_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    workflow: &Workflow,
+    edge: u32,
+    by: Option<&ExecId>,
+    note: Option<&str>,
+) -> StoreResult<bool> {
+    let chosen = &workflow.definition.edges[edge as usize];
+    let stopped = match &workflow.position {
+        WorkflowPosition::Node { .. } => None,
+        WorkflowPosition::Edge { exec_id, .. } => Some(exec_id.as_str()),
+    };
+    let carried = chosen.flow.is_some();
+    let left = tx.execute(
+        "UPDATE task_workflows SET node=?2,edge=?3,exec_id=?4,updated_at=?5
+         WHERE task_id=?1 AND node=?6 AND exec_id IS ?7",
+        rusqlite::params![
+            task.as_str(),
+            if carried { &chosen.from } else { &chosen.to },
+            carried.then_some(edge),
+            by.filter(|_| carried),
+            crate::store::rows::now_unix(),
+            chosen.from,
+            stopped
+        ],
+    )?;
+    if left == 0 {
+        return Ok(false);
+    }
+    append_workflow_move(
+        tx,
+        task,
+        &workflow.definition.name,
+        WorkflowMoveKind::Chose,
+        (&chosen.from, &chosen.to),
+        Some(edge),
+        by,
+        note,
+    )?;
+    Ok(true)
+}
+
+fn arrive_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, by: &ExecId) -> StoreResult<()> {
+    let Some((definition, _, Some((edge, carrier)))) = workflow_row(tx, task)? else {
+        return Ok(());
+    };
+    if &carrier.id != by {
+        return Ok(());
+    }
+    let arrived = &definition.edges[edge as usize];
+    tx.execute(
+        "UPDATE task_workflows SET node=?2,edge=NULL,exec_id=NULL,updated_at=?3 WHERE task_id=?1",
+        rusqlite::params![task.as_str(), arrived.to, crate::store::rows::now_unix()],
+    )?;
+    append_workflow_move(
+        tx,
+        task,
+        &definition.name,
+        WorkflowMoveKind::Arrived,
+        (&arrived.from, &arrived.to),
+        Some(edge),
+        Some(by),
+        None,
+    )
+}
+
+fn set_node_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    node: &str,
+    by: Option<&ExecId>,
+    note: Option<&str>,
+) -> StoreResult<bool> {
+    let Some((definition, from, edge)) = workflow_row(tx, task)? else {
+        return Ok(false);
+    };
+    tx.execute(
+        "UPDATE task_workflows SET node=?2,edge=NULL,exec_id=NULL,updated_at=?3 WHERE task_id=?1",
+        rusqlite::params![task.as_str(), node, crate::store::rows::now_unix()],
+    )?;
+    append_workflow_move(
+        tx,
+        task,
+        &definition.name,
+        WorkflowMoveKind::Set,
+        (&from, node),
+        edge.map(|(edge, _)| edge),
+        by,
+        note,
+    )?;
+    Ok(true)
+}
+
+fn stands_at_end(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1 AND node=?2 AND edge IS NULL)",
+        [task.as_str(), END],
+        |row| row.get(0),
+    )?)
+}
+
+/// Make `how` for the Task. Returns whether this move put it at `end`: false
+/// when it already stood there, or when the move no longer applied.
+pub(super) fn reach_end_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    how: &EndMove,
+    by: Option<&ExecId>,
+    note: Option<&str>,
+) -> StoreResult<bool> {
+    if stands_at_end(tx, task)? {
+        return Ok(false);
+    }
+    match how {
+        EndMove::Arrive => {
+            if let Some(by) = by {
+                arrive_in(tx, task, by)?;
+            }
+        }
+        EndMove::Choose { workflow, edge } => {
+            choose_edge_in(tx, task, workflow, *edge, by, note)?;
+        }
+        EndMove::Set => {
+            if !set_node_in(tx, task, END, by, note)? {
+                let unplanned = crate::engine::workflow::unplanned();
+                tx.execute(
+                    "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,?4)",
+                    rusqlite::params![
+                        task.as_str(),
+                        serde_json::to_string(&unplanned)?,
+                        END,
+                        crate::store::rows::now_unix()
+                    ],
+                )?;
+                append_workflow_move(
+                    tx,
+                    task,
+                    &unplanned.name,
+                    WorkflowMoveKind::Set,
+                    (START, END),
+                    None,
+                    by,
+                    note,
+                )?;
+            }
+        }
+    }
+    stands_at_end(tx, task)
 }
 
 /// Every unfinished Exec paired with each Task it belongs to: the same
@@ -354,7 +517,7 @@ impl SqliteStore {
         &self,
         task: &TaskId,
         definition: &WorkflowDefinition,
-        by: &crate::id::ExecId,
+        by: &ExecId,
         note: Option<&str>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -375,7 +538,7 @@ impl SqliteStore {
             WorkflowMoveKind::TookUp,
             (START, START),
             None,
-            by,
+            Some(by),
             note,
         )?;
         Ok(tx.commit()?)
@@ -390,77 +553,22 @@ impl SqliteStore {
         task: &TaskId,
         workflow: &Workflow,
         edge: u32,
-        by: &crate::id::ExecId,
+        by: &ExecId,
         note: Option<&str>,
     ) -> StoreResult<bool> {
-        let chosen = &workflow.definition.edges[edge as usize];
-        let stopped = match &workflow.position {
-            WorkflowPosition::Node { .. } => None,
-            WorkflowPosition::Edge { exec_id, .. } => Some(exec_id.as_str()),
-        };
-        let carried = chosen.flow.is_some();
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let left = tx.execute(
-            "UPDATE task_workflows SET node=?2,edge=?3,exec_id=?4,updated_at=?5
-             WHERE task_id=?1 AND node=?6 AND exec_id IS ?7",
-            rusqlite::params![
-                task.as_str(),
-                if carried { &chosen.from } else { &chosen.to },
-                carried.then_some(edge),
-                carried.then_some(by),
-                crate::store::rows::now_unix(),
-                chosen.from,
-                stopped
-            ],
-        )?;
-        if left == 0 {
-            return Ok(false);
-        }
-        append_workflow_move(
-            &tx,
-            task,
-            &workflow.definition.name,
-            WorkflowMoveKind::Chose,
-            (&chosen.from, &chosen.to),
-            Some(edge),
-            by,
-            note,
-        )?;
+        let left = choose_edge_in(&tx, task, workflow, edge, Some(by), note)?;
         tx.commit()?;
-        Ok(true)
+        Ok(left)
     }
 
     /// The edge `by` carried the Task along succeeded: put the Task at its
     /// target. A Task no longer on that edge stays where it was put.
-    pub(crate) fn arrive_workflow_edge(
-        &self,
-        task: &TaskId,
-        by: &crate::id::ExecId,
-    ) -> StoreResult<()> {
+    pub(crate) fn arrive_workflow_edge(&self, task: &TaskId, by: &ExecId) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let Some((definition, _, Some((edge, carrier)))) = workflow_row(&tx, task)? else {
-            return Ok(());
-        };
-        if &carrier.id != by {
-            return Ok(());
-        }
-        let arrived = &definition.edges[edge as usize];
-        tx.execute(
-            "UPDATE task_workflows SET node=?2,edge=NULL,exec_id=NULL,updated_at=?3 WHERE task_id=?1",
-            rusqlite::params![task.as_str(), arrived.to, crate::store::rows::now_unix()],
-        )?;
-        append_workflow_move(
-            &tx,
-            task,
-            &definition.name,
-            WorkflowMoveKind::Arrived,
-            (&arrived.from, &arrived.to),
-            Some(edge),
-            by,
-            None,
-        )?;
+        arrive_in(&tx, task, by)?;
         Ok(tx.commit()?)
     }
 
@@ -470,30 +578,29 @@ impl SqliteStore {
         &self,
         task: &TaskId,
         node: &str,
-        by: &crate::id::ExecId,
+        by: &ExecId,
         note: Option<&str>,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let Some((definition, from, edge)) = workflow_row(&tx, task)? else {
-            return Ok(false);
-        };
-        tx.execute(
-            "UPDATE task_workflows SET node=?2,edge=NULL,exec_id=NULL,updated_at=?3 WHERE task_id=?1",
-            rusqlite::params![task.as_str(), node, crate::store::rows::now_unix()],
-        )?;
-        append_workflow_move(
-            &tx,
-            task,
-            &definition.name,
-            WorkflowMoveKind::Set,
-            (&from, node),
-            edge.map(|(edge, _)| edge),
-            by,
-            note,
-        )?;
+        let set = set_node_in(&tx, task, node, Some(by), note)?;
         tx.commit()?;
-        Ok(true)
+        Ok(set)
+    }
+
+    /// The node `by`'s edge enters, while the Task is still on that edge.
+    pub(crate) fn workflow_edge_target(
+        &self,
+        task: &TaskId,
+        by: &ExecId,
+    ) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(match workflow_row(&conn, task)? {
+            Some((definition, _, Some((edge, carrier)))) if &carrier.id == by => {
+                Some(definition.edges[edge as usize].to.clone())
+            }
+            _ => None,
+        })
     }
 
     /// Every Flow among the Task's work, oldest first.

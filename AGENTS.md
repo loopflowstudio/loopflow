@@ -10,6 +10,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the workflow its Tasks take up
 - A Task's work is every Session, Flow and Exec in its checkout, plus explicit binds; no Flow is selected over another
 - Workflow = a Task's nodes (a person, in its conversation) joined by edges (Flows), with its stored position; `lf task run` chooses an edge, `lf task move` sets a node
+- A Task's state is its Workflow position: ready at `start`, active between, done at `end`; reaching `end` is completion, abandoned is its own mark
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan

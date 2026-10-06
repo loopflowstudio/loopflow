@@ -1266,17 +1266,20 @@ Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
 | `--reason` | Direction for this run, published to the Task |
+| `--force` | Reach `end` although Linear already calls the active Task complete Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task move
 
-Put a Task at a node of its workflow without running anything
+Put a Task at a node of its workflow without running anything; `end` completes it
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
 | `<node>` | `start`, `end` or one of the workflow's nodes |
 | `--reason` | Why, kept in the Task's workflow history |
+| `--force` | Reach `end` although Linear already calls the active Task complete Default: false. |
+| `--accept-unknown-exec` | Accept one historical Exec's unknown outcome when reaching `end`; retain its checkout |
 | `--help / -h` | Print help |
 
 ## lf task create
@@ -1349,18 +1352,6 @@ Save UTF-8 stdin with an expected revision and retained recovery files
 | `<issue>` | issue |
 | `<path>` | path |
 | `--revision` | revision |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task complete
-
-Complete planning work, or a placed Task whose pull requests are settled
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--summary` | summary |
-| `--accept-unknown-exec` | Accept one historical Exec's unknown outcome for completion only; retain its checkout |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

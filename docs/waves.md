@@ -362,7 +362,7 @@ lf repo connect --all                  # all nested Waves reuse it
 lf refresh infra              # refresh the local SQLite snapshot
 lf wave status infra                   # deterministic cache-only read
 lf task create --wave infra --title "Daemon data integrity"
-lf task complete 1207... --summary "Dark mode delivered"
+lf task move 1207... end --reason "Dark mode delivered"
 ```
 
 A managed Project belongs to exactly one Initiative and exactly the repository
@@ -419,22 +419,22 @@ steering and recovery use the same commands for people and agents:
 ```bash
 lf land --next parser-proof   # after verified merge, rotate to the next
 lf land -c                    # after verified merge, complete the Task
-lf task complete INF-124 --summary "investigation recorded"   # no PR needed
+lf task move INF-124 end --reason "investigation recorded"   # no PR needed
 ```
 
-`task complete` also finishes planning-only Tasks without creating a checkout.
-It records the summary once in Linear; repeating the command preserves it.
-Placed Tasks still require a clean checkout and settled PRs. If their local
-completion reports pending PM writeback, repeat the same command to reconcile
-Linear without changing the original completion. Canceled and duplicate issues
-cannot be changed to completed through this command.
 
-`task complete` also finishes planning-only Tasks without creating a checkout.
-It records the summary once in Linear; repeating the command preserves it.
-Placed Tasks still require a clean checkout and settled PRs. If their local
-completion reports pending PM writeback, repeat the same command to reconcile
-Linear without changing the original completion. Canceled and duplicate issues
-cannot be changed to completed through this command.
+A Task's state is where it stands on its workflow: ready at `start`, active
+between, done at `end`. Reaching `end`, by an edge or by `task move`, completes
+the Task; no other command does. It is refused over uncommitted changes, an
+unsettled PR or unresolved execution, and retires a PR whose branch never moved.
+`task move ISSUE end` also finishes planning-only Tasks without creating a
+checkout, recording the reason once in Linear. If completion reports pending PM
+writeback, repeat the command to reconcile Linear. Canceled and duplicate
+issues cannot be changed to completed.
+
+Linear completing a Task that is active here is shown on the Task as an error.
+Its work goes on; `end` then takes `--force`. Linear completing a Task that
+never left `start` withdraws it from what is offered.
 
 Keep each PR reviewable — roughly 1000 LOC. A Task may need several serial
 PRs, but it still needs one concrete finish line.

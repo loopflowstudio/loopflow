@@ -83,7 +83,9 @@ public struct TaskStatusExecution: Decodable, Sendable {
     public let taskId: String
     public let issueId: String
     public let issueIdentifier: String
-    public let status: WorkStatus
+    public let status: TaskState
+    /// Linear calls the Task complete while it is active here.
+    public let planningConflict: String?
     public let worktree: String
     public let workspaceSlug: String
     public let actions: TaskActionModel
@@ -93,6 +95,7 @@ public struct TaskStatusExecution: Decodable, Sendable {
         case taskId = "task_id"
         case issueId = "issue_id"
         case issueIdentifier = "issue_identifier"
+        case planningConflict = "planning_conflict"
         case workspaceSlug = "workspace_slug"
     }
 }

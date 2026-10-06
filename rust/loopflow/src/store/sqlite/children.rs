@@ -13,7 +13,7 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior
 use time::OffsetDateTime;
 
 use crate::child::AbandonIntent;
-use crate::durable::Author;
+use crate::durable::{Author, TaskState};
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use crate::store::rows::now_unix;
@@ -183,7 +183,17 @@ impl SqliteStore {
         Ok(true)
     }
 
-    pub fn complete_task(&self, task: &Task, skipped_pr: Option<&TaskPr>) -> StoreResult<()> {
+    /// Put the Task at `end` of its Workflow by `how`, with what completion
+    /// settles beside it. Returns false, writing nothing, when the move no
+    /// longer applies to where the Task stands.
+    pub(crate) fn complete_task(
+        &self,
+        task: &Task,
+        skipped_pr: Option<&TaskPr>,
+        how: &super::task_work::EndMove,
+        by: Option<&crate::id::ExecId>,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
         validate_task(task)?;
         if let Some(pr) = skipped_pr {
             validate_task_pr(pr)?;
@@ -208,11 +218,26 @@ impl SqliteStore {
                 return Err(StoreError::NotFound);
             }
         }
+        if super::durable::task_state_in(&transaction, &task.id)? == TaskState::Abandoned {
+            return Err(StoreError::InvalidData(format!(
+                "Task {} is abandoned and cannot be completed",
+                task.id
+            )));
+        }
+        if super::task_work::reach_end_in(&transaction, &task.id, how, by, note)? {
+            insert_task_event_in(
+                &transaction,
+                &task.id,
+                &TaskEventKind::Completed {
+                    summary: "Task completed".to_string(),
+                },
+            )?;
+        } else if super::durable::task_state_in(&transaction, &task.id)? != TaskState::Done {
+            return Ok(false);
+        }
         update_task_pm_writeback_in(&transaction, &task.id, &task.pm_writeback, task.updated_at)?;
-        complete_task_work_in(&transaction, task)?;
-        // Cleanup settles the selected Flow after both driver and step exit.
         transaction.commit()?;
-        Ok(())
+        Ok(true)
     }
 
     pub fn task(&self, task_id: &TaskId) -> StoreResult<Option<Task>> {
@@ -314,12 +339,7 @@ impl SqliteStore {
                 "Task PR has a merge request; cancel its delivery before selecting a parent".into(),
             ));
         }
-        let ready: bool = tx.query_row(
-            "SELECT work_state='ready' FROM tasks WHERE id=?1",
-            [child.task_id.as_str()],
-            |row| row.get(0),
-        )?;
-        if !ready {
+        if super::durable::task_state_in(&tx, &child.task_id)?.is_terminal() {
             return Err(StoreError::InvalidAuthority(
                 "Task must be ready before selecting a parent".into(),
             ));
@@ -907,49 +927,6 @@ fn update_task_pm_writeback_in(
     if changed == 0 {
         return Err(StoreError::NotFound);
     }
-    Ok(())
-}
-
-fn complete_task_work_in(conn: &Connection, task: &Task) -> StoreResult<()> {
-    let state: String = conn.query_row(
-        "SELECT work_state FROM tasks WHERE id=?1",
-        [task.id.as_str()],
-        |row| row.get(0),
-    )?;
-    match state.as_str() {
-        "done" => return Ok(()),
-        "ready" => {}
-        "abandoned" => {
-            return Err(StoreError::InvalidData(format!(
-                "Task {} Work is abandoned and cannot be completed",
-                task.id
-            )))
-        }
-        other => {
-            return Err(StoreError::InvalidData(format!(
-                "Task {} Work has invalid state {other:?}",
-                task.id
-            )))
-        }
-    }
-    if conn.execute(
-        "UPDATE tasks SET work_state='done', work_terminal_at=?2
-         WHERE id=?1 AND work_state='ready'",
-        params![task.id.as_str(), now_unix()],
-    )? != 1
-    {
-        return Err(StoreError::InvalidData(format!(
-            "Task {} Work changed while completion was being recorded",
-            task.id
-        )));
-    }
-    insert_task_event_in(
-        conn,
-        &task.id,
-        &TaskEventKind::Completed {
-            summary: "Task completed".to_string(),
-        },
-    )?;
     Ok(())
 }
 

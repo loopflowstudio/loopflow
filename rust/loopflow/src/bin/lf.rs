@@ -725,6 +725,9 @@ fn print_task_snapshot(
         if let Some(workflow) = &snapshot.work.workflow {
             println!("  {}", workflow.summary());
         }
+        if let Some(conflict) = &snapshot.planning_conflict {
+            println!("  error: {conflict}");
+        }
         println!("  latest Flow: {}", snapshot.execution.reason);
         if let Some(run) = &snapshot.execution.captured {
             println!("  Session event: {run}");
@@ -919,10 +922,21 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             issue,
             node,
             reason,
+            force,
+            accept_unknown_exec,
         } => {
             println!(
                 "{}",
-                loopflow::ops::task::workflow_set(issue, node, reason.as_deref())?
+                loopflow::ops::task::workflow_set(
+                    repo,
+                    issue,
+                    node,
+                    reason.as_deref(),
+                    &loopflow::ops::task::EndOptions {
+                        force: *force,
+                        accept_unknown_exec: accept_unknown_exec.clone(),
+                    },
+                )?
             );
             Ok(())
         }
@@ -1092,31 +1106,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        TaskCommand::Complete {
-            issue,
-            summary,
-            accept_unknown_exec,
-            json,
-        } => match loopflow::ops::task::task_complete(
-            repo,
-            issue,
-            summary.clone(),
-            accept_unknown_exec,
-        )? {
-            Some(task) => print_task(&task, *json),
-            None => {
-                let resolved = loopflow::ops::pm::pm_resolve_task(repo, issue)?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&resolved.item)?);
-                } else {
-                    println!(
-                        "{}: completed {}",
-                        resolved.item.identifier, resolved.item.name
-                    );
-                }
-                Ok(())
-            }
-        },
         TaskCommand::Abandon { issue, force, json } => {
             let identifier = loopflow::ops::task::task_abandon(repo, issue.as_deref(), *force)?;
             if *json {
@@ -1490,9 +1479,14 @@ fn dispatch(
                 stack_on,
                 directive,
                 reason,
+                force,
             },
     }) = &cli.command
     {
+        let end = loopflow::ops::task::EndOptions {
+            force: *force,
+            accept_unknown_exec: Vec::new(),
+        };
         let directory = loopflow::repo::working_directory()?;
         let repo = loopflow::ops::task::task_repository(&directory, Some(issue))?;
         let (task, flow) = loopflow::ops::task::task_place(
@@ -1506,6 +1500,7 @@ fn dispatch(
                 flow: flow.clone(),
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
+                end: end.clone(),
             },
         )?;
         let Some(flow) = flow else {
@@ -1520,7 +1515,7 @@ fn dispatch(
         // the edge's target once an attempt at its Flow succeeded, otherwise
         // still on the edge.
         loopflow::lf::commands::flow::run_for_task(&cli, &task.plan.identifier, &flow)?;
-        return Ok(loopflow::ops::task::workflow_arrive(&task)?);
+        return Ok(loopflow::ops::task::workflow_arrive(&task, &end)?);
     }
     if let Some(task) = cli.task.as_ref() {
         let directory = loopflow::repo::working_directory()?;

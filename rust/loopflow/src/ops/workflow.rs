@@ -92,7 +92,8 @@ pub struct WorkflowMove {
     pub to: String,
     pub edge: Option<u32>,
     /// The `lf` process that made the move; for an edge, its Task run.
-    pub exec_id: String,
+    /// `None` when no registered process made it.
+    pub exec_id: Option<String>,
     pub actor: WorkflowActor,
     /// The conversation that asked, when `actor` is one.
     pub session_id: Option<String>,

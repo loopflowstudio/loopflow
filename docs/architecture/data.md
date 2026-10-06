@@ -39,6 +39,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | A Flow's identity, state and step results | Its driver Exec and child step Execs in `execs` |
 | A Flow's name, launched graph and each step's node | FlowExec: `flow_execs` and `flow_exec_steps`, appended by the driver |
 | A Task's Workflow: its graph, position and moves | `task_workflows`, one row per Task updated in place, and append-only `task_workflow_moves`; written by `lf task run` and `lf task move` |
+| A Task's state: not ready, ready, active, done | Read from its `task_workflows` position; never stored. `tasks.abandoned_at` is the one mark beside it |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
 | Credentials and provider-native conversation files | The selected provider account's native Home |
 | Current local liveness | OS process evidence matched to exact recorded PID/start identity |

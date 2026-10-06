@@ -3,7 +3,7 @@ mod support;
 use std::fs;
 use std::process::Command;
 
-use loopflow::durable::{WorkRef, WorkStatus};
+use loopflow::durable::WorkRef;
 use loopflow::ops::task::{task_interrupt, task_status};
 use loopflow::work::task::{GithubPr, Observation, PrPublication};
 use loopflow_test_support::TestRepo;
@@ -124,7 +124,7 @@ fn graph_ql_exhaustion_never_blocks_task_control_or_forces_pr_enumeration() {
         .execution
         .expect("execution");
     assert!(matches!(&first.observation, Observation::Fresh { .. }));
-    assert_eq!(first.status, WorkStatus::Ready, "{first:?}");
+    assert!(!first.status.is_terminal(), "{first:?}");
 
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let work = WorkRef::Task(task.task.id.clone());
@@ -177,7 +177,7 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
         .expect("REST failure degrades instead of failing")
         .execution
         .expect("execution");
-    assert_eq!(first.status, WorkStatus::Ready, "{first:?}");
+    assert!(!first.status.is_terminal(), "{first:?}");
     let (reason, first_retry_at) = match first.observation {
         Observation::Degraded {
             reason,
@@ -220,7 +220,7 @@ fn rest_failure_opens_one_durable_circuit_while_local_controls_continue() {
         }
         other => panic!("expected cached degradation, got {other:?}"),
     }
-    assert_eq!(cached.status, WorkStatus::Ready);
+    assert!(!cached.status.is_terminal());
     assert_eq!(
         github_rest_reads(log.to_string_lossy().as_ref()).len(),
         1,

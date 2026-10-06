@@ -103,7 +103,9 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
 
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let workId: String
-    public let status: WorkStatus
+    public let status: TaskState
+    /// Linear calls the Task complete while it is active here.
+    public let planningConflict: String?
     public let reason: String
     public let updatedAt: String
     public let provider: String
@@ -113,6 +115,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case status, reason, provider, started
         case workId = "work_id"
+        case planningConflict = "planning_conflict"
         case updatedAt = "updated_at"
     }
 }

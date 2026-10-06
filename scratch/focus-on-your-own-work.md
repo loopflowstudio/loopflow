@@ -154,61 +154,12 @@ provider asking a question; Desktop on screen (rendering, Start, a Task
 opening on its primary, progress moving, the Wave page's menu and Edit); the
 website as rendered.
 
-9. **Workflow as live state.** — **done**, `5cf71ffd7`, compressed
-   `f57abb655`. Jack: "lets just call TaskWorkflow Workflow"; October 6:
-   "mutable is probably wrong word. live state or something". Built to the
-   contract in [task-workflow.md](task-workflow.md): position stored and
-   written by the process running the edge; an append-only history of moves
-   with who and a note; `lf task move` sets a stage and runs nothing; a
-   stopped edge holds the Task on the edge. Compression removed authored
-   edge names, as slice 10 asks. Check, October 6 at `f57abb655`: `cargo
-   test -p loopflow --test task_flow_launch_tests` 6 passed (set, stopped
-   edge retried then back, late landing corrected); status JSON and the
-   Swift decoder by `dto_fixtures` 19 and Swift 34, as recorded at
-   compression. Choices: [questions.md](questions.md). Demo items: the Move
-   to menu and a stopped edge on screen; a conversation choosing an edge.
-
-9a. **One Task run, many Flow execs.** — **done**, `274a63a8a`, compressed
-    `24ba54689`. Words: Jack, October 6, "i think maybe cleaner to say run
-    for task and exec for flow", then "er run for workflow api and exec for
-    flow datamodel": *run* is the Workflow API's verb, *exec* is the Flow's
-    record. A *Task run* is one `lf task run` carrying one edge; a *Flow
-    exec* is one execution of a Flow, the FlowExec record. Say "Flow exec",
-    not "Flow run", in status, Desktop and docs; the Desktop log in slice 11
-    is the Flow exec log. (Collision carried to LOO-386: "Run" is also the
-    product word for a headless conversation.) Jack, October 6: "lf task run
-    should in addition to finding the flow also have some amount of retry,
-    i.e. we shoudl allow task run has many flow runs". Built: `lf task run`
-    carries the edge and starts `lf --task ISSUE run FLOW` as a child, again
-    when a Flow exec fails; the position names the Task-run Exec and each
-    attempt is its own FlowExec beneath it. Agent's defaults, not Jack's, in
-    [questions.md](questions.md): three attempts; `lf run` exits 3 when
-    blocked or stopped short, which is not retried. Check, October 6 at
-    `24ba54689`: `cargo test -p loopflow --test task_flow_launch_tests` 7
-    passed (three failures hold the edge stopped; failed, failed, succeeded
-    arrives once with three Flow execs under one Task run). Not renamed
-    yet: surfaces still say "Flow run"; slice 10's renaming owns it. Demo
-    item: a real provider failure retried.
-10. **Nodes and edges; Projects have workflows.** — **done**, `5b71ff345`,
-    compressed `4cd645c78`. Jack, October 6: "it is ok for now to require
-    that each edge is a unique step (flow/skill)"; "lets use Edge and node
-    instead of Stage and Way OUt"; "Then projects have workflows instead of
-    default" (both under "Name" and "Projects" in
-    [task-workflow.md](task-workflow.md)). Built: node and edge in
-    definitions (`nodes:`), types, store columns, wire, status text, skills,
-    Desktop and docs, with no alias; "Flow exec" for one FlowExec record;
-    the Project's `workflow` across the plan line, `lf wave update-plan
-    --workflow`, status, wire, Desktop's Wave page and docs. A Task with no
-    Workflow takes up its Project's; one that named its own keeps it.
-    Check, October 6, rerun at `65f8ec42b`: `cargo test -p loopflow --test
-    task_flow_launch_tests` 8 passed (Project's workflow taken up; a named
-    one kept; a Project naming a plain Flow refused); `--lib store::
-    pm:: ops::chapter` and `--test dto_fixtures` pass; Swift
-    `DesktopHeadlessTests|DTOFixtureTests|PodiumModelTests` 48 passed.
-    Compression: `--lib pm::` 108 and `ops::chapter` 17 passed, Clippy clean.
-    Choices: [questions.md](questions.md). Demo items: the Wave page's
-    Workflow section on screen; a live Project's `flow:` line read and
-    rewritten.
+Slices 9, 9a and 10 are **done**; their text, checks and demo items are at
+`65f8ec42b:scratch/focus-on-your-own-work.md`. 9. Workflow as live state
+(`lf task move`, stored position, move history) — `5cf71ffd7`. 9a. One Task
+run, many Flow execs (three attempts; run is the Workflow API's verb, exec the
+Flow's record) — `274a63a8a`. 10. Nodes and edges; Projects have workflows —
+`5b71ff345`, rerun October 6: `task_flow_launch_tests` 8 passed.
 
 10a. **A Task's state comes from its Workflow.** Jack, October 6: "no
     separate Task is ready state; that is derived from where it is in the

@@ -1038,7 +1038,7 @@ mod tests {
     fn scratch_stash_lands_under_the_ignored_tmp_prefix() {
         let path = scratch_stash_path(Path::new("/repo"), "jack/reconcile-out-of-band-merges");
         // .lf/tmp/ is gitignored; a sibling like .lf/scratch-stash/ would dirty
-        // the worktree and block `lf task complete`.
+        // the worktree and block the Task from reaching `end`.
         assert!(
             path.starts_with("/repo/.lf/tmp/scratch-stash"),
             "stash must sit under the ignored .lf/tmp prefix, got {}",

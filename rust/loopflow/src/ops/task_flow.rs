@@ -86,8 +86,7 @@ pub(crate) fn task_flow_controls(gate: &TaskFlowGate) -> Vec<TaskFlowControl> {
     let terminal = match gate.status {
         Some(WorkStatus::Done) => Some("Task is complete"),
         Some(WorkStatus::Abandoned) => Some("Task is abandoned; recover it before running a Flow"),
-        None => gate.plan_terminal_reason,
-        _ => None,
+        _ => gate.plan_terminal_reason,
     };
     vec![TaskFlowControl {
         kind: TaskFlowControlKind::Start,

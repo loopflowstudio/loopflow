@@ -185,7 +185,7 @@ for the recorded branch remain unresolved. `lf ci watch`
 starts a ci-fix when a recorded landing fails its required checks.
 
 ```bash
-lf task complete EXP-12 --accept-unknown-exec EXEC_ID --summary 'Accepted historical uncertainty; delivery verified'
+lf task move EXP-12 end --accept-unknown-exec EXEC_ID --reason 'Accepted historical uncertainty; delivery verified'
 ```
 
 Explicit acceptance records the named Exec's unknown outcome in Task history

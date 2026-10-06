@@ -1,4 +1,4 @@
-use loopflow::durable::WorkStatus;
+use loopflow::durable::TaskState;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot, WaveDetailSnapshot};
 use loopflow::ops::pm::PmShowResult;
 use loopflow::work::wave::metrics::MetricPortfolioDto;
@@ -131,7 +131,7 @@ fn wave_detail_preserves_flow_and_requires_home() {
 #[test]
 fn status_preserves_stranded_tasks_alongside_project_history() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
-    assert_eq!(snapshot.unavailable_tasks[0].status, WorkStatus::Ready);
+    assert_eq!(snapshot.unavailable_tasks[0].status, TaskState::Ready);
     let Evidence::Ok { items, .. } = snapshot.tasks else {
         panic!("available tasks")
     };

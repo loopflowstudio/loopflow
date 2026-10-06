@@ -207,7 +207,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         (SELECT CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.outcome') END FROM session_events e INDEXED BY session_driver_exit
             WHERE e.session_id=s.id AND e.receipt_key='driver:'||(a.driver_generation-1)||':exit' AND e.kind='observed'),
         {waiting},
-        COALESCE(t.work_state IN ('done','abandoned'),0),
+        COALESCE(({task_state}) IN ('done','abandoned'),0),
         EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -217,7 +217,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         LEFT JOIN execs driver ON driver.id=fs.flow_exec_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
-        ORDER BY {order}", super::task_work::session_tasks("s"))
+        ORDER BY {order}", super::task_work::session_tasks("s"),
+        task_state = super::durable::task_state_sql("t"))
 }
 
 fn read_summary(

@@ -1286,7 +1286,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         {
             return crate::ops::task::cleanup_completed_task(store, &task).await;
         }
-        eprintln!("Task {} remains open; retained its checkout for further work and the next PR. Use `lf task complete {} --summary TEXT` when delivery is finished.", task.plan.identifier, task.plan.identifier);
+        eprintln!("Task {} remains open; retained its checkout for further work and the next PR. Use `lf task move {} end` when delivery is finished.", task.plan.identifier, task.plan.identifier);
         return Ok(());
     }
     // Only a Flow still being driven needs the checkout; a stopped one is history.

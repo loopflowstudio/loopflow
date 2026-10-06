@@ -232,8 +232,9 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Put the Task at a node of its Workflow without running anything.
-    public func moveTask(issue: String, node: String, cwd: String?) async throws {
-        _ = try await run(["task", "move", issue, node], cwd)
+    /// `force` reaches `end` although Linear already calls the Task complete.
+    public func moveTask(issue: String, node: String, force: Bool = false, cwd: String?) async throws {
+        _ = try await run(["task", "move", issue, node] + (force ? ["--force"] : []), cwd)
     }
 
     /// One Flow exec from its driver's record, by driver Exec.
@@ -535,7 +536,7 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
     public let workId: String
     public let taskId: String
     public let taskIdentifier: String
-    public let status: WorkStatus
+    public let status: TaskState
     public let owner: WorkNextMoveOwner
     public let reason: String
     public let recovery: String

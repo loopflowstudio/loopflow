@@ -16,8 +16,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::child::ChildRef;
-use crate::durable::{Home, WorkRef, WorkStatus};
+use crate::durable::{Home, TaskState, WorkRef, WorkStatus};
 use crate::lf::commands::session_history::format_tokens;
 use crate::lf::output::Colors;
 use crate::ops::task_execution::TaskExecutionState;
@@ -151,7 +150,10 @@ pub struct DirectionSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRuntimeSnapshot {
     pub work_id: String,
-    pub status: WorkStatus,
+    /// Read from the Task's Workflow position; abandoned is its own mark.
+    pub status: TaskState,
+    /// Linear calls the Task complete while it is active here.
+    pub planning_conflict: Option<String>,
     pub reason: String,
     pub updated_at: String,
     pub provider: String,
@@ -350,7 +352,7 @@ pub struct UnavailableTaskEvidence {
     pub work_id: String,
     pub task_id: String,
     pub task_identifier: String,
-    pub status: WorkStatus,
+    pub status: TaskState,
     pub owner: NextMoveOwner,
     pub reason: String,
     pub recovery: String,
@@ -876,7 +878,11 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
             RoadmapSection::Available
         };
     };
-    if work_status_is_terminal(&runtime.status) {
+    // Linear completing a Task that never left `start` withdraws it from what
+    // is offered; an active one keeps its place and shows the conflict.
+    let withdrawn = matches!(runtime.status, TaskState::NotReady | TaskState::Ready)
+        && crate::pm::terminal_reason(task.task.state.as_deref(), task.task.completed).is_some();
+    if runtime.status.is_terminal() || withdrawn {
         return RoadmapSection::Later;
     }
     match task.next_move.owner {
@@ -933,8 +939,8 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         .map_err(|err| anyhow!("failed to count active Tasks: {err}"))?;
     let mut active_tasks = 0;
     for task in tasks {
-        let status = child_work_status(store, &ChildRef::Task(task.id)).await?;
-        active_tasks += u32::from(!work_status_is_terminal(&status));
+        let state = store.task_state(&task.id).await?;
+        active_tasks += u32::from(!state.is_terminal());
     }
     let placement = store
         .placement(&WorkRef::Wave(wave.id().clone()))
@@ -973,19 +979,21 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
 fn snapshot_task_runtime(
     execution: &crate::ops::task_execution::TaskExecutionSnapshot,
     task: &Task,
-    status: WorkStatus,
+    status: TaskState,
+    planning_conflict: Option<String>,
     started: bool,
 ) -> TaskRuntimeSnapshot {
     let config = crate::engine::config::load_config_or_default(Some(&task.worktree));
     let (provider, _) = crate::engine::config::parse_agent(config.agent());
     TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
-        reason: if work_status_is_terminal(&status) {
-            status.reason().to_string()
+        reason: if status.is_terminal() {
+            status.label().to_string()
         } else {
             execution.reason.clone()
         },
         status,
+        planning_conflict,
         updated_at: format_time(task.updated_at).unwrap_or_default(),
         provider,
         started,
@@ -1073,7 +1081,7 @@ async fn snapshot_tasks(
         }) {
             continue;
         }
-        let status = child_work_status(store, &ChildRef::Task(task.id.clone())).await?;
+        let status = store.task_state(&task.id).await?;
         let parent = projects
             .iter()
             .find(|project| project.id == task.project_id);
@@ -1084,8 +1092,8 @@ async fn snapshot_tasks(
                 .find(|plan| plan.id == parent.plan.id.as_str())
         });
         if current_plan.is_none() {
-            if include_retained || !work_status_is_terminal(&status) {
-                unavailable_tasks.push(unavailable_task(task, status.clone()));
+            if include_retained || !status.is_terminal() {
+                unavailable_tasks.push(unavailable_task(task, status));
             }
             if !include_retained {
                 continue;
@@ -1134,7 +1142,7 @@ async fn snapshot_tasks(
     Ok((details, unavailable_tasks))
 }
 
-fn unavailable_task(task: &Task, status: WorkStatus) -> UnavailableTaskEvidence {
+fn unavailable_task(task: &Task, status: TaskState) -> UnavailableTaskEvidence {
     const REASON: &str = "Task's owning Project is absent from the current PM snapshot";
     UnavailableTaskEvidence {
         work_id: task.id.to_string(),
@@ -1174,13 +1182,17 @@ async fn snapshot_task_detail(
         Some(task) => {
             let (execution, flow_record) =
                 crate::ops::task_execution::task_execution_and_flow(store, &task.id).await?;
-            let status = child_work_status(store, &ChildRef::Task(task.id.clone())).await?;
+            let status = store.task_state(&task.id).await?;
+            let conflict =
+                crate::ops::task::planning_conflict_of(status, &item, &task.plan.identifier);
             let started = store.task_started(&task.id).await?
                 || prs
                     .iter()
                     .any(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
             (
-                Some(snapshot_task_runtime(&execution, task, status, started)),
+                Some(snapshot_task_runtime(
+                    &execution, task, status, conflict, started,
+                )),
                 Some(execution),
                 flow_record,
             )
@@ -1204,7 +1216,7 @@ async fn snapshot_task_detail(
             execution.state != TaskExecutionState::Idle
                 && runtime
                     .as_ref()
-                    .is_some_and(|runtime| !work_status_is_terminal(&runtime.status))
+                    .is_some_and(|runtime| !runtime.status.is_terminal())
         }) {
             return NextMove {
                 owner: match execution.state {
@@ -1220,7 +1232,8 @@ async fn snapshot_task_detail(
             &runtime
                 .as_ref()
                 .expect("Task runtime exists when the durable Task exists")
-                .status,
+                .status
+                .work_status(),
             active.map(TaskPr::phase),
             active
                 .filter(|pr| pr.phase() == PrPhase::Open)
@@ -1243,7 +1256,7 @@ async fn snapshot_task_detail(
     let local_progress =
         task_local_progress(task, runtime.as_ref(), active, worktree_blocker.as_ref());
     let completion_refusal = match (task, runtime.as_ref()) {
-        (Some(task), Some(runtime)) if !work_status_is_terminal(&runtime.status) => {
+        (Some(task), Some(runtime)) if !runtime.status.is_terminal() => {
             crate::ops::task::task_completion_gate_among(store, task, &shared.open)
                 .await?
                 .refusal(&task.plan.identifier)
@@ -1265,7 +1278,7 @@ async fn snapshot_task_detail(
                 None => None,
             };
             Some(TaskActionEvidence {
-                status: runtime.status.clone(),
+                status: runtime.status.work_status(),
                 execution: execution.as_ref(),
                 latest_pr_phase: latest.map(TaskPr::phase),
                 latest_pr_after_merge: latest
@@ -1304,10 +1317,16 @@ async fn snapshot_task_detail(
         Some(task) => current_direction(store, &task.id).await?,
         None => None,
     };
+    let work_status = runtime.as_ref().map(|runtime| runtime.status.work_status());
     let flow_controls =
         crate::ops::task_flow::task_flow_controls(&crate::ops::task_flow::TaskFlowGate {
-            status: runtime.as_ref().map(|runtime| &runtime.status),
-            plan_terminal_reason: item.terminal_reason(),
+            status: work_status.as_ref(),
+            // Linear completing a Task that never left `start` withdraws it.
+            plan_terminal_reason: item.terminal_reason().filter(|_| {
+                runtime.as_ref().is_none_or(|runtime| {
+                    matches!(runtime.status, TaskState::NotReady | TaskState::Ready)
+                })
+            }),
             worktree_blocker: worktree_blocker
                 .as_ref()
                 .map(|blocker| blocker.reason.as_str()),
@@ -1363,8 +1382,8 @@ fn task_local_progress(
         };
     };
     inspect_task_local_progress(
-        runtime
-            .map(|runtime| &runtime.status)
+        &runtime
+            .map(|runtime| runtime.status.work_status())
             .expect("Task runtime exists when the durable Task exists"),
         &task.worktree,
         active_pr.map(|pr| pr.base_commit.as_str()),
@@ -1465,7 +1484,7 @@ fn derive_task_condition(
 ) -> TaskConditionSnapshot {
     // A removed historical checkout does not reopen settled work.
     let unresolved_execution = runtime.is_some_and(|runtime| {
-        runtime.status == WorkStatus::Ready
+        !runtime.status.is_terminal()
             || matches!(flow, TaskFlowRecord::Latest(flow) if flow.execution != TaskExecutionState::Idle)
             || (local_progress.state == LocalProgressEvidenceState::Observed
                 && local_progress.unsettled == Some(true))
@@ -1481,7 +1500,7 @@ fn derive_task_condition(
     let execution = action_evidence.and_then(|evidence| evidence.execution);
     let (state, reason) = if let Some(execution) = execution
         .filter(|execution| execution.state != TaskExecutionState::Idle)
-        .filter(|_| runtime.is_none_or(|runtime| !work_status_is_terminal(&runtime.status)))
+        .filter(|_| runtime.is_none_or(|runtime| !runtime.status.is_terminal()))
     {
         let state = match execution.state {
             TaskExecutionState::Starting | TaskExecutionState::Running => TaskConditionState::Clear,
@@ -1737,17 +1756,6 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
 
 fn work_status_is_terminal(status: &WorkStatus) -> bool {
     matches!(status, WorkStatus::Done | WorkStatus::Abandoned)
-}
-
-async fn child_work_status(store: &SharedStore, child: &ChildRef) -> Result<WorkStatus> {
-    let work = store
-        .work_for_child(child)
-        .await
-        .map_err(|error| anyhow!("failed to resolve child Work: {error}"))?;
-    store
-        .work_status(&work)
-        .await
-        .map_err(|error| anyhow!("failed to read child Work status: {error}"))
 }
 
 fn print_status(status: &WaveDetailSnapshot) {
@@ -2292,7 +2300,7 @@ mod tests {
         LocalProgressEvidence, LocalProgressEvidenceState, NextMove, NextMoveOwner,
         TaskConditionState, TaskFlowRecord, TaskRuntimeSnapshot,
     };
-    use crate::durable::WorkStatus;
+    use crate::durable::{TaskState, WorkStatus};
     use crate::ops::task_actions::TaskActionEvidence;
     use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
     use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
@@ -2761,6 +2769,7 @@ mod tests {
                 updated_at: "2026-07-21T00:00:00Z".to_string(),
                 provider: "codex".to_string(),
                 started: true,
+                planning_conflict: None,
             };
             derive_task_condition(
                 Some(&runtime),
@@ -2795,11 +2804,11 @@ mod tests {
         let none = TaskFlowRecord::None;
         let missing = LocalProgressEvidenceState::Missing;
         // A removed checkout alone does not reopen settled work.
-        assert!(!unresolved(WorkStatus::Done, &none, missing, true));
-        assert!(unresolved(WorkStatus::Ready, &none, missing, true));
-        assert!(unresolved(WorkStatus::Done, &review, missing, false));
+        assert!(!unresolved(TaskState::Done, &none, missing, true));
+        assert!(unresolved(TaskState::Active, &none, missing, true));
+        assert!(unresolved(TaskState::Done, &review, missing, false));
         assert!(unresolved(
-            WorkStatus::Done,
+            TaskState::Done,
             &none,
             LocalProgressEvidenceState::Observed,
             true
@@ -2810,11 +2819,12 @@ mod tests {
     fn task_condition_distinguishes_clear_work_from_external_waits() {
         let runtime = TaskRuntimeSnapshot {
             work_id: "task-1".to_string(),
-            status: WorkStatus::Ready,
+            status: TaskState::Active,
             reason: "ready".to_string(),
             updated_at: "2026-07-21T00:00:00Z".to_string(),
             provider: "codex".to_string(),
             started: true,
+            planning_conflict: None,
         };
         let next_move = NextMove {
             owner: NextMoveOwner::Task,
@@ -2916,7 +2926,7 @@ mod tests {
             assert_eq!(condition.state, expected);
             assert_eq!(condition.reason, execution.reason);
             if state == TaskExecutionState::Blocked {
-                for status in [WorkStatus::Done, WorkStatus::Abandoned] {
+                for status in [TaskState::Done, TaskState::Abandoned] {
                     let runtime = TaskRuntimeSnapshot {
                         work_id: "task-1".into(),
                         status,
@@ -2924,6 +2934,7 @@ mod tests {
                         updated_at: "2026-07-21T00:00:00Z".into(),
                         provider: "codex".into(),
                         started: true,
+                        planning_conflict: None,
                     };
                     let terminal = derive_task_condition(
                         Some(&runtime),
@@ -2933,7 +2944,7 @@ mod tests {
                         },
                         condition.local_progress.clone(),
                         Some(&TaskActionEvidence {
-                            status: runtime.status.clone(),
+                            status: runtime.status.work_status(),
                             ..actions
                         }),
                         &TaskFlowRecord::None,

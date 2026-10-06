@@ -77,6 +77,20 @@ impl WorkflowDefinition {
     }
 }
 
+/// The workflow of a Task that reached `end` without taking one up: nothing
+/// between `start` and `end`.
+pub fn unplanned() -> WorkflowDefinition {
+    WorkflowDefinition {
+        name: "unplanned".to_string(),
+        nodes: Vec::new(),
+        edges: vec![WorkflowEdge {
+            from: START.to_string(),
+            to: END.to_string(),
+            flow: None,
+        }],
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AuthoredWorkflow {

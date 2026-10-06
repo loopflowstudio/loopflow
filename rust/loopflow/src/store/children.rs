@@ -85,11 +85,25 @@ impl Store {
         .await
     }
 
-    pub async fn complete_task(&self, task: &Task, skipped_pr: Option<&TaskPr>) -> StoreResult<()> {
+    pub(crate) async fn complete_task(
+        &self,
+        task: &Task,
+        skipped_pr: Option<&TaskPr>,
+        how: crate::store::sqlite::EndMove,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
         let task = task.clone();
         let skipped_pr = skipped_pr.cloned();
+        let by = crate::journal::current_exec_id();
+        let note = note.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
-            store.complete_task(&task, skipped_pr.as_ref())
+            store.complete_task(
+                &task,
+                skipped_pr.as_ref(),
+                &how,
+                by.as_ref(),
+                note.as_deref(),
+            )
         })
         .await
     }

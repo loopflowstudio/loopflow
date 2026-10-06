@@ -772,7 +772,7 @@ struct SessionsContentView: View {
             if fileTask?.task.reference.workspace?.localExists == false,
                navigation.preparedTaskWorktrees[fileTask?.task.id ?? ""] == nil {
                 Text("Recorded checkout is missing").font(Typography.meta)
-                if let runtime = fileTask?.task.runtime, runtime.status != .ready {
+                if let runtime = fileTask?.task.runtime, runtime.status.isTerminal {
                     Text("This Task is \(runtime.status.label). Checkout restoration is unavailable.")
                         .font(Typography.meta).foregroundStyle(palette.textSecondary)
                     Button("View Task details") { workspace.showsDetails = true }

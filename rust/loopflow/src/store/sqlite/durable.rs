@@ -4,7 +4,7 @@ use time::OffsetDateTime;
 use crate::child::ChildRef;
 use crate::durable::{
     AbandonReceipt, Author, Home, HomeId, Placement, ProjectId, Steer, SteerComment, TaskId,
-    ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    TaskState, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::store::rows::now_unix;
@@ -156,14 +156,17 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = now_unix();
         let (table, id) = work_table(work);
-        if tx.execute(
-            &format!(
+        let abandon = match work {
+            WorkRef::Task(_) => format!(
+                "UPDATE tasks AS t SET abandoned_at=?2 WHERE t.id=?1 AND {}",
+                task_open_sql("t")
+            ),
+            _ => format!(
                 "UPDATE {table} SET work_state='abandoned', work_terminal_at=?2
                  WHERE id=?1 AND work_state='ready'"
             ),
-            params![id, now],
-        )? != 1
-        {
+        };
+        if tx.execute(&abandon, params![id, now])? != 1 {
             return Err(StoreError::InvalidAuthority(format!(
                 "{} {} is not ready",
                 work.kind(),
@@ -188,6 +191,11 @@ impl SqliteStore {
     pub fn work_status(&self, work: &WorkRef) -> StoreResult<WorkStatus> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         work_status_in(&conn, work)
+    }
+
+    pub fn task_state(&self, task: &TaskId) -> StoreResult<TaskState> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        task_state_in(&conn, task)
     }
 
     pub fn work_for_child(&self, target: &ChildRef) -> StoreResult<WorkRef> {
@@ -557,7 +565,35 @@ fn inherit_placement(
     write_placement(tx, work, &home_id, placed_at)
 }
 
+/// SQL for the state of Task row `t`, read from its Workflow position.
+pub(crate) fn task_state_sql(t: &str) -> String {
+    format!(
+        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' ELSE COALESCE((
+            SELECT CASE WHEN wf.edge IS NOT NULL THEN 'active' WHEN wf.node='start' THEN 'ready'
+                WHEN wf.node='end' THEN 'done' ELSE 'active' END
+            FROM task_workflows wf WHERE wf.task_id={t}.id),'not_ready') END"
+    )
+}
+
+/// SQL: Task row `t` is neither done nor abandoned.
+pub(crate) fn task_open_sql(t: &str) -> String {
+    format!("({}) NOT IN ('done','abandoned')", task_state_sql(t))
+}
+
+pub(crate) fn task_state_in(conn: &Connection, task: &TaskId) -> StoreResult<TaskState> {
+    let state: String = conn.query_row(
+        &format!("SELECT {} FROM tasks t WHERE t.id=?1", task_state_sql("t")),
+        [task.as_str()],
+        |row| row.get(0),
+    )?;
+    TaskState::parse(&state)
+        .ok_or_else(|| StoreError::InvalidData(format!("invalid Task state {state:?}")))
+}
+
 pub(crate) fn work_status_in(conn: &Connection, work: &WorkRef) -> StoreResult<WorkStatus> {
+    if let WorkRef::Task(task) = work {
+        return Ok(task_state_in(conn, task)?.work_status());
+    }
     let (table, id) = work_table(work);
     let state: String = conn.query_row(
         &format!("SELECT work_state FROM {table} WHERE id=?1"),
@@ -1097,7 +1133,7 @@ mod durable_store_tests {
         }
         // A done Task is still a valid assignment target.
         conn.execute(
-            "UPDATE tasks SET work_state='done',work_terminal_at=1 WHERE id=?1",
+            "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,'{\"name\":\"unplanned\",\"nodes\":[],\"edges\":[{\"from\":\"start\",\"to\":\"end\",\"flow\":null}]}','end',1)",
             [bound_task.as_str()],
         )
         .unwrap();

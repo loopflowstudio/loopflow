@@ -776,8 +776,11 @@ pub enum TaskCommand {
         /// Direction for this run, published to the Task
         #[arg(long)]
         reason: Option<String>,
+        /// Reach `end` although Linear already calls the active Task complete
+        #[arg(long)]
+        force: bool,
     },
-    /// Put a Task at a node of its workflow without running anything
+    /// Put a Task at a node of its workflow without running anything; `end` completes it
     Move {
         issue: String,
         /// `start`, `end` or one of the workflow's nodes
@@ -785,6 +788,12 @@ pub enum TaskCommand {
         /// Why, kept in the Task's workflow history
         #[arg(long)]
         reason: Option<String>,
+        /// Reach `end` although Linear already calls the active Task complete
+        #[arg(long)]
+        force: bool,
+        /// Accept one historical Exec's unknown outcome when reaching `end`; retain its checkout
+        #[arg(long, value_name = "EXEC_ID")]
+        accept_unknown_exec: Vec<crate::id::ExecId>,
     },
     /// File a Task in the current chapter
     Create {
@@ -850,17 +859,6 @@ pub enum TaskCommand {
         path: String,
         #[arg(long)]
         revision: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Complete planning work, or a placed Task whose pull requests are settled
-    Complete {
-        issue: String,
-        #[arg(long)]
-        summary: String,
-        /// Accept one historical Exec's unknown outcome for completion only; retain its checkout
-        #[arg(long, value_name = "EXEC_ID")]
-        accept_unknown_exec: Vec<crate::id::ExecId>,
         #[arg(long)]
         json: bool,
     },
@@ -939,7 +937,6 @@ impl TaskCommand {
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }
-            | Self::Complete { issue, .. }
             | Self::Delete { issue }
             | Self::Edit { issue, .. }
             | Self::Comment { issue, .. }
@@ -2250,22 +2247,6 @@ mod tests {
 
     #[test]
     fn task_completion_and_pr_dispositions_parse() {
-        let complete = Cli::try_parse_from([
-            "lf",
-            "task",
-            "complete",
-            "INF-123",
-            "--summary",
-            "Root cause recorded",
-        ])
-        .expect("parse task complete");
-        assert!(matches!(
-            complete.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Complete { issue, summary, .. }
-            }) if issue == "INF-123" && summary == "Root cause recorded"
-        ));
-
         let land = Cli::try_parse_from(["lf", "pr", "land", "-c"]).expect("parse completing land");
         assert!(matches!(
             land.command,
@@ -2303,46 +2284,39 @@ mod tests {
     }
 
     #[test]
-    fn task_completion_has_one_public_command() {
+    fn reaching_end_is_the_one_completion_command() {
         let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "move",
+            "LOO-42",
+            "end",
+            "--reason",
+            "Delivered",
+            "--force",
+            "--accept-unknown-exec",
+            "00000000-0000-0000-0000-000000000001",
+        ])
+        .unwrap();
+        assert!(matches!(cli.command,
+            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason, force: true, accept_unknown_exec } })
+                if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")
+                    && accept_unknown_exec.iter().map(|id| id.as_str()).collect::<Vec<_>>() == ["00000000-0000-0000-0000-000000000001"]));
+        assert!(Cli::try_parse_from([
             "lf",
             "task",
             "complete",
             "LOO-42",
             "--summary",
-            "Delivered",
-            "--json",
+            "Delivered"
         ])
-        .unwrap();
-        assert!(
-            matches!(cli.command, Some(Commands::Task { cmd: TaskCommand::Complete { issue, summary, json: true, .. } }) if issue == "LOO-42" && summary == "Delivered")
-        );
+        .is_err());
         assert!(matches!(
             Cli::try_parse_from(["lf", "pm", "task", "done", "--id", "LOO-42"])
                 .unwrap()
                 .command,
             Some(Commands::External(_))
         ));
-    }
-
-    #[test]
-    fn task_complete_accepts_exact_historical_execs() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "task",
-            "complete",
-            "LOO-42",
-            "--summary",
-            "Delivery verified",
-            "--accept-unknown-exec",
-            "00000000-0000-0000-0000-000000000001",
-            "--accept-unknown-exec",
-            "00000000-0000-0000-0000-000000000002",
-        ])
-        .unwrap();
-        assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Complete { accept_unknown_exec, .. } })
-                if accept_unknown_exec.iter().map(|id| id.as_str()).collect::<Vec<_>>() == ["00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"]));
     }
 
     #[test]

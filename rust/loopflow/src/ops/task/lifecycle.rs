@@ -78,10 +78,12 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         Ok(())
     }
     .await;
-    result.map_err(|error| task_error(format!(
-        "Task {} is complete, but cleanup is incomplete: {error}. Retry `lf task complete {} --summary 'Retry cleanup'`.",
-        task.plan.identifier, task.plan.identifier,
-    )))
+    result.map_err(|error| {
+        task_error(format!(
+            "Task {} is complete, but cleanup is incomplete: {error}. Retry `lf task move {} end`.",
+            task.plan.identifier, task.plan.identifier,
+        ))
+    })
 }
 
 async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore, Task)>> {

@@ -136,7 +136,8 @@ CREATE TABLE task_workflows (
 ) STRICT;
 
 -- Every change to a Task's position, oldest first. `exec_id` is the `lf`
--- process that made it; who asked is that Exec's caller.
+-- process that made it; who asked is that Exec's caller. A move no registered
+-- process made, such as this migration's, names none.
 CREATE TABLE task_workflow_moves (
     seq INTEGER PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -145,11 +146,27 @@ CREATE TABLE task_workflow_moves (
     from_node TEXT NOT NULL,
     to_node TEXT NOT NULL,
     edge INTEGER,
-    exec_id TEXT NOT NULL REFERENCES execs(id),
+    exec_id TEXT REFERENCES execs(id),
     note TEXT,
     at INTEGER NOT NULL
 ) STRICT;
 CREATE INDEX task_workflow_moves_task ON task_workflow_moves(task_id, seq);
+
+-- A Task's state is where it stands on its Workflow: ready at `start`, active
+-- between, done at `end`. Abandoned stays its own mark. A Task already done
+-- stands at the end of a workflow with nothing between; every other Task takes
+-- one up when it next runs.
+ALTER TABLE tasks ADD COLUMN abandoned_at INTEGER;
+UPDATE tasks SET abandoned_at=COALESCE(work_terminal_at,updated_at) WHERE work_state='abandoned';
+INSERT INTO task_workflows(task_id,graph,node,updated_at)
+SELECT id,'{"name":"unplanned","nodes":[],"edges":[{"from":"start","to":"end","flow":null}]}',
+    'end',COALESCE(work_terminal_at,updated_at)
+FROM tasks WHERE work_state='done';
+INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,note,at)
+SELECT id,'unplanned','set','start','end','completed before Workflows',COALESCE(work_terminal_at,updated_at)
+FROM tasks WHERE work_state='done';
+ALTER TABLE tasks DROP COLUMN work_state;
+ALTER TABLE tasks DROP COLUMN work_terminal_at;
 
 CREATE TRIGGER task_workflow_graph_is_fixed BEFORE UPDATE OF graph ON task_workflows BEGIN
     SELECT RAISE(ABORT,'A Workflow graph is fixed when taken up');

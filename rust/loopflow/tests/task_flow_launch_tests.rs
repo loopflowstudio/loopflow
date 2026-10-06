@@ -203,6 +203,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
 struct WorkflowTask {
     repo: TestRepo,
     home: tempfile::TempDir,
+    registered: support::RegisteredTask,
     _env: support::EnvGuard,
 }
 
@@ -216,12 +217,6 @@ impl WorkflowTask {
             ("open", "#!/bin/sh\nexit 0\n"),
             ("gh", "#!/bin/sh\nexit 1\n"),
         ]);
-        support::register_task(
-            home.path(),
-            &repo.path().canonicalize().unwrap(),
-            "launch-proof",
-            &repo.head_sha(),
-        );
         for (path, content) in [
             (".lf/flows/proof.yaml", "- cmd: task sync --plan\n"),
             (".lf/flows/land-proof.yaml", "- cmd: task sync --plan\n"),
@@ -231,7 +226,7 @@ impl WorkflowTask {
             // Another round succeeds; accepting fails until `late` exists.
             (
                 ".lf/workflows/gated.yaml",
-                "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: review, flow: proof}\n  - {from: review, to: end, flow: gate}\n",
+                "nodes:\n  review: demo\n  accepted: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: review, flow: proof}\n  - {from: review, to: accepted, flow: gate}\n  - {from: accepted, to: end}\n",
             ),
             // The Project's workflow, `feature`, as this repository defines it.
             (
@@ -253,11 +248,61 @@ impl WorkflowTask {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, content).unwrap();
         }
+        // The Task's branch starts from these definitions and holds nothing.
+        repo.stage_all();
+        repo.commit("Define the fixture Flows and workflows");
+        let registered = support::register_task(
+            home.path(),
+            &repo.path().canonicalize().unwrap(),
+            "launch-proof",
+            &repo.head_sha(),
+        );
         Self {
             repo,
             home,
+            registered,
             _env: env,
         }
+    }
+
+    fn status(&self) -> serde_json::Value {
+        let status = self.run(&["task", "status", "INF-123", "--json"]);
+        assert!(
+            status.status.success(),
+            "{}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+        let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+        status["execution"].clone()
+    }
+
+    /// The Task's state as `lf task status` reads it from the Workflow.
+    fn state(&self) -> String {
+        self.status()["status"].as_str().unwrap().to_string()
+    }
+
+    /// Linear now calls the Task complete, as last read.
+    fn complete_in_linear(&self) {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let scope = self
+            .repo
+            .path()
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string();
+        let store = &self.registered.store;
+        let mut record = runtime
+            .block_on(store.pm_task_observation(&scope, "linear", "INF-123"))
+            .unwrap()
+            .record
+            .unwrap();
+        record.item.revision = Some("2026-10-06T12:00:00Z".into());
+        record.item.state = Some("completed".into());
+        record.item.completed = true;
+        runtime
+            .block_on(store.put_pm_task(&scope, "linear", record))
+            .unwrap();
     }
 
     fn run(&self, args: &[&str]) -> std::process::Output {
@@ -276,14 +321,7 @@ impl WorkflowTask {
     }
 
     fn workflow(&self) -> serde_json::Value {
-        let status = self.run(&["task", "status", "INF-123", "--json"]);
-        assert!(
-            status.status.success(),
-            "{}",
-            String::from_utf8_lossy(&status.stderr)
-        );
-        let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-        status["execution"]["work"]["workflow"].clone()
+        self.status()["work"]["workflow"].clone()
     }
 }
 
@@ -361,9 +399,12 @@ fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
     assert_eq!(workflow["position"], at("end"));
     assert_eq!(moves(&workflow).last(), Some(&chose(1)));
     assert_eq!(support::recorded_flows(task.home.path()).len(), 1);
-    // Reaching the end neither completes the Task nor leaves an edge to run.
+    // Reaching the end is completion: the Task is done, its empty PR slot is
+    // retired, and nothing is left to run.
+    assert_eq!(task.state(), "done");
+    assert!(task.status()["active_pr"].is_null());
     let error = refusal(task.run(&["-b", "task", "run", "INF-123"]));
-    assert!(error.contains("reached its end"), "{error}");
+    assert!(error.contains("is done"), "{error}");
     let status = task.run(&["task", "status", "INF-123"]);
     assert!(String::from_utf8_lossy(&status.stdout).contains("Workflow findings: at end"));
 }
@@ -429,14 +470,10 @@ fn a_landing_that_settles_later_is_recorded_by_moving_the_task() {
     assert_eq!(set["session_id"], serde_json::Value::Null);
     // One Flow exec reached the node; the failing edge was attempted three times.
     assert_eq!(support::recorded_flows(task.home.path()).len(), 4);
-    // Taking up another workflow starts over and keeps the history.
-    let before = workflow["history"].as_array().unwrap().len();
-    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
-    let workflow = task.workflow();
-    assert_eq!(workflow["name"], "findings");
-    assert_eq!(workflow["position"], at("findings"));
-    assert_eq!(workflow["history"].as_array().unwrap().len(), before + 3);
-    assert_eq!(workflow["history"][0]["workflow"], "rounds");
+    // The Task is done; nothing runs until it is put back on its workflow.
+    assert_eq!(task.state(), "done");
+    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "findings"]));
+    assert!(error.contains("lf task move INF-123"), "{error}");
 }
 
 #[test]
@@ -454,14 +491,14 @@ fn a_stopped_edge_is_chosen_again_and_the_task_can_go_back() {
     let status = task.run(&["task", "status", "INF-123"]);
     let status = String::from_utf8_lossy(&status.stdout).to_string();
     assert!(
-        status.contains("Workflow gated: stopped on gate (review → end)"),
+        status.contains("Workflow gated: stopped on gate (review → accepted)"),
         "{status}"
     );
     // Once its cause is fixed the same edge is chosen again and arrives.
     let late = task.repo.path().join(".lf/flows/late.yaml");
     fs::write(late, "- cmd: task sync --plan\n").unwrap();
     task.ok(&["-b", "task", "run", "INF-123", "gate"]);
-    assert_eq!(task.workflow()["position"], at("end"));
+    assert_eq!(task.workflow()["position"], at("accepted"));
     // The demo was not good enough after all: go back and take the loop.
     task.ok(&[
         "task",
@@ -481,7 +518,18 @@ fn a_stopped_edge_is_chosen_again_and_the_task_can_go_back() {
         ["took_up", "chose", "arrived", "chose", "chose", "arrived", "set", "chose", "arrived"]
     );
     let error = refusal(task.run(&["task", "move", "INF-123", "nowhere"]));
-    assert!(error.contains("Nodes: start, review, end"), "{error}");
+    assert!(
+        error.contains("Nodes: start, review, accepted, end"),
+        "{error}"
+    );
+    // Taking up another workflow starts over and keeps the history.
+    let before = workflow["history"].as_array().unwrap().len();
+    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
+    let workflow = task.workflow();
+    assert_eq!(workflow["name"], "findings");
+    assert_eq!(workflow["position"], at("findings"));
+    assert_eq!(workflow["history"].as_array().unwrap().len(), before + 3);
+    assert_eq!(workflow["history"][0]["workflow"], "gated");
 }
 
 #[test]
@@ -567,7 +615,7 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
         String::from_utf8_lossy(&output.stderr)
     );
     let workflow = task.workflow();
-    assert_eq!(workflow["position"], at("end"));
+    assert_eq!(workflow["position"], at("accepted"));
     // One Task run: chosen once, arrived once, three Flow execs beneath it.
     let kinds: Vec<_> = moves(&workflow).into_iter().map(|(kind, _)| kind).collect();
     assert_eq!(
@@ -581,4 +629,115 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
         ["failed", "failed", "succeeded"]
     );
     assert_eq!(support::recorded_flows(task.home.path()).len(), 7);
+}
+
+#[test]
+fn a_tasks_state_is_read_from_where_it_stands_on_its_workflow() {
+    let task = WorkflowTask::new();
+    assert_eq!(task.state(), "not_ready");
+    // A node, then a stopped edge: both between start and end.
+    task.ok(&["-b", "task", "run", "INF-123", "gated"]);
+    assert_eq!(task.workflow()["position"], at("review"));
+    assert_eq!(task.state(), "active");
+    assert!(!task
+        .run(&["-b", "task", "run", "INF-123", "gate"])
+        .status
+        .success());
+    assert_eq!(task.workflow()["position"]["kind"], "edge");
+    assert_eq!(task.state(), "active");
+    task.ok(&["task", "move", "INF-123", "start"]);
+    assert_eq!(task.state(), "ready");
+    // Reaching `end` is completion, and leaving it reopens the Task.
+    task.ok(&["task", "move", "INF-123", "end", "--reason", "Delivered"]);
+    assert_eq!(task.state(), "done");
+    let text =
+        String::from_utf8_lossy(&task.run(&["task", "status", "INF-123"]).stdout).to_string();
+    assert!(text.contains("\nINF-123  done\n"), "{text}");
+    task.ok(&["task", "move", "INF-123", "review"]);
+    assert_eq!(task.state(), "active");
+    // The command `end` replaced is gone.
+    assert!(!task
+        .run(&["task", "complete", "INF-123", "--summary", "x"])
+        .status
+        .success());
+}
+
+#[test]
+fn a_task_with_no_workflow_reaches_end_on_one_with_nothing_between() {
+    let task = WorkflowTask::new();
+    task.ok(&["task", "move", "INF-123", "end"]);
+    assert_eq!(task.state(), "done");
+    let workflow = task.workflow();
+    assert_eq!(workflow["name"], "unplanned");
+    assert_eq!(workflow["position"], at("end"));
+    assert_eq!(moves(&workflow), [("set".into(), None)]);
+}
+
+#[test]
+fn end_is_refused_while_the_tasks_pr_is_unsettled() {
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
+    task.repo.create_file("notes.md", "unpublished\n");
+    task.repo.stage_all();
+    task.repo.commit("Unpublished work");
+    // By its edge or by hand, the Task stays where it was.
+    for reach in [
+        &["task", "run", "INF-123"][..],
+        &["task", "move", "INF-123", "end"],
+    ] {
+        let error = refusal(task.run(reach));
+        assert!(error.contains("unpublished pull request"), "{error}");
+        assert_eq!(task.workflow()["position"], at("findings"));
+        assert_eq!(task.state(), "active");
+    }
+}
+
+#[test]
+fn linear_completing_an_active_task_is_shown_and_holds_it_from_end() {
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "gated"]);
+    task.complete_in_linear();
+    let conflict = task.status()["planning_conflict"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        conflict.contains("lf task move INF-123 end --force"),
+        "{conflict}"
+    );
+    // Work goes on.
+    task.ok(&["-b", "task", "run", "INF-123", "proof"]);
+    assert_eq!(task.workflow()["position"], at("review"));
+    // `end` waits for a person to say so.
+    task.ok(&["task", "move", "INF-123", "accepted"]);
+    for reach in [
+        &["task", "run", "INF-123"][..],
+        &["task", "move", "INF-123", "end"],
+    ] {
+        let error = refusal(task.run(reach));
+        assert!(error.contains("--force"), "{error}");
+        assert_eq!(task.state(), "active");
+    }
+    task.ok(&[
+        "task", "move", "INF-123", "end", "--force", "--reason", "Agreed",
+    ]);
+    assert_eq!(task.state(), "done");
+    assert!(task.status()["planning_conflict"].is_null());
+    let workflow = task.workflow();
+    let set = workflow["history"].as_array().unwrap().last().unwrap();
+    assert_eq!(
+        set["note"],
+        "Agreed (forced: Linear already called it complete)"
+    );
+}
+
+#[test]
+fn linear_completing_a_task_that_never_started_withdraws_it() {
+    let task = WorkflowTask::new();
+    task.complete_in_linear();
+    assert!(task.status()["planning_conflict"].is_null());
+    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "gated"]));
+    assert!(error.contains("terminal"), "{error}");
+    assert!(support::recorded_flows(task.home.path()).is_empty());
+    assert_eq!(task.state(), "not_ready");
 }

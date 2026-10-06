@@ -53,6 +53,23 @@ struct WorkflowView: View {
                     .accessibilityIdentifier("task-workflow-move")
                     if draft?.acting == true { ProgressView().controlSize(.small) }
                 }
+                // Linear called the Task complete while it is active here.
+                if let conflict = task.runtime?.planningConflict {
+                    HStack(spacing: Spacing.sm) {
+                        Text(conflict)
+                            .font(Typography.body(12))
+                            .foregroundStyle(WorkspaceTone.blocked.ink)
+                            .textSelection(.enabled)
+                            .accessibilityIdentifier("task-workflow-conflict")
+                        Button("Complete anyway") {
+                            Task { await model.moveTask(to: "end", force: true, task: task, wave: wave) }
+                        }
+                        .buttonStyle(WorkspaceOutlineButtonStyle())
+                        .disabled(draft?.acting == true)
+                        .help("lf task move \(task.task.identifier) end --force")
+                        .accessibilityIdentifier("task-workflow-force-end")
+                    }
+                }
                 if let error = draft?.error {
                     Text(error)
                         .font(Typography.body(12))

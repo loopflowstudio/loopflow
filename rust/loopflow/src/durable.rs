@@ -215,6 +215,65 @@ impl std::fmt::Display for WorkStatus {
     }
 }
 
+/// A Task's state, read from where it stands on its Workflow. Abandoned is
+/// the Task's own mark and outranks its position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskState {
+    /// The Task has taken up no Workflow.
+    NotReady,
+    /// At `start`.
+    Ready,
+    /// At a node or on an edge between `start` and `end`.
+    Active,
+    /// At `end`.
+    Done,
+    Abandoned,
+}
+
+impl TaskState {
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            Self::NotReady => "not_ready",
+            Self::Ready => "ready",
+            Self::Active => "active",
+            Self::Done => "done",
+            Self::Abandoned => "abandoned",
+        }
+    }
+
+    pub(crate) fn parse(label: &str) -> Option<Self> {
+        [
+            Self::NotReady,
+            Self::Ready,
+            Self::Active,
+            Self::Done,
+            Self::Abandoned,
+        ]
+        .into_iter()
+        .find(|state| state.label() == label)
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Done | Self::Abandoned)
+    }
+
+    /// The Task as Work: open until it is done or abandoned.
+    pub(crate) fn work_status(&self) -> WorkStatus {
+        match self {
+            Self::NotReady | Self::Ready | Self::Active => WorkStatus::Ready,
+            Self::Done => WorkStatus::Done,
+            Self::Abandoned => WorkStatus::Abandoned,
+        }
+    }
+}
+
+impl std::fmt::Display for TaskState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.label().replace('_', " "))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbandonReceipt {
     pub work: WorkRef,

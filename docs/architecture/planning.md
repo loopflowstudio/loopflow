@@ -157,6 +157,16 @@ Task on its edge. `lf task move ISSUE NODE` sets. An edge is not chosen
 while another runs. A move's author is its Exec's calling conversation, else
 a person; an arrival is the edge's own.
 
+A Task's state is read from that position and stored nowhere else: not ready
+with no Workflow, ready at `start`, active at a node or on an edge, done at
+`end`. Abandoned is the Task's own mark. Any move that reaches `end` is
+completion: one transaction writes the position, the Completed event and the
+retirement of an empty unpublished PR, after the settled-PR and
+unresolved-execution checks and the Linear write. A Task with no Workflow
+reaches `end` on `unplanned`, which has nothing between. Linear calling an
+active Task complete is read as `planning_conflict`; `end` then takes `--force`,
+kept in the move's note.
+
 ## Read each step's result
 
 Each executed skill or operation runs in its own child lf Exec as the plain

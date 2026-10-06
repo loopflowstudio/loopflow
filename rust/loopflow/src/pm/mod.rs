@@ -158,6 +158,14 @@ impl PmItem {
     pub fn terminal_reason(&self) -> Option<&'static str> {
         terminal_reason(self.state.as_deref(), self.completed)
     }
+
+    /// Linear calls the item complete, not canceled or duplicate.
+    pub fn is_complete(&self) -> bool {
+        match self.state.as_deref() {
+            Some(state) => state == "completed",
+            None => self.completed,
+        }
+    }
 }
 
 pub fn terminal_reason(state: Option<&str>, completed: bool) -> Option<&'static str> {

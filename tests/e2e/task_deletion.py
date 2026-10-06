@@ -254,14 +254,18 @@ def main() -> None:
             assert result.returncode != 0
             assert "primary checkout or default branch" in result.stderr, result.stderr
             assert not issue["trashed"] and issue["state"]["type"] == "unstarted"
-            assert db.execute("SELECT work_state FROM tasks").fetchone() == ("ready",)
+            assert db.execute("SELECT abandoned_at FROM tasks").fetchone() == (None,)
+            assert db.execute("SELECT * FROM task_workflows").fetchall() == []
             assert db.execute("SELECT * FROM task_prs").fetchall() == prs
             assert authored.read_text() == "preserve authored work\n"
             issue["state"]["type"] = "completed"
             issue["updatedAt"] = _next_revision(issue["updatedAt"])
             db.execute(
-                "UPDATE tasks SET work_state='done',work_terminal_at=123 WHERE id=?",
-                (fixture["task"],),
+                "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?,?,'end',123)",
+                (
+                    fixture["task"],
+                    '{"name":"unplanned","nodes":[],"edges":[{"from":"start","to":"end","flow":null}]}',
+                ),
             )
             db.commit()
             before = db.execute("SELECT * FROM tasks").fetchall()

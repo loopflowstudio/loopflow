@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 use loopflow::durable::WorkStatus;
-use loopflow::ops::task::{pr_next, task_complete, task_snapshot, task_status};
+use loopflow::ops::task::{pr_next, task_end, task_snapshot, task_status};
 use loopflow::ops::{
     arm as land, commit_workflow, create_or_update_pr, current_pr, present_pr_review,
     CommitOptions, LandOptions, NullProgress, OpsError, PrOptions,
@@ -1014,7 +1014,7 @@ fn serial_task_pr_publication_restores_task_context() {
         .expect("reconcile Task PR")
         .execution
         .expect("execution");
-    assert!(!matches!(persisted_task.status, WorkStatus::Done));
+    assert!(!persisted_task.status.is_terminal());
     assert!(
         matches!(
             persisted_task.observation,
@@ -1413,7 +1413,7 @@ fn observed_merge_does_not_complete_a_task_from_status() {
         ),
         "status should use the bounded REST observation: {persisted_task:?}"
     );
-    assert!(matches!(persisted_task.status, WorkStatus::Ready));
+    assert!(!persisted_task.status.is_terminal());
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read completing PR");
@@ -1515,7 +1515,7 @@ fn observed_auto_merge_waits_for_watched_landing_to_complete_the_task() {
         .expect("reconcile watched PR merge")
         .execution
         .expect("execution");
-    assert!(!matches!(persisted_task.status, WorkStatus::Done));
+    assert!(!persisted_task.status.is_terminal());
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read completing PR");
@@ -1560,7 +1560,7 @@ fn repeated_status_of_merged_task_never_completes_work() {
         .expect("first merged-PR status")
         .execution
         .expect("execution");
-    assert_eq!(first.status, WorkStatus::Ready);
+    assert!(!first.status.is_terminal());
     let first_events = runtime
         .block_on(task.store.task_events_after(&task.task.id, 0))
         .expect("read first Task events");
@@ -1588,7 +1588,7 @@ fn repeated_status_of_merged_task_never_completes_work() {
         .block_on(task.store.task_events_after(&task.task.id, 0))
         .expect("reread Task events");
 
-    assert_eq!(second.status, WorkStatus::Ready);
+    assert!(!second.status.is_terminal());
     assert_eq!(
         second_state, first_state,
         "status must not mutate Work state"
@@ -1610,11 +1610,10 @@ fn repeated_status_of_merged_task_never_completes_work() {
 }
 
 #[test]
-fn task_complete_refuses_while_a_working_pr_is_unsettled() {
-    // W2-151: a Task must not be completed in the PM while it still owns an
-    // unsettled PR. Previously `lf task complete` would delete an unpublished
-    // working PR and complete; now the completion gate refuses it so the PR
-    // cannot be published later into a Task the PM already calls done.
+fn end_is_refused_while_a_working_pr_holds_unpublished_commits() {
+    // W2-151: a Task must not reach `end` while it still owns an unsettled
+    // PR, so the PR cannot be published later into a Task the PM already
+    // calls done. Only a PR whose branch never moved is retired there.
     let home = tempfile::TempDir::new().expect("temp home");
     let gh_script = write_gh_script("[]", None);
     let _env = EnvGuard::with_lf_home(&[("gh", gh_script.as_str())], home.path());
@@ -1622,9 +1621,12 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
     let base = repo.head_sha();
     let branch = "jack/task-pr-proof";
     repo.create_branch(branch);
+    repo.create_file("notes.md", "unpublished\n");
+    repo.stage_all();
+    repo.commit("Unpublished work");
     let task = register_task(home.path(), repo.path(), branch, &base);
 
-    let result = task_complete(repo.path(), "INF-123", "done".to_string(), &[]);
+    let result = task_end(repo.path(), "INF-123", Some("done"), &Default::default());
     let message = result
         .expect_err("an unpublished working PR must block completion")
         .to_string();

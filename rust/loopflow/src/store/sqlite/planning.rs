@@ -570,6 +570,7 @@ mod tests {
             "normalize_pm_planning",
             "pm_issue_revisions",
             "pm_project_evidence",
+            "task_flow_observations",
         ] {
             sqlite.apply_migration_for_test(name).unwrap();
         }

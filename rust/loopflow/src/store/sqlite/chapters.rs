@@ -72,7 +72,10 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         let (abandoned, completed): (bool, bool) = conn.query_row(
-            "SELECT work_state='abandoned',work_state='done' FROM tasks WHERE id=?1",
+            &format!(
+                "SELECT state='abandoned',state='done' FROM (SELECT {} AS state FROM tasks t WHERE t.id=?1)",
+                super::durable::task_state_sql("t")
+            ),
             [task.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
@@ -92,16 +95,19 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
-            "UPDATE tasks SET work_state='abandoned',work_terminal_at=?2 WHERE id=?1 AND work_state='ready'
-                 AND started_at IS NULL
+            &format!(
+                "UPDATE tasks AS t SET abandoned_at=?2 WHERE t.id=?1 AND {}
+                 AND t.started_at IS NULL
                  AND NOT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1
                     AND (publication_requested_at IS NOT NULL OR merge_commit IS NOT NULL))
                  AND NOT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
                     AND json_extract(kind_json,'$.kind')='started')",
+                super::durable::task_open_sql("t")
+            ),
             params![task.as_str(), super::super::rows::now_unix()],
         )?;
         let retired = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND work_state='abandoned')",
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND abandoned_at IS NOT NULL)",
             [task.as_str()],
             |row| row.get(0),
         )?;

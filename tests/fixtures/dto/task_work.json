@@ -101,6 +101,18 @@
     "outgoing": [],
     "history": [
       {
+        "workflow": "unplanned",
+        "kind": "set",
+        "from": "start",
+        "to": "end",
+        "edge": null,
+        "exec_id": null,
+        "actor": "person",
+        "session_id": null,
+        "note": "completed before Workflows",
+        "at": 1690000000
+      },
+      {
         "workflow": "feature",
         "kind": "took_up",
         "from": "start",

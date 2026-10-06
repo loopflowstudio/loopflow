@@ -656,11 +656,8 @@ struct WorkChannelChips: View {
         .clipShape(Capsule())
     }
 
-    private func statusColor(_ status: WorkStatus) -> Color {
-        switch status {
-        case .done, .abandoned: .statusNeutral
-        case .ready: .statusInfo
-        }
+    private func statusColor(_ status: TaskState) -> Color {
+        status.isTerminal ? .statusNeutral : .statusInfo
     }
 }
 

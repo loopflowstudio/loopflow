@@ -1991,9 +1991,76 @@ mod tests {
             VALUES('flow-only','p','linear-f','LOO-2',1,'/repo/flow-only');
             INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state)
             VALUES('only','flow-only','w','{"id":"only","flow":"code"}',0,0,1,0,9,'current');
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,updated_at,worktree,work_state,work_terminal_at)
+            VALUES('finished','p','linear-d','LOO-3',1,30,'/repo/finished','done',25),
+                  ('dropped','p','linear-a','LOO-4',1,30,'/repo/dropped','abandoned',26);
         "#).unwrap();
         conn.execute_batch(&current_draft_sql("task_flow_observations"))
             .unwrap();
+        // A Task's state is now its Workflow position. A done Task stands at
+        // the end of a workflow with nothing between, placed by a move no
+        // process made; abandoned keeps its own mark; the rest have no
+        // Workflow until they next run.
+        let states: Vec<(String, String)> = conn
+            .prepare(&format!(
+                "SELECT t.id,{} FROM tasks t ORDER BY t.id",
+                crate::store::sqlite::task_state_sql("t")
+            ))
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            states,
+            [
+                ("dropped", "abandoned"),
+                ("finished", "done"),
+                ("flow-only", "not_ready"),
+                ("t", "not_ready")
+            ]
+            .map(|(id, state)| (id.to_string(), state.to_string()))
+        );
+        let placed: (String, i64, Option<String>, i64, i64) = conn
+            .query_row(
+                "SELECT w.graph,w.updated_at,m.exec_id,m.at,t.abandoned_at IS NULL
+                 FROM task_workflows w JOIN task_workflow_moves m ON m.task_id=w.task_id
+                 JOIN tasks t ON t.id=w.task_id WHERE w.task_id='finished'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<crate::engine::workflow::WorkflowDefinition>(&placed.0).unwrap(),
+            crate::engine::workflow::unplanned()
+        );
+        assert_eq!((placed.1, placed.2, placed.3, placed.4), (25, None, 25, 1));
+        assert_eq!(
+            conn.query_row(
+                "SELECT abandoned_at FROM tasks WHERE id='dropped'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            26
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM pragma_table_info('tasks') WHERE name IN ('work_state','work_terminal_at')",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
         let feedback: (String, Option<i64>) = conn
             .query_row(
                 "SELECT json_extract(e.payload,'$.summary'),s.completed_at FROM agent_sessions s

@@ -125,6 +125,7 @@
         "runtime": {
           "work_id": "ts_22222222222222222222222222222222",
           "status": "ready",
+          "planning_conflict": null,
           "reason": "ready",
           "updated_at": "2026-07-13T19:00:00Z",
           "provider": "codex",

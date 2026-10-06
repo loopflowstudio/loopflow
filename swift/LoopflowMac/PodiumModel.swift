@@ -1232,14 +1232,15 @@ final class PodiumModel {
 
     /// Put the Task at a node of its Workflow, then refresh the shared
     /// reading. A refusal is kept on that Task's draft.
-    func moveTask(to node: String, task: RoadmapTask, wave: WaveSnapshot) async {
+    func moveTask(to node: String, force: Bool = false, task: RoadmapTask, wave: WaveSnapshot) async {
         let owner = navigation
         let taskId = task.id
         guard owner.flowDrafts[taskId]?.acting != true else { return }
         owner.flowDrafts[taskId, default: TaskFlowDraft()].acting = true
         owner.flowDrafts[taskId]?.error = nil
         do {
-            try await query.moveTask(issue: task.task.identifier, node: node, cwd: WaveOrigin.resolve(wave.repo))
+            try await query.moveTask(
+                issue: task.task.identifier, node: node, force: force, cwd: WaveOrigin.resolve(wave.repo))
             owner.flowDrafts[taskId] = nil
             await loadTaskWork(task: task, wave: wave)
         } catch {

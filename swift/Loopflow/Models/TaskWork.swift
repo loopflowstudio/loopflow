@@ -41,7 +41,8 @@ public struct Workflow: Codable, Sendable, Equatable {
         public let from: String
         public let to: String
         public let edge: Int?
-        public let execId: String
+        /// The `lf` process that made the move; `nil` when none was registered.
+        public let execId: String?
         public let actor: Actor
         public let sessionId: String?
         public let note: String?

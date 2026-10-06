@@ -1285,12 +1285,15 @@ mod tests {
                 "CREATE TABLE tasks (
                     id TEXT PRIMARY KEY,
                     worktree TEXT NOT NULL,
-                    work_state TEXT NOT NULL
+                    abandoned_at INTEGER
                  );
-                 INSERT INTO tasks VALUES ('running', '/repo.running', 'ready');
-                 INSERT INTO tasks VALUES ('waiting', '/repo.waiting', 'ready');
-                 INSERT INTO tasks VALUES ('completed', '/repo.completed', 'done');
-                 INSERT INTO tasks VALUES ('abandoned', '/repo.abandoned', 'abandoned');",
+                 CREATE TABLE task_workflows (task_id TEXT PRIMARY KEY, node TEXT NOT NULL, edge INTEGER);
+                 INSERT INTO tasks VALUES ('running', '/repo.running', NULL);
+                 INSERT INTO tasks VALUES ('waiting', '/repo.waiting', NULL);
+                 INSERT INTO tasks VALUES ('completed', '/repo.completed', NULL);
+                 INSERT INTO tasks VALUES ('abandoned', '/repo.abandoned', 1);
+                 INSERT INTO task_workflows VALUES ('running', 'review', 2);
+                 INSERT INTO task_workflows VALUES ('completed', 'end', NULL);",
             )
             .expect("seed task ownership");
         drop(connection);
@@ -1545,7 +1548,7 @@ mod tests {
         let connection = rusqlite::Connection::open(directory.path().join("registry.db")).unwrap();
         connection
             .execute(
-                "UPDATE tasks SET work_terminal_at=1700000000 WHERE id=?1",
+                "UPDATE tasks SET abandoned_at=1700000000 WHERE id=?1",
                 [task.id.as_str()],
             )
             .unwrap();
@@ -1553,7 +1556,7 @@ mod tests {
         assert!(store.retire_chapter_backlog(&task.id).await.unwrap());
         let terminal_at: i64 = connection
             .query_row(
-                "SELECT work_terminal_at FROM tasks WHERE id=?1",
+                "SELECT abandoned_at FROM tasks WHERE id=?1",
                 [task.id.as_str()],
                 |row| row.get(0),
             )
@@ -2677,7 +2680,10 @@ mod tests {
             .update_task_plan(&task.id, &refreshed_plan)
             .await
             .unwrap();
-        store.complete_task(&task, Some(&pr)).await.unwrap();
+        store
+            .complete_task(&task, Some(&pr), crate::store::sqlite::EndMove::Set, None)
+            .await
+            .unwrap();
         let retained = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(retained.plan, refreshed_plan);
         let stored = store.task_prs(&task.id).await.unwrap();

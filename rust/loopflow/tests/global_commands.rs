@@ -148,6 +148,7 @@ fn explicit_home_ignores_retired_control_home_pins() {
 }
 
 #[test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn installation_uses_candidate_authority_from_any_checkout() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
@@ -180,6 +181,7 @@ fn installation_uses_candidate_authority_from_any_checkout() {
 }
 
 #[test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn installation_reaches_candidate_verdict_with_an_unreadable_task_registry() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();

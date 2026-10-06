@@ -1016,6 +1016,12 @@ installation harness for default-runtime proofs; never replace the machine's
 selection to make tests pass. Flow/Session tests with an explicit experimental
 `LF_HOME` and source `LF_BIN` stay within that experiment.
 
+`lf home install preflight` and `promote` read the OS account's store and take
+its promotion lock; `HOME` and `LF_HOME` do not redirect them. Tests that run
+either command are installation proofs: ignored in the regular suite and listed
+in `scripts/test_task_installation.py`. On a developer machine they would copy
+the live database, without bound while other workers write to it.
+
 For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
 Verify the repair in that same environment. A pass under a developer's installed

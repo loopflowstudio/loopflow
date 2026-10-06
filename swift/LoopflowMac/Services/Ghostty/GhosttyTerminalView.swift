@@ -212,9 +212,12 @@ enum GhosttyTerminalPadding {
 /// concealed terminal text, so it scrolls, reflows and survives with its rows;
 /// the overlay reads it back and draws it smaller and dimmer than the command.
 enum GhosttyBlockHeader {
-    static let marker = LoopflowZshBootstrap.headerMarker
+    /// Starts a header row. Nothing a person types begins a prompt row with it.
+    static let marker = "\u{B6} "
+    /// The prompt truncates the directory to this many characters.
+    static let maxLength = 60
     /// Columns read from each candidate row.
-    static let columns = marker.count + LoopflowZshBootstrap.headerMaxLength
+    static let columns = marker.count + maxLength
 
     /// Smaller than the terminal's 13pt body.
     static let fontSize: CGFloat = 11
@@ -546,7 +549,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         else { return }
         commandBlocks = nextBlocks
         blockHeaders = nextHeaders
-        renderCommandBlocks(size: size)
+        renderCommandBlocks()
     }
 
     private func readBlockHeaders(
@@ -564,28 +567,36 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
                     y: UInt32(row)
                 )
             }
-            var text = ghostty_text_s()
             // Ghostty clamps the end column to the grid.
-            guard ghostty_surface_read_text(
-                surface,
-                ghostty_selection_s(
-                    top_left: point(0),
-                    bottom_right: point(GhosttyBlockHeader.columns - 1),
-                    rectangle: true
-                ),
-                &text
-            ) else { continue }
-            defer { ghostty_surface_free_text(surface, &text) }
-            guard let bytes = text.text, text.text_len > 0 else { continue }
-            let line = String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
-            headers[row] = GhosttyBlockHeader.text(inRow: line)
+            let line = readText {
+                ghostty_surface_read_text(
+                    surface,
+                    ghostty_selection_s(
+                        top_left: point(0),
+                        bottom_right: point(GhosttyBlockHeader.columns - 1),
+                        rectangle: true
+                    ),
+                    $0
+                )
+            }
+            headers[row] = line.flatMap(GhosttyBlockHeader.text(inRow:))
         }
         return headers
     }
 
-    private func renderCommandBlocks(size: ghostty_surface_size_s? = nil) {
+    /// The non-empty text a Ghostty read produced.
+    private func readText(_ read: (UnsafeMutablePointer<ghostty_text_s>) -> Bool) -> String? {
+        guard let surface else { return nil }
+        var text = ghostty_text_s()
+        guard read(&text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let bytes = text.text, text.text_len > 0 else { return nil }
+        return String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
+    }
+
+    private func renderCommandBlocks() {
         guard isShellPane, let surface else { return }
-        let surfaceSize = size ?? ghostty_surface_size(surface)
+        let surfaceSize = ghostty_surface_size(surface)
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         let cellHeight = CGFloat(surfaceSize.cell_height_px) / scale
 
@@ -1078,18 +1089,15 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     /// Copies whichever selection the terminal holds, read at copy time.
     private func copySelection() -> Bool {
-        guard let surface else { return false }
-        var text = ghostty_text_s()
-        guard ghostty_surface_has_selection(surface)
-            ? ghostty_surface_read_selection(surface, &text)
-            : ghostty_surface_read_selected_command_block(surface, &text)
+        guard let surface,
+              let selection = readText({
+                  ghostty_surface_has_selection(surface)
+                      ? ghostty_surface_read_selection(surface, $0)
+                      : ghostty_surface_read_selected_command_block(surface, $0)
+              })
         else { return false }
-        defer { ghostty_surface_free_text(surface, &text) }
-        guard let bytes = text.text, text.text_len > 0 else { return false }
-
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        let selection = String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
         return pasteboard.setString(selection, forType: .string)
     }
 
@@ -1361,10 +1369,6 @@ func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? 
 /// in its own size and color.
 enum LoopflowZshBootstrap {
     static let macOSDefaultPrompt = "%n@%m %1~ %# "
-    /// Starts a header row. Nothing a person types begins a prompt row with it.
-    static let headerMarker = "\u{B6} "
-    /// The prompt truncates the directory to this many characters.
-    static let headerMaxLength = 60
 
     static let zshenv = """
     if [[ -o interactive ]]; then
@@ -1372,7 +1376,7 @@ enum LoopflowZshBootstrap {
         _loopflow_prompt() {
             precmd_functions=(${precmd_functions:#_loopflow_prompt})
             [[ $PROMPT == '\(macOSDefaultPrompt)' ]] || builtin return 0
-            PROMPT=$'\\n%{\\e[8m%}\(headerMarker)%\(headerMaxLength)<\u{2026}<%~%<<%{\\e[28m%}\\n%F{\(accent)}\u{276F}%f '
+            PROMPT=$'\\n%{\\e[8m%}\(GhosttyBlockHeader.marker)%\(GhosttyBlockHeader.maxLength)<\u{2026}<%~%<<%{\\e[28m%}\\n%F{\(accent)}\u{276F}%f '
             # The command is bold; zsh ends the highlight before output starts.
             zle_highlight=(${zle_highlight:#default:*} default:bold)
         }

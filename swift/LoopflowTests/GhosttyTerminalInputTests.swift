@@ -103,70 +103,6 @@ import GhosttyKit
 /// Shell block behavior that needs no display, so it runs headless.
 @Suite("Embedded terminal shell blocks")
 struct GhosttyShellBlockTests {
-    @Test("bundled shell integration emits semantic command boundaries")
-    func shellIntegrationEmitsSemanticMarks() throws {
-        let resources = try #require(GhosttyRuntimeResources.directoryURL)
-        let home = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ghostty-shell-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: home) }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = [
-            "-i",
-            "-c",
-            """
-            _ghostty_deferred_init
-            print -Pn "$PS1"
-            _ghostty_preexec "print block-proof"
-            print block-proof
-            _ghostty_precmd
-            print -Pn "$PS1"
-            """,
-        ]
-        var environment = ProcessInfo.processInfo.environment
-        environment["HOME"] = home.path
-        environment["GHOSTTY_RESOURCES_DIR"] = resources.path
-        environment["GHOSTTY_SHELL_FEATURES"] = ""
-        environment["GHOSTTY_ZSH_ZDOTDIR"] = home.path
-        environment["TERM"] = "xterm-256color"
-        environment["ZDOTDIR"] = resources
-            .appendingPathComponent("shell-integration/zsh", isDirectory: true)
-            .path
-        process.environment = environment
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        try process.run()
-        // Drain before waiting: a full pipe would block the shell forever.
-        let output = String(
-            decoding: stdout.fileHandleForReading.readDataToEndOfFile(),
-            as: UTF8.self
-        )
-        process.waitUntilExit()
-        let error = String(
-            decoding: stderr.fileHandleForReading.readDataToEndOfFile(),
-            as: UTF8.self
-        )
-        #expect(process.terminationStatus == 0, "zsh failed: \(error)")
-
-        let markers = [
-            "\u{1B}]133;A;cl=line\u{7}",
-            "\u{1B}]133;B\u{7}",
-            "\u{1B}]133;C\u{7}",
-            "block-proof",
-            "\u{1B}]133;D;0\u{7}",
-        ]
-        var remaining = output[...]
-        for marker in markers {
-            let range = try #require(remaining.range(of: marker))
-            remaining = remaining[range.upperBound...]
-        }
-    }
-
     @Test("the default-prompt shell gets a context header and reports a failed command")
     func zshBootstrapMarksHeaderAndFailure() throws {
         let resources = try #require(GhosttyRuntimeResources.directoryURL)
@@ -213,14 +149,21 @@ struct GhosttyShellBlockTests {
             return String(decoding: output, as: UTF8.self)
         }
 
+        func expectInOrder(_ markers: [String], in output: String) throws {
+            var remaining = output[...]
+            for marker in markers {
+                let range = try #require(remaining.range(of: marker), "missing \(marker.debugDescription)")
+                remaining = remaining[range.upperBound...]
+            }
+        }
+
         // The stock prompt becomes a blank row, a concealed header row holding
         // the directory, then the command line.
         let stock = try run(rc: "PS1='\(LoopflowZshBootstrap.macOSDefaultPrompt)'\n")
-        var remaining = stock[...]
-        for marker in [
+        try expectInOrder([
             "\u{1B}]133;A;cl=line\u{7}",
             "\n\u{1B}]133;A;k=s\u{7}",
-            "\u{1B}[8m\(LoopflowZshBootstrap.headerMarker)",
+            "\u{1B}[8m\(GhosttyBlockHeader.marker)",
             home.lastPathComponent,
             "\u{1B}[28m",
             "\n\u{1B}]133;A;k=s\u{7}",
@@ -229,16 +172,18 @@ struct GhosttyShellBlockTests {
             "\u{1B}]133;C\u{7}",
             "\u{1B}]133;D;127\u{7}",
             "\u{1B}]133;A;cl=line\u{7}",
-        ] {
-            let range = try #require(remaining.range(of: marker), "missing \(marker.debugDescription)")
-            remaining = remaining[range.upperBound...]
-        }
+        ], in: stock)
 
-        // A prompt someone chose is theirs.
+        // A prompt someone chose is theirs, and still marks its commands.
         let custom = try run(rc: "PS1='mine> '\n")
-        #expect(custom.contains("mine> "))
         #expect(!custom.contains("\u{276F}"))
-        #expect(custom.contains("\u{1B}]133;D;127\u{7}"))
+        try expectInOrder([
+            "\u{1B}]133;A;cl=line\u{7}",
+            "mine> ",
+            "\u{1B}]133;B\u{7}",
+            "\u{1B}]133;C\u{7}",
+            "\u{1B}]133;D;127\u{7}",
+        ], in: custom)
     }
 
     @Test("command blocks are full-width bands on the padded grid's rows")
@@ -272,7 +217,7 @@ struct GhosttyShellBlockTests {
 
     @Test("a header is the marked prompt row, looked for only where a prompt can be")
     func blockHeader() throws {
-        let marker = LoopflowZshBootstrap.headerMarker
+        let marker = GhosttyBlockHeader.marker
         #expect(GhosttyBlockHeader.text(inRow: "\(marker)~/src/loopflow   ") == "~/src/loopflow")
         #expect(GhosttyBlockHeader.text(inRow: "~/src/loopflow") == nil)
         #expect(GhosttyBlockHeader.text(inRow: "\u{276F} ls") == nil)

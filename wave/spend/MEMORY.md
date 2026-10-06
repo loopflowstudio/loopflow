@@ -106,8 +106,9 @@ October 6 reconciliation distinguishes local administrative report access from
 designated-consumer access. The Home-bound `auth.report` probe proves a
 local Store read. `auth.export` requirements now own recipient scope and collect
 local isolated-container receipts, bound to Home, requirement revision, fresh
-invocation and export hash. No uploaded receipt establishes success; remote
-Homes remain unavailable. Consumer execution dispatches before Home admission
+invocation and export hash. No uploaded receipt establishes success. Remote export delivery now uses the
+SSH channel described below; remote credential and administrative probes remain
+unavailable. Consumer execution dispatches before Home admission
 and receives only export bytes, never the administrative Store or credentials.
 The trusted local Docker daemon/image and private child-process pipe establish
 local process provenance, not remote delivery, provider permissions or export
@@ -153,7 +154,11 @@ The isolated reader receives only the report request; administration remains in
 the trusted controller. Receipts bind Home, requirement revision, invocation,
 recipient, period and hash. Headless pipe/receipt fixtures and a real-Docker
 controller fixture with synthetic Home identity cover the protocol and isolation;
-SSH server authentication still needs integration coverage. This supersedes the
+SSH server authentication still needs integration coverage: the fixtures do not
+exercise the production SSH client against an SSH server. Reconciliation confirms
+the requested remote-delivery implementation is present; this remaining proof
+belongs to gate. Transport authentication and export issuer authenticity remain
+separate claims. This supersedes the
 remote-export implementation gap above, without claiming live remote access or
 provider permissions. Missing transport/identity/runtime remains unavailable.
 

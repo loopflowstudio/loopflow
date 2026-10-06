@@ -293,10 +293,13 @@ async fn billing_probe_records_unavailable_without_claiming_scope_or_remote_acce
         .verify_spend_access(id, "2026-09".into(), None)
         .await
         .unwrap();
-    assert!(remote.observations.iter().any(|o| o
-        .gap
-        .as_ref()
-        .is_some_and(|gap| gap.contains("no remote probe"))));
+    assert_eq!(
+        remote.observations[0].outcome,
+        loopflow::spend::AccessOutcome::Unavailable
+    );
+    assert!(remote
+        .current_observation(&remote.requirements[0])
+        .is_none());
     assert!(remote
         .observations
         .iter()

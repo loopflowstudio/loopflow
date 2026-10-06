@@ -23,9 +23,10 @@ additional provider probes/execution, SSH server integration coverage,
 and broader acceptance coverage. Dated CLI import outcomes and a reusable isolated
 export consumer now exist. `access verify --export` now binds a directly collected
 local container receipt to the Home and requirement scope. `auth.report` remains
-administrative-only. The previous iteration's local integration request is
-implemented; SSH server integration coverage and additional provider probes remain
-separate work, not prerequisites for repeating that completed local integration.
+administrative-only. The requested remote designated-delivery cut is implemented, alongside the earlier
+local integration and Runpod read probe. SSH server integration coverage and
+additional provider probes remain separate work; neither requires repeating those
+completed implementations.
 Rotation reconciliation, historical linked
 metadata, project/tag rules, separate Session usage links and a local AWS export
 reader now exist. No live financial import exists. Mercury

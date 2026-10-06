@@ -98,7 +98,6 @@ impl Store {
                 .iter()
                 .find(|c| requirement.credential.as_ref() == Some(&c.id));
             let mut report_receipt = None;
-            let mut executed_home = local.id.clone();
             let (outcome, gap) = match (is_local, requirement.tool.as_deref()) {
                 (_, Some("auth.export")) => match (export.as_deref(), requirement.report_consumer.as_ref()) {
                     (Some(path), Some(consumer)) => {
@@ -113,7 +112,6 @@ impl Store {
                         };
                         match result {
                             Ok((_, receipt)) => {
-                                executed_home = receipt.binding.as_ref().expect("verification supplies a Home binding").home.clone();
                                 report_receipt = Some(receipt);
                                 (AccessOutcome::Success, Some("isolated container read over a directly collected channel; provider permissions and export provenance unverified".into()))
                             }
@@ -157,7 +155,17 @@ impl Store {
             };
             observations.push(AccessObservation {
                 environment: environment.clone(),
-                executed_home,
+                executed_home: report_receipt.as_ref().map_or_else(
+                    || local.id.clone(),
+                    |receipt| {
+                        receipt
+                            .binding
+                            .as_ref()
+                            .expect("verification supplies a Home binding")
+                            .home
+                            .clone()
+                    },
+                ),
                 requirement: requirement.id.clone(),
                 requirement_revision: requirement.revision.clone(),
                 credential: requirement.credential.clone(),

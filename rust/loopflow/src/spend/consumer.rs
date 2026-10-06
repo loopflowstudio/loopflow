@@ -94,11 +94,15 @@ pub async fn consume_bound(
         "report": String::from_utf8(bytes).map_err(|_| ConsumptionError::Denied)?,
     }))
     .map_err(|_| ConsumptionError::Denied)?;
-    if let Some(home) = remote {
-        let result = deliver_remote(home, &receipt, &request).await?;
-        validate_receipt(&result, &receipt)?;
-        return Ok((report, receipt));
-    }
+    let result = match remote {
+        Some(home) => deliver_remote(home, &receipt, &request).await?,
+        None => deliver_local(&receipt.invocation, &request).await?,
+    };
+    validate_receipt(&result, &receipt)?;
+    Ok((report, receipt))
+}
+
+async fn deliver_local(invocation: &str, request: &[u8]) -> Result<Vec<u8>, ConsumptionError> {
     let docker = [
         "/usr/bin/docker",
         "/usr/local/bin/docker",
@@ -122,8 +126,10 @@ pub async fn consume_bound(
     if !endpoint.starts_with("unix:///") {
         return Err(ConsumptionError::Unavailable);
     }
-    let name = format!("lf-spend-{}", receipt.invocation);
-    let result = run_probe(docker, endpoint, &name, &request).await;
+    let name = format!("lf-spend-{invocation}");
+    let mut command = docker_command(docker, endpoint);
+    command.args(probe_args(&name));
+    let result = capture(&mut command, request, 65536, 60, None).await;
     // Killing the client on timeout need not kill its container. Always remove it.
     let _ = tokio::time::timeout(
         Duration::from_secs(5),
@@ -136,25 +142,13 @@ pub async fn consume_bound(
             .status(),
     )
     .await;
-    validate_receipt(&result?, &receipt)?;
-    Ok((report, receipt))
+    result
 }
 
 fn docker_command(executable: &str, endpoint: &str) -> Command {
     let mut command = Command::new(executable);
     command.env_clear().args(["--host", endpoint]);
     command
-}
-
-async fn run_probe(
-    docker: &str,
-    endpoint: &str,
-    name: &str,
-    request: &[u8],
-) -> Result<Vec<u8>, ConsumptionError> {
-    let mut command = docker_command(docker, endpoint);
-    command.args(probe_args(name));
-    capture(&mut command, request, 65536, 60, None).await
 }
 
 async fn capture(
@@ -319,10 +313,9 @@ async fn deliver_remote(
 
 #[cfg(test)]
 mod tests {
-    use super::{capture, validate_receipt, ConsumptionBinding, ConsumptionReceipt, PROBE};
+    use super::{capture, validate_receipt, ConsumptionBinding, ConsumptionReceipt};
     use crate::durable::HomeId;
     use crate::spend::{Consumer, RequirementId};
-    use sha2::{Digest, Sha256};
     use tokio::process::Command;
 
     fn receipt() -> ConsumptionReceipt {
@@ -369,23 +362,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remote_channel_fixture_consumes_only_after_matching_home() {
-        let mut expected = receipt();
-        let raw = serde_json::json!({
-            "period": "2026-09", "repo": "example/two", "wave_id": null,
-            "generated_at": 0, "amounts": [], "totals": [], "coverage": []
-        })
-        .to_string();
-        expected.export_sha256 = format!("{:x}", Sha256::digest(raw.as_bytes()));
+    async fn remote_channel_sends_only_after_matching_home() {
+        let expected = receipt();
         let home = &expected.binding.as_ref().unwrap().home;
         let request =
-            serde_json::to_vec(&serde_json::json!({"receipt": expected, "report": raw})).unwrap();
-        // This pipe fixture exercises the real reader and handshake; Docker and
-        // SSH authentication retain their independent integration boundary.
+            serde_json::to_vec(&serde_json::json!({"receipt": expected, "report": "fixture"}))
+                .unwrap();
+        // Exercise the channel handshake independently of the reader. The Docker
+        // controller fixture exercises the complete isolated reader.
         let script = format!(
-            "print({}, flush=True)\n{}\nprint(json.dumps(receipt))",
+            "import json, sys\nprint({}, flush=True)\nprint(json.dumps(json.load(sys.stdin)['receipt']))",
             serde_json::to_string(&serde_json::to_string(home).unwrap()).unwrap(),
-            PROBE.split("assert not any").next().unwrap()
         );
         let mut command = Command::new("/usr/bin/python3");
         command.env_clear().args(["-I", "-c", &script]);

@@ -29,10 +29,10 @@ implementation results; full Task acceptance and publication remain outstanding.
 
 Commit `2f36ba3bc` implements the previous iteration's rotation recovery,
 historical linked metadata, project/tag rules, Session usage links and AWS export
-reader. HEAD `abe39fe3f` incorporates the v0.13.7 base merge and main's release
+reader. Commit `abe39fe3f` incorporates the v0.13.7 base merge and main's release
 proof timing repairs (`8a3759bd9`); those repairs change unrelated fixtures,
-not Spend behavior. The uncommitted
-changes share rotation consumer selection, add the changed-Home/reference
+not Spend behavior. Checkpoint `a31a6ab18` preserves the later changes, which share
+rotation consumer selection, add the changed-Home/reference
 regression, persist import outcomes and connect isolated export consumption to
 environment-bound observations.
 
@@ -203,8 +203,8 @@ unavailable, while provider 401/403 responses are denied; neither grants scope e
 
 ### Remote designated delivery — October 6
 
-The working tree now routes `auth.export` verification through the existing Home
-SSH route. A fixed Python controller reports `lf home id --json` before the sender
+Checkpoint `a31a6ab18` implements `auth.export` verification through the existing
+Home SSH route; the current compression shares receipt validation across transports. A fixed Python controller reports `lf home id --json` before the sender
 releases export bytes, then launches the same isolated container arguments. SSH
 uses strict known-host checking, batch mode, no ambient config or forwarding, and
 bounded exchange. The destination's administrator, installed lf/Python, Docker
@@ -223,6 +223,15 @@ These fixtures do not exercise SSH server authentication end to end; that is a
 remaining gate integration check, not evidence of live remote access. No live
 credentials or provider account were used. Provisioned default SSH identities and
 known-host entries are prerequisites; verification never creates them.
+
+October 6 reconciliation closes the requested remote-delivery implementation cut.
+The channel fixture covers the pre-data handshake, unavailable peer and exact
+receipt/replay rejection; the Docker controller fixture covers isolated consumption
+with synthetic Home identity. Neither executes the production SSH client against
+an SSH server. Gate therefore retains that integration proof, including host-key
+rejection before export transmission and successful receipt collection through the
+production transport. No additional remote-delivery implementation is established
+as missing by this review; authorized live billing acceptance remains open.
 
 ### Provider contract finding
 
@@ -280,7 +289,7 @@ Administrative reports separately link retained Session inputs captured during
 the month, with their existing usage evidence and historical attribution. This is
 not a monthly usage allocation, invoice money or proof of provider-key identity.
 Designated exports exclude those links. The Runpod read probe described above supplies local access evidence; other-provider
-probes remain outstanding; remote export delivery is implemented below. Local export parsing needs neither provider nor Doppler access.
+probes remain outstanding; remote export delivery is described above. Local export parsing needs neither provider nor Doppler access.
 
 ## Experience and demo
 
@@ -600,49 +609,26 @@ an inventory-only replacement milestone and is not ready to publish.
 
 ### Delete — do not maintain
 
-The blanket remote-export unavailability branch is removed; remote credential probes
-remain unavailable. Local and remote paths share `probe_args` and exact receipt
-comparison; there is no uploaded-success path or general SSH credential bundle.
+Checkpoint `a31a6ab18` preserves the completed cuts and their detailed rationale:
+SSH's private Doppler resolver, mutable source/account invoice ownership, duplicate
+rotation consumer selection, the standalone Python launcher and duplicate import
+completion paths are removed. Keep their surviving shared implementations.
 
-`lf/commands/ssh.rs::resolve_doppler_secret` has been removed; SSH now uses
-the narrow shared resolver. Preserve SSH forwarding behavior and its tests.
-Credential requirements now name their optional billing probe separately from
-designated report tools. The provider-unavailable path is replaced only for Runpod; preserve
-unknown-provider and remote unavailability, without adding an endpoint registry.
-The working tree has removed the invoice foreign key to mutable source/account
-membership, serialized credential equality and nested access-command rematching.
-Durable invoice references, typed equality and a shared repository/Wave predicate
-retain those responsibilities without duplicate representations.
-Rotation creation, validation and reconciliation now share `rotation_consumers`;
-their duplicated requirement/environment selection is removed, while the persisted
-consumer snapshot still makes changed-inventory receipts stale. The Store facade
-uses one implementation block and explicit type imports. AWS account validation
-binds the native identity once instead of checking an Option then repeatedly
-unwrapping it. Review retained history's JSON equality because declared decimal
-precision is evidence: ordinary decimal equality would collapse 1.0 and 1.00.
-The standalone Python container launcher and `scripts/consume_spend_export.py`
-wrapper have been removed; `lf auth access consume` and access verification share
-the Rust consumer and embedded probe. The isolation check calls the public CLI
-directly without an administrative Home. Access verification matches Home locality
-and tool together, keeping remote requirements unavailable before any probe. Preserve the independent
-Docker boundary check. Source imports now share one completion path for dated outcomes and result display;
-`finish_import` and the duplicated CLI result blocks are removed. AWS text output
-also includes the reconciliation difference. Billing tests load their two fixture
-documents through shared readers, preserving typed and JSON mutation scenarios.
-Review retained the independent container probe: it checks host-path absence as
-well as exercising the reusable designated consumer. No other production deletion
-is indicated. The Runpod read now uses one HTTP status match for denial, bounded
-retry and success. Its synthetic tests share server startup and a named billing
-handler; the successful-read call counter is removed while retry/redirect assertions
-remain. The Doppler resolver returns its bounded result directly. Keep explicit URL
-query assembly: this repository's reqwest build does not enable the query helper,
-and another feature is unnecessary for three fixed parameters. Architecture docs
-now describe the implemented local probes; the dependency guide uses credential
-IDs correctly and states historical snapshot behavior once. Preserve native model account routing,
-Session attribution and the bank budget script. Forbidden: generic provider
-registries, duplicate account auth, secret caches in this Store, dual inventory
-writers, inferred equal shares, zero-filled missing evidence, and a shell launcher
-advertised as restricted merely because its environment was cleared.
+Local and remote delivery now converge on one receipt comparison after transport.
+`deliver_local` owns Docker execution and cleanup; the forwarding-only `run_probe`
+wrapper is removed. Access observations derive execution Home from the collected
+receipt instead of tracking a second mutable identity. The handshake fixture uses
+an explicit channel peer instead of slicing production Python source; the separate
+Docker controller fixture still exercises the complete isolated reader. Remote
+credential probes remain unavailable, and no uploaded receipt can establish success.
+
+Retain history's JSON equality: declared decimal precision distinguishes `1.0`
+from `1.00`. Preserve the independent container boundary check, native model account
+routing, Session attribution and the bank budget script. Keep fixed Runpod query
+assembly without another reqwest feature. Forbidden: generic provider registries,
+duplicate account auth, Store secret caches, dual inventory writers, inferred equal
+shares, zero-filled missing evidence, or an environment-cleared shell presented as
+restricted. No remaining obsolete production path was found in this review.
 
 ## Done when and checks
 
@@ -688,4 +674,4 @@ analysis, general security policy, fleet-wide sandbox design, Desktop UI,
 automatic provider purchases and live resource mutations. Chapter metric targets
 are empty; no new KR is represented as accepted.
 
-Check: `cargo test -p loopflow --lib spend::consumer` (2), focused `spend_tests` DTO and designated-access tests (1 each), `uv run python scripts/check_spend_remote_delivery.py`, `cargo fmt --check` and `git diff --check` passed; broader suites/clippy and SSH server integration belong to gate; authorized live evidence remains missing.
+Check: realign `git diff --check` passed and `lf context` is within budget; prior recorded passes retained without rerun: `cargo test -p loopflow --lib spend::consumer` (2), `cargo test -p loopflow --test spend_tests access` (4), `uv run python scripts/check_spend_isolation.py`, `uv run python scripts/check_spend_remote_delivery.py`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` and `git diff --check` passed; remaining suites and SSH server integration belong to gate; authorized live evidence remains missing.

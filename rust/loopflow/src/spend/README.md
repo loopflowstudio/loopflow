@@ -66,8 +66,8 @@ Verification binds observations to the executing Home, requirement revision and
 available credential version and exact Doppler reference. Dependency inspection
 includes the same current evidence and dated observations. `auth.report` reads the
 local administrative Store; `auth.export` verifies the designated container path
-below. Both require the environment to name this Home. Previous observations
-remain as dated history.
+below, locally or through the environment's registered remote Home. Previous
+observations remain as dated history.
 
 Set a requirement's `billing_probe` to `runpod` and `credential` to the inventory
 credential ID holding its Doppler reference. Running `access verify`
@@ -194,8 +194,8 @@ reconciliation; reconciliation never switches keys or revokes them.
 Synthetic endpoint tests demonstrate creation, provisioning, failed replacement,
 all-consumer verification, restart, cutover and failed/successful retirement, with
 runtime secrets absent from persisted records and command output. Provider permission
-probes, authenticated remote delivery and live acceptance remain open. No CLI operation
-creates or revokes provider keys.
+probes and live acceptance remain open; remote delivery still needs SSH server
+integration coverage. No CLI operation creates or revokes provider keys.
 
 
 ```sh

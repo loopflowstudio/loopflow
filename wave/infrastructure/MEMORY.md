@@ -750,9 +750,9 @@ owner and live recorder; headless fixture/history/draft proofs pass. No rendered
 run exists. Task details, Flow/history disclosure and file-sidebar controls now
 have native harness paths; idle trace analysis uses the trace's clock and keeps
 missing/partial coverage explicit. Fixture Task/Session workspace Home identities
-must agree or native routes never open. LOO-371's October 5
-branch and checkout contain no isolated snapshot runner; its handoff remains
-required for comparable CLI receipts. A copied database alone is insufficient. Same-window
+must agree or native routes never open. LOO-371's published PR #1449 at `684fd05d` supplies the snapshot runner;
+the earlier clean-checkout observation missed stashed work. LOO-304 has integrated
+the published source locally; comparable CLI receipts remain uncollected. A copied database alone is insufficient. Same-window
 Session coalescing does not prove cross-window deduplication or change-driven
 refresh. Copied SQLite alone cannot isolate retained checkout/process references
 or external effects. Release's installed filtering proof above supplies none of
@@ -765,9 +765,11 @@ one Session and native history; post-exit inventory requires `--history`.
 The mounted scenario remains unrendered. Fixture preparation owns both receipt
 directories; real-CLI isolation confirms separate setup counts. Partial counts
 remain visible; older combined receipts remain unscoped. Production refresh still
-uses fixture data; native reopening runs separately before the soak. Real CLI
-refresh and Task-based reopening throughout soak require LOO-371's absent runner
-before gate can measure acceptance. Release's retired publisher UI receipt does
+uses fixture data; native reopening runs separately before the soak. Published snapshot transport provides real CLI reads and Task links, but refuses
+Session connection. Combined soak integration still needs an owned Task-bound
+native fixture: copied checkout, process and account references grant no execution
+authority. Setup/scenario counts remain separate; an unexecuted requested soak
+reports incomplete. Release's retired publisher UI receipt does
 not waive this Task's rendered proof.
 
 
@@ -937,7 +939,6 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
 ## Gotchas
 
 - **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly** (filed). `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
-- **Dotted-root vs dotted-ancestry collision — RESOLVED** by the WaveId decoupling: the dir is a flat `.`-chain, the remote branch carries `/`+author, and ancestry is read from the `Run` record, not the string. The old `branch_names.schema` grammar that caused it is gone.
 - **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures — two `bin/lf.rs` tests naming a deleted command had never run at all.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.

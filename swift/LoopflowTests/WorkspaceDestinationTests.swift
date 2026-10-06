@@ -41,7 +41,7 @@ struct WorkspaceDestinationTests {
         }, repoPath: wave.wave.repo)
         // The ordinary outline has already published this planning inventory.
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]),
-                           processActivity: .loading, workActivity: .loading, repos: [])
+                           workActivity: .loading, repos: [])
         model.openTaskDestination(wave: wave, task: task)
         let selectedID = runtimeSelection ? try #require(task.runtime?.workId) : task.id
         model.select(.task(id: selectedID))
@@ -75,7 +75,7 @@ struct WorkspaceDestinationTests {
             return #"{"entries":[\#(encoded)],"next":"remaining-history"}"#
         }, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]),
-                           processActivity: .loading, workActivity: .loading, repos: [])
+                           workActivity: .loading, repos: [])
         var url = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
         url.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo), URLQueryItem(name: "session", value: record.id)]
         await model.openTaskLink(try #require(url.url))

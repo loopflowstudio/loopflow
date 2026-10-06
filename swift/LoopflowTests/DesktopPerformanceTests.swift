@@ -946,6 +946,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     process.currentDirectoryURL = URL(fileURLWithPath: cwd)
     var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("LF_") }
     environment["LF_HOME"] = home
+    environment["LF_PERF_OUTPUT"] = ProcessInfo.processInfo.environment["LF_PERF_OUTPUT"]
     environment["GIT_OPTIONAL_LOCKS"] = "0"
     process.environment = environment
     let output = Pipe()

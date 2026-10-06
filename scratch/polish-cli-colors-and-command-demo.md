@@ -166,3 +166,19 @@ holds every fill at 3:1 for palette 8. 16 focused tests pass. Loopflow Dev was
 relaunched on this build; Jack has not yet said whether cream reads right.
 The choice of cream is mine, not Jack's.
 
+## Approval, 2026-10-05
+
+Jack, after the relaunch with cream selection: "ok, looks good. demo approved.
+Complete."
+
+This approves the demo as Jack saw it in Loopflow Dev at the build of
+`5f74da4a3` plus the cream selection change, against the local `lf2`
+framework. It is an overall approval. Jack did not report on individual
+checks, so these are not established by it: the Codex footer colors and the
+`env` output inside Desktop, right-click, Command-Up/Down, the line-editing
+keys, and selection through wrap and scroll. "The bar on the right" was never
+pinned down. The approval authorizes no publication of the `lf2` artifact,
+merge or landing; the Task's Flow ends at this review. The display suite has
+still not run, and no other checkout or CI can build the branch until `lf2`
+is at `bin.loopflow.studio`.
+

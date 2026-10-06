@@ -18,10 +18,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::child::ChildRef;
 use crate::durable::{Home, WorkRef, WorkStatus};
-use crate::lf::commands::runs::{format_tokens, SessionHistory};
+use crate::lf::commands::session_history::format_tokens;
 use crate::lf::output::Colors;
 use crate::ops::task_execution::TaskExecutionState;
 use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot};
+use crate::session_record::SessionHistory;
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
 use crate::work::task::{
@@ -72,7 +73,7 @@ pub struct WaveDetailSnapshot {
     /// non-terminal Tasks stranded under a terminal historical Project.
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
     /// This Wave's Home-local Session history, newest first.
-    pub runs: Evidence<SessionHistory>,
+    pub history: Evidence<SessionHistory>,
 }
 
 /// A reading, or the reason there is none. "We looked and found nothing" and
@@ -153,7 +154,7 @@ pub struct TaskRuntimeSnapshot {
     pub reason: String,
     pub updated_at: String,
     pub provider: String,
-    /// Durable evidence that work began: a launched Run, a worker report or
+    /// Durable evidence that work began: a started Session, a worker report or
     /// finished Flow, or a published PR. `false` means none is recorded, not
     /// proof that nothing ever ran; preparing a checkout never sets it.
     pub started: bool,
@@ -528,13 +529,15 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
         let metric_portfolio =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, now()).await?;
         let status = WaveDetailSnapshot {
-            runs: Evidence::from_result(crate::lf::commands::runs::collect_runs(
-                crate::lf::commands::WorkFilter {
-                    wave: Some(wave.slug()),
-                    project: None,
-                    task: None,
-                },
-            )),
+            history: Evidence::from_result(
+                crate::lf::commands::session_history::collect_recent_history(
+                    crate::lf::commands::WorkFilter {
+                        wave: Some(wave.slug()),
+                        project: None,
+                        task: None,
+                    },
+                ),
+            ),
             wave: snapshot,
             projects: project_planning(&store, &wave).await,
             tasks: task_snapshots.tasks,
@@ -1709,7 +1712,7 @@ fn print_status(status: &WaveDetailSnapshot) {
         }
     }
     print_unavailable_tasks(&status.unavailable_tasks);
-    print_runs(&status.runs);
+    print_history(&status.history);
 }
 
 fn print_unavailable_tasks(tasks: &[UnavailableTaskEvidence]) {
@@ -1941,8 +1944,8 @@ fn metric_contract_issue(issue: &MetricContractIssueDto) -> String {
     }
 }
 
-fn print_runs(runs: &Evidence<SessionHistory>) {
-    match runs {
+fn print_history(history: &Evidence<SessionHistory>) {
+    match history {
         Evidence::Unavailable { reason } => println!("  sessions unavailable: {reason}"),
         Evidence::Ok { items, .. } if items.is_empty() => {
             println!("  sessions   no Session history in the window")
@@ -1962,7 +1965,7 @@ fn print_runs(runs: &Evidence<SessionHistory>) {
                 );
             }
             if *truncated {
-                println!("    (older runs beyond the window cap are not shown)");
+                println!("    (older history beyond the window cap are not shown)");
             }
         }
     }

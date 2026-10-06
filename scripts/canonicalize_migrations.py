@@ -13,8 +13,8 @@ the release PR and run under real Rust CI before the queue merges and tags. It:
   2. rejects missing, cyclic, or self dependencies;
   3. topologically orders the set (dependency edges, ties broken by name), a
      total order that does not depend on merge timing, PR number, or wall clock;
-  4. concatenates the ordered SQL into the release's single canonical
-     `<major>.<minor>.<patch>.001_release.sql` batch, retaining `-- draft:`
+  4. concatenates the ordered SQL into one canonical
+     `<major>.<minor>.<patch>.<ordinal>_release.sql` batch, retaining `-- draft:`
      provenance markers;
   5. installs the batch *atomically*: it plans everything in memory first, then
      writes the canonical file, replaces the MIGRATIONS registry, and deletes
@@ -24,7 +24,8 @@ A dependency may name another draft in the cut or an already-released migration
 (a released upstream is an ancestor of the whole cut, so it imposes no in-cut
 ordering). Deterministic and retry-safe: the same draft set and version always
 produce the same ids, files, and diff, so an aborted release regenerates
-identically. An empty draft set is a no-op.
+identically. Corrections append a batch at the next ordinal in the same version;
+earlier canonical bytes remain immutable. An empty draft set is a no-op.
 
 Writing requires explicit release-cut authority. CI may materialize the same tree
 in its disposable checkout with `--materialize-for-tests`; when the active
@@ -182,17 +183,18 @@ def _order(drafts: list[Draft]) -> list[Draft]:
     return [by_name[name] for name in order]
 
 
-def _entry(major: int, minor: int, patch: int) -> str:
+def _entry(major: int, minor: int, patch: int, ordinal: int) -> str:
+    filename = f"{major}.{minor}.{patch}.{ordinal:03}_release.sql"
     return (
         f"    Migration {{\n"
         f"        id: MigrationId {{\n"
         f"            major: {major},\n"
         f"            minor: {minor},\n"
         f"            patch: Some({patch}),\n"
-        f"            ordinal: 1,\n"
+        f"            ordinal: {ordinal},\n"
         f"        }},\n"
         f'        name: "release",\n'
-        f'        sql: include_str!("migrations/{major}.{minor}.{patch}.001_release.sql"),\n'
+        f'        sql: include_str!("migrations/{filename}"),\n'
         f"    }},\n"
     )
 
@@ -371,12 +373,13 @@ def main() -> None:
         if namespace == (major, minor, patch):
             release_files.append(path.name)
     package_manifest_text = None
-    if release_files:
-        if write_mode != "--materialize-for-tests":
-            _fail(
-                f"release {major}.{minor}.{patch} already has canonical migration(s): "
-                f"{', '.join(sorted(release_files))}"
-            )
+    ordinal = 1 + max(
+        (int(MIGRATION_NAME.fullmatch(name).group(4)) for name in release_files), default=0
+    )
+    if ordinal > 999:
+        _fail("release migration ordinal exhausted")
+    if release_files and write_mode == "--materialize-for-tests":
+        ordinal = 1
         current = f"{major}.{minor}.{patch}"
         patch += 1
         next_version = f"{major}.{minor}.{patch}"
@@ -386,15 +389,17 @@ def main() -> None:
         package_manifest_text = _test_package_manifest(current, next_version)
         print(f"test materialization advances the disposable package {current} -> {next_version}")
 
-    canonical = MIGRATIONS_DIR / f"{major}.{minor}.{patch}.001_release.sql"
-    print(f"canonicalizing {len(ordered)} draft(s) into {major}.{minor}.{patch}.001_release:")
+    canonical = MIGRATIONS_DIR / f"{major}.{minor}.{patch}.{ordinal:03}_release.sql"
+    print(
+        f"canonicalizing {len(ordered)} draft(s) into {major}.{minor}.{patch}.{ordinal:03}_release:"
+    )
     for draft in ordered:
         depends = ", ".join(draft.depends_on) if draft.depends_on else "(none)"
         print(f"  draft {draft.name} [{depends}]")
     if check:
         return
 
-    registry_text = _new_registry_text(_entry(major, minor, patch))
+    registry_text = _new_registry_text(_entry(major, minor, patch, ordinal))
     _install(canonical, _batch_sql(ordered), ordered, registry_text, package_manifest_text)
     print(
         f"wrote 1 canonical migration from {len(ordered)} draft(s); "

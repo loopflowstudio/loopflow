@@ -73,9 +73,10 @@ helpers are idle; a completed launcher does not prove its interactive Session
 is closed. Inspect Sessions separately. Reserve bound helper conversations
 for distinct contributions.
 
-Task status and `lf mon list` show up to 50 Runs started in the last seven days.
-Inspect an exact Run ID for older evidence; an empty recent list does not prove
-that no Flow or Session remains active.
+Wave status shows up to 50 recent Session inputs from the last seven days.
+Read complete Task history with `lf usage --days 0 --task <task> --json`, or inspect
+one input with `lf mon show <session> --input <capture>`. An empty recent list
+does not prove that no Flow or Session remains active.
 
 Answer an exact pending question, send durable direction through Steer, or
 launch fresh work for the same Task:

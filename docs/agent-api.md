@@ -108,8 +108,8 @@ nothing. Each structural step and each new Flow has its own history;
 unreceived late comments remain eligible. This records delivery, not proof that
 the model followed the instruction.
 
-Keep routine agent progress in working notes and the Run response. `task comment`
-inside a Run marks its publication as progress, excluded from steers. Use
+Keep routine agent progress in working notes and the Session response. `task comment`
+from an agent Session marks its publication as progress, excluded from steers. Use
 `--steer` only to deliver deliberate new direction. Direct
 participant comments and explicit `--steer` remain direction, even through
 the same account. Other integrations should mark progress with

@@ -38,13 +38,14 @@ release worktree, **after the version bump and before the commit**, so the gener
 files are part of the release PR and run under real Rust CI before the queue merges
 and tags. It freezes the draft set, rejects missing or cyclic dependencies, and topologically orders it (edges
 first, ties broken by name — never merge time, PR number, or wall clock). It then
-concatenates the ordered bodies into the release's one
-`<major>.<minor>.<patch>.001_release.sql` batch. `-- draft: <name>` markers retain
+concatenates the ordered bodies into a
+`<major>.<minor>.<patch>.<ordinal>_release.sql` batch, starting at `001`. `-- draft: <name>` markers retain
 the draft names for dependencies and incident review. The cut appends one
 `Migration` entry and deletes all consumed drafts atomically; on any failure it
 restores the tree byte-for-byte. The same drafts and version always produce the
-same id and diff, so an aborted release regenerates identically. A second batch for
-the same package version is rejected. The manual script is a `--check` preview
+same id and diff, so an aborted release regenerates identically. If migrations arrive after the first preparation commit, a corrected release cut
+appends the next batch in the same unpublished version. Earlier batches remain
+byte-for-byte immutable; a preparation commit does not consume a version. The manual script is a `--check` preview
 only; creating canonical files requires `--release-cut`. Rust CI uses the separate
 `--materialize-for-tests` authority in its disposable checkout. The release run is
 the authority that publishes.
@@ -65,6 +66,11 @@ The runner temporarily disables foreign-key actions around the transaction so a
 SQLite table rebuild cannot cascade-delete child history. It runs
 `PRAGMA foreign_key_check` before commit and restores enforcement afterward; a
 migration that leaves a dangling reference rolls back as one unit.
+
+That is the only place stored rows are scanned for dangling references during
+ordinary use. Opening a store validates its migration ledger and schema and
+relies on per-connection enforcement; `lf home doctor` and installation
+preflight run the full `PRAGMA foreign_key_check`, which reads the whole database.
 
 Persisted JSON is schema too. Changing a required field, enum variant, or wire
 shape in a DTO stored by the database requires a repair in the Task's draft and
@@ -100,7 +106,7 @@ the last release tag and fails the build if one moved.
   same ids and names. A file nobody registered never runs; a registry entry whose
   id, name, and file disagree is a lie about what a database applied.
 - The registry is in id order. New canonical ids match the full package version,
-  use ordinal `001`, and name the single batch `release`. Known historical
+  use increasing ordinals starting at `001`, and name each batch `release`. Known historical
   three-part ids remain valid; no new one can be introduced.
 - Every canonical migration already on `origin/main` has the same ordinal, name, and
   bytes.
@@ -119,7 +125,7 @@ before anything is cut. Same script, both paths.
 ```text
 0.12.2.001_release.sql
  │  │ │  │   └── canonical batch name
- │  │ │  └────── ordinal; one batch means every release uses 001
+ │  │ │  └────── ordinal; corrected cuts append 002, 003, …
  └──┴─┴───────── package major.minor.patch that published the batch
 ```
 

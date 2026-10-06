@@ -2,19 +2,24 @@
 # Operating Through Loopflow
 
 Loopflow owns git, worktrees, delegation, and release plumbing. Use `lf` for
-those operations so placement, release state, and execution authority stay
-consistent. Read-only inspection and ordinary edits/tests run directly here.
+those so placement, release state, and execution authority stay consistent.
+Read-only inspection and ordinary edits/tests run directly here.
+
+- **Wave**: a durable objective with its memory and current plan of Tasks.
+- **Task**: one intended outcome with its brief, checkout and PR chain.
+- **Session**: one agent conversation, interactive or headless.
+- **Flow**: a Task's authored sequence of steps and reviews.
+- **Exec**: one actual `lf` process.
 
 ## Execute Here First
 
 Stay in the worktree supplied for this run. Do the assigned work here; do not
-create another worktree or launch another worker merely to execute it. When
-worktree management is the task, use `lf wt`, never raw `git worktree`.
+create another worktree or launch another worker merely to execute it. Manage
+worktrees with `lf wt`, never raw `git worktree`.
 
 Use orchestration only when the user or selected skill calls for it. Do not
 guess a Wave, inspect PM, or repair auth as a prerequisite for ordinary work.
-If an explicitly requested service is unavailable, report the exact blocker
-and continue whatever can be completed locally.
+Report an unavailable requested service and continue what can be done locally.
 
 ## Git and delivery
 
@@ -36,6 +41,7 @@ settles verified merges. Bare land keeps the Task open;
 selected delivery skill for preparation and recovery. `lf pr open` creates or
 updates a draft and opens its page; use it when the user asks to see the PR.
 It preserves an existing PR's readiness. Publish/submit/arm/land make drafts ready.
+A Flow ends where authored: finishing or publishing is not Task completion.
 
 Preserve existing work before editing. Checkpoint coherent changes with
 `lf commit`; never include another active contribution just because it is dirty.
@@ -50,22 +56,19 @@ earlier work. Record a one-line result in scratch, not a verification ledger.
 Fix actual failures and revise assumptions when observations contradict them.
 
 Delegate when an independent subset makes the problem smaller. Keep the main
-blocker inline. A supplied Flow is an instruction;
-follow its authored order and review boundaries.
+blocker inline. A supplied Flow is an instruction; follow its order and reviews.
 
 ## Speak and inspect
 
 Write in language the user would use themselves. In persisted artifacts—Tasks,
-PRs, docs, memory, reports, and decision summaries—refer to people by name.
-For example, if Maya made the request, write “Maya requested the prototype path.”
-In conversation with Maya, write “You requested the prototype path.”
-A stored transcript remains conversation;
-a summary extracted from it uses names. Refer to other participants by name.
-Use names supplied in context or by the person; never infer a requester from
-the machine owner, account, or Task assignee. If a necessary name is unknown,
-ask when possible or leave the attribution explicitly unresolved. Do not write
-“the human,” substitute an ambiguous “you” in an artifact, or claim someone's
-approval without evidence.
+PRs, docs, memory, reports, and decision summaries—refer to people by name:
+“Maya requested the prototype path.” In conversation with Maya, write “You
+requested the prototype path.” A stored transcript remains conversation; a
+summary extracted from it uses names. Use names supplied in context or by the
+person; never infer a requester from the machine owner, account, or Task
+assignee. Ask for a necessary unknown name or leave the attribution unresolved.
+Do not write “the human,” substitute an ambiguous “you” in an artifact, or
+claim someone's approval without evidence.
 
 Answer the user in this conversation. Never open another
 session merely to reach them. Headless work that lacks required input explains
@@ -78,41 +81,41 @@ review boundaries grant no authority to close a conversation or launch a Flow.
 
 When asked about Loopflow state, use `lf wave list --json`, `lf wave status <wave> --json`,
 or `lf roadmap --json`. Do not reconstruct shared state from processes or
-worktrees. Detailed placement, Task supervision, and recovery belong to the
-`repo/operate` and `wave/operate` skills.
+worktrees. Supervision, recovery and placement belong to `repo/operate`,
+`wave/operate` and `task/operate`. The ongoing repository, Wave or Task
+conversation is that scope's operator: it reads failed work's logs and keeps
+started Tasks moving. Task workers and optional scheduled checks run
+independently; nothing re-invokes a conversation.
 
 Use `lf screenshot SOURCE -o OUTPUT` for unattended HTML or URL captures;
 never launch a GUI browser executable for capture. Keep credentials out of
-terminal output, logs, and chat; follow the repository's secret-management policy.
+output, logs, and chat; follow the repository's secret-management policy.
 
 ## Context and durable knowledge
 
-Keep agent progress in local working notes and the final Run response. Do not
+Keep agent progress in local working notes and the final Session response. Do not
 post routine progress to Linear: Task comments are for new direction from people.
 Agent comments published through `lf comment` carry a progress marker and
 are excluded from steers. Use `--steer` only for deliberate new direction.
-Preserve `<!-- loopflow-progress:... -->` provenance
-when writing progress through another integration.
+Keep `<!-- loopflow-progress:... -->` provenance when writing progress elsewhere.
 
 Launch context has explicit budgets. An excerpt names its complete local source;
-read relevant omitted sections before acting, rather than rereading whole archives.
+read relevant omitted sections before acting, not whole archives.
 
 Read the supplied repo guide and existing design before deriving another plan.
-Recursive Markdown under `scratch/` enters this worktree's runs; selected Wave
-context belongs to that Work. A path in another checkout does not transfer its
-contents. Treat earlier drafts as evidence, not automatic approval.
+Recursive Markdown under `scratch/` enters this worktree's runs. A path in another
+checkout does not transfer its contents. Earlier drafts are evidence, not approval.
 
 Write designs to `scratch/<branch>.md` and open assumptions to
-`scratch/questions.md`. Delivery preparation clears scratch: preserve useful
-conclusions in their durable owner before shipping.
+`scratch/questions.md`. Delivery clears scratch: preserve useful conclusions in
+their durable owner before shipping.
 
 Put repeatable task instructions in the skill that exercises them; repo-wide
 conventions in the repo agent guide; configuration in `.lf/config.yaml`.
 Curate Wave decisions in `wave/<address>/MEMORY.md` through `realign`. Child
-memories live in nested directories; discover relevant ones with ordinary
-filesystem tools. Do not create
-miscellaneous `.lf/` handoff notes or copy maintainer instructions into customer
-skills.
+memories live in nested directories; find relevant ones with filesystem tools.
+Do not create miscellaneous `.lf/` handoff notes or copy maintainer
+instructions into customer skills.
 
 </lf:loopflow>
 

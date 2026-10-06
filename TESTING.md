@@ -355,7 +355,8 @@ actor. A newer local compiler's pass does not establish older-toolchain support.
 SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
 Keep tests that reference Ghostty-only types or helpers inside
 `#if canImport(GhosttyKit)`. Keep file-local helpers inside the enclosing
-whole-file platform gate. When changing terminal code or its tests, gate both
+whole-file platform gate. App code outside `#if GHOSTTY_ENABLED` compiles in
+the fallback too: a type it names must also live outside that block. When changing terminal code or its tests, gate both
 build configurations: run the headless Swift suite and
 `uv run python scripts/test.py --loopflow`. A SwiftPM pass alone does not prove
 the Xcode test target compiles.
@@ -627,6 +628,8 @@ After editing embedded skills, directions, surfaces, or prompt assembly, run
 the Rust golden prompt check even for Markdown-only changes. If the mismatch
 reflects the intended prompt change, regenerate the snapshots, review their
 diff, and rerun the check before gate.
+Terminology-only replacements count as prompt changes; include the golden
+check in their focused verification even when no prompt assembly code changed.
 
 ```bash
 cargo test -p loopflow --test golden_prompt
@@ -869,6 +872,29 @@ installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
 
+### Released capture-history preservation
+
+```bash
+uv run python tests/e2e/capture_history.py \
+  --released-archive /tmp/lf-aarch64-apple-darwin.tar.gz \
+  --candidate target/debug/lf
+```
+
+Supply the matching v0.13.3 CLI archive from its published release. The fixture
+checks its pinned SHA256 before extraction, creates a temporary Home with stub
+providers, and exercises ordinary public commands with both binaries. It preserves
+capture paths/bytes, native identity, usage and released review feedback through
+candidate reads, replay, resume, review settlement and nested Exec ancestry.
+`runs/` remains the one opaque capture root; no migration or installation runs.
+Provider and terminal transport are simulated, so this is not installed acceptance.
+
+Pair this with `session_lifecycle_tests`' interruption, nested Task attribution and
+review replacement cases and `session_cli_tests`' stale actor/identity cases.
+Full affected verification belongs to gate. Do not run installation preflight or
+promotion fixtures on a host account merely by overriding HOME/LF_HOME: installation
+uses getpwuid. The three tests named in LOO-370's current isolation steer remain
+isolated-CI owned until PR #1444's disposable-account runner is integrated.
+
 ## Nightly Package Tests
 
 `.github/workflows/nightly-packages.yml` builds the same native `lf` tarballs as the release workflow. Each runner extracts its tarball and runs:
@@ -986,10 +1012,19 @@ installation harness for default-runtime proofs; never replace the machine's
 selection to make tests pass. Flow/Session tests with an explicit experimental
 `LF_HOME` and source `LF_BIN` stay within that experiment.
 
+`lf home install preflight` and `promote` read the OS account's store and take
+its promotion lock; `HOME` and `LF_HOME` do not redirect them. Tests that run
+either command are installation proofs: ignored in the regular suite and listed
+in `scripts/test_task_installation.py`. On a developer machine they would copy
+the live database, without bound while other workers write to it.
+
 For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
 Verify the repair in that same environment. A pass under a developer's installed
 Loopflow can hide the CI failure.
+Include direct provider-harness startup tests in this check: even an expected
+spawn failure first resolves the conversation's `lf`. Pin a fixture executable
+under the environment lock and restore the pin afterward.
 
 Release repair checks must cover completion before inherited checkout locks close.
 Use the public release path with a delayed repair launcher; a terminal Exec receipt

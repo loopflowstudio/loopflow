@@ -1774,9 +1774,9 @@ pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
 /// Write a runtime prompt file and return its path.
 ///
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
-/// File format: `{timestamp}-{run_id}-{sources}.{skill}.md`, with the
-/// `{run_id}` segment present only when `LF_TRACE_ID` is set (daemon-dispatched
-/// runs) — it joins the log to the run's journal and token-usage records.
+/// File format: `{timestamp}-{trace_id}-{sources}.{skill}.md`, with the
+/// `{trace_id}` segment present when `LF_TRACE_ID` is set, joining the prompt
+/// to its command trace.
 ///
 /// Ensures `.lf/prompts/` is in the repo's root `.gitignore`.
 pub fn write_prompt_log(
@@ -1798,12 +1798,12 @@ pub fn write_prompt_log(
         }
         _ => safe_skill,
     };
-    let run_part = std::env::var(crate::journal::LF_TRACE_ID_ENV)
+    let trace_part = std::env::var(crate::journal::LF_TRACE_ID_ENV)
         .ok()
         .map(|value| value.trim().replace('/', "."))
         .filter(|value| !value.is_empty());
-    let filename = match run_part {
-        Some(run_id) => format!("{}-{}-{}.md", timestamp, run_id, name_part),
+    let filename = match trace_part {
+        Some(trace_id) => format!("{}-{}-{}.md", timestamp, trace_id, name_part),
         None => format!("{}-{}.md", timestamp, name_part),
     };
     let path = prompts_dir.join(&filename);
@@ -2078,6 +2078,10 @@ mod tests {
             "default",
             "repo/operate",
             "wave/operate",
+            "task/operate",
+            "repo/session",
+            "wave/session",
+            "task/session",
         ] {
             let components = gather_context(&GatherContextOpts {
                 repo_root: repo.path().to_path_buf(),
@@ -2096,18 +2100,39 @@ mod tests {
             assert!(!prompt.contains("scripts/dev-lf"));
             assert!(!prompt.contains("LOO-267"));
 
-            let orchestrates = matches!(name, "repo/operate" | "wave/operate");
+            let scope = name.split_once('/').map(|(scope, _)| scope);
+            let orchestrates = scope.is_some();
             assert_eq!(prompt.contains("lf task run"), orchestrates, "{name}");
-            for procedure in ["lf wave place", "lf ps --json"] {
+            for procedure in ["lf wave place"] {
                 assert_eq!(
                     prompt.contains(procedure),
-                    name == "repo/operate",
+                    scope == Some("repo"),
                     "{name}: {procedure}"
                 );
             }
-            if !orchestrates {
+            if scope.is_none() {
                 assert!(!prompt.contains("doppler run"), "{name}");
             }
+            assert!(!prompt.contains("lf skill show"), "{name}");
+        }
+    }
+
+    #[test]
+    fn each_session_carries_its_operate_procedure_once() {
+        for scope in ["repo", "wave", "task"] {
+            let operate = crate::engine::builtins::get_builtin_skill(&format!("{scope}/operate"))
+                .expect("operate skill");
+            let procedure = operate
+                .splitn(3, "---\n")
+                .nth(2)
+                .expect("operate skill has a body");
+            let session = crate::engine::builtins::get_builtin_skill(&format!("{scope}/session"))
+                .expect("session skill");
+            assert_eq!(session.matches(procedure).count(), 1, "{scope}");
+            assert!(
+                session.contains("nothing schedules your next one"),
+                "{scope}"
+            );
         }
     }
 

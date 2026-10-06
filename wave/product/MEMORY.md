@@ -78,6 +78,43 @@ precedence. Resume also admits completed history. This supplies no configured
 workspace proof. Remote/performance/defaults/website scope stays LOO-353;
 LOO-366/367 retain separate policy scope.
 
+## Session and operate pairs (2026-10-05)
+
+Jack Heart's decisions on [LOO-383](https://linear.app/loopflow/issue/LOO-383):
+the Wave conversation is operations, and “reliably finishing stuff ive started
+and isnt blocked on me” is the goal.
+
+- Operators keep every started Task moving and leave unstarted backlog alone
+  “for now at least.” A defined Flow with steps left proceeds without asking.
+  A Task whose Flow ended before landing waits on Jack; how a Task changes its
+  Flow is wanted and undesigned.
+- Each session carries its operate procedure inline (“just make it work
+  reliably”). The branch composes session file plus operate body at build time.
+- `task/session` is a plain skill; a primary Task Session is “just a smaller
+  wrapper around this that saves that id in a field” (LOO-364).
+
+Lessons: the observed failure copied `next_move.owner: wave` into the reply, so
+the operator reported its own queue as a handoff. A status label naming the
+reader's own scope must say so in the prompt. Nothing re-invokes a
+conversation; `lf task reconcile` resumes only enrolled Tasks with an unfinished
+captured Flow. On Jack's Home that day the minute check was disabled and
+Product's declared `wave/operate` cron was not installed. `lf wave status`
+describes only the managed Flow: before continuing, check every Flow and
+unfinished Exec against `lf ps --json`, or a second driver starts.
+
+Jack approved the branch in demo review and asked for the operator report
+grouped as waiting on him, moving and stuck, with PR links. Leaving an unarmed
+merge to the person is the branch's choice; Jack did not answer.
+
+Open PR #1439 (LOO-353, `32f42bffe`) changes the contract: `lf task run`
+always starts a fresh Flow, nothing continues a stopped one, reconcile never
+resumes, and review moves into the Task conversation. “A defined Flow proceeds”
+then needs a new mechanism; whichever lands second rewrites the other's prompts.
+
+Limits: the [review](../../docs/reviews/session-operate-prompts.md) holds
+simulated walk-throughs and two read-only model runs. Installed behavior is
+unshown; an open conversation keeps its old text until `lf session replace`.
+
 ## Capture and configurable New Session (2026-10-03 UTC)
 
 Jack Heart accepted capture on October 1, then selected New Session and the
@@ -320,7 +357,8 @@ investigate and act independently; one shared pass note carries evidence forward
 Repository scope remains the default despite ambient Wave attribution, unless
 the request narrows it. Whether `wave/operate` uses that sequence remains open;
 its separate operation is retained. Jack's “soften, dont harden” correction
-rejects turning “one or two useful moves” into a numeric cap. No action is valid.
+rejects a numeric cap on moves. The October 5 pairs decision above replaces
+“one or two useful moves”: no action is valid only once started work is covered.
 Task findings can challenge Wave purpose and Wave findings repository direction;
 accepted decisions return to affected owners without acquiring another control
 authority or making operation a prerequisite for independent Tasks.
@@ -377,11 +415,8 @@ acceptance state. AGENTS.md and operating guidance already own Jack's naming rul
   Recorded scope retained Session code and background tmux process wrappers.
   Fixture renders do not prove tab/window interaction or native recovery.
 
-The prior name-attribution gate passed 799 affected Rust tests, 229 Python tests,
-78 website checks (three skips), 112 focused Swift tests, static checks and the
-Mac build. A full Swift package run stopped completing and was terminated;
-focused stream checks passed later, but full-package and native-rendering proof
-remain absent. Fresh real CLI generations demonstrated Jack/Maya/unknown prose,
+The prior name-attribution gate passed its affected suites; full Swift package
+and native-rendering proof remain absent. Fresh real CLI generations demonstrated Jack/Maya/unknown prose,
 not a live Task write or the review-bearing design Flow. Native review resume
 still needs anonymous → named → corrected → unknown participant acceptance on
 a differently named Home, preserving historical authors and review authority.
@@ -870,27 +905,30 @@ substitute for another merely because identifiers coincide.
 ## Performance — launch renders before any read (2026-10-04)
 
 Jack Heart requested Desktop open on a usable workspace with one loading
-vocabulary and one refresh path (LOO-376). On Jack's Home, installed `lf`
-0.12.32, single samples: `roadmap --all` 14.5 s, `session list` 12.4 s,
-`wave list` 2.4 s, `home id` and `ps` 1.2 s each. No read fits the 1000 ms
-budget, so a returning launch shows saved wire text first; that CLI latency has
-no owning Task (LOO-375 owns `wt list` only).
+vocabulary and one refresh path (LOO-376). On Jack's Home no `lf` read fits the
+1000 ms budget (`roadmap --all` 14.5 s), so a returning launch shows saved wire
+text first; that latency has no owning Task (LOO-375 owns `wt list` only).
 
 - Save the reads' wire text, restore through the live decoder, and strip
   liveness and legal actions before saving. Display evidence, never authority.
   Keep it inside the Home; a different `lf home id` drops content and selection.
 - One model owns refresh; views that each start a loop supersede each other's
   reads. A view that builds its own model reopens the blocking path.
-- The in-process replay (9.6 ms saved vs 13.2 s uncached, 20 samples) is
-  lower-level timing. Agent runs have no Aqua session: first frame, stalls,
-  CPU and the 400/1000 ms targets are unmeasured.
 - Jack's delivery contract (2026-10-04): land on autonomous checks and honest
   benchmark evidence; rendered startup is post-merge validation, not a gate.
-- Rendered receipt (`launch.py`, [20261004-launch-rendered](../../scripts/benchmarks/desktop-performance/20261004-launch-rendered/README.md)):
-  saved launch usable at 506 ms median / 540 p95, under load, never waiting on
-  a read. Still open on LOO-376: first frame misses 400 ms (~420 ms of first
-  render after an 89 ms restore); an unsaved launch waits 10–12 s; every `lf`
-  read costs 3.7 s or more; `session list` runs twice. Stalls unmeasured.
+- Receipts: `scripts/benchmarks/desktop-performance/`. First frame went
+  850 → 617 ms under heavy load (20261005-first-render). Profile before
+  guessing: the cost was getters re-normalizing paths per render, not drawing.
+- A benchmark that reopens one bundle hides the launch Jack gets. Both recorded
+  real launches were first runs of a new version: 625–790 ms before `main`.
+  20261005-first-launch: the system charges a new binary about 390 ms, partly
+  by file size, so no post-update launch meets 400 ms through app work.
+  Stripping local symbols saves 40–100 ms but unnames crash-report frames;
+  shipping it with a retained dSYM is Jack's open choice. Reopened: 430 ms
+  first frame (4 samples, loaded host).
+- Still open on LOO-376: quiet-host proof of 400 ms; cold file cache and
+  selection/repository-change refresh scenarios; unsaved launch waits on `lf`;
+  `session list` runs 2–3 times (refresh owner: LOO-382/LOO-304).
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 
@@ -970,54 +1008,57 @@ replaces their mechanism with Exec evidence. What still holds:
 - The 2026-09-22 interactive demo confirmed retained Session switching, copy/image
   input, and explicit Warp handoff. A later demo exposed split paste misrouting;
   the automated real-PTY correction passes but its final reviewer confirmation is
-  still pending. Latest identity pass recorded 45 tests in four suites, then 24
-  affected tests after review. These are prior-run receipts, not fresh update-wave
-  validation or an all-provider matrix. Hosted UI initialization was canceled by
-  LocalAuthentication; it supplied no behavioral result. JSON prepare-without-kill
+  still pending. No all-provider matrix exists. JSON prepare-without-kill
   has source/Swift contract coverage but no focused Rust behavioral proof yet.
 
-### Shell command blocks and build fidelity (2026-09-22)
+### Shell command blocks and build fidelity (2026-09-22, revised 2026-10-05)
 
 - Reviewer acceptance is **visible grouping before interaction plus one ordinary
   click anywhere in a completed command/output region selecting both**. Invisible
   OSC 133 metadata, triple-click gestures, or tooltips do not meet it. Warp is the
-  benchmark: full-width groups, persistent separation, restrained tint and left
-  accent, whole-surface hover/selection, and a distinct fresh prompt. Preserve
-  Loopflow's palette; context/timing and richer actions are options, not mandatory
-  copies of Warp. Provider Session panes remain outside shell-block semantics.
-- The checked-in Ghostty patch exposes visible block geometry and a separate
-  read-block API. Block Copy deliberately avoids native character highlighting:
-  the first demo showed two competing highlights. Keep geometry and hover separate
-  from one selected `(id, text)` snapshot. Page/pin IDs are not durable across
-  reflow/recycling; selection clears when its block leaves the visible list.
+  benchmark; preserve Loopflow's palette. Provider Session panes remain outside
+  shell-block semantics.
+- Jack Heart's October 5 report (LOO-381) added: colors lost in provider CLIs,
+  a context header and indentation per block, a red background from the real
+  exit status, and one selection at a time. Jack asked for more space between
+  blocks and Warp's small dim directory header (drawn in the overlay from a
+  concealed prompt row), then rejected burgundy selection beside red: red
+  means failed only, selection is cream. He approved the demo overall and
+  asked that it land; no per-check report, "the bar on the right" unresolved.
+- Block chrome never takes selection or focus from the shell: a right-click
+  keeps the selection under it, any key reaching the shell ends a block
+  selection, Command chords keep it. Fills keep the dimmest palette color at
+  3:1. Open: Option-letter inserts the composed character.
+- **Desktop inherits its launcher's environment.** Opened from an agent shell it
+  carried `NO_COLOR=1`, `PAGER=cat` and `TERM_PROGRAM`, and every pane lost
+  color. The GUI drops those variables at launch, beside the execution markers.
+  A prefix scrub also caught provider credentials `lf` reads; keep them by name.
+  Not the palette or Ghostty config.
+- **The terminal owns block state.** A Swift-side `(id, text)` snapshot produced
+  two competing highlights and stale copies; pointer-derived ids died on reflow.
+  The `lf2` patch keeps exit status on the prompt row and one text-or-block
+  selection in Ghostty's `Screen`; Swift holds only hover. Upstream also splits a
+  block when its command line soft-wraps; the patch treats the wrapped row as a
+  continuation. A new artifact version accompanies every patch change;
+  publication needs authorization. Jack authorized `lf2`; published 2026-10-05.
 - SwiftPM pins the published, checksum-verified patched artifact, not a local
   build path. `swift/GhosttyKitPatches/` plus `loopflow-dev.py ghostty-build`
-  carry the reproducible source patch. Use a new artifact version on patch changes;
-  publication is a separate authorized action. The upstream surface API did not
-  expose semantic geometry; a newer standalone VT API is not automatically an
-  embedded-surface replacement. Avoid synthetic multi-click API workarounds.
-- Real marked-output PTY tests prove parser→click→pasteboard block copy, clearing
-  at the live prompt, window-local release, and title delivery. Wait for parsed
-  completed blocks, not incidental prompt text. They do not prove automatic shell
-  hook injection or final appearance. `shellIntegrationEmitsSemanticMarks`
-  manually invokes zsh hooks; custom prompts and other bundled shells remain
-  unproven. Upstream excludes macOS `/bin/bash` from auto-injection. Provider
-  `TERM` stays `xterm-256color`; changing it needs separate fidelity evidence.
+  carry the patch and now run its Zig tests. Avoid synthetic multi-click
+  workarounds.
+- Headless tests cover the launch environment, block layout and style, and the
+  zsh hooks. The real-PTY click/drag/resize test needs a display and has not run
+  for `lf2` (filter by `GhosttyTerminalInputTests`; display names do not
+  match). Custom prompts, bash and fish headers, and on-screen overlay
+  alignment are unproven. Provider `TERM` stays
+  `xterm-256color`; changing it needs separate fidelity evidence.
 - **Build parity remains broken.** `project.yml` copies resources but still builds
-  Ghostty-disabled stubs, unlike SwiftPM. The later fresh Xcode build-for-testing
-  failure supersedes earlier compile-success notes. Binary/resource revision facts
-  also remain duplicated, the build recipe does not regenerate the shell payload,
-  and missing resources disable all terminals. Give both builds one dependency
-  and generated provenance, degrade missing shell resources to blockless terminals,
-  and contain resource-environment mutation. Copying payload alone is no proof.
-- Remaining block risks are hypotheses to measure: centered-grid math is shared
-  by geometry helpers and tests rather than checked against rendered padding;
-  per-row prompt scans at 10 Hz hold the renderer mutex and may repeatedly walk
-  long history. Patch Zig tests lack a recorded run. Final block appearance and
-  corrected split paste need configured-app confirmation. Keep separate command,
-  output, and last-command actions, multi-selection, bookmarks, and sharing
-  deferred until the core interaction is proven. Upstream API contribution may
-  reduce patch maintenance later (research reference: ghostty-org/ghostty#11747).
+  Ghostty-disabled stubs, unlike SwiftPM (LOO-280). Binary/resource revision
+  facts remain duplicated, the build recipe does not regenerate the shell
+  payload, and missing resources disable all terminals.
+- Still deferred until the core interaction is accepted: separate command,
+  output and last-command actions, multi-selection, bookmarks, sharing, exit-code
+  or duration badges. Upstream API contribution may reduce patch maintenance
+  later (ghostty-org/ghostty#11747).
 
 ### Shared viewing boundary
 
@@ -1040,23 +1081,9 @@ App-quit survival and remote Home attachment remain separate scope decisions.
 Client provenance is absent today; keep ELSEWHERE generic until the shared API
 can name the recorded terminal/location.
 
-The 2026-09-22 reconciliation filed these remaining concrete gaps under Mac
-Surface UX: [LOO-280](https://linear.app/loopflow/issue/LOO-280) for build/resource
-parity, [LOO-281](https://linear.app/loopflow/issue/LOO-281) for real-shell blocks,
-geometry, long-output measurements, and visual proof,
-[LOO-282](https://linear.app/loopflow/issue/LOO-282) for client provenance, and
-[LOO-283](https://linear.app/loopflow/issue/LOO-283) for the bounded shared-viewing
-comparison. This branch does not establish any Project's week/month evidence
-window; definitions and KRs remain unchanged. No open Task had enough evidence
-to close during this reconciliation.
-
-## Historical remote client
-
-The June HTTP-to-lfd, bearer-token, and Concerto build recipes are superseded by
-shared `lf` projections and explicit Home transport. Their dated observations are
-preserved in the [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md)
-and the [execution synthesis](../../.lf/chapters/20260922-manual-baseline/execution-architecture-synthesis.md).
-They explain the topology change; they are not current setup instructions.
+Filed 2026-09-22 under Mac Surface UX: LOO-280 build/resource parity; LOO-281
+real-shell blocks, geometry, long-output measurements and visual proof; LOO-282
+client provenance; LOO-283 the bounded shared-viewing comparison.
 
 ## Learnings
 
@@ -1082,6 +1109,6 @@ They explain the topology change; they are not current setup instructions.
 - **Historical migrations demonstrated the shared-store blast radius.** Product
   and Intelligence collided on `061`; editing an already-applied migration left
   existing databases without a required column. Preserve released migrations and
-  test upgrades from the released frontier. The specific 057/061 incident and
-  proposed remedies are retained in the prior memory linked above; they are not
-  current repair instructions. AGENTS.md owns the current one-draft-per-Task rule.
+  test upgrades from the released frontier. The incident detail and June's
+  superseded remote-client recipes are in the
+  [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md). AGENTS.md owns the current one-draft-per-Task rule.

@@ -213,6 +213,13 @@ interval. Old clients may display events but cannot start/steer turns or write
 Session state. Passive connection acquires no claim. Dispatch fences include
 queued native RPCs and approval replies, not only database claim updates.
 
+Headless admission records a provider-generation reservation in Session history.
+A launch records its spawn request under the exact driver fence before starting
+any provider process. An unconsumed reservation permits retry after pre-spawn
+failure; it is not engine-exit evidence. Once spawn is requested, a missing PID
+remains unknown. Saved native thread identity is loaded before account selection.
+Historical generations without this evidence retain their liveness protections.
+
 Native dispatch and driver claim, release, and exit share a Session-scoped OS
 lock beside the canonical database path. Driver validation releases the SQLite
 mutex before provider I/O; history and other Sessions keep using the database.
@@ -222,7 +229,15 @@ would let two processes own different locks for the same Session.
 
 Connect transfers the driver while retaining the live conversation. Client
 replacement claims the driver before stopping the exact old clients; it leaves the engine and sibling
-conversations running. Missing process evidence remains unknown.
+conversations running. Session resume can retain the recorded native conversation on
+a new engine after confirmed engine exit. Missing process evidence remains unknown.
+For a released driver without a process identity or connection, failed admission
+records the current machine and boot identity against that exact generation and
+its originating host. A later admission after a restart of the same machine may
+replace the engine while preserving its unknown outcome and native thread. The
+observation must precede the restart; wall-clock age, a failed Exec and a missing
+PID are insufficient. A changed driver invalidates the observation. This fallback
+does not restart the host, complete a turn, or settle a Flow.
 PID/start identity and native endpoint are operational evidence; conversation
 identity, causality and elapsed time grant no signal authority.
 
@@ -488,7 +503,7 @@ a disposable copy and leaves the installed Home unchanged.
 | `.lf/skills/`, `.lf/flows/`, `.lf/config.yaml` | Repository-owned execution definitions | Authored and reviewed with code |
 | `wave/<name>/GOAL.md`, `MEMORY.md`, `metrics/` | Wave intent, curated memory, metric contracts | Authored and reviewed with code |
 | `.lf/releases/<tag>/<commit>-<run>/` | Prepared release bytes and their candidate receipt | Replace one exact candidate atomically; retain through retry, remove after publication |
-| `$LF_HOME/runs/<prefix>/<run-id>/` | Session capture manifest, event streams, terminal receipt | Publish once, append streams, settle once |
+| `$LF_HOME/runs/<prefix>/<artifact-key>/` | Session capture manifest, event streams, terminal receipt | Publish once, append streams, settle once |
 | Home provider directories | Provider-native login and resume state | Owned by provider adapters |
 | Git directory `loopflow/` receipts | writer/sync/PR mutation coordination | Kernel-locked receipt files |
 | machine install root | Versioned artifact sets and switch receipts | Stage immutably, select atomically |
@@ -539,17 +554,21 @@ the inner `lf` and separator are implicit, the target re-resolves its own Home
 state, and durable processes scrub foreground-forwarded secrets before
 detaching.
 
-## Harness launch and Run records
+<a id="harness-launch-and-run-records"></a>
+## Harness launch and Session captures
 
-The heading remains an inbound documentation anchor; Run is historical vocabulary.
 The execution cutover uses one AgentSession admission and capture path for Task,
 Wave, helper and direct callers.
 
 SQLite owns Exec history. Repository trace events live in
 `.lf/journal/traces/<trace-id>/events.jsonl` and name their `trace_id` and `exec`
 node explicitly. Session captures retain the published `~/.lf/runs` directory
-layout, selected through SQLite artifact keys. That directory contains current
-Session data; its historical name does not make it disposable Run history.
+as one opaque physical encoding, selected through SQLite artifact keys. Current
+and historical captures use the same root: there is no relocation, parallel
+layout, alias or privileged conversion. Missing payload does not erase a resumable
+Session's SQLite identity. `LF_CAPTURE_KEY` selects subordinate history;
+Session/Exec caller provenance supplies ancestry and mutation authority.
+
 
 1. Admit the actual lf Exec; resolve typed work without granting Flow authority.
 2. Reserve the AgentSession and its initial history/capture reference before
@@ -563,6 +582,40 @@ Session data; its historical name does not make it disposable Run history.
    Exec captured.
 6. Settle the actual command's Exec when the process completes, independently of
    whether its conversation remains open.
+
+### Retained encoding inventory (LOO-370)
+
+- `session_record::record_dir`, active-reader watches, ablation staging and
+  preservation fixtures retain `runs/<shard>/<artifact-key>`. This is the single
+  physical capture root; keys (including historical `run_` strings) are immutable.
+- `ops/git_operation.rs` keeps serialized `run_id` / `process_id` receipt fields
+  while Rust names their actual Trace/Exec owners. Released SQL, migration
+  fixtures and `session_events` historical source labels retain their original
+  bytes. Historical cohort readers in `scripts/context_ablation.py` still decode
+  `launch`, `run_id` and `parent_run_id` from their frozen inputs.
+- `LF_RUN_ID` / `LF_RUN_DIR` occur only in launch scrubbing, rejection fixtures
+  and the checksum-pinned released-CLI preservation fixture. Current execution
+  reads `LF_CAPTURE_KEY` and typed Session/Exec provenance. Capture context does
+  not confer Flow or Task settlement authority.
+- GitHub workflow/check runs, release-run operations, gate execution receipts,
+  launchd `RunAtLoad`, Swift attributed-text runs and ordinary execution verbs
+  name other things. Published release notes, dated benchmark reports and chapter
+  archives retain historical terminology. The old heading anchor above preserves
+  documentation links, not a runtime interface.
+- Current Wave JSON exposes `history: Evidence<SessionHistory>`; Rust, Swift and
+  `wave_detail.json` share the required field without a fallback. Telemetry uses
+  Session metric IDs and labels; ablation/check-cost use capture names. Session
+  commands select durable Session/native conversation IDs; monitor's `--input`
+  and replay select retained captures.
+
+Production source against `8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3`:
+Rust **+545 / −659**, Swift **+64 / −64**, Python package **+0 / −0**,
+scripts **+97 / −81** (net **−98** lines). Physical-line comparison includes
+comments/blanks, excludes tests/fixtures, SQL, builtin prose and generated output;
+Rust test-only attributed items are removed using its syntax tree. Rename pairs
+are compared as one file, so moves do not count as deletion. This measures source,
+not installed acceptance. Abandoned relocation probes survive in Git at
+`6fcdbe9da0b47ef95f1f92ebdb259401a327cd46`; their contrary evidence remains valid.
 
 Payloads may remain large immutable files. SQLite owns identity, attribution,
 current control and searchable history. Current capture payloads may use files; ordinary readers select their exact

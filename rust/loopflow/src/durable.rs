@@ -5,8 +5,6 @@ use time::OffsetDateTime;
 
 use crate::id::WaveId;
 
-/// The exact active Run named by an in-Run process.
-pub const RUN_ID_ENV: &str = "LF_RUN_ID";
 macro_rules! durable_id {
     ($name:ident, $prefix:literal) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -18,9 +18,9 @@ pub fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
     }
     let database = crate::store::database_path_from_env()
         .map_err(|error| OpsError::Message(format!("resolve telemetry database: {error}")))?;
-    // Earlier and unfinished Runs can contain the first attempt on a PR merged
-    // inside the window. Python windows Run statistics and PR intervals separately.
-    let runs = crate::lf::commands::runs::collect_history(
+    // Earlier and unfinished Sessions can contain the first attempt on a PR merged
+    // inside the window. Python windows Session statistics and PR intervals separately.
+    let history = crate::lf::commands::session_history::collect_history(
         crate::lf::commands::WorkFilter {
             wave: None,
             project: None,
@@ -29,11 +29,12 @@ pub fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
         None,
         0,
     )
-    .map_err(|error| OpsError::Message(format!("read telemetry Runs: {error}")))?;
-    let mut run_input = tempfile::NamedTempFile::new()
+    .map_err(|error| OpsError::Message(format!("read telemetry Session history: {error}")))?;
+    let mut history_input = tempfile::NamedTempFile::new()
         .map_err(|error| OpsError::Message(format!("create telemetry input: {error}")))?;
-    serde_json::to_writer(run_input.as_file_mut(), &runs)
-        .map_err(|error| OpsError::Message(format!("serialize telemetry Runs: {error}")))?;
+    serde_json::to_writer(history_input.as_file_mut(), &history).map_err(|error| {
+        OpsError::Message(format!("serialize telemetry Session history: {error}"))
+    })?;
     let mut command = std::process::Command::new("python3");
     command
         .arg(script)
@@ -41,8 +42,8 @@ pub fn run_telemetry_scorecard(repo: &Path, json: bool) -> OpsResult<()> {
         .arg(repo)
         .arg("--database")
         .arg(database)
-        .arg("--runs")
-        .arg(run_input.path())
+        .arg("--history")
+        .arg(history_input.path())
         .arg("--envelope");
     command
         .stdin(Stdio::null())
@@ -182,7 +183,7 @@ import pathlib
 import sys
 
 repo = pathlib.Path(sys.argv[2])
-runs = json.loads(pathlib.Path(sys.argv[sys.argv.index("--runs") + 1]).read_text())
+runs = json.loads(pathlib.Path(sys.argv[sys.argv.index("--history") + 1]).read_text())
 repo.joinpath("scorecard-ran").write_text(json.dumps(runs))
 print(json.dumps({"report": {"ok": True}, "metric_observations": [], "text": "scorecard text\n"}))
 "#,

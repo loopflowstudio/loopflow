@@ -172,7 +172,7 @@ enum AccountLogin {
         store: SharedStore,
         profile: PathBuf,
     },
-    /// A profile in a recorded Run's catalog, read to check identity. Replay
+    /// A profile in a recorded capture's catalog, read to check identity. Replay
     /// names the account it requires and records nothing.
     Replayed {
         catalog: SharedStore,
@@ -1653,7 +1653,7 @@ pub(crate) fn resolve_provider_account_exact_blocking(
 /// Resolve one recorded account without consulting current planning routes.
 ///
 /// A forwarded credential grant wins when it contains the exact account.
-/// Otherwise the account's deterministic credential Home on the Run's Home is
+/// Otherwise the account's deterministic credential Home on the Session's Home is
 /// the authority. This path deliberately does not apply current repository
 /// routing or account-health policy: replay names the account it requires.
 /// Both providers read the owning account catalog to check credential identity.

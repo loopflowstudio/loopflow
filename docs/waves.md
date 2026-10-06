@@ -16,7 +16,9 @@ Flow execution; each Home retains command and conversation history.
 | `wave/<name>/metrics/*.md` | Metric meaning, window and freshness |
 
 In Loopflow on macOS, select a Wave to read its plan, Tasks and execution history. Start a
-Session for a conversation, or invoke `wave/operate` for a bounded planning pass.
+Session for a conversation, or invoke `wave/operate` for one finite pass. The
+Wave's ongoing conversation (`lf session ensure -w <name>`) applies that same
+pass each time you return.
 
 ## Nested Waves
 
@@ -71,10 +73,12 @@ Neither pass requires Discord or a schedule. VSM makes five sequential skill
 invocations, without requiring five reports or five actions. `wave/operate`
 remains a single skill; whether it should use the VSM Flow is still undecided.
 
-Each pass reads dated evidence, aims for one or two useful moves,
-and replies in the invoking conversation. Evidence determines how much is
-worthwhile; the number is guidance. A no-action result is useful when
-the evidence supports it. Failed reads and stale provider data remain explicit
+Each pass reads dated evidence and replies in the invoking conversation. It
+gives every started Task one disposition: moving, acted on and verified,
+waiting on a named person or dependency, paused, or unknown. A started Task
+with Flow steps left and no live worker is continued; unstarted backlog is
+listed and left for you to select. A no-action result is valid only when every
+started Task already has a disposition. Failed reads and stale provider data remain explicit
 gaps; they cannot justify closing work or treating a Task as idle.
 
 Task findings can challenge Wave purpose; Wave findings can challenge shared

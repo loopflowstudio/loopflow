@@ -41,7 +41,7 @@ public enum SessionTitleSource: String, Codable, Sendable, Hashable {
 }
 
 /// Whether a Session is an occurrence of a Flow. Rust owns
-/// this from the Flow position or the Run's recorded capture; Swift never
+/// this from the Flow position or the Session's recorded capture; Swift never
 /// infers it from Task, checkout, provider, or skill.
 public enum SessionFlowMembership: Codable, Sendable, Hashable {
     case step(flow: String, invocationId: String, step: String, node: UInt32?, iterations: [[UInt32]]?,
@@ -176,8 +176,8 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let titleSource: SessionTitleSource
     public let flowMembership: SessionFlowMembership
     public let detail: String
-    /// Provider harness recorded on the Session's Run manifest; nil when the
-    /// Run is on another Home or its manifest is unreadable.
+    /// Provider harness recorded on the Session's capture manifest; nil when the
+    /// capture is on another Home or its manifest is unreadable.
     public let provider: String?
     public let cwd: String
     public let state: SessionState

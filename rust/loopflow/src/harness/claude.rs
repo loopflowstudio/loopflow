@@ -135,6 +135,9 @@ impl ClaudeHarness {
                 ))
             })
             .transpose()?;
+        if let Some((store, session, driver)) = &owner {
+            store.record_session_provider_launch(session, driver, true)?;
+        }
         let mut child = cmd
             .spawn()
             .map_err(|err| anyhow!("failed to spawn claude: {err}"))?;

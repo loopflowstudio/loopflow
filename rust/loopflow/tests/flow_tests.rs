@@ -715,7 +715,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let bin = TempDir::new().unwrap();
         let launched = bin.path().join("launched");
         write_executable(&bin.path().join("codex"), &format!(
-            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' '{{\"schema_version\":1,\"provider_session_id\":\"ses-'\"$LF_RUN_ID\"'\",\"account_id\":null}}' > \"$LF_RUN_DIR/provider-session.json\"\necho \"$LF_RUN_ID\" > '{}'\n", launched.display(),
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" > '{}'\n", launched.display(),
         ));
         let path = format!(
             "{}:{}",
@@ -1245,8 +1245,8 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
         &bin.path().join("codex"),
         &format!(
             "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\n\
-             printf '%s' '{{\"schema_version\":1,\"provider_session_id\":\"ses-'\"$LF_RUN_ID\"'\",\"account_id\":null}}' \
-             > \"$LF_RUN_DIR/provider-session.json\"\necho \"$LF_RUN_ID\" >> '{}'\n",
+             printf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' \
+             | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" >> '{}'\n",
             launched.display()
         ),
     );

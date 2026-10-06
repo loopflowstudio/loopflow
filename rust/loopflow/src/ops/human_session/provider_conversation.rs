@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 
-use super::{local_session_run_dir, lock_session_exec, publish_prepared_input};
+use super::{local_capture_dir, lock_session_exec, publish_prepared_input};
 use crate::provider_account::activation::native_home;
 use crate::provider_auth::Provider;
 use crate::session::{AgentSession, SessionKind, TitleSource};
@@ -255,8 +255,8 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<AgentS
         &session,
         crate::session_record::SessionFlowMembership::Independent,
     )?;
-    let dir = local_session_run_dir(&session.artifact_key)
-        .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?;
+    let dir = local_capture_dir(&session.artifact_key)
+        .ok_or_else(|| anyhow!("Session {} has an invalid capture reference", session.id))?;
     crate::session_record::write_provider_session(&dir, id, conversation.account.clone())?;
     if let Some(account) = &conversation.account {
         // It resumes in the account home that holds its history.

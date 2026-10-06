@@ -154,12 +154,13 @@ pub(crate) fn checkout_execution_boundary(
     Ok(AgentExecutionBoundary { writable_roots })
 }
 
-pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 5] = [
+pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 6] = [
     crate::exec::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
-    crate::durable::RUN_ID_ENV,
-    crate::session_record::RUN_DIR_ENV,
+    crate::session_record::CAPTURE_KEY_ENV,
+    "LF_RUN_ID",
+    "LF_RUN_DIR",
 ];
 
 #[derive(Clone, Default)]
@@ -243,7 +244,7 @@ impl std::fmt::Debug for AgentConfig {
     }
 }
 
-/// Select and pin a managed Claude/Codex account before publishing a Run.
+/// Select and pin a managed Claude/Codex account before publishing a capture.
 pub(crate) fn pin_provider_account_id_blocking(launch: &mut AgentConfig) -> Result<(), CoreError> {
     let (harness, _) = parse_agent(launch.agent());
     let provider = match harness.as_str() {
@@ -1169,6 +1170,13 @@ pub fn exec_agent(
 ) -> Result<AgentExecResult, CoreError> {
     let mut launch = launch.clone();
     launch.chrome = capabilities.chrome;
+    if launch.resume_token.is_none() {
+        if let Some(capture) = &process.capture {
+            launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
+                CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))
+            })?;
+        }
+    }
     pin_provider_account_id_blocking(&mut launch)?;
     let (harness, model) = parse_agent(launch.agent());
     let implicit_capture = if process.capture.is_none() {
@@ -1973,6 +1981,11 @@ fn spawn_agent_child(
     capture: Option<&CaptureHandle>,
     activation: Option<std::fs::File>,
 ) -> Result<Child, CoreError> {
+    if let Some(capture) = capture {
+        capture
+            .begin_provider_spawn()
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    }
     let mut child = cmd.spawn()?;
     drop(activation);
     if let Some(capture) = capture {

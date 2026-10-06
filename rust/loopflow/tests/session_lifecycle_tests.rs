@@ -252,15 +252,8 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
     assert_eq!(listed[0]["provider"], "opencode");
     assert_eq!(listed[0]["work"], Value::Null);
 
-    // The agent names its own Session by `$LF_RUN_ID`; a person then renames it.
-    let suggested = fixture.json(&[
-        "session",
-        "rename",
-        &first_run,
-        "Parser",
-        "--suggest",
-        "--json",
-    ]);
+    // The agent and person name the same durable Session.
+    let suggested = fixture.json(&["session", "rename", &id, "Parser", "--suggest", "--json"]);
     assert_eq!(suggested["id"], id.as_str());
     assert_eq!(suggested["title"], "Parser");
     assert_eq!(suggested["title_source"], "generated");
@@ -622,6 +615,10 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     assert_eq!(fixture.run_parents(&orphan), (None, None, None));
     assert_eq!(started(task.task.id.as_str()), None);
     assert!(task_runs("INF-123").is_empty());
+
+    let wrong_identity = fixture.run(&["session", "bind", &orphan, "--task", "INF-123", "--json"]);
+    assert!(!wrong_identity.status.success(), "{wrong_identity:?}");
+    assert!(String::from_utf8_lossy(&wrong_identity.stderr).contains("was not found"));
 
     let preview = fixture.json(&[
         "session",

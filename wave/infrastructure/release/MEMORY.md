@@ -1,5 +1,21 @@
 # Release memory
 
+## Installed schedule repair (2026-10-05)
+
+Infrastructure's installed release and telemetry jobs still referenced an old
+immutable executable after v0.13.3 installation. Both were reinstalled through
+`lf wave cron add` with their original 10:00 and 09:00 local schedules unchanged.
+Readback confirms loaded jobs now use the machine installation gate, so future
+published CLI promotions do not strand them on that old executable.
+
+The installed owner remains `infrastructure`: `infrastructure/release` is not
+registered, and no child-owner migration was attempted. Release history after
+refresh exposes three unresolved historical opportunities with unknown timezone
+provenance, zero executions and no qualifying pair. Do not backfill success or
+count this repair as unattended settlement. LOO-285 remains open for two adjacent
+original scheduled opportunities, distinct automatic executions, required proof
+and at least one publication without manual repair.
+
 ## Release completion responsibility (2026-10-05)
 
 Jack Heart directed Infrastructure on October 4 to ensure releases finish through
@@ -35,12 +51,22 @@ Remove the obsolete receipt requirement and use `lf list --json`; keep all actua
 public verification stages required. The scheduled regression exercises published,
 no-change, telemetry failure/recovery, missing proof and smoke failure without a
 UI receipt. Publisher fixtures now reject unknown CLI commands instead of returning
-a version for every invocation. The follow-up is not yet shipped at this curation.
+a version for every invocation. The follow-up landed in PR #1441 and shipped in
+v0.13.3, published at 2026-10-05 08:40:22 UTC from
+`8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3` after
+[candidate 37283026406](https://github.com/loopflowstudio/loopflow/actions/runs/37283026406)
+passed. The normal installed CLI completed that release without the temporary
+recovery CLI. CLI and Desktop then installed as 0.13.3 without another migration.
 
 A Docker startup failure recovered through one failed-job rerun on a fresh GitHub
 runner. This manual recovery does not satisfy LOO-285's two unattended scheduled
-settlements. Public read-back/smoke verification remains distinct from publication
-and local installation; no verified public receipt was produced by the manual run.
+settlements. Direct public read-back for 0.13.3 matched all seven GitHub asset
+digests and both versioned/latest DMG downloads against the prepared checksums;
+the website and crate registry reported 0.13.3. Installed CLI discovery and the
+default Session inventory passed (43 interactive, zero headless, zero closed).
+These observations are manual acceptance, not a scheduled verified receipt or
+proof of two unattended settlements. Reopening Desktop remains necessary to
+load the new UI in an already-running application.
 Publisher checkout cleanup reported a retained lease at
 `/Users/jack/src/loopflow.publish-default-v0-13-2`; preserve it for supported
 reconciliation rather than removing it manually.
@@ -151,3 +177,13 @@ journal recording. That separate boundary did not cause hosted Swift CI to
 fail. #1308's branch/Home isolation landed during this investigation; its
 merge alone proves neither installed recovery nor publication. Preserve the
 populated Home and historical receipts rather than rewriting the failed attempt.
+
+## Preserve the pending release version (2026-10-05)
+
+Jack Heart requested autonomous 5whys and prevention after the v0.13.1 gap.
+Incorrect earlier preparation commits may remain in history; a corrected commit
+must retain and publish the same pending version. This supersedes recovery's
+previous automatic patch-successor policy. The sourced causal analysis and
+prevention live in `release/v0.13.1/RECOVERY.md`. Existing published artifacts,
+tags and migration bytes remain immutable. The historical gap is not repaired
+by this source change; installed activation requires a later published release.

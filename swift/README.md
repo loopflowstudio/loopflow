@@ -47,14 +47,22 @@ checks; `lf ci watch --status` shows its last poll and what it started.
 ```
 
 Shell panes with Ghostty shell integration group each completed command and its
-output into a full-width block. Click anywhere in a block to select the whole
-unit, then use Command-C or the terminal's context menu to copy the command and
-all of its output.
-Command-Up/Down navigates between prompts. The live prompt remains ungrouped;
+output into a full-width block. A command that exited non-zero has a red
+background. Click anywhere in a block to select the whole unit; drag to select
+text instead. There is one selection at a time, and Command-C or the context
+menu copies it: a block copies its command and all of its output. Right-click
+keeps the selection it lands on. A selected block clears when you type or press
+Escape. Command-Up and Command-Down jump between prompts. The live prompt remains ungrouped;
 Session/provider panes keep their native TUI behavior and do not expose shell
 command blocks.
 Automatic integration depends on the configured shell; macOS `/bin/bash` is
-excluded by the pinned Ghostty build.
+excluded by the pinned Ghostty build. A zsh shell still on the macOS default
+prompt gets a small dim directory line above each bold command, with the gap
+between blocks shared evenly; any other prompt is left as it is.
+
+Terminals start from Desktop's own terminal settings. A launcher's `NO_COLOR`,
+`TERM`, pager and agent variables do not reach them, so provider CLIs keep their
+colors however Desktop was opened.
 
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
@@ -144,7 +152,7 @@ launches a fresh Flow, including beside an earlier one, and is disabled with
 Rust's reason when it cannot be used. A launched Flow without a live worker
 reads **Stopped**; there is no Pause until Loopflow can hold a Flow at a boundary.
 **Recent runs** under the Flow reads nothing until expanded; it then lists that
-Task's newest 50 Runs from the last seven days (`lf usage --days 0 --task ID --json`) with each recorded
+Task's complete recorded input history (`lf usage --days 0 --task ID --json`) with each recorded
 outcome. Session rows show the provider recorded on their Run and a ready summary
 only when the Session recorded one.
 Below the Description, **Comments (n)** is collapsed and counts the Task's Linear

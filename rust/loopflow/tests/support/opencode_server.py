@@ -28,9 +28,9 @@ def _event(kind, **properties):
 
 def _record_launch():
     with (HOME / "launched").open("a") as output:
-        output.write(os.environ["LF_RUN_ID"] + "\n")
+        output.write(os.environ["LF_CAPTURE_KEY"] + "\n")
     with (HOME / "declarations").open("a") as output:
-        declaration = {"capture": os.environ["LF_RUN_ID"], "as": os.environ.get("LF_AS")}
+        declaration = {"capture": os.environ["LF_CAPTURE_KEY"], "as": os.environ.get("LF_AS")}
         output.write(json.dumps(declaration) + "\n")
     tool = HOME / "tool-command.json"
     if tool.exists():
@@ -184,7 +184,7 @@ class Server(BaseHTTPRequestHandler):
         elif self.path.endswith("/prompt_async"):
             if evidence := os.environ.get("LF_TEST_REPLAY_EVIDENCE"):
                 Path(evidence).write_text(json.dumps({
-                    "input": os.environ["LF_RUN_ID"],
+                    "input": os.environ["LF_CAPTURE_KEY"],
                     "request": body,
                 }))
             self._json({})
@@ -204,7 +204,7 @@ class Server(BaseHTTPRequestHandler):
 if "--version" in sys.argv:
     raise SystemExit(0)
 if "serve" not in sys.argv:
-    print("message=created id=ses_" + os.environ["LF_RUN_ID"], file=sys.stderr)
+    print("message=created id=ses_" + os.environ["LF_CAPTURE_KEY"], file=sys.stderr)
     _record_launch()
     if __WAIT__:  # noqa: F821 — substituted by the Rust fixture before execution
         sys.stdin.readline()

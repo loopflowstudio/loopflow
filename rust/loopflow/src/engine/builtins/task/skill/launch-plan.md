@@ -124,8 +124,7 @@ Inspect the current context first: a design already in the Task worktree needs
 no transfer. For a separate source, copy the actual documents and supporting
 files before launch, preserve relative references, and check their contents in
 the destination. A path alone does not supply context. Preparation launches no
-worker; put any initial directive on preparation, since an already prepared
-Task rejects a new `run --directive`. Do not overwrite newer destination work.
+worker. Do not overwrite newer destination work.
 
 The destination becomes the working design; retain source provenance without
 maintaining competing active copies. Markdown under its recursive `scratch/`

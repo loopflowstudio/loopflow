@@ -132,6 +132,12 @@ impl OpenCodeHarness {
         #[cfg(unix)]
         command.process_group(0);
         super::configure_vendor_std_env(command.as_std_mut())?;
+        {
+            let history = self.history.lock().expect("OpenCode history lock poisoned");
+            if let Some((store, session, driver)) = &history.owner {
+                store.record_session_provider_launch(session, driver, true)?;
+            }
+        }
         let mut child = command
             .spawn()
             .map_err(|err| anyhow!("failed to spawn opencode serve: {err}"))?;

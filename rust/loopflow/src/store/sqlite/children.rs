@@ -647,6 +647,21 @@ impl SqliteStore {
         task_events_after_in(&conn, task_id, cursor)
     }
 
+    pub(crate) fn task_accepted_unknown_execs(
+        &self,
+        task_id: &TaskId,
+    ) -> StoreResult<Vec<crate::id::ExecId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT DISTINCT accepted.value FROM task_events,
+             json_each(task_events.kind_json, '$.exec_ids') AS accepted
+             WHERE task_id=?1 AND json_extract(kind_json, '$.kind')='historical_uncertainty_accepted'",
+        )?;
+        let rows = statement.query_map([task_id.as_str()], |row| row.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
     pub fn task_event(&self, task_id: &TaskId, event_id: i64) -> StoreResult<Option<TaskEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(

@@ -129,7 +129,7 @@ fn explicit_home_ignores_retired_control_home_pins() {
     ] {
         let output = command(home.path(), home.path(), &args)
             .env("LF_RUN_DIR", source.path().join("runs/parent"))
-            .env("LF_RUN_ID", "run_parent")
+            .env("LF_CAPTURE_KEY", "run_parent")
             .output()
             .unwrap();
         success(output);
@@ -148,6 +148,7 @@ fn explicit_home_ignores_retired_control_home_pins() {
 }
 
 #[test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn installation_uses_candidate_authority_from_any_checkout() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
@@ -179,6 +180,7 @@ fn installation_uses_candidate_authority_from_any_checkout() {
 }
 
 #[test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 fn installation_reaches_candidate_verdict_with_an_unreadable_task_registry() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();

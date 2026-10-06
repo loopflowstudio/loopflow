@@ -646,11 +646,11 @@ impl SqliteStore {
             .optional()?)
     }
 
-    pub fn session_for_artifact(&self, run_id: &str) -> StoreResult<Option<AgentSession>> {
+    pub fn session_for_artifact(&self, artifact_key: &str) -> StoreResult<Option<AgentSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             &format!("{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1)"),
-            [run_id],
+            [artifact_key],
             read_session,
         )
         .optional()?
@@ -812,33 +812,18 @@ impl SqliteStore {
         Ok(session)
     }
 
-    /// A review Run stored before providers were: take it from launch evidence.
-    pub fn fill_run_provider(
-        &self,
-        run: &str,
-        provider: &str,
-        model: Option<&str>,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE agent_sessions SET provider=?2, model=?3 WHERE current_capture=?1 AND provider IS NULL",
-            params![capture_seq_in(&conn,run)?, provider, model],
-        )?;
-        Ok(())
-    }
-
-    /// Choose the agent of a Run that has not launched. A published Run keeps
+    /// Choose the agent of an unpublished capture. A published capture keeps
     /// the provider it launched with.
-    pub fn retarget_unpublished_run(
+    pub fn retarget_unpublished_capture(
         &self,
-        run: &str,
+        artifact_key: &str,
         provider: &str,
         model: Option<&str>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "UPDATE agent_sessions SET provider=?2, model=?3 WHERE current_capture=?1 AND input_published=0",
-            params![capture_seq_in(&conn,run)?, provider, model],
+            params![capture_seq_in(&conn,artifact_key)?, provider, model],
         )?;
         Ok(())
     }
@@ -931,24 +916,14 @@ impl SqliteStore {
             .collect()
     }
 
-    pub fn rename_session(
-        &self,
-        id: &str,
-        expected_capture: Option<i64>,
-        title: &str,
-        source: TitleSource,
-    ) -> StoreResult<()> {
+    pub fn rename_session(&self, id: &str, title: &str, source: TitleSource) -> StoreResult<()> {
         if title.trim().is_empty() {
             return Err(invalid("Session title cannot be empty"));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        if expected_capture.is_some_and(|event| Some(event) != session.captured) {
-            return Err(StoreError::InvalidAuthority(
-                "Session changed before rename".into(),
-            ));
-        }
+        require_current_actor_in(&tx, id)?;
+        session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.execute(
             "UPDATE agent_sessions SET title=?2, title_source=?3
              WHERE id=?1 AND (title_source='generated' OR ?3='human')",
@@ -1023,6 +998,50 @@ fn resolve_ancestry_in(conn: &Connection, session: &mut AgentSession) -> StoreRe
             })
             .transpose()
             .map_err(invalid)?;
+    }
+    Ok(())
+}
+
+/// A replaced provider keeps causal history, but cannot mutate its conversation.
+fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
+    if let Some(caller) = crate::journal::agent_caller().filter(|caller| caller.session_id == id) {
+        let current: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1
+                AND provider_generation=?2 AND provider_exec_id=?3
+                AND driver_exec_id IS NOT NULL)",
+            params![id, caller.provider_generation, caller.origin_exec_id],
+            |row| row.get(0),
+        )?;
+        if !current {
+            return Err(StoreError::InvalidAuthority(
+                "Session provider was replaced".into(),
+            ));
+        }
+    }
+    if let Some(key) = std::env::var_os(crate::session_record::CAPTURE_KEY_ENV) {
+        let key = key
+            .into_string()
+            .map_err(|_| invalid("capture key is not valid UTF-8"))?;
+        crate::session_record::parse_artifact_key(&key).map_err(invalid)?;
+        let (owner, current): (String, bool) = conn
+            .query_row(
+                "SELECT s.id,e.seq IS s.current_capture FROM session_events e
+                JOIN agent_sessions s ON s.id=e.session_id
+                WHERE e.kind='captured' AND e.receipt_key=?1",
+                [&key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| invalid("capture does not belong to a recorded Session in this Home"))?;
+        if crate::journal::agent_caller().is_some_and(|caller| caller.session_id != owner) {
+            return Err(invalid("capture belongs to another Session"));
+        }
+        let stale = owner == id && !current;
+        if stale {
+            return Err(StoreError::InvalidAuthority(
+                "Session input was replaced".into(),
+            ));
+        }
     }
     Ok(())
 }

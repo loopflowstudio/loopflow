@@ -61,7 +61,7 @@ subprocess edge to one concept.
 ```text
 lf                         foreground command and Skill/Flow launches
 lf-prompt                  prompt-oriented executable surface
-lf __provider-session      provider hook that binds native session identity to a Run
+lf __provider-session      provider hook that binds native conversation identity to an AgentSession
 lf __screenshot-supervisor bounded browser-capture owner
 Loopflow.app               pure client over CLI/HTTP DTOs
 ```

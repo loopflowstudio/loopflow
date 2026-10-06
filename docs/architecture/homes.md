@@ -69,8 +69,11 @@ The outer command journal records command receipts. `lf ps` and `lf top` join
 those receipts to current OS process facts. Completed processes disappear from
 the live view. This is observation, not a durable lifecycle model.
 
-`lf mon prune` removes dead command receipts and may reap only registered orphan
-OpenCode process groups whose ownership is known. An unclaimed provider PID is
+`lf mon prune` removes dead command receipts only after their terminal outcome
+is recorded, and may reap only registered orphan OpenCode process groups whose
+ownership is known. Receipts use Exec IDs, so PID reuse cannot overwrite an
+unfinished Exec’s identity. Failed terminal writes and interrupt cleanup retain
+that identity without inventing an outcome. An unclaimed provider PID is
 never killed merely because it resembles a Loopflow child.
 
 Cross-process control requires exact PID/start identity and the applicable

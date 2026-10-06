@@ -1,12 +1,10 @@
 ---
 description: Clear obsolete work state, report activity, advance Waves, and capture Tasks.
 ---
-
-# Operate repository work
-
-Keep the repository's work state clean and its work moving. Clear old state
-that is no longer needed, summarize current activity, drive Tasks forward
-through their Waves, and capture new Tasks as direction emerges.
+Keep the repository's work state clean and its work moving. You are this
+repository's operator: clear old state that is no longer needed, keep every
+started Task moving through its Wave, summarize current activity, and capture
+new Tasks as direction emerges.
 
 ## Clear old work state
 
@@ -95,9 +93,9 @@ as success.
 
 ## Summarize current activity
 
-Give a concise update: what finished, what is running, what is waiting, what is
-blocked, and what needs a decision. Include cleanup results and useful next
-moves. Use `lf wave list --json`, `lf wave status <wave> --json`, and Task status
+Give a concise update grouped in this order: what waits on the participant,
+what is moving, and what is stuck, then what finished. Include cleanup results
+and useful next moves. Use `lf wave list --json`, `lf wave status <wave> --json`, and Task status
 for shared state; inspect PRs and branches where they explain a gap.
 
 Refresh relevant facts after actions and when an update is needed. Link Tasks
@@ -107,16 +105,35 @@ put routine progress in this conversation, not Task comments.
 
 ## Drive work through Waves
 
-For each Wave that needs attention, apply `wave/operate`: read its objective,
-memory, plan, and current work; make useful moves that advance its
-Tasks. Use `lf --wave <wave> wave/operate "<concrete direction>"` when a separate
-Wave pass is useful. The repository view connects outcomes and dependencies
-across Waves; the Wave pass owns the detailed judgment within each Wave.
+Every started, unfinished Task in the repository ends this pass with one
+disposition and its evidence: **moving** (a live worker was observed),
+**acted** (continued, recovered or delivered here, then verified), **waiting on
+a person** (the named review, decision or merge click and its Session or PR),
+**waiting on a dependency or capacity**, **paused** (an explicit hold or
+instruction), or **unknown** (the missing read or liveness evidence). “Ready”,
+“needs reconciliation” and “its Wave owns this” are not dispositions. Unstarted
+backlog is listed and left alone: starting it is the person's selection.
 
-Leave healthy workers moving. Preserve Task identity, selected Flows, review
-gates, and existing execution. Do not create a competing driver or require a
-repository pass before a Task can progress. Follow an intervention through to
-its observed result, then include that result in the repository update.
+Operate each Wave that has started work with `wave/operate`: read its
+objective, memory, plan and current work, and give its started Tasks their
+dispositions. Do that here, or run
+`lf --wave <wave> wave/operate "<concrete direction>"` for a separate pass and
+read its result. Operate started Tasks outside any Wave with
+`lf task/operate <issue>`. Sending the user to another conversation is not
+operating. The repository view connects outcomes and dependencies across
+Waves; the Wave pass owns the detailed judgment within each Wave.
+
+Leave live Flows running. For a failed or stopped Flow, read its log and effects,
+repair the cause, and launch only authorized remaining work through
+`lf task run <issue> <flow> --reason "<what changed>"`. Verify from
+`lf task status <issue> --json`; nothing resumes a stopped driver. A Flow ends
+where authored. Work awaiting review or a new direction stays in the Task
+conversation, with the PR and remaining scope named.
+
+Preserve Task identity, Flow history, conversations and existing execution.
+Do not create a competing driver or require a repository pass before a Task
+can progress. Follow an intervention through to its observed result, then
+include that result in the repository update.
 
 ## Capture new Tasks
 
@@ -243,8 +260,7 @@ Inspect the current context first: a design already in the Task worktree needs
 no transfer. For a separate source, copy the actual documents and supporting
 files before launch, preserve relative references, and check their contents in
 the destination. A path alone does not supply context. Preparation launches no
-worker; put any initial directive on preparation, since an already prepared
-Task rejects a new `run --directive`. Do not overwrite newer destination work.
+worker. Do not overwrite newer destination work.
 
 The destination becomes the working design; retain source provenance without
 maintaining competing active copies. Markdown under its recursive `scratch/`

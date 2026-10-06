@@ -1,4 +1,4 @@
-//! An independent Discord bridge. Each message gets one ordinary bounded Run.
+//! An independent Discord bridge. Each message gets one ordinary bounded Session.
 //! The cursor is process-local; startup skips existing channel history.
 
 use std::path::Path;

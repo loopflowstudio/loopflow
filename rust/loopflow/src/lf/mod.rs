@@ -521,7 +521,7 @@ pub enum SessionCommand {
     },
     /// Read this conversation's native start, usage and completion receipts
     History {
-        /// Session ID, one of its Run IDs, or the provider's own conversation ID
+        /// Session ID or provider conversation ID
         id: String,
         #[arg(long)]
         json: bool,
@@ -569,7 +569,7 @@ pub enum SessionCommand {
     /// Connect to the live conversation, or resume its saved history
     #[command(name = "connect")]
     Open {
-        /// Session ID, one of its Run IDs, or the provider's own conversation ID
+        /// Session ID or provider conversation ID
         id: String,
         #[arg(long)]
         json: bool,
@@ -596,7 +596,7 @@ pub enum SessionCommand {
     },
     /// Rename a Session; a human name is never replaced by a suggestion
     Rename {
-        /// Session ID, one of its Run IDs, or the provider's own conversation ID
+        /// Session ID or provider conversation ID
         id: String,
         #[arg(value_name = "NAME", required = true, num_args = 1..)]
         name: Vec<String>,
@@ -608,7 +608,7 @@ pub enum SessionCommand {
     },
     /// Assign a Task to a Session that has none; the Task never changes after
     Bind {
-        /// Session ID, one of its Run IDs, or the provider's own conversation ID
+        /// Session ID or provider conversation ID
         id: String,
         /// The Task, by its issue identifier (e.g. INF-123) or stable Task ID
         #[arg(long)]
@@ -827,6 +827,9 @@ pub enum TaskCommand {
         issue: String,
         #[arg(long)]
         summary: String,
+        /// Accept one historical Exec's unknown outcome for completion only; retain its checkout
+        #[arg(long, value_name = "EXEC_ID")]
+        accept_unknown_exec: Vec<crate::id::ExecId>,
         #[arg(long)]
         json: bool,
     },
@@ -2280,7 +2283,7 @@ mod tests {
         ])
         .unwrap();
         assert!(
-            matches!(cli.command, Some(Commands::Task { cmd: TaskCommand::Complete { issue, summary, json: true } }) if issue == "LOO-42" && summary == "Delivered")
+            matches!(cli.command, Some(Commands::Task { cmd: TaskCommand::Complete { issue, summary, json: true, .. } }) if issue == "LOO-42" && summary == "Delivered")
         );
         assert!(matches!(
             Cli::try_parse_from(["lf", "pm", "task", "done", "--id", "LOO-42"])
@@ -2288,6 +2291,26 @@ mod tests {
                 .command,
             Some(Commands::External(_))
         ));
+    }
+
+    #[test]
+    fn task_complete_accepts_exact_historical_execs() {
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "complete",
+            "LOO-42",
+            "--summary",
+            "Delivery verified",
+            "--accept-unknown-exec",
+            "00000000-0000-0000-0000-000000000001",
+            "--accept-unknown-exec",
+            "00000000-0000-0000-0000-000000000002",
+        ])
+        .unwrap();
+        assert!(matches!(cli.command,
+            Some(Commands::Task { cmd: TaskCommand::Complete { accept_unknown_exec, .. } })
+                if accept_unknown_exec.iter().map(|id| id.as_str()).collect::<Vec<_>>() == ["00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"]));
     }
 
     #[test]

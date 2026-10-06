@@ -93,9 +93,9 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```
 
 ```bash
-lf --wave designer wave/operate        # one finite planning pass
+lf --wave designer wave/operate        # one finite pass: keep started Tasks moving
 lf --wave designer wave/operate "ship the button audit first"
-lf --wave designer wave/operate        # one finite planning pass
+lf session ensure -w designer          # the Wave's ongoing conversation, applying that pass on every return
 ```
 
 Edit `wave/designer/MEMORY.md` directly when durable context changes; it is a
@@ -112,6 +112,7 @@ lf --task INF-123 research "write scratch/runtime.md"    # one independent Task 
 lf task run INF-123 --reason "reconcile all scratch first" # publish direction, then run fresh work
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
+lf --task INF-123 skill task/session               # ongoing conversation that keeps applying task/operate
 lf arm -c                                          # request exact-head auto-merge and return
 lf land -c                                         # hand off delivery; complete the Task after verified merge
 lf pr reconcile                                      # check recorded deliveries once and settle merges

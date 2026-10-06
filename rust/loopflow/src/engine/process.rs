@@ -347,11 +347,14 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::lf::WORK_DECLARATION_ENV,
     crate::ops::human_session::HUMAN_SESSION_ENV,
     crate::ops::human_session::PREPARED_CAPTURE_ENV,
-    crate::session_record::RUN_DIR_ENV,
+    "LF_RUN_DIR",
+    "LF_RUN_ID",
+    "LF_HUMAN_SESSION_RUN",
+    "LF_REVIEW_RUN_RESERVATION",
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
     crate::work::wave::context::WAVE_ID_ENV,
-    crate::durable::RUN_ID_ENV,
+    crate::session_record::CAPTURE_KEY_ENV,
     crate::exec::AGENT_CALLER_ENV,
     crate::ops::git_operation::LF_GIT_OPERATION_ID_ENV,
     crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
@@ -559,7 +562,7 @@ mod tests {
 
         let command = lf_session_shell_command(std::path::Path::new("."), &argv, &[]);
 
-        assert!(command.contains("LF_WAVE_ID LF_RUN_ID "));
+        assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
     }
@@ -641,7 +644,7 @@ mod tests {
             ],
         );
 
-        assert!(command.contains("LF_WAVE_ID LF_RUN_ID "));
+        assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.ends_with(
             "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"

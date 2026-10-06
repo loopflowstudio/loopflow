@@ -701,7 +701,9 @@ struct SessionsContentView: View {
     }
 
     private var taskMaterials: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        // Read once: asking per Session rebuilds the workspace for each row.
+        let taskIdentity = taskIdentity
+        return VStack(alignment: .leading, spacing: 12) {
             Text("Sessions").font(Typography.meta.weight(.semibold))
                 .foregroundStyle(palette.textSecondary)
                 .padding(.horizontal, 8)

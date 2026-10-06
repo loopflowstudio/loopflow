@@ -355,6 +355,131 @@ impl SqliteStore {
             .optional()?)
     }
 
+    /// Record positive pre-spawn evidence under the exact admission fence.
+    /// Once spawn is requested, missing process evidence remains unknown.
+    pub(crate) fn record_session_provider_launch(
+        &self,
+        session: &str,
+        expected: &SessionDriver,
+        spawning: bool,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.exec_id.is_none() {
+            return Err(StoreError::InvalidAuthority(
+                "Session driver changed".into(),
+            ));
+        }
+        let phase = if spawning {
+            "spawn_requested"
+        } else {
+            "reserved"
+        };
+        tx.execute(
+            "INSERT OR IGNORE INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1",
+            params![session, format!("provider:{}:{phase}", expected.provider_generation),
+                expected.exec_id, time::OffsetDateTime::now_utc().unix_timestamp(),
+                serde_json::json!({"type":"provider_launch", "phase":phase,
+                    "provider_generation":expected.provider_generation}).to_string()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn session_provider_unstarted(&self, session: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT provider_pid IS NULL AND provider_endpoint IS NULL
+             AND EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
+                AND e.receipt_key='provider:' || s.provider_generation || ':reserved')
+             AND NOT EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
+                AND e.receipt_key='provider:' || s.provider_generation || ':spawn_requested')
+             FROM agent_sessions s WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Retain a boot witness for this released driver, without settling its
+    /// unknown provider outcome. A later boot on the same host excludes all
+    /// processes that could have survived that witness, including descendants.
+    pub(crate) fn observe_session_recovery_boot(
+        &self,
+        session: &str,
+        expected: &SessionDriver,
+        boot: &crate::session_record::recovery::HostBoot,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.exec_id.is_some() {
+            return Err(StoreError::InvalidAuthority(
+                "Session driver changed".into(),
+            ));
+        }
+        let unidentified: bool = tx.query_row(
+            "SELECT provider_pid IS NULL AND provider_endpoint IS NULL FROM agent_sessions WHERE id=?1",
+            [session], |row| row.get(0),
+        )?;
+        if !unidentified {
+            return Ok(false);
+        }
+        // A copied Home cannot witness the death of a provider on its origin
+        // host. Establish locality from the provider Exec's retained capture,
+        // then bind the witness to the machine's OS identity across restarts.
+        let local: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_events c JOIN session_events m ON m.captured_event=c.seq
+             WHERE c.session_id=?1 AND c.kind='captured' AND c.exec_id=?2
+             AND m.session_id=c.session_id AND m.kind='observed'
+             AND m.receipt_key=c.receipt_key || ':manifest.json'
+             AND json_extract(m.payload,'$.input_id')=c.receipt_key
+             AND json_extract(m.payload,'$.source')='manifest.json'
+             AND json_extract(m.payload,'$.evidence.schema_version')=1
+             AND json_extract(m.payload,'$.evidence.artifact_key')=c.receipt_key
+             AND json_extract(m.payload,'$.evidence.host')=?3)",
+            params![session, expected.provider_exec_id, boot.host], |row| row.get(0),
+        )?;
+        if !local {
+            return Ok(false);
+        }
+        let key = format!("driver:{}:recovery_boot", expected.generation);
+        let previous: Option<String> = tx
+            .query_row(
+                "SELECT payload FROM session_events WHERE session_id=?1 AND receipt_key=?2",
+                params![session, key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let previous = previous
+            .map(|payload| serde_json::from_str::<serde_json::Value>(&payload))
+            .transpose()?;
+        let recovered = previous.as_ref().is_some_and(|payload| {
+            payload["provider_generation"].as_i64() == Some(expected.provider_generation)
+                && payload["provider_exec_id"].as_str() == Some(expected.provider_exec_id.as_str())
+                && payload["host"]["machine"].as_str() == Some(boot.machine.as_str())
+                && payload["host"]["boot"]
+                    .as_str()
+                    .is_some_and(|old| old != boot.boot)
+        });
+        let phase = if recovered {
+            "recovered_after_restart"
+        } else {
+            "recovery_boot"
+        };
+        tx.execute(
+            "INSERT OR IGNORE INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,?3,?4,current_capture FROM agent_sessions WHERE id=?1",
+            params![session, format!("driver:{}:{phase}", expected.generation),
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+                serde_json::json!({"type":phase, "host":boot,
+                    "provider_generation":expected.provider_generation,
+                    "provider_exec_id":expected.provider_exec_id,
+                    "previous":if recovered { previous } else { None }}).to_string()],
+        )?;
+        tx.commit()?;
+        Ok(recovered)
+    }
+
     pub(crate) fn record_session_provider_process(
         &self,
         session: &str,

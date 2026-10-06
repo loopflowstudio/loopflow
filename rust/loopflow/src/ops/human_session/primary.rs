@@ -58,16 +58,18 @@ pub(crate) async fn ensure_task(
     };
     let scope = PrimaryScope::Task(id.clone());
     let _lock = lock_scope(&scope).await?;
-    let existing = match choose {
+    let chosen = match choose {
         Some(session) => Some(session.to_string()),
-        None => match store.task_primary(id).await? {
-            Some(primary) => return surface(store, &primary).await,
-            None => super::most_recent(store, store.task_conversations(id).await?)
+        None => {
+            if let Some(primary) = store.task_primary(id).await? {
+                return surface(store, &primary).await;
+            }
+            super::most_recent(store, store.task_conversations(id).await?)
                 .await?
-                .map(|session| session.id),
-        },
+                .map(|session| session.id)
+        }
     };
-    if let Some(session) = existing {
+    if let Some(session) = chosen {
         let primary = store.choose_task_primary(id, &session).await?;
         return surface(store, &primary).await;
     }

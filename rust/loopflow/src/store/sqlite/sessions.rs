@@ -758,7 +758,7 @@ impl SqliteStore {
     ) -> StoreResult<AgentSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let column = |kind: &str, column: &str, id: String| {
+        let marked = |kind: &str, column: &str, id: String| {
             tx.query_row(
                 &format!(
                     "{SESSION_SELECT} WHERE s.primary_scope=?1 AND s.{column}=?2 \
@@ -771,8 +771,8 @@ impl SqliteStore {
             .transpose()
         };
         let current = match scope {
-            PrimaryScope::Repository(repo) => column("repository", "repo", repo.to_string())?,
-            PrimaryScope::Wave(wave) => column("wave", "wave_id", wave.to_string())?,
+            PrimaryScope::Repository(repo) => marked("repository", "repo", repo.to_string())?,
+            PrimaryScope::Wave(wave) => marked("wave", "wave_id", wave.to_string())?,
             PrimaryScope::Task(task) => task_primary_in(&tx, task)?,
         };
         match current {

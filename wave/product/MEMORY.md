@@ -438,11 +438,9 @@ issue read. No Task was filed or changed by these records.
 - Chapter display switches to live state after a complete successful status read,
   including no chapter. Cached authored content is fallback for a failed read
   with a visible stale warning; history remains available independently.
-- Retired the local four-stage `ux-research` flow: every checked orientation path
-  was gone, and it treated scratch personas/guidelines as durable despite landing
-  cleanup. Future UI research should start from current Product code and a real
-  user question. Simulated personas generate hypotheses, not customer evidence;
-  enduring conclusions belong here after validation.
+- The local `ux-research` flow is retired (detail at
+  `80686b43b:wave/product/MEMORY.md`). Simulated personas generate hypotheses,
+  not customer evidence; enduring conclusions belong here after validation.
 
 ## Workspace redesign decisions (2026-09-26)
 

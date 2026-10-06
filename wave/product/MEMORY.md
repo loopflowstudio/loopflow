@@ -713,34 +713,6 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
 - **Backlogs are allowed.** Linear Tasks may exist without a Run; open Runs are
   not the Wave's roadmap.
 
-### Earlier runtime findings (July–August evidence)
-
-- **Missing lifecycle flows must settle, not retry** (dogfood 2026-07-21).
-  LOO-167, LOO-193, and LOO-195 repeatedly alternated between `ready` and a
-  short-lived Run while `task` was absent from the installed flow catalog,
-  producing hundreds of identical resumable failures. The shared action
-  surfaces still recommended `resume` or `no_action`, and no non-destructive
-  pause exists for ready Task Work. Flow resolution failure must become one
-  durable blocked/failed boundary with bounded retry and a legal next action.
-- **Containment liveness is not provider-progress proof** (dogfood 2026-07-21).
-  LOO-207 and its owning Project reported `process_alive: true` while no exact
-  `lf ps` receipt existed and `lf top` recorded no completed output; interrupt
-  receipts contained no Turn ids and the residents immediately relaunched.
-  Supervisors must distinguish a live containment from an owned provider
-  process and an advancing Turn before recommending wait, interrupt, or retry.
-- Cross-Work questions need no parent resident or answer lane. The broader Home
-  server design remains open for automatic backlog dispatch, remote nudges, and
-  Ready work that has no blocking child command to trigger a wake.
-- The server design must assign one owner each for dispatch, liveness, retry,
-  streaming, and remote nudge before Wave, Project, and Task controls collapse
-  onto one host path.
-- Mid-turn Steer remains provider-dependent; queued durable Steers must still
-  survive provider and app exit.
-- Composite flow nodes still use the internal `__flow-step` fallback, and
-  Project-loop caps still need real dogfood data before changing.
-- Residency still reads Wave definitions from the main checkout; promotion
-  authored in a worker worktree requires landing first.
-
 ## Model (design invariants)
 
 - `lf` and durable store projections define the product API; Mac and iOS
@@ -834,17 +806,23 @@ no owning Task (LOO-375 owns `wt list` only).
   Keep it inside the Home; a different `lf home id` drops content and selection.
 - One model owns refresh; views that each start a loop supersede each other's
   reads. A view that builds its own model reopens the blocking path.
-- The in-process replay (9.6 ms saved vs 13.2 s uncached, 20 samples) is
-  lower-level timing, not a rendered launch.
 - Jack's delivery contract (2026-10-04): land on autonomous checks and honest
   benchmark evidence; rendered startup is post-merge validation, not a gate.
 - Rendered receipts (`launch.py`): [20261004](../../scripts/benchmarks/desktop-performance/20261004-launch-rendered/README.md)
   saved launch usable at 506 ms median; [20261005](../../scripts/benchmarks/desktop-performance/20261005-first-render/README.md)
-  first frame 850 → 617 ms in alternating rounds under heavy load, never
-  waiting on a read. Profile before guessing: the cost was model getters
-  re-normalizing paths per render, not drawing. Still open on LOO-376: 400 ms
-  unproven on a quiet host; unsaved launch waits on `lf`; `session list` runs
-  2–3 times (refresh owner: LOO-382/LOO-304).
+  first frame 850 → 617 ms under heavy load. Profile before guessing: the cost
+  was model getters re-normalizing paths per render, not drawing.
+- A benchmark that reopens one bundle hides the launch Jack gets. Both recorded
+  real launches were first runs of a new version: 625–790 ms before `main`.
+  [20261005-first-launch](../../scripts/benchmarks/desktop-performance/20261005-first-launch/README.md):
+  the system charges a new binary about 390 ms, partly by file size, so no
+  post-update launch meets 400 ms through app work. Stripping local symbols
+  saves 40–100 ms but unnames crash-report frames; whether to ship it with a
+  retained dSYM is Jack's open choice. Reopened, the bundle's first frame was
+  430 ms (4 samples, loaded host).
+- Still open on LOO-376: quiet-host proof of 400 ms; cold file cache and
+  selection/repository-change refresh scenarios; unsaved launch waits on `lf`;
+  `session list` runs 2–3 times (refresh owner: LOO-382/LOO-304).
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 

@@ -14,6 +14,10 @@ Home instead, so a baseline and a candidate read the same data. The numbers are
 the app's launch journal; `timings.py --home <work>/home` reads the same files.
 Needs a logged-in desktop session. Windows appear behind your work and close
 again.
+
+`--first-launch N` opens N fresh copies of the bundle, each once: the system
+charges a binary it has not run before, which is what the launch after every
+update pays. `--strip` builds the bundle without local symbols, to compare.
 """
 
 from __future__ import annotations
@@ -47,9 +51,16 @@ exec "$LF_BENCH_LF" "$@"
 """
 # What each scenario waits for before the app is closed.
 SCENARIOS = {
-    "uncached": {"saved": False, "fail": "", "until": "fresh"},
-    "saved": {"saved": True, "fail": "", "until": "fresh"},
-    "saved_refresh_fails": {"saved": True, "fail": "roadmap session", "until": "refresh_failed"},
+    "uncached": {"saved": False, "fail": "", "until": "fresh", "new_binary": False},
+    "saved": {"saved": True, "fail": "", "until": "fresh", "new_binary": False},
+    "saved_refresh_fails": {
+        "saved": True,
+        "fail": "roadmap session",
+        "until": "refresh_failed",
+        "new_binary": False,
+    },
+    # The first launch after an update. It ends at usable: its reads are `saved`'s.
+    "saved_first_launch": {"saved": True, "fail": "", "until": "usable", "new_binary": True},
 }
 
 
@@ -89,12 +100,14 @@ def snapshot(home: Path, source: Path) -> None:
         shutil.copy(source / "config.yaml", home)
 
 
-def bundle(app: Path) -> None:
+def bundle(app: Path, strip: bool) -> None:
     _sh(["swift", "build", "-c", "release", "--product", "LoopflowMac"], cwd=SWIFT)
     contents = app / "Contents"
     (contents / "MacOS").mkdir(parents=True, exist_ok=True)
     (contents / "Resources").mkdir(exist_ok=True)
     shutil.copy(SWIFT / ".build/release/LoopflowMac", contents / "MacOS/Loopflow")
+    if strip:
+        _sh(["strip", "-x", str(contents / "MacOS/Loopflow")], capture_output=True)
     shutil.copy(SWIFT / "LoopflowMac/Info.plist", contents)
     shutil.copy(SWIFT / "LoopflowMac/AppIcon.icns", contents / "Resources")
     _sh(
@@ -127,7 +140,12 @@ def bundle(app: Path) -> None:
         capture_output=True,
         text=True,
     )
-    (app / "Contents/Resources/source").write_text(source.stdout.strip(), encoding="utf-8")
+    megabytes = (contents / "MacOS/Loopflow").stat().st_size / 1e6
+    (app / "Contents/Resources/source").write_text(
+        f"{source.stdout.strip()}, {megabytes:.1f} MB executable"
+        + (" without local symbols" if strip else ""),
+        encoding="utf-8",
+    )
 
 
 def _records(path: Path) -> list[dict]:
@@ -145,6 +163,11 @@ def _pid(executable: Path) -> int | None:
 
 def launch(app: Path, home: Path, repo: Path, scenario: str, timeout: float) -> dict:
     spec = SCENARIOS[scenario]
+    if spec["new_binary"]:
+        # A copy at a path never used is a binary the system has not run. A
+        # reused path stops counting after a few launches.
+        original, app = app, app.parent / f"first-launch-{time.time_ns()}" / app.name
+        shutil.copytree(original, app, symlinks=True)
     cache = home / "desktop-cache"
     timings = cache / "timings"
     if not spec["saved"]:
@@ -186,6 +209,8 @@ def launch(app: Path, home: Path, repo: Path, scenario: str, timeout: float) -> 
         os.kill(pid, 15)
         while _pid(executable):
             time.sleep(0.1)
+    if spec["new_binary"]:
+        shutil.rmtree(app.parent)
     events = {record["event"]: record for record in _records(timings / "launches.ndjson")}
     calls = Counter(log.read_text().splitlines())
     minutes, _, seconds = usage[1].partition(":") if usage else ("0", "", "0")
@@ -317,13 +342,14 @@ def run(args: argparse.Namespace) -> int:
     home, app = work / "home", work / "Loopflow Bench.app"
     snapshot(home, args.home.expanduser())
     if not args.built:
-        bundle(app)
+        bundle(app, args.strip)
     output.mkdir(parents=True, exist_ok=True)
     rows = []
     plan = [
         ("uncached", args.uncached),
         ("saved", args.saved),
         ("saved_refresh_fails", args.failed),
+        ("saved_first_launch", args.first_launch),
     ]
     with (output / "journal.ndjson").open("w", encoding="utf-8") as journal:
         for scenario, count in plan:
@@ -370,7 +396,11 @@ def main() -> int:
     runner.add_argument("--uncached", type=int, default=3)
     runner.add_argument("--saved", type=int, default=20)
     runner.add_argument("--failed", type=int, default=3)
+    runner.add_argument(
+        "--first-launch", type=int, default=3, help="launches of a bundle copy never run before"
+    )
     runner.add_argument("--built", action="store_true", help="reuse the bundle already in --work")
+    runner.add_argument("--strip", action="store_true", help="build without local symbols")
     runner.add_argument("--timeout", type=float, default=120)
     runner.set_defaults(func=run)
     args = parser.parse_args()

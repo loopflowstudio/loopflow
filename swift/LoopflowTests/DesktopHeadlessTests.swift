@@ -105,12 +105,12 @@ struct DesktopHeadlessTests {
         _ = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-id-\(flow.id)")
         let detail = try #require(model.flowRuns[flow.id])
         let status = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-status-\(flow.id)").text().string()
-        #expect(status == "Running implement · iteration (1, 0)")
+        #expect(status == "Running implement · pass 2")
         for step in detail.steps {
             _ = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-step-\(step.execId)")
         }
         #expect(detail.progress.execution == .running)
-        #expect(detail.progress.current == 1)
+        #expect(detail.progress.current == 0)
 
         // Desktop's own write asks the reader again and shows what it answers.
         let moving = Task { await model.moveTask(to: "demo", task: task, wave: wave) }

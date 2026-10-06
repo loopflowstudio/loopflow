@@ -239,6 +239,19 @@ confirmed by Jack Heart.
   PR's views follow. `WorkspaceIdentity` and the Task workspace keep their
   names, as on main.
 
+## Choices the cleanup pass made without Jack
+
+The agent's, October 6, slice 16; none is confirmed by Jack Heart.
+
+- **Restoring the slice.** It left the list in `f9e74029e` unexplained; the
+  agent read that as an accident. If it was dropped on purpose, revert the
+  slice's commit.
+- **Words for loop positions.** A loop that has returned N times reads
+  "pass N+1"; with several loops each is numbered in authored order, nested
+  ones after their parents. A step past a finished loop still shows that
+  loop's pass. "iteration unavailable" became "pass unavailable".
+- **The status heading** no longer says `blocked` or `stalled`.
+
 ## Choices the test repair and Task view passes made without Jack
 
 The agent's, October 6, slices 13–14; none is confirmed by Jack Heart. Both

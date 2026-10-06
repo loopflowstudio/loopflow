@@ -511,6 +511,26 @@ pub fn flow_iterations(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Vec<
     levels
 }
 
+/// Recorded return counts (see `flow_iterations`) in words: the pass each
+/// returned loop is on, loops numbered in authored order. `None` on a first pass.
+pub fn loop_passes(iterations: &[Vec<u32>]) -> Option<String> {
+    let counts: Vec<u32> = iterations.iter().flatten().copied().collect();
+    let passes: Vec<String> = counts
+        .iter()
+        .enumerate()
+        .filter(|(_, count)| **count > 0)
+        .map(|(index, count)| {
+            let pass = u64::from(*count) + 1;
+            if counts.len() == 1 {
+                format!("pass {pass}")
+            } else {
+                format!("loop {} pass {pass}", index + 1)
+            }
+        })
+        .collect();
+    (!passes.is_empty()).then(|| passes.join(", "))
+}
+
 /// Where a recorded step stands inside its Flow's graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PositionProjection {
@@ -1041,6 +1061,15 @@ mod tests {
         // The active child's own count wins over an older settled visit.
         assert_eq!(projection.returns[0].traversals, 2);
         assert_eq!(flow_iterations(&steps, &cursor), [vec![], vec![2]]);
+        assert_eq!(
+            super::loop_passes(&[vec![], vec![2]]).as_deref(),
+            Some("pass 3")
+        );
+        assert_eq!(
+            super::loop_passes(&[vec![2, 0], vec![1]]).as_deref(),
+            Some("loop 1 pass 3, loop 3 pass 2")
+        );
+        assert_eq!(super::loop_passes(&[vec![0, 0]]), None);
     }
 
     #[test]

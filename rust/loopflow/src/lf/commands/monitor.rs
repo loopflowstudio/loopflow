@@ -482,7 +482,12 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
             let at = detail
                 .as_ref()
                 .and_then(|detail| detail.steps.last())
-                .map(|step| format!("{} · iteration {:?}", step.label, step.iterations))
+                .map(
+                    |step| match crate::engine::flow_graph::loop_passes(&step.iterations) {
+                        Some(passes) => format!("{} · {passes}", step.label),
+                        None => step.label.clone(),
+                    },
+                )
                 .unwrap_or_else(|| "an unreadable step".into());
             let (state, reason) = match summary.state {
                 crate::session::FlowSummaryState::Completed => {

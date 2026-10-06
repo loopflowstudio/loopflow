@@ -257,7 +257,7 @@ struct FlowRunView: View {
         if let run {
             let progress = run.progress
             FlowDiagram(graph: run.graph, latest: progress, inspected: $inspected)
-            Text([progress.reason, flowIterationLabel(run.iterations).map { "iteration \($0)" }]
+            Text([progress.reason, flowIterationLabel(run.iterations)]
                 .compactMap { $0 }.joined(separator: " · "))
                 .accessibilityIdentifier("flow-run-status-\(flow.id)")
             ForEach(run.steps) { step in

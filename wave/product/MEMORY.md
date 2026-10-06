@@ -140,6 +140,11 @@ types under conflicting hunks, take one side and apply the rename from the
 two trees' token sets; SQL in strings compiles against a dropped column, so
 grep for every dropped name and run the suites before trusting a build.
 
+A queued cleanup slice left the plan when the merge slice above it was
+rewritten (`f9e74029e`), with no reason recorded. The agent restored and
+built it, unreviewed: `lf task status` heads with Workflow state; loop
+positions read "pass 2". Lesson: diff a plan rewrite for dropped items.
+
 ## Session and operate pairs (2026-10-05)
 
 Jack Heart's decisions on [LOO-383](https://linear.app/loopflow/issue/LOO-383):
@@ -424,26 +429,15 @@ Task findings can challenge Wave purpose and Wave findings repository direction;
 accepted decisions return to affected owners without acquiring another control
 authority or making operation a prerequisite for independent Tasks.
 
-The direct finite passes used installed reads on September 28 local time
-(September 29 UTC). The repository roster crossed the invocation's Product
-attribution, but chapter/Task reads were unavailable. That was incomplete
-planning evidence, not an empty backlog or permission to rotate a chapter.
-The cross-Wave judgment reconciled Product usability, Intelligence's reusable
-instructions and Infrastructure's execution boundaries; Jack's accepted direction
-was returned to this local memory. It did not demonstrate a launched VSM Flow
-or a planning write.
+The September 28 finite passes ran without chapter/Task reads: incomplete
+planning evidence, not an empty backlog. Their account is at
+`f9e74029e:wave/product/MEMORY.md` under this heading.
 
 The [committed design](https://github.com/loopflowstudio/loopflow/blob/9619d803ee9765de907cc529791507e822c21b57/scratch/skill-consolidation.md)
 and [evidence record](https://github.com/loopflowstudio/loopflow/blob/9619d803ee9765de907cc529791507e822c21b57/scratch/skill-consolidation-evidence.md)
-preserve the source decisions, scenario simulations and verification limits.
-Private-Home checks covered catalog/export pruning with personal overrides,
-Flow endpoints and review returns, assembled prompts, alignment and docs;
-formatting and all-target Clippy passed. Compression's focused proof passed
-26 Rust and four Python checks. These are recorded branch checks, not new
-configured acceptance. Five-step VSM scope/evidence handoff and the incident
-handoff still need configured proof. Installed adoption, live planning changes
-and delivery are not established by this consolidation; no prompting-outcome
-KR or external-product progress is earned by source checks alone.
+preserve the source decisions, simulations and verification limits. Recorded
+branch checks only: five-step VSM handoff, the incident handoff, installed
+adoption and delivery lack configured proof; no KR or external progress is earned.
 
 ## Named participants and review feedback (curated 2026-09-25)
 
@@ -469,12 +463,8 @@ acceptance state. AGENTS.md and operating guidance already own Jack's naming rul
   regression, not just a mock call.
 - A failed-demo conversation is useful evidence, never a success claim.
   Runnable prototyping and Flow alternatives belong to
-  [LOO-297](https://linear.app/loopflow/issue/LOO-297). The retired Review
-  Complete loop is at `70e76a7d3:wave/product/MEMORY.md`.
-- Wave playhead removal leaves Session semantics intact. Task-shell NSView pools
-  need per-workspace ownership: a global pool steals terminals between windows.
-  Recorded scope retained Session code and background tmux process wrappers.
-  Fixture renders do not prove tab/window interaction or native recovery.
+  [LOO-297](https://linear.app/loopflow/issue/LOO-297).
+- Fixture renders do not prove tab/window interaction or native recovery.
 
 The prior name-attribution gate passed its affected suites; full Swift package
 and native-rendering proof remain absent. Fresh real CLI generations demonstrated Jack/Maya/unknown prose,

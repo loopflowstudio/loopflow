@@ -23,10 +23,6 @@ Two different things were both being called a Flow:
 | Lifetime | the Task's; many processes and conversations | one driver process |
 | Record | mutable, own identity, replace/take over like a Session | **FlowExec**: append-only, written by its driver |
 
-**Order of work.** FlowExec and oblivious steps first; then TaskWorkflow, from
-[task-workflow.md](task-workflow.md). Jack: "I think you own TaskWorkflow.
-We cant do this design correctly without it."
-
 - **FlowExec.** One row per Flow run, keyed by its driver Exec: Flow name and
   the graph as compiled at launch. One step row per step the driver starts:
   child Exec, graph key, iteration. Jack: "something more similar to an Exec
@@ -103,14 +99,10 @@ October 5 (delivery review):
   I dont think we need the FlowSession datatype." Then: "fold it into this pr."
 - `lf commit`: "should always push i guess ... or else should accept -p."
 
-## Branch state after the FlowExec pass
+## Remaining from the FlowExec pass
 
-FlowExec, oblivious steps, the Task entry and their readers are built
-(`aa2f42289`, `70e76a7d3`); Jack Heart has not reviewed them. The itemized
-account is at `74a738f72:scratch/focus-on-your-own-work.md` under this
-heading. Takeover and resume are not built.
-
-## Remaining from this pass
+Built at `aa2f42289` and `70e76a7d3`, unreviewed by Jack Heart; takeover and
+resume are not built.
 
 - **Unproven.** A real provider step, in particular whether real providers
   return the contract's JSON without a schema request; a driver killed
@@ -225,8 +217,7 @@ runs nothing ends a Task over uncommitted changes and keeps its checkout) —
     widths at small window sizes.
 
 15. **Merge main** is **done**: `b5948ab72` (#1463, by the pass) and
-    `f360cdcc3` (#1468, #1469, #1449, concluded by the managing conversation
-    after it stopped the pass by mistake at the moment it committed). Jack:
+    `f360cdcc3` (#1468, #1469, #1449, by the managing conversation). Jack:
     "Determine the higher level goal of the diff and make suer we have a
     nother way of addressing ... ideally is just a bunch unncessary code that
     is made trivial by the new model." Finding: #1463 (LOO-366: a Wave's
@@ -239,6 +230,19 @@ runs nothing ends a Task over uncommitted changes and keeps its checkout) —
     `ops::chapter` tests fail (10 rotation, 1 adoption) that pass alone.
     Unreviewed: main lets a Project have no workflow; its Tasks read not
     ready.
+
+16. **Cleanups after Jack's approval** ("make whatever cleanups yyou want").
+    Queued at `f8fe8aff0`, absent from this list at `f9e74029e` with no
+    reason recorded; restored by the implement pass. Built, not yet
+    realigned: (a) text `lf task status` heads a Task with its Workflow
+    state; the last Flow's reason stays on its own line. (b) Loop positions
+    read "pass 2", or "loop 1 pass 3, loop 2 pass 2", in Desktop, `lf flow
+    show` and `lf monitor`. The diagram already wraps to its pane and
+    scrolls sideways. (c) The fixture's Flow exec is a
+    `pursue` run on its second pass, its graph taken from `lf flow list`.
+    (d) Clippy finds nothing unused; Swift was not searched.
+    Check: `dto_fixtures` 20, `flow_tests` 27, `task_flow_launch_tests` 13,
+    Clippy, and the Swift filter under Checks (36) pass.
 
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task

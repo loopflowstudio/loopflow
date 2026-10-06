@@ -14,7 +14,6 @@ use loopflow::lf::{
 };
 
 use loopflow::ops::project::{update_plan, PlanChange};
-use loopflow::ops::task_execution::TaskExecutionState;
 
 #[derive(Clone, Default)]
 struct FlagTables {
@@ -707,15 +706,10 @@ fn print_task_snapshot(
             snapshot.agent.as_deref().unwrap_or("default"),
             snapshot.provider
         );
-        let status = match snapshot.execution.state {
-            TaskExecutionState::Blocked => "blocked".to_string(),
-            TaskExecutionState::Stalled => "stalled".to_string(),
-            _ => snapshot.status.to_string(),
-        };
         println!(
             "{}  {}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}",
             snapshot.issue_identifier,
-            status,
+            snapshot.status,
             snapshot.task_id,
             body,
             snapshot.worktree,

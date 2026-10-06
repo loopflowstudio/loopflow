@@ -133,8 +133,9 @@ struct TaskFlowTests {
         #expect(review.returns[1].traversals == 1)
         guard case .latest(let running) = snapshots[1].record else { Issue.record("latest"); return }
         #expect(running.iterations == [[2, 0]])
-        #expect(flowIterationLabel([[2, 1], [3]]) == "(2, 1) / (3)")
-        #expect(flowIterationLabel([[]]) == nil)
+        #expect(flowIterationLabel([[2, 1], [3]]) == "loop 1 pass 3, loop 2 pass 2, loop 3 pass 4")
+        #expect(flowIterationLabel([[], [2]]) == "pass 3")
+        #expect(flowIterationLabel([[0, 0]]) == nil)
         #expect(running.returns.map(\.traversals) == [2, 0])
 
         guard case .latest(let blocked) = snapshots[3].record else { Issue.record("latest"); return }

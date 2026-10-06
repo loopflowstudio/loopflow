@@ -1964,7 +1964,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     );
     let status = String::from_utf8(status.stdout).unwrap();
     assert!(
-        status.lines().any(|line| line == "INF-123  blocked"),
+        status.lines().any(|line| line == "INF-123  not ready"),
         "{status}"
     );
     assert!(

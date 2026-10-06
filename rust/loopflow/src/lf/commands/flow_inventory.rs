@@ -130,11 +130,14 @@ pub fn inspect(selector: &str, json: bool) -> Result<()> {
         let summary = &detail.entry.summary;
         println!("{}  {:?}  {}", summary.id, summary.state, summary.name);
         for step in &detail.steps {
+            let label = match crate::engine::flow_graph::loop_passes(&step.iterations) {
+                Some(passes) => format!("{} · {passes}", step.label),
+                None => step.label.clone(),
+            };
             println!(
-                "  {}  {}  iteration {:?}  {}",
+                "  {}  {}  {}",
                 step.exec_id,
-                step.label,
-                step.iterations,
+                label,
                 step.outcome.as_deref().unwrap_or("no recorded exit"),
             );
         }

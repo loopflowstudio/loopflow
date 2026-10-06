@@ -31,7 +31,6 @@ dlf flow list                            # workflows beside Flows
 dlf session list --waiting
 ```
 
-The agent's rehearsal left the Task at `end` of `notes`;
 `dlf -b task run INF-123 feature` starts `feature` again.
 
 ## Try it: Desktop

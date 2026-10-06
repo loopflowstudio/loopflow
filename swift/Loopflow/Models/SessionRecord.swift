@@ -87,16 +87,16 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
         }
     }
 
-    /// Short human label: "feature / implement · iteration (2, 1)", "Independent".
+    /// Short human label: "pursue / implement · pass 3", "Independent".
     public var label: String {
         switch self {
         case let .step(flow, _, step, _, iterations, occurrence):
             let base = "\(flow) / \(step)"
             let label: String
             if let iterations {
-                label = flowIterationLabel(iterations).map { "\(base) · iteration \($0)" } ?? base
+                label = flowIterationLabel(iterations).map { "\(base) · \($0)" } ?? base
             } else {
-                label = "\(base) · iteration unavailable"
+                label = "\(base) · pass unavailable"
             }
             switch occurrence {
             case .unknown: return "\(label) · position unavailable"

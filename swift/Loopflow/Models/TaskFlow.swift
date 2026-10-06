@@ -259,9 +259,11 @@ extension Array where Element == FlowCatalogEntry {
 
 /// Formatting only: order and nesting are supplied by Rust's captured definition.
 public func flowIterationLabel(_ levels: [[UInt32]]) -> String? {
-    guard levels.contains(where: { !$0.isEmpty }) else { return nil }
-    return levels.map { "(" + $0.map(String.init).joined(separator: ", ") + ")" }
-        .joined(separator: " / ")
+    let counts = levels.flatMap { $0 }
+    let passes = counts.enumerated().filter { $0.element > 0 }.map { index, count in
+        counts.count == 1 ? "pass \(UInt64(count) + 1)" : "loop \(index + 1) pass \(UInt64(count) + 1)"
+    }
+    return passes.isEmpty ? nil : passes.joined(separator: ", ")
 }
 
 /// Template-local disclosure IDs never identify execution or an invocation.

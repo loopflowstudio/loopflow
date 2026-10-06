@@ -249,10 +249,6 @@ def inspect_source(commit: str, tag: str, *, check_publication: bool) -> dict[st
     return {"preparation_required": drafts, "publications": publications}
 
 
-def _validate_archives(artifact_dir: Path) -> None:
-    _validate_release_candidate(_find_native_archives(artifact_dir))
-
-
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as file:
@@ -400,7 +396,7 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
         except RuntimeError as error:
             print(f"Rebuilding invalid prepared candidate: {error}", flush=True)
         else:
-            _validate_archives(output_dir)
+            _validate_release_candidate(_find_native_archives(output_dir))
             _write_receipt(receipt, ".candidate")
             return receipt
 
@@ -474,8 +470,8 @@ def publish_release(tag: str, artifact_dir: Path) -> ArtifactReceipt:
     source_commit = _run(["git", "rev-parse", "HEAD"], capture=True).stdout.strip()
     candidate = _read_candidate_receipt(artifact_dir)
     _verify_candidate_receipt(candidate, artifact_dir, tag, source_commit)
-    _validate_archives(artifact_dir)
     archives = _find_native_archives(artifact_dir)
+    _validate_release_candidate(archives)
     dmg = artifact_dir / "Loopflow.dmg"
     installer = artifact_dir / "install.sh"
     checksums = artifact_dir / "SHA256SUMS"

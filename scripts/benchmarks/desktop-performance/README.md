@@ -284,19 +284,45 @@ wraps both shell and direct modes in login. A `direct:` prefix in the surface
 string would not select config direct mode; even config direct mode retains
 login. Loopflow's command-block patch does not change this path.
 
-The remaining repair requires a supported upstream launch option or a production
-GhosttyKit change separating explicit child commands from login-shell startup,
-with command/environment/cwd and ordinary shell regressions. A benchmark-only
-launcher or unconfined terminal would change the measured path. No such binary
-change was made or verified here. A disposable rendering host alone does not
-remove the wrapper under this policy. Contained mounted startup must pass before
-the matched snapshot pair (21 samples and 3,600 seconds each).
-Keep snapshots local to the isolated host. No such remotely callable host
-or performance job is configured in this checkout. Hosted `ci.yml` jobs
-`swift-test` and `loopflow-ui-test` on `macos-15` own headless tests and the Xcode
-compile check only; checkpoint PRs defer that matrix while scratch remains.
-This remaining performance obligation does not prevent source publication under
-Jack Heart's October 6 direction, and does not authorize merge or Task completion.
+The local production repair now lives in
+[GhosttyKitPatches](../../../swift/GhosttyKitPatches/README.md). The lf3 framework
+passes pinned Zig launch/block tests and the contained mounted shell contract:
+login startup files, inherited environment/cwd, PTY input, production companion
+shell after command exit, terminal markers and surface retention. The published
+SwiftPM dependency remains lf2; no archive was uploaded. Local-path overrides
+are temporary proof inputs, not dependency publication.
+
+```sh
+uv run python scripts/desktop_performance.py verify-fixture --mounted --lf target/debug/lf --output /tmp/ghostty-launch-proof
+```
+
+The final proof is `/tmp/loo304-lf3-reviewed-proof-20261006/native.log` (five
+headless containment/history checks and one mounted test with three launches).
+The policy permits signals only within the inherited sandbox and the exact
+`/usr/bin/tty` needed by the production shell bootstrap. An external-parent
+signal probe remains denied, alongside credential/file/provider/network checks.
+The first lf3 replay exposed the old blanket signal denial hanging Ghostty's
+child teardown; `/tmp/loo304-lf3-mounted-sample.txt` retains the stack, and
+`/tmp/loo304-local-lf3-mounted-20261006/` retains the failed run. Exact owned cat
+children were stopped to release that attempt; no successful outcome is claimed.
+
+The catalogue now calls production font registration before rendering; without
+it, custom-font labels were unreadable. `/tmp/loo304-lf3-font-replay-20261006/`
+retains readable Task rows but a timeout on the first compact-to-full outline
+interaction. It supplies no successful scored samples. The next check must
+separate the Picker's model update from mounted outline invalidation/capture.
+`/tmp/loo304-lf3-snapshot-probe-20261006/` retains the existing October 5 realistic
+snapshot probe: all three Task-link scenarios timed out, Task/roadmap reads were
+unavailable, and the combined journey did not reach native reopening. Diagnose
+the copied registry read failure before scoring it; denied/unavailable work is
+not speedup. No live Home was opened to replace the preserved snapshot.
+
+A matched realistic pair (21 samples and 3,600 seconds each), all original
+budgets, and complete journey coverage remain required. Neither these focused
+launch proofs nor the partial replay establish p95 or soak acceptance. No remote
+performance host/job is configured; `ci.yml` headless/compile checks do not supply
+that evidence. Jack Heart authorized source preparation, not artifact upload,
+merge or Task completion on partial measurements.
 
 Source gate on October 6: the affected runner passed 2,250 Rust tests (20 skipped),
 370 Python, 78 website (three skipped), 377 headless Swift tests, formatting,

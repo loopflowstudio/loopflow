@@ -774,13 +774,16 @@ write-once bind permits done/landed Tasks. Preserve current ownership through th
 one-machine conversion; discarded historical attribution needs no importer.
 
 LOO-304 retains Jack Heart's budgets and separate observational/owned Homes.
-October 6 contained proofs preserve membership, drafts, history and external-effect
-denial. A PTY probe isolated login: cat and Bash exec-cat passed; both login forms
-failed at execvp despite an exact allowance. Setuid remains a causal hypothesis. Pinned Ghostty forces
-embedded commands into shell mode and wraps both modes in login; `direct:` cannot
-bypass it. A host change is insufficient. Mounted acceptance needs a production GhosttyKit launch repair; evidence lives
-in the benchmark guide. Journey, matched p95 and soak remain unproved. Jack's October 6 direction
-authorizes source publication, not merge/completion. Preserve snapshots and budgets; denial is not speedup. Earlier evidence: `d8f1214b0:wave/infrastructure/MEMORY.md`.
+Local GhosttyKit lf3 adds an opt-out from macOS login(1), preserving
+login-shell argv and standalone defaults. Contained mounted proofs pass shell
+startup, cwd/environment, PTYs, companion return and retained identity; five
+headless checks preserve history and deny external effects. Same-sandbox signals
+permit owned teardown; host signals remain denied. The published dependency is
+still lf2. Jack authorized local preparation, not the separately required R2
+upload or manifest promotion. Full-outline capture and copied-registry reads
+still fail; matched p95/journey/soak remain unproved. Preserve snapshots and
+budgets; denial is not speedup. Proofs and next checks live in the benchmark
+guide. Earlier evidence: `25b3ab40f:wave/infrastructure/MEMORY.md`.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

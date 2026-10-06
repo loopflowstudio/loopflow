@@ -134,6 +134,7 @@ final class GhosttyManager: ObservableObject {
     // own Ghostty config binds them to.
     static let embeddedConfig = """
     term = xterm-256color
+    macos-login-session = false
     shell-integration = detect
     scrollback-limit = 10000000
     window-padding-x = \(Int(GhosttyTerminalPadding.x))

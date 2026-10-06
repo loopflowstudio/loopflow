@@ -7,6 +7,9 @@
 (allow network* (local unix-socket (subpath (param "HOME")))
                 (remote unix-socket (subpath (param "HOME"))))
 (deny signal)
+; Ghostty closes its owned PTY process groups. Other sandboxes and the host
+; remain outside this authority, including the runner that launched this one.
+(allow signal (target same-sandbox))
 (deny file-read-data)
 (allow file-read-data
     (vnode-type DIRECTORY)
@@ -27,4 +30,4 @@
     (literal (param "HELPER")) (literal (param "GIT"))
     (literal "/usr/bin/env") (literal "/usr/bin/sandbox-exec")
     (literal "/bin/sh") (literal "/bin/bash") (literal "/bin/zsh")
-    (literal "/bin/cat") (literal "/usr/bin/grep"))
+    (literal "/bin/cat") (literal "/usr/bin/grep") (literal "/usr/bin/tty"))

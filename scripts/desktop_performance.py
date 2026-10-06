@@ -980,7 +980,7 @@ def _run(
     return 0 if summary["status"] == "complete" else 1
 
 
-def _verify_native_fixture(output: Path, cli: Path) -> int:
+def _verify_native_fixture(output: Path, cli: Path, *, mounted: bool = False) -> int:
     output.mkdir(parents=True, exist_ok=False)
     with (output / "native.log").open("w") as log:
         result, failure = _run_process(BUILD_COMMAND, os.environ.copy(), log, timeout=600)
@@ -1005,6 +1005,12 @@ def _verify_native_fixture(output: Path, cli: Path) -> int:
             environment["LOOPFLOW_TEST_CANARY"] = str(canary)
             command = _native_command("DesktopNativeSessionTests", environment)
             result, failure = _run_process(command, environment, log, timeout=120)
+            if mounted and not result and not failure:
+                environment.update(LOOPFLOW_NATIVE_TESTS="1", SHELL="/bin/bash")
+                command = _native_command(
+                    "DesktopPerformanceTests.embeddedLaunchContract", environment
+                )
+                result, failure = _run_process(command, environment, log, timeout=60)
             if canary.read_text() != content:
                 raise RuntimeError("Benchmark escaped its filesystem boundary")
         for directory in ("fixture-setup-cli-volume", "cli-volume"):
@@ -1052,6 +1058,11 @@ def main() -> int:
     )
     verify.add_argument("--lf", type=Path, required=True)
     verify.add_argument("--output", type=Path, required=True)
+    verify.add_argument(
+        "--mounted",
+        action="store_true",
+        help="Also verify production Ghostty shell launches in an owned native window",
+    )
     snapshot_command = commands.add_parser("snapshot", help="Consistent private SQLite backup")
     snapshot_command.add_argument("--database", type=Path, required=True)
     snapshot_command.add_argument("--output", type=Path, required=True)
@@ -1066,7 +1077,9 @@ def main() -> int:
     volume.add_argument("directory", type=Path)
     args = parser.parse_args()
     if args.command == "verify-fixture":
-        return _verify_native_fixture(args.output.resolve(), args.lf.resolve())
+        return _verify_native_fixture(
+            args.output.resolve(), args.lf.resolve(), mounted=args.mounted
+        )
     if args.command == "snapshot":
         _snapshot(args.database, args.output)
         print(args.output / "snapshot.json")

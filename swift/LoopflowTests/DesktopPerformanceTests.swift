@@ -36,6 +36,7 @@ struct DesktopPerformanceTests {
                                     "Actions use SwiftUI controls; OS event delivery latency is excluded.",
                                     "Forced bitmap capture and OCR are intrusive observer costs, recorded separately."]])
 #if canImport(GhosttyKit)
+        bootstrapLoopflowApp()
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
         NSApp.finishLaunching()
@@ -65,6 +66,65 @@ struct DesktopPerformanceTests {
     }
 
 #if canImport(GhosttyKit)
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_TEST_NATIVE_FIXTURE"] != nil))
+    func embeddedLaunchContract() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        let home = URL(fileURLWithPath: try #require(environment["HOME"]))
+        let checkout = home.appendingPathComponent("launch-contract")
+        // The runner owns HOME. Never write startup files for the OS account.
+        try #require(home.resolvingSymlinksInPath().path.hasPrefix(URL(fileURLWithPath: try #require(environment["LOOPFLOW_TEST_NATIVE_FIXTURE"]))
+            .deletingLastPathComponent().resolvingSymlinksInPath().path + "/"))
+        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        let profile = home.appendingPathComponent(".bash_profile")
+        try #require(!FileManager.default.fileExists(atPath: profile.path))
+        try Data("export LOOPFLOW_LOGIN_PROFILE=loaded\n".utf8).write(to: profile)
+        defer { try? FileManager.default.removeItem(at: profile) }
+
+        bootstrapLoopflowApp()
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.finishLaunching()
+        try #require(NSScreen.main != nil)
+        GhosttyManager.shared.initialize()
+        try #require(GhosttyManager.shared.state == .ready)
+        let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 900, height: 500),
+                                       styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.contentView = nil; window.close() }
+        let companion = buildWorkspaceShellCommand(id: "launch-contract", argv: ["/bin/sh", "-c", "exit 0"], env: [:])
+        for command in ["/bin/bash --noprofile --norc -i", "/bin/bash -i", companion] {
+            let terminal = GhosttyMetalView(terminal: .shell(UUID().uuidString), frame: CGRect(x: 0, y: 0, width: 900, height: 500))
+            terminal.workingDirectory = checkout.path
+            terminal.command = command
+            window.contentView = terminal
+            window.orderFront(nil)
+            terminal.createSurface(manager: GhosttyManager.shared)
+            defer { terminal.destroySurface() }
+            let surface = try #require(terminal.surface)
+            let marker = "launch-\(UUID().uuidString)"
+            let input = "printf '\\n%s\\n' '\(marker)' \"$PWD\" \"$HOME\" \"$TERM\" \"${LOOPFLOW_LOGIN_PROFILE-unset}\"; shopt -q login_shell && printf 'login-shell-ok\\n'; test -t 0 && test -t 1 && printf 'pty-ok\\n'\n"
+            input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
+            let profileValue = command.contains("--noprofile") ? "unset" : "loaded"
+            try await wait(window) {
+                let text = terminalText(surface)
+                return [marker, checkout.path, home.path, "xterm-256color", profileValue, "login-shell-ok", "pty-ok"]
+                    .allSatisfy { text.contains("\n\($0)") }
+            }
+            if command == companion {
+                let input = "test \"$LF_TERMINAL_ID\" = launch-contract && test -n \"$LF_TERMINAL_TTY\" && printf '\\ncompanion-ready\\n'\n"
+                input.withCString { ghostty_surface_text(surface, $0, UInt(input.utf8.count)) }
+                try await wait(window) { terminalText(surface).contains("\ncompanion-ready") }
+            }
+            window.contentView = NSView(frame: terminal.frame)
+            window.contentView = terminal
+            try #require(terminal.surface == surface)
+            let reply = "retained-\(UUID().uuidString)"
+            let retainedInput = "printf '\\n%s\\n' '\(reply)'\n"
+            retainedInput.withCString { ghostty_surface_text(surface, $0, UInt(retainedInput.utf8.count)) }
+            try await wait(window) { terminalText(surface).contains("\n\(reply)") }
+        }
+    }
+
     private func measure(population: String, taskCount: Int, samples: Int, soakSeconds: Double, journal: PerformanceJournal) async throws {
         let output = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["LF_DESKTOP_PERF_OUTPUT"]))
             .deletingLastPathComponent()
@@ -859,6 +919,7 @@ extension DesktopPerformanceTests {
                            "gaps": ["A new Podium and native window measure cold workspace construction, not OS application launch.",
                                     "Bitmap capture is not compositor presentation; OCR adds observer cost.",
                                     "Copied providers cannot connect; native usability uses an owned Task and synthetic provider."]])
+        bootstrapLoopflowApp()
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
         NSApp.finishLaunching()

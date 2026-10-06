@@ -110,6 +110,28 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
 @MainActor
 struct DesktopNativeSessionTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_TEST_CANARY"] != nil))
+    func ownedChildrenCanExitButHostSignalsStayDenied() async throws {
+        #expect(kill(getppid(), 0) == -1 && errno == EPERM)
+        let child = Process()
+        let input = Pipe()
+        child.executableURL = URL(fileURLWithPath: "/bin/cat")
+        child.standardInput = input
+        child.standardOutput = FileHandle.nullDevice
+        child.standardError = FileHandle.nullDevice
+        try child.run()
+        child.terminate()
+        let deadline = ContinuousClock.now + .seconds(3)
+        while child.isRunning && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        // EOF also releases a child if signaling fails, without hanging tests.
+        try input.fileHandleForWriting.close()
+        child.waitUntilExit()
+        #expect(child.terminationReason == .uncaughtSignal)
+        #expect(child.terminationStatus == SIGTERM)
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_TEST_CANARY"] != nil))
     func ownedTemporaryFilesAndPTYRemainAvailable() throws {
         let directory = terminalTemporaryDirectory()
         let path = directory.appendingPathComponent("terminal-proof")

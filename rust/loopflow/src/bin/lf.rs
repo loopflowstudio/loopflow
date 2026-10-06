@@ -826,14 +826,11 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             loopflow::lf::commands::placement::wave(repo, command)
         }
         WaveCommand::UpdatePlan { wave, plan, flow } => {
-            let plan = match (plan, flow) {
-                (Some(plan), _) => {
-                    PlanChange::Replace(serde_json::from_slice(&std::fs::read(plan)?)?)
-                }
-                (None, Some(flow)) => PlanChange::Flow(flow.clone()),
-                (None, None) => unreachable!("clap requires --plan or --flow"),
+            let change = match plan {
+                Some(plan) => PlanChange::Replace(serde_json::from_slice(&std::fs::read(plan)?)?),
+                None => PlanChange::Flow(flow.clone().expect("clap requires --plan or --flow")),
             };
-            update_plan(repo, wave.as_deref(), plan)?;
+            update_plan(repo, wave.as_deref(), change)?;
             Ok(())
         }
     }

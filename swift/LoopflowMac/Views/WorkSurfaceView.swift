@@ -758,11 +758,11 @@ struct WaveDefaultFlowView: View {
                     .accessibilityIdentifier("wave-default-edit")
                 }
             }
-            Text(entry?.source ?? (entry == nil ? "" : "builtin \(entry?.kind.rawValue ?? "")"))
+            Text(entry.map { $0.source ?? "builtin \($0.kind.rawValue)" } ?? "")
                 .font(Typography.code(11)).foregroundStyle(palette.textTertiary)
                 .accessibilityIdentifier("wave-default-source")
             if let workflow = entry?.workflow {
-                WorkflowGraphRow(stages: workflow.stages, edges: workflow.edges, current: nil, running: nil)
+                WorkflowGraphRow(stages: workflow.stages, edges: workflow.edges)
             } else if let graph = entry?.graph, let template = entry?.template {
                 FlowTemplateView(graph: graph, template: template, navigation: model.navigation)
             } else {

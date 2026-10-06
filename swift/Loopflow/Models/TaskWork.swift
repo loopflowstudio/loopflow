@@ -87,16 +87,18 @@ public struct TaskWorkflow: Codable, Sendable, Equatable {
         return (index, edges[index])
     }
 
-    /// Edges leaving `stage`, each with its place among `edges`.
-    public func edges(from stage: String) -> [(index: Int, edge: Edge)] {
-        edges.enumerated().filter { $0.element.from == stage }.map { ($0.offset, $0.element) }
-    }
-
     /// Edges a person can start next: those leaving the stage the Task waits
     /// at, or the one its running edge left.
     public var outgoing: [(index: Int, edge: Edge)] {
-        if case .stage(let stage) = position { return edges(from: stage) }
-        return edges(from: running?.edge.from ?? "start")
+        if case .stage(let stage) = position { return edges.leaving(stage) }
+        return edges.leaving(running?.edge.from ?? "start")
+    }
+}
+
+extension Array where Element == TaskWorkflow.Edge {
+    /// Edges leaving `stage`, each with its place among the workflow's edges.
+    public func leaving(_ stage: String) -> [(index: Int, edge: TaskWorkflow.Edge)] {
+        enumerated().filter { $0.element.from == stage }.map { ($0.offset, $0.element) }
     }
 }
 

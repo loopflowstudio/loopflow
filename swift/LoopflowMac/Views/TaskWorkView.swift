@@ -81,8 +81,8 @@ struct WorkflowGraphRow: View {
     let stages: [TaskWorkflow.Stage]
     let edges: [TaskWorkflow.Edge]
     /// The stage a Task waits at, and the edge it is running, when a Task has taken the workflow up.
-    let current: String?
-    let running: Int?
+    var current: String?
+    var running: Int?
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -92,7 +92,7 @@ struct WorkflowGraphRow: View {
                     WorkspaceChip(text: stage, tone: current == stage ? .human : .neutral)
                         .accessibilityIdentifier("task-workflow-stage-\(stage)")
                         .accessibilityValue(current == stage ? "Current" : "")
-                    ForEach(Array(edges.enumerated()).filter { $0.element.from == stage }, id: \.offset) { index, edge in
+                    ForEach(edges.leaving(stage), id: \.index) { index, edge in
                         Text("→ \(edge.flow ?? "no Flow") → \(edge.to)")
                             .font(Typography.code(11))
                             .foregroundStyle(running == index ? WorkspaceTone.running.ink : palette.textTertiary)

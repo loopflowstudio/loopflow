@@ -355,7 +355,8 @@ actor. A newer local compiler's pass does not establish older-toolchain support.
 SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
 Keep tests that reference Ghostty-only types or helpers inside
 `#if canImport(GhosttyKit)`. Keep file-local helpers inside the enclosing
-whole-file platform gate. When changing terminal code or its tests, gate both
+whole-file platform gate. App code outside `#if GHOSTTY_ENABLED` compiles in
+the fallback too: a type it names must also live outside that block. When changing terminal code or its tests, gate both
 build configurations: run the headless Swift suite and
 `uv run python scripts/test.py --loopflow`. A SwiftPM pass alone does not prove
 the Xcode test target compiles.

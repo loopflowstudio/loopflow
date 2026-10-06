@@ -43,13 +43,8 @@ conversations first; the Wave page's Task default menu.
 
 ## What the agent saw (rehearsal, not Jack's observation)
 
-A bare `task run` started `feature` and stopped at `design`. `ship` from
-`design` was refused, naming `task-design` and `pursue`. A running edge read
-"running pursue (demo → demo)" with its step named, and `flow show` listed one
-step succeeded and one with no recorded exit. An ad hoc `lf run` left the
-position alone. `ship` reached `end`. The no-PR workflow refused a bare run at
-a stage with two ways out, then ended on `end`. `--needs-me` is gone and
-`--waiting` is accepted.
+Every command above behaved as its comment says; the transcripts are in the
+walkthrough.
 
 Checks at `ac91bf9e1`: seven Rust integration suites (129 tests), Clippy,
 format, architecture check, 42 headless Desktop tests and the app build pass.
@@ -67,9 +62,8 @@ PR CI ran one job and skipped 14.
 
 ## Not shown
 
-Any real provider step; a live conversation reading stage guidance and running
-the next edge; a driver killed during an agent step; the migration on a
-populated Home; the September 30 workspace proof items.
+Any real provider step; a driver killed during an agent step; the migration
+on a populated Home; the September 30 workspace proof items.
 
 ## Jack's review
 

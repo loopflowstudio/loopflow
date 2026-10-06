@@ -212,9 +212,8 @@ ones most likely to matter in review:
 - **Task primary.** `tasks.primary_session_id`; `lf session ensure --task
   ISSUE [--choose SESSION]` remembers its first pick; only an empty Task gets
   a new conversation; `lf resume` ignores the primary.
-- **Seen, not fixed.** `scripts/check_architecture.py` reports the two
-  workflow tables missing from the map (docs slice). Five lib tests fail in a
-  full parallel `--lib` run and pass alone.
+- **Seen, not fixed.** Five lib tests fail in a full parallel `--lib` run
+  and pass alone.
 
 ## Choices the Desktop and Waiting passes made without Jack
 

@@ -267,12 +267,11 @@ Flow history below means FlowExec rows joined to their Execs.
    reference, builtin skills and the website describe TaskWorkflow, FlowExec,
    Sessions and Runs, Waiting and `lf task run`; no resident, review-handshake
    or worker text remains. Done when the website checks and
-   `scripts/check_architecture.py` pass. *Built October 6, not yet
-   realigned:* `scripts/check_architecture.py` passes (SQLite 41/41),
-   `cd website && uv run python dev.py test` 78 passed, 3 skipped; prompt
-   goldens regenerated; `--lib engine::` 417, `documented_commands` 17 and
-   Python 349 passed. Compress kept the workflow YAML in `docs/authoring.md`
-   only; both checks rerun and pass. Demo items: the website's five building blocks as
+   `scripts/check_architecture.py` pass. **Done** at `ce7648eed` (built
+   `0846e663d`; compress kept the workflow YAML in `docs/authoring.md` only):
+   `scripts/check_architecture.py` passes (SQLite 41/41) and `cd website &&
+   uv run python dev.py test` 78 passed, 3 skipped; prompt goldens
+   regenerated. Demo items: the website's five building blocks as
    rendered; the two flow diagrams, unchanged, still say "flow".
 
 Demo items carried from September 30, for Jack's review and not for the loop:

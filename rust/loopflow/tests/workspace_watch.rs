@@ -125,7 +125,7 @@ impl Home {
         let project = Project {
             id: ProjectId::new(),
             plan: ProjectPlan {
-                flow: "feature".into(),
+                workflow: "feature".into(),
                 status: loopflow::pm::ProjectStatus::Started,
                 id: LinearProjectId::new(PROJECT).unwrap(),
                 slug: "reactive".into(),

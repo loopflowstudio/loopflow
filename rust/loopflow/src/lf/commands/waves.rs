@@ -1466,7 +1466,7 @@ fn derive_task_condition(
     // A removed historical checkout does not reopen settled work.
     let unresolved_execution = runtime.is_some_and(|runtime| {
         runtime.status == WorkStatus::Ready
-            || matches!(flow, TaskFlowRecord::Pinned(flow) if flow.execution != TaskExecutionState::Idle)
+            || matches!(flow, TaskFlowRecord::Latest(flow) if flow.execution != TaskExecutionState::Idle)
             || (local_progress.state == LocalProgressEvidenceState::Observed
                 && local_progress.unsettled == Some(true))
     });
@@ -2782,16 +2782,15 @@ mod tests {
             )
             .unresolved_execution
         };
-        let review = TaskFlowRecord::Pinned(crate::ops::task_flow::PinnedTaskFlow {
+        let review = TaskFlowRecord::Latest(crate::ops::task_flow::LatestTaskFlow {
             invocation_id: "inv".into(),
             graph: crate::engine::flow_graph::FlowGraph::new("feature", &[]),
             current: None,
             completed: Vec::new(),
             returns: Vec::new(),
             iterations: Vec::new(),
-            execution: TaskExecutionState::Human,
-            reason: "Review remains open".into(),
-            restart_required: false,
+            execution: TaskExecutionState::Blocked,
+            reason: "Release target is unavailable".into(),
         });
         let none = TaskFlowRecord::None;
         let missing = LocalProgressEvidenceState::Missing;

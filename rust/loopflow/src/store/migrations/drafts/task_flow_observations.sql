@@ -181,3 +181,65 @@ CREATE TABLE session_activity (
 ALTER TABLE projects RENAME COLUMN flow TO workflow;
 UPDATE pm_projects SET body = json_remove(json_set(body, '$.workflow', json_extract(body, '$.flow')), '$.flow')
 WHERE json_type(body, '$.flow') IS NOT NULL;
+
+-- Workspace observation follows the replacement records.
+CREATE TRIGGER store_revision_flow_execs_insert AFTER INSERT ON flow_execs
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'flows';
+END;
+CREATE TRIGGER store_revision_flow_execs_update AFTER UPDATE ON flow_execs
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'flows';
+END;
+CREATE TRIGGER store_revision_flow_execs_delete AFTER DELETE ON flow_execs
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'flows';
+END;
+CREATE TRIGGER store_revision_flow_exec_steps_insert AFTER INSERT ON flow_exec_steps
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'flows';
+END;
+CREATE TRIGGER store_revision_flow_exec_steps_update AFTER UPDATE ON flow_exec_steps
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'flows';
+END;
+CREATE TRIGGER store_revision_flow_exec_steps_delete AFTER DELETE ON flow_exec_steps
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'flows';
+END;
+CREATE TRIGGER store_revision_task_workflows_insert AFTER INSERT ON task_workflows
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning';
+END;
+CREATE TRIGGER store_revision_task_workflows_update AFTER UPDATE ON task_workflows
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning';
+END;
+CREATE TRIGGER store_revision_task_workflows_delete AFTER DELETE ON task_workflows
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning';
+END;
+CREATE TRIGGER store_revision_task_workflow_moves_insert AFTER INSERT ON task_workflow_moves
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning';
+END;
+CREATE TRIGGER store_revision_task_workflow_moves_update AFTER UPDATE ON task_workflow_moves
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning';
+END;
+CREATE TRIGGER store_revision_task_workflow_moves_delete AFTER DELETE ON task_workflow_moves
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'planning';
+END;
+CREATE TRIGGER store_revision_session_activity_insert AFTER INSERT ON session_activity
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
+END;
+CREATE TRIGGER store_revision_session_activity_update AFTER UPDATE ON session_activity
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
+END;
+CREATE TRIGGER store_revision_session_activity_delete AFTER DELETE ON session_activity
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
+END;

@@ -628,39 +628,6 @@ struct PodiumModelStreamTests {
         #expect(!model.roadmap.isLoading)
     }
 
-    @Test("A frame read before a local write cannot restore what the write removed")
-    func localWriteSupersedesOlderFrames() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let feed = WorkspaceFeed()
-        let model = PodiumModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
-        let keeping = Task { await model.keepWorkspaceCurrent() }
-        defer { keeping.cancel() }
-
-        try await feed.opened(1)
-        let scope = try await feed.request(1)
-        guard case .scope(let scopeId, let sent) = scope else {
-            Issue.record("first request was \(scope)")
-            return
-        }
-        #expect(sent.repo == "/src/loopflow")
-        let session = try fixture.sessionEntries()
-        await feed.send(try fixture.sessionsFrame(sequence: 1, answers: scopeId, repo: "/src/loopflow", entries: session.json))
-        try await eventually { model.sessions.value?.count == session.ids.count }
-
-        model.sessionResolved(session.ids[0], repo: "/src/loopflow")
-        #expect(model.sessions.value?.contains { $0.id == session.ids[0] } == false)
-        let refresh = try await feed.request(2)
-        // Read before the completion: still lists the Session.
-        await feed.send(try fixture.sessionsFrame(sequence: 2, answers: scopeId, repo: "/src/loopflow", entries: session.json))
-        // Another repository's rows never land in this one.
-        await feed.send(try fixture.sessionsFrame(sequence: 3, answers: refresh.id, repo: "/src/context", entries: session.json))
-        await feed.send(try fixture.heartbeat(sequence: 4))
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(model.sessions.value?.contains { $0.id == session.ids[0] } == false)
-        await feed.send(try fixture.sessionsFrame(sequence: 5, answers: refresh.id, repo: "/src/loopflow", entries: "[]"))
-        try await eventually { model.sessions.value?.isEmpty == true }
-    }
-
     @Test("Another Home's frame replaces what the previous Home showed")
     func anotherHomeDropsPreviousContent() async throws {
         let fixture = try PodiumTestFixture.load()

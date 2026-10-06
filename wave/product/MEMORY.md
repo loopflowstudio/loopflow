@@ -645,14 +645,10 @@ conversation context. Outstanding rename and delayed New-session feedback retain
 the originating identity. Neither navigation nor a matching cwd authorizes client
 transfer. Task/Session completion and closing a view remain different actions.
 
-The September 25 signed promotion reused the retained
-chapter-bearing Home and preserved all six chapter receipts. Installed-app reads
-and a native capture showed real Loopflow/Etude planning; Kata's missing chapter
-remained explicit. See [the configured receipt](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/demo-ready-evidence/README.md).
-This predates S1–S5. Jack rejected that composition on September 26; configured
-provider input/retention and the two-loop discussion remain unproven. A missing
-local chapter may mean the wrong Home is selected, not that provider planning
-needs rotation. Preserve the chapter-bearing Home before proposing a new chapter.
+September 25's promotion receipt and superseded composition remain at
+`6c44d9792:wave/product/MEMORY.md` under this heading. Jack rejected the
+composition September 26; provider input/retention remains unproven. A missing
+chapter may mean the wrong Home: preserve the chapter-bearing Home before rotation.
 
 ### Identity, retention, and counterexamples
 
@@ -668,10 +664,9 @@ caps, and keep missing ownership evidence explicit.
   removes it. Preserve launch provenance and resolve declared issue/slug subjects
   through shared Work binding. Passive output must also follow native continuation;
   choosing journal output solely from original launch mode loses that history.
-- Rust projects Session legal actions, labels/help/reasons, and Work display paths;
-  Swift dispatches them. Ready decisions are checked before client stop and again
-  at settlement; Iterate also requires a preceding autonomous step. Shared Wave
+- Rust owns legal actions and Work paths; Swift dispatches them. Shared Wave
   ancestry keeps historical Project-bound Sessions reachable across chapter moves.
+  Retired Ready/Iterate mechanics remain at `6c44d9792:wave/product/MEMORY.md`.
 - Pane ID alone cannot restore a Task's choice: the pane may now contain another
   Task's Session. Retain expected content and save direct Sessions only for their
   exact selected Task subject. Refresh retained Task evidence with each successful
@@ -683,11 +678,10 @@ caps, and keep missing ownership evidence explicit.
   focus. A retained native view owns focus requests and latest title. Verify ordinary
   dispatched input stays out of both PTYs while Monitor is focused, then require
   exact retained draft and child replies on return. PTY echo alone is insufficient.
-- Completion/Approve/Iterate rejection must coexist with a live terminal and survive
-  polling; local `resolutionError` is separate from opening state. Complete uses
-  reconciliation, not undoable Close view. External disappearance also invalidates
-  hidden Undo. Completion after repository navigation cleans its originating
-  workspace without changing the current repository's reading or companions.
+- Retired completion/Approve/Iterate UI lessons remain at
+  `6c44d9792:wave/product/MEMORY.md`. Action errors must preserve live terminals;
+  delayed results retain their originating workspace, and external disappearance
+  invalidates hidden Undo.
 - Shell-to-Session attachment uses actual client terminal identity verified against
   stdin's PTY, never cwd/title or an inherited marker after external handoff. Multiple
   attached Sessions keep individual actions. Completing one leaves its shell usable;
@@ -834,13 +828,10 @@ caps, and keep missing ownership evidence explicit.
 
 ### Earlier runtime findings (July–August evidence)
 
-Detailed scheduler/server proposals and dated LOO-167/193/195/207 failures remain
-at `b908182f5:wave/product/MEMORY.md` under this heading. October 4 retires their
-automatic-recovery approach. Preserve the lessons: repeated missing-Flow failures
-must not silently retry; containment liveness proves neither provider ownership
-nor progress; unknown observation cannot authorize duplicate execution. Durable
-Steers must survive provider/app exit, with mid-turn delivery provider-dependent.
-The old resident topology is historical evidence, not a second runtime design.
+Resident-era incidents remain at `b908182f5:wave/product/MEMORY.md`.
+October 4 retires automatic recovery. Keep unknown liveness explicit; missing
+Flows must not silently retry. Durable Steers survive provider/app exit;
+mid-turn delivery is provider-dependent.
 
 ## Model (design invariants)
 

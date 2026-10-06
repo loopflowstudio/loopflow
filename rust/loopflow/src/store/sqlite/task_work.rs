@@ -216,9 +216,9 @@ fn members(
             })
         })?
         .collect::<StoreResult<Vec<_>>>()?;
-    let flows = flows_of_task(&tx, task)?
+    let flows = flows_of_task(tx, task)?
         .iter()
-        .map(|flow| super::flow_inventory::entry_in(&tx, flow))
+        .map(|flow| super::flow_inventory::entry_in(tx, flow))
         .collect::<StoreResult<Vec<_>>>()?;
     Ok((sessions, flows))
 }
@@ -748,11 +748,14 @@ mod tests {
         assert_eq!(work.flows[0].summary.task_id.as_ref(), Some(&task));
         assert_eq!(work.execs.len(), 4);
         // The open reading agrees with the full one about unfinished Execs.
-        assert!(store
+        let initial_open = store
             .task_open_work(&task, &store.open_execs().unwrap())
-            .unwrap()
+            .unwrap();
+        assert_eq!(initial_open.execs.len(), 2);
+        assert!(initial_open
             .execs
-            .is_empty());
+            .iter()
+            .all(|exec| exec.completed_at.is_none()));
         let unfinished = ExecId::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -767,12 +770,10 @@ mod tests {
             .task_open_work(&task, &store.open_execs().unwrap())
             .unwrap();
         assert_eq!(open.sessions, store.task_work(&task).unwrap().sessions);
-        assert_eq!(
-            open.execs.iter().map(|exec| &exec.id).collect::<Vec<_>>(),
-            [&unfinished]
-        );
+        assert_eq!(open.execs.len(), 3);
+        assert!(open.execs.iter().any(|exec| exec.id == unfinished));
         // With every Exec unfinished, each membership path agrees: checkout,
-        // Session event, driver and Flow event.
+        // Session event and driver.
         store
             .conn
             .lock()

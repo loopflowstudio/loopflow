@@ -68,15 +68,16 @@ prose narrating a builtin Flow drifts when its YAML changes: `advance` and
 `launch-plan` described human steps two passes after they were removed. Fake-provider
 suites prove decisions, correction, routing and loop passes; a real provider
 step, a driver killed mid-turn and a populated-store migration remain unproven.
-Workflow, loop, steer, Task-primary, Waiting and Desktop slices have headless
-tests only; defaults and docs are unbuilt.
+Every slice through defaults has headless tests only; docs are unbuilt.
 
 Desktop (October 6, unreviewed by Jack) draws the TaskWorkflow and every Flow
 run from FlowExec, lists Waiting first, and matches no conversation to a Flow
 step. Lessons: `lf` allows a second `lf task run` while an edge runs, so only
 Desktop's disabled Start keeps two drivers out of a checkout; a killed driver
-has no exit record and its run reads as running forever; nothing lists
-workflows, so an unstarted Task has no graph to preview.
+has no exit record and its run reads as running forever. `lf flow list` now
+lists workflows, so an unstarted Task previews its default. `lf wave
+update-plan --flow` saves a name without loading it; Desktop shows that
+default invalid, Start disabled.
 
 Main `16fa97425` adds native-human-input recency for `lf resume`; the Task
 primary reuses that ranking. Remote/performance/defaults/website scope stays
@@ -487,7 +488,6 @@ Decisions that outlive the branch (Jack's, verbatim where quoted):
   on its edges; exact captured occurrence identity remains required.
 - The September 30 primary-Session direction supersedes deferring the waveless
   beginner: repository onboarding must work before any Wave or Task exists.
-- Perf continues in a follow-up; the Session read-path changes follow the data model.
 
 State-of-the-art baseline adopted: one row component per sidebar level;
 state glyphs only when they mean something; a surface ladder instead of

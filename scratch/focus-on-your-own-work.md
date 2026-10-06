@@ -253,13 +253,15 @@ Flow history below means FlowExec rows joined to their Execs.
    set in Wave settings; Edit opens the real workflow or Flow source, with
    builtin customization creating the `.lf/` file explicitly; an invalid file
    stays saved and visibly invalid. Done when its headless tests pass.
-   **Built `31f7861c0` and compressed, not yet realigned** (compress shared one edges-leaving-a-stage helper between the Task workflow and the catalog drawing; the Swift filter below reran, 34 passed): lib
-   `engine::workflow` 3 and `changing_the_default_flow_keeps_the_chapters_krs`
-   pass, `dto_fixtures` 19, Swift `DesktopHeadlessTests|DTOFixtureTests|
-   TaskFlowProofTests` 34 passed, all-target Clippy clean. `lf flow list` also
-   lists workflows (kind, source, stages and edges); `lf flow customize NAME`
-   writes a builtin to `.lf/`; `lf wave update-plan --flow NAME` changes only
-   the default. Demo items: the Wave page's Task default menu and
+   **Done** at `f87d02872` (built `31f7861c0`; compress shared one
+   edges-leaving-a-stage helper between the Task workflow and the catalog
+   drawing): lib `engine::workflow` 3 and
+   `changing_the_default_flow_keeps_the_chapters_krs` pass, `dto_fixtures` 19,
+   Swift `DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests` 34 passed,
+   all-target Clippy clean. `lf flow list` also lists workflows (kind, source,
+   stages and edges); `lf flow customize NAME` writes a builtin to `.lf/`;
+   `lf wave update-plan --flow NAME` changes only the default and does not
+   check that NAME loads. Demo items: the Wave page's Task default menu and
    Customize/Edit opening an editor; an unstarted Task previewing its workflow.
 8. **Docs and website.** README, `docs/`, AGENTS.md, the architecture
    reference, builtin skills and the website describe TaskWorkflow, FlowExec,

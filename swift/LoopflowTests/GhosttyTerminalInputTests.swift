@@ -213,12 +213,16 @@ struct GhosttyShellBlockTests {
             return String(decoding: output, as: UTF8.self)
         }
 
-        // The stock prompt becomes a header line, then the command line.
+        // The stock prompt becomes a blank row, a concealed header row holding
+        // the directory, then the command line.
         let stock = try run(rc: "PS1='\(LoopflowZshBootstrap.macOSDefaultPrompt)'\n")
         var remaining = stock[...]
         for marker in [
             "\u{1B}]133;A;cl=line\u{7}",
+            "\n\u{1B}]133;A;k=s\u{7}",
+            "\u{1B}[8m\(LoopflowZshBootstrap.headerMarker)",
             home.lastPathComponent,
+            "\u{1B}[28m",
             "\n\u{1B}]133;A;k=s\u{7}",
             "\u{276F}",
             "\u{1B}]133;B\u{7}",
@@ -252,6 +256,38 @@ struct GhosttyShellBlockTests {
         #expect(row(atY: frame.minY + 1) == 3)
         #expect(row(atY: 196) == nil)
         #expect(row(atY: 200 - 8 - 10 * 18 - 1) == nil)
+
+        // Under the Loopflow prompt the blank row between two blocks is split:
+        // each edge beside one sits half a row lower.
+        let padded = ghosttyCommandBlockFrame(
+            block, bounds: bounds, cellHeight: 18, blankRowAbove: true, blankRowBelow: true
+        )
+        #expect(padded == frame.offsetBy(dx: 0, dy: -9))
+        let scrolledPastHeader = ghosttyCommandBlockFrame(
+            block, bounds: bounds, cellHeight: 18, blankRowBelow: true
+        )
+        #expect(scrolledPastHeader.maxY == frame.maxY)
+        #expect(scrolledPastHeader.minY == padded.minY)
+    }
+
+    @Test("a header is the marked prompt row, looked for only where a prompt can be")
+    func blockHeader() throws {
+        let marker = LoopflowZshBootstrap.headerMarker
+        #expect(GhosttyBlockHeader.text(inRow: "\(marker)~/src/loopflow   ") == "~/src/loopflow")
+        #expect(GhosttyBlockHeader.text(inRow: "~/src/loopflow") == nil)
+        #expect(GhosttyBlockHeader.text(inRow: "\u{276F} ls") == nil)
+        #expect(GhosttyBlockHeader.text(inRow: marker) == nil)
+
+        // Rows 0-1: an empty prompt. Rows 2-6: a block (blank, header,
+        // command, two output rows). Rows 7-9: the live prompt.
+        let block = GhosttyCommandBlockLayout(startRow: 2, endRow: 6, exitCode: 0, selected: false)
+        #expect(GhosttyBlockHeader.candidateRows(blocks: [block], rows: 10) == [0, 1, 2, 3, 7, 8, 9])
+
+        // The header is drawn on its own row, inside the grid's padding.
+        let frame = ghosttyBlockHeaderFrame(
+            row: 3, bounds: CGRect(x: 0, y: 0, width: 300, height: 200), cellHeight: 18
+        )
+        #expect(frame == CGRect(x: 12, y: 200 - 8 - 4 * 18, width: 276, height: 18))
     }
 
     @Test("only a reported failure is red; a resting block has no fill")

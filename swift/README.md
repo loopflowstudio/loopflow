@@ -56,8 +56,8 @@ Session/provider panes keep their native TUI behavior and do not expose shell
 command blocks.
 Automatic integration depends on the configured shell; macOS `/bin/bash` is
 excluded by the pinned Ghostty build. A zsh shell still on the macOS default
-prompt gets a directory-and-branch line above each command; any other prompt is
-left as it is.
+prompt gets a small dim directory line above each bold command, with the gap
+between blocks shared evenly; any other prompt is left as it is.
 
 Terminals start from Desktop's own terminal settings. A launcher's `NO_COLOR`,
 `TERM`, pager and agent variables do not reach them, so provider CLIs keep their

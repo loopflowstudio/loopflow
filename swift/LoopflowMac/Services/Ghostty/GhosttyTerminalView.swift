@@ -208,6 +208,36 @@ enum GhosttyTerminalPadding {
     static let y: CGFloat = 8
 }
 
+/// The directory line above a command. The Loopflow prompt prints it as
+/// concealed terminal text, so it scrolls, reflows and survives with its rows;
+/// the overlay reads it back and draws it smaller and dimmer than the command.
+enum GhosttyBlockHeader {
+    static let marker = LoopflowZshBootstrap.headerMarker
+    /// Columns read from each candidate row.
+    static let columns = marker.count + LoopflowZshBootstrap.headerMaxLength
+
+    /// Smaller than the terminal's 13pt body.
+    static let fontSize: CGFloat = 11
+    static let color = NSColor(red: 0xA3 / 255, green: 0x9B / 255, blue: 0x93 / 255, alpha: 1)
+
+    /// The header a terminal row holds, or `nil` for any other row.
+    static func text(inRow row: String) -> String? {
+        guard row.hasPrefix(marker) else { return nil }
+        let text = row.dropFirst(marker.count).trimmingCharacters(in: .whitespaces)
+        return text.isEmpty ? nil : text
+    }
+
+    /// Viewport rows that can hold a header: a block's first two rows (its
+    /// first row when the blank row above scrolled away) and every row outside
+    /// a completed block, where the live prompt and empty prompts sit.
+    static func candidateRows(blocks: [GhosttyCommandBlockLayout], rows: Int) -> [Int] {
+        (0..<rows).filter { row in
+            guard let block = blocks.first(where: { $0.contains(row) }) else { return true }
+            return row <= block.startRow + 1
+        }
+    }
+}
+
 /// A completed shell command as Ghostty reports it: viewport rows, the exit
 /// status the shell gave, and whether it is the terminal's selected block.
 struct GhosttyCommandBlockLayout: Equatable {
@@ -236,15 +266,30 @@ func ghosttyViewportRow(
     return Int(distanceFromTop / cellHeight)
 }
 
-/// The full-width band covering a block's rows.
+/// The full-width band covering a block's rows. Under the Loopflow prompt a
+/// blank row precedes every header; each edge that borders one moves half a
+/// row down, so the gap is shared evenly by the blocks on either side.
 func ghosttyCommandBlockFrame(
     _ block: GhosttyCommandBlockLayout,
     bounds: CGRect,
-    cellHeight: CGFloat
+    cellHeight: CGFloat,
+    blankRowAbove: Bool = false,
+    blankRowBelow: Bool = false
 ) -> CGRect {
-    let top = bounds.height - GhosttyTerminalPadding.y - CGFloat(block.startRow) * cellHeight
-    let bottom = bounds.height - GhosttyTerminalPadding.y - CGFloat(block.endRow + 1) * cellHeight
+    let origin = bounds.height - GhosttyTerminalPadding.y
+    let top = origin - (CGFloat(block.startRow) + (blankRowAbove ? 0.5 : 0)) * cellHeight
+    let bottom = origin - (CGFloat(block.endRow + 1) + (blankRowBelow ? 0.5 : 0)) * cellHeight
     return CGRect(x: 0, y: bottom, width: bounds.width, height: max(0, top - bottom))
+}
+
+/// Where a header row's text is drawn: on its row, at the grid's left edge.
+func ghosttyBlockHeaderFrame(row: Int, bounds: CGRect, cellHeight: CGFloat) -> CGRect {
+    CGRect(
+        x: GhosttyTerminalPadding.x,
+        y: bounds.height - GhosttyTerminalPadding.y - CGFloat(row + 1) * cellHeight,
+        width: max(0, bounds.width - 2 * GhosttyTerminalPadding.x),
+        height: cellHeight
+    )
 }
 
 /// Block chrome. A resting block has none; hover is faint; selection is the
@@ -323,6 +368,11 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var dropHighlight: NSView?
     private let commandBlockOverlay = CALayer()
     private var commandBlocks: [GhosttyCommandBlockLayout] = []
+    /// Header text by viewport row, read from the terminal on each refresh.
+    private var blockHeaders: [Int: String] = [:]
+    /// Set once this shell has shown a Loopflow header: its prompts start
+    /// with a blank row, which block edges then share.
+    private var promptHasBlankRow = false
     private var hoveredRow: Int?
     /// Where the left button went down, until a drag moves away from it.
     private var clickOrigin: CGPoint?
@@ -412,6 +462,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         displayLink = nil
         commandBlockOverlay.removeFromSuperlayer()
         commandBlocks = []
+        blockHeaders = [:]
         hoveredRow = nil
         clickOrigin = nil
 
@@ -487,9 +538,49 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
                 selected: $0.selected
             )
         }
-        guard nextBlocks != commandBlocks || commandBlockOverlay.frame != bounds else { return }
+        let nextHeaders = readBlockHeaders(blocks: nextBlocks, size: size)
+        if !nextHeaders.isEmpty { promptHasBlankRow = true }
+        guard nextBlocks != commandBlocks
+            || nextHeaders != blockHeaders
+            || commandBlockOverlay.frame != bounds
+        else { return }
         commandBlocks = nextBlocks
+        blockHeaders = nextHeaders
         renderCommandBlocks(size: size)
+    }
+
+    private func readBlockHeaders(
+        blocks: [GhosttyCommandBlockLayout],
+        size: ghostty_surface_size_s
+    ) -> [Int: String] {
+        guard let surface else { return [:] }
+        var headers: [Int: String] = [:]
+        for row in GhosttyBlockHeader.candidateRows(blocks: blocks, rows: Int(size.rows)) {
+            func point(_ column: Int) -> ghostty_point_s {
+                ghostty_point_s(
+                    tag: GHOSTTY_POINT_VIEWPORT,
+                    coord: GHOSTTY_POINT_COORD_EXACT,
+                    x: UInt32(column),
+                    y: UInt32(row)
+                )
+            }
+            var text = ghostty_text_s()
+            // Ghostty clamps the end column to the grid.
+            guard ghostty_surface_read_text(
+                surface,
+                ghostty_selection_s(
+                    top_left: point(0),
+                    bottom_right: point(GhosttyBlockHeader.columns - 1),
+                    rectangle: true
+                ),
+                &text
+            ) else { continue }
+            defer { ghostty_surface_free_text(surface, &text) }
+            guard let bytes = text.text, text.text_len > 0 else { continue }
+            let line = String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
+            headers[row] = GhosttyBlockHeader.text(inRow: line)
+        }
+        return headers
     }
 
     private func renderCommandBlocks(size: ghostty_surface_size_s? = nil) {
@@ -501,8 +592,15 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         commandBlockOverlay.frame = bounds
-        commandBlockOverlay.sublayers = commandBlocks.map { block in
-            let frame = ghosttyCommandBlockFrame(block, bounds: bounds, cellHeight: cellHeight)
+        let blockLayers = commandBlocks.map { block in
+            let frame = ghosttyCommandBlockFrame(
+                block,
+                bounds: bounds,
+                cellHeight: cellHeight,
+                // A block scrolled past its header has no blank row in view.
+                blankRowAbove: blockHeaders[block.startRow + 1] != nil,
+                blankRowBelow: promptHasBlankRow
+            )
             let style = GhosttyCommandBlockStyle(
                 block: block,
                 hovered: hoveredRow.map(block.contains) ?? false
@@ -526,6 +624,26 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             surfaceLayer.addSublayer(accentLayer)
             return surfaceLayer
         }
+        let font = NSFont.monospacedSystemFont(ofSize: GhosttyBlockHeader.fontSize, weight: .regular)
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        let headerLayers = blockHeaders.map { row, text in
+            let rowFrame = ghosttyBlockHeaderFrame(row: row, bounds: bounds, cellHeight: cellHeight)
+            let textLayer = CATextLayer()
+            textLayer.frame = CGRect(
+                x: rowFrame.minX,
+                y: rowFrame.midY - lineHeight / 2,
+                width: rowFrame.width,
+                height: lineHeight
+            )
+            textLayer.string = text
+            textLayer.font = font
+            textLayer.fontSize = font.pointSize
+            textLayer.foregroundColor = GhosttyBlockHeader.color.cgColor
+            textLayer.truncationMode = .start
+            textLayer.contentsScale = scale
+            return textLayer
+        }
+        commandBlockOverlay.sublayers = blockLayers + headerLayers
         CATransaction.commit()
     }
 
@@ -1234,33 +1352,31 @@ func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? 
 }
 
 /// zsh reads `ZDOTDIR/.zshenv` first. Loopflow's gives a shell still on the
-/// macOS default prompt a context header (directory, branch) above its command
-/// line, leaves every other prompt alone, then hands over to Ghostty's
+/// macOS default prompt a blank row, a header row holding the directory, and a
+/// command line, leaves every other prompt alone, then hands over to Ghostty's
 /// integration, which restores the user's own ZDOTDIR.
+///
+/// The header row is concealed text behind `GhosttyBlockHeader.marker`: the
+/// terminal keeps it as the directory at submission, and the overlay draws it
+/// in its own size and color.
 enum LoopflowZshBootstrap {
     static let macOSDefaultPrompt = "%n@%m %1~ %# "
+    /// Starts a header row. Nothing a person types begins a prompt row with it.
+    static let headerMarker = "\u{B6} "
+    /// The prompt truncates the directory to this many characters.
+    static let headerMaxLength = 60
 
     static let zshenv = """
     if [[ -o interactive ]]; then
-        _loopflow_prompt_context() {
-            builtin typeset -g _loopflow_branch
-            _loopflow_branch=$(command git symbolic-ref --quiet --short HEAD 2>/dev/null \\
-                || command git rev-parse --short HEAD 2>/dev/null)
-            # The value is prompt-expanded: escape it, then color it.
-            [[ -z $_loopflow_branch ]] \\
-                || _loopflow_branch=" %F{\(accent)}${_loopflow_branch//\\%/%%}%f"
-        }
         # Runs once, after the user's rc files have had their say.
         _loopflow_prompt() {
             precmd_functions=(${precmd_functions:#_loopflow_prompt})
             [[ $PROMPT == '\(macOSDefaultPrompt)' ]] || builtin return 0
-            builtin setopt prompt_subst
-            # The leading blank row separates this block from the output above.
-            PROMPT=$'\\n%F{8}%~%f${_loopflow_branch}\\n%F{\(accent)}\u{276F}%f '
-            precmd_functions=(_loopflow_prompt_context $precmd_functions)
-            _loopflow_prompt_context
+            PROMPT=$'\\n%{\\e[8m%}\(headerMarker)%\(headerMaxLength)<\u{2026}<%~%<<%{\\e[28m%}\\n%F{\(accent)}\u{276F}%f '
+            # The command is bold; zsh ends the highlight before output starts.
+            zle_highlight=(${zle_highlight:#default:*} default:bold)
         }
-        builtin typeset -ga precmd_functions
+        builtin typeset -ga precmd_functions zle_highlight
         precmd_functions+=(_loopflow_prompt)
     fi
     builtin source -- "$GHOSTTY_RESOURCES_DIR/shell-integration/zsh/.zshenv"

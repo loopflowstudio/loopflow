@@ -989,9 +989,9 @@ no owning Task (LOO-375 owns `wt list` only).
   shell-block semantics.
 - Jack Heart's October 5 report (LOO-381) added: colors lost in provider CLIs,
   a context header and indentation per block, a red background from the real
-  exit status, and one selection at a time. The LOO-381 branch implements these;
-  Jack has not seen it, and header contents, spacing and replacing the default
-  zsh prompt are kickoff choices awaiting his demo.
+  exit status, and one selection at a time. Jack's demo verdict: "looks good",
+  more space between blocks, and Warp's smaller dim directory header. The
+  branch draws that header in the overlay from a concealed prompt row; unseen.
 - **Desktop inherits its launcher's environment.** Opened from an agent shell it
   carried `NO_COLOR=1`, `PAGER=cat` and `TERM_PROGRAM`, and every pane lost
   color. The GUI drops those variables at launch, beside the execution markers.

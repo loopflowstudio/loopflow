@@ -13,7 +13,9 @@ import json
 import math
 import os
 import platform
+import shutil
 import signal
+import sqlite3
 import statistics
 import subprocess
 import sys
@@ -22,21 +24,21 @@ import uuid
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from types import FrameType
+from typing import Callable, TextIO
 
 REPO = Path(__file__).resolve().parent.parent
 RECORDER = REPO / "scripts/benchmarks/desktop-performance/record_live.py"
-COMMAND = [
+BUILD_COMMAND = [
     "swift",
-    "test",
+    "build",
     "--package-path",
     "swift",
+    "--build-tests",
     "-Xswiftc",
     "-gnone",
     "--jobs",
     "4",
-    "--no-parallel",
-    "--filter",
-    "DesktopPerformanceTests",
 ]
 
 
@@ -255,8 +257,8 @@ def _cli_volume(directory: Path) -> dict:
 def _comparison(current: dict, baseline: dict) -> dict:
     # Different source builds are the purpose of comparison; different measurement
     # contracts, host or population would make the latency delta misleading.
-    for key in ["host", "build_mode", "command", "measurement_source"]:
-        if current["metadata"][key] != baseline["metadata"][key]:
+    for key in ["host", "build_mode", "command", "measurement_source", "snapshot", "repo", "issue"]:
+        if current["metadata"].get(key) != baseline["metadata"].get(key):
             return {"available": False, "reason": f"Different {key}"}
     for key in [
         "population_version",
@@ -268,8 +270,22 @@ def _comparison(current: dict, baseline: dict) -> dict:
     ]:
         if (current.get("plan") or {}).get(key) != (baseline.get("plan") or {}).get(key):
             return {"available": False, "reason": f"Different {key}"}
-    if current["status"] != "complete" or baseline["status"] != "complete":
-        return {"available": False, "reason": "Both runs need complete, source-stable observations"}
+    for run in [current, baseline]:
+        metadata = run["metadata"]
+        if (
+            metadata.get("exit_code") != 0
+            or metadata["source_before"] != metadata["source_after"]
+            or metadata.get("cli_sha256") != metadata.get("cli_sha256_after")
+            or run["soak"]["status"] == "incomplete"
+            or run["journey_errors"]
+            or run["not_started"] != 0
+            or run["journal_errors"]
+            or any(attempt["outcome"] == "interrupted" for attempt in run["attempts"])
+        ):
+            return {
+                "available": False,
+                "reason": "Both runs need complete, source-stable observations",
+            }
     previous = {
         (g["metric"], g["scenario"], g["population"], g["state"]): g for g in baseline["groups"]
     }
@@ -282,7 +298,11 @@ def _comparison(current: dict, baseline: dict) -> dict:
         deltas.append(
             {
                 **dict(zip(["metric", "scenario", "population", "state"], key)),
-                "p50_delta_ms": group["p50_ms"] - before["p50_ms"],
+                "p50_delta_ms": group["p50_ms"] - before["p50_ms"]
+                if group["p50_ms"] is not None and before["p50_ms"] is not None
+                else None,
+                "before_failure_rate": before["failure_rate"],
+                "after_failure_rate": group["failure_rate"],
                 "p95_delta_ms": (group["p95_ms"] - before["p95_ms"])
                 if group["p95_ms"] is not None and before["p95_ms"] is not None
                 else None,
@@ -300,6 +320,8 @@ def _report(output: Path, baseline: Path | None) -> dict:
     events, errors = _read_events(output / "attempts.jsonl")
     summary = _summarize(events)
     errors.extend(summary["journal_errors"])
+    if metadata.get("soak_seconds", 0):
+        summary["soak"] = _soak(events, {"soak_seconds": metadata["soak_seconds"]})
     complete = (
         metadata.get("exit_code") == 0
         and metadata.get("source_before") == metadata.get("source_after")
@@ -341,16 +363,20 @@ def _report(output: Path, baseline: Path | None) -> dict:
 
 
 def _markdown(summary: dict, *, scoped: bool) -> str:
+    snapshot_run = summary["metadata"].get("snapshot") is not None
     lines = [
         f"# Desktop measurements: {summary['status']}",
         "",
-        "Endpoint: in-process native bitmap capture with text verification; "
-        "Session return also waits for owned PTY replies.",
+        "Endpoint: in-process native bitmap capture with text verification."
+        + ("" if snapshot_run else " Session return also waits for owned PTY replies."),
         "**Not compositor paint time. Soak trace evidence is reported separately.**",
         "",
         "Fixture data excludes CLI/registry discovery, network and provider startup. "
         "Three retained cat PTYs per population; "
-        "separate native Session reopen uses a real CLI and owned provider stub.",
+        "separate native Session reopen uses a real CLI and owned provider stub."
+        if not snapshot_run
+        else "Snapshot mode uses real CLI reads and Task links; "
+        "copied Session connections are disabled.",
         f"Attempts: {len(summary['attempts'])}/{summary['expected_attempts']}; "
         f"not started: {summary['not_started']}.",
         "First interaction and warm samples are separate. "
@@ -406,7 +432,8 @@ def _markdown(summary: dict, *, scoped: bool) -> str:
             "Fixture setup is excluded and reported separately in fixture_setup_cli_volume. "
             "Scenario totals include native reopening; "
             "synthetic planning reads emit no CLI receipts."
-            if scoped else "No separate setup receipts; setup/scenario attribution is unmeasured."
+            if scoped
+            else "No separate setup receipts; setup/scenario attribution is unmeasured."
         ),
     ]
     if summary["status"] != "complete":
@@ -508,98 +535,255 @@ def _prepare_native_fixture(output: Path, cli: Path) -> Path:
     return fixture
 
 
-def _run_native(output: Path, samples: int, soak_seconds: int, cli: Path) -> dict:
+def _snapshot(source: Path, output: Path) -> None:
+    output.mkdir(parents=True, exist_ok=False, mode=0o700)
+    database = output / "loopflow.db"
+    with sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True) as source_db:
+        with sqlite3.connect(database) as target:
+            source_db.backup(target)
+    database.chmod(0o600)
+    with sqlite3.connect(database) as target:
+        tables = [
+            row[0] for row in target.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        ]
+        counts = {
+            name: target.execute(
+                'SELECT count(*) FROM "' + name.replace('"', '""') + '"'
+            ).fetchone()[0]
+            for name in tables
+        }
+    _write(
+        output / "snapshot.json",
+        {
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "sha256": hashlib.sha256(database.read_bytes()).hexdigest(),
+            "counts": counts,
+        },
+    )
+
+
+def _native_command(test_filter: str, environment: dict[str, str]) -> list[str]:
+    swift = Path(subprocess.check_output(["xcrun", "--find", "swift"], text=True).strip())
+    platform_path = Path(
+        subprocess.check_output(
+            ["xcrun", "--sdk", "macosx", "--show-sdk-platform-path"], text=True
+        ).strip()
+    )
+    developer = platform_path / "Developer"
+    environment["DYLD_FRAMEWORK_PATH"] = ":".join(
+        str(developer / "Library" / name) for name in ["Frameworks", "PrivateFrameworks"]
+    )
+    environment["DYLD_LIBRARY_PATH"] = str(developer / "usr/lib")
+    return [
+        str(swift.parent.parent / "libexec/swift/pm/swiftpm-testing-helper"),
+        "--test-bundle-path",
+        str(
+            REPO
+            / "swift/.build/debug/LoopflowSwiftPackageTests.xctest"
+            / "Contents/MacOS/LoopflowSwiftPackageTests"
+        ),
+        "--testing-library",
+        "swift-testing",
+        "--filter",
+        test_filter,
+    ]
+
+
+def _run_process(
+    command: list[str],
+    environment: dict[str, str],
+    log: TextIO,
+    timeout: float,
+    observe: Callable[[], None] | None = None,
+) -> tuple[int, str | None]:
+    interrupted = False
+
+    def _terminate(signum: int, frame: FrameType | None) -> None:
+        nonlocal interrupted
+        interrupted = True
+
+    previous = signal.signal(signal.SIGTERM, _terminate)
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=REPO,
+            env=environment,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + timeout
+        outcome = None
+        try:
+            while not interrupted:
+                if observe is not None:
+                    observe()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    outcome = "timeout"
+                    break
+                try:
+                    process.wait(timeout=min(remaining, 0.1))
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+        except KeyboardInterrupt:
+            interrupted = True
+        except BaseException:
+            _stop(process)
+            raise
+        if interrupted:
+            outcome = "interrupted"
+        if outcome:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            # The leader can exit before its children. Stop the remaining group
+            # even when wait() has already returned, so the journal stays frozen.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+        return process.returncode, outcome
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def _run_native(
+    output: Path,
+    samples: int,
+    soak_seconds: int,
+    cli: Path,
+    snapshot: Path | None = None,
+    repo: Path | None = None,
+    issue: str | None = None,
+) -> dict:
     metadata: dict = {}
     environment = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
     isolated = output / "home"
-    isolated.mkdir()
+    isolated.mkdir(mode=0o700)
     environment.update(LF_HOME=str(isolated), HOME=str(isolated))
-    fixture = _prepare_native_fixture(output, cli)
+    fixture = None
+    if not snapshot:
+        fixture = _prepare_native_fixture(output, cli)
+    else:
+        for directory in ("fixture-setup-cli-volume", "cli-volume"):
+            (output / directory).mkdir()
+    test_filter = "DesktopPerformanceTests.measureExperiences"
+    if snapshot:
+        manifest = json.loads((snapshot / "snapshot.json").read_text())
+        database = snapshot / "loopflow.db"
+        if hashlib.sha256(database.read_bytes()).hexdigest() != manifest["sha256"]:
+            raise ValueError("Snapshot changed since capture; create a new consistent snapshot")
+        shutil.copyfile(database, isolated / "loopflow.db")
+        (isolated / "loopflow.db").chmod(0o600)
+        environment.update(
+            LOOPFLOW_UI_TEST_MODE="live",
+            LF_DESKTOP_TASK_SNAPSHOT=str(isolated),
+            LF_DESKTOP_TASK_BINARY=str(cli),
+            LF_DESKTOP_TASK_REPO=str(repo),
+            LF_DESKTOP_TASK_ISSUE=issue,
+        )
+        test_filter = "DesktopPerformanceTests.measureSnapshotTaskOpening"
     environment.update(
-        LOOPFLOW_TEST_NATIVE_FIXTURE=str(fixture),
         LOOPFLOW_NATIVE_TESTS="1",
         LF_DESKTOP_PERF_OUTPUT=str(output / "attempts.jsonl"),
         LF_DESKTOP_PERF_SAMPLES=str(samples),
         LF_DESKTOP_PERF_SOAK_SECONDS=str(soak_seconds),
+        LF_PERF_OUTPUT=str(output / "cli-volume"),
     )
-    # These are host-boundary time limits, never latency targets. The attempt
-    # journal survives termination; only this invocation's process group stops.
+    if fixture is not None:
+        environment["LOOPFLOW_TEST_NATIVE_FIXTURE"] = str(fixture)
+    recorder = None
+    recorder_attempted = False
     with (output / "native.log").open("w") as log:
+
+        def observe() -> None:
+            nonlocal recorder, recorder_attempted
+            if soak_seconds and not recorder_attempted:
+                events, _ = _read_events(output / "attempts.jsonl")
+                began = next((e for e in events if e["event"] == "soak_begin"), None)
+                if began:
+                    recorder_attempted = True
+                    try:
+                        recorder = subprocess.Popen(
+                            [
+                                sys.executable,
+                                str(RECORDER),
+                                "record",
+                                "--pid",
+                                str(began["pid"]),
+                                "--seconds",
+                                str(soak_seconds),
+                                "--output",
+                                str(output / "soak-resources"),
+                                "--phases",
+                                str(output / "attempts.jsonl"),
+                            ],
+                            stdout=log,
+                            stderr=subprocess.STDOUT,
+                            start_new_session=True,
+                        )
+                    except OSError as error:
+                        metadata["recorder_error"] = str(error)
+            if recorder_attempted and (recorder is None or recorder.poll() is not None):
+                (output / "resources-finished").touch(exist_ok=True)
+
         try:
-            process = subprocess.Popen(
-                COMMAND,
-                cwd=REPO,
-                env=environment,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
+            code, outcome = _run_process(BUILD_COMMAND, environment, log, timeout=600)
+            if code != 0 or outcome:
+                return {"outcome": outcome or "failed", "exit_code": code}
+            command = _native_command(test_filter, environment)
+            metadata["command"] = command
+            metadata["test_binary_sha256"] = hashlib.sha256(
+                Path(command[2]).read_bytes()
+            ).hexdigest()
+            code, outcome = _run_process(
+                command,
+                environment,
+                log,
+                timeout=600 + samples * 150 + soak_seconds,
+                observe=observe,
             )
-        except OSError as error:
-            return {"outcome": "unavailable", "reason": str(error), "exit_code": None}
-        recorder = None
-        recorder_attempted = False
-        timeout = 600 + samples * 120 + soak_seconds
-        try:
-            deadline = time.monotonic() + timeout
-            while process.poll() is None:
-                if time.monotonic() >= deadline:
-                    raise subprocess.TimeoutExpired(COMMAND, timeout)
-                if soak_seconds and not recorder_attempted:
-                    events, _ = _read_events(output / "attempts.jsonl")
-                    began = next((e for e in events if e["event"] == "soak_begin"), None)
-                    if began:
-                        recorder_attempted = True
-                        try:
-                            recorder = subprocess.Popen(
-                                [
-                                    sys.executable,
-                                    str(RECORDER),
-                                    "record",
-                                    "--pid",
-                                    str(began["pid"]),
-                                    "--seconds",
-                                    str(soak_seconds),
-                                    "--output",
-                                    str(output / "soak-resources"),
-                                    "--phases",
-                                    str(output / "attempts.jsonl"),
-                                ],
-                                stdout=log,
-                                stderr=subprocess.STDOUT,
-                                start_new_session=True,
-                            )
-                        except OSError as error:
-                            metadata["recorder_error"] = str(error)
-                if recorder_attempted and (recorder is None or recorder.poll() is not None):
-                    (output / "resources-finished").touch(exist_ok=True)
-                time.sleep(0.25)
+            metadata.update(exit_code=code, outcome=outcome)
             if recorder is not None:
                 try:
                     recorder.wait(timeout=30)
                 except subprocess.TimeoutExpired:
-                    pass  # The shared cleanup below stops a recorder that outlives the runner.
-        except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
-            metadata["outcome"] = (
-                "timeout" if isinstance(error, subprocess.TimeoutExpired) else "interrupted"
-            )
+                    pass
         finally:
-            _stop(process)
-            metadata["exit_code"] = process.returncode
             if recorder is not None:
                 _stop(recorder)
                 metadata["recorder_exit_code"] = recorder.returncode
     return metadata
 
 
-def _run(output: Path, samples: int, baseline: Path | None, soak_seconds: int, cli: Path) -> int:
+def _run(
+    output: Path,
+    samples: int,
+    baseline: Path | None,
+    soak_seconds: int,
+    cli: Path,
+    snapshot: Path | None = None,
+    repo: Path | None = None,
+    issue: str | None = None,
+) -> int:
     output.mkdir(parents=True, exist_ok=False)
     metadata = {
         "schema": 1,
+        "soak_seconds": soak_seconds,
         "cli_sha256": hashlib.sha256(cli.read_bytes()).hexdigest(),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "host": {"name": platform.node(), "os": platform.platform(), "arch": platform.machine()},
         "build_mode": "SwiftPM debug -gnone",
-        "command": COMMAND,
+        "build_command": BUILD_COMMAND,
+        "command": None,
         "source_before": _sources(),
         "measurement_source": hashlib.sha256(
             b"".join(
@@ -623,6 +807,13 @@ def _run(output: Path, samples: int, baseline: Path | None, soak_seconds: int, c
         ).hexdigest(),
         "population_source": "isolated DTO fixtures; no configured Home",
     }
+    if snapshot:
+        metadata.update(
+            population_source="isolated SQLite online backup",
+            snapshot=json.loads((snapshot / "snapshot.json").read_text()),
+            repo=str(repo),
+            issue=issue,
+        )
     _write(output / "run.json", metadata)
     if sys.platform != "darwin":
         metadata.update(
@@ -630,7 +821,7 @@ def _run(output: Path, samples: int, baseline: Path | None, soak_seconds: int, c
         )
     else:
         try:
-            metadata.update(_run_native(output, samples, soak_seconds, cli))
+            metadata.update(_run_native(output, samples, soak_seconds, cli, snapshot, repo, issue))
         except (OSError, RuntimeError, ValueError) as error:
             metadata.update(outcome="failed", reason=str(error), exit_code=None)
     metadata["source_after"] = _sources()
@@ -660,7 +851,11 @@ def main() -> int:
     )
     run.add_argument("--baseline", type=Path)
     run.add_argument(
-        "--cli", type=Path, required=True, help="Source CLI for the owned native Session fixture"
+        "--cli",
+        "--lf",
+        type=Path,
+        required=True,
+        help="Source CLI for the owned native Session fixture",
     )
     run.add_argument(
         "--soak-seconds",
@@ -668,6 +863,12 @@ def main() -> int:
         default=0,
         help="Append unattended idle/navigation/typing; 3600 for the acceptance soak",
     )
+    run.add_argument("--snapshot", type=Path)
+    run.add_argument("--repo", type=Path)
+    run.add_argument("--issue")
+    snapshot_command = commands.add_parser("snapshot", help="Consistent private SQLite backup")
+    snapshot_command.add_argument("--database", type=Path, required=True)
+    snapshot_command.add_argument("--output", type=Path, required=True)
     report = commands.add_parser(
         "report", help="Rebuild reports, including interrupted invocation evidence"
     )
@@ -678,11 +879,17 @@ def main() -> int:
     )
     volume.add_argument("directory", type=Path)
     args = parser.parse_args()
+    if args.command == "snapshot":
+        _snapshot(args.database, args.output)
+        print(args.output / "snapshot.json")
+        return 0
     if args.command == "volume":
         result = _cli_volume(args.directory)
         print(json.dumps(result, indent=2))
         return 0 if result["status"] == "complete" else 1
     if args.command == "run":
+        if args.snapshot and not all([args.repo, args.issue]):
+            parser.error("--snapshot requires --repo and --issue")
         if args.soak_seconds < 0:
             parser.error("--soak-seconds cannot be negative")
         if args.samples < 1:
@@ -693,6 +900,9 @@ def main() -> int:
             args.baseline,
             args.soak_seconds,
             args.cli.resolve(),
+            args.snapshot.resolve() if args.snapshot else None,
+            args.repo.resolve() if args.repo else None,
+            args.issue,
         )
     summary = _report(args.output, args.baseline)
     print(args.output / "report.md")

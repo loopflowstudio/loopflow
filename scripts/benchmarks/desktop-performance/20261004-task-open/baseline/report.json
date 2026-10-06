@@ -1,0 +1,623 @@
+{
+  "attempts": [
+    {
+      "attempt": 0,
+      "capture_ready_ms": 13936.786125,
+      "duration_ms": 13967.836291,
+      "event": "end",
+      "id": "snapshot-cold_workspace-0",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": "session_a0c231326e1f4e48a126e46d1024c2b6",
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 215.760875,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112424
+            ]
+          },
+          {
+            "at_ms": 503.949125,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112424,
+              112426
+            ]
+          },
+          {
+            "at_ms": 4412.883041,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              112424
+            ]
+          },
+          {
+            "at_ms": 8459.424666,
+            "key_window": -1,
+            "selection": "task_6eacca1dd17545548e72e876b4637fd3",
+            "task_link_sheet": false,
+            "window_numbers": [
+              112424
+            ]
+          }
+        ]
+      },
+      "outcome": "passed",
+      "population": "snapshot",
+      "scenario": "cold_workspace",
+      "state": "first_interaction"
+    },
+    {
+      "attempt": 0,
+      "capture_ready_ms": 4772.221167,
+      "duration_ms": 4815.038833,
+      "event": "end",
+      "id": "snapshot-warm_task-0",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": "session_a0c231326e1f4e48a126e46d1024c2b6",
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 431.212208,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112424
+            ]
+          },
+          {
+            "at_ms": 708.023375,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112424,
+              112431
+            ]
+          },
+          {
+            "at_ms": 4760.245667,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              112424
+            ]
+          }
+        ]
+      },
+      "outcome": "passed",
+      "population": "snapshot",
+      "scenario": "warm_task",
+      "state": "first_interaction"
+    },
+    {
+      "attempt": 0,
+      "duration_ms": 45039.936084,
+      "event": "end",
+      "id": "snapshot-reopen_task-0",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": null,
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 49.804917,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112424
+            ]
+          },
+          {
+            "at_ms": 359.633292,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112424,
+              112432
+            ]
+          },
+          {
+            "at_ms": 6485.673625,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              112424
+            ]
+          }
+        ]
+      },
+      "outcome": "timeout",
+      "population": "snapshot",
+      "reason": "Task identity not captured in 45 seconds",
+      "scenario": "reopen_task",
+      "state": "first_interaction"
+    },
+    {
+      "attempt": 1,
+      "capture_ready_ms": 19738.266083,
+      "duration_ms": 19786.7995,
+      "event": "end",
+      "id": "snapshot-cold_workspace-1",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": "session_a0c231326e1f4e48a126e46d1024c2b6",
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 173.706958,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112437
+            ]
+          },
+          {
+            "at_ms": 459.493083,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112437,
+              112439
+            ]
+          },
+          {
+            "at_ms": 5113.7685,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              112437
+            ]
+          },
+          {
+            "at_ms": 10358.4635,
+            "key_window": -1,
+            "selection": "task_6eacca1dd17545548e72e876b4637fd3",
+            "task_link_sheet": false,
+            "window_numbers": [
+              112437
+            ]
+          }
+        ]
+      },
+      "outcome": "passed",
+      "population": "snapshot",
+      "scenario": "cold_workspace",
+      "state": "warm"
+    },
+    {
+      "attempt": 1,
+      "capture_ready_ms": 6249.243458,
+      "duration_ms": 6292.898,
+      "event": "end",
+      "id": "snapshot-warm_task-1",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": "session_a0c231326e1f4e48a126e46d1024c2b6",
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 486.297083,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112437
+            ]
+          },
+          {
+            "at_ms": 779.635,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112437,
+              112442
+            ]
+          },
+          {
+            "at_ms": 6238.057208,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              112437
+            ]
+          }
+        ]
+      },
+      "outcome": "passed",
+      "population": "snapshot",
+      "scenario": "warm_task",
+      "state": "warm"
+    },
+    {
+      "attempt": 1,
+      "capture_ready_ms": 7576.404458,
+      "duration_ms": 7625.486833,
+      "event": "end",
+      "id": "snapshot-reopen_task-1",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": "session_a0c231326e1f4e48a126e46d1024c2b6",
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 53.547208,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112437
+            ]
+          },
+          {
+            "at_ms": 361.03325,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112437,
+              112443
+            ]
+          },
+          {
+            "at_ms": 4151.05375,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              112437
+            ]
+          }
+        ]
+      },
+      "outcome": "passed",
+      "population": "snapshot",
+      "scenario": "reopen_task",
+      "state": "warm"
+    },
+    {
+      "attempt": 2,
+      "capture_ready_ms": 20325.82,
+      "duration_ms": 20376.226542,
+      "event": "end",
+      "id": "snapshot-cold_workspace-2",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": "session_a0c231326e1f4e48a126e46d1024c2b6",
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 183.57225,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112444
+            ]
+          },
+          {
+            "at_ms": 466.964875,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112444,
+              112446
+            ]
+          },
+          {
+            "at_ms": 4172.095292,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              112444,
+              112446
+            ]
+          },
+          {
+            "at_ms": 4521.059042,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              112444
+            ]
+          },
+          {
+            "at_ms": 9934.904417,
+            "key_window": -1,
+            "selection": "task_6eacca1dd17545548e72e876b4637fd3",
+            "task_link_sheet": false,
+            "window_numbers": [
+              112444
+            ]
+          }
+        ]
+      },
+      "outcome": "passed",
+      "population": "snapshot",
+      "scenario": "cold_workspace",
+      "state": "warm"
+    },
+    {
+      "attempt": 2,
+      "capture_ready_ms": 5510.948291,
+      "duration_ms": 5546.453125,
+      "event": "end",
+      "id": "snapshot-warm_task-2",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": "session_a0c231326e1f4e48a126e46d1024c2b6",
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 521.010833,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112444
+            ]
+          },
+          {
+            "at_ms": 811.121541,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112444,
+              112447
+            ]
+          },
+          {
+            "at_ms": 5499.497875,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              112444
+            ]
+          }
+        ]
+      },
+      "outcome": "passed",
+      "population": "snapshot",
+      "scenario": "warm_task",
+      "state": "warm"
+    },
+    {
+      "attempt": 2,
+      "duration_ms": 45048.349084,
+      "event": "end",
+      "id": "snapshot-reopen_task-2",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": null,
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 51.72625,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112444
+            ]
+          },
+          {
+            "at_ms": 360.77375,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": true,
+            "window_numbers": [
+              112444,
+              112448
+            ]
+          },
+          {
+            "at_ms": 6861.268792,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              112444
+            ]
+          }
+        ]
+      },
+      "outcome": "timeout",
+      "population": "snapshot",
+      "reason": "Task identity not captured in 45 seconds",
+      "scenario": "reopen_task",
+      "state": "warm"
+    }
+  ],
+  "expected_attempts": 9,
+  "groups": [
+    {
+      "attempted": 1,
+      "failure_rate": 0.0,
+      "metric": "task_workspace_ready_ms",
+      "p50_ms": 13967.836291,
+      "p95_ms": null,
+      "passed": 1,
+      "population": "snapshot",
+      "scenario": "cold_workspace",
+      "state": "first_interaction"
+    },
+    {
+      "attempted": 2,
+      "failure_rate": 0.0,
+      "metric": "task_workspace_ready_ms",
+      "p50_ms": 20081.513021,
+      "p95_ms": null,
+      "passed": 2,
+      "population": "snapshot",
+      "scenario": "cold_workspace",
+      "state": "warm"
+    },
+    {
+      "attempted": 1,
+      "failure_rate": 1.0,
+      "metric": "task_workspace_ready_ms",
+      "p50_ms": null,
+      "p95_ms": null,
+      "passed": 0,
+      "population": "snapshot",
+      "scenario": "reopen_task",
+      "state": "first_interaction"
+    },
+    {
+      "attempted": 2,
+      "failure_rate": 0.5,
+      "metric": "task_workspace_ready_ms",
+      "p50_ms": 7625.486833,
+      "p95_ms": null,
+      "passed": 1,
+      "population": "snapshot",
+      "scenario": "reopen_task",
+      "state": "warm"
+    },
+    {
+      "attempted": 1,
+      "failure_rate": 0.0,
+      "metric": "task_workspace_ready_ms",
+      "p50_ms": 4815.038833,
+      "p95_ms": null,
+      "passed": 1,
+      "population": "snapshot",
+      "scenario": "warm_task",
+      "state": "first_interaction"
+    },
+    {
+      "attempted": 2,
+      "failure_rate": 0.0,
+      "metric": "task_workspace_ready_ms",
+      "p50_ms": 5919.6755625000005,
+      "p95_ms": null,
+      "passed": 2,
+      "population": "snapshot",
+      "scenario": "warm_task",
+      "state": "warm"
+    }
+  ],
+  "journal_errors": [],
+  "journey_errors": [],
+  "metadata": {
+    "binary_sha256": "ae7eaac17043234d863c026d0529e7eeb6dfa36fc2ec25ff1a3a26b10c88626d",
+    "build_mode": "SwiftPM debug -gnone",
+    "command": [
+      "swift",
+      "test",
+      "--package-path",
+      "swift",
+      "-Xswiftc",
+      "-gnone",
+      "--jobs",
+      "4",
+      "--no-parallel",
+      "--filter",
+      "DesktopPerformanceTests.measureSnapshotTaskOpening"
+    ],
+    "exit_code": 0,
+    "host": {
+      "arch": "arm64",
+      "name": "Jacks-MacBook-Pro-2.local",
+      "os": "macOS-26.0.1-arm64-arm-64bit-Mach-O"
+    },
+    "issue": "LOO-368",
+    "measurement_source": "d87f9c9a46812865609c256ca4b5231247c1bd6dfd92a7a62d903b2ea50dd40f",
+    "population_source": "isolated SQLite online backup",
+    "repo": "/Users/jack/src/loopflow",
+    "schema": 1,
+    "snapshot": {
+      "captured_at": "2026-10-04T07:02:24.354140+00:00",
+      "counts": {
+        "access_profiles": 4,
+        "agent_sessions": 175,
+        "auth_browser_bindings": 7,
+        "blob_tokens": 1401,
+        "ci_incidents": 201,
+        "execs": 116688,
+        "flow_events": 225,
+        "flow_sessions": 48,
+        "homes": 1,
+        "metric_instruments": 0,
+        "metric_observations": 0,
+        "pm_issue_changes": 0,
+        "pm_items": 137,
+        "pm_projects": 27,
+        "pm_wave_projects": 27,
+        "pm_wave_sync": 21,
+        "pr_landings": 96,
+        "project_events": 30536,
+        "projects": 49,
+        "provider_account_limits": 12,
+        "provider_accounts": 6,
+        "provider_routes": 12,
+        "provider_session_accounts": 3312,
+        "provider_tokens": 5,
+        "schema_migrations": 60,
+        "session_events": 123217,
+        "sqlite_sequence": 3,
+        "task_deletions": 1,
+        "task_events": 66350,
+        "task_issue_identities": 1,
+        "task_linear_ingested_comments": 505,
+        "task_linear_observations": 321,
+        "task_pr_repair_incidents": 3,
+        "task_prs": 412,
+        "tasks": 321,
+        "tool_responses": 0,
+        "waves": 53,
+        "work_placements": 420
+      },
+      "sha256": "3ec626da8b778e87275e3a824ee498ba357847f2391d8eafe99730862e239b13"
+    },
+    "source_after": "fb31ba0a843778572b1219c0cdf4337b826e07aa6c15e765d93c557714b6f3d2",
+    "source_before": "fb31ba0a843778572b1219c0cdf4337b826e07aa6c15e765d93c557714b6f3d2",
+    "started_at": "2026-10-04T07:04:45.998579+00:00"
+  },
+  "not_started": 0,
+  "plan": {
+    "endpoint": "native_capture_ocr",
+    "event": "plan",
+    "gaps": [
+      "A new Podium and native window measure cold workspace construction, not OS application launch.",
+      "Bitmap capture is not compositor presentation; OCR adds observer cost.",
+      "Copied providers cannot be connected. Session usability/provider startup are unmeasured."
+    ],
+    "poll_interval_ms": 5,
+    "population_version": "home-snapshot-v1",
+    "populations": {
+      "snapshot": 1
+    },
+    "samples": 3,
+    "scenarios": [
+      "cold_workspace",
+      "warm_task",
+      "reopen_task"
+    ]
+  },
+  "status": "incomplete"
+}

@@ -21,6 +21,14 @@ uv run python scripts/benchmarks/desktop-performance/startup.py run --capture /t
 
 # Native capture/OCR journeys; the historical September receipt remains on disk.
 uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-after
+# Capture/OCR journeys: record a baseline before changing the production build.
+uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-before
+uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-after --baseline /tmp/desktop-before
+
+# Preserve a realistic Home, then exercise Task links through Podium and local CLI reads.
+uv run python scripts/desktop_performance.py snapshot --database /path/to/Home/loopflow.db --output /tmp/task-snapshot
+uv run python scripts/desktop_performance.py run --snapshot /tmp/task-snapshot --lf /path/to/lf --repo /path/to/repo --issue LOO-368 --samples 21 --output /tmp/task-before
+uv run python scripts/desktop_performance.py run --snapshot /tmp/task-snapshot --lf /path/to/optimized-lf --repo /path/to/repo --issue LOO-368 --samples 21 --output /tmp/task-after --baseline /tmp/task-before
 ```
 
 The app appends to `<Home>/desktop-cache/timings/launches.ndjson` and
@@ -43,6 +51,26 @@ timeout, so a hung read shows as a launch that never reached `fresh`. A launch
 still running, or quit early, is counted the same way. `first_frame` is a
 commit, not on-glass presentation; CPU, memory and main-thread stalls are
 `record_live.py`'s.
+
+Snapshot runs preserve every database row and use a fresh private copy for each
+invocation. Keep snapshots outside Git: they contain private history and credentials.
+Only local read commands run against copied records; provider connection and
+execution are refused. Repository files and placement metadata still come from
+the supplied repository, so preserve those inputs across comparisons too.
+Use the same host, CLI build mode, snapshot and measurement source before/after.
+Both runner modes build their native tests and launch the selected test directly
+so interruption can stop its process group. Allow disk/build capacity first.
+Archived SwiftPM-launcher runs remain historical evidence; the changed command
+requires fresh baselines for comparisons.
+
+The endpoint is a native bitmap with recognized Task identity, not OS application
+launch, compositor presentation or usable Session input. Read timings and sampled
+window/focus/sheet transitions are in `attempts.jsonl`. The
+[October 4 evidence](20261004-task-open/README.md) records failed attempts,
+overlapping-run discovery and the budgets' origin; it establishes no speedup.
+The [October 5 evidence](20261005-task-open/README.md) compares base and branch
+on one snapshot: warm and reopen meet 250 ms, cold misses 5,000 ms behind one
+`lf` read. The runner changed afterward, so new runs need a fresh baseline.
 
 `record_live.py record` attaches to the app you are already using (`Loopflow` from
 /Applications, or `LoopflowMac` from `swift/.build`), waits `--seconds`, then writes
@@ -143,11 +171,14 @@ requires matching soak duration. Bitmap/OCR and PTY echo do not establish
 key-to-glyph latency. The September 24 receipt remains on disk but is incompatible
 with the expanded harness.
 
-LOO-371 owns the representative snapshot runner for real CLI comparisons. Its
-October 5 committed tree and checkout contained no such runner, so this harness
-supplies no real-snapshot CLI receipt. `launch.py`'s database backup alone does
-not isolate copied checkout/process references, credentials or external writes;
-it is not a substitute for that handoff.
+LOO-371's published snapshot runner is integrated here. Snapshot mode measures
+real CLI reads and native Task links; fixture mode retains the broader journeys
+and soak. These are not yet a combined acceptance journey. The snapshot transport
+refuses Session connections; the owned native fixture has no Task binding.
+A requested snapshot soak without soak events reports incomplete. Combining real
+refresh and owned Task-bound reopening in one workspace remains implementation
+work before rendered acceptance. Copied checkout/process/account references must
+remain observational; a copied database alone does not isolate provider execution.
 
 ### CLI volume and native reopening
 
@@ -182,6 +213,6 @@ Scenario receipts in `cli-volume/` cover native reopening; setup receipts stay
 separate in `fixture-setup-cli-volume/` and `fixture_setup_cli_volume` in the report.
 Both retain partial counts. Older recordings without separate setup receipts
 remain unscoped. Neither measures DTO-backed planning refresh or the retained-cat
-soak. Native provider service costs and
-realistic workspace process/query volume still require LOO-371's isolated
-snapshot runner; this fixture is not a replacement for that runner.
+soak. Snapshot mode separately records real Task-link CLI reads. Real refresh and
+Task-bound native reopening throughout the soak still require integration; neither
+mode currently measures that combined journey.

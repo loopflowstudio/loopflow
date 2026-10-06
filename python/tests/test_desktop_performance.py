@@ -1,12 +1,114 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import signal
+import sqlite3
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from scripts import desktop_performance as performance
+
+
+@pytest.mark.parametrize("termination", ["signal", "timeout"])
+def test_interruption_stops_owned_benchmark_and_returns_outcome(
+    tmp_path: Path, termination: str
+) -> None:
+    ready = tmp_path / "ready"
+    child = (
+        "import os, time; from pathlib import Path; "
+        f"Path({str(ready)!r}).write_text(str(os.getpid())); time.sleep(60)"
+    )
+    script = (
+        "import json, os, sys; from scripts import desktop_performance as p; "
+        f"result = p._run_process([sys.executable, '-c', {child!r}], "
+        f"os.environ.copy(), sys.stderr, {2 if termination == 'timeout' else 30}); "
+        "print(json.dumps(result))"
+    )
+    runner = subprocess.Popen(
+        [sys.executable, "-c", script],
+        cwd=performance.REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    child_pid = None
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists(), "Owned benchmark did not start"
+        child_pid = int(ready.read_text())
+        if termination == "signal":
+            runner.send_signal(signal.SIGTERM)
+        stdout, stderr = runner.communicate(timeout=10)
+        assert runner.returncode == 0, stderr
+        code, outcome = json.loads(stdout)
+        assert code != 0
+        assert outcome == ("interrupted" if termination == "signal" else "timeout")
+        with pytest.raises(ProcessLookupError):
+            os.kill(child_pid, 0)
+    finally:
+        if runner.poll() is None:
+            runner.kill()
+            runner.wait()
+        if child_pid is not None:
+            try:
+                os.killpg(child_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_snapshot_preserves_committed_wal_history_without_mutating_source(tmp_path: Path) -> None:
+    source = tmp_path / "live.db"
+    with sqlite3.connect(source) as database:
+        database.execute("PRAGMA journal_mode=WAL")
+        database.execute("CREATE TABLE history(id INTEGER PRIMARY KEY, text TEXT)")
+        database.executemany(
+            "INSERT INTO history(text) VALUES (?)", [(f"event {i}",) for i in range(1000)]
+        )
+        database.commit()
+        output = tmp_path / "snapshot"
+        performance._snapshot(source, output)
+        database.execute("INSERT INTO history(text) VALUES ('later')")
+        database.commit()
+        with sqlite3.connect(output / "loopflow.db") as copy:
+            assert copy.execute("SELECT count(*) FROM history").fetchone()[0] == 1000
+            assert (
+                copy.execute("SELECT text FROM history WHERE id=1000").fetchone()[0] == "event 999"
+            )
+        assert database.execute("SELECT count(*) FROM history").fetchone()[0] == 1001
+    manifest = json.loads((output / "snapshot.json").read_text())
+    assert manifest["counts"]["history"] == 1000
+    assert manifest["sha256"] == hashlib.sha256((output / "loopflow.db").read_bytes()).hexdigest()
+    assert (output.stat().st_mode & 0o777) == 0o700
+
+
+def test_snapshot_comparison_rejects_different_population(tmp_path: Path) -> None:
+    baseline = _report(tmp_path, _events())
+    current = _report(tmp_path, _events())
+    baseline["metadata"]["snapshot"] = {"sha256": "before"}
+    current["metadata"]["snapshot"] = {"sha256": "different"}
+    assert performance._comparison(current, baseline) == {
+        "available": False,
+        "reason": "Different snapshot",
+    }
+
+
+def test_comparison_retains_observed_timeouts(tmp_path: Path) -> None:
+    events = _events()
+    events[-1]["outcome"] = "timeout"
+    baseline = _report(tmp_path, events)
+    current = _report(tmp_path, _events())
+    comparison = performance._comparison(current, baseline)
+    assert comparison["available"]
+    assert comparison["deltas"][1]["before_failure_rate"] == 1 / 20
+    assert comparison["deltas"][1]["after_failure_rate"] == 0
 
 
 def _events(samples: int = 21) -> list[dict]:
@@ -245,7 +347,7 @@ def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path) -
         "end = dict(start, event='end', elapsed_ms=1, statements=12)\n"
         "(directory / f'lf-{os.getpid()}.jsonl').write_text("
         "json.dumps(start) + '\\n' + json.dumps(end))\n"
-        "print('[{\"id\":\"retained-session\"}]')\n"
+        'print(\'[{"id":"retained-session"}]\')\n'
     )
     cli.chmod(0o755)
     fixture = json.loads(performance._prepare_native_fixture(tmp_path, cli).read_text())
@@ -275,7 +377,13 @@ signal.signal(signal.SIGTERM, stopped)
 journal.write_text('{"event":"soak_begin"}\\n')
 time.sleep(60)
 """
-    monkeypatch.setattr(performance, "COMMAND", [sys.executable, "-c", child])
+    executable = tmp_path / "native-test"
+    executable.write_text(f"#!{sys.executable}\n" + child)
+    executable.chmod(0o755)
+    monkeypatch.setattr(performance, "BUILD_COMMAND", [sys.executable, "-c", "pass"])
+    monkeypatch.setattr(
+        performance, "_native_command", lambda *_: [sys.executable, "-u", str(executable)]
+    )
     monkeypatch.setattr(
         performance, "_prepare_native_fixture", lambda output, cli: output / "fixture"
     )
@@ -284,3 +392,14 @@ time.sleep(60)
         performance._run_native(tmp_path, samples=1, soak_seconds=1, cli=tmp_path / "unused-cli")
 
     assert (tmp_path / "attempts.stopped").exists()
+
+
+def test_requested_snapshot_soak_cannot_pass_as_task_open_measurements(tmp_path: Path) -> None:
+    _report(tmp_path, _events())
+    metadata = json.loads((tmp_path / "run.json").read_text())
+    metadata.update(snapshot={"sha256": "same"}, soak_seconds=3600)
+    (tmp_path / "run.json").write_text(json.dumps(metadata))
+    result = performance._report(tmp_path, None)
+    assert result["status"] == "incomplete"
+    assert result["soak"]["status"] == "incomplete"
+    assert result["soak"]["requested_seconds"] == 3600

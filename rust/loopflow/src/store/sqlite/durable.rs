@@ -1424,33 +1424,12 @@ mod durable_store_tests {
                 vec![task.id.clone()]
             );
             assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+            let work = store.task_work(&task.id).unwrap();
+            assert_eq!(work.sessions.len(), 1);
+            assert_eq!(work.sessions[0].id, session.id);
             assert!(!store.task_started(&task.id).unwrap());
+            assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
         }
-    }
-
-    #[test]
-    fn task_registration_retains_earlier_checkout_conversations_without_binding() {
-        let (dir, store, existing) = store_with_task();
-        let (task, pr) = unregistered_task(&store, &existing, dir.path().join("later-checkout"));
-
-        let mut conversation = unpublished_conversation(None, None, 1);
-        conversation.cwd = task.worktree.join("src");
-        conversation.work_source = None;
-        let session = store.create_session(conversation, None, None).unwrap();
-        assert!(store.session_task_ids(&session.id).unwrap().is_empty());
-
-        store.insert_task_with_worktree(&task, &pr).unwrap();
-
-        assert_eq!(
-            store.session_task_ids(&session.id).unwrap(),
-            vec![task.id.clone()]
-        );
-        let work = store.task_work(&task.id).unwrap();
-        assert_eq!(work.sessions.len(), 1);
-        assert_eq!(work.sessions[0].id, session.id);
-        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
-        assert!(!store.task_started(&task.id).unwrap());
-        assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
     }
 
     #[test]

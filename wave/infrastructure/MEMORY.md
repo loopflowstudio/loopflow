@@ -333,8 +333,10 @@ through SQLite commit. Ancestor exclusion covers future roots without a Task
 population scan; siblings progress independently. The rejected Home-wide guard
 remains at `2d96630b3:wave/infrastructure/MEMORY.md`. Registration still needs
 accepted facts and Wave serialization; rotation exclusion remains unimplemented.
-Git checkout leases and admission remain separate. Store proofs establish neither
-rotation recovery nor configured readiness.
+Git leases and admission remain separate. `store/sqlite/admission.rs` merges all
+roots' ancestor modes before locking. Registration retry retains unbound
+conversations without setting Started; it proves neither rotation recovery nor
+configured readiness.
 
 `b06e17d3c:wave/infrastructure/MEMORY.md` retains the prior build/13-test/Clippy
 record and acquisition details. CI repair, both rotation/start orderings and
@@ -821,12 +823,10 @@ The September 30 model/cutover decisions above supersede Run, Ask, Project-curso
 and private-store mechanisms there. Archiving detail does not establish remaining
 acceptance or authorize deleting execution history.
 
-- LOO-295 owns continuation; LOO-296 broader restoration. The live demonstration
-  required manual Flow/native-Home corrections and did not prove automatic
-  propagation. Current Task review → decision → repeat → final-demo acceptance
-  remains unproved. OAuth-injection removal fixed one login rejection, not all
-  ambient-account/lease questions. Prior simulated suites and isolated reruns
-  were not a green configured default gate.
+- LOO-295's October 4 operator acceptance above supersedes this section's
+  unresolved continuation claim. LOO-296 retains broader restoration; historical
+  manual Flow/native-Home corrections and ambient-account/lease gaps remain in
+  the pre-curation memory, not proof of automatic recovery.
 - Capture all alternatives and human boundaries before execution; recover from
   saved definitions after sources disappear. Invocation identity fences late
   results independently of reusable versions/generations. Consume actual

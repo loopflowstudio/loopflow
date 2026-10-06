@@ -313,8 +313,9 @@ executed provider-rotation proof:
   counter or explicit-ancestry lock would miss this contract.
 - **Registration changes membership without a Session write.**
   `ops/task.rs::create_prepared_task` resolves a Project before existing-issue
-  registration via `Store::create_task_with_worktree`, holding a worktree lease
-  and checkout admission, but no Wave planning lock. A provider-started issue can move remotely during
+  registration via `Store::create_task_with_worktree`. The caller holds a Git
+  worktree lease; the SQLite worker acquires checkout admission through commit.
+  Neither acquires the Wave planning lock. A provider-started issue can move remotely during
   rotation, then register locally against the predecessor after checkout locks
   were collected. Its earlier taskless conversations immediately become Task
   work. Unknown unregistered backlog would block rotation; this example relies
@@ -355,6 +356,8 @@ The remaining operation order is Wave planning locks, checkout admission locks
 in canonical-path order, then SQLite writes. Registration must join the same Wave
 boundary before rotation enumerates its Task roots; execution needs no Wave lock.
 Hold those roots through classification, transfer and the configuration switch.
+Rotation submits all roots to one admission acquisition, merging ancestor modes
+before locking; separate acquisitions can conflict with held nested-root locks.
 Shared ancestor admission already covers taskless work below roots absent when
 its admission began. Resolve accepted issue ownership and the selected Project
 within registration's transaction; reuse any caller-held Wave guard. No population
@@ -389,9 +392,9 @@ Existing public-store regressions establish narrower preservation contracts:
   binding succeeds, sets Started and retains Task/checkout identity.
 - `checkout_session_membership_survives_project_transfer_without_binding`:
   transfer retains unbound Session bytes, checkout identity and membership.
-- `task_registration_retains_earlier_checkout_conversations_without_binding`:
-  registration associates earlier Sessions without changing their bytes or
-  setting Started.
+- `checkout_exclusion_preserves_registration_and_retry`: both registration APIs
+  retain earlier Session bytes/membership and unset Started after exclusion/retry.
+  It also covers the former standalone earlier-conversation registration case.
 
 These tests prove neither rotation nor its exclusion. Selection and rotation
 remain unimplemented; Jack Heart's explicit-binding policy is unchanged.
@@ -868,15 +871,10 @@ under this heading. Shared `associate_project` rollback, independent entity ages
 `run_planning_write` guard lifetime, stable-ID lock order and exact Team readbacks
 remain required; full-refresh freshness differs from partial acceptance.
 
-Compression details remain at `b06e17d3c:scratch/keep-every-wave-ready-for.md`:
-one Task insertion, registered-Wave refresh identity, cancellation-safe acquisition
-and shared Session admission remain implemented. CI repair owns outer admission
-without reacquiring it inside reservation. These prove no rotation exclusion.
-
-First-error collection, shared membership and migration-slice boundaries remain
-required. Earlier review detail remains at
-`661622ee2a22386e1e51f192132116e36b1b46c8:scratch/keep-every-wave-ready-for.md`;
-pre-pass local notes are preserved in `/tmp/loo366-compress-preserved/`.
+Shared acquisition, first-error collection, membership and migration-slice
+boundaries remain required. Prior compression detail survives at
+`a7789f1b88beb125110b36f511510701c463fd1d:scratch/keep-every-wave-ready-for.md`.
+CI repair retains outer admission without reacquiring it in reservation.
 
 The recorded nextest pass also reports a leaky projectless-Task case. Its cause
 is unknown; gate retains output-handle investigation, not an assumed harmless leak.
@@ -892,9 +890,12 @@ provider status/content and configured selection retain their respective owners.
 #1451's pending-version behavior retains the name-cutover fixture's same-batch
 boundary; no release-tree gate ran here.
 
-Compression only inlines insertion parameters and shares Task/PR fixture setup;
-registration transactions and preservation assertions remain. Earlier checks and
-the failed Home-wide fence remain at
-`37fe75cd9d13b969ab1d01cb6cd40d4fcc13f521:scratch/keep-every-wave-ready-for.md`.
+Checkout admission now lives in `store/sqlite/admission.rs`, shared by registration,
+Sessions, Flows and CI repair. Path modes accumulate directly in the ordered map;
+there is no intermediate path list. The registration retry test also covers the
+former standalone earlier-conversation case, preserving all assertions for both
+APIs. Review retained canonical path order, ancestor sharing and guard lifetime
+through commit. This refactor establishes no rotation exclusion or readiness.
+Earlier checks and the failed Home-wide fence remain in the history above.
 
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b descendant_admission_excludes_registration_of_a_missing_root missing_root_exclusion_preserves_taskless_session_admission checkout_exclusion unrelated_checkout_exclusion input_replacement session_binding_retains_a_task task_registration_retains_earlier checkout_session_membership --test-threads=4` passed (14); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed. Gate owns operation-entry and configured acceptance.
+Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; isolated `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b descendant_admission_excludes_registration_of_a_missing_root missing_root_exclusion_preserves_taskless_session_admission checkout_exclusion input_replacement session_binding_retains_a_task checkout_session_membership chapter_evidence_retains_taskless_mechanical --test-threads=4` passed (14); `cargo fmt --all -- --check` and `git diff --check` passed. Gate owns operation-entry and configured acceptance.

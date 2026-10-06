@@ -34,14 +34,9 @@ pub fn run(
     let items = compile_flow(flow, repo)?;
     require_autonomous_steps(&items)?;
     if let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?
-            .block_on(async {
-                crate::ops::task::require_task_flow_launch(&open_flow_store().await?, task)
-                    .await
-                    .map_err(anyhow::Error::from)
-            })?;
+        block_on(async {
+            Ok(crate::ops::task::require_task_flow_launch(&open_flow_store().await?, task).await?)
+        })?;
     }
     print_pipeline_header(&flow.name, &items);
     let bound_message = binding
@@ -121,10 +116,7 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str) -> Result<()> {
     }
     args.extend(["--task", issue, "run", flow].map(str::to_owned));
     let lf = crate::engine::process::resolve_pinned_lf_binary()?;
-    let store = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?
-        .block_on(open_flow_store())?;
+    let store = block_on(open_flow_store())?;
     let store = &store.sqlite;
     let exec = journal::current_exec_id().context("a Task run requires a registered Exec")?;
     // An interrupted Task run takes its running attempt with it.
@@ -135,7 +127,8 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str) -> Result<()> {
             crate::engine::platform::kill_process(pid);
         }
     });
-    for attempt in 1.. {
+    let mut attempt = 1;
+    loop {
         let mark = store.exec_mark()?;
         let mut child = std::process::Command::new(&lf)
             .args(&args)
@@ -163,8 +156,8 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str) -> Result<()> {
         eprintln!(
             "Flow {flow} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again."
         );
+        attempt += 1;
     }
-    unreachable!("the attempt loop returns")
 }
 
 /// Drive the Flow in this process, bracketed by flow journal events.
@@ -176,9 +169,6 @@ fn execute(
     repo: &Path,
     binding: Option<&WorkBinding>,
 ) -> Result<()> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
     let accounts = crate::provider_account::lease::AccountSelection::from_flags_or_env(
         &cli.account,
         &cli.only_account,
@@ -187,7 +177,7 @@ fn execute(
         WorkRef::Task(id) => Some(id.clone()),
         _ => None,
     });
-    report_outcome(runtime.block_on(async {
+    report_outcome(block_on(async {
         let driver = Driver {
             store: open_flow_store().await?,
             exec: journal::current_exec_id().context("a Flow requires a registered Exec")?,
@@ -224,8 +214,16 @@ fn execute(
                 .context("Flow Task disappeared")?;
             crate::ops::task::cleanup_completed_task(&driver.store, &task).await?;
         }
-        Ok::<_, anyhow::Error>(outcome)
+        Ok(outcome)
     })?)
+}
+
+/// Run `future` to completion from this synchronous command.
+fn block_on<T>(future: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(future)
 }
 
 async fn open_flow_store() -> Result<SharedStore> {

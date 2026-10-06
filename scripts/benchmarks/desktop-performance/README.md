@@ -235,10 +235,16 @@ trace and does not supply a matched performance distribution or hour coverage.
 
 One OS sandbox, inherited by the native runner and every child, permits writes
 only beneath the output directory, local sockets there and a fixed executable
-set including the owned stub. Selected repository/source reads remain available; external credential files,
-network access, signals and copied providers remain denied. Other copied checkout
-paths can report unavailable reads; retain and resolve those failures before
-scoring realistic-snapshot budgets. Denied work is not a performance improvement.
+set including the owned stub. Snapshot-named existing Git checkouts and their
+Git metadata receive read-only access for discovery and status; their parent
+directories and external credential homes do not. Network, external signals and
+copied providers remain denied. The runner fingerprints tracked content/modes,
+untracked names, ignore files, checkout identities, aliases, configuration and
+Git metadata before and after. Changed inputs reject comparison. Git Trace2
+records each command's exit, errors and internal duration in `git-events.jsonl`;
+failed or unfinished Git observations reject scoring despite an outer CLI success.
+Missing/non-Git checkout observations remain explicit. Denied work is not a
+performance improvement. Input manifests stay beside the private receipts.
 CLI environments select their own Homes explicitly. The app's Home is private;
 copied workspaces remain observational. `desktop-performance.sb` is part of the
 measurement-source hash. macOS rejects nested sandbox application; the runner
@@ -374,10 +380,11 @@ schema-refusal replay remains `/tmp/loo304-snapshot-schema-replay-20261006/`.
 The database population spans 36 repository paths. The initial policy denied
 other repositories' `.lf/config.yaml` and Wave goals. A config-only diagnostic
 restored all 45 current Waves without unavailable Task collections. The runner
-now grants read access only to those exact authored configuration files, records
-their hashes and rejects changes during or between comparisons. Missing files
-stay missing. It does not grant repository-directory access, credentials,
-provider/network access, filesystem mutations or host signaling.
+then granted only those exact authored configuration files. The later
+[Git correction](20261006-matched-rust/README.md#corrected-repository-observations--october-6)
+adds bounded checkout/status observations and fingerprints their inputs.
+Missing files stay missing; credentials, provider/network access, filesystem
+mutations and host signaling remain denied.
 
 The owned fixture now follows the repository's configured Team and uses its
 repository for exact Task queries; native execution retains its owned checkout.

@@ -1,0 +1,5470 @@
+{
+  "source_sha256": "d9dc08b5d7d241294b78bf5035d47e8e9069aa58c13808d04d31cd8a0f8230e4",
+  "binaries": {
+    "before": "20d509f1bb367f72e3e724a970c55eed7889c75da53c4a8240a7c153e8d5dc1f",
+    "after": "d884a2bc6a8033545310154b066cf0b4a3a60f89859ea2e3148303fe358b2b76"
+  },
+  "reads": {
+    "roadmap": {
+      "before": {
+        "first": {
+          "git_outcomes": [
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 1.161
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--show-toplevel"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 1.07
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow",
+                "rev-parse",
+                "--git-path",
+                "info/exclude"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 0.885
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--show-toplevel"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 1.082
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 0.9909999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/kata",
+              "ms": 0.866
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/hootro",
+              "ms": 0.739
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude",
+              "ms": 1.085
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 128,
+              "errors": [
+                "not a git repository (or any of the parent directories): .git"
+              ],
+              "ms": 0.619
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+              "ms": 1.184
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+              "ms": 9.369
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+              "ms": 1.186
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.train-a-frozen-policy-belief",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+              "ms": 9.16
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+              "ms": 1.1520000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+              "ms": 10.08
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.train-and-compare-complete-compound",
+              "ms": 1.062
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.train-and-compare-complete-compound",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.train-and-compare-complete-compound",
+              "ms": 8.963000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+              "ms": 1.1150000000000002
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+              "ms": 9.023
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+              "ms": 1.1139999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+              "ms": 9.102
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+              "ms": 1.123
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+              "ms": 8.512
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+              "ms": 1.143
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+                "rev-parse",
+                "jack-heart/challenge-an-identified-trained-bot"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+              "ms": 0.993
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+                "merge-base",
+                "--is-ancestor",
+                "1cd60fdaabf783788f6ee94ce4c4508c9435785c",
+                "jack-heart/challenge-an-identified-trained-bot"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+              "ms": 2.1189999999999998
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.make-action-consequences-and-the",
+              "ms": 0.8989999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.make-action-consequences-and-the",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.make-action-consequences-and-the",
+              "ms": 9.001999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.make-action-consequences-and-the",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.make-action-consequences-and-the",
+              "ms": 1.08
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+              "ms": 1.2149999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+              "ms": 11.718
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+              "ms": 1.356
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+                "rev-parse",
+                "jack/loo-382-update-the-workspace-automatically-when-loopflow-data"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+              "ms": 1.285
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+                "merge-base",
+                "--is-ancestor",
+                "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+                "jack/loo-382-update-the-workspace-automatically-when-loopflow-data"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+              "ms": 2.502
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+              "ms": 1.149
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+              "ms": 11.562
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+              "ms": 1.203
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+                "rev-parse",
+                "jack/loo-381-polish-cli-colors-and-command-blocks-in-desktop"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+              "ms": 1.217
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+                "merge-base",
+                "--is-ancestor",
+                "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+                "jack/loo-381-polish-cli-colors-and-command-blocks-in-desktop"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+              "ms": 2.677
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+              "ms": 1.165
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+              "ms": 11.164
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+              "ms": 1.346
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+              "ms": 1.1460000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+              "ms": 10.876
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+              "ms": 1.3290000000000002
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+                "rev-parse",
+                "jack/loo-378-connect-quickly-to-an-existing-live-session"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+              "ms": 1.306
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+                "merge-base",
+                "--is-ancestor",
+                "f4cbe142b9a320ac6c2488273345c28153b45e91",
+                "jack/loo-378-connect-quickly-to-an-existing-live-session"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+              "ms": 2.52
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+              "ms": 1.0610000000000002
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+              "ms": 13.783999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+              "ms": 1.299
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+                "rev-parse",
+                "jack/open-desktop-immediately-from-one-first-render"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+              "ms": 1.42
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+                "merge-base",
+                "--is-ancestor",
+                "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+                "jack/open-desktop-immediately-from-one-first-render"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+              "ms": 2.721
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+              "ms": 1.2409999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+              "ms": 13.11
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+              "ms": 1.244
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+                "rev-parse",
+                "jack/loo-371-open-tasks-directly-and-optimize-loading-against-a-realistic"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+              "ms": 1.363
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+                "merge-base",
+                "--is-ancestor",
+                "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+                "jack/loo-371-open-tasks-directly-and-optimize-loading-against-a-realistic"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+              "ms": 2.886
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-current-tasks-visible-and",
+              "ms": 1.177
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.keep-current-tasks-visible-and",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-current-tasks-visible-and",
+              "ms": 11.965
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.focus-on-your-own-work",
+              "ms": 1.157
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.focus-on-your-own-work",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.focus-on-your-own-work",
+              "ms": 17.386
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.focus-on-your-own-work",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.focus-on-your-own-work",
+              "ms": 1.368
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+              "ms": 1.192
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+              "ms": 12.349
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+              "ms": 1.274
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+                "rev-parse",
+                "jack-heart/design-subwaves-and-expressive-memory"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+              "ms": 1.2570000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+                "merge-base",
+                "--is-ancestor",
+                "632b67ec7e98be40fd0b9720b513165f90ef2bef",
+                "jack-heart/design-subwaves-and-expressive-memory"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+              "ms": 2.4810000000000003
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+              "ms": 1.1520000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+              "ms": 13.327
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+              "ms": 1.188
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+              "ms": 12.569
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+              "ms": 1.22
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+              "ms": 12.616999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+              "ms": 1.26
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+              "ms": 1.2049999999999998
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+              "ms": 12.216
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+              "ms": 1.192
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+                "rev-parse",
+                "jack-heart/start-and-finish-tasks-without"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+              "ms": 1.2630000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+                "merge-base",
+                "--is-ancestor",
+                "16fa9742591e3edfc0ed42c913c64347c02ffeb5",
+                "jack-heart/start-and-finish-tasks-without"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+              "ms": 2.8240000000000003
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+              "ms": 1.1620000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+              "ms": 12.271
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+              "ms": 1.345
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+                "rev-parse",
+                "jack/loo-366-keep-every-wave-ready-for-work-without-requiring-a-chapter"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+              "ms": 1.312
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+                "merge-base",
+                "--is-ancestor",
+                "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+                "jack/loo-366-keep-every-wave-ready-for-work-without-requiring-a-chapter"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+              "ms": 2.757
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-release-and-ci",
+              "ms": 1.228
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-release-and-ci",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-release-and-ci",
+              "ms": 11.801
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-release-and-ci",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-release-and-ci",
+              "ms": 1.272
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+              "ms": 1.176
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+              "ms": 12.168999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+              "ms": 1.2149999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+                "rev-parse",
+                "jack/loo-304-make-the-current-desktop-workspace-fast-and-quiet"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+              "ms": 1.2910000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+                "merge-base",
+                "--is-ancestor",
+                "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+                "jack/loo-304-make-the-current-desktop-workspace-fast-and-quiet"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+              "ms": 2.5509999999999997
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.data-model-one-table-per",
+              "ms": 1.148
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.data-model-one-table-per",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.data-model-one-table-per",
+              "ms": 10.762
+            }
+          ],
+          "path": "roadmap",
+          "variant": "before",
+          "sample": 0,
+          "ms": 3043.7642500037327,
+          "exit": 0,
+          "load": [
+            24.52294921875,
+            21.51318359375,
+            21.4833984375
+          ],
+          "bytes": 674787,
+          "child_cpu_ms": 1412.3910000000003,
+          "git_processes": 94,
+          "git_common_dir": 31
+        },
+        "ms": {
+          "n": 20,
+          "median": 1146.3840629876358,
+          "p95": 1189.080209005624
+        },
+        "child_cpu_ms": {
+          "n": 20,
+          "median": 1207.2870000000019,
+          "p95": 1249.897000000008
+        },
+        "git_processes": {
+          "n": 20,
+          "median": 94.0,
+          "p95": 94
+        },
+        "git_common_dir": {
+          "n": 20,
+          "median": 31.0,
+          "p95": 31
+        },
+        "load_median": 18.4365234375,
+        "load_max": 21.66845703125
+      },
+      "after": {
+        "first": {
+          "git_outcomes": [
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 1.188
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--show-toplevel"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 1.1640000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow",
+                "rev-parse",
+                "--git-path",
+                "info/exclude"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 1.0150000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--show-toplevel"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 1.08
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 0.9740000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/kata",
+              "ms": 0.923
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/hootro",
+              "ms": 0.874
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude",
+              "ms": 1.108
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 128,
+              "errors": [
+                "not a git repository (or any of the parent directories): .git"
+              ],
+              "ms": 0.68
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+              "ms": 1.178
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+              "ms": 9.577
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+              "ms": 1.1440000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.train-a-frozen-policy-belief",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+              "ms": 9.461
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+              "ms": 1.1119999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+              "ms": 9.438
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.train-and-compare-complete-compound",
+              "ms": 1.156
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.train-and-compare-complete-compound",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.train-and-compare-complete-compound",
+              "ms": 10.355
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+              "ms": 1.177
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+              "ms": 9.492
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+              "ms": 1.1620000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+              "ms": 9.483
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+              "ms": 1.168
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+              "ms": 9.174
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+              "ms": 1.1969999999999998
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+                "rev-parse",
+                "jack-heart/challenge-an-identified-trained-bot"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+              "ms": 1.259
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+                "merge-base",
+                "--is-ancestor",
+                "1cd60fdaabf783788f6ee94ce4c4508c9435785c",
+                "jack-heart/challenge-an-identified-trained-bot"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+              "ms": 2.305
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.make-action-consequences-and-the",
+              "ms": 1.074
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.make-action-consequences-and-the",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.make-action-consequences-and-the",
+              "ms": 9.544
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/etude.make-action-consequences-and-the",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/etude.make-action-consequences-and-the",
+              "ms": 1.17
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+              "ms": 1.2409999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+              "ms": 11.99
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+              "ms": 1.234
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+                "rev-parse",
+                "jack/loo-382-update-the-workspace-automatically-when-loopflow-data"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+              "ms": 1.294
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+                "merge-base",
+                "--is-ancestor",
+                "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+                "jack/loo-382-update-the-workspace-automatically-when-loopflow-data"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+              "ms": 2.401
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+              "ms": 1.085
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+              "ms": 12.036
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+              "ms": 1.2349999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+                "rev-parse",
+                "jack/loo-381-polish-cli-colors-and-command-blocks-in-desktop"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+              "ms": 1.2069999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+                "merge-base",
+                "--is-ancestor",
+                "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+                "jack/loo-381-polish-cli-colors-and-command-blocks-in-desktop"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+              "ms": 2.348
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+              "ms": 1.206
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+              "ms": 11.49
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+              "ms": 1.217
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+              "ms": 1.2329999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+              "ms": 11.94
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+              "ms": 1.303
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+                "rev-parse",
+                "jack/loo-378-connect-quickly-to-an-existing-live-session"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+              "ms": 1.196
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+                "merge-base",
+                "--is-ancestor",
+                "f4cbe142b9a320ac6c2488273345c28153b45e91",
+                "jack/loo-378-connect-quickly-to-an-existing-live-session"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+              "ms": 2.552
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+              "ms": 1.149
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+              "ms": 12.022
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+              "ms": 1.239
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+                "rev-parse",
+                "jack/open-desktop-immediately-from-one-first-render"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+              "ms": 1.2899999999999998
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+                "merge-base",
+                "--is-ancestor",
+                "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+                "jack/open-desktop-immediately-from-one-first-render"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+              "ms": 2.335
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+              "ms": 1.124
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+              "ms": 12.389000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+              "ms": 1.227
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+                "rev-parse",
+                "jack/loo-371-open-tasks-directly-and-optimize-loading-against-a-realistic"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+              "ms": 1.314
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+                "merge-base",
+                "--is-ancestor",
+                "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+                "jack/loo-371-open-tasks-directly-and-optimize-loading-against-a-realistic"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+              "ms": 2.628
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-current-tasks-visible-and",
+              "ms": 1.2229999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.keep-current-tasks-visible-and",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-current-tasks-visible-and",
+              "ms": 10.893999999999998
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.focus-on-your-own-work",
+              "ms": 1.156
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.focus-on-your-own-work",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.focus-on-your-own-work",
+              "ms": 16.511000000000003
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.focus-on-your-own-work",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.focus-on-your-own-work",
+              "ms": 1.23
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+              "ms": 1.219
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+              "ms": 10.999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+              "ms": 1.256
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+                "rev-parse",
+                "jack-heart/design-subwaves-and-expressive-memory"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+              "ms": 1.234
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+                "merge-base",
+                "--is-ancestor",
+                "632b67ec7e98be40fd0b9720b513165f90ef2bef",
+                "jack-heart/design-subwaves-and-expressive-memory"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+              "ms": 2.4
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+              "ms": 1.16
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+              "ms": 11.790999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+              "ms": 1.266
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+              "ms": 11.710999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+              "ms": 1.125
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+              "ms": 12.138
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+              "ms": 1.209
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+              "ms": 1.221
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+              "ms": 12.137
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+              "ms": 1.287
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+                "rev-parse",
+                "jack-heart/start-and-finish-tasks-without"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+              "ms": 1.2329999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+                "merge-base",
+                "--is-ancestor",
+                "16fa9742591e3edfc0ed42c913c64347c02ffeb5",
+                "jack-heart/start-and-finish-tasks-without"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+              "ms": 2.3440000000000003
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+              "ms": 1.167
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+              "ms": 12.001
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+              "ms": 1.131
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+                "rev-parse",
+                "jack/loo-366-keep-every-wave-ready-for-work-without-requiring-a-chapter"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+              "ms": 1.1969999999999998
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+                "merge-base",
+                "--is-ancestor",
+                "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+                "jack/loo-366-keep-every-wave-ready-for-work-without-requiring-a-chapter"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+              "ms": 2.3600000000000003
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-release-and-ci",
+              "ms": 1.1689999999999998
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-release-and-ci",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-release-and-ci",
+              "ms": 9.714
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-release-and-ci",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-release-and-ci",
+              "ms": 1.194
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+              "ms": 1.1150000000000002
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+              "ms": 10.848999999999998
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+                "rev-parse",
+                "HEAD"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+              "ms": 1.332
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+                "rev-parse",
+                "jack/loo-304-make-the-current-desktop-workspace-fast-and-quiet"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+              "ms": 1.306
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+                "merge-base",
+                "--is-ancestor",
+                "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+                "jack/loo-304-make-the-current-desktop-workspace-fast-and-quiet"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+              "ms": 2.577
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.data-model-one-table-per",
+              "ms": 1.1640000000000001
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow.data-model-one-table-per",
+                "status",
+                "--porcelain"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow.data-model-one-table-per",
+              "ms": 10.265
+            }
+          ],
+          "path": "roadmap",
+          "variant": "after",
+          "sample": 0,
+          "ms": 2987.3030000017025,
+          "exit": 0,
+          "load": [
+            23.11962890625,
+            21.27197265625,
+            21.3984375
+          ],
+          "bytes": 674793,
+          "child_cpu_ms": 1402.2879999999996,
+          "git_processes": 94,
+          "git_common_dir": 31
+        },
+        "ms": {
+          "n": 20,
+          "median": 1116.7622084903996,
+          "p95": 1164.3634170177393
+        },
+        "child_cpu_ms": {
+          "n": 20,
+          "median": 1192.426000000003,
+          "p95": 1238.9589999999978
+        },
+        "git_processes": {
+          "n": 20,
+          "median": 94.0,
+          "p95": 94
+        },
+        "git_common_dir": {
+          "n": 20,
+          "median": 31.0,
+          "p95": 31
+        },
+        "load_median": 18.4365234375,
+        "load_max": 21.66845703125
+      }
+    },
+    "sessions": {
+      "before": {
+        "first": {
+          "git_outcomes": [
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 1.178
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--show-toplevel"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 1.003
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow",
+                "rev-parse",
+                "--git-path",
+                "info/exclude"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 0.88
+            }
+          ],
+          "path": "sessions",
+          "variant": "before",
+          "sample": 0,
+          "ms": 284.43029199843295,
+          "exit": 0,
+          "load": [
+            15.873046875,
+            19.5419921875,
+            20.74755859375
+          ],
+          "bytes": 64406,
+          "child_cpu_ms": 265.31999999999556,
+          "git_processes": 3,
+          "git_common_dir": 1
+        },
+        "ms": {
+          "n": 20,
+          "median": 269.06331299687736,
+          "p95": 273.9881669986062
+        },
+        "child_cpu_ms": {
+          "n": 20,
+          "median": 264.00849999999565,
+          "p95": 269.07100000000025
+        },
+        "git_processes": {
+          "n": 20,
+          "median": 3.0,
+          "p95": 3
+        },
+        "git_common_dir": {
+          "n": 20,
+          "median": 1.0,
+          "p95": 1
+        },
+        "load_median": 15.40234375,
+        "load_max": 15.873046875
+      },
+      "after": {
+        "first": {
+          "git_outcomes": [
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 1.1019999999999999
+            },
+            {
+              "argv": [
+                "git",
+                "rev-parse",
+                "--show-toplevel"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 0.94
+            },
+            {
+              "argv": [
+                "git",
+                "-C",
+                "/Users/jack/src/loopflow",
+                "rev-parse",
+                "--git-path",
+                "info/exclude"
+              ],
+              "exit": 0,
+              "worktree": "/Users/jack/src/loopflow",
+              "ms": 1.24
+            }
+          ],
+          "path": "sessions",
+          "variant": "after",
+          "sample": 0,
+          "ms": 285.3240830008872,
+          "exit": 0,
+          "load": [
+            15.873046875,
+            19.5419921875,
+            20.74755859375
+          ],
+          "bytes": 64406,
+          "child_cpu_ms": 264.6960000000007,
+          "git_processes": 3,
+          "git_common_dir": 1
+        },
+        "ms": {
+          "n": 20,
+          "median": 269.59241650183685,
+          "p95": 276.5402919903863
+        },
+        "child_cpu_ms": {
+          "n": 20,
+          "median": 265.5845000000028,
+          "p95": 270.1319999999967
+        },
+        "git_processes": {
+          "n": 20,
+          "median": 3.0,
+          "p95": 3
+        },
+        "git_common_dir": {
+          "n": 20,
+          "median": 1.0,
+          "p95": 1
+        },
+        "load_median": 15.40234375,
+        "load_max": 15.873046875
+      }
+    }
+  },
+  "scope": "Retained release binaries before/after Task Session membership materialization; corrected read-only Git observation policy on both sides. CLI-only, not rendered acceptance.",
+  "raw_receipts": "/tmp/loo304-corrected-git-20261006",
+  "preservation": {
+    "source_sha256": "d9dc08b5d7d241294b78bf5035d47e8e9069aa58c13808d04d31cd8a0f8230e4",
+    "storage": {
+      "before": {
+        "access_profiles": {
+          "retained_rows": 4,
+          "identical": true,
+          "added_rows": 0
+        },
+        "agent_sessions": {
+          "retained_rows": 604,
+          "identical": true,
+          "added_rows": 0
+        },
+        "auth_browser_bindings": {
+          "retained_rows": 7,
+          "identical": true,
+          "added_rows": 0
+        },
+        "blob_tokens": {
+          "retained_rows": 1401,
+          "identical": true,
+          "added_rows": 0
+        },
+        "ci_incidents": {
+          "retained_rows": 212,
+          "identical": true,
+          "added_rows": 0
+        },
+        "execs": {
+          "retained_rows": 218637,
+          "identical": true,
+          "added_rows": 42
+        },
+        "flow_events": {
+          "retained_rows": 901,
+          "identical": true,
+          "added_rows": 0
+        },
+        "flow_sessions": {
+          "retained_rows": 104,
+          "identical": true,
+          "added_rows": 0
+        },
+        "homes": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_instruments": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_observations": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_issue_changes": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_items": {
+          "retained_rows": 163,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_sync": {
+          "retained_rows": 21,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pr_landings": {
+          "retained_rows": 142,
+          "identical": true,
+          "added_rows": 0
+        },
+        "project_events": {
+          "retained_rows": 30536,
+          "identical": true,
+          "added_rows": 0
+        },
+        "projects": {
+          "retained_rows": 49,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_limits": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_switches": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_accounts": {
+          "retained_rows": 6,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_routes": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_session_accounts": {
+          "retained_rows": 3724,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_tokens": {
+          "retained_rows": 5,
+          "identical": true,
+          "added_rows": 0
+        },
+        "schema_migrations": {
+          "retained_rows": 62,
+          "identical": true,
+          "added_rows": 0
+        },
+        "session_events": {
+          "retained_rows": 521637,
+          "identical": true,
+          "added_rows": 0
+        },
+        "sqlite_sequence": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_deletions": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_events": {
+          "retained_rows": 66836,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_issue_identities": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_ingested_comments": {
+          "retained_rows": 611,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_observations": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_pr_repair_incidents": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_prs": {
+          "retained_rows": 449,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tasks": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tool_responses": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "waves": {
+          "retained_rows": 53,
+          "identical": true,
+          "added_rows": 0
+        },
+        "work_placements": {
+          "retained_rows": 441,
+          "identical": true,
+          "added_rows": 0
+        }
+      },
+      "after": {
+        "access_profiles": {
+          "retained_rows": 4,
+          "identical": true,
+          "added_rows": 0
+        },
+        "agent_sessions": {
+          "retained_rows": 604,
+          "identical": true,
+          "added_rows": 0
+        },
+        "auth_browser_bindings": {
+          "retained_rows": 7,
+          "identical": true,
+          "added_rows": 0
+        },
+        "blob_tokens": {
+          "retained_rows": 1401,
+          "identical": true,
+          "added_rows": 0
+        },
+        "ci_incidents": {
+          "retained_rows": 212,
+          "identical": true,
+          "added_rows": 0
+        },
+        "execs": {
+          "retained_rows": 218637,
+          "identical": true,
+          "added_rows": 42
+        },
+        "flow_events": {
+          "retained_rows": 901,
+          "identical": true,
+          "added_rows": 0
+        },
+        "flow_sessions": {
+          "retained_rows": 104,
+          "identical": true,
+          "added_rows": 0
+        },
+        "homes": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_instruments": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_observations": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_issue_changes": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_items": {
+          "retained_rows": 163,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_sync": {
+          "retained_rows": 21,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pr_landings": {
+          "retained_rows": 142,
+          "identical": true,
+          "added_rows": 0
+        },
+        "project_events": {
+          "retained_rows": 30536,
+          "identical": true,
+          "added_rows": 0
+        },
+        "projects": {
+          "retained_rows": 49,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_limits": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_switches": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_accounts": {
+          "retained_rows": 6,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_routes": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_session_accounts": {
+          "retained_rows": 3724,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_tokens": {
+          "retained_rows": 5,
+          "identical": true,
+          "added_rows": 0
+        },
+        "schema_migrations": {
+          "retained_rows": 62,
+          "identical": true,
+          "added_rows": 0
+        },
+        "session_events": {
+          "retained_rows": 521637,
+          "identical": true,
+          "added_rows": 0
+        },
+        "sqlite_sequence": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_deletions": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_events": {
+          "retained_rows": 66836,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_issue_identities": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_ingested_comments": {
+          "retained_rows": 611,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_observations": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_pr_repair_incidents": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_prs": {
+          "retained_rows": 449,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tasks": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tool_responses": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "waves": {
+          "retained_rows": 53,
+          "identical": true,
+          "added_rows": 0
+        },
+        "work_placements": {
+          "retained_rows": 441,
+          "identical": true,
+          "added_rows": 0
+        }
+      }
+    },
+    "counters": {
+      "before": {
+        "starts": 42,
+        "ends": 42,
+        "connections": 525,
+        "statements": 94628,
+        "rows": 1194461
+      },
+      "after": {
+        "starts": 42,
+        "ends": 42,
+        "connections": 525,
+        "statements": 94628,
+        "rows": 1194461
+      }
+    }
+  },
+  "responses": {
+    "pairs": 42,
+    "identical_except_fresh_timestamps_and_verified_ages": true,
+    "age_checks": 1554
+  },
+  "inputs": {
+    "all_four_identical": true,
+    "files": 62120,
+    "checkouts": 378,
+    "existing_checkouts": 34
+  },
+  "git": {
+    "before/roadmap": {
+      "reads": 21,
+      "commands": 1974,
+      "success": 1953,
+      "failed": 21,
+      "unfinished": 0,
+      "first_commands": [
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 1.161
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--show-toplevel"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 1.07
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow",
+            "rev-parse",
+            "--git-path",
+            "info/exclude"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 0.885
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--show-toplevel"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 1.082
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 0.9909999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/kata",
+          "ms": 0.866
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/hootro",
+          "ms": 0.739
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude",
+          "ms": 1.085
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 128,
+          "errors": [
+            "not a git repository (or any of the parent directories): .git"
+          ],
+          "ms": 0.619
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+          "ms": 1.184
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+          "ms": 9.369
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+          "ms": 1.186
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.train-a-frozen-policy-belief",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+          "ms": 9.16
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+          "ms": 1.1520000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+          "ms": 10.08
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.train-and-compare-complete-compound",
+          "ms": 1.062
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.train-and-compare-complete-compound",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.train-and-compare-complete-compound",
+          "ms": 8.963000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+          "ms": 1.1150000000000002
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+          "ms": 9.023
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+          "ms": 1.1139999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+          "ms": 9.102
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+          "ms": 1.123
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+          "ms": 8.512
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+          "ms": 1.143
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+            "rev-parse",
+            "jack-heart/challenge-an-identified-trained-bot"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+          "ms": 0.993
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+            "merge-base",
+            "--is-ancestor",
+            "1cd60fdaabf783788f6ee94ce4c4508c9435785c",
+            "jack-heart/challenge-an-identified-trained-bot"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+          "ms": 2.1189999999999998
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.make-action-consequences-and-the",
+          "ms": 0.8989999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.make-action-consequences-and-the",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.make-action-consequences-and-the",
+          "ms": 9.001999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.make-action-consequences-and-the",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.make-action-consequences-and-the",
+          "ms": 1.08
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+          "ms": 1.2149999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+          "ms": 11.718
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+          "ms": 1.356
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+            "rev-parse",
+            "jack/loo-382-update-the-workspace-automatically-when-loopflow-data"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+          "ms": 1.285
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+            "merge-base",
+            "--is-ancestor",
+            "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+            "jack/loo-382-update-the-workspace-automatically-when-loopflow-data"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+          "ms": 2.502
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+          "ms": 1.149
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+          "ms": 11.562
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+          "ms": 1.203
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+            "rev-parse",
+            "jack/loo-381-polish-cli-colors-and-command-blocks-in-desktop"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+          "ms": 1.217
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+            "merge-base",
+            "--is-ancestor",
+            "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+            "jack/loo-381-polish-cli-colors-and-command-blocks-in-desktop"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+          "ms": 2.677
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+          "ms": 1.165
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+          "ms": 11.164
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+          "ms": 1.346
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+          "ms": 1.1460000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+          "ms": 10.876
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+          "ms": 1.3290000000000002
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+            "rev-parse",
+            "jack/loo-378-connect-quickly-to-an-existing-live-session"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+          "ms": 1.306
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+            "merge-base",
+            "--is-ancestor",
+            "f4cbe142b9a320ac6c2488273345c28153b45e91",
+            "jack/loo-378-connect-quickly-to-an-existing-live-session"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+          "ms": 2.52
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+          "ms": 1.0610000000000002
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+          "ms": 13.783999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+          "ms": 1.299
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+            "rev-parse",
+            "jack/open-desktop-immediately-from-one-first-render"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+          "ms": 1.42
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+            "merge-base",
+            "--is-ancestor",
+            "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+            "jack/open-desktop-immediately-from-one-first-render"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+          "ms": 2.721
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+          "ms": 1.2409999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+          "ms": 13.11
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+          "ms": 1.244
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+            "rev-parse",
+            "jack/loo-371-open-tasks-directly-and-optimize-loading-against-a-realistic"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+          "ms": 1.363
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+            "merge-base",
+            "--is-ancestor",
+            "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+            "jack/loo-371-open-tasks-directly-and-optimize-loading-against-a-realistic"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+          "ms": 2.886
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-current-tasks-visible-and",
+          "ms": 1.177
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.keep-current-tasks-visible-and",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-current-tasks-visible-and",
+          "ms": 11.965
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.focus-on-your-own-work",
+          "ms": 1.157
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.focus-on-your-own-work",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.focus-on-your-own-work",
+          "ms": 17.386
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.focus-on-your-own-work",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.focus-on-your-own-work",
+          "ms": 1.368
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+          "ms": 1.192
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+          "ms": 12.349
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+          "ms": 1.274
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+            "rev-parse",
+            "jack-heart/design-subwaves-and-expressive-memory"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+          "ms": 1.2570000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+            "merge-base",
+            "--is-ancestor",
+            "632b67ec7e98be40fd0b9720b513165f90ef2bef",
+            "jack-heart/design-subwaves-and-expressive-memory"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+          "ms": 2.4810000000000003
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+          "ms": 1.1520000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+          "ms": 13.327
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+          "ms": 1.188
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+          "ms": 12.569
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+          "ms": 1.22
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+          "ms": 12.616999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+          "ms": 1.26
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+          "ms": 1.2049999999999998
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+          "ms": 12.216
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+          "ms": 1.192
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+            "rev-parse",
+            "jack-heart/start-and-finish-tasks-without"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+          "ms": 1.2630000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+            "merge-base",
+            "--is-ancestor",
+            "16fa9742591e3edfc0ed42c913c64347c02ffeb5",
+            "jack-heart/start-and-finish-tasks-without"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+          "ms": 2.8240000000000003
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+          "ms": 1.1620000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+          "ms": 12.271
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+          "ms": 1.345
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+            "rev-parse",
+            "jack/loo-366-keep-every-wave-ready-for-work-without-requiring-a-chapter"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+          "ms": 1.312
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+            "merge-base",
+            "--is-ancestor",
+            "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+            "jack/loo-366-keep-every-wave-ready-for-work-without-requiring-a-chapter"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+          "ms": 2.757
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-release-and-ci",
+          "ms": 1.228
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-release-and-ci",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-release-and-ci",
+          "ms": 11.801
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-release-and-ci",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-release-and-ci",
+          "ms": 1.272
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+          "ms": 1.176
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+          "ms": 12.168999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+          "ms": 1.2149999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+            "rev-parse",
+            "jack/loo-304-make-the-current-desktop-workspace-fast-and-quiet"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+          "ms": 1.2910000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+            "merge-base",
+            "--is-ancestor",
+            "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+            "jack/loo-304-make-the-current-desktop-workspace-fast-and-quiet"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+          "ms": 2.5509999999999997
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.data-model-one-table-per",
+          "ms": 1.148
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.data-model-one-table-per",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.data-model-one-table-per",
+          "ms": 10.762
+        }
+      ]
+    },
+    "before/sessions": {
+      "reads": 21,
+      "commands": 63,
+      "success": 63,
+      "failed": 0,
+      "unfinished": 0,
+      "first_commands": [
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 1.178
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--show-toplevel"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 1.003
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow",
+            "rev-parse",
+            "--git-path",
+            "info/exclude"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 0.88
+        }
+      ]
+    },
+    "after/roadmap": {
+      "reads": 21,
+      "commands": 1974,
+      "success": 1953,
+      "failed": 21,
+      "unfinished": 0,
+      "first_commands": [
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 1.188
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--show-toplevel"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 1.1640000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow",
+            "rev-parse",
+            "--git-path",
+            "info/exclude"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 1.0150000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--show-toplevel"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 1.08
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 0.9740000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/kata",
+          "ms": 0.923
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/hootro",
+          "ms": 0.874
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude",
+          "ms": 1.108
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 128,
+          "errors": [
+            "not a git repository (or any of the parent directories): .git"
+          ],
+          "ms": 0.68
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+          "ms": 1.178
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+          "ms": 9.577
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+          "ms": 1.1440000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.train-a-frozen-policy-belief",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+          "ms": 9.461
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+          "ms": 1.1119999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+          "ms": 9.438
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.train-and-compare-complete-compound",
+          "ms": 1.156
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.train-and-compare-complete-compound",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.train-and-compare-complete-compound",
+          "ms": 10.355
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+          "ms": 1.177
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+          "ms": 9.492
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+          "ms": 1.1620000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+          "ms": 9.483
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+          "ms": 1.168
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+          "ms": 9.174
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+          "ms": 1.1969999999999998
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+            "rev-parse",
+            "jack-heart/challenge-an-identified-trained-bot"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+          "ms": 1.259
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+            "merge-base",
+            "--is-ancestor",
+            "1cd60fdaabf783788f6ee94ce4c4508c9435785c",
+            "jack-heart/challenge-an-identified-trained-bot"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+          "ms": 2.305
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.make-action-consequences-and-the",
+          "ms": 1.074
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.make-action-consequences-and-the",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.make-action-consequences-and-the",
+          "ms": 9.544
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/etude.make-action-consequences-and-the",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/etude.make-action-consequences-and-the",
+          "ms": 1.17
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+          "ms": 1.2409999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+          "ms": 11.99
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+          "ms": 1.234
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+            "rev-parse",
+            "jack/loo-382-update-the-workspace-automatically-when-loopflow-data"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+          "ms": 1.294
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+            "merge-base",
+            "--is-ancestor",
+            "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+            "jack/loo-382-update-the-workspace-automatically-when-loopflow-data"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+          "ms": 2.401
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+          "ms": 1.085
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+          "ms": 12.036
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+          "ms": 1.2349999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+            "rev-parse",
+            "jack/loo-381-polish-cli-colors-and-command-blocks-in-desktop"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+          "ms": 1.2069999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+            "merge-base",
+            "--is-ancestor",
+            "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+            "jack/loo-381-polish-cli-colors-and-command-blocks-in-desktop"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+          "ms": 2.348
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+          "ms": 1.206
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+          "ms": 11.49
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+          "ms": 1.217
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+          "ms": 1.2329999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+          "ms": 11.94
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+          "ms": 1.303
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+            "rev-parse",
+            "jack/loo-378-connect-quickly-to-an-existing-live-session"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+          "ms": 1.196
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+            "merge-base",
+            "--is-ancestor",
+            "f4cbe142b9a320ac6c2488273345c28153b45e91",
+            "jack/loo-378-connect-quickly-to-an-existing-live-session"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+          "ms": 2.552
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+          "ms": 1.149
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+          "ms": 12.022
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+          "ms": 1.239
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+            "rev-parse",
+            "jack/open-desktop-immediately-from-one-first-render"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+          "ms": 1.2899999999999998
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+            "merge-base",
+            "--is-ancestor",
+            "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+            "jack/open-desktop-immediately-from-one-first-render"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+          "ms": 2.335
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+          "ms": 1.124
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+          "ms": 12.389000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+          "ms": 1.227
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+            "rev-parse",
+            "jack/loo-371-open-tasks-directly-and-optimize-loading-against-a-realistic"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+          "ms": 1.314
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+            "merge-base",
+            "--is-ancestor",
+            "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+            "jack/loo-371-open-tasks-directly-and-optimize-loading-against-a-realistic"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+          "ms": 2.628
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-current-tasks-visible-and",
+          "ms": 1.2229999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.keep-current-tasks-visible-and",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-current-tasks-visible-and",
+          "ms": 10.893999999999998
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.focus-on-your-own-work",
+          "ms": 1.156
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.focus-on-your-own-work",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.focus-on-your-own-work",
+          "ms": 16.511000000000003
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.focus-on-your-own-work",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.focus-on-your-own-work",
+          "ms": 1.23
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+          "ms": 1.219
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+          "ms": 10.999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+          "ms": 1.256
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+            "rev-parse",
+            "jack-heart/design-subwaves-and-expressive-memory"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+          "ms": 1.234
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+            "merge-base",
+            "--is-ancestor",
+            "632b67ec7e98be40fd0b9720b513165f90ef2bef",
+            "jack-heart/design-subwaves-and-expressive-memory"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+          "ms": 2.4
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+          "ms": 1.16
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+          "ms": 11.790999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+          "ms": 1.266
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+          "ms": 11.710999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+          "ms": 1.125
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+          "ms": 12.138
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+          "ms": 1.209
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+          "ms": 1.221
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+          "ms": 12.137
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+          "ms": 1.287
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+            "rev-parse",
+            "jack-heart/start-and-finish-tasks-without"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+          "ms": 1.2329999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+            "merge-base",
+            "--is-ancestor",
+            "16fa9742591e3edfc0ed42c913c64347c02ffeb5",
+            "jack-heart/start-and-finish-tasks-without"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+          "ms": 2.3440000000000003
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+          "ms": 1.167
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+          "ms": 12.001
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+          "ms": 1.131
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+            "rev-parse",
+            "jack/loo-366-keep-every-wave-ready-for-work-without-requiring-a-chapter"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+          "ms": 1.1969999999999998
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+            "merge-base",
+            "--is-ancestor",
+            "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+            "jack/loo-366-keep-every-wave-ready-for-work-without-requiring-a-chapter"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+          "ms": 2.3600000000000003
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-release-and-ci",
+          "ms": 1.1689999999999998
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-release-and-ci",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-release-and-ci",
+          "ms": 9.714
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-release-and-ci",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-release-and-ci",
+          "ms": 1.194
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+          "ms": 1.1150000000000002
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+          "ms": 10.848999999999998
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+            "rev-parse",
+            "HEAD"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+          "ms": 1.332
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+            "rev-parse",
+            "jack/loo-304-make-the-current-desktop-workspace-fast-and-quiet"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+          "ms": 1.306
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+            "merge-base",
+            "--is-ancestor",
+            "8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3",
+            "jack/loo-304-make-the-current-desktop-workspace-fast-and-quiet"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+          "ms": 2.577
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.data-model-one-table-per",
+          "ms": 1.1640000000000001
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow.data-model-one-table-per",
+            "status",
+            "--porcelain"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow.data-model-one-table-per",
+          "ms": 10.265
+        }
+      ]
+    },
+    "after/sessions": {
+      "reads": 21,
+      "commands": 63,
+      "success": 63,
+      "failed": 0,
+      "unfinished": 0,
+      "first_commands": [
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 1.1019999999999999
+        },
+        {
+          "argv": [
+            "git",
+            "rev-parse",
+            "--show-toplevel"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 0.94
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/Users/jack/src/loopflow",
+            "rev-parse",
+            "--git-path",
+            "info/exclude"
+          ],
+          "exit": 0,
+          "worktree": "/Users/jack/src/loopflow",
+          "ms": 1.24
+        }
+      ]
+    }
+  },
+  "profile": {
+    "main_thread_samples": 743,
+    "completion_exec_query_samples": 559,
+    "path": "/tmp/loo304-corrected-git-20261006/profile/sample.txt",
+    "limit": "One intrusive partial-interval sample, not a whole-command CPU allocation."
+  },
+  "rejected_query": {
+    "tasks": 342,
+    "identical_rows": 57,
+    "vm_steps": [
+      17559770,
+      17922832
+    ],
+    "cpu_seconds": [
+      1.078644,
+      1.079741
+    ],
+    "change": "Force existing unfinished index on outer Exec selection",
+    "decision": "No supported benefit; no Rust change."
+  },
+  "checks": {
+    "python": "63 passed",
+    "swift_build": "passed",
+    "contained_native": "5 passed",
+    "rendered": "not run",
+    "full_trace": "not admitted; 6.6 GiB free versus 8 GiB minimum"
+  },
+  "limits": [
+    "One Git common-directory discovery per roadmap still fails for existing non-Git historical cadenza path; outer CLI zero is not all-repository success.",
+    "Report comparison refuses failed Git observations; these distributions are supporting matched read evidence.",
+    "No latency/growth/Swift/compositor/hour acceptance or merge/completion.",
+    "Initial policy-encoding failures and pilot summary-script failure remain in raw receipts.",
+    "Configuration, tracked content, file modes, file membership, checkout identity and Git metadata agree across both variants; no source CLI used installed Home."
+  ],
+  "receipt_hashes": {
+    "/tmp/loo304-corrected-git-20261006/final.py": "bb09105253d58dd27c939ae4fec9a68d61d578e2f0930e80c7016caa2868ffcf",
+    "/tmp/loo304-corrected-git-20261006/verify.py": "31e5d945c367ffd7cf869e1ef83f7aa12b9aeff28688c9d063ad5a03cf129caa",
+    "/tmp/loo304-corrected-git-20261006/verify-responses.py": "b97a94f52566fb57558df5e10c8a433bc8511e1c0977be5bcc2785e99ea7d130",
+    "/tmp/loo304-corrected-git-20261006/profile.py": "0cccbcb794f0922cce7d0fd858a549e252b1b5896ca2dd23362fe49bf60b320d",
+    "/tmp/loo304-corrected-git-20261006/outer-query.c": "894255fcf4a7e18bfe89820fe8e5e627647a9ed596071d190722f97d780ea115",
+    "/tmp/loo304-corrected-git-20261006/outer-query.txt": "a784ead788d4986ed44fe8f1e545ec69d606201a74834f145c95634ea977ee9c",
+    "/tmp/loo304-corrected-git-20261006/profile/sample.txt": "330915dfde0702d0914899a4b29276f1d794034afdf7c9349c3ced6bc25743f0",
+    "/tmp/loo304-corrected-git-20261006/final/reads.jsonl": "b0c44f33f1ad0b9cd2c8e787770bafd9fe07054638a491efa6ee551e7d0cedfa",
+    "/tmp/loo304-corrected-git-20261006/final/before/git.jsonl": "e2f3106b6294b7a8f74c0e1a06a05d70149f01ad720928d22c994dc9dda6b877",
+    "/tmp/loo304-corrected-git-20261006/final/after/git.jsonl": "1df045c57068c939b6d38891818ae478000feac13a2a05c7d8db0df3a6493f90",
+    "/tmp/loo304-corrected-git-20261006/final/before-inputs-before.json": "009a4bffd28142317ceba76dfef827f7d9583dbdda857a316ad3d5f48bf47f68",
+    "/tmp/loo304-corrected-git-20261006/final/before-inputs-after.json": "009a4bffd28142317ceba76dfef827f7d9583dbdda857a316ad3d5f48bf47f68",
+    "/tmp/loo304-corrected-git-20261006/final/after-inputs-before.json": "009a4bffd28142317ceba76dfef827f7d9583dbdda857a316ad3d5f48bf47f68",
+    "/tmp/loo304-corrected-git-20261006/final/after-inputs-after.json": "009a4bffd28142317ceba76dfef827f7d9583dbdda857a316ad3d5f48bf47f68",
+    "/tmp/loo304-corrected-git-20261006/discovery.json": "d68d190e9905828244a7e9ce3e8bd5c9629b804ff3762e2e9475618d257cd6b0"
+  },
+  "discovery": [
+    {
+      "cwd": "/Users/jack/src/cadenza",
+      "exit": 128,
+      "error": "fatal: not a git repository (or any of the parent directories): .git\n"
+    },
+    {
+      "cwd": "/Users/jack/src/etude",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/etude.challenge-an-identified-trained-bot",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/etude.compare-learning-speed-and-ataraxos",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/etude.complete-learn-lesson-in-the",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/etude.improve-a-frozen-trained-policy",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/etude.make-action-consequences-and-the",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/etude.measure-the-ataraxos-controls-omitted",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/etude.measure-trained-policy-weaknesses-with",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/etude.search-learning-architecture",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/etude.train-a-frozen-policy-belief",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/etude.train-and-compare-complete-compound",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/hootro",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/kata",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.account-for-scheduled-release-opportunities",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.chapter-planning",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.connect-quickly-to-an-existing",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.data-model-one-table-per",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.design-subwaves-and-expressive-memory",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.focus-on-your-own-work",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.keep-current-tasks-visible-and",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.keep-every-wave-ready-for",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.make-laptop-refresh-and-lf",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.make-lf-wt-list-fast",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.make-linear-oauth-recovery-survive",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.make-the-current-desktop-workspace",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.make-the-live-loopflow-workspace",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.make-the-release-and-ci",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.open-desktop-immediately-from-one",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.open-tasks-directly-and-optimize",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.polish-cli-colors-and-command",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.start-and-finish-tasks-without",
+      "exit": 0,
+      "error": ""
+    },
+    {
+      "cwd": "/Users/jack/src/loopflow.update-the-workspace-automatically-when",
+      "exit": 0,
+      "error": ""
+    }
+  ]
+}

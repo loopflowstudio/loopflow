@@ -1064,3 +1064,80 @@ independent Swift attribution, compositor/input and both hours remain open.
 No mounted replay was run: there is no product or runner change to validate.
 Review rejected replacing Git semantics or dropping boundary checks based on failed
 reads. Publication of this evidence correction does not authorize merge/completion.
+
+
+## Corrected repository observations — October 6
+
+Jack Heart requested the demonstrated harness correction and a fresh matched
+baseline before another production optimization. [Summary](corrected-git-summary.json)
+retains command outcomes, distributions, binary/input hashes and preservation.
+Raw scripts and receipts are `/tmp/loo304-corrected-git-20261006/`.
+
+The runner now grants read-only access to exact snapshot-named Git checkout trees,
+plus their common/per-worktree Git metadata. Git status needs tracked content and
+per-directory ignore files, beyond the prior twelve `.git` markers. No parent
+source directory, credential Home, write, network, process or signal grant was
+added. Copied clients still cannot execute. Exact-file policy experiments hit
+macOS compiler limits; their failures remain in the raw receipts. The final
+policy uses the existing bounded checkout-tree form. Symlinks cannot grant reads
+outside those trees. Setup enumerates Git files inside the same sandbox.
+
+Before/after manifests agree **across all four observations**: 62,120 file
+fingerprints, 378 recorded checkout paths (34 existing), names, aliases, inode
+identities, content/modes, Git metadata and authored configuration. Hashing occurs
+outside measured commands and warms filesystem caches equally on both variants.
+The input set is deliberately conservative, including reachable metadata files
+that a particular command might not read. Removed/recreated checkout, alias,
+changed-content and refused-access regressions pass. Raw after-manifests survive;
+changed inputs or failed/incomplete Git observations reject report comparison.
+
+The retained release binaries are the preceding Task-membership pair, with exact
+hashes matching its provenance: baseline Rust `4151c79a6` (unchanged through
+`b1a75d2ff`), candidate materializing Session membership within one query.
+Neither was rebuilt or promoted. Both use the same corrected policy, immutable
+prepared database, host and instrumentation. This is a renewed **CLI-only**
+comparison, not independent Swift or rendered acceptance.
+
+| Read, twenty warm observations each | Baseline median / p95 | Candidate median / p95 |
+| --- | ---: | ---: |
+| Roadmap | 1146 / 1189 ms | 1117 / 1164 ms |
+| Sessions | 269 / 274 ms | 270 / 277 ms |
+| Roadmap child CPU | 1207 / 1250 ms | 1192 / 1239 ms |
+| Session child CPU | 264 / 269 ms | 266 / 270 ms |
+
+All **84/84 outer CLI reads** exited zero, without timeouts. Each roadmap now
+records **94 Git children: 93 successful, one failed**, including 25 successful
+status commands. Each Session read records 3/3 successful Git children. The
+remaining discovery failure is consistent with the existing historical `cadenza`
+path no longer being a Git checkout; separate discovery probes retain its exact
+cwd and outcome. These failed reads stay visible and prevent full report scoring.
+The prior 31/36 failed-child cohorts remain limited evidence; they are not this
+baseline. Per-command traces retain all 4,074 exits across the pair.
+
+All 39 tables retain identical original rows; each copy gained only 42 inspection
+Execs. All 42 response pairs agree apart from fresh timestamps and **1,554 verified
+age differences**. Each variant records 42/42 CLI starts/ends, 525 connections,
+94,628 SQLite statements and 1,194,461 rows. This proves no reduction in refresh
+volume. Host load and first-observation timings remain in the summary. Roadmap
+still misses 300 ms; the small query delta is not Desktop acceptance.
+
+A separate one-second exact-process sample found 559/743 main-thread samples in
+the completion gate's Exec read, including SQLite page reads; fresh Git boundary
+checks account for only part of the remainder. No exact status command repeats
+within the sampled roadmap. Forcing the existing unfinished index on the outer
+Exec selection preserved all 342 Tasks' results (57 rows), but VM steps rose
+17,559,770→17,922,832 and CPU stayed 1.079 seconds. That hypothesis was rejected;
+no Rust patch or new index was adopted. The useful next query investigation is
+the full completion-gate read and its page access under bundled SQLite, retaining
+all membership/history and fresh launch checks. A partial sample cannot allocate
+the entire command's CPU or justify deleting those checks.
+
+The corrected harness passes 63 Python tests, a Swift test build and five contained
+native proofs, including copied-client refusal, history and process restrictions.
+No mounted workload or trace ran. Storage is 6.6 GiB, below the 8 GiB admission
+threshold. All original latency, <32 MiB growth, independent Swift attribution,
+compositor/input, recorder readiness/capacity and both full-hour obligations remain.
+Release's immediate goal and current schedule/publication/installation memory were
+read; older incidents were not reread and provide no Desktop acceptance.
+Review retained the real failed Git child, rejected the unsupported SQL hint and
+kept publication separate from merge/completion.

@@ -600,25 +600,19 @@ counting moved lines as deleted. Recorded focused checks and Clippy passed;
 no full gate or installed acceptance follows. This curation changes no chapter,
 Task disposition or delivery state.
 
-## Task convergence (LOO-319, curated 2026-10-02)
+## Task convergence (LOO-319, curated 2026-10-06)
 
-[LOO-319](https://linear.app/loopflow/issue/LOO-319) and
-[PR #1301](https://github.com/loopflowstudio/loopflow/pull/1301) retain ownership.
-[Prior memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#task-convergence-loo-319-branch-evidence-2026-09-27)
-preserves exact slice/demo evidence and superseded Flow compositions.
-
-Jack Heart selected reconciliation before decision/publication and retained human
-demo and authored delivery. Captured invocations keep their definitions; tests
-must locate captured policy rather than copy current catalog indices. Feedback
-never supplies a verdict, and failed decisions cannot regain authority. Task
-agent choice survives PM refresh and reloads at each launch, including review.
-A PATH-only provider repair failed: executable and Home must agree. The real
-Codex fixture used synthetic feedback and predates generic loop-decide; configured
-Claude launch/resume, real five-minute stall and rendered Desktop agreement
-remain unverified. Local simulated liveness is not signal authority. Preserve
-first PID/birth identity across missing samples; active tool work prevents a
-false stall. TESTING.md owns fixture isolation and disk-resource policy. Source
-verification uses disposable stores; no old branch binary may migrate main.
+LOO-319 / PR #1301 retains ownership. September 27 evidence and remaining configured proofs are at
+`bc97e651661d68524060020a852c8b3a938ee4e7:wave/infrastructure/MEMORY.md`
+under this heading. Jack Heart selected reconciliation before publication and
+retained authored review/delivery. Captured invocations keep their definitions;
+feedback supplies no verdict and failed decisions regain no authority. Task agent
+choice reloads at launch. Executable and Home must agree; PATH alone did not repair
+provider startup. Simulated liveness grants no signal authority. Preserve first
+PID/birth identity across missing samples; active tools prevent false stalls.
+Configured Claude resume, real stall and rendered Desktop agreement remain
+unverified. Source proofs use disposable Homes; never migrate main with a branch
+binary. TESTING.md owns fixture isolation and resource policy.
 
 ## Data model and performance decisions (reconciled 2026-09-30)
 
@@ -824,14 +818,22 @@ causal latency proof. Query-local materialization grants no persistent freshness
 or authority. The report owns exact evidence; every original latency/growth,
 Swift, compositor/input and hour obligation remains. Publication only.
 
-LOO-304 Git attribution: 31 of
-36 Git launches fail, including all twelve sibling checkout discovery/status
-paths denied by the sandbox. Distinct launch-boundary checks are not redundant
-identity reads. Exact read-only Git metadata access made the bounded discovery
-probe pass 36/36 versus 0/36; no production repair follows. Outer CLI success and
-SQLite preservation do not prove successful repository observations. Re-establish
-both variants with explicit Git outcomes and stable read-only inputs before
-claiming checkout-cost improvement. The matched report retains receipts; acceptance and sandbox/authority remain unchanged.
+LOO-304's corrected October 6 runner grants bounded read-only snapshot checkout
+and Git metadata observations, retaining all other sandbox/copy-authority limits.
+All four input manifests match across 84 fresh alternating reads; 39-table and
+42-response-pair preservation passes. Roadmap median/p95 1146/1189→1117/1164 ms
+still misses 300 ms. Each roadmap has 93/94 successful Git children, including
+25 statuses; historical non-Git discovery remains failed and prevents full report
+scoring. Earlier 31/36-failed-child cohorts remain degraded-path evidence. Outer
+CLI success cannot establish repository-read success. Hash content/config/metadata,
+checkout identity and membership; changed inputs reject comparison.
+
+The bounded sample attributes 559/743 main-thread observations to completion-gate
+Exec reads. An outer-index hint preserved 342 Tasks but showed no benefit and
+was rejected. Further full-query/page attribution remains useful; fresh launch
+checks are distinct obligations. Exact receipts and policy-compilation failures
+live in the matched report. No new rendered/memory/Swift/compositor/hour proof;
+6.6 GiB remains below trace admission. Jack Heart authorized publication only.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -538,6 +539,7 @@ def test_native_runner_stops_owned_child_after_unexpected_journal_error(
     child = """
 import os
 import signal
+import shutil
 import time
 from pathlib import Path
 
@@ -666,3 +668,105 @@ def test_trace_soak_requires_both_tables_across_entire_interval(tmp_path: Path, 
     if gap == "end":
         assert coverage["end_gap_seconds"] == 1
     assert len(result["soak"]["rounds"]) == 4
+
+
+def test_git_outcomes_keep_failed_and_unfinished_children(tmp_path: Path) -> None:
+    trace = tmp_path / "git.jsonl"
+    events = [
+        {"event": "start", "sid": "a", "argv": ["git", "status"]},
+        {"event": "start", "sid": "b", "argv": ["git", "rev-parse"]},
+        {"event": "exit", "sid": "a", "code": 128},
+    ]
+    trace.write_text("\n".join(json.dumps(event) for event in events))
+    assert performance._git_outcomes(trace) == [
+        {"argv": ["git", "status"], "exit": 128},
+        {"argv": ["git", "rev-parse"], "exit": None},
+    ]
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS sandbox boundary")
+def test_checkout_observation_preserves_read_boundary_and_detects_changes(tmp_path: Path) -> None:
+    tmp_path = tmp_path.resolve()
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    git = performance._benchmark_git()
+    subprocess.run([str(git), "init", str(checkout)], check=True, capture_output=True)
+    tracked = checkout / "tracked"
+    tracked.write_text("original")
+    subprocess.run([str(git), "-C", str(checkout), "add", "tracked"], check=True)
+    secret = tmp_path / "credential-canary"
+    secret.write_text("must remain unreadable")
+    (checkout / "outside").symlink_to(secret)
+    alias = tmp_path / "alias"
+    alias.symlink_to(checkout, target_is_directory=True)
+    missing = tmp_path / "missing"
+    database = tmp_path / "observations.db"
+    with sqlite3.connect(database) as db:
+        db.execute("CREATE TABLE tasks (worktree TEXT)")
+        db.executemany(
+            "INSERT INTO tasks VALUES (?)", [(str(p),) for p in [checkout, alias, missing]]
+        )
+        db.execute("CREATE TABLE waves (repo TEXT, name TEXT)")
+    policy = tmp_path / "policy.sb"
+    base = """(version 1)
+(allow default)
+(deny network*)
+(deny file-write*)
+(allow file-write* (literal "/dev/null"))
+(deny file-read-data)
+(allow file-read-data (vnode-type DIRECTORY) (subpath "/System") (subpath "/usr")
+ (subpath "/bin") (subpath "/dev") (subpath "/Applications/Xcode.app"))
+"""
+    prefix = ["/usr/bin/sandbox-exec", "-f", str(policy)]
+
+    def observe() -> dict:
+        policy.write_text(base)
+        return performance._checkout_inputs(database, prefix, policy, git)
+
+    first = observe()
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "GIT_OPTIONAL_LOCKS": "0"}
+    result = subprocess.run(
+        prefix + [str(git), "-C", str(alias), "status", "--porcelain"], env=env, capture_output=True
+    )
+    assert result.returncode == 0
+    assert b"tracked" in result.stdout
+    assert subprocess.run(prefix + ["/bin/cat", str(secret)], capture_output=True).returncode != 0
+    assert (
+        subprocess.run(
+            prefix + ["/bin/sh", "-c", 'echo changed > "$1"', "sh", str(tracked)],
+            capture_output=True,
+        ).returncode
+        != 0
+    )
+    assert (
+        subprocess.run(
+            prefix + ["/bin/cat", str(checkout / "outside")], capture_output=True
+        ).returncode
+        != 0
+    )
+    assert observe() == first
+    tracked.write_text("changed")
+    assert observe() != first
+    missing.mkdir()
+    assert observe()["checkouts"] != first["checkouts"]
+    alias.unlink()
+    alias.symlink_to(missing, target_is_directory=True)
+    assert observe()["checkouts"] != first["checkouts"]
+
+    before_recreation = observe()
+    checkout.rename(tmp_path / "retired")
+    shutil.copytree(tmp_path / "retired", checkout, symlinks=True)
+    assert observe()["checkouts"] != before_recreation["checkouts"]
+
+
+def test_changed_repository_inputs_and_failed_git_cannot_compare(tmp_path: Path) -> None:
+    (tmp_path / "baseline").mkdir()
+    (tmp_path / "current").mkdir()
+    baseline = _report(tmp_path / "baseline", _events())
+    current = _report(tmp_path / "current", _events())
+    assert performance._comparison(current, baseline)["available"]
+    current["metadata"]["repository_inputs_unchanged"] = False
+    assert not performance._comparison(current, baseline)["available"]
+    current["metadata"]["repository_inputs_unchanged"] = True
+    current["metadata"]["git_observations_complete"] = False
+    assert not performance._comparison(current, baseline)["available"]

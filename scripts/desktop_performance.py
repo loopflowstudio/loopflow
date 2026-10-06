@@ -286,6 +286,8 @@ def _has_complete_observations(summary: dict) -> bool:
             or (summary["soak"].get("trace_coverage") or {}).get("status") == "complete"
         )
         and metadata.get("repository_configs_unchanged", True)
+        and metadata.get("repository_inputs_unchanged", True)
+        and metadata.get("git_observations_complete", True)
         and not summary["journey_errors"]
         and not summary["journal_errors"]
         and all(attempt["outcome"] != "interrupted" for attempt in summary["attempts"])
@@ -305,6 +307,7 @@ def _comparison(current: dict, baseline: dict) -> dict:
         "repo",
         "issue",
         "repository_configs",
+        "repository_inputs",
     ]:
         if current["metadata"].get(key) != baseline["metadata"].get(key):
             return {"available": False, "reason": f"Different {key}"}
@@ -872,6 +875,175 @@ def _repository_configs(database: Path) -> list[dict]:
     ]
 
 
+def _git_outcomes(path: Path) -> list[dict]:
+    processes: dict[str, dict] = {}
+    for line in path.read_text().splitlines() if path.exists() else []:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            processes[f"malformed-{len(processes)}"] = {"argv": [], "exit": None}
+            continue
+        sid = event.get("sid")
+        if event.get("event") == "start":
+            processes[sid] = {"argv": event["argv"], "exit": None}
+        elif sid in processes and event.get("event") == "error":
+            processes[sid].setdefault("errors", []).append(event["msg"])
+        elif sid in processes and event.get("event") == "def_repo":
+            processes[sid]["worktree"] = event["worktree"]
+        elif sid in processes and event.get("event") == "exit":
+            processes[sid]["exit"] = event["code"]
+            if "t_abs" in event:
+                processes[sid]["ms"] = event["t_abs"] * 1000
+    return list(processes.values())
+
+
+def _input_hash(path: Path) -> str | None:
+    if path.is_symlink():
+        return "symlink:" + os.readlink(path)
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return f"{path.stat().st_mode:o}:" + digest.hexdigest()
+
+
+def _checkout_inputs(database: Path, prefix: list[str], policy: Path, git: Path) -> dict:
+    """Observe exact snapshot checkouts without granting writes or their parent directories."""
+    with sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True) as db:
+        checkouts = sorted(
+            {
+                row[0]
+                for row in db.execute("SELECT worktree FROM tasks UNION SELECT repo FROM waves")
+                if row[0]
+            }
+        )
+    files: set[Path] = set()
+    trees: set[Path] = set()
+    identities = []
+    existing = []
+    for name in checkouts:
+        checkout = Path(name)
+        identities.append(
+            {
+                "path": name,
+                "resolved": str(checkout.resolve()),
+                "exists": checkout.is_dir(),
+                "identity": [checkout.stat().st_dev, checkout.stat().st_ino]
+                if checkout.exists()
+                else None,
+            }
+        )
+        marker = checkout / ".git"
+        files.add(marker)
+        if not marker.exists():
+            continue
+        existing.append(checkout)
+        trees.add(checkout.resolve())
+        if marker.is_file():
+            text = marker.read_text().strip()
+            if not text.startswith("gitdir: "):
+                raise ValueError(f"Invalid Git marker: {marker}")
+            directory = (checkout / text[8:]).resolve()
+        else:
+            directory = marker.resolve()
+        common_file = directory / "commondir"
+        common = (
+            (directory / common_file.read_text().strip()).resolve()
+            if common_file.exists()
+            else directory
+        )
+        for root in {directory, common}:
+            for name in [
+                "HEAD",
+                "index",
+                "commondir",
+                "gitdir",
+                "config",
+                "config.worktree",
+                "packed-refs",
+                "shallow",
+                "info/exclude",
+                "info/attributes",
+            ]:
+                files.add(root / name)
+            for name in ["refs", "objects"]:
+                folder = root / name
+                trees.add(folder)
+                if folder.exists():
+                    files.update(path for path in folder.rglob("*") if path.is_file())
+    files.update(Path(item["path"]) for item in _repository_configs(database))
+    original = policy.read_text()
+
+    def write_policy() -> None:
+        # Git status reads tracked content and per-directory ignore files throughout
+        # each selected checkout. No parent directory or credential Home is granted.
+        rules = [" (subpath " + json.dumps(str(path)) + ")\n" for path in sorted(trees)]
+        roots = tuple(str(tree) + "/" for tree in trees)
+        rules += [
+            " (literal " + json.dumps(str(path.parent.resolve() / path.name)) + ")\n"
+            for path in sorted(files)
+            if not path.is_dir() and not str(path).startswith(roots)
+        ]
+        policy.write_text(original + "\n(allow file-read-data\n" + "".join(rules) + ")\n")
+
+    write_policy()
+    env = {
+        "HOME": str(policy.parent),
+        "PATH": str(git.parent) + ":/usr/bin:/bin",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_CONFIG_NOSYSTEM": "1",
+    }
+    listings = []
+    for checkout in existing:
+        tracked = subprocess.check_output(
+            prefix + [str(git), "-C", str(checkout), "ls-files", "-z", "--cached"],
+            env=env,
+            timeout=30,
+        )
+        for name in tracked.decode().split("\0"):
+            if name:
+                path = checkout / name
+                if not path.is_symlink() and not path.resolve().is_relative_to(checkout.resolve()):
+                    raise ValueError(f"Tracked input escapes checkout: {path}")
+                files.add(path)
+    write_policy()
+    for checkout in existing:
+        result = subprocess.run(
+            prefix
+            + [
+                str(git),
+                "-C",
+                str(checkout),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ],
+            env=env,
+            capture_output=True,
+            timeout=30,
+            check=True,
+        )
+        names = sorted(set(result.stdout.decode().split("\0")) - {""})
+        listings.append({"path": str(checkout), "names": names})
+        for name in names:
+            if Path(name).name == ".gitignore":
+                files.add(checkout / name)
+    write_policy()
+    return {
+        "checkouts": identities,
+        "listings": listings,
+        "files": [
+            {"path": str(path.absolute()), "sha256": _input_hash(path)}
+            for path in sorted(files)
+            if not path.is_dir()
+        ],
+    }
+
+
 def _native_command(test_filter: str, environment: dict[str, str]) -> list[str]:
     environment["LOOPFLOW_TEST_GIT"] = str(_benchmark_git())
     swift = Path(subprocess.check_output(["xcrun", "--find", "swift"], text=True).strip())
@@ -929,6 +1101,14 @@ def _native_command(test_filter: str, environment: dict[str, str]) -> list[str]:
     sandbox = ["/usr/bin/sandbox-exec"]
     for name, value in sorted(parameters.items()):
         sandbox += ["-D", f"{name}={value if name == 'DISPLAY' else Path(value).resolve()}"]
+    if snapshot:
+        inputs = _checkout_inputs(
+            Path(snapshot) / "loopflow.db",
+            sandbox + ["-f", str(policy)],
+            policy,
+            Path(environment["LOOPFLOW_TEST_GIT"]),
+        )
+        (output / "repository-inputs.json").write_text(json.dumps(inputs, indent=2) + "\n")
     # sandbox-exec is SIP-protected and strips DYLD_* from its environment.
     # Set only the test framework paths after crossing that boundary.
     loader = [
@@ -1034,6 +1214,7 @@ def _run_native(
         LF_DESKTOP_PERF_SAMPLES=str(samples),
         LF_DESKTOP_PERF_SOAK_SECONDS=str(soak_seconds),
         LF_PERF_OUTPUT=str(output / "cli-volume"),
+        GIT_TRACE2_EVENT=str(output / "git-events.jsonl"),
     )
     environment["LOOPFLOW_TEST_NATIVE_FIXTURE"] = str(fixture)
     recorder = None
@@ -1102,6 +1283,21 @@ def _run_native(
                 _stop(recorder)
                 metadata["recorder_exit_code"] = recorder.returncode
     if snapshot:
+        inputs_path = output / "repository-inputs.json"
+        metadata["repository_inputs"] = json.loads(inputs_path.read_text())
+        policy = output / "snapshot-policy.sb"
+        # Rebuild the exact read boundary, including checkout disappearance/recreation,
+        # file membership and aliases, rather than hashing only still-existing files.
+        policy.write_text((REPO / "scripts/desktop-performance.sb").read_text())
+        prefix = command[: command.index("/usr/bin/env")]
+        after = _checkout_inputs(isolated / "loopflow.db", prefix, policy, _benchmark_git())
+        (output / "repository-inputs-after.json").write_text(json.dumps(after, indent=2) + "\n")
+        metadata["repository_inputs_unchanged"] = metadata["repository_inputs"] == after
+        outcomes = _git_outcomes(output / "git-events.jsonl")
+        metadata["git_outcomes"] = outcomes
+        metadata["git_observations_complete"] = bool(outcomes) and all(
+            row["exit"] == 0 for row in outcomes
+        )
         metadata["repository_configs_unchanged"] = metadata[
             "repository_configs"
         ] == _repository_configs(snapshot / "loopflow.db")

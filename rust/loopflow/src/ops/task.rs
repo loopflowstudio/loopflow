@@ -902,7 +902,7 @@ fn create_prepared_task(
         requested_agent,
         directive,
     } = prepared;
-    let acquisition = block_on_task(async {
+    block_on_task(async move {
         let store = task_store().await?;
         let locator = crate::work::wave::WaveLocator::discover(&main_repo, &resolved.wave)
             .map_err(task_error)?;
@@ -911,18 +911,9 @@ fn create_prepared_task(
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("owning Wave is not initialized"))?;
-        super::chapter::rotation_lock(&wave).await
-    })?;
-    let project = block_on_task(crate::ops::project::resolve_project_for_task(
-        &main_repo,
-        &resolved.wave,
-        &resolved.project.id,
-    ))?;
-    let project_id = project.id.clone();
-    let wave_id = project.wave_id.clone();
-
-    block_on_task(async move {
-        let store = task_store().await?;
+        let acquisition = super::chapter::rotation_lock(&wave).await?;
+        let project =
+            super::project::resolve_project_for_task(&store, &wave, &resolved.project.id).await?;
         // Re-resolve after worktree planning: a concurrent run may have created
         // the Task in the gap. Non-terminal Work wins. Terminal Work remains
         // authoritative and requires an explicit recovery transition.
@@ -960,8 +951,8 @@ fn create_prepared_task(
                 description: resolved.item.description.clone(),
                 pm_snapshot_synced_at: resolved.observed_at,
             },
-            wave_id,
-            project_id,
+            wave_id: project.wave_id,
+            project_id: project.id,
             pm_writeback: PmWritebackState::Current,
             worktree: plan.worktree_path.clone(),
             workspace_slug: workspace_slug.clone(),
@@ -1131,9 +1122,9 @@ async fn prepare_task_creation(
     project: crate::pm::PmProject,
     options: &TaskExecOptions,
 ) -> OpsResult<Option<PreparedTask>> {
+    let store = task_store().await?;
     if let Some(item) = &existing {
         require_startable_issue(item)?;
-        let store = task_store().await?;
         if store
             .get_task_by_issue(&item.id)
             .await
@@ -1143,7 +1134,15 @@ async fn prepare_task_creation(
             return Ok(None);
         }
     }
-    crate::ops::project::resolve_project_for_task(repo, wave, &project.id).await?;
+    let wave = crate::work::wave::context::resolve_managed_wave(
+        Some(&store),
+        Some(repo),
+        Some(wave),
+        None,
+    )
+    .await
+    .map_err(task_error)?;
+    super::project::resolve_project_for_task(&store, &wave, &project.id).await?;
     let prepared = prepare_new_task(
         repo,
         existing.as_ref().map_or(title, |item| item.name.as_str()),
@@ -5415,13 +5414,13 @@ mod tests {
             .unwrap();
             snapshot.projects.truncate(1);
             snapshot.items.truncate(1);
-            snapshot.projects[0].id = "task-recovery-project".into();
+            snapshot.projects[0].id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3".into();
             snapshot.projects[0].status = crate::pm::ProjectStatus::Started;
             snapshot.items[0].id = "new-issue".into();
             snapshot.items[0].completed = false;
             snapshot.items[0].completed_at = None;
             snapshot.items[0].state = Some("unstarted".into());
-            snapshot.items[0].project_id = Some("task-recovery-project".into());
+            snapshot.items[0].project_id = Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3".into());
             snapshot.items[0].revision = Some("2026-10-05T12:00:00Z".into());
             let resolved = crate::ops::task_pm::ResolvedTask {
                 wave: "task-recovery".into(),
@@ -6770,7 +6769,7 @@ time.sleep(30)
             plan: ProjectPlan {
                 flow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
-                id: LinearProjectId::new("task-recovery-project").unwrap(),
+                id: LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap(),
                 slug: "task-recovery".to_string(),
                 name: "Task recovery".to_string(),
                 prompt_context: "Keep automatic Task recovery bounded.".to_string(),
@@ -6823,6 +6822,14 @@ time.sleep(30)
         };
         store.create_wave(&wave).await.unwrap();
         store.create_project(&project).await.unwrap();
+        crate::work::wave::project_binding::write_project_binding(
+            database.path(),
+            wave.id(),
+            None,
+            project.plan.id.as_str(),
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
         store.create_task(&task, &pr, None).await.unwrap();
         let work = store
             .work_for_child(&ChildRef::Task(task.id.clone()))

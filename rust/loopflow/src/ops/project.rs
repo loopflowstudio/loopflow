@@ -1,25 +1,19 @@
 use std::path::Path;
-use std::sync::Arc;
 
 use crate::ops::{OpsError, OpsResult};
 use crate::pm::{PmProject, ProjectContent};
-use crate::store::{open_existing_store, SharedStore};
+use crate::store::Store;
 use crate::work::project::Project;
+use crate::work::wave::Wave;
 
 fn project_error(message: impl ToString) -> OpsError {
     OpsError::Message(message.to_string())
 }
 
-async fn project_store() -> OpsResult<SharedStore> {
-    open_existing_store().await.map(Arc::new).ok_or_else(|| {
-        project_error("no Loopflow registry on this machine; start the owning Wave first")
-    })
-}
-
 /// Select by the shared binding, independently of names and other Project statuses.
 pub(crate) fn select_project<'a>(
-    store: &crate::store::Store,
-    wave: &crate::work::wave::Wave,
+    store: &Store,
+    wave: &Wave,
     projects: &'a [PmProject],
 ) -> OpsResult<&'a PmProject> {
     let home = store.sqlite.home_dir().map_err(project_error)?;
@@ -45,10 +39,7 @@ pub(crate) fn select_project<'a>(
     Ok(project)
 }
 
-pub(crate) async fn current_project(
-    store: &crate::store::Store,
-    wave: &crate::work::wave::Wave,
-) -> OpsResult<crate::pm::PmProject> {
+pub(crate) async fn current_project(store: &Store, wave: &Wave) -> OpsResult<crate::pm::PmProject> {
     let snapshot = store
         .pm_snapshot(wave.id())
         .await
@@ -58,19 +49,11 @@ pub(crate) async fn current_project(
 }
 
 pub(crate) async fn resolve_project_for_task(
-    repo: &Path,
-    wave_name: &str,
+    store: &Store,
+    wave: &Wave,
     project_id: &str,
 ) -> OpsResult<Project> {
-    let locator =
-        crate::work::wave::WaveLocator::discover(repo, wave_name).map_err(project_error)?;
-    let store = project_store().await?;
-    let wave = store
-        .get_wave_at(&locator)
-        .await
-        .map_err(project_error)?
-        .ok_or_else(|| project_error("owning Wave is not initialized"))?;
-    let current = current_project(&store, &wave).await?;
+    let current = current_project(store, wave).await?;
     if current.id != project_id {
         return Err(project_error(
             "new Tasks require the Wave's configured Project",

@@ -883,9 +883,11 @@ Reteam's retained compression and earlier check evidence remain at
 `3555375af:scratch/keep-every-wave-ready-for.md`; its full preflight, exact readbacks
 and cancellation-safe acceptance remain required.
 
-Reconciliation October 5: inspected Release’s complete child goal/memory; its
-operation-entry recovery lesson remains applicable. No new product decision or
-acceptance evidence changes steps 4–7. Migration-marked adoption remains distinct
-from ordinary ensure; it does not supply configuration selection.
+Compression October 5: Task registration now uses one runtime, store and resolved
+Wave through selection and insertion. `resolve_project_for_task` borrows that
+store/Wave; the redundant `project_store` opener is deleted. Guard ownership still
+moves into the queued SQLite writer before checkout setup. The operation fixture
+now supplies its required explicit binding. Release’s operation-entry recovery
+lesson still applies; steps 4–7 and configured acceptance remain unfinished.
 
-Checks: network-isolated `cargo nextest run -p loopflow --lib -E 'test(configured_project_admission) | test(registration_returns_accepted_planning) | test(registration_rejects) | test(registration_retains)' --no-fail-fast`: 5 passed (continuation reported an unresolved output-handle leak); `-E 'test(store::tests::)'`: 52 passed. Fmt, all-target Clippy and diff checks passed. Implementation retains operation/CLI fixture migration and ensure/rotation; gate retains leak investigation, CI repair and configured acceptance.
+Checks: network-isolated `cargo nextest run -p loopflow --lib -E 'test(prepared_registration_consumes) | test(configured_project_admission) | test(registration_returns_accepted) | test(registration_retains)' --no-fail-fast`: 5 passed; formatting, all-target Clippy and diff checks passed. Earlier store results and the unresolved output-handle leak remain at `c1f9b6ebbd3de006fe334099301704862c1bafb6:scratch/keep-every-wave-ready-for.md`; gate retains leak investigation, CI repair and configured acceptance.

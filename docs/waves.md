@@ -76,7 +76,8 @@ remains a single skill; whether it should use the VSM Flow is still undecided.
 Each pass reads dated evidence and replies in the invoking conversation. It
 gives every started Task one disposition: moving, acted on and verified,
 waiting on a named person or dependency, paused, or unknown. A started Task
-with Flow steps left and no live worker is continued; unstarted backlog is
+whose Flow stopped or failed is read and its remaining work run fresh; one at
+a workflow stage waits on you; unstarted backlog is
 listed and left for you to select. A no-action result is valid only when every
 started Task already has a disposition. Failed reads and stale provider data remain explicit
 gaps; they cannot justify closing work or treating a Task as idle.
@@ -134,7 +135,7 @@ observes the same statuses on `lf refresh <wave>` or its next normal
 planning refresh. Lost responses are reconciled by stable Project and issue IDs.
 Recheck external reassignments after previewing.
 
-Set the Project's default Flow in its content:
+Set the Project's Task default, a workflow or a Flow, in its content:
 
 ```markdown
 flow: feature
@@ -144,7 +145,10 @@ flow: feature
 - [ ] A new contributor ships a change without an undocumented dependency.
 ```
 
-`lf task run <task>` uses that Flow unless a template argument selects another. Existing
+`lf task run <task>` uses that default unless an argument selects another.
+`lf update-plan --wave <wave> --flow NAME` rewrites only that line; it does not
+check that NAME loads, and `lf flow list` shows a default that names nothing
+as invalid. Existing
 Projects observed before the status-model upgrade retain their identity and
 custom default Flow. The first explicit `lf refresh` or chapter rotation
 converts their old `recommended:` line to `flow:` and marks the recorded current
@@ -380,7 +384,12 @@ lf task run INF-125 incident
 ```
 
 Task Work advances through one active remote branch and PR to `main`. Its
-Project's Flow supplies the default; naming a Flow selects any other template.
+Project's `flow:` supplies the default. When that names a workflow (`feature`,
+`code`, `research`, or a file in `.lf/workflows/`), the Task moves through its
+stages: each `lf task run` takes one edge leaving the current stage and runs
+that edge's Flow, and at a stage the Task waits on you in its conversation.
+See [workflows](authoring.md#workflows). When the default is a plain Flow,
+naming a Flow selects any other template.
 Each launch starts a fresh Flow: one driver process holding the expanded graph
 and the step processes it starts. Every Flow remains history and none is privileged. A finished Flow
 leaves Task Work open until an explicit completion or delivery operation

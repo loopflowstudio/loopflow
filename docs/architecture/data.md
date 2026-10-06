@@ -38,6 +38,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Native starts, outcomes, retries and usage | AgentSession history, correlated to native turn and driving Exec |
 | A Flow's identity, state and step results | Its driver Exec and child step Execs in `execs` |
 | A Flow's name, launched graph and each step's node | FlowExec: `flow_execs` and `flow_exec_steps`, appended by the driver |
+| A Task's workflow and the edges it has taken | `task_workflows` and `task_workflow_traversals`, appended by `lf task run`; position is derived from the traversed Execs |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
 | Credentials and provider-native conversation files | The selected provider account's native Home |
 | Current local liveness | OS process evidence matched to exact recorded PID/start identity |

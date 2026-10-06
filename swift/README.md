@@ -142,15 +142,20 @@ below the outline. Sessions without a Task association are also available under
 **Debug → Sessions → Orphan Sessions** in the repository menu, or `lf session list --orphan`.
 There is no creation opt-out from checkout association. **Task details** opens the description, comments and Run history.
 
-The Task's compact Flow shows interactive stages and inspectable background work.
-Select a current stage to join its exact conversation; select a future stage to
-inspect it. **Detailed Flow** exposes the captured branches and repeats. The header
-uses the shared read: the Flow **Start** would launch (click its name to search
-the catalogue) and, once one has been launched, the most recent Flow's captured
-definition, current occurrence, and each loop's iteration. **Start** always
-launches a fresh Flow, including beside an earlier one, and is disabled with
-Rust's reason when it cannot be used. A launched Flow without a live worker
-reads **Stopped**; there is no Pause until Loopflow can hold a Flow at a boundary.
+A Task on a workflow draws it: stages, the edges between them, and the current
+stage or running edge. At a stage the page reads **Waiting on you** and offers
+one **Start** per edge leaving it; each runs `lf -b task run` as a child of the
+app. Every Start is disabled while an edge runs. An unstarted Task previews its
+Project's default workflow. A default that names nothing reads invalid, with
+Start disabled.
+Each Flow run of the Task is a row that opens to its graph, steps and output
+(`lf flow show ID --sessions --json`); **Detailed Flow** exposes the captured
+branches and repeats. A run whose driver exited early reads **Stopped**. A run
+whose driver was killed has no exit record and keeps reading as running.
+Sessions list **Waiting** first and working ones in a compact group.
+The Wave page's **Task default** sets the Project's default from the catalogue
+(`lf flow list`); **Customize** or **Edit** opens the workflow or Flow source in
+your editor, writing a builtin to `.lf/` first.
 **Session history** under the Flow reads nothing until expanded; it then lists that
 Task's complete recorded input history (`lf usage --days 0 --task ID --json`) with each recorded
 outcome. Session rows show the provider recorded on their Run and a ready summary
@@ -260,7 +265,7 @@ The shared Session projection supplies action labels, unavailable reasons and Wo
 paths to both CLI and Mac; local terminal presence only determines which pane to show.
 Closing or detaching a review never resolves it.
 
-Task FlowSteps run ordinary `lf --mode tui --task <id> <skill>` provider Sessions.
+Flow steps run as ordinary `lf -b skill <name>` commands under their driver.
 The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
 The Session ID targets conversation actions and history lookup. A prepared

@@ -31,8 +31,10 @@ repair or preserve them. Use a fresh directory when its schema changes.
 lf --task EXP-12 skill design       # contribute in the Task's checkout
 lf --wt csv-export : "Add CSV export"
 lf --wave exports : "Review the goal" # add context in the current directory
-lf -b task run EXP-12       # place the Task, run the Project's default Flow
-lf -b task run EXP-12 incident # run a chosen Flow
+lf -b task run EXP-12       # place the Task, run its default
+lf -b task run EXP-12 pursue # take the workflow edge that runs pursue
+lf task run EXP-12 end       # take an edge that runs nothing
+lf --task EXP-12 run incident # run a Flow without moving the Task
 lf task run EXP-12 --reason "take the smaller approach"
 ```
 
@@ -43,6 +45,19 @@ worktree, defaults to its Project's Flow, then runs like
 Flow ends. Background it yourself when you will not wait. It never continues
 an earlier Flow. `--reason` publishes direction to the Task first. Every
 Flow run for a Task is equally its work.
+
+When the Project's default names a workflow, the Task moves through stages.
+Each `task run` takes one edge leaving the current stage: the only one, or the
+one whose Flow you name. At a stage the Task waits on you in its conversation;
+no command approves a stage. A Flow that does not leave the stage is refused
+with the edges that do. `lf task run EXP-12 code` takes up another workflow from
+its start. See [workflows](authoring.md#workflows).
+
+```bash
+lf flow list                   # Flows and workflows, with source and validity
+lf flow customize feature      # write the builtin to .lf/ and print its path
+lf update-plan --wave exports --flow code   # change only the Task default
+```
 
 A Flow whose driver died leaves its Execs as history. No command resumes it. To change direction or recover:
 
@@ -127,10 +142,11 @@ inspection and replay; they do not select these Session actions.
 | Task | `lf task/operate EXP-12` | `lf session ensure --task EXP-12` |
 
 Each conversation is its scope's operator and carries the matching operate
-procedure. It continues every started Task that has Flow steps left and no live
-worker, reads failures before retrying them, and names what waits on you.
-Unstarted backlog stays unstarted. A conversation acts only during a turn:
-between turns, Task workers and any installed background checks run on their own.
+procedure. It leaves running Flows alone, reads a stopped or failed Flow before
+running its remaining work fresh, and names what waits on you, including a Task
+at a workflow stage. Unstarted backlog stays unstarted. A conversation acts
+only during a turn: between turns, running Flows and any installed background
+checks continue on their own.
 An open conversation keeps the instructions it launched with; `replace` it
 after an upgrade.
 
@@ -275,12 +291,15 @@ lf session list --task LOO-358 --interactive all --history
 `lf session list` defaults to unfinished interactive conversations.
 `--waiting` narrows that selection to conversations waiting on you: one that
 asked a question, handed its turn back, or went quiet for two minutes with no
-tool call outstanding. A long silent step can show up there;
+tool call outstanding. A long silent step can show up there. Waiting is read
+from a provider stream `lf` drives: a conversation in a native `claude` or
+`opencode` terminal never shows it.
 `--all` changes repository scope, `--interactive all` includes background work,
 and `--history` includes completed conversations and historical reviews.
 
 Task status lists Sessions, Flows and Execs from the checkout and explicit binds,
-including headless and completed work. No Flow is privileged; the execution
+including headless and completed work. A Task on a workflow also shows its
+stages, edges, position and the edges it has taken. No Flow is privileged; the execution
 line observes the most recently launched one. Live or unresolved work preserves
 the checkout. A stopped Flow is history and blocks nothing.
 

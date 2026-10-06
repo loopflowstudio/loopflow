@@ -129,6 +129,38 @@ steps only: launching one with a `human: true` step is rejected. Finishing
 retains history and chooses no successor; Flow completion alone does not
 complete Task Work.
 
+## Move a Task through its workflow
+
+```yaml
+# .lf/workflows/feature.yaml
+stages:
+  design: review-design      # the skill the Task conversation uses there
+  demo: demo
+edges:
+  - { from: start,  to: design, flow: task-design }
+  - { from: design, to: design, flow: task-design }
+  - { from: design, to: demo,   flow: pursue }
+  - { from: demo,   to: demo,   flow: pursue }
+  - { from: demo,   to: end,    flow: ship }
+```
+
+A workflow is the outer shape of a Task: stages where a person takes part in
+the Task conversation, and edges that each run one Flow. `start` and `end` are
+implicit; only an edge into `end` may run nothing. A Task takes up a workflow
+on its first `lf task run` when its Project's default names one, or when a
+workflow is named. `task_workflows` keeps the graph as it was then, so a later
+edit to the YAML applies to Tasks that take it up afterwards.
+
+`lf task run ISSUE [FLOW]` takes one edge leaving the current stage: the one
+that runs FLOW, or the only one. It appends a traversal naming its own Exec,
+which is the edge Flow's driver, then runs the Flow. Position is derived: on
+the edge while that Exec may still run, at the edge's `to` when it succeeded,
+back at `from` when it stopped or failed. Nothing sets position directly and
+no command approves or completes a stage; feedback in the conversation leads
+it to run the next edge. A second `lf task run` is not refused while an edge
+runs. `lf --task ISSUE run FLOW` runs a Flow without traversing. Reaching `end`
+does not complete the Task.
+
 ## Read each step's result
 
 Each executed skill or operation runs in its own child lf Exec as the plain

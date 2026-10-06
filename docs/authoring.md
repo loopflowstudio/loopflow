@@ -130,7 +130,7 @@ one path runs:
 ```
 
 The `router:` skill reads the available evidence and returns `{"path":"NAME"}`
-under the schema declared by its captured branch. Routing instructions and path descriptions are appended
+as its message asks. Routing instructions and path descriptions are appended
 to its captured prompt. The choice belongs to the selected native turn and takes effect
 when it succeeds; a retry must supply its own candidate. A path
 with no `flow:`, `skill:`, or inline `steps:` (like `silence`) is a clean no-op
@@ -143,8 +143,8 @@ commands; Task binding adds context and Task authority. Task and ordinary Flow
 execution interpret backward edges through the same transition rules.
 
 ```bash
-lf feature
-lf task run DES-123 feature
+lf pursue
+lf task run DES-123 pursue
 ```
 
 A loop is a backward edge in that Flow. `loop: <target>` runs a deciding step
@@ -177,8 +177,8 @@ implementation loop with no human review or outer return edge.
 
 At the deciding occurrence, return `{"decision":"advance","summary":"evidence","reason":null}`
 or `{"decision":"iterate","summary":"next action and proof","reason":null}`, or
-`{"decision":"blocked","summary":null,"reason":"question and evidence"}`. The provider receives
-this schema before generation. The Flow reads the final answer of the turn its
+`{"decision":"blocked","summary":null,"reason":"question and evidence"}`. The contract
+travels in the step's message, not as a provider schema. The Flow reads the final answer of the turn its
 step captured; invalid output gets at most two corrective turns in the same
 conversation, then the Flow fails. A failed turn cannot navigate.
 
@@ -199,6 +199,54 @@ does not choose another Flow; author delivery explicitly.
 before execution and use the same cursor for nested paths and backward edges.
 The implementation and recovery fixtures do not establish live provider/Session
 handoff parity; that still requires a configured end-to-end demonstration.
+
+## Workflows
+
+A workflow is a Task's outer shape: stages where you take part in the Task
+conversation, joined by edges that each run one Flow.
+
+```yaml
+# .lf/workflows/feature.yaml
+stages:
+  design: review-design      # the skill the conversation uses at this stage
+  demo: demo
+edges:
+  - { from: start,  to: design, flow: task-design }
+  - { from: design, to: design, flow: task-design }   # revise the design
+  - { from: design, to: demo,   flow: pursue }
+  - { from: demo,   to: demo,   flow: pursue }        # another pass
+  - { from: demo,   to: end,    flow: ship }          # land
+```
+
+```bash
+lf task run DES-123            # start: the only edge, task-design
+lf task run DES-123 pursue     # at design: build it
+lf task run DES-123 ship       # at demo: land it
+lf task status DES-123         # stage or running edge
+```
+
+`start` and `end` are implicit. An edge runs anything `lf run` accepts, a
+skill included. Only an edge into `end` may omit `flow:`; take it with
+`lf task run ISSUE end`. A Task with no PR is a workflow with no landing edge,
+like builtin `research`. Two edges leaving one stage cannot run the same Flow.
+
+A Task takes up a workflow on its first `lf task run` when its Project's
+default names one, or when you name one. It keeps the graph as it was then.
+The Task is on an edge while that Flow runs, at the edge's target when it
+succeeds, and back where it left when it stops or fails. Nothing else moves
+it: there is no approve or complete command. Give feedback in the Task
+conversation, which is told its stage's skill and the command for each edge
+leaving it. `lf --task ISSUE run FLOW` runs a Flow without moving the Task.
+
+Builtins are `feature` (design, demo, land), `code` (demo, land) and
+`research` (findings, no PR). `lf flow list` shows workflows beside Flows with
+their source; `lf flow customize NAME` writes a builtin to `.lf/workflows/` or
+`.lf/flows/` and prints the path. `.lf/workflows/NAME.yaml` wins over a Flow of
+the same name. An invalid file stays listed with its reason.
+
+A Flow that repeats a step passes it `--steers-after STEER`, so the step
+receives only Task direction newer than its last run. The option works on any
+`lf` run.
 
 ## Goals
 

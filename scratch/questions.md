@@ -130,9 +130,6 @@ The agent's readings of these points, since built, are at
 
 ## Asked of Jack, unanswered; the pass took the default
 
-- **Backgrounding** (answered above): `task create --run/--flow` is deleted;
-  Desktop starts `lf task run` as a child, watches three seconds for a refusal
-  and leaves it running.
 - **Planning refusal** (terminal, moved or removed Task) applies to every Flow
   launch that resolves to a Task. It does not apply to a single skill or an
   interactive conversation in a Task worktree: binding stays allowed for done
@@ -269,6 +266,27 @@ The agent's, October 6, building slice 7. None is confirmed by Jack Heart.
 - **Invalid files** stay listed with their reason and stay editable; Desktop
   rereads the catalog when it becomes the active application, not on a timer.
 - **Not listed:** a skill used as a default, which `lf run` accepts.
+
+## Choices the Docs and website pass made without Jack
+
+The agent's, October 6, building slice 8. None is confirmed by Jack Heart.
+
+- **Operators on a workflow.** Jack's October 5 "a defined Flow with steps
+  left proceeds without asking" had no mechanism after resume was deleted.
+  The operate skills and docs now say: a Task at a stage its last edge
+  reached waits on a person; an edge that stopped or failed is rerun after
+  its log is read; no other edge is taken for the person.
+- **Skills name no Flow by default.** `lf task run <issue> <chosen-flow>`
+  became bare `lf task run <issue>`, with one paragraph on edges, `end`,
+  taking up a workflow and `lf --task <issue> run <flow>` for a Flow that
+  must not move the Task.
+- **"Worker" survives** in skills where it means whoever does the work.
+- **Website.** The flow example is builtin `pursue`; a fifth block shows the
+  `feature` workflow and an odd last block spans the grid. The SVG diagrams
+  are not redrawn.
+- **Architecture map.** TaskWorkflow is its own concept row.
+- **Not written:** a standalone Waiting or Desktop guide; `docs/lf.md`,
+  `conducting.md` and `swift/README.md` carry them.
 
 ## Choices the earlier pass made without Jack
 

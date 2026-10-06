@@ -451,6 +451,9 @@ a:focus-visible,
     grid-template-columns: 1fr 1fr;
     gap: 20px;
 }
+.building-block-item:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+}
 @media (max-width: 768px) {
     .building-blocks-grid {
         grid-template-columns: 1fr;

@@ -16,8 +16,8 @@ print, and keeps no separate copy.
 - **Wave conversations**: ordinary Sessions with Wave context.
 - **Roadmap**: every task across every Wave, each marked waiting, blocked,
   clear, or unknown.
-- **Sessions**: the conversations that are open, including the ones waiting
-  for your review. Each one is a terminal inside the app, where you talk to
+- **Sessions**: the conversations that are open, with the ones waiting
+  on you listed first. Each one is a terminal inside the app, where you talk to
   the AI directly.
 - **Task workspace**: the files a task changed, and what changed in each.
 - **Telemetry**: what the work cost, how the project grew, and whether
@@ -81,8 +81,8 @@ filters inventory; it cannot opt a new Session out of Task membership.
 
 Use Session identity to return to a conversation and its native history. A
 successful provider turn, the command's outcome and the Flow's progress can
-differ: the engine can finish after its driver dies, and a completed command
-can leave a Flow parked at review.
+differ: the engine can finish after its driver dies, and a finished Flow
+leaves its Task at a workflow stage, waiting on you.
 
 `lf mon show` and `lf replay` retain their historical selectors during the conversion.
 Their current fields and reader limitations are recorded in
@@ -156,8 +156,8 @@ lf session connect <id>                   # start or resume the selected convers
 Open a Session in the app or CLI to return to its provider-native conversation.
 Task workspace shells run directly in the app's terminal.
 
-Use the [Sessions lifecycle](../README.md#sessions) to open and explicitly
-resolve every unresolved Session.
+See the [Sessions lifecycle](../README.md#sessions) for opening and replacing
+conversations.
 Use `lf comment` for durable Task direction,
 and `lf --task` for another agent perspective.
 

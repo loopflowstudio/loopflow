@@ -9,6 +9,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - Chapter = shared name of every Wave's In Progress Linear Project; no Chapter table
 - Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the default Flow
 - A Task's work is every Session, Flow and Exec in its checkout, plus explicit binds; no Flow is selected over another
+- TaskWorkflow = a Task's stages (a person, in its conversation) joined by edges (Flows); `lf task run` takes an edge
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
@@ -207,8 +208,13 @@ its checkout, plus explicit binds. Rust owns this shared association for status,
 Desktop navigation, recovery and completion. Membership grants no process or
 Flow authority and never rewrites historical usage. Every Flow naming the Task
 is equally its work; a stopped Flow is history its caller inspects, never a
-position to resume. The Project's Flow supplies the default for a fresh launch;
-explicit Flow selection is allowed.
+position to resume. The Project's `flow:` supplies the default for a fresh
+launch and may name a Flow or a workflow; explicit selection is allowed.
+A TaskWorkflow is the Task's outer shape: stages where a person takes part in
+the Task conversation, joined by edges that each run one Flow. Its record
+captures the graph when the Task takes it up and appends each edge
+`lf task run` sets out on; position is read from those Execs, never stored. It
+executes nothing, and no command approves or completes a stage.
 Taskless execution uses the same driver. A Flow is one driver Exec and the step
 Execs it starts; its id is the driver Exec id. The driver holds the cursor and
 return counts in memory and writes FlowExec, append-only: the Flow's name and
@@ -227,7 +233,9 @@ Current navigation stays Wave → Task and Linear retains past Projects.
 
 Exec is one actual lf process, including direct and agent-issued nested commands.
 AgentSession is one durable agent conversation, interactive or headless; identity,
-name, feedback and native history survive driver replacement. A step's result
+name, feedback and native history survive driver replacement. Product text says
+Session for interactive and Run for headless work. Waiting is the one attention
+state, judged in Rust from a provider stream `lf` owns. A step's result
 is how its process exited; a deciding or routing step also answers through the
 Session turn its Exec captured. Agent outcomes and retries belong in Session
 history; mechanical results are step Exec exits. A Session reaches its Flow

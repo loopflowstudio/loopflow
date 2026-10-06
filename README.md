@@ -106,6 +106,7 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 ```bash
 lf checkout INF-123                               # durable Task Work + worktree, no controller
 lf -b task run INF-123                            # place the Task, then run its Flow here until it ends
+lf task run INF-123 pursue                        # on a workflow: take the edge that runs pursue
 lf comment INF-123 "take the smaller approach"   # post a Linear comment for the Task's running Flow
 lf interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
@@ -165,7 +166,7 @@ lf session bind SESSION --task INF-123
 A Session keeps the conversation's identity, name, feedback and native history
 across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed
-ones. `--all` means all repositories.
+ones, and `--waiting` keeps those waiting on you. `--all` means all repositories.
 
 `lf resume` is short for `lf session resume`. It selects the latest human message
 in this worktree, falling back per Session to its last opening when native input
@@ -180,8 +181,9 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | --- | --- | --- |
 | **Skill** | Gives the agent reusable instructions and context | `.lf/skills/*.md` |
 | **Flow** | Composes agent work and mechanical operations; a run is one driver Exec and the step Execs it starts | `.lf/flows/*.yaml` |
+| **Workflow** | Gives a Task stages, where you take part in its conversation, joined by the Flows between them | `.lf/workflows/*.yaml` |
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `wave/<name>/` |
-| **Project** | Holds one Wave's plan, Tasks, KRs, targets and default Flow | Linear |
+| **Project** | Holds one Wave's plan, Tasks, KRs, targets and Task default | Linear |
 | **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
 | **Task** | Owns concrete work, its checkout, serial PRs and every Flow run for it | Linear and local SQLite |
 | **Exec** | Records one actual lf process and its observed command outcome | Home-local SQLite |

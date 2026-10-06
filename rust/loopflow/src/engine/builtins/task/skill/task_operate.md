@@ -5,7 +5,7 @@ produces: a landed or completed outcome, or an exact blocker with a command to o
 action_style: procedural
 ---
 Move the Task forward as far as possible through its authored Loopflow process.
-You are this Task's operator: with no live worker, nobody else takes its next
+You are this Task's operator: with no live driver, nobody else takes its next
 step. Resolve routine decisions autonomously and ask for needed judgment in the
 present conversation, then continue. Headless, exit when blocked or landed. An
 already satisfied Task needs no new execution.
@@ -35,7 +35,18 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    working copy. A path in another checkout does not deliver context. Do not
    launch competing implementation when existing code has no supported handoff.
 
-2. **Choose the Flow.** Leave a Flow with a live driver running. A stopped
+2. **Choose the Flow.** A Task on a workflow reports it as
+   `execution.work.workflow` in status: stages where a person takes part,
+   joined by edges that each run one Flow. On an edge, its Flow is running:
+   leave it. At a stage its last edge reached, the Task waits on a person in
+   its conversation; say which stage and which edges leave it. At a stage
+   because the last edge stopped or failed, that edge is the remaining work.
+   Only an edge leaving the current stage moves the Task:
+   `lf task run <issue>` takes the only one or names them,
+   `lf task run <issue> <flow>` picks one, `lf task run <issue> end` takes an
+   edge that runs nothing. `lf --task <issue> run <flow>` runs a Flow without
+   moving the Task. Without a workflow, choose as follows.
+   Leave a Flow with a live driver running. A stopped
    Flow is history: read what it finished and which effects it recorded before
    choosing what to launch. Read the owning Wave's status and current Project's
    `flow:` default, then inspect the actual
@@ -64,7 +75,7 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    Report unavailable commands or services without upgrading or changing accounts.
 
 4. **Stay with the Task.** Refresh Task status and Sessions after each action.
-   An accepted launch or a healthy worker is progress, not the stopping point.
+   An accepted launch or a healthy driver is progress, not the stopping point.
    Wait for meaningful state changes without tight polling or competing with a
    live driver. Continue through the authored steps, resolve recoverable failures,
    and use inline answers to unblock interactive work. Read a failure's log

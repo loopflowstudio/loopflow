@@ -61,7 +61,7 @@ Use the appropriate operation:
 
 - **Ship / ship-partial:** use the delivery skill appropriate to the requested
   outcome in the owning checkout. Preserve useful unfinished scope in a Task.
-  Keep existing workers and review gates intact.
+  Keep running Flows and review conversations intact.
 - **Abandon:** `lf task abandon <issue>` retires a Task and its delivery state
   together. For a branch without a Task, `lf pr abandon <branch>` closes its PR
   and removes its checkout and branches. Use `lf task delete <issue>` only when
@@ -106,7 +106,7 @@ put routine progress in this conversation, not Task comments.
 ## Drive work through Waves
 
 Every started, unfinished Task in the repository ends this pass with one
-disposition and its evidence: **moving** (a live worker was observed),
+disposition and its evidence: **moving** (a live driver was observed),
 **acted** (continued, recovered or delivered here, then verified), **waiting on
 a person** (the named review, decision or merge click and its Session or PR),
 **waiting on a dependency or capacity**, **paused** (an explicit hold or
@@ -186,7 +186,7 @@ Wave operator reads its logs.
 ## Launching and advancing work
 
 Inspect whether the requested work already has a Task, prepared context, or
-running worker before filing or launching. Keep the Task title and description
+running Flow before filing or launching. Keep the Task title and description
 focused on the current problem, desired experience, observable acceptance, and
 real constraints. Reconcile changed scope instead of appending amendments.
 Keep current blockers, dependencies, and accepted scope visible in the description.
@@ -204,11 +204,20 @@ BRIEF
 When execution is intended, start the captured Task or reuse an existing one:
 
 ```bash
-lf task run <existing-issue> <chosen-flow>
+lf task run <existing-issue>   # its workflow's next edge, or its Project's Flow
 ```
 
-Stdin becomes the durable Task description; `--directive` supplies worker
+Stdin becomes the durable Task description; `--directive` supplies
 direction and does not replace that brief.
+
+A Project's default may name a workflow: stages where a person takes part
+in the Task conversation, joined by edges that each run one Flow. A Task on a
+workflow takes only an edge leaving its current stage. Bare
+`lf task run <issue>` takes the only one or names the choices,
+`lf task run <issue> <flow>` picks one, and `lf task run <issue> end` takes an
+edge that runs nothing. Naming a workflow (`code`, `feature`, `research`)
+takes it up from its start. `lf --task <issue> run <flow>` runs any Flow
+without moving the Task.
 
 Use the Flow template the user selected; otherwise use the current Linear
 Project's required `flow:` default. Read the actual Flow before describing its
@@ -253,24 +262,24 @@ its maturity, and open questions. Do not invent ownership.
 lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
 lf checkout <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
-lf task run <issue> <chosen-flow>
+lf task run <issue>
 ```
 
 Inspect the current context first: a design already in the Task worktree needs
 no transfer. For a separate source, copy the actual documents and supporting
 files before launch, preserve relative references, and check their contents in
 the destination. A path alone does not supply context. Preparation launches no
-worker. Do not overwrite newer destination work.
+Flow. Do not overwrite newer destination work.
 
 The destination becomes the working design; retain source provenance without
 maintaining competing active copies. Markdown under its recursive `scratch/`
-tree enters worker context; other assets remain on disk. Preserve material
+tree enters each step's context; other assets remain on disk. Preserve material
 needed after scratch cleanup in durable documentation or existing records.
 Do not pipe the design into Task creation: stdin becomes the Task description.
 
 Continue the design already present without treating its draft choices as
 approved. Report the Task link, destination design path, selected Flow, and
-observed launch result. Verify supplied context separately from worker startup.
+observed launch result. Verify supplied context separately from the launch.
 
 If implementation already exists in the source checkout, preserve it and its
 writer. Document transfer does not adopt a checkout; current preparation does
@@ -287,7 +296,7 @@ A Work names a stable Home authority. Placement changes through `lf wave place <
 Use `lf id`, then `lf --wave <wave> wave/operate` locally or
 `lf ssh <home-id> --wave <wave> wave/operate` at its placement. `lf ssh` runs the target's `lf`;
 its SSH route may change without moving Work. Foreground provider accounts can
-be forwarded; durable workers use credentials installed on their Home.
+be forwarded; background Flows use credentials installed on their Home.
 
 Prepare a Task without launching it with `lf checkout <issue> --json`.
 For one bounded contribution use `lf --task <issue> research "<question>"` or
@@ -296,13 +305,14 @@ attributes a skill, inline prompt, or Flow. Attribution resolves this command's
 `--task`, then the checkout's Task, then an ancestor's explicit `LF_AS` declaration.
 Process ancestry supplies no Work attribution. Every attributed contribution
 is equally the Task's work; none claims exclusive ownership. `task run` places
-the Task, then is the same command as `lf --task <issue> run <flow>`.
+the Task, records the workflow edge it takes when the Task has one, then is
+the same command as `lf --task <issue> run <flow>`.
 
 Task scratch Markdown enters each contribution at launch. Give independent
 contributions distinct paths, wait for the artifacts needed, and inspect their
 contents. A bounded contributor leaves edits uncommitted and never claims
 unrelated dirty files. Checkpoint only after the coherent contributions finish.
-`lf task run <issue> <chosen-flow>` returns when its Flow ends; run it with
+`lf task run <issue>` returns when its Flow ends; run it with
 your own background tool for pursuit you will not wait on. Dependent
 work starts as a separate Task with `--stack-on <parent-task>`; the child binds
 to the parent's active PR. Never create another branch for the same Task.

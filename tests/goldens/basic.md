@@ -84,7 +84,7 @@ or `lf roadmap --json`. Do not reconstruct shared state from processes or
 worktrees. Supervision, recovery and placement belong to `repo/operate`,
 `wave/operate` and `task/operate`. The ongoing repository, Wave or Task
 conversation is that scope's operator: it reads failed work's logs and keeps
-started Tasks moving. Task workers and optional scheduled checks run
+started Tasks moving. Running Flows and optional scheduled checks continue
 independently; nothing re-invokes a conversation.
 
 Use `lf screenshot SOURCE -o OUTPUT` for unattended HTML or URL captures;

@@ -242,7 +242,7 @@ mod tests {
             "Keep that core in this Task",
             "lf task create --wave <wave>",
             "lf checkout <issue> --json",
-            "lf task run <issue> <chosen-flow>",
+            "lf task run <issue>",
             "Use the Flow the user selected",
         ] {
             assert!(

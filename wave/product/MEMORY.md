@@ -68,7 +68,7 @@ prose narrating a builtin Flow drifts when its YAML changes: `advance` and
 `launch-plan` described human steps two passes after they were removed. Fake-provider
 suites prove decisions, correction, routing and loop passes; a real provider
 step, a driver killed mid-turn and a populated-store migration remain unproven.
-Every slice through defaults has headless tests only; docs are unbuilt.
+Every slice has headless tests only.
 
 Desktop (October 6, unreviewed by Jack) draws the TaskWorkflow and every Flow
 run from FlowExec, lists Waiting first, and matches no conversation to a Flow
@@ -113,8 +113,8 @@ merge to the person is the branch's choice; Jack did not answer.
 
 Open PR #1439 (LOO-353, `32f42bffe`) changes the contract: `lf task run`
 always starts a fresh Flow, nothing continues a stopped one, reconcile never
-resumes, and review moves into the Task conversation. “A defined Flow proceeds”
-then needs a new mechanism; whichever lands second rewrites the other's prompts.
+resumes, and review moves into the Task conversation. The agent's unreviewed
+replacement: a Task at a workflow stage waits on Jack; a failed edge is rerun.
 
 Limits: the [review](../../docs/reviews/session-operate-prompts.md) holds
 simulated walk-throughs and two read-only model runs. Installed behavior is

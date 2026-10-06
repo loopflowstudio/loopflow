@@ -33,13 +33,13 @@ waiting indefinitely.
 
 Give every started, unfinished Task in the Wave exactly one disposition, with
 its evidence: the first row below that fits. Started is the recorded fact,
-whether or not a worker is alive now. Include Tasks status lists under
+whether or not a driver is alive now. Include Tasks status lists under
 `unavailable_tasks`; they are unknown until read. Unstarted backlog is listed
 as backlog and left alone: starting it is the person's selection.
 
 | Disposition | Evidence and action |
 | --- | --- |
-| moving | A live worker or driver was observed. Leave it alone. A connected conversation or review Session is not a driver. |
+| moving | A live driver was observed. Leave it alone. A connected conversation or review Session is not a driver. |
 | acted | This pass continued, recovered or delivered it through a supported control, then reread status and saw the effect. |
 | waiting on a person | A named review, decision or merge click, with the Session or PR to open. Never completed or approved for them. |
 | waiting on a dependency or capacity | The named Task, PR, check, account or limit. |
@@ -63,7 +63,9 @@ a valid result only when every started Task already holds a disposition above.
   report an unchanged failure instead of repeating it.
 - **A Flow ends where authored.** A finished Flow or published PR does not
   complete the Task. Name what remains and the PR or Task conversation awaiting
-  a decision. Follow the TaskWorkflow's outgoing edges when one is present;
+  a decision. A Task on a workflow (`execution.work.workflow`) at a stage its
+  last edge reached waits on a person there; rerun an edge that stopped or
+  failed with `lf task run <issue> <flow>`, and take no other edge for them;
   do not choose a new direction or arm an unapproved merge.
 - **Reviews stay in the Task conversation.** Surface the Session from
   `lf session list --waiting --json`. Discuss feedback and preserve agreed

@@ -1,9 +1,9 @@
 # Update the workspace automatically when Loopflow data changes (LOO-382)
 
-Status: **stream and the five planning-read slices built, 2026-10-05; not
-shipped, window not re-measured.** Jack Heart requested the Task and made the
-decisions below in design review. After reading the PR walkthrough he set the
-direction in the next section. Open choices are in [questions.md](questions.md).
+Status: **stream, the five planning-read slices and second-round slices 6–9
+built, 2026-10-05; slices 10 and 11 dropped with evidence. Not shipped; the
+window was not re-measured.** Jack Heart requested the Task and made the
+decisions below. Open choices are in [questions.md](questions.md).
 
 ## Simple, fast planning read (direction 2026-10-05)
 
@@ -155,13 +155,30 @@ above, and dropped with its evidence if it turns out not to be a clear win.
    directories, each for its own reader. Found on the way: on a temporary
    volume the checkout's own FSEvents paths never matched (`/private`
    prefix); real checkouts are unaffected and it was left alone.
-10. **One reader per window.** `active` becomes a part of the workspace
-    stream and the separate `monitor active --watch` process is deleted;
-    its native-receipt reader, bounded frames and explicit retry survive.
-11. **A one-shot read does not re-run planning.** An Exec that planning
-    cannot read (finished at once, outside any Task checkout) does not move
-    a revision planning follows, so a file click or comment load in Desktop
-    costs nothing in the reader.
+10. **One reader per window: dropped.** `monitor active --watch` stays its
+    own process. Measured on the copy at load 9–12 (`measure/idle.py`, 30 s):
+    it starts in 0.23 s, idles at 0.2% of a core and holds 25 MB, and a
+    window starts it only on first Monitor demand. Folding it in saves that
+    and one Exec row per window. It costs rewriting the reader's
+    demand-start, explicit-retry and drain-on-Home-change lifecycle in Swift,
+    and moving it from the writable store it opens to the watch's read-only
+    one. Limit: the copy has no `runs/` receipts, so its idle cost on Jack's
+    Home is higher than measured. Not a clear win against a proven reader.
+11. **One-shot reads: dropped.** Measured (`measure/oneshot.py`, load 15):
+    ten `lf session list` beside a running watch caused 20–22 planning
+    readings, about 0.2 s each in the reader, and no frame for reads in a
+    Task checkout (one frame in the run from the main checkout, cause not
+    traced). The rule as planned cannot be written in a trigger: an insert
+    does not know the Exec will finish at once, and Desktop's remaining
+    reads (file, diff, comments) run inside the Task checkout, where a live
+    Exec is a real completion blocker that planning shows. Exempting them
+    needs the store to know a command only reads, which is a change to
+    Infrastructure's Exec model (questions 6 and 9). After slice 9 a window
+    makes these reads only on a click.
+
+Also measured: the workspace reader left alone on the copy uses 1.6% of a
+core and 37 MB (target under 1%). Unprofiled; the 2 s process observation is
+the likely cost.
 
 Not in this round: reading the completion gate's remaining per-Task
 statements in bulk (about 40 ms of a 200 ms reading, in the code that
@@ -169,86 +186,42 @@ decides `lf task complete`; not a clear win), and stored derived rows.
 
 ## Remaining work
 
-Built on the branch: the `store_revisions` migration and coverage test, the
-change waiter, `lf monitor workspace --watch --json` with planning, Sessions,
-Task work, Wave detail, Work activity and process activity parts, the
-unfinished-Exec completion-gate read, and the Desktop cutover with the
-planning, Session, process-activity, Wave-detail and registry timer loops
-deleted. Not yet done:
-
-0. **The demo's first step cannot pass as written.** `lf task create` with
-   no `--run` produces a Task the outline does not list: it shows started
-   Tasks and Tasks with open Sessions only, by Jack Heart's 2026-09-25
-   decision. The new Task appears in its Wave's Task list without a refresh,
-   and in the outline once a Run or Session is recorded. The Task's first
-   acceptance line and that decision conflict; Jack has not chosen
-   (question 22). Found by running the rendered benchmark, not by reading.
-1. **The reader meets the budgets; the window has not been re-measured.**
-   Planning projection 190–200 ms, commit to frame 0.3 s for a Task and
-   0.13 s for a Session (slices above). The rendered benchmark (item 5) was
-   last run before these slices, at 2.3 s and 0.56 s; nobody has rerun it.
-   A first reading is still 4.2–4.6 s. A Session commit that lands behind a
-   planning reading now waits about 0.2 s for it, not 2 s (question 19).
-2. **`active` is still its own process.** `monitor active --watch` was not
-   folded in (question 5's fallback, taken for now); a window runs two readers.
-   Both share one Swift pipe reader, `LocalLineObservation`.
-3. **The explicit one-shot reads survive.** `PodiumModel.refresh`,
+1. **The outline keeps started Tasks only** (Jack Heart, 2026-10-05). A Task
+   created without a Run shows in its Wave's Task list at once and in the
+   outline once a Run or Session is recorded. LOO-382's first acceptance
+   line is not met as written, by that decision.
+2. **The window has not been re-measured.** Reader numbers are in the slices.
+   The rendered benchmark (`desktop_performance.py write-visible`) last ran
+   before slice 1: 3 samples, debug builds, a renamed or created Task about
+   2.3 s warm against 1 s, a Session change 550–600 ms against 500 ms. The
+   20-sample release run and the installed-app demo are gate's and demo's.
+   A development `lf` reads a Home copy only after the draft is applied to
+   the copy by hand.
+3. **`active` is still its own process** (slice 10, dropped). Both readers
+   share one Swift pipe reader, `LocalLineObservation`.
+4. **The explicit one-shot reads survive.** `PodiumModel.refresh`,
    `refreshPlanning`, `refreshSessions`, `refreshProcessActivity` and
    `refreshWorkActivity` still spawn `lf` when no reader is open: session
-   fixtures, and about sixty call sites in four test suites. With a reader open
-   they send a request instead. `roadmapGeneration` and `sessionsGeneration`
-   remain to guard those reads. Moving the suites onto scripted frames deletes
-   both.
-4. **Git-only changes are slower than before.** Checkout contents are re-read
-   at most once a minute and only when planning is read; with no store commit
-   that is every five minutes. The 15 s poll used to show a dirty checkout
-   sooner. Nobody chose this trade.
-5. **Three rendered samples, not twenty.** `desktop_performance.py
-   write-visible` opens one window on a private Home copy through the real
-   reader, commits with `sqlite3`, and times the writer's exit to the row
-   read back from a captured bitmap. One run, debug `lf` and debug app, 3
-   samples: a renamed Task in the outline and a created Task in its Wave's
-   Task list about 2.3 s warm (4.8–4.9 s first) against 1 s; a Session
-   created, renamed or completed 550–600 ms against 500 ms. Each write waited
-   for an idle reader. The 20-sample release run and the installed-app demo
-   are gate's and demo's. A development `lf` reads a Home copy only after the
-   draft migration is applied to the copy by hand; that took 0.19 s on the
-   1.4 GB store.
-6. **Swift coverage gaps.** A scripted feed proves in-place updates, an older
-   sequence ignored, a pre-write frame ignored, another repository's rows
-   ignored, `refresh` waiting for its answer, reader end then recovery,
+   fixtures and about sixty call sites in four test suites. With a reader
+   open they send a request. `roadmapGeneration` and `sessionsGeneration`
+   guard those reads. Moving the suites onto scripted frames deletes both.
+5. **Swift coverage gaps.** A scripted feed proves in-place updates, an
+   older sequence ignored, a pre-write frame ignored, another repository's
+   rows ignored, `refresh` waiting for its answer, reader end then recovery,
    another Home's frame dropping the previous Home's Sessions and selection,
-   and a Task completed elsewhere leaving the default Task list while staying
-   under Completed and selected. Not covered: UI-test modes, which no longer
-   re-read Sessions every 2 s. As built, another Home's frame is applied
-   after the drop, not ignored; the plan's "drop a frame whose home differs"
-   was never what the code did.
-7. **`WavesView`** (Portfolio and repository windows) now follows the stream
-   through its own model; unexercised beyond compiling.
-8. **One timer loop still spawns `lf`.** While a Task's file comparison is
-   shown, `TaskFilesView` re-reads its change list every 10 s (LOO-327; Git
-   metadata of a linked worktree can sit outside the watched checkout). It is
-   not a store read and was left alone, so "0 spawns from refresh paths" holds
-   only for a window not showing a comparison. Nobody decided whether it
-   belongs in this Task.
-9. **Rust coverage against "Done when".** Covered now: each Session fact
-   read from `session_events` (Flow membership, a finished turn's reply
-   attention, an interrupted driver) plus rename, provider, ready and
-   completion, each shown after a second connection's write; a store created
-   after the reader started; a store that cannot be opened reported as
-   unavailable instead of empty; the change waiter re-arming on a removed and
-   recreated `-wal`. A reader holds the log open, so that last case is tested
-   on the waiter, not through the binary. Still short: the transcript test
-   writes its 2,000 lines in about a second, not ten. It leaves `activity`
-   out on purpose: that part observes this machine's processes every 2 s and
-   reads nothing a transcript line can change. Task binding is not walked; it
-   is an `agent_sessions` update, which has no predicate.
-10. **Token totals lag.** A Wave's Session history shows tokens, and usage
-    rows move no revision. The totals are read again at the next displayed
-    change (a turn finishing is one) or the Wave part's five-minute clock.
-    Counting usage would re-read planning about 10,700 more times a day
-    (7,710 usage lines and 3,021 usage events in the last 24 h). Nobody
-    chose this trade (question 18).
+   and a Task completed elsewhere staying under Completed and selected. Not
+   covered: UI-test modes, which read Sessions once; `WavesView` following
+   the stream beyond compiling; slice 9 in a window.
+6. **Rust coverage.** `workspace_watch` covers a Task committed elsewhere,
+   bursts, each displayed Session fact, a store created later, a store that
+   cannot be opened, a steady writer, a paused reader, scope, a checkout
+   changed on disk, and usage read only by Wave detail. Short of the
+   original list: the transcript test writes its 2,000 lines in about a
+   second, not ten; Task binding is not walked; Work activity and Wave
+   history have no per-fact test.
+7. **The copy's draft is hand-applied.** The upgrade path through `lf` with
+   the final draft, including the `usage` domain, is covered by the
+   migration tests only.
 
 ## Decisions (Jack Heart, 2026-10-05 design review)
 
@@ -269,69 +242,27 @@ work succeeded but looks missing until something refreshes. The same staleness
 applies to renames, completion, Session binding and Flow progress, whether the
 change came from Desktop, `lf`, a background worker or another window.
 
-## What the system does today (measured 2026-10-05, installed `lf` 0.13.3, Jack's Home)
+## What the system did before (measured 2026-10-05, installed `lf` 0.13.3)
 
-Desktop has no change observation for planning or Sessions. `PodiumModel`
-polls by spawning `lf`:
+Five loops in `PodiumModel` and its views spawned `lf` every 2–30 s. The
+full table and findings are at commit `018083656`. What still shapes the
+design:
 
-| Loop | Where | Cadence | Command |
-| --- | --- | --- | --- |
-| Planning | `PodiumModel.keepPlanningCurrent` | 15 s | `roadmap --all --json`, `wave list` |
-| Sessions | `PodiumModel.keepSessionsCurrent` | 2 s | `session list --json --page` |
-| Process activity | `PodiumView` `.task` | 2 s | `monitor ps --json` |
-| Work activity | after each planning read | 15 s | `monitor activity` |
-| Wave detail | `WaveDetailPane` | 30 s | `wave status` |
-
-One streaming reader already exists: `lf monitor active --watch --json`
-(`runs_watch.rs`, `LocalActiveRunsObservation.swift`) — newline frames, stdin
-requests, latest-frame backpressure, FSEvents invalidation.
-
-Findings that shape the design:
-
-1. **Reads are far slower than their cadence.** `roadmap --all` 18.6–22.7 s
-   (627 KB), `session list` 7.5–7.8 s, `wave list` 3.3 s, `home id` 2.3 s,
-   `--version` 0.06 s. A new Task is visible 20–40 s after commit at best. A
-   notification that merely triggers the same subprocess read would not help.
-2. **Polling is the largest writer in the store.** Every `lf` read records an
-   Exec. Of 65,043 Exec rows written in the last 24 h, ~63,000 are Desktop's
-   own polls (`session list` 25,836; `monitor ps` 22,764; `wave list` 4,788;
-   `roadmap --all` 4,781; `monitor activity` 4,772). `execs` holds 212,476
-   rows; the database is 1.1 GB.
-3. **That write volume is what makes the read slow.** A 12 s sample of
-   `roadmap --all` puts ~70% of command time in `wave_tasks →
-   snapshot_task_detail → task_completion_gate → associated_work_blockers →
-   SqliteStore::task_work → read_exec`: one query per Task whose
-   `exec_ids` selector joins `execs` on checkout path with no usable index, so
-   each of ~340 Tasks scans the whole table. The read gets slower every day
-   Desktop is open. Process admission (`journal::admit_process`) adds roughly
-   1 s to every invocation.
-4. **A naive "watch the database, then re-read" loops forever**, because the
-   read is itself a commit.
-5. **Cross-process commits are cheaply observable** (probe, WAL mode, separate
-   writer processes): a kqueue vnode watch on `-wal` saw 20/20 commits; a
-   200-row transaction produced one delivery; idle produced none; reading
-   `data_version` plus a revision row costs 3.5 µs; a rolled-back write does
-   not move a trigger-maintained revision. `data_version` signals change but
-   does not count commits. A truncating checkpoint produced no write event, and
-   the `-wal` file can be removed when the last connection closes, so the watch
-   must re-arm from the directory. FSEvents latency for the same writes was not
-   probed.
-6. The roadmap projection also reads Git and the filesystem per Task
-   (worktree blockers). Those are not store commits.
-7. **Table-level change domains would not filter anything while agents work.**
-   Last 24 h on Jack's Home (read-only count, 2026-10-05): 168,336
-   `session_events`, of which 164,192 are provider transcript lines
-   (`kind='observed'`, receipt key `…:events.jsonl:…`) and 3,021 are `usage`.
-   Transcript lines arrived in 610 of the day's 1,440 minutes, up to 2,095 in
-   one minute. Everything else in the table — lifecycle, manifest, terminal and
-   driver-exit facts — is 1,338 rows, at most 26 in a minute. `flow_events`:
-   214. Execs not written by Desktop's polls: 2,067. `kind` alone does not
-   separate the two: lifecycle facts are also `observed`.
+- Reads were slower than their cadence (`roadmap --all` 18.6–22.7 s), and
+  about 63,000 of 65,043 daily Exec rows were those polls. That volume made
+  the read slow: one unindexed Exec scan per Task.
+- A reader that commits wakes itself.
+- A kqueue watch on `-wal` saw 20/20 commits from other processes; a
+  truncating checkpoint produced no event and the file can be removed, so
+  the watch re-arms and a 1 s re-read of the revisions is the authority.
+- Table-level domains filter nothing while agents work: 164,192 of 168,336
+  daily `session_events` were transcript lines. `kind` alone does not
+  separate them from lifecycle facts.
 
 ## Demo
 
-As written below, the first step fails for a reason outside the stream
-(remaining work 0): the row appears in the Wave's Task list, not the outline.
+The first step shows the row in the Wave's Task list, not the outline
+(remaining work 1).
 
 With Desktop open on the Loopflow repository, sidebar scrolled, a draft typed in
 a Session:
@@ -357,12 +288,12 @@ A `store_revisions(domain TEXT PRIMARY KEY, revision INTEGER NOT NULL)` table,
 bumped by SQLite triggers on insert/update/delete. Domains: `planning` (waves,
 projects, tasks, task PRs, PM snapshots, metrics), `sessions` (agent sessions and
 the Session events that change a displayed row), `flows` (flow sessions and
-events), `execs`.
+events), `execs`, and `usage` (slice 8).
 
 A domain follows what a write can change on screen, not which table it lands
-in. Provider transcript lines and `usage` events bump nothing (finding 7): no
-part of this stream displays them, and counting them would invalidate every
-part for ten hours a day. The `session_events` trigger therefore carries a
+in. Provider transcript lines bump nothing: no part of this stream displays
+them, and counting them would invalidate every part for ten hours a day.
+Usage bumps only `usage`. The `session_events` trigger therefore carries a
 `WHEN` predicate. As built it exempts kind `usage`, and kind `observed` with
 `:events.jsonl:` in the receipt key whose evidence type is one the summary
 readers already skip (`activity`, `handoff`, `user_input`, `conversation`,
@@ -401,13 +332,13 @@ Parts and what invalidates them:
 
 | Part | Body (existing wire DTO) | Recomputed when |
 | --- | --- | --- |
-| `planning` | `RoadmapSnapshot` + Waves | `planning`, `flows`, `sessions`, `execs`; 5 min clock |
+| `planning` | `RoadmapSnapshot` + Waves | `planning`, `flows`, `sessions`, `execs`; a changed checkout; 5 min clock |
 | `sessions` | Session records for the scoped repository | `sessions`, `flows`, `planning` |
 | `task` | `TaskWork` for the selected Task | any domain |
-| `wave` | `WaveDetailSnapshot` for the shown Wave | any domain; 5 min clock |
+| `wave` | `WaveDetailSnapshot` for the shown Wave | any domain, `usage` at most every 10 s; a changed checkout; 5 min clock |
 | `work_activity` | `WorkActivitySnapshot` for the selection | any domain |
 | `activity` | `ActivitySnapshot` | `execs`; 2 s clock for liveness |
-| `active` | `ActiveSessionsSnapshot` | not built: still `monitor active --watch` |
+| `active` | `ActiveSessionsSnapshot` | dropped: stays `monitor active --watch` |
 
 Bodies are the existing DTOs unchanged, so Swift keeps its decoders and
 LOO-376's saved wire text keeps working. A part is emitted only when its bytes
@@ -509,8 +440,7 @@ spawn, Exec-row and no-polling rows are structural and are not negotiable.
 
 **Exclusions.** No Linear observation in Desktop (Jack's decision above): a
 change made in Linear appears when a sync commits it, and then by the same
-path as any other commit. Git-only changes (commits, dirty files) keep their existing slower
-paths. Remote-Home streaming over SSH is not proven here. LOO-380 owns
+path as any other commit. Remote-Home streaming over SSH is not proven here. LOO-380 owns
 reconciling stale live records. No change to process admission cost for
 one-shot commands. iOS is unchanged.
 
@@ -524,9 +454,9 @@ one-shot commands. iOS is unchanged.
   bodies of `refresh`, `refreshPlanning`, `refreshSessions`,
   `refreshProcessActivity`, `refreshWorkActivity` (remaining work 3). Do not
   extend them.
-- Still to delete: the separate `monitor active --watch` process, once
-  `active` is a part of the workspace stream. Its native-receipt reader,
-  bounded frames and explicit-retry behavior survive.
+- Deleted in the second round: the 10 s comparison loop in `TaskFilesView`.
+- Kept by decision of slice 10: the separate `monitor active --watch`
+  process.
 - Must survive: saved-workspace launch (LOO-376), page-wise Session history on
   request, `updateTaskDirective`'s "absent after accept" error, fixture mode.
 
@@ -554,10 +484,16 @@ falls short of it, the gap is in Remaining work.
   first exemption was too wide. The heartbeat projection counts guard the
   second and are tested. The trigger now parses each inserted payload's JSON;
   its cost on large transcript lines is unmeasured.
-- **`execs` invalidates planning.** Cheap once Desktop's polls are gone (2,067
-  a day). One landing means no interval in which a surviving poll loop bumps
-  it. Desktop's remaining one-shot reads (file clicks, comments, the 10 s
-  comparison loop) each still write an Exec and re-run it (question 9).
+- **`execs` invalidates planning.** Every `lf` command anywhere costs two
+  planning readings of about 0.2 s in each open window's reader and no
+  frame (slice 11, dropped). 2,067 non-poll Execs a day on Jack's Home.
+- **A checkout change the watch misses** waits for the clocks: Git answers
+  stand for a minute and planning is read without a commit every five. The
+  watch covers checkouts that existed when the planning revision last
+  moved; a main checkout that is a Task's worktree also reports every
+  write under its `.git`, which costs Git commands and no reading.
+- **Two triggers now parse each inserted Session event's JSON**, one for
+  `sessions` and one for `usage`. Unmeasured on large transcript lines.
 - **The planning reading grows with unfinished Tasks.** 190–200 ms for 140
   Tasks, because the gate still runs statements per Task (slice 3). It fits
   the budget on Jack's store today; nothing bounds it.
@@ -568,25 +504,12 @@ falls short of it, the gap is in Remaining work.
 
 ## Check results
 
-- 2026-10-05 realign: plan, questions and memory only; no code changed, no
-  check rerun.
-- 2026-10-05 compress: `cargo test -p loopflow --lib -- lf::commands::waves
-  engine::worktrees` 35/35; clippy `--all-targets -D warnings` clean.
-- 2026-10-05 slices 2–5: `cargo test -p loopflow --test workspace_watch`
-  8/8; `--test dto_fixtures` 19/19; `--lib -- lf::commands::waves` 14/14;
-  `--lib -- workspace_watch` 3/3; clippy `--all-targets -D warnings` clean;
-  `swift test` on the eight affected suites 88/88. Gate owns the rest.
-- 2026-10-05 realign, after merging main (#1447): `swift test --filter
-  PodiumModelStreamTests` 6/6. No code changed; Rust not rerun.
-- 2026-10-05 `desktop_performance.py write-visible --samples 3` on a Home
-  copy: complete, 15/15.
-- 2026-10-05 compress: `cargo test -p loopflow --test workspace_watch` 8/8;
-  `--lib -- workspace_watch` 2/2; clippy `--all-targets -D warnings` clean.
-- 2026-10-05 implement, second pass: `cargo test -p loopflow --test
-  workspace_watch` 8/8; `--lib -- store_revisions store::changes` 6/6; clippy
-  `--all-targets -D warnings` clean; `swift test --filter
-  PodiumModelStreamTests` 6/6; `swift build --build-tests` compiles the
-  benchmark; `check_migrations.py` pass; `ruff check` clean. Earlier passes:
-  `dto_fixtures` 19/19, focused Swift 53/53. `status_tests`
+Earlier passes are at commit `018083656`.
+
+- 2026-10-05 second round: `cargo test -p loopflow --test workspace_watch`
+  10/10; `--test dto_fixtures` 19/19; `--lib -- revisions workspace_watch
+  store_revisions` 10/10; `--lib -- lf::commands::waves` 14/14; clippy
+  `--all-targets -D warnings` clean; `check_migrations.py` pass; `swift
+  test --filter "TaskFiles|DTOFixture"` pass. `status_tests`
   `previous_release_merge_request_migrates…` needs
-  `materialize_rust_tests.py`, left to gate.
+  `materialize_rust_tests.py`, left to gate. Gate owns the rest.

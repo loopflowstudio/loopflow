@@ -420,11 +420,11 @@ impl Reader {
             self.watched_at = Some(revisions.planning);
         }
         let changed = self.checkouts.take(Instant::now());
-        // Every one is asked: `any` would stop at the first that differs.
-        let differs = changed
-            .iter()
-            .map(|worktree| crate::engine::git::reread_retained(worktree))
-            .fold(false, |any, differs| any || differs);
+        // Every one is asked again, not only up to the first that differs.
+        let mut differs = false;
+        for worktree in &changed {
+            differs |= crate::engine::git::reread_retained(worktree);
+        }
         if differs {
             for part in [Part::Planning, Part::Wave] {
                 self.parts.entry(part).or_default().stale = true;

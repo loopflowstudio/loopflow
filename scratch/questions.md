@@ -1,161 +1,82 @@
 # Open questions and assumptions (LOO-382)
 
-Recorded 2026-10-05 during kickoff. Nobody has confirmed these.
+Questions resolved or overtaken before the second round are at commit
+`018083656`; their numbers are kept so older notes still resolve.
 
-1. **Store revisions are a shared-store change.** The plan adds a
-   `store_revisions` table and triggers. Infrastructure owns execution and
-   store semantics; the Task asks for coordination. Assumed acceptable as one
-   draft migration on this branch. Unresolved: whether Infrastructure wants to
-   own the interface or its domain list.
-2. **Roadmap read cost has no owning Task.** Wave memory says so (LOO-375 owns
-   `wt list` only). This plan takes the completion-gate Exec scan because the
-   latency acceptance cannot be met without it. Other read costs stay unowned.
-3. **Resolved (Jack Heart, 2026-10-05).** Desktop reacts to the store only;
-   Linear arrives through sync. Unowned: nothing schedules that sync for
-   Desktop's benefit today. Jack named a schedule, Desktop-triggered syncs and
-   webhooks as options, preferring webhooks. No Task filed.
-4. **Resolved (Jack Heart, 2026-10-05).** The budgets stand as targets pursued
-   for about an hour; a miss ships with measured numbers and a follow-up Task.
-5. **Folding `monitor active --watch` into the workspace stream** reshapes a
-   proven reader. Chosen to end with one process per window; if it destabilizes
-   active-Session discovery, the fallback is to leave that reader separate and
-   say so, not to keep both paths for the same part. As built the fallback
-   was taken: `active` is still its own process, without evidence that folding
-   it in destabilizes anything.
-6. **Per-read Exec recording.** ~63,000 of 65,043 daily Exec rows come from
-   Desktop polls. This plan removes the polls; it does not change whether
-   one-shot read commands record an Exec. That stays a question for
-   Infrastructure.
-7. **Desktop's Create button uses `task create --run`.** The row will appear
-   from the commit regardless of the run. Whether Desktop should also offer
+## Decided by Jack Heart, 2026-10-05
+
+- **3, 30.** Desktop reacts to the store only; Linear arrives through sync.
+  Nothing schedules that sync for Desktop. Jack prefers webhooks; no Task.
+- **4.** The latency budgets are targets pursued for about an hour; a miss
+  ships with measured numbers.
+- **8.** One landing.
+- **22, 29.** A Task that has not started stays out of the outline for now.
+  LOO-382's first acceptance line is not met as written.
+- **15, 30.** No follow-up Tasks.
+- **31.** Questions 5, 9, 12, 13, 17, 18 and 26 became the second round.
+
+## Unconfirmed
+
+1. **Store revisions are a shared-store change.** One draft migration adds
+   `store_revisions`, its triggers and three indexes (`execs_unfinished`,
+   `session_events_exec`, `flow_events_exec`). The second round added a fifth
+   domain, `usage`. Infrastructure has not seen any of it.
+2. **Read costs outside the planning reading have no owning Task** (LOO-375
+   owns `wt list` only).
+6. **Per-read Exec recording.** Whether a one-shot read should record an
+   Exec at all is Infrastructure's. Slice 11 was dropped on it (question 37).
+7. **Desktop's Create uses `task create --run`.** Whether it should offer
    create-without-run is a product choice outside this plan.
-
-Added 2026-10-05 in design review. Still unconfirmed.
-
-8. **Resolved (Jack Heart, 2026-10-05).** One landing.
-9. **Should a one-shot read bump `execs` at all?** Clicking a file or loading
-   comments in Desktop runs `lf`, writes an Exec and, as designed, re-runs the
-   planning projection. Harmless at 2,067 a day; it is also the reason
-   question 8 has a cost. Narrowing the `execs` domain to Execs the planning
-   conditions can read (those inside a Task checkout, or unfinished) would
-   remove it. Not designed here.
-10. **Narrowed in implementation, 2026-10-05.** The first predicate exempted
-    every `:events.jsonl:` observation, including provider attempts that Work
-    activity and Wave history read. It now exempts only the types the summary
-    readers skip, plus usage. `session list` fields are tested; Work activity
-    and Wave history are not.
-
-Added 2026-10-05 in implementation. Nobody has confirmed these.
-
-11. **Three indexes joined the shared store** beside `store_revisions`:
-    `execs_unfinished`, `session_events_exec`, `flow_events_exec`. They serve
-    the completion gate. Infrastructure has not seen them (question 1).
-12. **The watch reuses Git answers**: repository layout for ten minutes,
-    checkout contents for one. Only the watch process does; one-shot commands
-    ask Git every time. This is what makes a planning reading 2 s instead of
-    7.5 s, and it is why Git-only changes show later than they did.
-13. **Planning is re-read every five minutes without a commit**, down from the
-    design's sketch of a slow clock. Shorter costs a 2 s reading each time.
-14. **Process activity is read every 2 s inside the watch**, as the deleted
-    loop did by spawning `lf`. It observes every provider process on the
-    machine, so its frames keep arriving while agents work. Idle CPU of the
-    watch is unmeasured.
-15. **The follow-up Task for the latency miss is not filed.** Jack asked for
-    one when the budget is missed; filing belongs with whoever lands this.
-16. **Session fixtures read once.** UI-test modes without a reader used to
-    re-read Sessions every 2 s; they now read at launch and after local
-    actions. No UI test was run.
-
-Added 2026-10-05 in realign. Nobody has confirmed these.
-
-17. **The Task-files comparison still re-reads every 10 s through `lf`** while
-    it is shown (LOO-327). Each read writes an Exec and re-runs planning in
-    the watch. Whether this Task removes that loop, or question 9 narrows the
-    `execs` domain instead, is undecided.
-18. **Token totals in a Wave's Session history lag** until the next displayed
-    change or five minutes, because usage moves no revision. A `usage` domain
-    that invalidates only the Wave part would fix it at the cost of re-reading
-    that part every few seconds while agents work. Not built.
-19. **One loop reads the parts in turn.** A Session commit that lands while
-    planning is being read waits about 2 s for it on Jack's store. Reading
-    Sessions on its own connection would remove the wait. Not built; it is
-    the same gap as the planning reading being 2 s.
-20. **The write-to-visible benchmark writes rows with `sqlite3`**, cloning a
-    current Task's planning item, because `lf task create` needs Linear. It
-    measures the reader and the window, not `lf`'s own write path.
+10. **The transcript predicate** exempts only the types the summary readers
+    skip. `session list` fields are tested; Work activity and Wave history
+    are not.
+14. **Process activity is read every 2 s inside the watch.** Measured in the
+    second round: the reader left alone uses 1.6% of a core and 37 MB on the
+    copy, over the 1% target. Not profiled.
+16. **Session fixtures read once.** UI-test modes read Sessions at launch and
+    after local actions. No UI test was run.
+20. **The write-to-visible benchmark writes rows with `sqlite3`**, because
+    `lf task create` needs Linear. It measures the reader and the window, not
+    `lf`'s own write path.
 21. **A frame from another Home is applied after dropping the old Home's
-    content**, where the plan said it would be ignored. The reader exits on a
-    Home change, so one reader never sends two Homes; the drop is what a
-    reopened reader needs.
-22. **A Task created without a Run never reaches the left pane.** The outline
-    lists a Task only when work on it has started or it has an open Session
-    (`WorkspaceTask.inWorkingSet`; Jack Heart accepted "started Tasks only"
-    on 2026-09-25). LOO-382 asks for a new Task to appear in the left pane
-    "without an execution-start prerequisite", and its demo creates one with
-    no `--run`. Both cannot hold. The stream delivers the Task: it shows in
-    its Wave's Task list at once. Whether the outline should also list
-    unstarted Tasks, or only new ones, is Jack's to decide; nothing was
-    changed. Desktop's own Create uses `--run`, so that Task appears once
-    its Run is recorded.
-
-Added 2026-10-05 after Jack Heart read the PR walkthrough.
-
-23. **Direction (Jack Heart, 2026-10-05): seeing which Waves and Tasks
-    are current is a basic part of the UX, and the architecture should make
-    it very simple and fast.** Two principles: move each thing to its right
-    owner, Swift or the database; build on the performant, scalable
-    architecture from the start. The database serves the Loopflow UX overall.
-    Measured since: the list is slow because of one per-Task query and
-    cold Git, not because it carries detail (plan, "Simple, fast planning
-    read"). **Chosen without Jack's confirmation:** keep the wire and Swift
-    types, read in bulk, store no derived state and add no change log. Jack
-    said "i think we want it in the db" about derived state; that is not
-    built. He also said not to over-index on a keyed Swift store.
-    Jack added: "this db's only purpose really is to serve this UX." Read as:
-    display-shaped rows are the store's primary tables, not a cache beside
-    them. The store also holds execution authority (Flow position, claims,
-    landing locks); how those relate to display rows is not worked out.
-24. **Built: a failing part backs off**, 1 s doubling to 60 s. The cap is a
-    guess. A commit or a request still reads the part at once, so a part
-    that fails while agents commit is read as often as a healthy one.
-
-Added 2026-10-05 building the planning-read slices. Nobody has confirmed these.
-
-25. **The planning reading still runs statements per unfinished Task**, so
-    the plan's rule is met for Exec membership only. Stopped there because
-    the projection is 190–200 ms against 300 ms, and the remaining reads are
-    the completion rule `lf task complete` also uses. Reading them in bulk
-    is the next step when the reading stops fitting; whether to do it now,
-    or to store derived rows as Jack described (question 23), is his call.
-26. **A first reading is 4.2–4.6 s and was left there.** About 1.7 s is Git
-    asked about 32 existing checkouts in turn; asking at once was not built.
-    0.6 s is a foreign-key check a development build runs on every store
-    open, twice per start; whether an installed build pays it was not
-    checked.
-27. **`unresolved_execution` is a required field on the Task condition.**
-    Workspace text saved by an earlier build lacks it, so the first launch
-    after upgrading should show no saved planning until the reader answers.
-    Expected from LOO-376's rule that saved text goes through the live
-    decoder; not exercised.
+    content**, where the plan said it would be ignored.
+23, 32. **Derived state in the database.** Jack said "i think we want it in
+    the db", then that SQLite reads should not be a major problem. Taken as:
+    nothing derived is stored while reads meet their budget. Not confirmed
+    in those words.
+24. **A failing part backs off** 1 s doubling to 60 s. The cap is a guess.
+25, 33. **The planning reading still runs statements per unfinished Task**
+    (about 40 ms of 200 ms). Left alone as not a clear win; Jack did not
+    follow the question as asked.
+27. **`unresolved_execution` is a required field.** Workspace text saved by
+    an earlier build should show no saved planning until the reader answers.
+    Not exercised.
 28. **The outline's "has open Sessions" and "started" tests stay in Swift.**
-    Slice 5 moved only the finished-Task rule. Moving the rest means Rust
-    joining Sessions into the planning part.
 
-Decided by Jack Heart, 2026-10-05, after the first five slices.
+## Added in the second round, 2026-10-05. Nobody has confirmed these.
 
-29. **Question 22 resolved:** a Task that has not started stays out of the
-    outline for now. LOO-382's first acceptance line is not met as written
-    and is not being met.
-30. **Question 15 resolved:** no follow-up Task is needed. The same answer
-    covered the unscheduled Linear sync in question 3.
-31. **Questions 5, 9, 12, 13, 17, 18 and 26 become work**: the plan's second
-    round, slices 6 to 11.
-32. **Question 23, unconfirmed reading:** Jack said SQLite reads should not
-    be a major problem and that the question confused him. Taken as: nothing
-    derived needs storing while reads meet their budget. Not confirmed in
-    those words.
-33. **Question 25 left alone**, by the rule Jack gave for optimizing: about
-    40 ms is not a clear, meaningful win against the risk. Jack did not
-    follow the question as asked; not confirmed.
-34. **Stale above:** question 19's 2 s wait and the 2 s readings in 12 and 13
-    are about 200 ms since slice 1.
+35. **Slice 10 dropped: `active` stays its own process.** Jack listed it
+    among the taboos to remove. The measurement (0.2% of a core, 25 MB,
+    started only on Monitor demand) is in the plan; the copy has no `runs/`
+    receipts, so the real idle cost is higher. If one process per window
+    matters for a reason other than cost, this is his to reverse.
+36. **A checkout an agent builds in is asked about every 3 s** (four Git
+    commands), and a change shows in about 2 s. Both numbers are guesses
+    that measured well once. CPU of the watch during a build is unmeasured.
+37. **Slice 11 dropped: every `lf` command still re-runs planning in the
+    reader**, twice, without a frame. Exempting a read needs the store to
+    know a command only reads. That is the same change as question 6.
+38. **The watch's Git reads set `GIT_OPTIONAL_LOCKS=0`**, so the reader never
+    takes a checkout's index lock from an agent. One-shot commands are
+    unchanged.
+39. **Token totals may be 10 s old**, and only Wave detail follows usage.
+    Whether another surface shows a total that still lags was not surveyed.
+40. **Slice 9 watches in Swift, slice 7 in Rust.** Two watchers of the same
+    two directories per shown Task, each feeding its own reader. Folding the
+    comparison into the stream as a part would remove one and the `lf` spawn
+    per change. Not built.
+41. **The first reading asks Git about eight checkouts at once.** The number
+    is a guess; it was not varied.
+42. **FSEvents paths on a temporary volume never match the Swift checkout
+    root** (`/private` prefix). Left alone: real checkouts are unaffected
+    and open documents are covered by vnode sources.

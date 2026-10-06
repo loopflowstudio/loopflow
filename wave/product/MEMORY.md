@@ -19,23 +19,26 @@ and a miss ships with numbers and a follow-up Task.
   re-read everything for ten hours a day.
 - A reading restates when it was taken in several fields. Comparing bytes
   without removing them sends a frame for every reading.
-- Git facts are not commits. The watch reuses Git answers, so a dirty
-  checkout shows later than the 15 s poll showed it. Nobody chose that trade.
+- Git facts are not commits. Jack (2026-10-05): show them within seconds,
+  by watching, not a tighter clock. A linked worktree commits without
+  touching a file in its checkout: watch its Git metadata directory too.
 - A receipt key does not say what a row is. Provider attempts share
   `:events.jsonl:` with transcript lines; exempting the key silenced about
-  1,270 displayed rows a day. Exempt the types readers skip. Usage still
-  moves nothing, so token totals lag: nobody chose that either.
+  1,270 displayed rows a day. Exempt the types readers skip. Usage moves
+  its own revision, which only Wave detail reads, at most every 10 s.
 - An unreadable store must not read empty.
 - On the branch, unshipped: one `lf monitor workspace --watch` per window
-  replaces the 2–30 s loops; the Task-files comparison keeps its 10 s read.
-  Reader on a copy of Jack's store (release, 5 samples): commit to frame
-  0.3 s for a Task, 0.13 s for a Session. The window was not re-measured.
+  replaces every timer loop. Reader on a copy of Jack's store: commit to
+  frame 0.3 s for a Task, 0.13 s for a Session; a file written in a
+  checkout about 2 s. The window was not re-measured.
+- Measure before merging readers: the second reader per window, listed as
+  a taboo, used 0.2% of a core and 25 MB alone. It stayed.
 - Jack (2026-10-05): which Waves and Tasks are current must be simple and
   fast, and he wants derived state in the database. None is stored: sampling
   put 83% of the read in one per-Task statement, and reading it in bulk met
   300 ms. Sample first.
-- The outline lists started Tasks only (2026-09-25), so a Task created with
-  no Run never reaches the left pane. LOO-382 asks that it does. Unresolved.
+- The outline lists started Tasks only (2026-09-25). LOO-382 asked that a
+  new Task appear there; Jack kept the rule for now (2026-10-05).
 
 ## Session and operate pairs (2026-10-05)
 
@@ -1083,9 +1086,6 @@ to close during this reconciliation.
   the right style + behavior — adapt them.
 - **`loopflow-dev.py` builds from the worktree it runs in.** Repository
   discovery collapses linked worktrees to the canonical main checkout.
-- **Interactive provider clients resume natively.** Reuse `SessionRecord` and
-  `lf session open`; do not restore lfd attachment or a tmux presentation path.
-- Review for invented fields that duplicate existing ones (e.g. `RunStatus`).
 - `cargo test -p loopflow dto_fixtures` filters by test name; use
   `--test dto_fixtures` to run that integration file. Headless runs set
   `LF_RUN_ID`; Rust tests asserting generated journal ids / branch-derived ingest

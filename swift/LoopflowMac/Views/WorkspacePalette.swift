@@ -42,7 +42,8 @@ extension PodiumModel {
                               key: session.title))
         }
         for flow in flowCatalog.value ?? [] {
-            rows.append(.init(id: .flow(flow.name), title: flow.name, detail: "Flow template", key: flow.name))
+            rows.append(.init(id: .flow(flow.name), title: flow.name,
+                              detail: flow.kind == .workflow ? "Workflow" : "Flow template", key: flow.name))
         }
         if let selection, selection.kind == .task, let found = task(id: selection.id) {
             let flowIsVisible: Bool
@@ -234,6 +235,8 @@ struct FlowCatalogInspector: View {
             Text(entry?.name ?? "Flow unavailable").font(Typography.sectionTitle(26))
             if let graph = entry?.graph, let template = entry?.template {
                 FlowTemplateView(graph: graph, template: template, navigation: navigation)
+            } else if let workflow = entry?.workflow {
+                WorkflowGraphRow(stages: workflow.stages, edges: workflow.edges, current: nil, running: nil)
             } else { Text(entry?.unavailable ?? "Refresh the Flow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)

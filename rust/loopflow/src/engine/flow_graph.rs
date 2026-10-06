@@ -16,6 +16,7 @@ use std::path::Path;
 
 use crate::engine::execution::{ExecutionCursor, NestedCursor};
 use crate::engine::flow::ConcreteStep;
+use crate::engine::workflow::{self, Workflow};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowGraph {
@@ -119,20 +120,38 @@ fn template_items(
         .collect()
 }
 
-/// One selectable Flow and the topology it would pin if started now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CatalogKind {
+    Flow,
+    Workflow,
+}
+
+/// One Flow or workflow a Task can run, as it would be captured if started now.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowCatalogEntry {
     pub name: String,
-    /// `None` when the definition cannot be loaded or compiled.
+    pub kind: CatalogKind,
+    /// The repository file that defines it; `None` for a builtin.
+    pub source: Option<String>,
+    /// A Flow's topology; `None` for a workflow or an unusable definition.
     pub graph: Option<FlowGraph>,
     pub template: Option<FlowTemplate>,
-    /// Why the definition is unusable; set exactly when `graph` is `None`.
+    /// A workflow's stages and edges; `None` for a Flow or an unusable definition.
+    pub workflow: Option<Workflow>,
+    /// Why the definition is unusable; set exactly when it has no topology.
     pub unavailable: Option<String>,
 }
 
-/// Every Flow available in `repo`, each compiled through the shared loader.
+/// Every Flow and workflow available in `repo`, each read through the shared
+/// loader. A file that does not load stays listed with the reason.
 pub fn flow_catalog(repo: &Path) -> Vec<FlowCatalogEntry> {
-    crate::engine::available_flow_names(repo)
+    let source = |path: Option<std::path::PathBuf>| {
+        let path = path?;
+        let relative = path.strip_prefix(repo).unwrap_or(&path);
+        Some(relative.to_string_lossy().into_owned())
+    };
+    let flows = crate::engine::available_flow_names(repo)
         .into_iter()
         .map(|name| {
             let compiled = crate::engine::load_flow(&name, repo)
@@ -150,22 +169,39 @@ pub fn flow_catalog(repo: &Path) -> Vec<FlowCatalogEntry> {
                         template,
                     ))
                 });
-            match compiled {
-                Ok((graph, template)) => FlowCatalogEntry {
-                    name,
-                    graph: Some(graph),
-                    template: Some(template),
-                    unavailable: None,
-                },
-                Err(reason) => FlowCatalogEntry {
-                    name,
-                    graph: None,
-                    template: None,
-                    unavailable: Some(reason),
-                },
+            let (topology, unavailable) = match compiled {
+                Ok(topology) => (Some(topology), None),
+                Err(reason) => (None, Some(reason)),
+            };
+            let (graph, template) = topology.unzip();
+            FlowCatalogEntry {
+                source: source(crate::engine::flow::find_flow_source_path(&name, repo)),
+                name,
+                kind: CatalogKind::Flow,
+                graph,
+                template,
+                workflow: None,
+                unavailable,
             }
-        })
-        .collect()
+        });
+    let workflows = workflow::available_workflow_names(repo)
+        .into_iter()
+        .map(|name| {
+            let (workflow, unavailable) = match workflow::load_workflow(&name, repo) {
+                Ok(workflow) => (workflow, None),
+                Err(error) => (None, Some(error.to_string())),
+            };
+            FlowCatalogEntry {
+                source: source(workflow::workflow_path(&name, repo)),
+                name,
+                kind: CatalogKind::Workflow,
+                graph: None,
+                template: None,
+                workflow,
+                unavailable,
+            }
+        });
+    flows.chain(workflows).collect()
 }
 
 /// Participation stages and bounded references to the captured automated routes.

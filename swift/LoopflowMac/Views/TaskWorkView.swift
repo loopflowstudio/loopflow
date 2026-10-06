@@ -19,17 +19,10 @@ struct TaskWorkflowView: View {
                 Text(workflow.name).font(Typography.code(12)).foregroundStyle(palette.textSecondary)
             }
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: Spacing.sm) {
-                        ForEach(["start"] + workflow.stages.map(\.name) + ["end"], id: \.self) { stage in
-                            stageChip(stage)
-                            ForEach(workflow.edges(from: stage), id: \.index) { index, edge in
-                                edgeLabel(edge, running: workflow.running?.index == index)
-                                    .accessibilityIdentifier("task-workflow-edge-\(index)")
-                            }
-                        }
-                    }
-                }
+                WorkflowGraphRow(
+                    stages: workflow.stages, edges: workflow.edges,
+                    current: { if case .stage(let stage) = workflow.position { stage } else { nil } }(),
+                    running: workflow.running?.index)
                 Text(position)
                     .font(Typography.body(13))
                     .foregroundStyle(palette.textSecondary)
@@ -81,20 +74,34 @@ struct TaskWorkflowView: View {
             return "Running \(edge.flow ?? "edge") · \(edge.from) to \(edge.to)"
         }
     }
+}
 
-    private func stageChip(_ stage: String) -> some View {
-        let current = workflow.position == .stage(stage)
-        return WorkspaceChip(text: stage, tone: current ? .human : .neutral)
-            .accessibilityIdentifier("task-workflow-stage-\(stage)")
-            .accessibilityValue(current ? "Current" : "")
-    }
+/// A workflow's stages in authored order, each followed by the edges leaving it.
+struct WorkflowGraphRow: View {
+    let stages: [TaskWorkflow.Stage]
+    let edges: [TaskWorkflow.Edge]
+    /// The stage a Task waits at, and the edge it is running, when a Task has taken the workflow up.
+    let current: String?
+    let running: Int?
+    @Environment(\.palette) private var palette
 
-    private func edgeLabel(_ edge: TaskWorkflow.Edge, running: Bool) -> some View {
-        let text = "→ \(edge.flow ?? "no Flow") → \(edge.to)"
-        return Text(text)
-            .font(Typography.code(11))
-            .foregroundStyle(running ? WorkspaceTone.running.ink : palette.textTertiary)
-            .accessibilityValue(running ? "Running" : "")
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Spacing.sm) {
+                ForEach(["start"] + stages.map(\.name) + ["end"], id: \.self) { stage in
+                    WorkspaceChip(text: stage, tone: current == stage ? .human : .neutral)
+                        .accessibilityIdentifier("task-workflow-stage-\(stage)")
+                        .accessibilityValue(current == stage ? "Current" : "")
+                    ForEach(Array(edges.enumerated()).filter { $0.element.from == stage }, id: \.offset) { index, edge in
+                        Text("→ \(edge.flow ?? "no Flow") → \(edge.to)")
+                            .font(Typography.code(11))
+                            .foregroundStyle(running == index ? WorkspaceTone.running.ink : palette.textTertiary)
+                            .accessibilityValue(running == index ? "Running" : "")
+                            .accessibilityIdentifier("task-workflow-edge-\(index)")
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -327,6 +327,8 @@ See [Homes and processes](architecture/homes.md) and
 ```bash
 lf wave status infra --json
 lf update-plan --wave infra --plan plan.json
+lf update-plan --wave infra --flow research    # only the Task default
+lf flow customize research                     # .lf/workflows/research.yaml, written from the builtin
 ```
 
 `plan.json` contains the complete current plan:

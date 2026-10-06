@@ -65,34 +65,51 @@ pub fn new_chapter(repo: &Path, name: &str, dry_run: bool) -> OpsResult<ChapterR
         .block_on(rotate(repo, name, dry_run))
 }
 
-pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) -> OpsResult<()> {
-    content.validate().map_err(error)?;
-    if content.flow.trim().is_empty() {
-        return Err(error("Project content requires a nonempty flow: line"));
-    }
+/// What `lf wave update-plan` writes to the current chapter's Project.
+#[derive(Debug)]
+pub enum PlanChange {
+    Replace(ProjectContent),
+    /// Only the default Flow or workflow; KRs and targets stay as they are.
+    Flow(String),
+}
+
+pub fn update_plan(repo: &Path, wave: Option<&str>, change: PlanChange) -> OpsResult<()> {
     let wave =
         crate::work::wave::context::resolve_managed_wave_sync(Some(repo), wave).map_err(error)?;
     tokio::runtime::Runtime::new()
         .map_err(error)?
-        .block_on(async {
-            let _lock = rotation_lock(&wave).await?;
-            super::metrics::validate_chapter_targets(&wave, &content.metric_targets)
-                .map_err(error)?;
-            let ctx = resolve_context(repo, wave.slug()).await?;
-            let projects = checked_projects(repo, &ctx, wave.slug()).await?;
-            let project = select_current(wave.slug(), &projects)?;
-            let provider = ctx
-                .client
-                .project_ownership(&project.id)
-                .await
-                .map_err(error)?;
-            ctx.client
-                .update_project(&provider.id, &provider.name, content)
-                .await
-                .map_err(error)?;
-            refresh_pm_snapshot(repo, wave.slug(), &ctx).await?;
-            Ok(())
-        })
+        .block_on(write_plan(repo, &wave, change))
+}
+
+async fn write_plan(repo: &Path, wave: &Wave, change: PlanChange) -> OpsResult<()> {
+    let _lock = rotation_lock(wave).await?;
+    let ctx = resolve_context(repo, wave.slug()).await?;
+    let projects = checked_projects(repo, &ctx, wave.slug()).await?;
+    let project = select_current(wave.slug(), &projects)?;
+    let provider = ctx
+        .client
+        .project_ownership(&project.id)
+        .await
+        .map_err(error)?;
+    let content = match change {
+        PlanChange::Replace(content) => content,
+        PlanChange::Flow(flow) => ProjectContent {
+            metric_targets: provider.metric_targets.clone(),
+            flow,
+            krs: provider.krs.clone(),
+        },
+    };
+    content.validate().map_err(error)?;
+    if content.flow.trim().is_empty() {
+        return Err(error("Project content requires a nonempty flow: line"));
+    }
+    super::metrics::validate_chapter_targets(wave, &content.metric_targets).map_err(error)?;
+    ctx.client
+        .update_project(&provider.id, &provider.name, &content)
+        .await
+        .map_err(error)?;
+    refresh_pm_snapshot(repo, wave.slug(), &ctx).await?;
+    Ok(())
 }
 
 pub(crate) fn select_current(wave: &str, projects: &[PmProject]) -> OpsResult<PmProject> {

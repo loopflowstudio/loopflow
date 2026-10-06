@@ -1,5 +1,7 @@
 {
   "name": "study",
+  "kind": "flow",
+  "source": null,
   "graph": {
     "name": "study",
     "steps": [
@@ -277,5 +279,6 @@
       }
     ]
   },
-  "unavailable": null
+  "unavailable": null,
+  "workflow": null
 }

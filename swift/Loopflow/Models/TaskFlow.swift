@@ -226,14 +226,35 @@ public struct TaskFlowSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-/// One selectable Flow and the topology it would capture if started now.
+/// One Flow or workflow a Task can run, as it would be captured if started now.
 public struct FlowCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
+    public enum Kind: String, Decodable, Sendable { case flow, workflow }
+
     public let name: String
+    public let kind: Kind
+    /// The repository file that defines it; `nil` for a builtin.
+    public let source: String?
     public let graph: FlowGraph?
     public let template: FlowTemplate?
+    public let workflow: WorkflowDefinition?
+    /// Why the definition cannot be used. Its file stays listed.
     public let unavailable: String?
 
-    public var id: String { name }
+    public var id: String { "\(kind.rawValue)/\(name)" }
+}
+
+/// An authored workflow before any Task has taken it up.
+public struct WorkflowDefinition: Decodable, Sendable, Hashable {
+    public let name: String
+    public let stages: [TaskWorkflow.Stage]
+    public let edges: [TaskWorkflow.Edge]
+}
+
+extension Array where Element == FlowCatalogEntry {
+    /// What `lf task run ISSUE <name>` would take up: a workflow wins over a Flow.
+    public func named(_ name: String) -> FlowCatalogEntry? {
+        first { $0.name == name && $0.kind == .workflow } ?? first { $0.name == name }
+    }
 }
 
 /// Formatting only: order and nesting are supplied by Rust's captured definition.

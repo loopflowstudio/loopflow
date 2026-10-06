@@ -933,6 +933,34 @@ final class PodiumModel {
         flowCatalogReadings[key] = reading(from: result, lastGood: previous)
     }
 
+    /// Why a Wave's last default or source change was refused, by Wave.
+    private(set) var defaultFlowErrors: [String: String] = [:]
+
+    /// Make `name` the default for the Wave's current chapter, then reread planning.
+    func setDefaultFlow(_ name: String, wave: WaveSnapshot) async {
+        do {
+            try await query.setDefaultFlow(name, wave: wave.name, cwd: WaveOrigin.resolve(wave.repo))
+            defaultFlowErrors[wave.id] = nil
+            await refresh()
+        } catch {
+            defaultFlowErrors[wave.id] = error.localizedDescription
+        }
+    }
+
+    /// The repository file to edit for a Flow or workflow. A builtin gets its
+    /// `.lf/` file here; the catalog is reread so the entry names it.
+    func definitionSource(_ entry: FlowCatalogEntry, wave: WaveSnapshot) async -> URL? {
+        do {
+            let path = try await query.customizeDefinition(entry.name, cwd: repoPath)
+            defaultFlowErrors[wave.id] = nil
+            await loadFlowCatalog(force: true)
+            return URL(fileURLWithPath: path)
+        } catch {
+            defaultFlowErrors[wave.id] = error.localizedDescription
+            return nil
+        }
+    }
+
     /// Launch a fresh Flow for the Task, then refresh the shared reading.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.

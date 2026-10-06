@@ -13,7 +13,7 @@ use loopflow::lf::{
     Cli, Commands, FlowCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
 };
 
-use loopflow::ops::chapter::update_plan;
+use loopflow::ops::chapter::{update_plan, PlanChange};
 use loopflow::ops::task_execution::TaskExecutionState;
 
 #[derive(Clone, Default)]
@@ -825,9 +825,15 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         WaveCommand::Place { .. } | WaveCommand::Rename { .. } => {
             loopflow::lf::commands::placement::wave(repo, command)
         }
-        WaveCommand::UpdatePlan { wave, plan } => {
-            let content = serde_json::from_slice(&std::fs::read(plan)?)?;
-            update_plan(repo, wave.as_deref(), &content)?;
+        WaveCommand::UpdatePlan { wave, plan, flow } => {
+            let plan = match (plan, flow) {
+                (Some(plan), _) => {
+                    PlanChange::Replace(serde_json::from_slice(&std::fs::read(plan)?)?)
+                }
+                (None, Some(flow)) => PlanChange::Flow(flow.clone()),
+                (None, None) => unreachable!("clap requires --plan or --flow"),
+            };
+            update_plan(repo, wave.as_deref(), plan)?;
             Ok(())
         }
     }

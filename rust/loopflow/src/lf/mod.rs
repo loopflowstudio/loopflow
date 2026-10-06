@@ -495,6 +495,9 @@ pub enum FlowCommand {
         #[arg(long)]
         sessions: bool,
     },
+    /// Print the repository file that defines a Flow or workflow, creating
+    /// it from the builtin when the repository has none
+    Customize { name: String },
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -693,8 +696,12 @@ pub enum WaveCommand {
     UpdatePlan {
         #[arg(short = 'w', long)]
         wave: Option<String>,
-        #[arg(long)]
-        plan: std::path::PathBuf,
+        /// The complete plan as JSON
+        #[arg(long, required_unless_present = "flow")]
+        plan: Option<std::path::PathBuf>,
+        /// Change only the default Flow or workflow, keeping KRs and targets
+        #[arg(long, conflicts_with = "plan")]
+        flow: Option<String>,
     },
 }
 

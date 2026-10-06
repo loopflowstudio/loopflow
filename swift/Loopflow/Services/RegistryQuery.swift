@@ -192,6 +192,17 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([FlowCatalogEntry].self, from: stdout)
     }
 
+    /// The repository file that defines a Flow or workflow, written from the
+    /// builtin when the repository has none.
+    public func customizeDefinition(_ name: String, cwd: String?) async throws -> String {
+        try await run(["flow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Change the Wave's current chapter default, keeping its KRs and targets.
+    public func setDefaultFlow(_ name: String, wave: String, cwd: String?) async throws {
+        _ = try await run(["wave", "update-plan", "--wave", wave, "--flow", name], cwd)
+    }
+
     /// Run a fresh Flow for the Task headless, placing it when needed. Without
     /// `flow`, Rust runs the Project default.
     public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {

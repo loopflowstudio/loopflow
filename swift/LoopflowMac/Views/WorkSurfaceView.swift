@@ -146,18 +146,12 @@ struct WorkSurfaceView: View {
                 }
 
                 if let name = roadmap.currentProject?.flow {
-                    section {
-                        WorkspaceSectionHeading("Flow · \(name)")
-                        if let entry = model.flowCatalog.value?.first(where: { $0.name == name }),
-                           let graph = entry.graph, let template = entry.template {
-                            FlowTemplateView(graph: graph, template: template, navigation: model.navigation)
-                        } else {
-                            Text(model.flowCatalog.value?.first(where: { $0.name == name })?.unavailable
-                                 ?? model.flowCatalog.errorMessage ?? "Flow template unavailable")
-                                .font(Typography.caption())
+                    section { WaveDefaultFlowView(model: model, wave: roadmap.wave, name: name) }
+                        .task { await model.loadFlowCatalog() }
+                        // Coming back from the editor: reread, so a saved mistake shows as invalid.
+                        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                            Task { await model.loadFlowCatalog(force: true) }
                         }
-                    }
-                    .task { await model.loadFlowCatalog() }
                 }
 
                 switch roadmap.tasks {
@@ -719,6 +713,76 @@ struct TaskDirectiveEditor: View {
         .foregroundStyle(palette.text)
         .background(palette.background)
         .interactiveDismissDisabled(isSaving)
+    }
+}
+/// The Wave's default for a Task's first `lf task run`: which workflow or Flow
+/// it names, what that draws, and the file that defines it.
+struct WaveDefaultFlowView: View {
+    let model: PodiumModel
+    let wave: WaveSnapshot
+    let name: String
+    @Environment(\.palette) private var palette
+
+    private var catalog: [FlowCatalogEntry] { model.flowCatalog.value ?? [] }
+    private var entry: FlowCatalogEntry? { catalog.named(name) }
+
+    /// Workflows first: they are what a Task is meant to be started on.
+    private var choices: [FlowCatalogEntry] {
+        catalog.filter { $0.kind == .workflow } + catalog.filter { $0.kind == .flow }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            WorkspaceSectionHeading(title: "Task default") {
+                Menu(name) {
+                    ForEach(choices) { choice in
+                        Button(choice.unavailable == nil ? choice.name : "\(choice.name) (invalid)") {
+                            Task { await model.setDefaultFlow(choice.name, wave: wave) }
+                        }
+                        .disabled(choice.unavailable != nil || choice.id == entry?.id)
+                        .accessibilityIdentifier("wave-default-option-\(choice.id)")
+                    }
+                }
+                .font(Typography.code(12))
+                .fixedSize()
+                .accessibilityIdentifier("wave-default-menu")
+                if let entry {
+                    // Editing a builtin first writes its `.lf/` file, so the button says so.
+                    Button(entry.source == nil ? "Customize" : "Edit") {
+                        Task {
+                            if let url = await model.definitionSource(entry, wave: wave) { NSWorkspace.shared.open(url) }
+                        }
+                    }
+                    .buttonStyle(WorkspaceOutlineButtonStyle())
+                    .help(entry.source ?? "Write this builtin to .lf/ and open it")
+                    .accessibilityIdentifier("wave-default-edit")
+                }
+            }
+            Text(entry?.source ?? (entry == nil ? "" : "builtin \(entry?.kind.rawValue ?? "")"))
+                .font(Typography.code(11)).foregroundStyle(palette.textTertiary)
+                .accessibilityIdentifier("wave-default-source")
+            if let workflow = entry?.workflow {
+                WorkflowGraphRow(stages: workflow.stages, edges: workflow.edges, current: nil, running: nil)
+            } else if let graph = entry?.graph, let template = entry?.template {
+                FlowTemplateView(graph: graph, template: template, navigation: model.navigation)
+            } else {
+                Text(entry?.unavailable.map { "\(name) is invalid: \($0)" }
+                     ?? model.flowCatalog.errorMessage
+                     ?? (model.flowCatalog.isLoading ? "Reading Flows…" : "\(name) names no workflow or Flow here"))
+                    .font(Typography.caption())
+                    .foregroundStyle(Color.statusWarning)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("wave-default-invalid")
+            }
+            if let error = model.defaultFlowErrors[wave.id] {
+                Text(error)
+                    .font(Typography.body(12))
+                    .foregroundStyle(WorkspaceTone.blocked.ink)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("wave-default-error")
+            }
+        }
+        .accessibilityIdentifier("wave-default")
     }
 }
 #endif

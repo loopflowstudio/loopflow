@@ -1179,7 +1179,8 @@ Replace the current chapter's KRs, targets, and Flow recommendation
 | Argument | What it does |
 |---|---|
 | `--wave / -w` | wave |
-| `--plan` | plan |
+| `--plan` | The complete plan as JSON |
+| `--flow` | Change only the default Flow or workflow, keeping KRs and targets |
 | `--help / -h` | Print help |
 
 ## lf task
@@ -1528,6 +1529,15 @@ Inspect an authored flow, or one that ran
 | `<name>` | name |
 | `--json` | json Default: false. |
 | `--sessions` | sessions Default: false. |
+| `--help / -h` | Print help |
+
+## lf flow customize
+
+Print the repository file that defines a Flow or workflow, creating it from the builtin when the repository has none
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
 | `--help / -h` | Print help |
 
 ## lf skill

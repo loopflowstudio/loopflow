@@ -222,7 +222,9 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
         Commands::Help { .. }
             | Commands::List { .. }
             | Commands::Flow {
-                cmd: FlowCommand::List { .. } | FlowCommand::Show { .. }
+                cmd: FlowCommand::List { .. }
+                    | FlowCommand::Show { .. }
+                    | FlowCommand::Customize { .. }
             }
     ) {
         return None;
@@ -248,6 +250,12 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 anyhow::ensure!(!json, "--json requires --sessions for flow show");
                 crate::lf::commands::flow::show(name, &repo)?;
             }
+            Commands::Flow {
+                cmd: FlowCommand::Customize { name },
+            } => println!(
+                "{}",
+                crate::engine::workflow::customize(name, &repo)?.display()
+            ),
             _ => unreachable!("inspection command selected above"),
         }
         Ok(())

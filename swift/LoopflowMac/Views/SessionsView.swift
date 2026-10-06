@@ -592,7 +592,7 @@ struct SessionsContentView: View {
         )) {
             switch navigation.palette {
             case .flow(let name):
-                FlowCatalogInspector(entry: model.flowCatalog.value?.first { $0.name == name }, navigation: navigation)
+                FlowCatalogInspector(entry: model.flowCatalog.value?.named(name), navigation: navigation)
             case .search:
                 WorkspacePalette(model: model, activate: navigate)
             case nil:

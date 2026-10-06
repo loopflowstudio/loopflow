@@ -115,6 +115,7 @@ The agent's choices here are listed in [questions.md](questions.md) under
   column, workflow listing and authored-edge type removed): the same two
   commands, `dto_fixtures` 18 and all-target Clippy pass.
 
-Desktop draws the workflow and starts its edges (slice 6). Not built: a
-take-over command (open choice 2); a workflow listing or preview; workflow defaults in Wave settings and source editing (slice 7); docs
+Desktop draws the workflow and starts its edges (slice 6); the catalog lists
+workflows, and the Wave page sets the default and opens sources (slice 7). Not built: a
+take-over command (open choice 2); docs
 (slice 8).

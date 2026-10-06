@@ -219,76 +219,56 @@ ones most likely to matter in review:
   workflow tables missing from the map (docs slice). Five lib tests fail in a
   full parallel `--lib` run and pass alone.
 
-## Choices the Desktop pass made without Jack
+## Choices the Desktop and Waiting passes made without Jack
 
-The agent's, October 6, building slice 6. None is confirmed by Jack Heart.
+The agent's, October 6, slices 5–6; none is confirmed by Jack Heart. The full
+lists are at `574858a7c:scratch/questions.md` under each pass's heading. The
+ones most likely to matter in review:
 
-- **How Desktop reads the primary.** `task_primary` (true/false) on every
-  listed Session; `primary_scope` stays null for it, so grouping and Ctrl-C
-  are unchanged. Entering a Task with empty panes opens its primary, else a
-  waiting conversation, else the first open one. Desktop never calls
-  `session ensure`, so reading picks nothing.
-- **Wire removals.** Session `kind`, state `waiting` and `TaskSession.kind`
-  are gone, with the `agent_sessions.kind` column (dropped in the one draft).
-  A row reads Waiting from `attention`; headless work is labelled Run.
-- **Flow review participation is deleted** in Desktop: no conversation is
-  matched to a Flow step, so a stage button only opens the step's detail.
-  `human` on a Flow node is still on the wire, unproduced by builtins.
-- **Every Flow run** is a row under Work that opens to `lf flow show ID
-  --sessions --json`: the launched graph, where it stands, each step's Exec
-  and exit. Step text output stays in the Task's History section; the run
-  view does not embed transcripts.
-- **`current` draws as running.** A killed driver has no exit record, so its
-  run keeps reading as running.
-- **Refresh.** The shown Task's work and its opened unfinished runs reload on
-  the existing 15-second planning cadence: one more `lf task status` per tick.
-- **Workflow Start.** One button per edge leaving the stage the Task waits
-  at; none can be pressed while an edge runs, since a second Start would put
-  two drivers in the checkout. `lf` itself still allows it.
-- **An unstarted workflow has no preview.** Nothing lists workflows, so a
-  Task whose default is `feature` shows one line and an enabled Start until
-  its first run records the workflow. Slice 7 needs that listing anyway.
-- **The Flow picker stays** on a workflow Task; a Flow that leaves no edge is
-  refused by `lf` and the refusal is shown.
-- **Sessions on the Task page.** A Waiting group of full rows, then one-line
-  rows for the rest; closed conversations are not listed there.
-- **Outside the slice.** `ConversationLaunchTests` still expected `--mode`;
-  it now expects `--interactive`. `ActiveSessionsLifetimeTests replacement`
-  fails in a full parallel `swift test` and passes alone; whether it failed
-  before this pass is unchecked.
-
-## Choices the Waiting pass made without Jack
-
-The agent's, October 6, building slice 5. None is confirmed by Jack Heart.
-
-- **Who knows.** Only a driver that owns a provider's stream: every headless
-  Run, and Codex through `lf`'s app-server connection. A conversation typed
-  into a native `claude` or `opencode` terminal has no stream `lf` reads, so
-  it never shows Waiting. The earlier Reply reading had the same blind spot.
-  Open for Jack: whether to read Claude's transcript file, which his
+- **Waiting comes only from a stream `lf` owns:** every headless Run, and
+  Codex through the app-server. A native `claude` or `opencode` terminal never
+  shows Waiting. Open for Jack: reading Claude's transcript file, which his
   stream-json-only rule may exclude.
-- **One reading per Session.** `session_activity`, replaced in place by the
-  current driver: last heard, open tool calls, unanswered questions, handed
-  back. Unchanged readings are saved every 5 seconds, so quiet is measured
-  within that. It is the one mutable row here; an append-only log of stream
-  messages was the alternative.
-- **The rule is SQL,** used for both the row's `attention` and `--waiting`,
-  so the filter precedes paging. Waiting: an unanswered question; or no open
-  tool call and either an interactive turn handed back or 120 seconds of
-  quiet. A reading from a driver that has let go, or none, is not Waiting.
-- **Headless Runs** can be Waiting through a question or quiet, never
-  through a finished turn. `--waiting` still lists interactive conversations
-  unless `--interactive all` is given.
-- **A failed turn** is not a hand-back; it waits only after quiet.
-- **A killed driver** leaves its reading in force: the Session reads Waiting
-  after 120 seconds until another driver takes it.
-- **Codex approvals count as questions** when a person's client must answer
-  them. OpenCode permissions do not: its driver answers them.
-- **Wire.** `attention` is `"waiting"` or null; the Desktop pass removed
-  Session state `waiting` and kind `flow`. Text `lf session list` and `lf monitor` print waiting from `attention`.
-- **A failed save of a reading is logged,** never a failed turn.
-- **Removed with reviews:** a closed review refusing a driver, review rows
-  blocking CI repair and landing repair, and the index the Reply reading used.
+- **One mutable reading per Session** (`session_activity`), saved at most
+  every 5 seconds; one SQL rule judges the row and `--waiting`: an unanswered
+  question, or no open tool call and either an interactive hand-back or 120
+  seconds of quiet. A killed driver's reading stays in force.
+- **Codex approvals count as questions;** OpenCode permissions do not.
+- **Wire.** `attention` is `"waiting"` or null; Session `kind`, state
+  `waiting`, `TaskSession.kind` and the `agent_sessions.kind` column are
+  gone; `task_primary` marks a Task's primary on every listed Session.
+- **Desktop matches no conversation to a Flow step** and never calls
+  `session ensure`. Each Flow run is a row that opens to `lf flow show ID
+  --sessions --json`; `current` draws as running, so a killed driver's run
+  reads as running forever.
+- **Workflow Start** is one button per edge leaving the waiting stage, all
+  disabled while an edge runs; `lf` itself still allows a second run.
+- **Seen, not fixed.** `ActiveSessionsLifetimeTests replacement` fails in a
+  full parallel `swift test` and passes alone.
+
+## Choices the Defaults and editing pass made without Jack
+
+The agent's, October 6, building slice 7. None is confirmed by Jack Heart.
+
+- **"Wave settings" is the Wave page's Task default section;** Desktop has no
+  settings screen. Its menu sets the default, and lists Flows after workflows
+  because a Project default may still be a plain Flow.
+- **One catalog.** `lf flow list --json` lists workflows beside Flows: each
+  entry gains `kind`, `source` (the repository file, null for a builtin) and
+  `workflow` (stages and edges). Text output marks `(workflow)`. An unstarted
+  Task previews its default workflow from it.
+- **`lf flow customize NAME`** prints the repository file, writing the
+  builtin to `.lf/workflows/` or `.lf/flows/` when there is none; a workflow
+  wins over a Flow of the same name. Desktop's Customize (builtin) and Edit
+  (repository file) both call it, so only the label differs.
+- **Edit opens the file in the system's default application,** not the Task
+  file pane, and in the checkout Desktop has open for the repository.
+- **`lf wave update-plan --flow NAME`** rewrites only the `flow:` line. It
+  does not check that NAME loads: the CLI can save a default that names
+  nothing, which Desktop shows as invalid with Start disabled.
+- **Invalid files** stay listed with their reason and stay editable; Desktop
+  rereads the catalog when it becomes the active application, not on a timer.
+- **Not listed:** a skill used as a default, which `lf run` accepts.
 
 ## Choices the earlier pass made without Jack
 

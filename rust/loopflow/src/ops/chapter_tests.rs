@@ -6,7 +6,8 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use super::{
-    classify_task, plan_rotation, rotate, successor_id, TaskDisposition, TaskStartEvidence,
+    classify_task, plan_rotation, rotate, successor_id, write_plan, PlanChange, TaskDisposition,
+    TaskStartEvidence,
 };
 use crate::ops::pm::{pm_sync, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::NullProgress;
@@ -686,6 +687,35 @@ async fn rotation_preserves_conflicting_statuses_observed_in_the_final_inventory
         assert_eq!(state.issues["a-backlog"]["state"]["type"], "canceled");
         assert_eq!(state.projects["b-old"]["status"]["type"], "started");
     }
+    server.abort();
+}
+
+#[tokio::test]
+async fn changing_the_default_flow_keeps_the_chapters_krs() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(provider_fixture()));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let home = context(&directory.path().join("default.db"), &repo, &url).await;
+    let wave = ensure_wave_row(&home.store, &repo, "a").await.unwrap();
+    PM_TEST_CONTEXT
+        .scope(home, async {
+            write_plan(&repo, &wave, PlanChange::Flow("research".into()))
+                .await
+                .unwrap();
+            let empty = write_plan(&repo, &wave, PlanChange::Flow(" ".into())).await;
+            assert!(empty.unwrap_err().to_string().contains("nonempty flow"));
+        })
+        .await;
+    let state = provider.lock().await;
+    let content = state.projects["a-old"]["content"].as_str().unwrap();
+    let plan = crate::pm::parse_project_content(content).unwrap();
+    assert_eq!(plan.flow, "research");
+    assert_eq!(plan.krs[0].text, "Retain proof");
+    assert!(state.projects["b-old"]["content"]
+        .as_str()
+        .unwrap()
+        .contains("flow: feature"));
     server.abort();
 }
 

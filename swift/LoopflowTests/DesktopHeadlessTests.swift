@@ -55,6 +55,47 @@ struct DesktopHeadlessTests {
         #expect(detail.progress.current == 1)
     }
 
+    @Test("A Wave's default draws its workflow, is set through lf, and keeps an invalid file visible")
+    func waveDefault() async throws {
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
+        let wave = try #require(roadmap.waves.first).wave
+        let catalog = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("flow_catalog.json")), as: UTF8.self)
+        let calls = Recorder()
+        let model = PodiumModel(query: RegistryQuery { args, _ in
+            await calls.add(args)
+            if args.prefix(2) == ["flow", "list"] { return catalog }
+            if args.prefix(2) == ["flow", "customize"] { return "/repo/.lf/workflows/\(args[2]).yaml\n" }
+            if args.prefix(2) == ["wave", "update-plan"], args.last == "broken" {
+                throw RegistryQueryError("broken does not load")
+            }
+            return "{}"
+        })
+        await model.loadFlowCatalog()
+        func view(_ name: String) -> WaveDefaultFlowView { WaveDefaultFlowView(model: model, wave: wave, name: name) }
+
+        // A builtin workflow is drawn before any Task has run it, and editing it is an explicit Customize.
+        let builtin = view("code")
+        _ = try builtin.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-stage-demo")
+        #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-default-source").text().string() == "builtin workflow")
+        #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-default-edit").button().labelView().text().string() == "Customize")
+        let entry = try #require(model.flowCatalog.value?.named("code"))
+        #expect(await model.definitionSource(entry, wave: wave)?.path == "/repo/.lf/workflows/code.yaml")
+
+        // An invalid repository file stays listed with its reason and can still be opened.
+        let invalid = view("proof")
+        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-default-invalid").text().string().contains("unreachable"))
+        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-default-source").text().string() == ".lf/workflows/proof.yaml")
+        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-default-edit").button().labelView().text().string() == "Edit")
+
+        // Setting the default changes only the Flow line; a refusal is shown on the Wave.
+        await model.setDefaultFlow("code", wave: wave)
+        #expect(await calls.calls.contains(["wave", "update-plan", "--wave", wave.name, "--flow", "code"]))
+        #expect(model.defaultFlowErrors[wave.id] == nil)
+        await model.setDefaultFlow("broken", wave: wave)
+        #expect(try view("code").inspect().find(viewWithAccessibilityIdentifier: "wave-default-error").text().string() == "broken does not load")
+    }
+
     @Test("A Task's workflow shows its running edge, then offers the edges leaving the stage it waits at")
     func taskWorkflow() async throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,

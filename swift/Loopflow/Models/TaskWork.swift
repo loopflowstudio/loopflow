@@ -11,12 +11,12 @@ public struct TaskWork: Codable, Sendable, Equatable {
 
 /// Conversation stages joined by edges that are Flows. `start` and `end` are implicit.
 public struct TaskWorkflow: Codable, Sendable, Equatable {
-    public struct Stage: Codable, Sendable, Equatable {
+    public struct Stage: Codable, Sendable, Hashable {
         public let name: String
         public let skill: String
     }
 
-    public struct Edge: Codable, Sendable, Equatable {
+    public struct Edge: Codable, Sendable, Hashable {
         public let from: String
         public let to: String
         public let flow: String?

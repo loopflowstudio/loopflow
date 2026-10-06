@@ -52,7 +52,12 @@ struct TaskFlowTests {
         }
 
         let catalog = try JSONDecoder().decode([FlowCatalogEntry].self, from: fixture("flow_catalog.json"))
-        #expect(catalog.map(\.name) == ["feature", "broken"])
+        #expect(catalog.map(\.id) == ["flow/feature", "flow/broken", "workflow/code", "workflow/proof"])
+        // A workflow carries stages and edges instead of a Flow graph; an invalid file keeps its source.
+        #expect(catalog[2].workflow?.edges.map(\.launchName) == ["pursue", "pursue", "ship"])
+        #expect(catalog[2].source == nil && catalog[2].graph == nil)
+        #expect(catalog[3].source == ".lf/workflows/proof.yaml" && catalog[3].unavailable != nil)
+        #expect(catalog.named("code")?.kind == .workflow)
         #expect(catalog[0].graph?.steps.count == 8 && catalog[1].unavailable != nil)
         #expect(catalog[0].graph?.steps[0].sources == ["feature"])
         let graph = try #require(catalog[0].graph)

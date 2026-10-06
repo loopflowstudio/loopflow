@@ -85,7 +85,8 @@ struct AuthoredWorkflow {
     edges: Vec<WorkflowEdge>,
 }
 
-fn workflow_path(name: &str, repo: &Path) -> Option<PathBuf> {
+/// The repository file that defines workflow `name`.
+pub fn workflow_path(name: &str, repo: &Path) -> Option<PathBuf> {
     ["yaml", "yml"]
         .iter()
         .map(|extension| repo.join(format!(".lf/workflows/{name}.{extension}")))
@@ -100,6 +101,55 @@ fn builtin_workflow(name: &str, repo: &Path) -> Option<&'static str> {
     find_flow_source_path(name, repo)
         .is_none()
         .then_some(*content)
+}
+
+/// Every workflow `repo` can name: its own files, then builtins it has not
+/// given to a Flow.
+pub fn available_workflow_names(repo: &Path) -> Vec<String> {
+    let mut names: BTreeSet<String> = BUILTIN_WORKFLOWS
+        .iter()
+        .filter(|(name, _)| builtin_workflow(name, repo).is_some())
+        .map(|(name, _)| name.to_string())
+        .collect();
+    for entry in fs::read_dir(repo.join(".lf/workflows"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let path = entry.path();
+        let authored = matches!(
+            path.extension().and_then(|extension| extension.to_str()),
+            Some("yaml" | "yml")
+        );
+        if let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) {
+            if authored && path.is_file() {
+                names.insert(name.to_string());
+            }
+        }
+    }
+    names.into_iter().collect()
+}
+
+/// The repository file to edit for `name`, written from the builtin when the
+/// repository has none. A workflow wins over a Flow of the same name, as it
+/// does for `lf task run`.
+pub fn customize(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
+    if let Some(path) = workflow_path(name, repo) {
+        return Ok(path);
+    }
+    let (path, content) = if let Some(content) = builtin_workflow(name, repo) {
+        (format!(".lf/workflows/{name}.yaml"), content)
+    } else if let Some(path) = find_flow_source_path(name, repo) {
+        return Ok(path);
+    } else if let Some(content) = super::builtins::get_builtin_flow(name) {
+        (format!(".lf/flows/{name}.yaml"), content)
+    } else {
+        return Err(LoadError::FlowNotFound(name.to_string()));
+    };
+    let path = repo.join(path);
+    fs::create_dir_all(path.parent().expect("a definition sits in a directory"))?;
+    fs::write(&path, content)?;
+    Ok(path)
 }
 
 pub fn names_workflow(name: &str, repo: &Path) -> bool {
@@ -200,7 +250,8 @@ fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<Workflow, St
 
 #[cfg(test)]
 mod tests {
-    use super::{load_workflow, names_workflow, END, START};
+    use super::{customize, load_workflow, names_workflow, END, START};
+    use crate::engine::flow_graph::{flow_catalog, CatalogKind};
 
     fn write(repo: &std::path::Path, path: &str, content: &str) {
         let path = repo.join(path);
@@ -275,5 +326,45 @@ mod tests {
             let error = load(content).unwrap_err().to_string();
             assert!(error.contains(expected), "{expected}: {error}");
         }
+    }
+
+    #[test]
+    fn a_customized_builtin_is_a_repository_file_that_stays_listed_when_invalid() {
+        let repo = tempfile::tempdir().unwrap();
+        let entry = |name: &str, kind: CatalogKind| {
+            flow_catalog(repo.path())
+                .into_iter()
+                .find(|entry| entry.name == name && entry.kind == kind)
+        };
+        let builtin = entry("feature", CatalogKind::Workflow).unwrap();
+        assert_eq!(builtin.source, None);
+        assert_eq!(builtin.workflow.unwrap().stages.len(), 2);
+        // Listing creates nothing; customizing writes the builtin once.
+        assert!(!repo.path().join(".lf").exists());
+        let path = customize("feature", repo.path()).unwrap();
+        assert_eq!(path, repo.path().join(".lf/workflows/feature.yaml"));
+        std::fs::write(
+            &path,
+            "edges:\n  - {from: start, to: end, flow: no-such-flow}\n",
+        )
+        .unwrap();
+        assert_eq!(customize("feature", repo.path()).unwrap(), path);
+        let invalid = entry("feature", CatalogKind::Workflow).unwrap();
+        assert_eq!(
+            invalid.source.as_deref(),
+            Some(".lf/workflows/feature.yaml")
+        );
+        assert!(invalid.workflow.is_none());
+        assert!(invalid.unavailable.unwrap().contains("no-such-flow"));
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("no-such-flow"));
+
+        let flow = customize("pursue", repo.path()).unwrap();
+        assert_eq!(flow, repo.path().join(".lf/flows/pursue.yaml"));
+        let pursue = entry("pursue", CatalogKind::Flow).unwrap();
+        assert_eq!(pursue.source.as_deref(), Some(".lf/flows/pursue.yaml"));
+        assert!(pursue.graph.is_some());
+        assert!(customize("no-such-definition", repo.path()).is_err());
     }
 }

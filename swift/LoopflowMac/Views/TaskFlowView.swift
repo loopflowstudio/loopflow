@@ -239,7 +239,7 @@ struct TaskFlowView: View {
         }
         .buttonStyle(WorkspaceOutlineButtonStyle())
         .disabled(start?.unavailable != nil || draft.acting
-            || (previewEntry?.graph == nil && previewName != flow.recommended))
+            || previewEntry.map { $0.unavailable != nil } ?? (previewName != flow.recommended))
         .help(start?.unavailable ?? "Launch a fresh \(previewName) Flow from its first step")
         .accessibilityIdentifier("task-flow-start")
     }
@@ -259,7 +259,7 @@ struct TaskFlowView: View {
                     .textFieldStyle(.plain)
                     .font(Typography.code(12))
                     .focused($focus, equals: .search)
-                    .onSubmit { if let first = matches.first(where: { $0.graph != nil }) { choose(first.name) } }
+                    .onSubmit { if let first = matches.first(where: { $0.unavailable == nil }) { choose(first.name) } }
                     .accessibilityIdentifier("task-flow-search")
                 Button("Cancel") { dismissTransient() }
                     .buttonStyle(.link)
@@ -291,7 +291,7 @@ struct TaskFlowView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(entry.graph == nil)
+                .disabled(entry.unavailable != nil)
                 .accessibilityIdentifier("task-flow-option-\(entry.name)")
             }
         }
@@ -300,7 +300,7 @@ struct TaskFlowView: View {
     // MARK: Diagram
 
     private var previewEntry: FlowCatalogEntry? {
-        catalog.value?.first { $0.name == previewName }
+        catalog.value?.named(previewName)
     }
 
     @ViewBuilder
@@ -309,14 +309,17 @@ struct TaskFlowView: View {
             participation(latest.graph, latest: latest)
         } else if let graph = previewEntry?.graph {
             participation(graph, latest: nil)
-        } else if let entry = catalog.value?.first(where: { $0.name == previewName }), let reason = entry.unavailable {
+        } else if let workflow = previewEntry?.workflow {
+            WorkflowGraphRow(stages: workflow.stages, edges: workflow.edges, current: nil, running: nil)
+                .accessibilityIdentifier("task-flow-workflow-preview")
+        } else if let reason = previewEntry?.unavailable {
             Text("\(previewName) cannot be previewed: \(reason)")
                 .font(Typography.caption(11)).foregroundStyle(Color.statusWarning)
         } else if let reason = catalog.errorMessage {
             Text("Flow preview unavailable: \(reason)")
                 .font(Typography.caption(11)).foregroundStyle(Color.statusWarning)
         } else if catalog.value != nil, previewName == flow.recommended {
-            // The Project default may name a workflow, which is drawn once the Task has one.
+            // The Project default may name a skill, which the catalog does not list.
             Text("\(previewName) is this Task's default; Start runs it.")
                 .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
                 .accessibilityIdentifier("task-flow-default")

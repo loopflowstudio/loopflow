@@ -255,6 +255,83 @@ struct GhosttyShellBlockTests {
         #expect(!isRed(style(exit: nil, hovered: true).fill))
         #expect(style(exit: 1, selected: true).fill.alphaComponent > style(exit: 1).fill.alphaComponent)
     }
+
+    @Test("dim text stays readable on every block fill")
+    @MainActor
+    func commandBlockFillContrast() throws {
+        func rgb(_ hex: UInt) -> [CGFloat] {
+            [CGFloat((hex >> 16) & 0xFF), CGFloat((hex >> 8) & 0xFF), CGFloat(hex & 0xFF)].map { $0 / 255 }
+        }
+        func luminance(_ rgb: [CGFloat]) -> CGFloat {
+            let linear = rgb.map { $0 <= 0.03928 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+        }
+        // Palette 8 is the dimmest color a shell prints text in.
+        let config = GhosttyManager.loopflowConfig
+        let entry = try #require(config.range(of: "palette = 8=#"))
+        let dim = rgb(try #require(UInt(config[entry.upperBound...].prefix(6), radix: 16)))
+        let background = rgb(TerminalPalette.backgroundHex)
+
+        for exit in [0, 1] {
+            for (selected, hovered) in [(false, true), (true, false), (false, false)] {
+                let fill = try #require(GhosttyCommandBlockStyle(
+                    block: GhosttyCommandBlockLayout(startRow: 0, endRow: 1, exitCode: exit, selected: selected),
+                    hovered: hovered
+                ).fill.usingColorSpace(.sRGB))
+                let alpha = fill.alphaComponent
+                let shown = zip([fill.redComponent, fill.greenComponent, fill.blueComponent], background)
+                    .map { $0 * alpha + $1 * (1 - alpha) }
+                let ratio = (luminance(dim) + 0.05) / (luminance(shown) + 0.05)
+                #expect(ratio >= 3, "exit \(exit) selected \(selected) hovered \(hovered): \(ratio)")
+            }
+        }
+    }
+
+    @Test("a right-click on the selected block keeps it; anywhere else goes to the terminal")
+    func rightClickKeepsSelectedBlock() {
+        let blocks = [
+            GhosttyCommandBlockLayout(startRow: 0, endRow: 2, exitCode: 0, selected: false),
+            GhosttyCommandBlockLayout(startRow: 3, endRow: 5, exitCode: 1, selected: true),
+        ]
+        #expect(ghosttyRightClickKeepsBlock(row: 3, blocks: blocks))
+        #expect(ghosttyRightClickKeepsBlock(row: 5, blocks: blocks))
+        // Another block, the live prompt and the padding are Ghostty's to handle.
+        #expect(!ghosttyRightClickKeepsBlock(row: 1, blocks: blocks))
+        #expect(!ghosttyRightClickKeepsBlock(row: 6, blocks: blocks))
+        #expect(!ghosttyRightClickKeepsBlock(row: nil, blocks: blocks))
+    }
+
+    @Test("keys that go to the shell end a block selection; Command chords do not")
+    func keysReachingShell() {
+        #expect(ghosttyKeyReachesShell(modifiers: []))
+        #expect(ghosttyKeyReachesShell(modifiers: .shift))
+        #expect(ghosttyKeyReachesShell(modifiers: .control))
+        #expect(ghosttyKeyReachesShell(modifiers: .option))
+        #expect(!ghosttyKeyReachesShell(modifiers: .command))
+        #expect(!ghosttyKeyReachesShell(modifiers: [.command, .shift]))
+    }
+
+    @Test("the embedded config parses, and Command-Up and Command-Down jump between prompts")
+    @MainActor
+    func embeddedConfigBindsPromptJumps() throws {
+        try #require(GhosttyManager.libraryReady)
+        let config = try #require(ghostty_config_new())
+        defer { ghostty_config_free(config) }
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-ghostty-\(UUID().uuidString)")
+        try GhosttyManager.embeddedConfig.write(to: path, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: path) }
+        path.path.withCString { ghostty_config_load_file(config, $0) }
+        ghostty_config_finalize(config)
+        #expect(ghostty_config_diagnostics_count(config) == 0)
+
+        for (action, key) in [("jump_to_prompt:-1", GHOSTTY_KEY_ARROW_UP), ("jump_to_prompt:1", GHOSTTY_KEY_ARROW_DOWN)] {
+            let trigger = action.withCString { ghostty_config_trigger(config, $0, UInt(action.utf8.count)) }
+            #expect(trigger.tag == GHOSTTY_TRIGGER_PHYSICAL)
+            #expect(trigger.key.physical == key)
+            #expect(trigger.mods == GHOSTTY_MODS_SUPER)
+        }
+    }
 }
 #endif
 
@@ -435,6 +512,26 @@ struct GhosttyTerminalInputTests {
         // Clicking a block ends the text selection.
         try click(row: initial[0].end_row)
         #expect(!ghostty_surface_has_selection(surface))
+        #expect(blocks().map(\.selected) == [true, false])
+
+        // Command-C left the block selected; a key that goes to the shell ends
+        // it, and so does Escape.
+        func press(_ characters: String, keyCode: UInt16) throws {
+            view.keyDown(with: try #require(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                characters: characters, charactersIgnoringModifiers: characters,
+                isARepeat: false, keyCode: keyCode
+            )))
+        }
+        #expect(copied() == "echo alpha\nalpha")
+        #expect(blocks().map(\.selected) == [true, false])
+        try press("x", keyCode: 7)
+        #expect(blocks().allSatisfy { !$0.selected })
+        try click(row: initial[0].end_row)
+        try press("\u{1B}", keyCode: 53)
+        #expect(blocks().allSatisfy { !$0.selected })
+        try click(row: initial[0].end_row)
         #expect(blocks().map(\.selected) == [true, false])
 
         // The selection and the failure survive a resize that wraps output.

@@ -250,60 +250,75 @@ from output text.
   header twice or not at all.
 - **Jack's open points:** whether the gap is right, what "the bar on the
   right" is, and which Warp affordances come next (`scratch/questions.md` 7–10).
+- **The polish pass is unseen and its display checks have not run**; details
+  under Further polish.
 - **Color proof in a Desktop pane.** The environment fix is tested on the
   launch environment Desktop computes; the Codex footer has not been looked at inside Desktop.
 - `swift/project.yml` (Xcode build) still links Ghostty-disabled stubs: LOO-280.
 
-## Recommended further polish
+## Further polish (built 2026-10-05, unseen)
 
 Jack Heart asked on 2026-10-05 for the terminal research
 ([terminal-ux-research.md](terminal-ux-research.md)) to be turned into
-recommendations. These are proposals drawn from it; Jack has not chosen among
-them. The research is Hacker News-heavy and not from Loopflow users.
+recommendations, then for the five below to be built. The research is Hacker
+News-heavy and not from Loopflow users. Jack has seen none of this on screen.
 
-Build in this Task, in this order:
+1. **Right-click keeps the selection it is over.** A right-click on the selected
+   block opens the menu without telling Ghostty, whose press would select the
+   word there and end the block. Elsewhere the press goes to Ghostty at its own
+   position; Ghostty (`Surface.zig`, `right-click-action = context-menu`) keeps
+   a text selection that contains the press and otherwise selects the word.
+   The menu now opens at the pointer (it converted the point the wrong way).
+   Not in the display suite: the menu is modal, so a test calling
+   `rightMouseDown` would block.
+2. **A selected block ends on the first key that goes to the shell**, Escape
+   included, and on paste or drop. Escape still reaches the shell, as it does
+   when Ghostty clears a text selection. Command chords (copy, jump) keep it.
+3. **Command-Up and Command-Down jump between prompts.** Upstream already binds
+   them by default; `embeddedConfig` states both so a person's Ghostty config
+   cannot rebind them. The config is global, so provider panes have the binding
+   too and, having no prompts, do nothing with it.
+4. **Dim text on the fills.** Palette 8 (`#7F766F`) fell below 3:1 on two red
+   fills. Red is now 0.14 resting (as Jack saw it), 0.16 hovered, 0.18 selected.
 
-1. **Right-click keeps the selection it is over.** The most concrete Warp
-   complaint is a right-click replacing a text selection with the whole block.
-   `rightMouseDown` forwards the press to Ghostty, whose default right-click
-   can make its own word selection. Right-click inside the current text
-   selection or the selected block changes nothing and opens the menu; Copy in
-   that menu copies what is highlighted. Add the case to the display suite and,
-   for whatever is decidable without a display, to the headless tests.
-2. **A selected block never holds on to the keyboard.** "Click to focus on
-   blocks becomes a hindrance." Typing after a block click already reaches the
-   shell; the block highlight should also clear on the first key that reaches
-   the shell and on Escape, so a stale highlight never sits above a new
-   command. This settles `questions.md` 5.
-3. **Move between commands from the keyboard.** Block navigation is one of the
-   few block features people report using. Bind Command-Up and Command-Down in
-   `embeddedConfig` to Ghostty's `jump_to_prompt:-1` and `jump_to_prompt:1` for
-   shell panes. No selection change, no new state.
-4. **Text stays readable on the failure tint.** `minimum-contrast` is praised by
-   name. Check dim ANSI colors (palette 8, the header grey) against the red
-   failed fill and the burgundy selected fill; if any falls below about 3:1,
-   lighten the fill's alpha before reaching for `minimum-contrast`, which would
-   also alter provider TUIs.
-5. **Line editing matches a standalone terminal.** Embedded terminals lose
-   people on keys that behave differently. Confirm in a Desktop zsh pane that
-   Option-Backspace, Option-arrows, Control-A/E/U/W, Control-X Control-E and
-   Command-Backspace do what they do in Ghostty with the same shell, and fix
-   any the view intercepts. Record the result per key.
+   | Fill | Was | Now | Palette 8 | Header `#A39B93` | Foreground |
+   | --- | --- | --- | --- | --- | --- |
+   | none `#24211F` | | | 3.60 | 5.84 | 13.03 |
+   | hover, burgundy | 0.12 | 0.12 | 3.44 | 5.58 | 12.45 |
+   | selected, burgundy | 0.28 | 0.28 | 3.21 | 5.22 | 11.63 |
+   | failed | 0.14 | 0.14 | 3.15 | 5.12 | 11.41 |
+   | failed, hovered | 0.20 (2.95) | 0.16 | 3.09 | 5.01 | 11.17 |
+   | failed, selected | 0.30 (2.61) | 0.18 | 3.02 | 4.90 | 10.92 |
 
-Leave out, with the reason:
+   Cost: a selected failed block differs from an unselected one by a small
+   step in red plus the accent going from 0.75 to full. A deeper red at higher
+   alpha (`#A82A24` at 0.28, 3.05:1) would separate them more; not chosen.
+   Ghostty's own text selection (`#4A443F`) puts palette 8 at 2.16:1; that
+   predates this Task and is untouched.
+5. **Line editing.** Decided from source, not from a pane:
 
-- **Sharing, filtering, collapse, bookmarks, sticky headers.** Marketed, not
-  cited; no first-hand praise was found.
-- **A Loopflow input editor.** Warp's losses came from replacing the shell's
-  line editor (completions, readline bindings, tmux). The shell keeps its own.
-- **More header content.** Jack asked for the directory only.
-- **Per-part copy (command only, output only).** Plausibly useful, and Ghostty's
-  triple-click already selects a command's output; revisit after acceptance.
+   | Key | Route in the view | Ghostty sends |
+   | --- | --- | --- |
+   | Option-Backspace | `interpretKeyEvents` finds no text, key sent with Alt | `ESC DEL` |
+   | Option-Left / Right | same | default binding `ESC b` / `ESC f` |
+   | Control-A/E/U/W, Control-X Control-E | sent as keys, no text | the control bytes |
+   | Command-Backspace, Command-Left / Right | key equivalent, forwarded | default bindings `^U`, `^A`, `^E` |
 
-Proof: items 1–3 extend the display suite's click sequence and the headless
-config and key-routing tests; item 4 is a computed contrast table in this file;
-item 5 is a per-key table from a real Desktop pane. Jack's demo decides whether
-any of it feels right.
+   The view intercepts only Command-C and Command-V. One probable difference,
+   outside the listed keys and not changed: Option with a letter (Option-B,
+   Option-F, Option-D) goes through `interpretKeyEvents` and is inserted as the
+   composed character (`∫`), where standalone Ghostty on a US layout treats
+   Option as Alt and sends `ESC b`. See `questions.md` 12.
+
+Left out, with the reason: sharing, filtering, collapse, bookmarks and sticky
+headers (marketed, no first-hand praise found); a Loopflow input editor (Warp's
+losses came from replacing the shell's line editor); more header content (Jack
+asked for the directory only); per-part copy (revisit after acceptance).
+
+Still to do for these five: Jack's look at each; the display suite, whose
+click sequence now also presses a key and Escape, has not run; the per-key
+table from a real Desktop zsh pane beside standalone Ghostty; a decision on
+Option-letter.
 
 ## Done when
 
@@ -359,5 +374,7 @@ gate owns them. The Zig patch was left alone: any edit needs a new artifact.
 Check: kickoff PTY capture of the Codex 0.160.0 footer per environment (throwaway
 script, not in the repository) — colored under Ghostty and Warp environments,
 colorless with `NO_COLOR=1`.
+
+Check: after the polish pass, same filter against the local framework — 17 passed (adds fill contrast, right-click, shell keys, embedded config parsed by Ghostty). Pin restored.
 
 Check: realign by source inspection and `lf context --skill realign` — memory 15992/16000 tokens, scratch in budget; no code changed, no tests rerun (gate owns them).

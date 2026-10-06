@@ -296,7 +296,8 @@ func ghosttyBlockHeaderFrame(row: Int, bounds: CGRect, cellHeight: CGFloat) -> C
 }
 
 /// Block chrome. A resting block has none; hover is faint; selection is the
-/// burgundy tint; a reported failure is red, selected or not.
+/// burgundy tint; a reported failure is red, selected or not. Every fill keeps
+/// the dimmest palette color (8) at 3:1 or better, which caps red near 0.18.
 struct GhosttyCommandBlockStyle {
     let fill: NSColor
     let accent: NSColor
@@ -306,7 +307,7 @@ struct GhosttyCommandBlockStyle {
         let rose = NSColor(red: 0xB8 / 255, green: 0x62 / 255, blue: 0x6C / 255, alpha: 1)
         let red = NSColor(red: 0xD4 / 255, green: 0x45 / 255, blue: 0x3A / 255, alpha: 1)
         if block.failed {
-            fill = red.withAlphaComponent(block.selected ? 0.30 : hovered ? 0.20 : 0.14)
+            fill = red.withAlphaComponent(block.selected ? 0.18 : hovered ? 0.16 : 0.14)
             accent = red.withAlphaComponent(block.selected ? 1 : 0.75)
         } else if block.selected {
             fill = burgundy.withAlphaComponent(0.28)
@@ -319,6 +320,20 @@ struct GhosttyCommandBlockStyle {
             accent = .clear
         }
     }
+}
+
+/// A right-click on the selected block opens the menu for that block. Ghostty
+/// would select the word under the pointer instead, which ends the block
+/// selection; a press inside a text selection it already leaves alone.
+func ghosttyRightClickKeepsBlock(row: Int?, blocks: [GhosttyCommandBlockLayout]) -> Bool {
+    guard let row else { return false }
+    return blocks.contains { $0.selected && $0.contains(row) }
+}
+
+/// Command chords are app and Ghostty bindings such as copy and jump to
+/// prompt. Every other key press, Escape included, goes to the shell.
+func ghosttyKeyReachesShell(modifiers: NSEvent.ModifierFlags) -> Bool {
+    !modifiers.contains(.command)
 }
 
 @MainActor
@@ -552,6 +567,15 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         renderCommandBlocks()
     }
 
+    /// A selected block is for copying. Once input goes to the shell the
+    /// highlight would sit stale above the new command, so it ends there.
+    private func clearBlockSelection() {
+        guard isShellPane, let surface, commandBlocks.contains(where: \.selected) else { return }
+        // No block holds this row, which clears the selection.
+        _ = ghostty_surface_select_command_block(surface, .max)
+        refreshCommandBlocks()
+    }
+
     private func readBlockHeaders(
         blocks: [GhosttyCommandBlockLayout],
         size: ghostty_surface_size_s
@@ -757,6 +781,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             }
         }
 
+        if ghosttyKeyReachesShell(modifiers: mods) { clearBlockSelection() }
+
         // Let other command shortcuts through to the terminal
         let key = translateKey(event)
         return ghostty_surface_key(surface, key)
@@ -770,6 +796,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if keyToDraw == nil {
             keyToDraw = Perf.signposter.beginInterval(Perf.terminalKeyToDraw, id: Perf.signposter.makeSignpostID())
         }
+        if ghosttyKeyReachesShell(modifiers: event.modifierFlags) { clearBlockSelection() }
 
         if ghosttyShouldHandleKeyDownDirectly(
             characters: event.characters,
@@ -970,18 +997,23 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     override func rightMouseDown(with event: NSEvent) {
         focusForPointerInput()
         guard let surface else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard !ghosttyRightClickKeepsBlock(row: viewportRow(at: point), blocks: commandBlocks) else {
+            showContextMenu(at: point)
+            return
+        }
 
-        // Send to terminal first
-        let consumed = ghostty_surface_mouse_button(
-            surface,
-            GHOSTTY_MOUSE_PRESS,
-            GHOSTTY_MOUSE_RIGHT,
-            translateMods(event.modifierFlags)
-        )
+        // Send to terminal first, at the press's own position: Ghostty keeps
+        // a text selection the press lands in and otherwise selects the word.
+        let mods = translateMods(event.modifierFlags)
+        ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, mods)
+        let consumed = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, mods)
+        // A word selected by the press ended any block selection.
+        refreshCommandBlocks()
 
         // If terminal didn't consume it, show context menu
         if !consumed {
-            showContextMenu(at: event.locationInWindow)
+            showContextMenu(at: point)
         }
     }
 
@@ -1064,8 +1096,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         clearItem.target = self
         menu.addItem(clearItem)
 
-        let screenPoint = convert(point, to: nil)
-        menu.popUp(positioning: nil, at: screenPoint, in: self)
+        menu.popUp(positioning: nil, at: point, in: self)
     }
 
     @objc private func copyAction() {
@@ -1174,6 +1205,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func insertTerminalText(_ text: String) -> Bool {
         guard let surface else { return false }
+        clearBlockSelection()
         text.withCString { ptr in
             ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
         }

@@ -20,9 +20,8 @@ Recorded at kickoff, 2026-10-05. None of these has Jack Heart's confirmation.
    are agent-shell settings in the observed leak; a person who exports them in
    their rc files gets them back in shell panes, but not in a provider launched
    before the login shell starts.
-5. **Clicking a block while typing.** A block selection persists until another
-   click or selection; typing does not clear it. Warp's behavior here was not
-   checked.
+5. **Clicking a block while typing.** Settled in the polish pass: the first
+   key that goes to the shell ends the block selection. See 11.
 6. **Jack's screenshots were not available to kickoff.** The plan rests on the
    Task's description of them. The color cause matches the app instance running
    at the screenshot times, but the screenshots themselves were not compared.
@@ -39,3 +38,15 @@ Added 2026-10-05 after Jack's demo feedback. Not confirmed by Jack.
    on failed and selected blocks.
 10. **The command is bold** through zsh's `zle_highlight`, under the Loopflow
     prompt only. Jack's screenshot shows it; he did not name it.
+
+Added 2026-10-05 in the polish pass. Not confirmed by Jack.
+
+11. **Escape ends a block selection and still reaches the shell.** Swallowing it
+    would make a selected block hold the keyboard for one key; in zsh vi mode
+    the Escape also changes mode. Ghostty treats a text selection the same way.
+12. **Option-letter is not Alt in Desktop.** Standalone Ghostty on a US layout
+    sends `ESC b` for Option-B; the view inserts the composed character. Fixing
+    it means translating modifiers per layout before text input, which needs a
+    real pane to check. Not in the requested key list; left for Jack.
+13. **Selected failed blocks are only slightly redder than unselected ones**, to
+    keep dim text at 3:1. A deeper red is the alternative.

@@ -6,6 +6,7 @@
 //! (see `load_show_snapshot`).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::OpenOptions;
 use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
@@ -13,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::future::try_join_all;
 
+use crate::durable::WorkRef;
 use crate::engine::config::load_repo_config;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -864,6 +866,56 @@ async fn fetch_pm_snapshot_for_projects(
     })
 }
 
+pub(crate) async fn require_planning_home(store: &Store, wave: &Wave) -> OpsResult<()> {
+    let placement = store
+        .placement(&WorkRef::Wave(wave.id().clone()))
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let local = store
+        .local_home()
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    if placement.home_id != local.id {
+        return Err(OpsError::Message(format!(
+            "Wave {} is placed on {}; run this command with `lf home ssh {}`",
+            wave.slug(),
+            placement.home_id,
+            placement.home_id
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::store::PlanningLocks>> {
+    // Keep the existing lock inode namespace shared with already-running callers.
+    let path = crate::store::lf_home_dir().join("chapter-locks");
+    #[cfg(test)]
+    let path = PM_TEST_CONTEXT
+        .try_with(|context| context.path.with_extension("chapter-locks"))
+        .unwrap_or(path);
+    std::fs::create_dir_all(&path).map_err(|error| OpsError::Message(error.to_string()))?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path.join(format!("{}.lock", wave.id())))
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    // OS ownership releases on crash; provider state makes the next holder a resumer.
+    for _ in 0..300 {
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => return Ok(Arc::new(crate::store::PlanningLocks::new(file))),
+            Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(cause) => return Err(OpsError::Message(cause.to_string())),
+        }
+    }
+    Err(OpsError::Message(
+        "another planning operation is active; retry after it finishes".into(),
+    ))
+}
+
 pub(crate) async fn refresh_pm_snapshot(
     repo: &Path,
     wave: &str,
@@ -873,7 +925,7 @@ pub(crate) async fn refresh_pm_snapshot(
     let registered = crate::work::wave::ensure_wave_row(&store, repo, wave)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let acquisition = super::chapter::rotation_lock(&registered).await?;
+    let acquisition = lock_wave_planning(&registered).await?;
     refresh_pm_snapshot_locked(repo, &registered, ctx, &store, acquisition).await
 }
 
@@ -1178,8 +1230,8 @@ where
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message(format!("Wave {wave} is not initialized")))?;
-    super::chapter::require_chapter_home(&store, &registered).await?;
-    let acquisition = super::chapter::rotation_lock(&registered).await?;
+    require_planning_home(&store, &registered).await?;
+    let acquisition = lock_wave_planning(&registered).await?;
     let ctx = resolve_context(repo, wave).await?;
     refresh_pm_snapshot_locked(repo, &registered, &ctx, &store, acquisition.clone()).await?;
     let project = super::project::current_project(&store, &registered).await?;
@@ -1759,7 +1811,7 @@ async fn inspect_task_planning_async(
                 .await
                 .map_err(|error| OpsError::Message(error.to_string()))?
                 .ok_or_else(|| OpsError::Message(format!("Wave {wave} is not initialized")))?;
-            acquisition = Some(super::chapter::rotation_lock(&registered).await?);
+            acquisition = Some(lock_wave_planning(&registered).await?);
             observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
             observation = repository
                 .client
@@ -2114,7 +2166,7 @@ async fn apply_or_plan_repository_reteam(
     registered.sort_by(|left, right| left.id().as_str().cmp(right.id().as_str()));
     let mut locked_waves = BTreeMap::new();
     for wave in registered {
-        let acquisition = super::chapter::rotation_lock(&wave).await?;
+        let acquisition = lock_wave_planning(&wave).await?;
         locked_waves.insert(wave.slug().to_string(), (wave, acquisition));
     }
     let mut project_moves = Vec::new();

@@ -160,6 +160,17 @@ Step 5 remains next, with the recovery correction below. Rotation still uses
 names/status and neither consumes transitions nor switches the binding. The
 branch is not releasable. Desktop, skills and configured acceptance remain open.
 
+October 5 realignment confirms the remaining preflight gap in `rotate`:
+Task evidence is collected across Waves, but exact successor ownership is checked
+inside each `apply_rotation`, after earlier Waves may have mutated. The same
+loop calls Wave-wide `adopt_legacy_projects(..., true)` before applying its pair.
+The replacement must include any required legacy conversion in whole-input
+preflight and reservation ordering; it must not activate unrelated legacy
+Projects outside the selected pair. Retain released-data conversion in its
+existing owner. A later Wave with invalid KRs, inaccessible/foreign destination
+or invalid conversion evidence must cause zero provider writes across the input.
+This is source inspection, not an executed failure proof.
+
 ### Rotation recovery correction — October 5
 
 Source inspection found two missing inputs in the earlier receipt contract.
@@ -216,6 +227,10 @@ issue moved externally after the switch while another historical Task starts;
 pre-switch response loss followed by new work; and caller cancellation around
 membership persistence. Retain the existing created-successor, backlog, checkout
 exclusion and execution-identity proofs. None of these new proofs has run.
+The proposed `--plan` flag, Wave-scoped operation and settled-transition lookup
+are not implemented; the CLI still accepts only name, dry-run and JSON. Existing
+start-chapter skills still prescribe empty-KR creation, required Flow and backlog
+cancellation. Their coordinated replacement remains step 7, not completed behavior.
 
 ### Accepted planning must own durable projection — October 5
 
@@ -436,7 +451,7 @@ Project selection. `ProjectContent` keeps empty-string Flow; LOO-367 owns launch
 validation. `checked_projects_with_store` retains exact missing-membership lookup
 and ownership checks. Linear creation accepts a caller UUID, but attachment is
 separate; `find_project` distinguishes archived from absent. Duplicate-ID and
-attachment behavior still need configured proof. `rotation_lock` supplies the
+attachment behavior still need configured proof. `pm::lock_wave_planning` supplies the
 shared per-Wave OS lock with a 30-second bound.
 
 Desktop activates through `RegistryQuery` and the shared CLI transport outside
@@ -720,51 +735,25 @@ Apply the remaining cuts with their replacement consumers under the selected
 shared local configuration owner. Empty-Flow, names and reader selection are implemented
 locally; rotation remains. Keep this one delivery boundary.
 
-- Deleted: repeated ownership/acceptance blocks in binding and ensure. One
-  `accept_project` validates response and accepted body while retaining the Wave
-  guard; activation still judges accepted facts. Creation owns one optional receipt.
-- Deleted: `ops/chapter.rs::update_plan`; ordinary Project editing now lives in
-  `ops/project.rs` and shares one store across validation, selection and refresh.
-  Selection borrows the matching Project; summary rendering copies only its ID.
+Completed deletion details remain at
+`3296fcbab4a0a143e46fd7fcdfc18a72ca0c8a7c:scratch/keep-every-wave-ready-for.md`
+under this heading. Shared accepted-fact projection, transactional registration,
+checkout admission and exact-ID selection retain their behavior tests.
+
+Compression moved the surviving Wave planning lock and Home-placement check from
+`ops/chapter.rs` to `ops/pm.rs` (`lock_wave_planning`, `require_planning_home`).
+Ordinary ensure, binding, editing, refresh, registration and reteam no longer
+depend on chapter orchestration for these mechanisms. Keep the existing lock
+namespace and queued-writer ownership so running callers retain exclusion.
+
 - `ops/chapter.rs::select_current`: remaining rotation/legacy-adoption status selection awaits
   exact transitions. Ordinary selection moved to `ops/project.rs`; status Task
   filtering and Desktop status inference are deleted. `sync_projects` and
   `record_project` are deleted.
+
 - `plan_rotation`'s `predecessor_names` and target-name lookup, plus `successor_id`:
   replace inferred predecessors and name-derived UUIDs with exact recorded IDs.
-- Deleted: `canonical_project_name`, Task-resolution projection, sync/reteam
-  prefix rewrites, the unused `rename_project` API and reteam’s `target_name`
-  field/rename display. Provider IDs establish ownership.
-- Deleted: rotation's durable-only `record_project`/`move_chapter_task` writers.
-  Accepted readbacks preserve exact transfer identity; full recovery still needs
-  the selection/transition replacement.
-- Deleted: `update_task_plan`, generic `update_task`, their async wrappers,
-  `TASK_UPDATE`, and restart's captured Project/Task plan writes. Preservation
-  assertions use accepted ingestion; placement fixtures seed their own rows.
-  Generic runtime `update_project` and its SQL are also deleted. Fixture setup
-  remains local; behavioral updates use accepted observations.
-- Deleted: `project_params` and `task_params`, allocating parameter builders left
-  behind by the generic update APIs; each insertion binds values beside its SQL.
-- Deleted: SQLite's separate `insert_task_with_worktree` transaction; both public
-  registration APIs use one insertion path, with an optional initialization event.
-- Deleted: `create_task_work`'s duplicate Task lookup/insert and fallback identity.
-  Registration inserts the Task once; `inherit_task_placement` only inherits its
-  Project placement in the same transaction.
-- Deleted: `ops/pm.rs::store_pm_snapshot`; held-lock refresh accepts the already
-  registered Wave directly, without rediscovering its identity after acquisition.
-- Deleted: checkout admission's Task-population scan. Shared ancestor locks cover
-  future Task roots without a population owner or discovery retry.
-- Deleted: `sessions::replace_input_in`'s generic `cwd` update. Input replacement
-  retains the stored workspace; explicit primary workspace admission remains.
-- Deleted: rotation's automatic backlog cancellation, `retire_chapter_backlog`
-  and its exclusive retirement test. Unreviewed Tasks retain their Project;
-  explicit Task cancellation keeps its separate owner and confirmation.
-- Deleted: `move_project_to_team`, its duplicate GraphQL mutation and exclusive
-  wiring test. Expansion and narrowing both use `set_project_teams`; the operation
-  test retains resulting Team membership, names and issue identifiers.
-- Deleted: `rebind_task_issue_identifier`, both callers and its exclusive test.
-  Full accepted issue readbacks preserve UUID, Task/PR identity and revisions;
-  explicit Team reconciliation supplies authorized relationship evidence.
+
 - Replace obsolete assertions in `ops/chapter_tests.rs`, including
   `zero_current_without_shared_predecessor_evidence_stays_unresolved`,
   `lost_creation_has_one_identity_on_every_home` and
@@ -882,4 +871,4 @@ Release's operation-entry recovery lesson still applies; its publication and
 installation evidence establishes no Project-readiness acceptance. Registration
 compression and prior check evidence remain at `eb80d7198178a418cf44b3074f9b666f3e11cd40`.
 
-Checks: `cargo test -p loopflow --lib --no-run` passed; compiled lib filters `project_ensure` (7) and `project_binding` (5) passed under `scripts/test_network.py`; `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` passed. Recovery design correction: `git diff --check` passed; no runtime change or test rerun. Gate retains configured/CLI/Desktop acceptance, the prior output-handle leak and CI repair.
+Checks: prior build, `project_ensure` (7), `project_binding` (5), `cancelled_` (6), formatting and Clippy passes retained; prose realignment: `git diff --check` passed. Gate retains configured/CLI/Desktop acceptance, the prior output-handle leak and CI repair.

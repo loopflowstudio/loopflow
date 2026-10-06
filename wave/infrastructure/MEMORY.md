@@ -291,7 +291,6 @@ Relationship serialization and membership fencing are implemented below;
 configuration-switch recovery remains unproved. Desktop activation
 must preserve #1447's cached plans and independent Session reads, outside polling.
 #1446's ongoing procedures retain started-Task follow-through; reads never provision.
-Installed and configured acceptance remain unproved.
 
 Input replacement exposed two admission gaps on October 5: generic `cwd` updates
 removed unbound Task membership, and a Session elsewhere could replace input while
@@ -333,8 +332,6 @@ checkout lock set. Queued planning writers retain both scopes after cancellation
 a caller-owned lock alone would release exclusion before a queued commit. Automatic
 backlog cancellation and its standalone retirement writer are deleted. Unreviewed
 backlog stays with its Project; unresolved abandonment keeps its separate settlement.
-Shared binding is implemented; transition recovery, CI repair acceptance and
-configured readiness remain open. Operation proofs establish no readiness.
 
 October 5 binding preserves YAML bytes and accepted ownership. Routing, editing
 and SQLite admission select its exact ID; started Tasks continue in predecessors
@@ -342,9 +339,8 @@ and remain visible. Malformed bodies stay errors. Earlier reader/store evidence
 and the unresolved output-handle leak remain at
 `1825a5a45c743833f625e8c8144949ed139b97f9:wave/infrastructure/MEMORY.md`.
 
-Ensure's six synthetic operation fixtures and one migration proof retain exact-ID
-creation, uncertain mutations and empty-Flow Backlog. Post-binding recovery is seeded,
-not a crash; accepted facts precede activation. Evidence:
+Ensure has six synthetic operation fixtures and one migration proof; post-binding
+recovery is seeded, not a crash. Accepted facts precede activation. Evidence:
 `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:scratch/keep-every-wave-ready-for.md`.
 
 October 5 source review found two rotation gaps: name-only retries cannot identify
@@ -352,8 +348,12 @@ settled destinations; current membership cannot identify the original transfer s
 after the binding switch. The revised plan retains exact destinations in caller
 input and selected issue IDs in transition evidence, without selection/execution
 authority. Later historical starts stay put; external moves remain conflicts.
-These source-derived counterexamples are not executed proofs or new Jack Heart
-approvals. Rotation, Desktop and configured Intelligence acceptance remain open.
+These counterexamples are source inspection, not executed proofs or new approvals.
+Rotation, Desktop and configured Intelligence acceptance remain open.
+Preflight must cover every destination and legacy conversion before any Wave
+mutates. Rotation checks destinations and applies adoption per Wave; Task-only
+preflight is insufficient. Release's lesson applies: helper proofs cannot
+establish public operation ordering.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 

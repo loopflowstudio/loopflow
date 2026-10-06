@@ -911,7 +911,7 @@ fn create_prepared_task(
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("owning Wave is not initialized"))?;
-        let acquisition = super::chapter::rotation_lock(&wave).await?;
+        let acquisition = super::pm::lock_wave_planning(&wave).await?;
         let project =
             super::project::resolve_project_for_task(&store, &wave, &resolved.project.id).await?;
         // Re-resolve after worktree planning: a concurrent run may have created

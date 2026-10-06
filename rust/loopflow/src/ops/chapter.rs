@@ -2,15 +2,12 @@
 //! No local record owns the chapter or remembers a partially applied operation.
 
 use std::collections::BTreeSet;
-use std::fs::OpenOptions;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::durable::WorkRef;
 use crate::engine::git::{is_clean, rev_parse};
 use crate::ops::{OpsError, OpsResult};
 use crate::pm::{PmItem, PmProject, ProjectContent, ProjectStatus};
@@ -18,7 +15,7 @@ use crate::store::Store;
 use crate::work::wave::{Wave, WaveLocator};
 
 use super::pm::{
-    checked_projects, linear_project_name, pm_store, project_is_foreign,
+    checked_projects, linear_project_name, lock_wave_planning, pm_store, project_is_foreign,
     refresh_pm_snapshot_locked, resolve_context, PmContext,
 };
 
@@ -229,7 +226,7 @@ pub(crate) async fn rotate(repo: &Path, name: &str, dry_run: bool) -> OpsResult<
     contexts.sort_by(|(left, _), (right, _)| left.id().as_str().cmp(right.id().as_str()));
     if !dry_run {
         for (wave, _) in &contexts {
-            locks.push(rotation_lock(wave).await?);
+            locks.push(lock_wave_planning(wave).await?);
         }
         let mut roots = Vec::new();
         for (wave, _) in &contexts {
@@ -746,52 +743,6 @@ async fn apply_rotation(
         .await
         .map_err(error)?;
     Ok(())
-}
-
-pub(crate) async fn require_chapter_home(store: &Store, wave: &Wave) -> OpsResult<()> {
-    let placement = store
-        .placement(&WorkRef::Wave(wave.id().clone()))
-        .await
-        .map_err(error)?;
-    let local = store.local_home().await.map_err(error)?;
-    if placement.home_id != local.id {
-        return Err(error(format!(
-            "Wave {} is placed on {}; run this command with `lf home ssh {}`",
-            wave.slug(),
-            placement.home_id,
-            placement.home_id
-        )));
-    }
-    Ok(())
-}
-
-pub(crate) async fn rotation_lock(wave: &Wave) -> OpsResult<Arc<crate::store::PlanningLocks>> {
-    let path = crate::store::lf_home_dir().join("chapter-locks");
-    #[cfg(test)]
-    let path = super::pm::PM_TEST_CONTEXT
-        .try_with(|context| context.path.with_extension("chapter-locks"))
-        .unwrap_or(path);
-    std::fs::create_dir_all(&path).map_err(error)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path.join(format!("{}.lock", wave.id())))
-        .map_err(error)?;
-    // OS ownership releases on crash; provider state makes the next holder a resumer.
-    for _ in 0..300 {
-        match fs2::FileExt::try_lock_exclusive(&file) {
-            Ok(()) => return Ok(Arc::new(crate::store::PlanningLocks::new(file))),
-            Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock => {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-            Err(cause) => return Err(error(cause)),
-        }
-    }
-    Err(error(
-        "another planning operation is active; retry after it finishes",
-    ))
 }
 
 async fn disposition(store: &Store, item: PmItem) -> OpsResult<ChapterTask> {

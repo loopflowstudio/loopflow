@@ -82,7 +82,7 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
     )
     .await
     .map_err(project_error)?;
-    let acquisition = super::chapter::rotation_lock(&wave).await?;
+    let acquisition = super::pm::lock_wave_planning(&wave).await?;
     let home = store.sqlite.home_dir().map_err(project_error)?;
     let selected = read_project_binding(&home, wave.id()).map_err(project_error)?;
     if selected.as_deref().is_some_and(|id| id != project_id) {
@@ -138,8 +138,8 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
     )
     .await
     .map_err(project_error)?;
-    super::chapter::require_chapter_home(&store, &wave).await?;
-    let acquisition = super::chapter::rotation_lock(&wave).await?;
+    super::pm::require_planning_home(&store, &wave).await?;
+    let acquisition = super::pm::lock_wave_planning(&wave).await?;
     let home = store.sqlite.home_dir().map_err(project_error)?;
     let selected = read_project_binding(&home, wave.id()).map_err(project_error)?;
     let pending = store
@@ -339,7 +339,7 @@ pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) ->
         .map_err(project_error)?
         .block_on(async {
             let store = super::pm::pm_store().await?;
-            let acquisition = super::chapter::rotation_lock(&wave).await?;
+            let acquisition = super::pm::lock_wave_planning(&wave).await?;
             super::metrics::validate_chapter_targets(&wave, &content.metric_targets)
                 .map_err(project_error)?;
             let ctx = super::pm::resolve_context(repo, wave.slug()).await?;

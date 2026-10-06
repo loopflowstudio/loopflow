@@ -21,7 +21,7 @@ From an agent shell (the tainted case), run `lf desktop`, then in Desktop:
 1. Open a Codex Session. The footer shows the model in warm yellow and the path
    in green, as in Warp with the same Codex version and `~/.codex/config.toml`.
 2. Open a shell. Run `ls`, then `sdl`. Each command sits under a one-line
-   context header (directory, branch), indented off the edge. Only `sdl` has a
+   context header (the directory), indented off the edge. Only `sdl` has a
    red block background. The header is smaller and dimmer than the bold
    command. The fresh prompt below has its header and no block chrome.
 3. Click the `ls` block, Command-C, paste: `ls` and its output. Drag across two
@@ -278,7 +278,7 @@ Gate, headless:
   prints the checksum pinned in `Package.swift`.
 
 Display diagnostic, not a gate: `LOOPFLOW_NATIVE_TESTS=1 swift test --filter
-"Embedded terminal"` drives a real PTY through `true`, `false`, click, drag,
+GhosttyTerminalInputTests` drives a real PTY through `true`, `false`, click, drag,
 click, resize and Command-C, and checks overlay rows against rendered rows.
 Interaction acceptance is Jack's demo review.
 
@@ -290,9 +290,14 @@ Interaction acceptance is Jack's demo review.
   most likely to change at demo.
 - Padding on provider TUIs changes their column count by about three cells.
 
-Realigned 2026-10-05: the prefix scrub also removed three provider credentials
-`lf` reads from the environment; they are now kept and the launch test names
-them. `main` has not moved since the base, and the `lf2` URL still returns 404.
+Realigned 2026-10-05, twice. First: the prefix scrub also removed provider
+account variables `lf` reads; the four are kept and the launch test names them
+(a source search finds no other `CODEX_`/`CLAUDE_CODE_` name read outside tests).
+Second, after the header pass: the code matches this plan (padding 12/8, marker,
+60-character directory, 11pt `#A39B93`, bold command, ungated block suite). The
+Demo step still named the branch in the header, and the display filter used the
+suite's display name, which `swift test --filter` does not match; both corrected.
+`main` has not moved since the base, and the `lf2` URL still returns 404.
 
 Check: against the local `lf2` framework (pin swapped to a path, then restored),
 `swift test --filter "GhosttyShellBlockTests|LocalWaveAgentLauncherTests"` —
@@ -303,3 +308,5 @@ gate owns them. The Zig patch was left alone: any edit needs a new artifact.
 Check: kickoff PTY capture of the Codex 0.160.0 footer per environment (throwaway
 script, not in the repository) — colored under Ghostty and Warp environments,
 colorless with `NO_COLOR=1`.
+
+Check: realign by source inspection and `lf context --skill realign` — memory 15992/16000 tokens, scratch in budget; no code changed, no tests rerun (gate owns them).

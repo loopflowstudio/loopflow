@@ -1024,8 +1024,9 @@ text first; that latency has no owning Task (LOO-375 owns `wt list` only).
   workarounds; a standalone VT API is not an embedded-surface replacement.
 - Headless tests cover the launch environment, block layout and style, and the
   zsh hooks. The real-PTY click/drag/resize test needs a display and has not run
-  for `lf2`; custom prompts beyond the stock one, bash and fish headers, and
-  on-screen overlay alignment are unproven. Provider `TERM` stays
+  for `lf2` (filter by `GhosttyTerminalInputTests`; display names do not
+  match). Custom prompts, bash and fish headers, and on-screen overlay
+  alignment are unproven. Provider `TERM` stays
   `xterm-256color`; changing it needs separate fidelity evidence.
 - **Build parity remains broken.** `project.yml` copies resources but still builds
   Ghostty-disabled stubs, unlike SwiftPM (LOO-280). Binary/resource revision
@@ -1063,9 +1064,7 @@ parity, [LOO-281](https://linear.app/loopflow/issue/LOO-281) for real-shell bloc
 geometry, long-output measurements, and visual proof,
 [LOO-282](https://linear.app/loopflow/issue/LOO-282) for client provenance, and
 [LOO-283](https://linear.app/loopflow/issue/LOO-283) for the bounded shared-viewing
-comparison. This branch does not establish any Project's week/month evidence
-window; definitions and KRs remain unchanged. No open Task had enough evidence
-to close during this reconciliation.
+comparison.
 
 ## Learnings
 

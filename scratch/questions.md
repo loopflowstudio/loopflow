@@ -12,7 +12,7 @@ Recorded at kickoff, 2026-10-05. None of these has Jack Heart's confirmation.
 2. **Loopflow replaces the default zsh prompt in Desktop shells.** Assumed
    acceptable because Jack's screenshots show the stock `user@host` prompt and
    name its repetition as a problem. Customized prompts are untouched. Header
-   contents are directory and branch only.
+   contents were directory and branch at kickoff; see 7.
 3. **Left padding applies to provider panes too** (12pt), since "text tight to
    the left edge" reads as a terminal-wide complaint. Block decorations remain
    shell-only.

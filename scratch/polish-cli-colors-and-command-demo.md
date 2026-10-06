@@ -60,8 +60,8 @@ Jack named two:
 2. **A header holding what was in the prompt when the command was sent.** Each
    block keeps the directory, branch and other context as they were at
    submission, not as they are now. Loopflow's header is printed prompt text in
-   the terminal rows, so it already is that snapshot, for directory and branch
-   only.
+   the terminal rows, so it already is that snapshot. It held directory and
+   branch at the demo; the later header pass keeps the directory only.
 
 The rest is recalled from Warp's product, not observed in Jack's installed
 version during this demo; verify before building against it:
@@ -144,5 +144,5 @@ Jack looks at a Loopflow Dev built from the branch head: `ls`, `sdl`, a third
 command, then a bare Enter and a scroll. He confirms or corrects the header,
 the gap and the even red, and says what the right-side bar is. Proof for these
 is his eye on a real shell; the display suite
-(`LOOPFLOW_NATIVE_TESTS=1 swift test --filter "Embedded terminal"`) has still
+(`LOOPFLOW_NATIVE_TESTS=1 swift test --filter GhosttyTerminalInputTests`) has still
 not run for `lf2`.

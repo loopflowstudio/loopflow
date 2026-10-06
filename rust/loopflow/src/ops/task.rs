@@ -5779,7 +5779,7 @@ mod tests {
                 cwd: fixture.task.worktree.clone(),
                 message: None,
                 model: None,
-                current_attempt: None,
+                selected_capture: None,
                 finished: false,
                 invocation,
                 pending_session_id: None,
@@ -6194,7 +6194,7 @@ mod tests {
                     cwd: fixture.task.worktree.clone(),
                     message: None,
                     model: None,
-                    current_attempt: None,
+                    selected_capture: None,
                     finished: false,
                     invocation,
                     pending_session_id: None,
@@ -6279,7 +6279,7 @@ mod tests {
                     version: 0,
                     message: None,
                     model: None,
-                    current_attempt: None,
+                    selected_capture: None,
                     pending_session_id: None,
                     ready_summary: None,
                     worker_generation: 0,
@@ -7145,7 +7145,7 @@ time.sleep(30)
                     cwd: task.worktree.clone(),
                     message: None,
                     model: None,
-                    current_attempt: None,
+                    selected_capture: None,
                     pending_session_id: None,
                     ready_summary: None,
                     worker_generation: 0,
@@ -7165,7 +7165,7 @@ time.sleep(30)
 
         exec_task_process(&store, &mut task, None).await.unwrap();
 
-        // A parked human boundary keeps its Session's reserved Run without
+        // A parked human boundary keeps its Session's reserved capture without
         // launching a provider; everything else about the position is untouched.
         let stored = store.task_flow(&task.id).await.unwrap().unwrap();
         let sessions = store
@@ -7567,21 +7567,22 @@ time.sleep(30)
     }
 
     #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // the guard serializes process-wide Run env
+    #[allow(clippy::await_holding_lock)] // the guard serializes process-wide capture environment
     async fn parent_run_cannot_override_task_worktree_resolution() {
         let _lock = crate::journal::test_env_lock();
-        let _environment = EnvRestore::capture(&[
-            crate::durable::RUN_ID_ENV,
-            crate::session_record::RUN_DIR_ENV,
-        ]);
+        let _environment =
+            EnvRestore::capture(&[crate::session_record::CAPTURE_KEY_ENV, "LF_RUN_DIR"]);
         let repository = loopflow_test_support::TestRepo::new();
         repository.create_branch("test/task-recovery-fixture");
         repository.push_new_branch("test/task-recovery-fixture");
         let TaskFixture { store, task, .. } =
             task_fixture_at("TEST-PARENT", repository.path().to_path_buf()).await;
         let parent_run_id = crate::session_record::new_artifact_key();
-        std::env::set_var(crate::durable::RUN_ID_ENV, parent_run_id.as_str());
-        std::env::remove_var(crate::session_record::RUN_DIR_ENV);
+        std::env::set_var(
+            crate::session_record::CAPTURE_KEY_ENV,
+            parent_run_id.as_str(),
+        );
+        std::env::remove_var("LF_RUN_DIR");
 
         let resolved = super::task_for_checkout(&store, &task.worktree)
             .await

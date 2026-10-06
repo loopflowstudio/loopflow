@@ -107,7 +107,7 @@ pub(crate) async fn complete(store: &SharedStore, session: &AgentSession) -> Res
         .await?;
     let launch = flow_run::exec_driver(flow.id()).await;
     if let Err(error) = human_session::stop_session_client(&session.artifact_key) {
-        tracing::warn!(run_id = %session.artifact_key, %error, "review completed but provider cleanup failed");
+        tracing::warn!(artifact_key = %session.artifact_key, %error, "review completed but provider cleanup failed");
     }
     launch.with_context(|| {
         format!(
@@ -223,7 +223,7 @@ mod tests {
                     cwd: home.path().to_path_buf(),
                     message: None,
                     model: None,
-                    current_attempt: None,
+                    selected_capture: None,
                     pending_session_id: None,
                     ready_summary: None,
                     worker_generation: 0,

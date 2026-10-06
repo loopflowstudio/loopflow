@@ -3,18 +3,8 @@ use thiserror::Error;
 use serde::Serialize;
 
 #[derive(Debug, Error)]
-pub enum StoreError {
-    #[error("run not found: {0}")]
-    RunNotFound(String),
-    #[error("skill run not found: {0}")]
-    StepRunNotFound(String),
-    #[error("store error: {0}")]
-    Other(String),
-}
-
-#[derive(Debug, Error)]
 pub enum LoadError {
-    #[error("skill or flow not found: {0}. Run `lf list` to discover definitions")]
+    #[error("skill or flow not found: {0}. Run `lf list skill` or `lf list flow` to discover definitions")]
     TargetNotFound(String),
     #[error("flow not found: {0}. For a skill, use `lf skill {0}`")]
     FlowNotFound(String),
@@ -40,8 +30,6 @@ pub enum CoreError {
     ExecutionFailed(String),
     #[error("worktree error: {0}")]
     WorktreeError(String),
-    #[error("store error: {0}")]
-    StoreError(String),
     #[error("io error: {0}")]
     IoError(String),
 }
@@ -53,12 +41,6 @@ pub enum GitError {
     CommandFailed { command: String, stderr: String },
     #[error("io error: {0}")]
     Io(String),
-}
-
-impl From<StoreError> for CoreError {
-    fn from(err: StoreError) -> Self {
-        CoreError::StoreError(err.to_string())
-    }
 }
 
 impl From<LoadError> for CoreError {

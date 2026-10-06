@@ -417,7 +417,7 @@ provider, and literal subprocess edge must appear exactly once.
 | **Tool response** — one idempotent response to a Work-scoped tool request | Stable Work identity plus request id names the response slot; a second, different answer is rejected. | [`ToolResponseWrite`](../rust/loopflow/src/durable.rs), [`ToolResponseReceipt`](../rust/loopflow/src/durable.rs) | `tool_responses` | Store transaction | Internal Work store API | — |
 | **AgentSession** — one conversation | Session row owns name, ancestry, readiness, completion and publication. Its current capture references an immutable history event written at reservation. Earlier events retain caller and Work attribution. Complete returns saved feedback; the following typed decision chooses navigation. | `SessionRecord`, `SessionId` | `agent_sessions`, `session_events` | Native turn observation retains start/usage/completion; `lf __provider-session` records native identity; Session operations own state | `lf session`, interactive `lf` | — |
 | **Home / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `HomeId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Home`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/machine_install.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `homes`, `work_placements`; Home-local SQLite; machine install selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf home`, `lf ssh`, `lf install`, `lf schedule` | `exec:ssh`, `exec:launchctl`, `exec:systemctl`, `exec:/usr/bin/open`, `exec:/usr/bin/osascript`, `exec:brew`, `exec:/bin/sh`, `exec:tmux` |
-| **Session history projections** — captured events and exact provider evidence | AgentSession and FlowSession own outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects AgentSession-owned input/history; Home-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf mon show`, `lf replay`, `lf usage`, `lf activity`; Work/status history | `exec:lf`, provider harnesses |
+| **Session history projections** — captured events and exact provider evidence | AgentSession and FlowSession own outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects AgentSession-owned input/history; Home-local `runs/<prefix>/<artifact-key>/` immutable payload and process receipts | shared conversation admission and history | `lf mon show`, `lf replay`, `lf usage`, `lf activity`; Work/status history | `exec:lf`, provider harnesses |
 | **Browser capture** — one isolated, bounded screenshot transaction | The requested source, viewport, and output name the transaction; only a validated PNG replaces the output. The standalone shell identity and fresh process group keep capture separate from the user's browser and bound to its owner. | [`ScreenshotArgs`](../rust/loopflow/src/lf/mod.rs), [`ProcessGroupGuard`](../rust/loopflow/src/engine/process.rs) | Output PNG only; no control-store state | `lf __screenshot-supervisor` owns one `chrome-headless-shell` process group and observes the public command through a control pipe | `lf screenshot` | `exec:chrome-headless-shell` |
 | **Exec** — one actual lf process | The journal transaction records command completion and fixes each child's causal parent at admission. Agent provenance grants no control authority. | [`ExecId`](../rust/loopflow/src/id.rs), [`AgentCaller`](../rust/loopflow/src/exec.rs) | `execs` | Outermost foreground command; installation/bootstrap coverage remains a cutover obligation | `lf monitor`, `lf mon list`; ordinary parsed CLI commands | — |
 | **Local process observation** — outer command receipts joined to current OS facts | A live kernel process plus a matching local receipt is observation, not durable ownership. Registered orphan OpenCode groups may be reaped; unclaimed provider PIDs may not. | [`ActivitySnapshot`](../rust/loopflow/src/lf/commands/top.rs), [`ProcessPruneReport`](../rust/loopflow/src/lf/commands/top.rs) | Home-local Exec receipts and OpenCode server registry | The foreground observer samples the process table; no keeper asserts Run liveness | `lf ps`, `lf top`, `lf mon prune`, `lf doctor` | `exec:/bin/ps`, `exec:ps`, `exec:sysctl`, `exec:lsof`, `exec:kill`, `exec:which` |
@@ -475,7 +475,7 @@ a disposable copy and leaves the installed Home unchanged.
 | `.lf/skills/`, `.lf/flows/`, `.lf/config.yaml` | Repository-owned execution definitions | Authored and reviewed with code |
 | `wave/<name>/GOAL.md`, `MEMORY.md`, `metrics/` | Wave intent, curated memory, metric contracts | Authored and reviewed with code |
 | `.lf/releases/<tag>/<commit>-<run>/` | Prepared release bytes and their candidate receipt | Replace one exact candidate atomically; retain through retry, remove after publication |
-| `$LF_HOME/runs/<prefix>/<run-id>/` | Session capture manifest, event streams, terminal receipt | Publish once, append streams, settle once |
+| `$LF_HOME/runs/<prefix>/<artifact-key>/` | Session capture manifest, event streams, terminal receipt | Publish once, append streams, settle once |
 | Home provider directories | Provider-native login and resume state | Owned by provider adapters |
 | Git directory `loopflow/` receipts | writer/sync/PR mutation coordination | Kernel-locked receipt files |
 | machine install root | Versioned artifact sets and switch receipts | Stage immutably, select atomically |
@@ -526,17 +526,21 @@ the inner `lf` and separator are implicit, the target re-resolves its own Home
 state, and durable processes scrub foreground-forwarded secrets before
 detaching.
 
-## Harness launch and Run records
+<a id="harness-launch-and-run-records"></a>
+## Harness launch and Session captures
 
-The heading remains an inbound documentation anchor; Run is historical vocabulary.
 The execution cutover uses one AgentSession admission and capture path for Task,
 Wave, helper and direct callers.
 
 SQLite owns Exec history. Repository trace events live in
 `.lf/journal/traces/<trace-id>/events.jsonl` and name their `trace_id` and `exec`
 node explicitly. Session captures retain the published `~/.lf/runs` directory
-layout, selected through SQLite artifact keys. That directory contains current
-Session data; its historical name does not make it disposable Run history.
+as one opaque physical encoding, selected through SQLite artifact keys. Current
+and historical captures use the same root: there is no relocation, parallel
+layout, alias or privileged conversion. Missing payload does not erase a resumable
+Session's SQLite identity. `LF_CAPTURE_KEY` selects subordinate history;
+Session/Exec caller provenance supplies ancestry and mutation authority.
+
 
 1. Admit the actual lf Exec; resolve typed work without granting Flow authority.
 2. Reserve the AgentSession and its initial history/capture reference before
@@ -549,6 +553,40 @@ Session data; its historical name does not make it disposable Run history.
    selected Flow completion only under its separate boundary claim.
 6. Settle the actual command's Exec when the process completes, independently of
    whether its conversation or parked Flow remains open.
+
+### Retained encoding inventory (LOO-370)
+
+- `session_record::record_dir`, active-reader watches, ablation staging and
+  preservation fixtures retain `runs/<shard>/<artifact-key>`. This is the single
+  physical capture root; keys (including historical `run_` strings) are immutable.
+- `ops/git_operation.rs` keeps serialized `run_id` / `process_id` receipt fields
+  while Rust names their actual Trace/Exec owners. Released SQL, migration
+  fixtures and `session_events` historical source labels retain their original
+  bytes. Historical cohort readers in `scripts/context_ablation.py` still decode
+  `launch`, `run_id` and `parent_run_id` from their frozen inputs.
+- `LF_RUN_ID` / `LF_RUN_DIR` occur only in launch scrubbing, rejection fixtures
+  and the checksum-pinned released-CLI preservation fixture. Current execution
+  reads `LF_CAPTURE_KEY` and typed Session/Exec provenance. Capture context does
+  not confer Flow or Task settlement authority.
+- GitHub workflow/check runs, release-run operations, gate execution receipts,
+  launchd `RunAtLoad`, Swift attributed-text runs and ordinary execution verbs
+  name other things. Published release notes, dated benchmark reports and chapter
+  archives retain historical terminology. The old heading anchor above preserves
+  documentation links, not a runtime interface.
+- Current Wave JSON exposes `history: Evidence<SessionHistory>`; Rust, Swift and
+  `wave_detail.json` share the required field without a fallback. Telemetry uses
+  Session metric IDs and labels; ablation/check-cost use capture names. Session
+  commands select durable Session/native conversation IDs; monitor's `--input`
+  and replay select retained captures.
+
+Production source against `8ea0bec9cf4b0c08ca17c52e57de059000a7b0e3`:
+Rust **+545 / −659**, Swift **+64 / −64**, Python package **+0 / −0**,
+scripts **+97 / −81** (net **−98** lines). Physical-line comparison includes
+comments/blanks, excludes tests/fixtures, SQL, builtin prose and generated output;
+Rust test-only attributed items are removed using its syntax tree. Rename pairs
+are compared as one file, so moves do not count as deletion. This measures source,
+not installed acceptance. Abandoned relocation probes survive in Git at
+`6fcdbe9da0b47ef95f1f92ebdb259401a327cd46`; their contrary evidence remains valid.
 
 Payloads may remain large immutable files. SQLite owns identity, attribution,
 current control and searchable history. Current capture payloads may use files; ordinary readers select their exact

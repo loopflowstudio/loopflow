@@ -304,7 +304,6 @@ mod tests {
             .sqlite
             .rename_session(
                 &session_id,
-                None,
                 "Retained conversation",
                 crate::session::TitleSource::Human,
             )

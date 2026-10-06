@@ -105,7 +105,7 @@ async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore
     let store = match open_registry_for_authority().await {
         Ok(store) => Arc::new(store),
         Err(RegistryUnavailable::MissingFile { .. })
-            if std::env::var_os(crate::durable::RUN_ID_ENV).is_none() =>
+            if crate::journal::agent_caller().is_none() =>
         {
             return Ok(None)
         }

@@ -108,6 +108,10 @@ finds it or starts it, a Wave's with its goal and memory, and repeats return the
 same Session. `replace`
 stops that conversation, keeps it as history, and starts a fresh one.
 
+Session connect, rename, bind and complete take the durable Session ID shown by
+`lf session list`. Capture keys and history prefixes select retained inputs for
+inspection and replay; they do not select these Session actions.
+
 | Scope | One finite pass | Ongoing conversation |
 | --- | --- | --- |
 | Repository | `lf operate` | `lf session ensure` |

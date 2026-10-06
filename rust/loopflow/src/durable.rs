@@ -7,8 +7,7 @@ use crate::engine::invocation::{QueuedInvocation, StepKind, StepRef};
 use crate::engine::ConcreteStep;
 use crate::id::{ExecId, TraceId, WaveId};
 
-/// The exact active Run named by an in-Run process.
-pub const RUN_ID_ENV: &str = "LF_RUN_ID";
+/// The Task worker claim carried into its next Exec.
 pub const TASK_WORKER_CLAIM_ENV: &str = "LF_WORK_ADVANCE_CLAIM";
 macro_rules! durable_id {
     ($name:ident, $prefix:literal) => {
@@ -191,17 +190,17 @@ impl TaskFlowBlocker {
     }
 }
 
-/// Read projection of the Flow's selected capture and its Session publication.
-/// The recorder outcome is historical evidence, not native turn settlement.
+/// Read projection of the Flow's selected capture, Session publication and
+/// selected native turn's completion status.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FlowAttempt {
+pub struct SelectedCapture {
     pub captured: i64,
-    pub run_id: String,
+    pub artifact_key: String,
     pub published: bool,
     pub outcome: Option<String>,
 }
 
-impl FlowAttempt {
+impl SelectedCapture {
     pub fn completed(&self) -> bool {
         self.outcome.as_deref() == Some("completed")
     }
@@ -233,7 +232,7 @@ pub struct FlowSession {
     pub cwd: std::path::PathBuf,
     pub message: Option<String>,
     pub model: Option<String>,
-    pub current_attempt: Option<FlowAttempt>,
+    pub selected_capture: Option<SelectedCapture>,
     pub pending_session_id: Option<String>,
     /// The pending review's feedback once its agent ran `lf session ready`.
     pub ready_summary: Option<String>,
@@ -327,15 +326,15 @@ impl FlowSession {
         })
     }
 
-    /// The Run a pending review's agent is running in, once launched.
+    /// The published capture selected for a pending review.
     pub fn review_artifact_key(&self) -> Option<&String> {
-        self.current_attempt
+        self.selected_capture
             .as_ref()
             .filter(|attempt| attempt.published)
-            .map(|attempt| &attempt.run_id)
+            .map(|attempt| &attempt.artifact_key)
     }
 
-    /// The Work the Flow was launched with, as its Runs declare it.
+    /// The Work declared when the Flow was launched.
     pub fn declared_work(&self) -> Option<crate::session::SessionWork> {
         if self.task_id.is_none() && self.wave_id.is_none() {
             return None;

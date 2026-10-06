@@ -716,13 +716,16 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         } else {
             "tui"
         };
-        let capture = begin_run_capture(built, surface, &built.agent_config)?;
+        let capture = begin_capture(built, surface, &built.agent_config)?;
         let provider_session_id = if target == ExecTarget::Tui && built.harness == "claude" {
-            let run_id = capture.artifact_key();
-            let raw_id = run_id.as_str().strip_prefix("run_").unwrap_or(&run_id);
+            let artifact_key = capture.artifact_key();
+            let raw_id = artifact_key
+                .as_str()
+                .strip_prefix("run_")
+                .unwrap_or(&artifact_key);
             Some(
                 uuid::Uuid::parse_str(raw_id)
-                    .expect("Run IDs always carry a UUID")
+                    .expect("capture keys always carry a UUID")
                     .to_string(),
             )
         } else {
@@ -774,7 +777,7 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         .map_err(anyhow::Error::from)?;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
-    let capture = begin_run_capture(built, "headless", &agent_config)?;
+    let capture = begin_capture(built, "headless", &agent_config)?;
 
     let result = exec_headless_prompt(built, &capture, &effective_system, &agent_config);
     let outcome = if result.is_ok() {
@@ -784,11 +787,11 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
     };
     let settlement = capture.finish(outcome);
     match (result, settlement) {
-        (Err(error), Err(settlement)) => {
-            Err(error.context(format!("Run execution also failed to settle: {settlement}")))
-        }
+        (Err(error), Err(settlement)) => Err(error.context(format!(
+            "Session execution also failed to settle: {settlement}"
+        ))),
         (Err(error), Ok(())) => Err(error),
-        (Ok(()), Err(error)) => Err(anyhow!("Run completed but did not settle: {error}")),
+        (Ok(()), Err(error)) => Err(anyhow!("Session completed but did not settle: {error}")),
         (Ok(()), Ok(())) => Ok(capture.final_answer()?),
     }
 }
@@ -870,7 +873,7 @@ fn exec_headless_prompt(
     }
 }
 
-fn begin_run_capture(
+fn begin_capture(
     built: &PromptBuild,
     surface: &str,
     prepared_config: &AgentConfig,
@@ -899,12 +902,12 @@ fn begin_run_capture(
         flow: step.membership,
         work: built.work.clone(),
     };
-    let capture = if let Some((token, captured, run_id)) = step.reserved {
+    let capture = if let Some((token, captured, artifact_key)) = step.reserved {
         // The step command reserved this capture; publication retains its claim.
         let (provider, model) = (spec.harness.clone(), spec.model.clone());
         CaptureHandle::begin_reserved_with_context(
             spec,
-            run_id,
+            artifact_key,
             (surface == "headless")
                 .then(|| AgentExecRequest::from_prepared(prepared_config, &built.capabilities)),
             &built.context,
@@ -921,16 +924,27 @@ fn begin_run_capture(
                 )
             },
         )
-    } else if let Some((run_id, membership)) = crate::ops::human_session::reserved_capture()? {
+    } else if let Some((artifact_key, membership)) = crate::ops::human_session::reserved_capture()?
+    {
         let spec = SessionCaptureSpec {
             flow: membership,
             ..spec
         };
         let (provider, model) = (spec.harness.clone(), spec.model.clone());
-        CaptureHandle::begin_reserved_with_context(spec, run_id, None, &built.context, |run_id| {
-            crate::ops::human_session::publish_capture_binding(run_id, &provider, model.as_deref())
+        CaptureHandle::begin_reserved_with_context(
+            spec,
+            artifact_key,
+            None,
+            &built.context,
+            |artifact_key| {
+                crate::ops::human_session::publish_capture_binding(
+                    artifact_key,
+                    &provider,
+                    model.as_deref(),
+                )
                 .map_err(|error| crate::store::StoreError::InvalidAuthority(error.to_string()))
-        })
+            },
+        )
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
         CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &id, spec, &built.context)
     } else {
@@ -1271,7 +1285,7 @@ pub fn split_skill_args(args: &[String]) -> Result<(String, Vec<String>)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        attributed_context, begin_run_capture, build_bound_prompt_at, build_prompt_at,
+        attributed_context, begin_capture, build_bound_prompt_at, build_prompt_at,
         exec_headless_prompt, exec_prompt, forced_launch_target, is_interactive_run,
         is_interactive_run_with_tty, should_exec_via_skill, skill_exec_seed, split_skill_args,
         PromptBuild,
@@ -1281,33 +1295,11 @@ mod tests {
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
     use crate::engine::{Config, ExecTarget, Skill, Surface};
     use crate::lf::Cli;
+    use crate::test_ambient::EnvGuard;
     use crate::trace::{ContextAssetKind, ContextScope};
     use clap::Parser;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
-
-    struct EnvironmentRestore(Vec<(&'static str, Option<std::ffi::OsString>)>);
-
-    impl EnvironmentRestore {
-        fn capture(keys: &[&'static str]) -> Self {
-            Self(
-                keys.iter()
-                    .map(|key| (*key, std::env::var_os(key)))
-                    .collect(),
-            )
-        }
-    }
-
-    impl Drop for EnvironmentRestore {
-        fn drop(&mut self) {
-            for (key, value) in self.0.drain(..).rev() {
-                match value {
-                    Some(value) => std::env::set_var(key, value),
-                    None => std::env::remove_var(key),
-                }
-            }
-        }
-    }
 
     #[test]
     fn bare_lf_stays_in_terminal_and_operate_honors_launch_mode() {
@@ -1342,7 +1334,7 @@ mod tests {
     #[test]
     fn context_choices_override_config_and_omission_inherits() {
         let _lock = crate::journal::test_env_lock();
-        let _restore = EnvironmentRestore::capture(&["LF_HOME"]);
+        let _restore = EnvGuard::clear(&["LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         let repo = loopflow_test_support::TestRepo::new();
@@ -1405,7 +1397,7 @@ mod tests {
     #[test]
     fn preferred_name_survives_fresh_launches_and_corrections() {
         let _lock = crate::journal::test_env_lock();
-        let _restore = EnvironmentRestore::capture(&[
+        let _restore = EnvGuard::clear(&[
             "LF_HOME",
             "LF_USER_NAME",
             "GIT_CONFIG_COUNT",
@@ -1414,7 +1406,6 @@ mod tests {
         ]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
-        std::env::remove_var("LF_USER_NAME");
         std::env::set_var("GIT_CONFIG_COUNT", "1");
         std::env::set_var("GIT_CONFIG_KEY_0", "user.name");
         std::env::set_var("GIT_CONFIG_VALUE_0", "Git User");
@@ -1470,7 +1461,7 @@ mod tests {
     #[test]
     fn preferred_name_uses_remote_caller_and_leaves_background_work_unattributed() {
         let _lock = crate::journal::test_env_lock();
-        let _restore = EnvironmentRestore::capture(&["LF_HOME", "LF_USER_NAME"]);
+        let _restore = EnvGuard::clear(&["LF_HOME", "LF_USER_NAME"]);
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
         std::fs::write(
@@ -1525,7 +1516,7 @@ mod tests {
         std::fs::write(
             &provider,
             r#"#!/bin/sh
-printf '%s\n' "$LF_RUN_ID|$LF_RUN_DIR|${LF_TRACE_ID-unset}|${LF_PROCESS_ID-unset}" >> "$LF_TEST_RUN_EVIDENCE"
+printf '%s\n' "$LF_CAPTURE_KEY|${LF_RUN_DIR-unset}|${LF_TRACE_ID-unset}|${LF_PROCESS_ID-unset}" >> "$LF_TEST_RUN_EVIDENCE"
 if [ -n "${LF_TEST_ATTEMPT_FILE:-}" ] && [ ! -e "$LF_TEST_ATTEMPT_FILE" ]; then
   touch "$LF_TEST_ATTEMPT_FILE"
   printf '%s\n' '{"type":"result","is_error":true,"result":"service unavailable"}'
@@ -1543,31 +1534,24 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             "LF_HOME",
             crate::journal::LF_TRACE_ID_ENV,
             crate::journal::LF_PROCESS_ID_ENV,
-            crate::durable::RUN_ID_ENV,
-            crate::session_record::RUN_DIR_ENV,
+            crate::session_record::CAPTURE_KEY_ENV,
+            "LF_RUN_DIR",
         ];
-        let _environment = EnvironmentRestore::capture(&keys);
         let path = format!(
             "{}:{}",
             bin.display(),
             std::env::var("PATH").unwrap_or_default()
         );
+        let _environment = EnvGuard::clear(&keys);
         std::env::set_var("PATH", path);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", home.path());
         let registry = home.path().join("loopflow.db");
         std::env::set_var(crate::journal::LF_TRACE_ID_ENV, "trace_stale");
         std::env::set_var(crate::journal::LF_PROCESS_ID_ENV, "process_stale");
-        std::env::set_var(
-            crate::durable::RUN_ID_ENV,
-            crate::session_record::new_artifact_key().as_str(),
-        );
-        std::env::set_var(
-            crate::session_record::RUN_DIR_ENV,
-            home.path().join("stale-run"),
-        );
+        std::env::set_var("LF_RUN_DIR", home.path().join("stale-run"));
 
-        let task = "prove the generic Run launch";
+        let task = "prove the captured Session launch";
         let context = crate::trace::PreparedTurnContext::from_prompts("", task);
         let mut env = std::collections::BTreeMap::new();
         env.insert(
@@ -1601,8 +1585,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             work: None,
             claim: None,
         };
-        let capture = begin_run_capture(&built, "headless", &built.agent_config).unwrap();
-        let run_id = capture.artifact_key();
+        let capture = begin_capture(&built, "headless", &built.agent_config).unwrap();
+        let artifact_key = capture.artifact_key();
         let run_dir = capture.artifact_dir();
 
         assert!(run_dir.join("manifest.json").is_file());
@@ -1624,7 +1608,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let provider_identity = std::fs::read_to_string(evidence).unwrap();
         assert_eq!(
             provider_identity.trim(),
-            format!("{}|{}|unset|unset", run_id, run_dir.display())
+            format!("{}|unset|unset|unset", artifact_key)
         );
         assert!(run_dir.join("terminal.json").is_file());
         assert!(!run_dir.join("owner.json").exists());
@@ -1643,11 +1627,16 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let implicit_identities = std::fs::read_to_string(implicit_evidence).unwrap();
         let identities = implicit_identities.lines().collect::<Vec<_>>();
         assert_eq!(identities.len(), 2, "transient failure should retry once");
-        assert_eq!(identities[0], identities[1], "retry must stay in one Run");
+        assert_eq!(
+            identities[0], identities[1],
+            "retry must stay in one Session"
+        );
         let fields = identities[0].split('|').collect::<Vec<_>>();
         assert_eq!(&fields[2..], ["unset", "unset"]);
         let implicit_run_id = crate::session_record::parse_artifact_key(fields[0]).unwrap();
-        let implicit_run_dir = std::path::Path::new(fields[1]);
+        assert_eq!(fields[1], "unset");
+        let implicit_run_dir =
+            crate::session_record::record_dir(home.path(), &implicit_run_id).unwrap();
         assert_eq!(
             implicit_run_dir.file_name().and_then(|name| name.to_str()),
             Some(implicit_run_id.as_str())
@@ -1729,7 +1718,7 @@ if [ "${1:-}" = "--version" ]; then
 fi
 sleep "$LF_TEST_RESEARCH_DELAY"
 mkdir -p "$(dirname "$LF_TEST_RESEARCH_OUTPUT")"
-temporary="$LF_TEST_RESEARCH_OUTPUT.$LF_RUN_ID.tmp"
+temporary="$LF_TEST_RESEARCH_OUTPUT.$LF_CAPTURE_KEY.tmp"
 printf '%s\n' "$LF_TEST_RESEARCH_CONTENT" > "$temporary"
 mv "$temporary" "$LF_TEST_RESEARCH_OUTPUT"
 printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"output_tokens":3}}'
@@ -1738,30 +1727,13 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        // A suite launched from a live agent session must not inherit that
-        // session's execution identity.
-        let ambient_identity = [
-            crate::durable::RUN_ID_ENV,
-            crate::session_record::RUN_DIR_ENV,
-            "LF_WAVE_ID",
-            "LF_ACCOUNT_LEASE",
-        ];
-        let keys: Vec<&'static str> = ["PATH", "LF_BIN", "LF_HOME"]
-            .into_iter()
-            .chain(ambient_identity)
-            .collect();
-        let _environment = EnvironmentRestore::capture(&keys);
-        for name in ambient_identity {
-            std::env::remove_var(name);
-        }
-        std::env::set_var(
-            "PATH",
-            format!(
-                "{}:{}",
-                bin.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        );
+        let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )))
+        .unwrap();
+        let _ambient = EnvGuard::new();
+        let _environment = EnvGuard::clear(&["PATH", "LF_BIN", "LF_HOME"]);
+        std::env::set_var("PATH", path);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         std::env::set_var("LF_HOME", home.path());
 
@@ -1969,7 +1941,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     #[test]
     fn ide_wave_skill_launch_delivers_the_authored_goal() {
         let _lock = crate::journal::test_env_lock();
-        let _restore = EnvironmentRestore::capture(&["HOME", "LF_HOME"]);
+        let _restore = EnvGuard::clear(&["HOME", "LF_HOME"]);
         let home = tempfile::tempdir().unwrap();
         // A regression into native skill sync must never write personal skills.
         std::env::set_var("HOME", home.path());

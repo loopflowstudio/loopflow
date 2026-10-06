@@ -44,7 +44,7 @@ its conversation or replay on unchanged evidence. LOO-370's earlier disk blocker
 has cleared; its physical conversion requirement is superseded by the explicit
 opaque-root decision above, without permission to migrate the installed Home.
 
-## Release follow-through (2026-10-04)
+## Release follow-through (reconciled 2026-10-05)
 
 Jack Heart directed Infrastructure to take responsibility for finishing every
 release. Release owns the release-specific execution and evidence; Infrastructure
@@ -55,9 +55,33 @@ exact publication evidence, and surface any unresolved blocker and next action
 without requiring Jack to rediscover the gap. Keep progress updates in the
 ongoing conversation while recovery is active.
 
-The v0.13.1 version PR merged while v0.13.0 remained the latest published release.
-That gap left the Session filtering in PR #1421 absent from the installed Desktop.
-Release-specific recovery evidence belongs in [Release memory](release/MEMORY.md).
+Release memory records v0.13.2 publication and installation with PR #1421 filtering,
+but no verified public receipt from manual recovery or two unattended settlements.
+Upstream #1441 removes the retired UI receipt prerequisite and repairs CLI smoke;
+source integration is not configured acceptance. Exact recovery evidence belongs
+in [Release memory](release/MEMORY.md).
+
+## Capture cutover (LOO-370, reconciled 2026-10-05)
+
+Jack Heart authorized autonomous source delivery, not installed conversion or
+interruption. Infrastructure selected one opaque `runs/` physical capture root
+under that delegation; the updated brief and delivered steers explicitly accept
+it. This changes the prior layout-replacement requirement. No relocation,
+parallel layout, compatibility alias or privileged offline migration is required.
+
+Capture keys select history; Session IDs select mutations; Session/Exec provenance
+supplies authority. Missing payload cannot erase resumable SQLite identity.
+Keep historical paths, payloads, feedback, native identity and usage unchanged.
+Checksum-pinned v0.13.3 capture preservation passed with stub providers, including
+native resume, independent replay, review feedback and nested Exec ancestry.
+Final affected gate remains open; fixtures prove neither installation nor conversion.
+
+The abandoned permission probes demonstrated writable hard-link aliases and a
+recovery check/write race that altered unrelated replacement metadata. Those
+counterexamples and the unresolved Mac boot-custody investigation remain at
+`6fcdbe9da0b47ef95f1f92ebdb259401a327cd46:scratch/finish-removing-the-retired-run.md`.
+Deleting the probes does not establish exclusion or migration. Installed acceptance
+remains separate from source fixtures and delivery.
 
 ## Review replacement (2026-10-04)
 
@@ -387,7 +411,8 @@ the other names nothing read. One list of Exec-context names drives both the
 session shell's `unset` and the tmux client's environment, because a tmux server
 copies its first client's environment into every later session. Fixtures open
 their store at the Home's fixed path. Not reviewed by Jack; branch evidence only.
-`LF_RUN_ID` presence still decides three behaviours without validating the Run.
+LOO-370 removes those presence-based runtime decisions. Its accepted scope excludes
+conversion; source gate and delivery remain unfinished.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 
@@ -940,7 +965,6 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
 ## Gotchas
 
 - **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly** (filed). `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
-- **Dotted-root vs dotted-ancestry collision — RESOLVED** by the WaveId decoupling: the dir is a flat `.`-chain, the remote branch carries `/`+author, and ancestry is read from the `Run` record, not the string. The old `branch_names.schema` grammar that caused it is gone.
 - **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures — two `bin/lf.rs` tests naming a deleted command had never run at all.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.
@@ -950,7 +974,7 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
   marker through `migration_sql_for_test`; an `include_str!` pointing directly
   at `migrations/drafts/` passes locally and fails the release tree at compile
   time.
-- **Ordinary-PR integration tests inherit Task authority inside a worker.** Scrub `LF_RUN_CONTEXT` (plus its lease/invocation companions) when a fixture deliberately represents a non-Task repository. A missing registry while Run context is present is the intended fail-closed behavior, not a commit/push regression.
+- **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in TESTING.md: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
 - **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between one command and the next, and `done` advanced 6→22 with no `--continue` from the losing session. Nothing was lost that time. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
 - **Linear Project UUIDs survive renames; derived slugs do not.** Project content
   lives in Linear and the local SQLite snapshot, with no `projects/*.md` cache.

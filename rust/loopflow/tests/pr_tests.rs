@@ -1347,7 +1347,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         cwd: task.task.worktree.clone(),
         message: None,
         model: None,
-        current_attempt: None,
+        selected_capture: None,
         pending_session_id: None,
         ready_summary: None,
         worker_generation: 0,

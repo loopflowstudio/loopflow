@@ -55,7 +55,13 @@ rotation adapter: it supplies the already-held Wave/checkout guard without repea
 acceptance policy. The chapter-sweep fixture now binds through the real operation
 after its fake provider starts; its old direct selection preceded accepted facts.
 Its fake provider includes the required exact Project lookup. Sweep assertions are
-unchanged. No remaining deletion target was identified in these paths.
+unchanged. The follow-up compression removes the detail view's per-Wave filter
+dictionary: its enclosing view already keys its lifetime by repository and Wave.
+One filter and its timestamp suffice. The unused history-reference state and
+duplicate mock-mode guard are removed too. No remaining deletion target was
+identified in these paths. Focused checks exposed a mock detail fixture missing
+the required readiness field; the fixture now supplies it, and its existing
+decode test reports decoding errors directly instead of only an absent snapshot.
 
 ## Intelligence repair — Jack Heart's October 5 steer
 
@@ -111,9 +117,12 @@ Local synthetic passes establish neither installed conversion nor configured rea
 ## Remaining coherent cut
 
 October 6 reconciliation: reactive source is committed at `c2edcdba3`; dependency
-`e887a21c1` entered through `66a3daa86`. HEAD `9552df051` also includes telemetry
-repair #1462 (`102b8cfa0`); that integration supplies no new readiness proof.
-Compression is checkpointed at `45debbb7c`; its recorded checks remain applicable.
+`e887a21c1` entered through `66a3daa86`, and telemetry repair #1462 through
+`9552df051`. Compression is checkpointed at `45debbb7c`; HEAD `d3e0f2ec9`
+adds the live pending-command presentation requested in the iteration feedback.
+The subsequent detail-filter simplification and required mock-readiness repair
+remain local edits, with their 28-test pass recorded below. The pending presentation
+passed 40 focused tests before those edits; neither result is a full gate.
 
 
 Registration, exact-ID readers/admission, ensure, rotation, Portfolio activation
@@ -126,9 +135,9 @@ UI. The authorized reactive implementation now connects both surfaces through th
 model and removes the absent template section. [Demo evidence](project-readiness-demo.md)
 retains the original failure; the fixed mounted paths remain unproved.
 
-Gate still owns cross-process CLI/crash proof, configured acceptance, mounted
-retry, skill outcomes, output-handle leak investigation and CI-repair entry
-coverage. #1450's Session-ID conversation control and capture-history distinction
+Gate still owns cross-process CLI/crash proof, configured acceptance,
+skill outcomes, output-handle leak investigation and CI-repair entry coverage.
+Mounted opening/reopening/retry judgment remains with review. #1450's Session-ID conversation control and capture-history distinction
 remain required. Source fixtures establish neither installation nor Intelligence
 repair.
 
@@ -672,6 +681,8 @@ Registration compression evidence: `eb80d7198178a418cf44b3074f9b666f3e11cd40`.
 
 Earlier reactive implementation checks remain at `fd98f97352fdfc16145adf0efcc045443ae3a824:scratch/keep-every-wave-ready-for.md`; logs: `/tmp/loo366-pursue/`.
 
-Compression checks: network-isolated `cargo test -p loopflow --lib chapter` 32 passed, 1 failed on fixture setup; repaired `task_sweep_previews_old_chapters` 1 passed; headless `scripts/test_desktop.sh -Xswiftc -gnone --filter 'ProjectActivationTests|WaveDetailReadingTests|PodiumModelTests'` 38 passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, diff and context-budget checks passed. Gate retains configured/CLI/crash and mounted/skill acceptance, the output-handle leak and CI repair.
+Compression checks: `scripts/test_desktop.sh -Xswiftc -gnone --filter 'ProjectActivationTests|WaveDetailReadingTests|TaskHistoryFilterTests|MockWaveFixtureTests'` built Desktop and passed 28 headless tests with inherited LF authority removed after repairing the missing readiness fixture field (initial run: two failures); diff/context checks passed. Logs: `/tmp/loo366-compress-detail{,-retry}.log`. Earlier compression results remain at `d3e0f2ec9:scratch/keep-every-wave-ready-for.md`; gate retains CLI/crash/configured and skill acceptance, output-handle investigation and CI-repair entry proof; mounted judgment remains with review.
 
 Pending presentation checks: `scripts/test_desktop.sh -Xswiftc -gnone --filter 'ProjectActivationTests|WaveDetailReadingTests|PodiumModelTests'` built Desktop and passed 40 headless tests with inherited LF authority removed; `uv run --no-sync python scripts/check_swift_multiplatform_boundaries.py`, diff and context-budget checks passed. The first build rejected a test-file edit during compilation; the stable-tree rerun passed. Logs: `/tmp/loo366-pending-tests-retry.log`. CLI/crash and configured proof remain with gate, mounted judgment with review. Source review corrected current transport-error precedence over retained activation failure; no new readiness owner was introduced.
+
+Reconciliation check: `git diff --check` and `lf context --skill realign --json` passed; existing 40/28-test logs reviewed, no code changed or tests rerun.

@@ -399,10 +399,12 @@ or full-refresh freshness. Watchers never activate. Compression removed Portfoli
 post-reset refresh callback; committed workspace frames own updates. Live command
 feedback and persisted Exec uncertainty remain distinct: both surfaces derive
 “Preparing Project…” only from the existing per-Wave transport handle, preserving
-cached planning and unknown persisted outcomes after that handle ends. Headless checks prove no installed Intelligence repair or mounted
-acceptance. Release child memory reinforces operation-entry recovery: internal
-fixtures cannot replace public CLI/crash proof. Remaining acceptance lives in the
-design; source work grants no installation authority. Earlier Desktop evidence:
+cached planning and unknown persisted outcomes after that handle ends. Current
+transport errors precede retained activation errors; retry clears transport feedback.
+Headless checks prove no installed Intelligence repair or mounted acceptance.
+Release child memory reinforces operation-entry recovery: internal fixtures cannot
+replace public CLI/crash proof. The design retains acceptance; source work grants
+no installation authority. Earlier Desktop evidence:
 `42e6c2706b1b35b2852e438ff94a49d060faccda:scratch/keep-every-wave-ready-for.md`.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)

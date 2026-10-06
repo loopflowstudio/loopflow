@@ -48,7 +48,6 @@ struct WaveDetailPane: View {
     @State private var selection: WaveWorkSelection?
     @State private var showHistory = false
     @State private var showRealignment = false
-    @State private var historyReference: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,7 +61,6 @@ struct WaveDetailPane: View {
                 WavePlanView(
                     plan: wave.plan ?? WavePlan(objective: ""),
                     wave: wave,
-                    repoPath: repoPath,
                     selection: $selection,
                     streamed: streamed,
                     isProjectActivationPending: isProjectActivationPending,
@@ -80,7 +78,7 @@ struct WaveDetailPane: View {
             ProjectRealignmentView(repo: repoPath)
         }
         .sheet(isPresented: $showHistory) {
-            ProjectHistoryView(wave: wave.name, repo: repoPath, sourceReference: historyReference)
+            ProjectHistoryView(wave: wave.name, repo: repoPath, sourceReference: nil)
         }
     }
 
@@ -113,7 +111,6 @@ struct WaveDetailPane: View {
 private struct WavePlanView: View {
     let plan: WavePlan
     let wave: WaveViewModel
-    let repoPath: String
     @Binding var selection: WaveWorkSelection?
     let streamed: StreamedWaveDetail?
     let isProjectActivationPending: Bool
@@ -123,13 +120,12 @@ private struct WavePlanView: View {
 
     @Environment(\.palette) private var palette
     @State private var reading = WaveDetailReading()
-    @State private var historyFilters: [String: TaskHistoryFilter] = [:]
+    @State private var historyFilter = TaskHistoryFilter()
     @State private var historyNow = Date()
     // True until the first live read resolves. It gates the loading affordance,
     // so an empty plan during the pre-snapshot window reads as loading.
     @State private var isAwaitingDetail = true
 
-    private var identity: String { "\(repoPath)|\(wave.id)" }
     private var workMap: WaveWorkMap? { reading.snapshot?.workMap }
 
     var body: some View {
@@ -170,7 +166,7 @@ private struct WavePlanView: View {
     /// Later readings arrive from the window's workspace stream when a commit
     /// changes this Wave; nothing here reads on a clock.
     private func applyStreamed() {
-        guard let streamed, streamed.wave == wave.id, AppTestMode.current() != .mockWaves else { return }
+        guard let streamed, streamed.wave == wave.id else { return }
         if let snapshot = streamed.snapshot {
             historyNow = Date()
             reading.update(snapshot)
@@ -247,16 +243,12 @@ private struct WavePlanView: View {
                     WorkspaceSectionHeading("Tasks")
                     Text(reason).foregroundStyle(Color.statusWarning)
                 case .available(let inventory, let truncated):
-                    let filter = historyFilters[identity] ?? TaskHistoryFilter()
                     let tasks = inventory.filter {
-                        filter.includes($0.task, condition: $0.condition, now: historyNow)
+                        historyFilter.includes($0.task, condition: $0.condition, now: historyNow)
                     }
                     WorkspaceSectionHeading(title: "Tasks", count: tasks.count) {
-                        TaskHistoryControls(filter: Binding(
-                            get: { historyFilters[identity] ?? TaskHistoryFilter() },
-                            set: { historyFilters[identity] = $0; historyNow = Date() }
-                        ))
-                        .id(identity)
+                        TaskHistoryControls(filter: $historyFilter)
+                            .onChange(of: historyFilter) { historyNow = Date() }
                     }
                     if truncated { Text("Planning is partial; more Tasks exist.") }
                     if tasks.isEmpty { Text("No current Tasks").foregroundStyle(palette.textSecondary) }

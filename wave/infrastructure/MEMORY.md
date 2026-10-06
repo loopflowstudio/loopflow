@@ -346,7 +346,10 @@ identity is unchanged. [Method and verification](https://github.com/loopflowstud
 
 Jack Heart reported `lf wt list` at 44 s, 17 s after a deadlocked writer was
 killed. PR 1 shipped in v0.13.3; PR #1456 merged October 6, after v0.13.5,
-and awaits release/install validation. Numbers and method:
+and shipped in v0.13.6 on October 6. Installed validation on 54 worktrees returned
+20/20 successful samples per surface: external text median/p95 1.465/1.511 s,
+JSON 1.387/1.443 s. Both miss the one-second aim. Production timing is installed;
+local Git is the larger phase, with no measured hard lower bound. Numbers and method:
 [report](../../scripts/benchmarks/wt-list/README.md).
 
 - **Process count, not Git work, was the listing cost** (PR 1): about 370 serial

@@ -197,7 +197,36 @@ no working deadline. It now releases within 2 s of real time whatever the
 runtime is doing (`harness/dispatch.rs`, two regression tests that fail against
 the previous dispatch).
 
-### Production timing
+### Installed v0.13.6 — October 6, 2026
+
+After PR #1456 shipped in v0.13.6, the published installer updated Jack Heart's
+CLI and Desktop successfully. On the live Home, 20 alternating text/JSON pairs
+listed 54 worktrees. All 40 commands succeeded, with no recorded remote timeout,
+interruption or missing receipt. These are ordinary installed reads under the
+current host load, not a matched replay of the earlier release populations.
+
+| Surface | Samples | External median / p95 | Instrumented median / p95 |
+|---|---:|---:|---:|
+| Text | 20 | 1.465 / 1.511 s | 1.420 / 1.471 s |
+| JSON | 20 | 1.387 / 1.443 s | 1.348 / 1.404 s |
+
+Production phase median / p95 in milliseconds: text startup 113/118, local Git
+1242/1295, remote 872/956, receipts 4/4; JSON startup 114/116, local Git 1232/1283,
+remote 815/907, receipts 4/8. Local and remote phases overlap; do not add them.
+An additional diagnostic Git trace counted 67 Git processes, including 54 status
+reads (summed 1052 ms, median 12.6 ms, max 174.6 ms). Those summed subprocess
+times are not the local phase's wall time. SQLite query counts were not measured.
+
+Both surfaces still miss the one-second warm p95 aim. The installed instrumentation
+works and identifies local Git as the larger phase, but this does not establish a
+hard lower bound or complete the remaining performance investigation. Preserve
+unknown statuses and checkout read-only behavior when reducing that cost.
+Private receipts: `/tmp/infra-375-installed-0136/samples.json`,
+`/tmp/infra-375-installed-after.json`, and
+`/tmp/infra-375-installed-git-trace.jsonl`. The timing command remains
+`lf wt timing --json`.
+
+### Reading production timing
 
 Each real `lf wt list` appends one line to `<Home>/perf/wt-list.jsonl`:
 

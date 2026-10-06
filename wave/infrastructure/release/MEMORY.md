@@ -1,5 +1,23 @@
 # Release memory
 
+## v0.13.6 publication and installation (2026-10-06)
+
+The installed release controller completed [v0.13.6](https://github.com/loopflowstudio/loopflow/releases/tag/v0.13.6)
+at 18:38:27 UTC from `e177eafe6ee6f45b2221da845d12dd8dd640a2bb`.
+PR #1464 and candidate workflow 37509813134 passed. It includes #1452's reactive
+Desktop, #1456's listing repair and #1462's retired telemetry-producer repair.
+This was manual recovery after the scheduled attempt failed; it supplies no
+credit toward LOO-285's two original unattended settlements.
+
+Jack Heart reported `lf install` appearing hung. The supported installation
+eventually completed its 2.2 GiB store backup, migration and artifact promotion.
+CLI and Desktop report 0.13.6; a repeat install reported already installed.
+Samples identified repeated unpinned preflight snapshots and a migration backup
+sleeping between 64-page batches. Local prevention commit `3a9f55c8e` pins the
+snapshot, removes the migration backup's deliberate delay and announces that
+phase. Focused snapshot/integrity/exclusion tests and Clippy passed; the prevention
+fix is not yet published. No raw state edit or process termination was used.
+
 ## Published recovery runtime (2026-10-06)
 
 The normal installed `lf release run patch` completed v0.13.5 at

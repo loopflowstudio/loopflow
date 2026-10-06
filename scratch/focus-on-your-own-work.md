@@ -168,27 +168,27 @@ website as rendered.
    compression. Choices: [questions.md](questions.md). Demo items: the Move
    to menu and a stopped edge on screen; a conversation choosing an edge.
 
-9a. **One Task run, many Flow execs.** (Words: Jack, October 6, "i think
-    maybe cleaner to say run for task and exec for flow", then "er run for
-    workflow api and exec for flow datamodel": *run* is the Workflow API's
-    verb, *exec* is the Flow's record. A *Task run* is one
-    `lf task run` carrying one edge; a *Flow exec* is one execution of a
-    Flow, the FlowExec record. Say "Flow exec", not "Flow run", in status,
-    Desktop and docs; the Desktop log in slice 11 is the Flow exec log.
-    Collision to carry to LOO-386: "Run" is also the product word for a
-    headless conversation.) Jack, October 6: "lf task run should
-    in addition to finding the flow also have some amount of retry, i.e. we
-    shoudl allow task run has many flow runs". `lf task run` stops becoming
-    the Flow's driver: it stays the process that carries the edge and starts
-    the edge's Flow as a child, the plain `lf run FLOW` command, again when a
-    run fails. The Workflow's position names the task-run Exec; each attempt
-    is its own FlowExec beneath it and its own row in the Flow run log. The
-    Task arrives when an attempt succeeds and holds on the edge, stopped,
-    when attempts run out. Agent's defaults, not Jack's: three attempts; no
-    retry when the Flow ended blocked for a person or handed off a landing,
-    or when the task run itself was interrupted. Done when a test shows two
-    failed attempts then a success arriving once with three FlowExecs, and
-    exhausted attempts holding the edge. *Not done.*
+9a. **One Task run, many Flow execs.** — **done**, `274a63a8a`, compressed
+    `24ba54689`. Words: Jack, October 6, "i think maybe cleaner to say run
+    for task and exec for flow", then "er run for workflow api and exec for
+    flow datamodel": *run* is the Workflow API's verb, *exec* is the Flow's
+    record. A *Task run* is one `lf task run` carrying one edge; a *Flow
+    exec* is one execution of a Flow, the FlowExec record. Say "Flow exec",
+    not "Flow run", in status, Desktop and docs; the Desktop log in slice 11
+    is the Flow exec log. (Collision carried to LOO-386: "Run" is also the
+    product word for a headless conversation.) Jack, October 6: "lf task run
+    should in addition to finding the flow also have some amount of retry,
+    i.e. we shoudl allow task run has many flow runs". Built: `lf task run`
+    carries the edge and starts `lf --task ISSUE run FLOW` as a child, again
+    when a Flow exec fails; the position names the Task-run Exec and each
+    attempt is its own FlowExec beneath it. Agent's defaults, not Jack's, in
+    [questions.md](questions.md): three attempts; `lf run` exits 3 when
+    blocked or stopped short, which is not retried. Check, October 6 at
+    `24ba54689`: `cargo test -p loopflow --test task_flow_launch_tests` 7
+    passed (three failures hold the edge stopped; failed, failed, succeeded
+    arrives once with three Flow execs under one Task run). Not renamed
+    yet: surfaces still say "Flow run"; slice 10's renaming owns it. Demo
+    item: a real provider failure retried.
 10. **Nodes and edges; Projects have workflows.** Jack, October 6: "it is ok for
     now to require that each edge is a unique step (flow/skill)": an edge is
     named by what it runs, edges leaving one node run different things, and
@@ -281,7 +281,7 @@ Clear inherited `LF_*`/`LOOPFLOW_*` before Rust tests. Gate owns the full run.
 
 | Command | Proves |
 | --- | --- |
-| `cargo test -p loopflow --test task_flow_launch_tests` | The entry, `--task` and a worktree launch run in the foreground, leave identical step commands and get identical refusals; a refused launch records no Flow. A Workflow's stored position: arrival, a stopped edge chosen again, `task move`, history. |
+| `cargo test -p loopflow --test task_flow_launch_tests` | The entry, `--task` and a worktree launch run in the foreground, leave identical step commands and get identical refusals; a refused launch records no Flow. A Workflow's stored position: arrival, a stopped edge chosen again, `task move`, history. One Task run starting its Flow again: three failures hold the edge, a third-attempt success arrives once. |
 | `cargo test -p loopflow --test session_lifecycle_tests` | Against a fake provider answering in prose: decisions from the message contract, correction by `session resume` bounded at three turns, routing, three loop passes under one driver, a blocked decision. |
 | `cargo test -p loopflow --test flow_tests --test flow_discovery_tests` | Flows read back from FlowExec; a killed driver's step stays recorded; a past Flow keeps its launched graph. |
 | `cargo test -p loopflow --test land_tests lf_pr_land_returns` | A Flow stops at a landing its plain `pr land` step left watched. |

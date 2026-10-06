@@ -57,8 +57,9 @@ node) for every run, none primary for a Task. The outer record is the Task's
 Workflow (Jack, October 6: "lets just call TaskWorkflow Workflow"; "live
 state"): graph fixed when taken up, position stored, moves appended, `lf task
 move` sets a stage, edges named by what they run. Jack's words: run is the
-Workflow API's verb, exec the Flow's record. Built unreviewed in PR #1439;
-node/edge renaming, retries under one Task run, Project workflows, the
+Workflow API's verb, exec the Flow's record. Built unreviewed in PR #1439,
+with one Task run retrying a failed Flow exec (three attempts, the agent's
+number); node/edge renaming, Project workflows, state from position, the
 Desktop graph and LOO-382 alignment remain. Lesson: the first build derived
 position from append-only rows and Jack sent it back; settle the model, store,
 CLI and Desktop contract before building a record.
@@ -120,7 +121,8 @@ merge to the person is the branch's choice; Jack did not answer.
 Open PR #1439 (LOO-353, `32f42bffe`) changes the contract: `lf task run`
 always starts a fresh Flow, nothing continues a stopped one, reconcile never
 resumes, and review moves into the Task conversation. The agent's unreviewed
-replacement: a Task at a workflow stage waits on Jack; a failed edge is rerun.
+replacement: a Task at a workflow stage waits on Jack; a failed edge is
+rerun, which now means three more attempts.
 
 Limits: the [review](../../docs/reviews/session-operate-prompts.md) holds
 simulated walk-throughs and two read-only model runs. Installed behavior is
@@ -250,12 +252,8 @@ design; the Task Flow authority it once operated is deleted. Primary repo/Wave
 Ctrl-C replaces the conversation. TaskSession Ctrl-C remains undecided and must
 never silently restart its Flow. Ordinary reads remain read-only.
 
-October 4 removed mutable Flow switching; the superseded “switch now” proposal
-is at `16168c473:wave/product/MEMORY.md`.
-
-The earlier automatic Wave-wake and repo-attention plan is superseded by the
-Ask removal above; its text is at `f57abb655:wave/product/MEMORY.md` under
-this heading. Upstream `3dc89bc9a` removed the resident/listener and chat
+The automatic Wave-wake plan is superseded by the Ask removal above
+(`f57abb655:wave/product/MEMORY.md`). Upstream `3dc89bc9a` removed the resident/listener and chat
 bridge; do not restore that service or assume its journal provides recovery.
 
 The Task workspace implements Rust-derived checkout association

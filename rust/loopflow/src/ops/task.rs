@@ -2020,6 +2020,9 @@ fn resolve_upstream_base(repo: &Path, default_branch: &str) -> OpsResult<(String
 ///   truthful, then publish the minimal `M..H` range.
 /// - divergent — ambiguous ancestry; refuse, naming the commits and files on
 ///   both sides (`M..B` and `B..M`) plus the safe sync.
+///
+/// One `B` off the upstream line is not foreign: a former tip of this PR's own
+/// remote branch. It carries the PR's published work, so it heals to `M` too.
 pub(crate) fn verify_task_pr_range(repo: &Path) -> OpsResult<()> {
     let repo = repo.to_path_buf();
     block_on_task(async move {
@@ -2170,12 +2173,20 @@ async fn verify_task_pr_range_mode(
         )));
     }
 
-    let (base_ref, upstream) = match upstream_override {
+    let default_branch = get_default_branch(repo)?;
+    // A sync can integrate any ref, including this PR's own remote branch. Only
+    // a pinned default-branch target is the PR's upstream; every other target
+    // is measured against the real one, so integration never moves the base.
+    let pinned = upstream_override.filter(|(target_ref, _)| {
+        let name = target_ref
+            .strip_prefix("origin/")
+            .or_else(|| target_ref.strip_prefix("refs/heads/"))
+            .unwrap_or(target_ref);
+        name == default_branch
+    });
+    let (base_ref, upstream) = match pinned {
         Some(target) => target,
-        None => {
-            let default_branch = get_default_branch(repo)?;
-            resolve_verifier_upstream(store, &pr, repo, &default_branch).await?
-        }
+        None => resolve_verifier_upstream(store, &pr, repo, &default_branch).await?,
     };
     let head = rev_parse(repo, "HEAD")
         .map_err(|error| task_error(format!("failed to resolve Task HEAD: {error}")))?;
@@ -2195,6 +2206,26 @@ async fn verify_task_pr_range_mode(
         return Ok(());
     }
 
+    // B < M: the upstream advanced past a stale or squash-merged base. Or B was
+    // a tip of this PR's own remote branch, recorded as its base by a sync onto
+    // that branch: what it carries is the PR's published work. Either way, heal
+    // the recorded base to the true fork point so lf diff --files and the
+    // durable evidence report the minimal M..HEAD range.
+    if crate::engine::git::is_ancestor(repo, &base, &merge_base)?
+        || was_published_tip(repo, &branch, &base)
+    {
+        if stale_base == StaleBaseAction::Accept {
+            return Ok(());
+        }
+        pr.base_commit = merge_base.clone();
+        pr.updated_at = time::OffsetDateTime::now_utc();
+        store
+            .heal_task_pr_base(&pr)
+            .await
+            .map_err(|error| task_error(format!("failed to heal Task PR base: {error}")))?;
+        return Ok(());
+    }
+
     if crate::engine::git::is_ancestor(repo, &merge_base, &base)? {
         // M < B: the recorded base carries commits not on the upstream — the
         // foreign ancestry that contaminated #877/#882. Refuse before push.
@@ -2210,22 +2241,6 @@ async fn verify_task_pr_range_mode(
             short(&base),
             short(&base),
         )));
-    }
-
-    if crate::engine::git::is_ancestor(repo, &base, &merge_base)? {
-        // B < M: the upstream advanced past a stale or squash-merged base.
-        // Heal the recorded base to the true fork point so lf diff --files and
-        // the durable evidence report the minimal M..HEAD range.
-        if stale_base == StaleBaseAction::Accept {
-            return Ok(());
-        }
-        pr.base_commit = merge_base.clone();
-        pr.updated_at = time::OffsetDateTime::now_utc();
-        store
-            .heal_task_pr_base(&pr)
-            .await
-            .map_err(|error| task_error(format!("failed to heal Task PR base: {error}")))?;
-        return Ok(());
     }
 
     // Neither is an ancestor of the other: genuinely ambiguous ancestry. Name
@@ -2249,6 +2264,14 @@ async fn verify_task_pr_range_mode(
         short(&base),
         short(&base),
     )))
+}
+
+/// Whether `commit` was ever the tip of this branch on the remote, read from the
+/// remote-tracking reflog. A missing reflog is no evidence, so the answer is no.
+fn was_published_tip(repo: &Path, branch: &str, commit: &str) -> bool {
+    let remote_branch = format!("refs/remotes/origin/{branch}");
+    git_output(repo, &["reflog", "show", "--format=%H", &remote_branch])
+        .is_ok_and(|tips| tips.lines().any(|tip| tip == commit))
 }
 
 /// Core authoritative non-empty proof. Runs the ancestry parity check (which

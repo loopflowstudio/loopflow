@@ -728,6 +728,8 @@ rotation remain. Keep this one delivery boundary.
 - Deleted: `create_task_work`'s duplicate Task lookup/insert and fallback identity.
   Registration inserts the Task once; `inherit_task_placement` only inherits its
   Project placement in the same transaction.
+- Deleted: `ops/pm.rs::store_pm_snapshot`; held-lock refresh accepts the already
+  registered Wave directly, without rediscovering its identity after acquisition.
 - Deleted: `sessions::replace_input_in`'s generic `cwd` update. Input replacement
   retains the stored workspace; explicit primary workspace admission remains.
 - Rotation's automatic backlog expiration: preserve unreviewed Tasks until
@@ -835,14 +837,17 @@ under this heading. Shared `associate_project` rollback, independent entity ages
 `run_planning_write` guard lifetime, stable-ID lock order and exact Team readbacks
 remain required; full-refresh freshness differs from partial acceptance.
 
-October 5 compression retains one Task insertion and tests exact identity plus
-Project placement inheritance. Reteam reads cached identifiers only for issues
-already on the destination Team; moved issues use full readbacks. Its final refresh
-now reuses `refresh_pm_snapshot_locked` with the existing Store and acquisition
-guard through acceptance; held-lock refresh no longer reopens the Store. Checkout admission resolves its lock directory once, before
-acquiring the sorted checkout locks, avoiding store-mutex reads between acquisitions.
-Production tests replace the archived cancellation experiment. Step 2 stays
-open; no name-selector repair or configured readiness is implied.
+October 5 compression retains one Task insertion and placement inheritance,
+full reteam readbacks, and the Store/acquisition guard through refresh acceptance.
+Held-lock refresh now takes the registered Wave directly; the duplicate
+`store_pm_snapshot` wrapper and its second registration are deleted. Its rejection
+proof uses the surviving store ingestion API without an unused provider client.
+Session creation and input replacement share `lock_session_checkouts`, including
+Flow workspace and bound/inherited Task roots. CI repair retains its separate outer
+admission and never reacquires inside reservation. Checkout lock storage resolves
+before sorted acquisition. Prior detail remains at
+`83ba62f56de7d4f911ba23772ee074ef345350f8:scratch/keep-every-wave-ready-for.md`.
+Step 2 stays open; these reductions establish no rotation exclusion or readiness.
 
 The selection deletion targets require configured identity and exact-ID transitions;
 the old name selector remains unchanged. Rotation still holds only Wave locks.
@@ -877,4 +882,4 @@ invalidation and full reteam readback proofs remain at
 they establish neither rotation/start exclusion nor installed readiness. The new
 input-replacement regression failed before the admission fix and passes afterward.
 
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b checkout_exclusion input_replacement_retains_workspace_and_task_membership --test-threads=4` passed (5); `cargo fmt --all`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed; CI repair operation-entry, rotation/start and configured acceptance remain with implementation/gate.
+Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b checkout_exclusion input_replacement_retains_workspace_and_task_membership cancelled_detail_acceptance cancelled_snapshot_acceptance rejected_project_snapshot repository_team_reteam --test-threads=4` passed (13); `cargo fmt --all`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `git diff --check` and `lf context --skill compress --json` passed; CI repair operation-entry, rotation/start and configured acceptance remain with implementation/gate.

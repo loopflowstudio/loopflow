@@ -1,5 +1,7 @@
 //! Session transactions share the invocation's SQLite transaction and fences.
 
+use std::fs::File;
+
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::durable::{FlowSession, TaskId};
@@ -803,13 +805,11 @@ impl SqliteStore {
         .transpose()
     }
 
-    /// Admit the conversation and its captured input before provider effects.
-    pub fn create_session(
+    fn lock_session_checkouts(
         &self,
-        session: AgentSession,
+        session: &AgentSession,
         review: Option<&FlowSession>,
-        caller_exec: Option<&crate::id::ExecId>,
-    ) -> StoreResult<AgentSession> {
+    ) -> StoreResult<Vec<File>> {
         let flow = match session.flow_session_id.as_deref() {
             Some(id) => match review.filter(|flow| flow.id() == id) {
                 Some(flow) => Some(flow.clone()),
@@ -821,13 +821,23 @@ impl SqliteStore {
         if let Some(flow) = &flow {
             workspaces.push(&flow.cwd);
         }
-        let _admission = self.lock_task_checkouts(
+        self.lock_task_checkouts(
             &workspaces,
             session
                 .task_id
                 .as_ref()
                 .or_else(|| flow.as_ref().and_then(|flow| flow.task_id.as_ref())),
-        )?;
+        )
+    }
+
+    /// Admit the conversation and its captured input before provider effects.
+    pub fn create_session(
+        &self,
+        session: AgentSession,
+        review: Option<&FlowSession>,
+        caller_exec: Option<&crate::id::ExecId>,
+    ) -> StoreResult<AgentSession> {
+        let _admission = self.lock_session_checkouts(&session, review)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(existing) = session_in(&tx, &session.id)? {
@@ -963,17 +973,7 @@ impl SqliteStore {
         mut session: AgentSession,
     ) -> StoreResult<AgentSession> {
         let stored = self.session(&session.id)?.ok_or(StoreError::NotFound)?;
-        let flow = stored
-            .flow_session_id
-            .as_deref()
-            .map(|id| self.flow(id))
-            .transpose()?
-            .flatten();
-        let mut workspaces = vec![stored.cwd.as_path()];
-        if let Some(flow) = &flow {
-            workspaces.push(&flow.cwd);
-        }
-        let _admission = self.lock_task_checkouts(&workspaces, stored.task_id.as_ref())?;
+        let _admission = self.lock_session_checkouts(&stored, None)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;

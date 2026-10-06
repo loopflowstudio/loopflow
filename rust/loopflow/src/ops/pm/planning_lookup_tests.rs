@@ -164,7 +164,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
 #[tokio::test]
 async fn rejected_project_snapshot_preserves_durable_project_facts() {
     let fixture = Fixture::new().await;
-    let (repo, wave) = fixture.planning_repo().await;
+    let (_repo, wave) = fixture.planning_repo().await;
     let mut snapshot: PmSnapshot = serde_json::from_str(include_str!(
         "../../../../../tests/fixtures/dto/task_history_planning.json"
     ))
@@ -173,29 +173,22 @@ async fn rejected_project_snapshot_preserves_durable_project_facts() {
     snapshot.projects.truncate(1);
     snapshot.projects[0].revision = Some("2026-10-05T12:00:00Z".into());
     snapshot.projects[0].initiative_ids = vec!["initiative-1".into()];
-    let ctx = super::PmContext {
-        repository: super::RepositoryPmContext {
-            client: crate::pm::linear::LinearClient::with_base_url(
-                "fixture".into(),
-                Some("team-1".into()),
-                "http://127.0.0.1:1".into(),
-            ),
-            provider: crate::pm::PmProviderKind::Linear,
-            repo_id: crate::repository::RepoId::parse("loopflowstudio/fixture").unwrap(),
-            team_id: "team-1".into(),
-        },
+    let mut snapshot = PmSnapshotRow {
+        wave_id: wave.id().clone(),
+        provider: "linear".into(),
         initiative: "initiative-1".into(),
+        synced_at: 1,
+        snapshot,
     };
-    super::store_pm_snapshot(&repo, "product", &ctx, &snapshot, 1, &fixture.store, None)
+    fixture
+        .store
+        .put_pm_snapshot(snapshot.clone(), None)
         .await
         .unwrap();
     let retained = fixture.store.list_projects(Some(wave.id())).await.unwrap();
-    snapshot.projects[0].name = "Conflicting name".into();
-    assert!(
-        super::store_pm_snapshot(&repo, "product", &ctx, &snapshot, 2, &fixture.store, None)
-            .await
-            .is_err()
-    );
+    snapshot.snapshot.projects[0].name = "Conflicting name".into();
+    snapshot.synced_at = 2;
+    assert!(fixture.store.put_pm_snapshot(snapshot, None).await.is_err());
     assert_eq!(
         fixture.store.list_projects(Some(wave.id())).await.unwrap(),
         retained

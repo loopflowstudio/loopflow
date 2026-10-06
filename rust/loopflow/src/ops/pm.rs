@@ -32,6 +32,7 @@ use crate::store::{
     ProviderToken, ProviderTokenReplacement, StorageConfig, Store,
 };
 use crate::work::wave::config::{read_wave_config, update_wave_goal_config, WavePmConfig};
+use crate::work::wave::Wave;
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -864,33 +865,6 @@ async fn fetch_pm_snapshot_for_projects(
     })
 }
 
-async fn store_pm_snapshot(
-    repo: &Path,
-    wave: &str,
-    ctx: &PmContext,
-    snapshot: &PmSnapshot,
-    observed_at: i64,
-    store: &Store,
-    acquisition: Option<Arc<File>>,
-) -> OpsResult<()> {
-    let registered = crate::work::wave::ensure_wave_row(store, repo, wave)
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to register PM Wave: {err}")))?;
-    store
-        .put_pm_snapshot(
-            PmSnapshotRow {
-                wave_id: registered.id().clone(),
-                provider: ctx.provider.as_str().to_string(),
-                initiative: ctx.initiative.clone(),
-                synced_at: observed_at,
-                snapshot: snapshot.clone(),
-            },
-            acquisition,
-        )
-        .await
-        .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))
-}
-
 pub(crate) async fn refresh_pm_snapshot(
     repo: &Path,
     wave: &str,
@@ -901,28 +875,31 @@ pub(crate) async fn refresh_pm_snapshot(
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let acquisition = super::chapter::rotation_lock(&registered).await?;
-    refresh_pm_snapshot_locked(repo, wave, ctx, &store, acquisition).await
+    refresh_pm_snapshot_locked(repo, &registered, ctx, &store, acquisition).await
 }
 
 pub(crate) async fn refresh_pm_snapshot_locked(
     repo: &Path,
-    wave: &str,
+    wave: &Wave,
     ctx: &PmContext,
     store: &Store,
     acquisition: Arc<File>,
 ) -> OpsResult<PmSnapshot> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    let snapshot = fetch_pm_snapshot_with_store(repo, wave, ctx, store).await?;
-    store_pm_snapshot(
-        repo,
-        wave,
-        ctx,
-        &snapshot,
-        observed_at,
-        store,
-        Some(acquisition),
-    )
-    .await?;
+    let snapshot = fetch_pm_snapshot_with_store(repo, wave.slug(), ctx, store).await?;
+    store
+        .put_pm_snapshot(
+            PmSnapshotRow {
+                wave_id: wave.id().clone(),
+                provider: ctx.provider.as_str().to_string(),
+                initiative: ctx.initiative.clone(),
+                synced_at: observed_at,
+                snapshot: snapshot.clone(),
+            },
+            Some(acquisition),
+        )
+        .await
+        .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))?;
     Ok(snapshot)
 }
 
@@ -1205,7 +1182,7 @@ where
     super::chapter::require_chapter_home(&store, &registered).await?;
     let acquisition = super::chapter::rotation_lock(&registered).await?;
     let ctx = resolve_context(repo, wave).await?;
-    refresh_pm_snapshot_locked(repo, wave, &ctx, &store, acquisition.clone()).await?;
+    refresh_pm_snapshot_locked(repo, &registered, &ctx, &store, acquisition.clone()).await?;
     let project = super::chapter::current_project(&store, &registered).await?;
     let find_existing = |items: Vec<PmItem>| {
         items
@@ -2367,8 +2344,8 @@ async fn apply_or_plan_repository_reteam(
                 repository: resolved.repository.clone(),
                 initiative,
             };
-            refresh_pm_snapshot_locked(repo, wave, &ctx, store, locked_waves[wave].1.clone())
-                .await?;
+            let (registered, acquisition) = &locked_waves[wave];
+            refresh_pm_snapshot_locked(repo, registered, &ctx, store, acquisition.clone()).await?;
         }
         remove_legacy_pm_sentinels(repo, &waves)?;
         if repo.join(".git").exists() {

@@ -5,10 +5,9 @@ listener and `lf wave status` contracts consumed by the Mac app. Every absent fi
 is a parse error or an explicit null.
 
 `task_status.json` pins the planning/execution envelope for available, unavailable,
-invalid, removed and absent planning. Rust round-trips it; Swift decodes the `TaskStatus` model
-returned by `RegistryQuery.taskStatus`. These cases have no execution. Complete
-Task execution/action-state parity remains acceptance work; Wave contracts have
-their own fixtures below.
+invalid, removed and absent planning. Rust round-trips it. This CLI-only contract
+has no Swift mirror: the Mac app reads a Task's work from the workspace stream's
+`task` part (`workspace_frame.json`). These cases have no execution.
 
 `task_execution.json` pins the execution boundary inside the status envelope's
 optional Task snapshot (`execution.execution`).

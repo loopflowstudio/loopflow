@@ -2,10 +2,12 @@ import Foundation
 import Loopflow
 import Observation
 
-struct WorkActivityScope: Equatable, Sendable {
-    let wave: String?
-    let project: String?
-    let task: String?
+/// One Wave's streamed detail. `sequence` moves with each new reading.
+struct StreamedWaveDetail: Sendable {
+    let wave: String
+    let sequence: Int
+    let snapshot: WaveDetailSnapshot?
+    let reason: String?
 }
 
 enum TaskFlowControlRequest: Equatable, Sendable {
@@ -165,7 +167,7 @@ final class PodiumModel {
             throw RegistryQueryError("Session \(sessionID) was not found in Task \(task.task.identifier). Retry after its Session is available.")
         }
         openTaskDestination(wave: wave, task: task)
-        sessionsGeneration &+= 1
+        supersedeSessions()
         sessions = .available(records)
         navigation.selectedSessionId = record.id
         navigation.content = .terminals
@@ -329,6 +331,23 @@ final class PodiumModel {
     private var usesFixedFixture = false
     private var sessionsGeneration = 0
     private var roadmapGeneration = 0
+    /// The Wave whose detail a view is showing, if any.
+    var detailWaveId: String?
+    /// The scoped Wave's `lf wave status` reading, as last streamed.
+    private(set) var waveDetail: StreamedWaveDetail?
+    /// Moves with every planning frame, for views that derive from planning.
+    private(set) var planningSequence = 0
+    @ObservationIgnored private var workspaceObservation: WorkspaceObservation?
+    @ObservationIgnored private var workspaceHome: String?
+    @ObservationIgnored private var workspaceOpened = ContinuousClock.now
+    @ObservationIgnored private var nextRequestId = 0
+    @ObservationIgnored private var sentScope: WorkspaceScope?
+    @ObservationIgnored private var appliedSequence: [String: Int] = [:]
+    /// Frames read before these requests predate a local change and are ignored.
+    @ObservationIgnored private var planningFloor = 0
+    @ObservationIgnored private var sessionsFloor = 0
+    @ObservationIgnored private var scopeFloor = 0
+    @ObservationIgnored private var planningWaiters: [(id: Int, resume: CheckedContinuation<Void, Never>)] = []
     private var processActivityRefreshInFlight = false
     private var workActivityGeneration = 0
 
@@ -508,30 +527,235 @@ final class PodiumModel {
         }
     }
 
-    /// The window's one refresh owner. Planning and Sessions keep their own
-    /// cadence, so a slow planning read never delays Session rows.
+    /// The window's one refresh owner: one reader process whose frames say
+    /// what changed. Runs until cancelled, reopening the reader when it ends.
     func keepWorkspaceCurrent() async {
-        async let planning: Void = keepPlanningCurrent()
-        async let sessions: Void = keepSessionsCurrent()
-        _ = await (planning, sessions)
-    }
-
-    private func keepPlanningCurrent() async {
+        if usesFixedFixture {
+            if AppTestMode.current() == .sessionFixtures { await refreshSessions() }
+            return
+        }
+        guard query.streamsWorkspace else {
+            // This transport has no reader: one reading, shown until asked again.
+            await refresh()
+            await refreshProcessActivity()
+            return
+        }
+        var delay = Duration.seconds(1)
         while !Task.isCancelled {
-            await refreshPlanning()
-            do { try await Task.sleep(for: .seconds(15)) } catch { return }
+            var observation: WorkspaceObservation?
+            do {
+                let opened = try await query.watchWorkspace()
+                observation = opened
+                guard !Task.isCancelled else { await opened.cancel(); return }
+                // A new reader numbers its frames from one and reads the store
+                // as it is now, which includes every local write so far.
+                workspaceObservation = opened
+                workspaceOpened = .now
+                appliedSequence = [:]
+                (planningFloor, sessionsFloor, scopeFloor, sentScope) = (0, 0, 0, nil)
+                syncWorkspaceScope()
+                for try await frame in opened.frames {
+                    guard !Task.isCancelled else { break }
+                    await apply(frame)
+                    if frame.content.part != "heartbeat" { delay = .seconds(1) }
+                }
+                if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
+            } catch ActiveSessionsObservationError.configurationChanged {
+                // The installed `lf` or its Home selection was replaced.
+                delay = .milliseconds(100)
+            } catch {
+                if !Task.isCancelled { workspaceUnavailable(error.localizedDescription) }
+            }
+            workspaceObservation = nil
+            await observation?.cancel()
+            resumePlanningWaiters(through: .max)
+            do { try await Task.sleep(for: delay) } catch { return }
+            delay = min(delay * 2, .seconds(30))
         }
     }
 
-    private func keepSessionsCurrent() async {
-        while !Task.isCancelled {
-            await refreshSessions()
-            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+    var workspaceScope: WorkspaceScope {
+        let shown = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }
+        return WorkspaceScope(
+            repo: repoPath,
+            headless: navigation.showsHeadlessSessions,
+            task: shown?.task.task.identifier,
+            wave: detailWaveId,
+            activity: activityScope(for: selection))
+    }
+
+    /// Tell the reader what this window shows now. Frames for the previous
+    /// scope are ignored from here on.
+    func syncWorkspaceScope() {
+        guard workspaceObservation != nil else { return }
+        let scope = workspaceScope
+        guard scope != sentScope else { return }
+        sentScope = scope
+        scopeFloor = send { .scope(id: $0, scope) }
+    }
+
+    /// After sleep, events may have been missed.
+    func rescanWorkspace() {
+        guard workspaceObservation != nil else { return }
+        _ = send { .refresh(id: $0) }
+    }
+
+    private func send(_ request: (Int) -> WorkspaceRequest) -> Int {
+        nextRequestId += 1
+        workspaceObservation?.request(request(nextRequestId))
+        return nextRequestId
+    }
+
+    /// A local write changed Session rows; a frame read before it is stale.
+    private func supersedeSessions() {
+        sessionsGeneration &+= 1
+        guard workspaceObservation != nil else { return }
+        sessionsFloor = send { .refresh(id: $0) }
+    }
+
+    private func resumePlanningWaiters(through answered: Int) {
+        let ready = planningWaiters.filter { $0.id <= answered }
+        planningWaiters.removeAll { $0.id <= answered }
+        for waiter in ready { waiter.resume.resume() }
+    }
+
+    /// The reader ended. What is shown stays, marked as no longer current.
+    private func workspaceUnavailable(_ reason: String) {
+        if let value = roadmap.value { roadmap = .unavailable(lastGood: value, reason: reason) }
+        if let value = waves.value { waves = .unavailable(lastGood: value, reason: reason) }
+        if repoPath != nil, let value = sessions.value { sessions = .unavailable(lastGood: value, reason: reason) }
+        if let value = processActivity.value { processActivity = .unavailable(lastGood: value, reason: reason) }
+    }
+
+    private func apply(_ frame: WorkspaceFrame) async {
+        let part = frame.content.part
+        if case .heartbeat = frame.content { return }
+        guard frame.sequence > appliedSequence[part] ?? 0 else { return }
+        if let workspaceHome, workspaceHome != frame.home {
+            // Another Home answers now; nothing shown from the previous one names anything here.
+            dropHomeContent()
         }
+        workspaceHome = frame.home
+        let answers = frame.answers ?? 0
+        let reason = frame.unavailable ?? "Workspace reader returned no \(part) reading"
+        switch frame.content {
+        case .planning(let body):
+            guard answers >= planningFloor else { return }
+            await applyPlanning(body, wire: frame.wire, reason: reason)
+            planningSequence = frame.sequence
+            resumePlanningWaiters(through: answers)
+        case .sessions(let body):
+            guard answers >= max(sessionsFloor, scopeFloor), let repoPath else { return }
+            guard let body else {
+                sessions = .unavailable(lastGood: sessions.value, reason: reason)
+                break
+            }
+            guard body.repo.normalizedFilePath == repoPath.normalizedFilePath,
+                  body.includesHeadless == navigation.showsHeadlessSessions else { return }
+            let next = PodiumReading.available(body.entries)
+            if sessions != next { sessions = next }
+            if savedSessionRepos.remove(repoPath) != nil {
+                LaunchJournal.home.refreshed("sessions", ms: workspaceOpened.elapsedMs, ok: true)
+            }
+            endLaunchWhenCurrent()
+            // Explicit history is read on request, never restored at launch.
+            if !body.includesHeadless, let page = frame.wire?.sessionPage {
+                cache?.saveSessions([page], repo: repoPath)
+            }
+        case .task(let body):
+            guard answers >= scopeFloor, let shown = selection, shown.kind == .task,
+                  let task = task(id: shown.id)?.task else { return }
+            guard let body else {
+                taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value, reason: reason)
+                break
+            }
+            guard body.task == task.task.identifier else { return }
+            let next = PodiumReading.available(body.work)
+            if taskWork[task.id] != next { taskWork.values[task.id] = next }
+        case .wave(let body):
+            guard answers >= scopeFloor, let detailWaveId else { return }
+            guard body == nil || body?.wave == detailWaveId else { return }
+            waveDetail = StreamedWaveDetail(wave: detailWaveId, sequence: frame.sequence,
+                                           snapshot: body?.detail, reason: body == nil ? reason : nil)
+        case .workActivity(let body):
+            guard answers >= scopeFloor, let scope = activityScope(for: selection) else { return }
+            guard let body else {
+                workActivity = .unavailable(lastGood: workActivity.value, reason: reason)
+                break
+            }
+            guard body.scope == scope else { return }
+            workActivityScope = scope
+            let next = PodiumReading.available(body.snapshot)
+            if workActivity != next { workActivity = next }
+        case .activity(let body):
+            guard let body else {
+                processActivity = .unavailable(lastGood: processActivity.value, reason: reason)
+                break
+            }
+            await Self.resolveRepoOrigins(body.nodes.compactMap(\.repo))
+            let next = PodiumReading.available(body)
+            if processActivity != next { processActivity = next }
+        case .heartbeat:
+            break
+        }
+        appliedSequence[part] = frame.sequence
+    }
+
+    private func applyPlanning(_ body: WorkspaceFrame.Planning?, wire: WorkspaceFrame.Wire?, reason: String) async {
+        taskHistoryNow = Date()
+        guard let body else {
+            roadmap = .unavailable(lastGood: roadmap.value, reason: reason)
+            return
+        }
+        await Self.resolveRepoOrigins(body.waves.map(\.repo))
+        let nextWaves = PodiumReading.available(body.waves.map { $0.toWave() })
+        if waves != nextWaves { waves = nextWaves }
+        let next = PodiumReading.available(body.roadmap)
+        if roadmap != next { roadmap = next }
+        if showsSavedPlanning || roadmapGeneration == 0 {
+            LaunchJournal.home.refreshed("planning", ms: workspaceOpened.elapsedMs, ok: true)
+        }
+        // A one-shot read still in flight is older than this frame.
+        roadmapGeneration &+= 1
+        showsSavedPlanning = false
+        if let text = wire?.roadmap { cache?.saveRoadmap(text) }
+        if let text = wire?.waves { cache?.saveWaves(text) }
+        endLaunchWhenCurrent()
+        selectRequestedWaveIfNeeded()
+        if visibleRoadmaps.allSatisfy({ wave in
+            guard case .available(_, false) = wave.tasks else { return false }
+            return wave.unavailableTasks.isEmpty
+        }) {
+            clearSelectionIfOutsideScope()
+        }
+        // Names in the scope come from planning.
+        syncWorkspaceScope()
+    }
+
+    private func dropHomeContent() {
+        roadmap = .loading
+        waves = .loading
+        showsSavedPlanning = false
+        for navigation in navigationByRepo.values {
+            navigation.selection = nil
+            navigation.selectedTaskEvidence = nil
+            navigation.content = .overview
+        }
+        sessionReadings = [:]
+        savedSessionRepos = []
+        waveDetail = nil
+        taskWork = TaskReadings<TaskWork>()
     }
 
     /// One explicit read of everything, for a change the cadence should not wait on.
     func refresh() async {
+        if workspaceObservation != nil {
+            // Frames read before this request may predate the caller's write.
+            let id = send { .refresh(id: $0) }
+            (planningFloor, sessionsFloor) = (id, id)
+            await withCheckedContinuation { planningWaiters.append((id, $0)) }
+            return
+        }
         async let sessions: Void = refreshSessions()
         await refreshPlanning()
         await sessions
@@ -570,6 +794,7 @@ final class PodiumModel {
     }
 
     func refreshProcessActivity() async {
+        guard workspaceObservation == nil else { return }
         guard !usesFixedFixture, !isRefreshing, !processActivityRefreshInFlight else { return }
         processActivityRefreshInFlight = true
         defer { processActivityRefreshInFlight = false }
@@ -741,6 +966,18 @@ final class PodiumModel {
 
     func updateTaskDirective(task: RoadmapTask, wave: WaveSnapshot, text: String) async throws {
         try await query.updateTaskDirective(id: task.id, wave: wave.name, text: text, cwd: wave.repo)
+        if workspaceObservation != nil {
+            await refresh()
+            if let reason = roadmap.errorMessage {
+                throw RegistryQueryError("Update accepted, but planning refresh failed: \(reason)")
+            }
+            guard roadmap.value?.waves.contains(where: { row in
+                row.wave.id == wave.id && row.tasks.items.contains(where: { $0.id == task.id })
+            }) == true else {
+                throw RegistryQueryError("Update accepted, but the Task is absent from refreshed planning. Your draft is retained.")
+            }
+            return
+        }
         // Polls started before this write must not restore the old directive.
         roadmapGeneration &+= 1
         let generation = roadmapGeneration
@@ -798,6 +1035,13 @@ final class PodiumModel {
 
     func refreshWorkActivity() async {
         guard !usesFixedFixture else { return }
+        if workspaceObservation != nil {
+            if activityScope(for: selection) == nil {
+                workActivity = .unavailable(lastGood: nil, reason: "Selected Work is absent from the latest Podium evidence")
+            }
+            syncWorkspaceScope()
+            return
+        }
         workActivityGeneration &+= 1
         let generation = workActivityGeneration
         let requestedSelection = selection
@@ -821,6 +1065,10 @@ final class PodiumModel {
 
     func refreshSessions() async {
         guard !usesFixedFixture || AppTestMode.current() == .sessionFixtures else { return }
+        if workspaceObservation != nil {
+            syncWorkspaceScope()
+            return
+        }
         sessionsGeneration &+= 1
         let generation = sessionsGeneration
         let repoPath = repoPath
@@ -963,7 +1211,7 @@ final class PodiumModel {
         do {
             let record = try await query.renameSession(id: target, name: draft.text, cwd: repo)
             // A read started before the rename must not restore the old name.
-            sessionsGeneration &+= 1
+            supersedeSessions()
             replaceSession(record, repo: repo)
             if owner.renaming?.sessionId == target { owner.renaming = nil }
         } catch {
@@ -1009,7 +1257,7 @@ final class PodiumModel {
         owner.binding?.error = nil
         do {
             let record = try await query.bindSession(id: preview.sessionId, taskId: preview.taskId, cwd: repo)
-            sessionsGeneration &+= 1
+            supersedeSessions()
             replaceSession(record, repo: repo)
             if owner.selectedSessionId == record.id { owner.selection = record.work }
             if owner.binding?.id == draft.id { owner.binding = nil }
@@ -1042,7 +1290,7 @@ final class PodiumModel {
     func sessionResolved(_ id: String, repo: String) {
         // A pre-resolution read must not resurrect the completed human boundary.
         // Resolution may finish after the human has switched repositories.
-        sessionsGeneration &+= 1
+        supersedeSessions()
         if navigationByRepo[repo]?.selectedSessionId == id {
             navigationByRepo[repo]?.selectedSessionId = nil
         }

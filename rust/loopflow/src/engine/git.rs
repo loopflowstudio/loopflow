@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -71,7 +73,97 @@ impl WorktreeLease {
 }
 
 fn run_git(repo: &Path, args: &[&str]) -> Result<Output, GitError> {
-    run_git_inheriting(repo, args, &|_| {})
+    Ok(retained_output(repo, args)?)
+}
+
+type Question = (PathBuf, Vec<String>);
+type RetainedReads = HashMap<Question, (Instant, Output)>;
+
+/// Set only by a process that never writes through Git.
+static RETAINED_READS: Mutex<Option<RetainedReads>> = Mutex::new(None);
+
+/// How long a retained answer stands: repository layout rarely moves, while a
+/// checkout's files change under a working agent.
+const LAYOUT_RETENTION: Duration = Duration::from_secs(600);
+const CONTENT_RETENTION: Duration = Duration::from_secs(60);
+
+fn retained() -> MutexGuard<'static, Option<RetainedReads>> {
+    RETAINED_READS.lock().expect("git read cache poisoned")
+}
+
+/// Let this process reuse a Git answer for a short time instead of spawning
+/// `git` again. For a long-lived reader that asks the same questions on every
+/// reading and changes nothing itself; one-shot commands never call this.
+pub(crate) fn retain_reads() {
+    *retained() = Some(HashMap::new());
+}
+
+pub(crate) fn retains_reads() -> bool {
+    retained().is_some()
+}
+
+fn is_layout(args: &[String]) -> bool {
+    let layout = ["--git-common-dir", "--show-toplevel"];
+    args.iter().any(|arg| layout.contains(&arg.as_str()))
+}
+
+/// Ask Git and retain its answer. A reader must not take the index lock from
+/// an agent working in the checkout.
+fn ask(question: Question) -> std::io::Result<Output> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&question.0)
+        .args(&question.1)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .output()?;
+    if let Some(reads) = retained().as_mut() {
+        reads.insert(question, (Instant::now(), output.clone()));
+    }
+    Ok(output)
+}
+
+/// `git -C repo args`, reusing a retained answer when this process keeps them.
+pub(crate) fn retained_output(repo: &Path, args: &[&str]) -> std::io::Result<Output> {
+    let question = (
+        repo.to_path_buf(),
+        args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>(),
+    );
+    {
+        let reads = retained();
+        let Some(reads) = reads.as_ref() else {
+            return Command::new("git").arg("-C").arg(repo).args(args).output();
+        };
+        let stands = if is_layout(&question.1) {
+            LAYOUT_RETENTION
+        } else {
+            CONTENT_RETENTION
+        };
+        if let Some((read_at, output)) = reads.get(&question) {
+            if read_at.elapsed() < stands {
+                return Ok(output.clone());
+            }
+        }
+    }
+    ask(question)
+}
+
+/// Ask again what this process retains about `repo`'s contents. True when an
+/// answer differs from the retained one; layout answers are left standing.
+pub(crate) fn reread_retained(repo: &Path) -> bool {
+    let questions = retained()
+        .iter()
+        .flatten()
+        .filter(|((asked, args), _)| asked == repo && !is_layout(args))
+        .map(|(question, (_, output))| (question.clone(), output.clone()))
+        .collect::<Vec<_>>();
+    let mut changed = false;
+    // Every one is asked again, not only up to the first that differs.
+    for (question, before) in questions {
+        if let Ok(output) = ask(question) {
+            changed |= output.status != before.status || output.stdout != before.stdout;
+        }
+    }
+    changed
 }
 
 fn run_git_inheriting(
@@ -86,15 +178,10 @@ fn run_git_inheriting(
 }
 
 pub(crate) fn git_stdout(repo: &Path, args: &[&str]) -> Result<String, GitError> {
-    git_stdout_inheriting(repo, args, &|_| {})
+    successful_stdout(args, run_git(repo, args)?)
 }
 
-fn git_stdout_inheriting(
-    repo: &Path,
-    args: &[&str],
-    inherit: &impl Fn(&mut Command),
-) -> Result<String, GitError> {
-    let output = run_git_inheriting(repo, args, inherit)?;
+fn successful_stdout(args: &[&str], output: Output) -> Result<String, GitError> {
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: format!("git {}", args.join(" ")),
@@ -102,6 +189,14 @@ fn git_stdout_inheriting(
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn git_stdout_inheriting(
+    repo: &Path,
+    args: &[&str],
+    inherit: &impl Fn(&mut Command),
+) -> Result<String, GitError> {
+    successful_stdout(args, run_git_inheriting(repo, args, inherit)?)
 }
 
 pub(crate) fn find_worktree_for_branch(

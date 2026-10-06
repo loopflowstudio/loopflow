@@ -29,6 +29,9 @@ struct TaskHistoryFilterTests {
         var rows = try historyRows()
         if let index = rows.firstIndex(where: { ($0["task"] as? [String: Any])?["id"] as? String == "unresolved" }) {
             rows[index]["runtime"] = ["work_id": "task-unresolved", "status": "ready", "reason": "Running", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "started": true] as [String: Any]
+            var condition = try #require(rows[index]["condition"] as? [String: Any])
+            condition["unresolved_execution"] = true
+            rows[index]["condition"] = condition
         }
         evidence["items"] = rows
         waves[0]["tasks"] = evidence
@@ -36,7 +39,7 @@ struct TaskHistoryFilterTests {
         return root
     }
 
-    private func task(_ state: String, date: String?, runtime: String? = nil, missing: Bool = false) throws -> RoadmapTask {
+    private func task(_ state: String, date: String?, runtime: String? = nil, missing: Bool = false, review: Bool = false) throws -> RoadmapTask {
         var row = try #require(historyRows().first)
         var plan = try #require(row["task"] as? [String: Any])
         plan["state"] = state
@@ -47,12 +50,13 @@ struct TaskHistoryFilterTests {
             row["runtime"] = ["work_id": "task", "status": runtime, "reason": "settled", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "started": true] as [String: Any]
         }
         row["condition"] = ["state": missing ? "blocked" : "clear", "reason": "historical checkout", "observed_at": "2026-10-02T12:00:00Z", "evidence_age_secs": 0,
-            "local_progress": ["state": missing ? "missing" : "not_applicable", "unsettled": missing, "dirty": NSNull(), "authored_commits": NSNull(), "recovery_required": missing, "reason": "checkout removed"]] as [String: Any]
+            "local_progress": ["state": missing ? "missing" : "not_applicable", "unsettled": missing, "dirty": NSNull(), "authored_commits": NSNull(), "recovery_required": missing, "reason": "checkout removed"],
+            "unresolved_execution": runtime == "ready" || review] as [String: Any]
         return try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
     }
 
     private func visible(_ row: RoadmapTask, _ filter: TaskHistoryFilter) -> Bool {
-        filter.includes(row.task, runtime: row.runtime, condition: row.condition, flow: row.flow, now: now)
+        filter.includes(row.task, condition: row.condition, now: now)
     }
 
     @Test func rollingBoundariesAndValidation() throws {
@@ -94,9 +98,7 @@ struct TaskHistoryFilterTests {
 
     @Test func unresolvedReviewAndRetainedSessionSurviveHiddenHistory() throws {
         let row = try task("canceled", date: nil, runtime: "done", missing: true)
-        let pinned = PinnedTaskFlow(invocationId: "review", graph: FlowGraph(name: "feature", steps: [], interactions: InteractionGraph(stages: [], transitions: [])), current: nil, completed: [], returns: [], iterations: [], execution: .human, reason: "Review remains open", restartRequired: false)
-        let flow = TaskFlowSnapshot(recommended: "feature", record: .pinned(pinned), controls: [])
-        #expect(TaskHistoryFilter().includes(row.task, runtime: row.runtime, condition: row.condition, flow: flow, now: now))
+        #expect(visible(try task("canceled", date: nil, runtime: "done", missing: true, review: true), TaskHistoryFilter()))
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: Data(contentsOf: fixtures.appendingPathComponent("sessions.json")))
         let retained = WorkspaceTask(id: WorkspaceNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: [try #require(sessions.first)])
         #expect(!visible(row, TaskHistoryFilter()))
@@ -110,8 +112,8 @@ struct TaskHistoryFilterTests {
         let boundary = try task("completed", date: "2026-03-05T07:00:00-08:00")
         let before = try task("completed", date: "2026-03-05T06:59:59.9999-08:00")
         let springNow = ISO8601DateFormatter().date(from: "2026-03-12T08:00:00-07:00")!
-        #expect(filter.includes(boundary.task, runtime: nil, condition: boundary.condition, flow: boundary.flow, now: springNow))
-        #expect(!filter.includes(before.task, runtime: nil, condition: before.condition, flow: before.flow, now: springNow))
+        #expect(filter.includes(boundary.task, condition: boundary.condition, now: springNow))
+        #expect(!filter.includes(before.task, condition: before.condition, now: springNow))
     }
 
     @Test func inlineEditingAppliesCancelsAndRemembersRange() throws {

@@ -9,6 +9,7 @@ use crate::engine::worktrees::main_repo_root;
 use crate::ops::pm::PmResolvedTask;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
+use crate::store::sqlite::OpenExecs;
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
 use crate::work::task::{PrPhase, Task, TaskPr};
 
@@ -661,8 +662,15 @@ fn historical_unknown_exec(
     Ok(true)
 }
 
-pub(super) fn completion_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
-    let mut work = store.sqlite.task_work(&task.id).map_err(task_error)?;
+pub(super) fn completion_work_blockers(
+    store: &SharedStore,
+    task: &Task,
+    open: &OpenExecs,
+) -> OpsResult<Vec<String>> {
+    let mut work = store
+        .sqlite
+        .task_open_work(&task.id, open)
+        .map_err(task_error)?;
     let mut accepted = HashSet::new();
     for id in store
         .sqlite
@@ -679,8 +687,7 @@ pub(super) fn completion_work_blockers(store: &SharedStore, task: &Task) -> OpsR
 }
 
 pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
-    let work = store.sqlite.task_work(&task.id).map_err(task_error)?;
-    work_blockers(store, &work)
+    work_blockers(store, &open_work(store, task)?)
 }
 
 fn work_blockers(store: &SharedStore, work: &crate::task_work::TaskWork) -> OpsResult<Vec<String>> {
@@ -696,16 +703,20 @@ fn work_blockers(store: &SharedStore, work: &crate::task_work::TaskWork) -> OpsR
     Ok(blockers)
 }
 
+fn open_work(store: &SharedStore, task: &Task) -> OpsResult<crate::task_work::TaskWork> {
+    let open = store.sqlite.open_execs().map_err(task_error)?;
+    store
+        .sqlite
+        .task_open_work(&task.id, &open)
+        .map_err(task_error)
+}
+
 /// Restoring a checkout preserves idle Flows; only unresolved execution waits.
 pub(super) fn associated_execution_blockers(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<Vec<String>> {
-    execution_blockers(
-        store,
-        &store.sqlite.task_work(&task.id).map_err(task_error)?,
-        ExecutionCheck::RetainWork,
-    )
+    execution_blockers(store, &open_work(store, task)?, ExecutionCheck::RetainWork)
 }
 
 /// Resumption acquires exact Flow authority; unrelated history is not a claim.
@@ -713,11 +724,7 @@ pub(super) fn recovery_execution_blockers(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<Vec<String>> {
-    execution_blockers(
-        store,
-        &store.sqlite.task_work(&task.id).map_err(task_error)?,
-        ExecutionCheck::ResumeFlow,
-    )
+    execution_blockers(store, &open_work(store, task)?, ExecutionCheck::ResumeFlow)
 }
 
 #[derive(Clone, Copy)]

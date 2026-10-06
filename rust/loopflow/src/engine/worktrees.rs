@@ -171,11 +171,10 @@ pub struct AgentWorktree {
 }
 
 pub fn git_common_dir(repo: &Path) -> Result<PathBuf, GitError> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .output()?;
+    let output = crate::engine::git::retained_output(
+        repo,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
             command: "git rev-parse --git-common-dir".to_string(),

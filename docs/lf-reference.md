@@ -23,8 +23,8 @@ limits this launch and its children. Saved Flows retain provider selections;
 children check their destination's access before starting a provider.
 Account observations distinguish unavailable, expired and measured capacity.
 
-JSON readers emit one document; `monitor active --watch --json` emits NDJSON
-until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
+JSON readers emit one document; `monitor active --watch --json` and
+`monitor workspace --watch --json` emit NDJSON until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
 operation succeeded; 1 denotes an operational failure, 2 a syntax or lookup
 failure, and 130 interruption. A successful auto-merge request is not a merge.
 
@@ -326,6 +326,16 @@ Observe active conversations and missing process evidence
 | `--json` | json Default: false. |
 | `--watch` | Stream NDJSON until stdin closes Default: false. |
 | `--task` | task |
+| `--help / -h` | Print help |
+
+## lf monitor workspace
+
+Stream what a workspace shows, each part again only when it changes
+
+| Argument | What it does |
+|---|---|
+| `--json` | json |
+| `--watch` | Stream NDJSON until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor usage

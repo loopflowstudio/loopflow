@@ -1,5 +1,6 @@
 #if os(macOS) && canImport(GhosttyKit)
 import AppKit
+import os
 import GhosttyKit
 import SwiftUI
 import Testing
@@ -382,6 +383,33 @@ struct TaskFilesTests {
         #expect(store.documents.isEmpty)
     }
 
+    /// A commit in a linked worktree changes no file in the checkout.
+    @Test func commitInLinkedWorktreeRereadsTheComparison() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let checkout = directory.appendingPathComponent("checkout")
+        let metadata = directory.appendingPathComponent("main/.git/worktrees/checkout")
+        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: metadata, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("gitdir: \(metadata.path)\n".utf8).write(to: checkout.appendingPathComponent(".git"))
+        let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let readings = OSAllocatedUnfairLock(initialState: 0)
+        let store = TaskFilesStore(issue: "TEST-1", cwd: checkout.path, query: RegistryQuery { args, _ in
+            let root = try JSONSerialization.jsonObject(with: fixture) as! [String: Any]
+            if args.contains("--files") { readings.withLock { $0 += 1 } }
+            let value = root[args[1] == "files" ? "directory" : args.contains("--files") ? "changes" : "diff"]!
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        })
+        store.showsChanges = true
+        store.observeFiles()
+        await store.refreshChanges()
+        let before = readings.withLock { $0 }
+        try Data("ref: refs/heads/next\n".utf8).write(to: metadata.appendingPathComponent("HEAD"), options: .atomic)
+        try await eventually { readings.withLock { $0 } > before }
+    }
+
     @Test func saveKeepsTypingAndUndoWhileAdvancingOnlyTheSubmittedBaseline() async throws {
         let original = try fixture().file
         let document = TaskFileDocument(path: original.path)
@@ -512,7 +540,7 @@ struct TaskFilesTests {
 
         // Mount, hide and reopen the actual browser; its documents belong to the checkout.
         for _ in 0..<2 {
-            let browser = NSHostingView(rootView: TaskFilesView(store: store, prURL: nil))
+            let browser = NSHostingView(rootView: TaskFilesView(store: store, prURL: nil, prBase: nil))
             browser.frame = CGRect(x: 400, y: 0, width: 700, height: 500)
             root.addSubview(browser)
             browser.layoutSubtreeIfNeeded()

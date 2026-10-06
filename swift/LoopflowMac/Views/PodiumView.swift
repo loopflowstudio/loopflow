@@ -77,6 +77,7 @@ struct PodiumView: View {
         .onAppear { LaunchJournal.home.markAfterCommit(.firstFrame) }
         .task { await model.activeSessionsLifetime() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
+            model.rescanWorkspace()
             Task { await model.rescanActiveSessions() }
         }
         .task {
@@ -85,17 +86,8 @@ struct PodiumView: View {
                 persistedRepos: portfolioService.repos
             )
         }
-        .task {
-            while !Task.isCancelled {
-                await model.refreshProcessActivity()
-                do {
-                    try await Task.sleep(for: .seconds(2))
-                } catch {
-                    return
-                }
-            }
-        }
-        .task(id: model.repoPath) { await model.keepWorkspaceCurrent() }
+        .task { await model.keepWorkspaceCurrent() }
+        .onChange(of: model.workspaceScope) { _, _ in model.syncWorkspaceScope() }
         .task(id: model.repoPath) {
             // Fixture and UI-test runs render without background helpers.
             guard let repo = model.repoPath, AppTestMode.current() == nil else { return }

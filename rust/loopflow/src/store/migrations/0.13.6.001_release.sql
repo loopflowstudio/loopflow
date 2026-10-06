@@ -1,3 +1,4 @@
+-- draft: store_revisions
 -- Change revisions for displayed data. Every committed write to a table a
 -- workspace surface reads bumps its domain here, inside the writer's own
 -- transaction, so any reader can ask "what changed" without scanning history.

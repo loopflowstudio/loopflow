@@ -776,8 +776,7 @@ must honor Team identity and resolve Task links from the Wave repository.
 
 October 6 retained twenty warm Task-opening samples, but the hour soak failed
 on disk exhaustion after seven rounds. The 78.6 GiB historical trace has timestamp
-attribution only and stays intact. Bounded-recording receipts and failed lower-volume probes remain in benchmark
-guidance; full hours remain storage-limited.
+attribution only and stays intact. Benchmark guidance retains bounded-recording and failed probe receipts.
 
 Contained replay passed endpoints but failed RSS (+52.6/+54.5 MiB). Allocation
 maps support capture pressure, not a proven production leak or oversized atlas.
@@ -785,7 +784,7 @@ Buffer reuse/autorelease repairs failed and were removed; altered no-capture
 reopening also failed. Exact evidence remains in benchmark guidance and
 `3c931cc4d:wave/infrastructure/MEMORY.md`.
 
-Jack Heart requested the missing matched baseline. October 6's
+Jack Heart requested October 6's matched baseline. The
 [Rust comparison](../../scripts/benchmarks/desktop-performance/20261006-matched-rust/README.md)
 passed 84/84 endpoints per side, twenty warm samples each, with Swift/harness/lf3
 constant. Session-list median fell 2335→705 ms; roadmap 5140→3759 ms. Debug reads

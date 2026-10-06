@@ -14,7 +14,9 @@ still needs.
   would save more but changes which store is complete. That choice is left open
   in the review as proposal 1.
 - Install preflight reads an exact-frontier store in place. A pending migration
-  still validates against a migrated private snapshot.
+  still validates against a migrated private snapshot, copied by PR #1465's
+  pinned backup (merged, v0.13.7, already in this branch). #1465 made that copy
+  finish under writers; it did not remove the per-probe copy this change removes.
 - Write connections set `journal_size_limit` to 64 MiB.
 - A committed migration keeps the two newest fingerprinted backups. Hand-named
   and unfingerprinted files are never matched.
@@ -44,4 +46,13 @@ validation for pending migrations, and backup reuse by history fingerprint.
 - Proposals 1–9 in the review need sponsorship; retention (2) and the system of
   record (1) are decisions about what history is worth, not implementation gaps.
 
-Check: all `LF_*` unset, `cargo test -p loopflow --lib -- session_record` — 49 passed after compress; clippy `-D warnings` clean. Other suites unchanged since the 149-pass run; gate owns them.
+- Acceptance not met by this PR: growth is reduced, not bounded. No capture,
+  binary or Codex-home retention exists; `lf home doctor` reports no sizes; the
+  interrupt-cleanup gaps are documented, not fixed. The Task stays open on these
+  unless Jack accepts the review's proposals as the remaining scope.
+
+Reconciled 2026-10-06 against `41b86d141` (no newer main): code, review, data
+doc and memory agree; the review's probe path and `MIGRATIONS.md` backup
+retention were corrected.
+
+Check: all `LF_*` unset, `cargo test -p loopflow --lib -- session_record` — 49 passed after compress; clippy `-D warnings` clean. Realign changed prose only, no rerun. Other suites unchanged since the 149-pass run; gate owns them.

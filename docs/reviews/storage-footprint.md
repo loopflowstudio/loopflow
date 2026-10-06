@@ -122,16 +122,21 @@ The database also caused the temporary copies. `lf home install preflight`
 copied the whole store to validate lifecycle references against a migrated
 snapshot, on every preflight, including when no migration was pending. The
 install currency probe kills preflight after 30 seconds
-(`install/published.rs`), and interrupts exit without running destructors. Copy
-sizes of 0.27–1.9 GiB match copies cut off part way. The timeout as the killer
-is read from source and consistent with the sizes, not observed directly.
+(`lf/commands/install/published.rs`), and interrupts exit without running
+destructors. Copy sizes of 0.27–1.9 GiB match copies cut off part way. The
+timeout as the killer is read from source and consistent with the sizes, not
+observed directly. Release's v0.13.6 installation independently sampled the same
+copy restarting under concurrent writers; PR #1465 (v0.13.7) pinned its snapshot
+so it finishes. That made the copy complete, not unnecessary: a finished copy
+still costs the store's size on every probe. Whether any stranded directory was
+written by a build containing #1465 was not checked.
 
 ## What changed
 
 | Fix | Effect | Proof |
 | --- | --- | --- |
 | History keeps what increments add up to. A run of deltas becomes one event at the first delta's position; a Turn keeps its last cumulative diff; raw increment notifications stay in `events.jsonl` only. | Replaying all 2,046 retained capture files through the same rule keeps 27.5% of rows and 72% of bytes (`scripts/benchmarks/storage/replay_history.py`). Write transactions fall by the same 72%. | `history_keeps_what_streamed_increments_add_up_to`; the existing streamed-prose recovery test still passes with the capture directory deleted |
-| Preflight reads an exact-frontier store in place. Only a pending migration takes a snapshot. | No store copy on routine installs or currency probes; preflight no longer scales with store size. | `an_exact_store_is_validated_in_place` |
+| Preflight reads an exact-frontier store in place. Only a pending migration takes #1465's pinned snapshot. | No store copy on routine installs or currency probes; preflight no longer scales with store size. | `an_exact_store_is_validated_in_place` |
 | Write connections set `journal_size_limit` to 64 MiB. | The WAL is truncated when a checkpoint resets it. Expected to return about 1.4 GiB here after install. | `a_burst_does_not_leave_its_wal_on_disk` |
 | A committed migration keeps the two newest fingerprinted backups. | About 10.6 GiB returns at this machine's next migrating release. Hand-named and unfingerprinted backups are never touched. | `a_committed_migration_keeps_only_the_newest_backup_generations` |
 

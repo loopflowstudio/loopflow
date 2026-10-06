@@ -8,7 +8,8 @@ measurements and prioritized proposals: [storage footprint review](../../docs/re
 October 2 capture cutover: every streamed token was two rows, and the same
 events also sit in `runs/*/events.jsonl`. Source now coalesces increments before
 SQLite, validates an exact-frontier store in place during install preflight
-(full copies killed by the 30 s currency probe stranded 11.7 GiB in `$TMPDIR`),
+(full copies killed by the 30 s currency probe stranded 11.7 GiB in `$TMPDIR`;
+#1465's pinned snapshot remains for pending migrations),
 limits the WAL to 64 MiB, and keeps two fingerprinted migration backups.
 27.9 GiB was reclaimed: stranded preflight copies and Cargo output of two merged
 idle worktrees. Installed effect awaits a release and is unobserved. Existing
@@ -16,8 +17,7 @@ rows are not rewritten. Jack's 78.7 GiB recording and 81-copy leads were gone
 before measurement. Undecided, and left intact: which of SQLite or `events.jsonl`
 is the system of record, capture retention, binary/artifact pruning, and about
 23 GiB of legacy `traces`, `backups`, `lfd.db*` and `logs` with no reader.
-Unknown ownership is not permission to delete. The two `session_record` tests
-that open a Home fail under an inherited `LF_HOME`; run them with `LF_*` cleared.
+Unknown ownership is not permission to delete. Test `session_record` with `LF_*` cleared.
 
 ## Retained capture storage and autonomous cleanup (2026-10-05)
 

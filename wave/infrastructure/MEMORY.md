@@ -804,18 +804,20 @@ Session reads stayed 309→315 ms. Both miss 300 ms. Remaining roadmap samples
 identify Flow Exec membership and repeated repository discovery.
 
 The repaired rendered run remains 83/84: nineteen warm native successes, no
-native p95. Growth (+60.9/+53.5/+47.6 MiB) failed. Jack Heart requested the focused
-reopen repair. Refresh-before-exit reproduced a cached unavailable-client reason
-that silently suppressed connect after exit; the later poll did not resume the
-click. Selection now revalidates through connect, preserving fresh refusal and
-explicit takeover. The mounted fixture passes 21 reopens with transcript/pane/
-draft/selection/identity checks. Realistic repaired runs failed their five-second
-endpoints (5/21, 20/21); the latter connected and created a surface. Retain both
-beside the original pending failure; post-connect readiness remains open.
+native p95. Growth (+60.9/+53.5/+47.6 MiB) failed. Jack Heart requested reopening
+repair. Cached unavailable-client state suppressed connect after exit; selection
+now revalidates through connect, preserving fresh refusal and explicit takeover.
+Realistic repaired runs still failed at 5/21 and 20/21, the latter after connect.
+
+A 21/21 predicate replay did not reproduce the failure. Repeated main-actor OCR while connect was pending
+obstructed observation. Native samples now await independent readiness before
+capture/OCR, retaining the same five-second deadline and input/preservation proof.
+Focused 21/21 and full 84/84 passed. This repairs observation, not proven production latency. The
+historical failed predicate remains unknown; focused success cannot erase it.
 [The report](../../scripts/benchmarks/desktop-performance/20261006-matched-rust/README.md#native-reopen-diagnosis--october-6)
-owns receipts and limits. Publication only is authorized; Swift attribution,
-latency/growth budgets and both full hours remain open. No trace or installed-Home
-operation occurred.
+retains all failures and limits. Publication only is authorized; matched Swift
+attribution, latency/growth, both full hours and compositor proof remain open.
+No trace or installed-Home operation occurred.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

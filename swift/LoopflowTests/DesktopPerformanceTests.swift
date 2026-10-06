@@ -610,7 +610,8 @@ struct DesktopPerformanceTests {
                 try journal.write(["event": "soak_phase", "phase": "navigation_typing", "round": round,
                                    "time": Date().timeIntervalSince1970])
             }
-            try await sample("native_session_reopen", "snapshot", round, journal, window, soaking: round >= samples, action: {
+            var lastReadiness: String?
+            try await sample("native_session_reopen", "snapshot", round, journal, window, soaking: round >= samples, captureWhenReady: true, action: {
                 await model.openTaskLink(url)
                 try journal.write(["event": "reopen_request", "round": round,
                                    "linked": model.linkedSession?.id as Any? ?? NSNull(),
@@ -623,11 +624,15 @@ struct DesktopPerformanceTests {
                 } ?? false
                 let focused = window.firstResponder === terminal
                 let selected = model.selection?.id == fixture.taskId
-                try? journal.write(["event": "reopen_state", "round": round,
-                                    "linked": model.linkedSession?.id as Any? ?? NSNull(),
-                                    "has_surface": terminal.surface != nil, "has_history": hasHistory,
-                                    "focused": focused, "selected": selected,
-                                    "state": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.state)])
+                let state = String(describing: store.sessions.first { $0.id == fixture.sessionId }?.state)
+                let readiness = "\(terminal.surface != nil)/\(hasHistory)/\(focused)/\(selected)/\(state)"
+                if readiness != lastReadiness {
+                    try? journal.write(["event": "reopen_state", "round": round,
+                                        "linked": model.linkedSession?.id as Any? ?? NSNull(),
+                                        "has_surface": terminal.surface != nil, "has_history": hasHistory,
+                                        "focused": focused, "selected": selected, "state": state])
+                    lastReadiness = readiness
+                }
                 return selected && focused && hasHistory
             }, observation: {
                 ["session_id": fixture.sessionId, "task_id": fixture.taskId, "native_id": fixture.nativeId,
@@ -707,7 +712,8 @@ struct DesktopPerformanceTests {
 
     private func sample(_ scenario: String, _ population: String, _ attempt: Int,
                         _ journal: PerformanceJournal, _ window: PerformanceWindow,
-                        soaking: Bool = false, action: () async throws -> Void, ready: () -> Bool,
+                        soaking: Bool = false, captureWhenReady: Bool = false,
+                        action: () async throws -> Void, ready: () -> Bool,
                         observation: () -> [String: Any] = { [:] },
                         input: () async throws -> Void = {}) async throws {
         let metric = scenario == "new_pty" ? "new_pty_capture_and_echo_ms"
@@ -724,7 +730,7 @@ struct DesktopPerformanceTests {
         let start = DispatchTime.now().uptimeNanoseconds
         do {
             try await action()
-            try await wait(window, render: true, ready: ready)
+            try await wait(window, render: true, captureWhenReady: captureWhenReady, ready: ready)
             let captured = Double(window.observedAt - start) / 1_000_000
             let verified = milliseconds(start)
             let inputStart = DispatchTime.now().uptimeNanoseconds
@@ -756,14 +762,20 @@ struct DesktopPerformanceTests {
         Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
     }
 
-    private func wait(_ window: PerformanceWindow, render: Bool = false, ready: () -> Bool) async throws {
+    private func wait(_ window: PerformanceWindow, render: Bool = false,
+                      captureWhenReady: Bool = false, ready: () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(5)
         repeat {
             window.contentView?.layoutSubtreeIfNeeded()
             window.layoutIfNeeded()
             window.displayIfNeeded()
-            if render { try window.capture() }
-            if ready() { return }
+            // Native readiness is independent of OCR. Let connect, mounting and
+            // focus finish before the observer occupies their main actor.
+            // Pixel-based journeys still capture before evaluating their labels.
+            if !captureWhenReady || ready() {
+                if render { try window.capture() }
+                if ready(), ContinuousClock.now < deadline { return }
+            }
             try await Task.sleep(for: .milliseconds(5))
         } while ContinuousClock.now < deadline
         do { try window.saveFailureCapture() }
@@ -1084,6 +1096,7 @@ private final class PerformanceJournal {
     func write(_ record: [String: Any]) throws {
         var record = record
         record["rss_bytes"] = performanceResidentBytes() as Any? ?? NSNull()
+        record["uptime_ns"] = DispatchTime.now().uptimeNanoseconds
         var data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
         data.append(10)
         try file.write(contentsOf: data)

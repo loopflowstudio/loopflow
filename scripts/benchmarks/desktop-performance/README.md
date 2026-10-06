@@ -223,7 +223,13 @@ Add `--mounted` to check the production shell contract and 21 native Task-link
 reopens. The reopen regression refreshes Session observations before each client
 exits, then selects it again with the cached observation still present. It uses
 the same transcript, input, companion pane, draft, selection and identity checks
-as the combined soak, with its unchanged five-second endpoint. `reopen.jsonl`
+as the combined soak, with its unchanged five-second endpoint. Native reopening
+waits for selected Task, focus and native history before bitmap/OCR capture, then
+rechecks readiness and the same deadline. This keeps pending-screen OCR from
+blocking the main actor needed by connect and mounting; capture and input proof
+remain required. Monotonic `uptime_ns` and transition-only `reopen_state` records
+separate application readiness from observer cost. Comparisons must use the same
+observer on both sides. `reopen.jsonl`
 records requests and observed states. This focused regression takes no Instruments
 trace and does not supply a matched performance distribution or hour coverage.
 

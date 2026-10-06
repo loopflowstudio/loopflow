@@ -309,3 +309,91 @@ assertions, at `/tmp/loo304-reopen-contained-final-20261006/`. Runner pytest pas
 42 tests; Ruff and diff checks passed. The prepared realistic snapshot's SHA-256
 still matches its manifest. No matched p95, 32 MiB growth, full-hour, hitch/hang or
 compositor acceptance follows; publication remains separate from merge/completion.
+
+
+### Readiness before observation — October 6
+
+Jack Heart requested diagnosing the post-connect failure without changing its
+five-second endpoint. The separated-predicate replay at
+`/tmp/loo304-readiness-before-20261006/` passed **21/21** realistic reopens on
+`6dd8f171f`. Selection remained correct; surface, retained native history and
+focus became ready together. The historical last-round failure did not reproduce.
+Its missing predicates cannot be reconstructed from its final screenshot.
+
+The replay exposed observer interference: every reopen performed three synchronous
+main-actor bitmap/OCR passes, including passes while connect/mounting was pending.
+The historical failed attempt spent roughly six seconds in capture/OCR. That is
+a demonstrated source of main-actor obstruction, but does not identify which
+historical readiness predicate missed its deadline.
+
+Native reopening now waits for its independent selection/focus/history predicates
+before capturing pixels. Capture, both unchanged OCR recognizers, the second
+readiness check and input proof remain mandatory. The same five-second readiness
+deadline includes capture/OCR, with an explicit check after capture so a slow
+observer cannot turn an expired endpoint into success. Pixel-dependent catalogue
+journeys still capture before checking labels. Transition-only readiness records
+and monotonic journal timestamps separate application readiness from observation
+without hundreds of synchronous journal writes. No production readiness, timeout,
+provider, snapshot or sandbox code changed.
+
+`/tmp/loo304-readiness-after-20261006/` passed **21/21**, including every transcript,
+input, pane/layout, draft/selection and identity check. Each reopen needed one
+capture. Both focused runs use the same release CLI, published lf3, prepared
+snapshot (604 Sessions, 218,637 Execs), SwiftPM debug configuration and ordered
+refresh-before-exit sequence; the observer differs intentionally. The original
+fixture SHA-256 still matches `d9dc08b5d7d241294b78bf5035d47e8e9069aa58c13808d04d31cd8a0f8230e4`.
+
+| Focused warm native observation (20 successes each) | Before median / p95 ms | After median / p95 ms |
+| --- | ---: | ---: |
+| Application predicates, before capture | unmeasured | 596 / 1053 |
+| Bitmap-ready, including preceding work | 817 / 973 | 694 / 1177 |
+| Total OCR per reopen | 703 / 1281 | 266 / 386 |
+| Endpoint plus input proof | 1063 / 1639 | 974 / 1511 |
+
+These nearest-rank p95 values describe these focused runs only. Unequal host load
+and the intentionally changed observer prevent attributing a product speedup;
+bitmap-ready p95 worsened. No CPU/hitch/hang recorder or hour soak ran in these
+focused probes. Their RSS journals are not memory acceptance. Earlier **83/84**,
+**5/21** and **20/21** failures, nineteen-warm-native cohorts and failed memory
+results remain unchanged. A current pass cannot prove the historical failure's
+exact cause. The full matched comparison needs this observer on both sides;
+all original budgets, compositor and full-hour obligations remain open.
+
+
+The subsequent full candidate sequence at
+`/tmp/loo304-readiness-full-20261006/` passed **84/84**, including all 21 native
+rounds and final preservation assertions. It used the normal runner's SwiftPM
+`-gnone` build, real snapshot reads and production refresh owner:
+
+```bash
+uv run python scripts/desktop_performance.py run \
+  --snapshot /tmp/loo304-compatible-snapshot-20261006-02 \
+  --lf /tmp/loo304-release-20261006/bin/repair-lf \
+  --repo /Users/jack/src/loopflow --issue LOO-368 --samples 21 \
+  --output /tmp/loo304-readiness-full-20261006 --no-xctrace
+```
+
+| Full candidate endpoint (20 warm successes each) | Median / p95 ms |
+| --- | ---: |
+| Cold-workspace construction | 1809 / 2489 |
+| Warm Task | 453 / 553 |
+| Task reopening | 345 / 432 |
+| Native reopening plus input | 1237 / 1592 |
+
+First observations were 2937/578/421/1353 ms respectively and are excluded from
+these warm distributions. Native application predicates preceded capture at
+788/1034 ms median/p95. These observations still miss the original budgets.
+One visible window and terminal focus were retained; key-window identity remained
+unavailable. Source, CLI and authored-config hashes stayed unchanged. CLI starts/
+ends were 405/405, with 2,332 SQLite connections, 200,424 statements and 2,365,177
+rows. There were 43 refused comment reads (42 copied, one owned fixture) and 20
+cancellations. They remain explicit gaps, not successful provider-backed reads.
+CPU, stalls, hitches and hangs were unmeasured: no recorder or soak was requested.
+RSS checkpoints do not establish a four-round memory pass. This candidate-only
+replay verifies the repaired observation workflow, not the full matched comparison.
+
+Review kept the post-capture deadline check and rejected a speculative production
+focus patch. Checks: Swift build PASS; full realistic sequence PASS 84/84; focused
+before/after PASS 21/21 each; SessionsStoreTests PASS 11; headless verify-fixture
+PASS 5 (`/tmp/loo304-readiness-contained-20261006/`); diff PASS. No merge or Task
+completion follows.

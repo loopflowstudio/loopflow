@@ -204,7 +204,7 @@ struct RegistryQueryTests {
         "slug": "release-feedback",
         "name": "current",
         "flow": "task-design",
-        "status": "started",
+        "status": "started", "current": true,
         "metric_targets": [],
         "krs": [
           {

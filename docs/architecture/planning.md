@@ -14,8 +14,9 @@ cadence, budget and metric instruments across plans. Its one In Progress Linear
 Project owns Tasks, KRs, targets and an optional default Flow. A Chapter is the shared
 name of those current Projects across the repository. The rotation below describes
 the current implementation. LOO-366 replaces status/name selection with an explicit
-shared Project binding and preserves unreviewed backlog. Binding setup exists;
-selection and recovery cutover remain unimplemented. [Cutover status](../architecture-reference.md#cutover-status) records
+shared Project binding and preserves unreviewed backlog. Binding setup, operation
+routing and reader selection exist; SQLite admission and rotation recovery remain
+unfinished. [Cutover status](../architecture-reference.md#cutover-status) records
 other implementation and proof gaps.
 
 ```bash
@@ -26,8 +27,10 @@ Validate one existing Project and record `pm.linear_project` in
 `<Home>/waves/<WaveId>/config.yaml`. Repeating the same binding preserves it;
 a different existing binding is left unchanged. Setup preserves provider status,
 content and identity, including a Backlog Project without a Flow. It does not
-activate the Project. The reader/admission and rotation cutover must finish before
-this binding becomes ordinary Project selection.
+activate the Project. Operation routing and status select this exact ID; the JSON
+Project summary carries a required `current` boolean for Desktop. Status and
+roadmap retain predecessor Projects and Tasks. SQLite admission still has its old
+status/count check; ensure and rotation recovery must finish before release.
 
 ## Rotate the plan, preserve the work
 
@@ -141,7 +144,8 @@ under acquisition ownership; it cannot reconcile a changed Initiative.
 Chapter rollover transfers started work and retains unreviewed backlog in its
 predecessor Project before completing that Project in Linear. It confirms provider
 completion before recording the Project. Closing it neither completes transferred
-Tasks nor changes historical KR results. Current Project selection follows provider status.
+Tasks nor changes historical KR results. Current Project readers follow the shared
+binding; rotation's old status/name inference still awaits replacement.
 
 The planning store can retain explicit archival acknowledgements. Integrating
 archival into the provider-backed chapter operation and preserving old acknowledgements

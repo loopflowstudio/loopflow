@@ -344,13 +344,14 @@ backlog stays with its Project; unresolved abandonment keeps its separate settle
 Shared binding, transition recovery, CI repair acceptance and configured readiness
 remain open. Focused operation proofs pass; publication proves no readiness.
 
-October 5 binding setup preserves Home-local YAML bytes and exact identity.
-Initiative validation returns the accepted Project through commit; delayed Backlog
-cannot bind newer completed history. Binding is not selection: Task admission still
-counts Started Projects, and roadmap filters away historical Tasks. Shared selection
-must preserve unresolved predecessor visibility. Ensure, transitions and configured
-Intelligence repair remain unfinished. Release's entry-point recovery lesson applies;
-helper proofs alone do not establish recovery across the configuration switch.
+October 5 binding preserves YAML bytes and committed ownership; delayed Backlog
+cannot bind newer completed history. Routing/metrics use its exact ID. Status and
+roadmap retain predecessor Tasks; Rust/Swift carry selection explicitly. Desktop
+retains Task evidence with the latest Wave. Decode Project bodies before membership
+filtering: SQL hid a malformed body as an empty plan. Reader/DTO proofs establish
+no activation or switch recovery. SQLite admission still counts Started Projects;
+ensure, transitions and configured Intelligence repair remain open. Release's
+operation-entry recovery lesson still applies.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 

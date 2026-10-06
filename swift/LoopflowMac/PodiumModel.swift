@@ -1075,8 +1075,7 @@ final class PodiumModel {
             }
         }
         if let retained = navigation.selectedTaskEvidence, retained.task.id == id {
-            if let current = wave(id: retained.wave.wave.id),
-               current.tasks.unavailableReason != nil || current.projects.unavailableReason != nil || current.projects.items.filter({ $0.status == .started }).count != 1 {
+            if let current = wave(id: retained.wave.wave.id) {
                 return (current, retained.task)
             }
             return retained

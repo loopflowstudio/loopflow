@@ -76,7 +76,7 @@ pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) ->
                 .map_err(error)?;
             let ctx = resolve_context(repo, wave.slug()).await?;
             let projects = checked_projects(repo, &ctx, wave.slug()).await?;
-            let project = select_current(wave.slug(), &projects)?;
+            let project = super::project::select_project(&pm_store().await?, &wave, &projects)?;
             let provider = ctx
                 .client
                 .project_ownership(&project.id)
@@ -108,16 +108,6 @@ pub(crate) fn select_current(wave: &str, projects: &[PmProject]) -> OpsResult<Pm
                 .join(", ")
         ))),
     }
-}
-
-pub(crate) async fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmProject> {
-    let snapshot = store
-        .pm_snapshot(wave.id())
-        .await
-        .map_err(error)?
-        .ok_or_else(|| error("Project planning is unavailable; run `lf repo refresh <wave>`"))?;
-    let snapshot = snapshot.snapshot;
-    select_current(wave.slug(), &snapshot.projects)
 }
 
 // Stable across Homes, including a lost create response before initiative attachment.

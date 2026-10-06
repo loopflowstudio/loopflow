@@ -589,7 +589,7 @@
         "slug": "release-feedback",
         "name": "current",
         "flow": "task-design",
-        "status": "started",
+        "status": "started", "current": true,
         "metric_targets": [
           {
             "metric_id": "task-loop-trust",

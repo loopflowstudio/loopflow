@@ -18,6 +18,7 @@ public enum ProjectStatus: String, Decodable, Sendable, Hashable {
 }
 
 public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
+    public let current: Bool
     public let id: String
     public let workId: String?
     public let slug: String
@@ -28,7 +29,7 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
     public let krs: [PlanningKeyResult]
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, flow, status, krs
+        case id, slug, name, flow, status, krs, current
         case workId = "work_id"
         case metricTargets = "metric_targets"
     }
@@ -36,7 +37,7 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
 
 extension WorkEvidence where Item == ProjectPlanningSnapshot {
     public var currentProject: ProjectPlanningSnapshot? {
-        let current = items.filter { $0.status == .started }
+        let current = items.filter { $0.current }
         return current.count == 1 ? current[0] : nil
     }
 }

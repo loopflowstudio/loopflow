@@ -15,6 +15,48 @@ async fn project_store() -> OpsResult<SharedStore> {
     })
 }
 
+/// Select by the shared binding, independently of names and other Project statuses.
+pub(crate) fn select_project(
+    store: &crate::store::Store,
+    wave: &crate::work::wave::Wave,
+    projects: &[crate::pm::PmProject],
+) -> OpsResult<crate::pm::PmProject> {
+    let home = store.sqlite.home_dir().map_err(project_error)?;
+    let selected = crate::work::wave::project_binding::read_project_binding(&home, wave.id())
+        .map_err(project_error)?
+        .ok_or_else(|| project_error(format!("Wave {} has no configured Project", wave.slug())))?;
+    let project = projects
+        .iter()
+        .find(|project| project.id == selected)
+        .cloned()
+        .ok_or_else(|| {
+            project_error(format!(
+                "configured Project {selected} is unavailable; refresh the Wave"
+            ))
+        })?;
+    if matches!(
+        project.status,
+        crate::pm::ProjectStatus::Completed | crate::pm::ProjectStatus::Canceled
+    ) {
+        return Err(project_error(format!(
+            "configured Project {selected} is terminal; its history is unchanged"
+        )));
+    }
+    Ok(project)
+}
+
+pub(crate) async fn current_project(
+    store: &crate::store::Store,
+    wave: &crate::work::wave::Wave,
+) -> OpsResult<crate::pm::PmProject> {
+    let snapshot = store
+        .pm_snapshot(wave.id())
+        .await
+        .map_err(project_error)?
+        .ok_or_else(|| project_error("Project planning is unavailable; refresh the Wave"))?;
+    select_project(store, wave, &snapshot.snapshot.projects)
+}
+
 pub(crate) async fn resolve_project_for_task(
     repo: &Path,
     wave_name: &str,
@@ -28,10 +70,10 @@ pub(crate) async fn resolve_project_for_task(
         .await
         .map_err(project_error)?
         .ok_or_else(|| project_error("owning Wave is not initialized"))?;
-    let current = crate::ops::chapter::current_project(&store, &wave).await?;
+    let current = current_project(&store, &wave).await?;
     if current.id != project_id {
         return Err(project_error(
-            "new Tasks require the Wave's In Progress Project",
+            "new Tasks require the Wave's configured Project",
         ));
     }
     store

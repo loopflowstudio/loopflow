@@ -974,7 +974,7 @@
             "slug": "loopflow-api",
             "name": "current",
             "flow": "feature",
-            "status": "started",
+            "status": "started", "current": true,
             "metric_targets": [
               {
                 "metric_id": "task-loop-trust",

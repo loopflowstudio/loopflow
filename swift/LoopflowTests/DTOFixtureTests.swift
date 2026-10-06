@@ -123,6 +123,32 @@ struct DTOFixtureTests {
         }
     }
 
+    @Test("Configured Project selection survives competing statuses and provider renames")
+    func configuredProjectSelection() throws {
+        var root = try #require(JSONSerialization.jsonObject(with: loadFixtureData("wave_detail.json")) as? [String: Any])
+        var projects = try #require(root["projects"] as? [String: Any])
+        let rows = try #require(projects["items"] as? [[String: Any]])
+        var previous = try #require(rows.first)
+        previous["current"] = false
+        var selected = previous
+        selected["id"] = "configured-project"
+        selected["name"] = "Summer work — customer requests"
+        selected["current"] = true
+        selected["flow"] = ""
+        projects["items"] = [previous, selected]
+        root["projects"] = projects
+        let status = try JSONDecoder().decode(WaveDetailSnapshot.self, from: JSONSerialization.data(withJSONObject: root))
+        #expect(status.currentProject?.id == "configured-project")
+        #expect(status.currentProject?.flow == "")
+        #expect(status.projects.items.count == 2)
+        selected.removeValue(forKey: "current")
+        projects["items"] = [selected]
+        root["projects"] = projects
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(WaveDetailSnapshot.self, from: JSONSerialization.data(withJSONObject: root))
+        }
+    }
+
     @Test("Wave plan uses the same chapter as status")
     func planUsesChapterSnapshot() async throws {
         let json = String(decoding: try loadFixtureData("wave_detail.json"), as: UTF8.self)
@@ -132,6 +158,7 @@ struct DTOFixtureTests {
         }
         let plan = try await query.plan(wave: "infrastructure", objective: "Make releases boring.", cwd: "/fixture")
         #expect(plan.currentProject?.flow == "task-design")
+        #expect(plan.currentProject?.current == true)
         #expect(plan.currentProject?.krs.count == 1)
     }
 

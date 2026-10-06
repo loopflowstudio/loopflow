@@ -138,12 +138,13 @@ struct TaskMonitorProofTests {
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var waves = try #require(wire["waves"] as? [[String: Any]])
         var projects = try #require(waves[0]["projects"] as? [String: Any])
-        let plans = try #require(projects["items"] as? [[String: Any]])
+        var plans = try #require(projects["items"] as? [[String: Any]])
         let tasks = try #require(waves[0]["tasks"] as? [String: Any])
         var successor = plans[0]
         successor["name"] = "next-chapter"
         successor["id"] = "successor-project"
         successor["work_id"] = "successor-work"
+        plans[0]["current"] = false
         for transferring in [true, false] {
             projects["items"] = transferring ? plans + [successor] : [successor]
             waves[0]["projects"] = projects

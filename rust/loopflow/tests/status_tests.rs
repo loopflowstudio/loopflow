@@ -47,7 +47,7 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
         plan: ProjectPlan {
             flow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
-            id: LinearProjectId::new(format!("linear-{slug}")).expect("Linear Project id"),
+            id: LinearProjectId::new(uuid::Uuid::new_v4().to_string()).expect("Linear Project id"),
             slug: slug.to_string(),
             name: slug.replace('-', " "),
             prompt_context: "Keep status truthful.".to_string(),
@@ -62,6 +62,13 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
 }
 
 fn select_project(home: &Path, wave: &Wave, project_id: &str) {
+    let directory = home.join("waves").join(wave.id().as_str());
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join("config.yaml"),
+        format!("pm:\n  linear_project: {project_id}\n"),
+    )
+    .unwrap();
     let connection = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     connection.execute(
         "UPDATE projects SET status=CASE WHEN external_project_id=?2 THEN 'started' ELSE 'completed' END WHERE wave_id=?1",
@@ -397,6 +404,11 @@ fn seed_previous_release_task_pr(home: &Path) {
     assert_eq!(frontier, "0.12.8.001_release");
     migrations::apply_sqlite(&connection)
         .expect("apply published migrations to historical fixture");
+    for draft in loopflow::build_info::migration_draft_manifest() {
+        connection
+            .execute_batch(draft.sql)
+            .expect("apply finished draft to historical fixture");
+    }
     drop(connection);
 
     let store = SqliteStore::new(&database).expect("open migrated previous release store");
@@ -444,6 +456,7 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
             "name": project.plan.name,
             "flow": "feature",
             "status": "started",
+            "current": true,
             "metric_targets": [],
             "krs": [{"text": "Current state and history stay distinct", "holds": false}]
         }],

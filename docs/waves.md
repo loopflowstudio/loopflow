@@ -103,11 +103,14 @@ lf repo new-chapter 2026-10 --dry-run
 lf repo new-chapter 2026-10
 ```
 
-A Wave's one In Progress Linear Project holds its current Tasks, KRs, metric
-targets and optional default Flow. Projects created together share a chapter name,
-such as `2026-10`. The chapter is that group of Projects; there is no chapter table,
-plan packet or local switch. Current navigation stays Wave → Task. Completed
-Projects retain previous plans and Tasks in Linear.
+The shared Wave binding selects its current Project by UUID. Status and roadmap
+retain other Projects and their Tasks, including unresolved predecessor backlog.
+JSON marks the selected Project with `current`; another In Progress Project does
+not change that selection. Reading never creates a binding or activates a Project.
+
+Projects hold Tasks, KRs, metric targets and an optional default Flow. Projects
+created together share a chapter name, such as `2026-10`; there is no chapter table.
+Current navigation stays Wave → Task. Completed Projects retain their history.
 
 Create a Planned Project in Linear to prepare the next plan. Rotation reuses the
 Planned Project with the requested name in each Wave, or creates an empty one

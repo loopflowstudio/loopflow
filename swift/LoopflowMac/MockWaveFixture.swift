@@ -295,7 +295,7 @@ enum MockWaveFixture {
                 "slug": "release-feedback",
                 "name": "current",
                 "flow": "incident",
-                "status": "started",
+                "status": "started", "current": true,
                 "metric_targets": [],
                 "krs": [
                   {

@@ -385,6 +385,7 @@ pub struct WaveRoadmap {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectSummary {
+    pub current: bool,
     pub id: String,
     pub work_id: Option<String>,
     pub slug: String,
@@ -401,12 +402,14 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
             .pm_snapshot(wave.id())
             .await?
             .ok_or_else(|| anyhow!("Project planning has not been synced"))?;
+        let current = crate::ops::project::select_project(store, wave, &row.snapshot.projects)?;
         let registered = store.list_projects(Some(wave.id())).await?;
         let projects = row
             .snapshot
             .projects
             .into_iter()
             .map(|project| ProjectSummary {
+                current: project.id == current.id,
                 work_id: registered
                     .iter()
                     .find(|work| work.plan.id.as_str() == project.id)
@@ -430,10 +433,7 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
     match projects {
         Evidence::Unavailable { reason } => println!("  projects unavailable: {reason}"),
         Evidence::Ok { items, .. } => {
-            for project in items
-                .iter()
-                .filter(|project| project.status == crate::pm::ProjectStatus::Started)
-            {
+            for project in items.iter().filter(|project| project.current) {
                 println!(
                     "  project   {} ({}) · flow {}",
                     project.name, project.id, project.flow
@@ -693,15 +693,11 @@ async fn wave_tasks(
 ) -> Result<WaveTasks> {
     let projects = store.list_projects(Some(wave.id())).await?;
     let mut tasks = store.list_tasks(Some(wave.id())).await?;
-    let planning_read = if identifier.is_some() {
-        store
-            .pm_snapshot(wave.id())
-            .await
-            .map(|row| row.map(|row| row.snapshot))
-            .map_err(anyhow::Error::from)
-    } else {
-        read_pm_planning(store, wave).await
-    };
+    // Selection does not discard other Projects' backlog or ongoing work.
+    let planning_read = store
+        .pm_snapshot(wave.id())
+        .await
+        .map(|row| row.map(|row| row.snapshot));
     let (mut planning, unavailable) = match planning_read {
         Ok(Some(planning)) => (planning, None),
         result => (
@@ -712,7 +708,7 @@ async fn wave_tasks(
             Some(match result {
                 Err(error) => error.to_string(),
                 _ => format!(
-                    "no local chapter plan; run `lf repo refresh {}`",
+                    "no local Project plan; run `lf repo refresh {}`",
                     wave.slug()
                 ),
             }),
@@ -884,27 +880,6 @@ fn snapshot_task_runtime(
         provider,
         started,
     }
-}
-
-/// The wave's local PM snapshot, or `None` when none has been synced. `None` is
-/// a real, readable state ("no plan on this machine yet") — a caller that must
-/// tell it apart from "the plan is empty" keeps the `Option`; `lf wave status`
-/// and `lf roadmap` both render it as unavailable.
-async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmSnapshot>> {
-    let Some(row) = store
-        .pm_snapshot(wave.id())
-        .await
-        .map_err(|err| anyhow!("failed to read PM snapshot: {err}"))?
-    else {
-        return Ok(None);
-    };
-    let mut planning = row.snapshot;
-    let current = crate::ops::chapter::select_current(wave.slug(), &planning.projects)?;
-    planning.projects.retain(|project| project.id == current.id);
-    planning
-        .items
-        .retain(|item| item.project_id.as_deref() == Some(current.id.as_str()));
-    Ok(Some(planning))
 }
 
 async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()> {
@@ -2455,15 +2430,23 @@ mod tests {
         store.put_pm_snapshot(crate::store::PmSnapshotRow {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative".into(), synced_at: 2,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
-                "id":"first", "slug":"first", "name":"First chapter", "summary":"",
+                "id":"999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "slug":"first", "name":"First chapter", "summary":"",
                 "metric_targets":[], "flow":"feature", "status":"started", "krs":[{"text":"Edited proof", "holds":false}],
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]})).unwrap(),
         }, None).await.unwrap();
+        crate::work::wave::project_binding::write_project_binding(
+            directory.path(),
+            wave.id(),
+            None,
+            "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3",
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
         let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
             panic!("Project plan unavailable");
         };
-        assert_eq!(items[0].id, "first");
+        assert!(items[0].current);
         assert_eq!(items[0].krs[0].text, "Edited proof");
         assert_eq!(items[0].status, crate::pm::ProjectStatus::Started);
         let mut unreadable = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
@@ -2491,6 +2474,138 @@ mod tests {
             &missing.contract_issues[..],
             [crate::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
         ));
+    }
+
+    #[tokio::test]
+    async fn configured_project_selection_retains_predecessor_backlog() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                directory.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "product".into(),
+            directory.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let selected = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
+        let predecessor = "218967b6-a760-4b7c-9a46-11d9d61a42c2";
+        let project = |id: &str, name: &str| crate::pm::PmProject {
+            id: id.into(),
+            name: name.into(),
+            slug: name.into(),
+            summary: String::new(),
+            revision: None,
+            flow: String::new(),
+            status: crate::pm::ProjectStatus::Started,
+            metric_targets: Vec::new(),
+            krs: Vec::new(),
+            initiative_ids: vec!["initiative".into()],
+            team_ids: vec!["team".into()],
+        };
+        let item = crate::pm::PmItem {
+            id: "issue".into(),
+            identifier: "FIX-1".into(),
+            name: "Unreviewed backlog".into(),
+            description: String::new(),
+            rank: 0,
+            completed: false,
+            completed_at: None,
+            state: Some("unstarted".into()),
+            project_id: Some(predecessor.into()),
+            project: Some("Old ordinary plan".into()),
+            team_id: "team".into(),
+            assignee: None,
+            branch_name: None,
+            revision: None,
+            url: None,
+        };
+        store
+            .put_pm_snapshot(
+                crate::store::PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".into(),
+                    initiative: "initiative".into(),
+                    synced_at: 2,
+                    snapshot: crate::pm::PmSnapshot {
+                        projects: vec![
+                            project(predecessor, "Old ordinary plan"),
+                            project(selected, "Summer work — customer requests"),
+                        ],
+                        items: vec![item.clone()],
+                    },
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(crate::ops::project::current_project(&store, &wave)
+            .await
+            .is_err());
+        assert!(!directory.path().join("waves").exists());
+        let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
+        crate::work::wave::project_binding::write_project_binding(
+            directory.path(),
+            wave.id(),
+            None,
+            selected,
+            &guard,
+        )
+        .unwrap();
+        let before = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+        for _ in 0..2 {
+            let current = crate::ops::project::current_project(&store, &wave)
+                .await
+                .unwrap();
+            assert_eq!(current.id, selected);
+            assert!(current.flow.is_empty());
+            let super::Evidence::Ok {
+                items: projects, ..
+            } = super::project_planning(&store, &wave).await
+            else {
+                panic!("planning unavailable")
+            };
+            assert_eq!(projects.len(), 2);
+            assert_eq!(
+                projects
+                    .iter()
+                    .filter(|p| p.current)
+                    .map(|p| p.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec![selected]
+            );
+            let tasks = super::wave_tasks(&store, &wave, false, None).await.unwrap();
+            let super::Evidence::Ok { items, .. } = tasks.tasks else {
+                panic!("Task evidence unavailable")
+            };
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].task.id, item.id);
+            assert_eq!(super::roadmap_task(items[0].clone()).task.id, item.id);
+            assert!(tasks.unavailable_tasks.is_empty());
+        }
+        let after = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
+        assert_eq!(before.snapshot, after.snapshot);
+        assert_eq!(before.synced_at, after.synced_at);
+        // A different configured UUID never falls back to one of the Started Projects.
+        crate::work::wave::project_binding::write_project_binding(
+            directory.path(),
+            wave.id(),
+            Some(selected),
+            "5a3aaee8-a95a-4726-9578-22a4700270ac",
+            &guard,
+        )
+        .unwrap();
+        assert!(crate::ops::project::current_project(&store, &wave)
+            .await
+            .is_err());
+        let retained = super::wave_tasks(&store, &wave, false, None).await.unwrap();
+        assert!(
+            matches!(retained.tasks, super::Evidence::Ok { items, .. } if items.len() == 1 && items[0].task.id == item.id)
+        );
     }
 
     #[test]

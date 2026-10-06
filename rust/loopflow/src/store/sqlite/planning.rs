@@ -335,15 +335,17 @@ impl SqliteStore {
         let mut query = tx.prepare(
             "SELECT p.body FROM pm_wave_projects m JOIN pm_projects p ON p.id=m.project_id
              WHERE m.wave_id=?1 AND p.repo=?2 AND p.provider=?3 AND p.archived=0 AND p.membership_unresolved=0
-             AND EXISTS(SELECT 1 FROM json_each(p.body,'$.initiative_ids') WHERE value=?4)
              ORDER BY m.position,p.id",
         )?;
-        let projects = query
-            .query_map(params![wave_id, repo, provider, initiative], |row| {
+        // Decode before membership filtering: malformed retained bodies are unavailable
+        // evidence, not an empty plan.
+        let mut projects = query
+            .query_map(params![wave_id, repo, provider], |row| {
                 row.get::<_, String>(0)
             })?
             .map(|row| Ok(serde_json::from_str::<PmProject>(&row?)?))
             .collect::<StoreResult<Vec<_>>>()?;
+        projects.retain(|project| project.initiative_ids.contains(&initiative));
         let mut query = tx.prepare(
             "SELECT i.body,json_extract(p.body,'$.slug') FROM pm_items i JOIN pm_wave_projects m ON m.project_id=i.project_id
              JOIN pm_projects p ON p.id=i.project_id AND p.repo=i.repo AND p.provider=i.provider

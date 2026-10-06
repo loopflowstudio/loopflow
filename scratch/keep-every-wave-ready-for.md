@@ -65,10 +65,13 @@ Project ingestion now returns its committed body; a delayed Backlog response can
 bind a newer completed Project. File reads create no directories. Leading-comment
 preservation requires editing the YAML file rather than only its document.
 
-Ordinary readers/admission and rotation still use the old selectors. This is a
-local bootstrap slice, not a completed selection cut or shippable readiness.
-Exact-ID ensure, transition recovery and Desktop remain unfinished; Intelligence
-has not been bound or activated on the installed Home.
+Operation routing, metrics and Project editing now select the shared ID through
+`project::current_project`/`select_project`. Status/roadmap retain all Project/Task
+planning; Rust/Swift summaries carry required `current` selection rather than
+Desktop inferring it from Started status. Retained Task navigation uses the latest
+Wave even during a selection switch. SQLite admission and rotation still use the
+old selectors. Ensure, transitions and Desktop activation remain unfinished;
+Intelligence has not been bound or activated on the installed Home.
 
 ## Intelligence repair — Jack Heart's October 5 steer
 
@@ -161,22 +164,25 @@ separate. Detailed registration, rotation and admission evidence remains at
 `7e7204ddad0092beb1a633676f5d44af0853a9a8:scratch/keep-every-wave-ready-for.md`.
 These proofs establish neither configuration-switch recovery nor readiness.
 
-The branch is not releasable. Binding setup exists; steps 3–7 still own selection,
-ensure, transition recovery, KR-first rotation, Desktop and configured acceptance.
-October 5 source inventory confirms three remaining selection boundaries:
+The branch is not releasable. Steps 3–7 still own SQLite admission, ensure,
+transition recovery, KR-first rotation, Desktop activation and configured acceptance.
+The remaining selectors are `sqlite/children.rs::insert_initial_task`,
+`durable::require_current_task_chapter` (both status/count checks), and rotation's
+`chapter::select_current`/name inference. Replace them with shared binding and
+exact transitions under the existing admission boundary.
 
-- `chapter::current_project`/`select_current` feed Task routing, PM edits and metrics;
-  rotation also infers predecessor/successor from names.
-- `sqlite/children.rs::insert_initial_task` and
-  `durable::require_current_task_chapter` independently require one Started Project.
-  Replace both under the existing planning/admission boundary.
-- `waves.rs::read_pm_planning` filters out all other Projects and their Tasks;
-  `print_projects` independently filters by Started. Configured selection must
-  retain unresolved predecessor work in status/roadmap, not merely substitute
-  the selected UUID in those filters. Update DTO consumers and fixtures together.
-
-No further cached-name or selection policy decision is needed. The migration draft
-contains only name-cutover evidence; transition persistence and ensure do not exist.
+October 5 reader regression proves exact selection with two Started Projects,
+empty Flow, predecessor backlog in status/roadmap, unchanged observation ages
+across repeat reads, and refusal to fall back after an unknown configured ID.
+Swift DTO proof rejects a missing `current` field. The Desktop navigation fixture
+now models an explicit switch with both provider Projects still Started; its
+retained Task uses the latest Wave context independently of selection availability.
+Existing admission/rotation fixtures still need explicit bindings with the cut.
+The CLI regression failed on a malformed Project body: SQL filtered it before
+decoding, inventing an empty plan. Snapshot reads now decode before ownership
+filtering. All 13 status tests pass after that repair and materializing the existing
+finished draft in the historical-schema fixture. The duplicate filtered reader is
+deleted; exact-Task and whole-Wave inspection share the snapshot read.
 
 ### Accepted planning must own durable projection — October 5
 
@@ -280,7 +286,7 @@ transition receipt must replace the selector before the creation proof can pass.
 Writer deletion can precede that replacement, but it is not an independently ready
 rotation cut. Finish the remaining membership work;
 then implement binding, receipt and rotation together before judging recovery.
-No new product decision or reduction of acceptance is implied. The new regression
+The new regression
 remains failing under the old selector; the original reteam regressions now pass.
 The two-Wave backlog proof also failed on `A — previous, B — previous`. Its focused
 fixture now uses matching predecessor names to isolate preservation; differing-name
@@ -288,8 +294,8 @@ rotation remains unproved and requires the planned selector replacement.
 
 The rejected global fence’s 31-test pass does not apply to this tree. The
 preservation reader and its operation proof are described below. Inspection Execs
-and unexecuted Flows do not count as started work. Shared binding, ensure, KR-first
-rotation, Desktop and installed Intelligence repair remain unfinished.
+and unexecuted Flows do not count as started work. Shared admission, ensure, KR-first
+rotation, Desktop activation and installed Intelligence repair remain unfinished.
 
 ### Preservation boundary — October 5
 
@@ -464,11 +470,9 @@ transport, outside model construction, cache restoration and both periodic read
 owners. Preserve the existing saved-plan presentation and independent Session
 refresh while ensure runs. Headless Desktop acceptance must include reopening
 from saved state with failed or delayed ensure, and switching Waves before that
-response returns. Merge `f6a6c8f3f` also integrated #1454 (`c41895363`): benchmarks
-now distinguish first launch at a fresh bundle path from reopening. It changes
-no activation code. Its ad-hoc-signed, warm-cache, loaded-host measurements prove
-neither the published installation path nor Project readiness. Keep first-frame
-timing separate from ensure completion; no new launch benchmark is required here.
+response returns. #1454's benchmark integration changes no activation. First-frame timing stays
+separate from ensure completion; no new launch benchmark is required. Earlier
+measurement limits remain at `1e5086aa3:scratch/keep-every-wave-ready-for.md`.
 
 ## Chosen operation and authoritative state
 
@@ -489,9 +493,7 @@ other configuration keys and authored bytes when updating this field.
 `lf wave ensure <wave> --json` is the explicit activation operation shared by
 Desktop and agents. It takes no candidate-selection argument. To use an existing
 Project, configure its exact ID. Reads never write configuration or provision
-Projects. No matching by name, ranking by status, or candidate discovery belongs
-in this API.
-
+Projects. 
 1. Acquire the per-Wave planning lock shared with plan editing and reset. Resolve
    the configured Project, repository/Team/Initiative and pending transition.
    Do not contact unrelated Waves or launch a Session.
@@ -699,9 +701,9 @@ cases below own requirements; this list identifies each next cut:
    operation regressions cover newer accepted facts, stale-owner refusal, both
    start/rotation orderings and failed-reset retry. Final before/after-configuration-
    switch proofs and created-successor recovery depend on steps 3–5.
-3. Shared Wave-ID configuration and explicit binding setup exist locally. Replace
-   every current-Project selector, including Task routing and
-   CLI/status/DTO consumers. Preserve the designated Intelligence Project.
+3. Shared binding, operation routing and Rust/Swift reader selection exist locally.
+   Replace the two SQLite admission selectors; migrate affected fixtures to explicit
+   bindings. Preserve the designated Intelligence Project.
 4. Add transition persistence and ensure, exercising concurrency and uncertain
    responses through operations with a stateful fake provider. Test this Task's
    single migration draft from the released frontier.
@@ -723,11 +725,13 @@ cases below own requirements; this list identifies each next cut:
 ## Delete — do not maintain
 
 Apply the remaining cuts with their replacement consumers under the selected
-shared local configuration owner. The empty-Flow and name cuts are implemented locally; shared selection and
-rotation remain. Keep this one delivery boundary.
+shared local configuration owner. Empty-Flow, names and reader selection are implemented
+locally; SQLite admission and rotation remain. Keep this one delivery boundary.
 
-- `ops/chapter.rs::select_current`: replace status selection with the shared
-  configured-ID reader. `sync_projects` and `record_project` are deleted.
+- `ops/chapter.rs::select_current`: remaining rotation-only status selection awaits
+  exact transitions. Ordinary selection moved to `ops/project.rs`; status Task
+  filtering and Desktop status inference are deleted. `sync_projects` and
+  `record_project` are deleted.
 - `plan_rotation`'s `predecessor_names` and target-name lookup, plus `successor_id`:
   replace inferred predecessors and name-derived UUIDs with exact recorded IDs.
 - Deleted: `canonical_project_name`, Task-resolution projection, sync/reteam
@@ -868,7 +872,7 @@ CI repair retains outer admission without reacquiring it in reservation.
 The recorded nextest pass also reports a leaky projectless-Task case. Its cause
 is unknown; gate retains output-handle investigation, not an assumed harmless leak.
 Cached-name conversion and shared selection must land together. The approved
-historical name-only exception is implemented; the old selector remains to replace.
+historical name-only exception is implemented; SQLite and rotation selectors remain.
 
 Reserve identity before provider effects so a timeout cannot create another UUID.
 Use status-only writes and byte-preservation tests to protect authored content.
@@ -876,27 +880,22 @@ Review rejected bootstrap chapters, creation during status reads and name-derive
 permanent Project IDs. Keep recovery receipts confined to mutation recovery;
 provider status/content and configured selection retain their respective owners.
 
-#1451's pending-version behavior retains the name-cutover fixture's same-batch
-boundary; no release-tree gate ran here. Merge `596572efc` also includes the
-v0.13.4 version preparation at `99aa64dbd`; this is source integration, not
-publication or installation evidence. Release's child memory retains manual
-v0.13.3 verification and unresolved unattended settlements. Its operation-entry
-recovery lesson still applies to ensure and rotation: helper/store proofs do not
-establish recovery across the configuration switch.
+Release integration detail remains at `1e5086aa3:scratch/keep-every-wave-ready-for.md`.
+#1451 preserves the name-cutover fixture's same-batch boundary; source v0.13.4
+preparation is not publication. Release's child memory still records manual
+v0.13.3 verification, unresolved unattended settlements and the operation-entry
+recovery obligation for ensure/rotation.
 
 Checkout admission shares canonical path order, ancestor sharing and guard lifetime
 through queued commits across registration, Sessions, Flows and CI repair. Earlier
 compression detail remains at `25542c7b1:scratch/keep-every-wave-ready-for.md`.
 
-Compression retains the accepted Project returned by Initiative validation through
-association and commit, removing a second SQL read/decode for binding. Projection
-does not mutate that accepted body. The binding error has one structure. Replacing
-the initial YAML template with `{}` failed two binding tests: nested mapping edits
-produced invalid YAML. The original template is retained. Review preserved ownership
-checks, authored bytes and stale-binding refusal. Shared selection remains unfinished.
+Binding compression evidence remains at `1e5086aa3:scratch/keep-every-wave-ready-for.md`.
+Keep committed ownership, authored YAML bytes and stale-binding refusal; the empty
+mapping template failed two tests and was rejected.
 
 Reteam's retained compression and earlier check evidence remain at
 `3555375af:scratch/keep-every-wave-ready-for.md`; its full preflight, exact readbacks
 and cancellation-safe acceptance remain required.
 
-Checks: prior `cargo test -p loopflow --lib project_binding --jobs 4` (5 passed), all-target Clippy and formatting reused; `git diff --check` passed; context budgets checked with `lf context --skill realign`; gate retains affected suites, CI repair and configured acceptance.
+Checks: `cargo test -p loopflow --lib configured_project_selection` 1, `--test dto_fixtures` 18, `--test status_tests` 13 passed; headless Desktop DTO 22/Podium 20 passed; fmt/Clippy passed. Gate retains admission/rotation, CI repair and configured acceptance.

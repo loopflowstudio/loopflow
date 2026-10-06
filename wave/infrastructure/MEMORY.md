@@ -776,7 +776,7 @@ must honor Team identity and resolve Task links from the Wave repository.
 
 October 6 retained twenty warm Task-opening samples, but the hour soak failed
 on disk exhaustion after seven rounds. The 78.6 GiB historical trace has timestamp
-attribution only and stays intact. Benchmark guidance retains bounded-recording and failed probe receipts.
+attribution only and stays intact. Benchmark guidance retains recorder receipts.
 
 Contained replay passed endpoints but failed RSS (+52.6/+54.5 MiB). Allocation
 maps support capture pressure, not a proven production leak or oversized atlas.

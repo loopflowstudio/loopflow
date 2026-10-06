@@ -730,14 +730,14 @@ extension DesktopPerformanceTests {
                 }
                 return try result.get()
             }
-            let router = WorkspaceLinkRouter()
-            let view = PodiumView(portfolioService: PortfolioService(), initialRepoPath: repo,
+            let router = WorkLinkRouter()
+            let view = RepoView(portfolioService: PortfolioService(), initialRepoPath: repo,
                                   query: query, taskLinks: router)
             let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 800),
                                            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             defer { window.contentView = nil; window.close() }
-            var model: PodiumModel?
+            var model: WorkModel?
             for scenario in scenarios {
                 let start = DispatchTime.now().uptimeNanoseconds
                 var record: [String: Any] = ["event": "begin", "id": "snapshot-\(scenario)-\(attempt)",

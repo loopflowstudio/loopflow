@@ -733,6 +733,7 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         };
         let mut environment = built.agent_config.env.clone();
         environment.extend(capture.environment());
+        capture.begin_provider_spawn()?;
         let result = exec_session_with_env(
             target,
             &built.harness,
@@ -772,9 +773,7 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         "checked cli availability"
     );
 
-    let mut agent_config = built.agent_config.clone();
-    crate::engine::agent::pin_provider_account_id_blocking(&mut agent_config)
-        .map_err(anyhow::Error::from)?;
+    let agent_config = built.agent_config.clone();
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
     let capture = begin_capture(built, "headless", &agent_config)?;

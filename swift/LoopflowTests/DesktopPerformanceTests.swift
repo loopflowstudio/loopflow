@@ -40,6 +40,7 @@ struct DesktopPerformanceTests {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
         NSApp.finishLaunching()
+        NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
         guard NSScreen.main != nil else {
             try journal.write(["event": "setup", "outcome": "unavailable", "reason": "No native screen"])
             throw PerformanceFailure("unavailable", "No native screen")
@@ -84,6 +85,7 @@ struct DesktopPerformanceTests {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
         NSApp.finishLaunching()
+        NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
         try #require(NSScreen.main != nil)
         GhosttyManager.shared.initialize()
         try #require(GhosttyManager.shared.state == .ready)
@@ -266,6 +268,11 @@ struct DesktopPerformanceTests {
             navigator.onOpenSession(other)
             try await wait(window) { window.firstResponder === terminals[2] && multiplexer.focusedPaneId == otherPane }
             openTask(.task(id: "perf-task-0"))
+            // These Tasks share a checkout, so Task navigation retains that
+            // workspace's selected pane. Select the first Session explicitly
+            // before measuring its Monitor; neither pane nor draft is replaced.
+            try await wait(window) { window.firstResponder === terminals[2] }
+            navigator.onOpenSession(first)
             try await wait(window) { window.firstResponder === terminals[0] }
             let monitorButton = try view.inspect().find(ViewType.Button.self, where: {
                 try $0.accessibilityIdentifier() == "task-show-monitor-perf-task-0"
@@ -324,6 +331,11 @@ struct DesktopPerformanceTests {
                 try pressElement("breadcrumb-task", in: window)
             }, ready: { window.attachedSheet != nil && window.allText.contains { $0.contains("Task 000") } })
             try await sample("task_flow", population, attempt, journal, window, action: {
+                try pressElement("Detailed Flow", in: window, property: "Label")
+                try await wait(window) {
+                    guard let content = window.attachedSheet?.contentView else { return false }
+                    return accessible(content).contains { accessibility($0, "Identifier") as? String == "flow-node-2" }
+                }
                 try pressElement("flow-node-2", in: window)
             }, ready: {
                 model.navigation.flowDrafts[selected.task.id]?.selectedNode?.node == 2
@@ -332,7 +344,11 @@ struct DesktopPerformanceTests {
             model.navigation.expandedHistory.remove(selected.task.id)
             try await sample("task_history", population, attempt, journal, window, action: {
                 try pressElement("task-history-toggle", in: window)
-                try await wait(window) { model.sessionHistory[selected.task.id].value?.count == taskCount }
+                try await wait(window) {
+                    guard model.sessionHistory[selected.task.id].value?.count == taskCount,
+                          let content = window.attachedSheet?.contentView else { return false }
+                    return accessible(content).contains { accessibility($0, "Identifier") as? String == "task-history-list" }
+                }
                 try revealElement("task-history-list", in: window)
             }, ready: {
                 model.navigation.expandedHistory.contains(selected.task.id)
@@ -616,13 +632,15 @@ struct DesktopPerformanceTests {
             if ready() { return }
             try await Task.sleep(for: .milliseconds(5))
         } while ContinuousClock.now < deadline
+        do { try window.saveFailureCapture() }
+        catch { print("Failure capture unavailable: \(error)") }
         throw PerformanceFailure("timeout", "Captured native content/input endpoint not reached in 5 seconds; outline: \(window.outlineText); content: \(window.contentText)")
     }
 
     private func hasRendered(_ window: PerformanceWindow, _ id: String) -> Bool {
         // Identities are asserted against the shared model/pane owners; these
         // unique fixture labels independently prove the pixels changed too.
-        if id == "workspace-wave-wave-1" { return window.outlineText.contains { $0.contains("product") } }
+        if id == "workspace-wave-wave-1" { return window.outlineText.contains { $0.localizedCaseInsensitiveContains("product") } }
         if let index = Int(id.replacingOccurrences(of: "workspace-task-perf-task-", with: "")) {
             return window.outlineText.contains { $0.contains(String(format: "Task %03d", index)) }
         }
@@ -664,7 +682,12 @@ struct DesktopPerformanceTests {
     private func revealElement(_ value: String, in window: NSWindow, property: String = "Identifier") throws -> NSObject {
         let target = window.attachedSheet ?? window
         let content = try #require(target.contentView)
-        let element = try #require(accessible(content).first { accessibility($0, property) as? String == value })
+        let candidates = accessible(content)
+        guard let element = candidates.first(where: { accessibility($0, property) as? String == value }) else {
+            try? (window as? PerformanceWindow)?.saveFailureCapture()
+            let identifiers = Set(candidates.compactMap { accessibility($0, "Identifier") as? String }).sorted()
+            throw PerformanceFailure("failed", "Native control \(property)=\(value) not found; available identifiers: \(identifiers)")
+        }
         if let frame = accessibility(element, "Frame") as? NSValue,
            let scroll = scrollView(in: content), let document = scroll.documentView {
             let rect = document.convert(target.convertFromScreen(frame.rectValue), from: nil)
@@ -855,7 +878,12 @@ private final class PerformanceWindow: NSWindow {
     var observedAt: UInt64 = 0
     var allText: [String] { outlineText + contentText }
 
-    func capture() throws {
+    func saveFailureCapture() throws {
+        guard let output = ProcessInfo.processInfo.environment["LF_DESKTOP_PERF_OUTPUT"] else { return }
+        try capture(saveTo: URL(fileURLWithPath: output).deletingLastPathComponent().appendingPathComponent("failed-capture.png"))
+    }
+
+    func capture(saveTo output: URL? = nil) throws {
         guard let host = attachedSheet?.contentView ?? contentView,
               let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
             throw PerformanceFailure("unavailable", "Native capture is unavailable")
@@ -865,12 +893,20 @@ private final class PerformanceWindow: NSWindow {
             throw PerformanceFailure("unavailable", "Native bitmap has no image")
         }
         observedAt = DispatchTime.now().uptimeNanoseconds
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .fast
-        request.recognitionLanguages = ["en-US"]
-        request.usesLanguageCorrection = false
-        try VNImageRequestHandler(cgImage: image).perform([request])
-        let rows = request.results ?? []
+        // Read the same pixels with both recognizers: fast preserves the serif
+        // title's zeros; accurate resolves small monospaced Session IDs.
+        var rows: [VNRecognizedTextObservation] = []
+        for level: VNRequestTextRecognitionLevel in [.fast, .accurate] {
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = level
+            request.recognitionLanguages = ["en-US"]
+            request.usesLanguageCorrection = false
+            try VNImageRequestHandler(cgImage: image).perform([request])
+            rows += request.results ?? []
+        }
+        if let output, let png = bitmap.representation(using: .png, properties: [:]) {
+            try png.write(to: output)
+        }
         let outlineWidth = 300 / host.bounds.width
         outlineText = rows.filter { $0.boundingBox.midX < outlineWidth }.compactMap { $0.topCandidates(1).first?.string }
         contentText = rows.filter { $0.boundingBox.midX >= outlineWidth }.compactMap { $0.topCandidates(1).first?.string }
@@ -923,6 +959,7 @@ extension DesktopPerformanceTests {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
         NSApp.finishLaunching()
+        NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
         guard NSScreen.main != nil else {
             try journal.write(["event": "setup", "outcome": "unavailable", "reason": "No native screen"])
             throw PerformanceFailure("unavailable", "No native screen")
@@ -943,9 +980,11 @@ extension DesktopPerformanceTests {
                 let start = DispatchTime.now().uptimeNanoseconds
                 let result = await reads.read(binary: binary, home: snapshot, args: args, cwd: cwd ?? repo, fixture: fixture)
                 try await MainActor.run {
-                    try journal.write(["event": "read", "sample": attempt, "args": args,
-                                       "duration_ms": Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000,
-                                       "outcome": result.isSuccess ? "passed" : "unavailable"])
+                    var receipt: [String: Any] = ["event": "read", "sample": attempt, "args": args,
+                        "duration_ms": Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000,
+                        "outcome": result.isSuccess ? "passed" : "unavailable"]
+                    if case .failure(let error) = result { receipt["reason"] = String(describing: error) }
+                    try journal.write(receipt)
                 }
                 return try result.get()
             }
@@ -1096,7 +1135,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     // Copied launch authority is never exercised. This transport permits only local
     // reads; no network, Session connection, watcher, worker or provider can start.
     let verb = args.prefix(2).joined(separator: " ")
-    guard args.first == "roadmap" || ["wave list", "wave status", "session list", "home id", "task files", "task diff"].contains(verb) else {
+    guard ["roadmap", "activity"].contains(args.first ?? "") || ["wave list", "wave status", "session list", "home id", "task files", "task diff"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
     let process = Process()
@@ -1104,7 +1143,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     process.arguments = args
     process.currentDirectoryURL = URL(fileURLWithPath: cwd)
     let git = ProcessInfo.processInfo.environment["LOOPFLOW_TEST_GIT"] ?? "/usr/bin/git"
-    var environment = ["HOME": home, "PATH": URL(fileURLWithPath: git).deletingLastPathComponent().path + ":/usr/bin:/bin", "TMPDIR": home, "RUST_LOG": "off"]
+    var environment = ["HOME": home, "PATH": URL(fileURLWithPath: git).deletingLastPathComponent().path + ":/usr/bin:/bin", "TMPDIR": home, "RUST_LOG": "warn"]
     environment["LF_HOME"] = home
     environment["LF_PERF_OUTPUT"] = ProcessInfo.processInfo.environment["LF_PERF_OUTPUT"]
     environment["GIT_OPTIONAL_LOCKS"] = "0"

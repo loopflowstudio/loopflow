@@ -132,7 +132,7 @@ struct WorkspaceChip: View {
 
     var body: some View {
         Text(text)
-            .font(Typography.caption(10.5).weight(.bold))
+            .font(Typography.strong(10.5))
             .tracking(0.2)
             .foregroundStyle(tone == .neutral ? tone.ink : tone.text)
             .lineLimit(1)
@@ -234,7 +234,7 @@ struct WorkspaceDisclosureHeading: View {
                 ProgressView().controlSize(.mini)
             } else if let hasLastGood = failure {
                 Text(hasLastGood ? "May be out of date" : "Unavailable")
-                    .font(Typography.caption(10.5).weight(.bold))
+                    .font(Typography.strong(10.5))
                     .foregroundStyle(WorkspaceTone.human.text)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 1)

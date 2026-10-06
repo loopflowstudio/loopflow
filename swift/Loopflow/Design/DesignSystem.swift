@@ -65,25 +65,31 @@ public enum Typography {
     /// Everything else.
     public static let text = body(13)
     /// Row titles when selected, Session names.
-    public static let textStrong = body(13).weight(.bold)
+    public static let textStrong = strong(13)
     /// Meta, ranks, IDs.
     public static let meta = caption(11)
     /// Section headings and table heads; callers add `.textCase(.uppercase)`
     /// and `.tracking(0.66)` (0.06em).
-    public static let label = caption(11).weight(.bold)
+    public static let label = strong(11)
     /// Skill names, IDs, chips, terminal chrome.
     public static let mono = code(12)
 
+    // Select bundled faces by name; family/weight matching can choose an
+    // account-installed face that is unavailable inside the app sandbox.
     public static func heroTitle(_ size: CGFloat = 32) -> Font {
-        .custom(serifFamily, size: size).weight(.semibold)
+        .custom("CormorantGaramond-SemiBold", size: size)
     }
 
     public static func sectionTitle(_ size: CGFloat = 20) -> Font {
-        .custom(serifFamily, size: size).weight(.medium)
+        .custom("CormorantGaramond-Medium", size: size)
     }
 
     public static func body(_ size: CGFloat = 14) -> Font {
         .custom(sansFamily, size: size)
+    }
+
+    public static func strong(_ size: CGFloat = 14) -> Font {
+        .custom("Lato-Bold", size: size)
     }
 
     public static func caption(_ size: CGFloat = 12) -> Font {

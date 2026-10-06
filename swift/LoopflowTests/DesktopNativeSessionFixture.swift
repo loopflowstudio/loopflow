@@ -187,6 +187,10 @@ struct DesktopNativeSessionTests {
             args: ["session", "list", "--all", "--history", "--json"], cwd: fixture.repo).get()
         let copiedRecords = try JSONDecoder().decode([SessionRecord].self, from: Data(copied.utf8))
         let copiedRecord = try #require(copiedRecords.first)
+        let activityJSON = try await reads.read(binary: fixture.cli, home: snapshot,
+            args: ["activity", "--since", "7d", "--limit", "50", "--json"], cwd: fixture.repo).get()
+        let activity = try JSONDecoder().decode(WorkActivitySnapshot.self, from: Data(activityJSON.utf8))
+        #expect(activity.items.contains { $0.work == copiedRecord.work })
         await #expect(throws: (any Error).self) { try await query.openSession(id: copiedRecord.id) }
         let model = PodiumModel(query: query, repoPath: fixture.repo)
         await model.refresh()

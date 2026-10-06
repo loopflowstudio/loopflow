@@ -332,7 +332,7 @@ struct TaskFlowView: View {
     private func restartConfirmation(_ replacement: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text("Stop \(pinned?.graph.name ?? "the Flow") and restart with \(replacement)?")
-                .font(Typography.body(13).weight(.bold))
+                .font(Typography.strong(13))
             Text("Loopflow refreshes this Task from Linear, commits and pushes every change in its worktree as a checkpoint, stops the current worker, and starts \(replacement) from its first step. The Task, worktree, and PR history stay.")
                 .font(Typography.body(12))
                 .foregroundStyle(palette.textSecondary)
@@ -909,7 +909,7 @@ struct FlowDiagram: View {
                 shape.strokeBorder(color.opacity(0.30), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
             }
             Text(title)
-                .font(Typography.caption(11).weight(.bold))
+                .font(Typography.strong(11))
                 .foregroundStyle(color)
                 .padding(.horizontal, 10)
                 .padding(.top, 1)

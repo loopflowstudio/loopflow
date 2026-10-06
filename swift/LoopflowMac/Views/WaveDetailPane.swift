@@ -369,7 +369,7 @@ struct WaveMetricPortfolioView: View {
                             countLabel(portfolio.contractIssues.count, singular: "contract issue", plural: "contract issues"),
                             systemImage: "exclamationmark.triangle.fill"
                         )
-                        .font(Typography.caption(11).weight(.bold))
+                        .font(Typography.strong(11))
                         .foregroundStyle(Color.statusWarning)
                         ForEach(Array(portfolio.contractIssues.enumerated()), id: \.offset) { _, issue in
                             Text(issue.summary)
@@ -426,7 +426,7 @@ private struct WaveMetricTableHeader: View {
     private func cell(_ text: String) -> some View {
         Text(text)
             .textCase(.uppercase)
-            .font(Typography.caption(10.5).weight(.bold))
+            .font(Typography.strong(10.5))
             .tracking(0.6)
             .foregroundStyle(palette.textTertiary)
     }
@@ -445,7 +445,7 @@ private struct WaveMetricTableRow: View {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Text(presentation.name)
-                        .font(Typography.body(13).weight(.bold))
+                        .font(Typography.strong(13))
                         .foregroundStyle(palette.text)
                         .lineLimit(1)
                     if candidate {

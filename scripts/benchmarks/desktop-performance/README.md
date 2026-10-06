@@ -306,16 +306,40 @@ child teardown; `/tmp/loo304-lf3-mounted-sample.txt` retains the stack, and
 `/tmp/loo304-local-lf3-mounted-20261006/` retains the failed run. Exact owned cat
 children were stopped to release that attempt; no successful outcome is claimed.
 
-The catalogue now calls production font registration before rendering; without
-it, custom-font labels were unreadable. `/tmp/loo304-lf3-font-replay-20261006/`
-retains readable Task rows but a timeout on the first compact-to-full outline
-interaction. It supplies no successful scored samples. The next check must
-separate the Picker's model update from mounted outline invalidation/capture.
-`/tmp/loo304-lf3-snapshot-probe-20261006/` retains the existing October 5 realistic
-snapshot probe: all three Task-link scenarios timed out, Task/roadmap reads were
-unavailable, and the combined journey did not reach native reopening. Diagnose
-the copied registry read failure before scoring it; denied/unavailable work is
-not speedup. No live Home was opened to replace the preserved snapshot.
+Production registration alone did not repair every font. The retained bitmap in
+`/tmp/loo304-outline-pixels-20261006/` shows a mounted Wave row with missing-glyph
+boxes. Typography now selects bundled bold/serif PostScript faces explicitly;
+`strong(size)` owns the bundled Lato bold face. CoreText trait probes also found
+account-library font candidates outside containment; that access remains denied.
+The toolbar now contains its accessibility children rather than replacing their
+identifiers. The harness enables in-process accessibility, explicitly opens
+Detailed Flow, and waits for the loaded history list to mount before revealing it.
+Shared-checkout setup retains the selected pane and explicitly reselects its
+starting Session. These changes preserve every measured endpoint and population.
+
+`/tmp/loo304-journey-history-painted-20261006/` passes all 34 catalogue scenarios
+once (8 Tasks/4 Sessions and 256 Tasks/128 Sessions), with native presses, retained
+PTY replies and draft/selection/pane checks. This is a journey replay, not p95 or
+soak acceptance. Both OCR recognizers now inspect the same bitmap without custom
+word hints or fuzzy substitutions: fast reads serif zeroes, accurate reads small
+monospaced IDs. Their combined verification overhead must match on both sides;
+older capture timings are not causally comparable. Failure-only PNG capture adds
+no retained bitmap to successful measurements. Missing native controls list
+available identifiers, snapshot CLI warnings remain in `native.log`, and failed
+read receipts retain their reason. The real read adapter also supports the
+workspace's `activity` query; the contained proof verifies copied Work activity.
+
+The realistic October 5 snapshot still cannot open with the candidate CLI.
+The same-policy warning is `development store is incompatible: schema does not
+match this experiment`; a read-only schema comparison with the fresh fixture
+finds only the candidate's `execs_unfinished` index absent. The preserved database
+still matches SHA-256 `2d4ec12d2103f3200d3675ec419f97a6b06b782c697f63f0ab9d80c583901725`.
+No copied/live store was migrated, no index installed, and no schema check bypassed.
+A schema-compatible representative population or an explicitly authorized isolated
+conversion is needed before this source candidate can enter matched acceptance.
+The full same-snapshot replay in `/tmp/loo304-snapshot-schema-replay-20261006/`
+retains all three Task-link timeouts and the schema warnings. The existing
+dependency-publication decision remains with Infrastructure.
 
 A matched realistic pair (21 samples and 3,600 seconds each), all original
 budgets, and complete journey coverage remain required. Neither these focused

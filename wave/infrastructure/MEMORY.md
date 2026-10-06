@@ -773,17 +773,17 @@ failure evidence, not binding policy: current Session rows own attribution and
 write-once bind permits done/landed Tasks. Preserve current ownership through the
 one-machine conversion; discarded historical attribution needs no importer.
 
-LOO-304 retains Jack Heart's budgets and separate observational/owned Homes.
-Local GhosttyKit lf3 adds an opt-out from macOS login(1), preserving
-login-shell argv and standalone defaults. Contained mounted proofs pass shell
-startup, cwd/environment, PTYs, companion return and retained identity; five
-headless checks preserve history and deny external effects. Same-sandbox signals
-permit owned teardown; host signals remain denied. The published dependency is
-still lf2. Jack authorized local preparation, not the separately required R2
-upload or manifest promotion. Full-outline capture and copied-registry reads
-still fail; matched p95/journey/soak remain unproved. Preserve snapshots and
-budgets; denial is not speedup. Proofs and next checks live in the benchmark
-guide. Earlier evidence: `25b3ab40f:wave/infrastructure/MEMORY.md`.
+LOO-304 retains Jack Heart's budgets, snapshots and observational/owned Home
+separation. Local lf3 passes contained launch/history proofs; same-sandbox teardown
+is allowed, host effects denied. Published lf2 remains selected; R2 publication
+and promotion await separate authorization. The ready archive is unchanged.
+October 6 repairs select bundled bold/serif faces and preserve toolbar child IDs;
+all 34 catalogue scenarios pass once. Copied-registry reads fail exact-schema
+validation: only `execs_unfinished` differs. No migration or bypass is authorized.
+Compatible representative data, matched p95 and both hour soaks remain outstanding.
+Shared font/launch/OCR prerequisites change comparability. Failures, including a
+Swift metadata crash, and launch semantics remain in the benchmark guide, plan
+and `86430e589:wave/infrastructure/MEMORY.md`. Denial is not speedup.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

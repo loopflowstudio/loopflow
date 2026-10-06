@@ -23,7 +23,7 @@ struct TaskMonitorView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Monitor")
                         .textCase(.uppercase)
-                        .font(Typography.caption(11).weight(.bold))
+                        .font(Typography.strong(11))
                         .tracking(0.66)
                         .foregroundStyle(Ink.tertiary)
                     Text(model.task(id: taskId)?.task.task.name ?? "Task unavailable")
@@ -124,7 +124,7 @@ struct TaskMonitorView: View {
     private func sessionRow(_ session: ActiveSession) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(session.title)
-                .font(Typography.body(13.5).weight(.bold))
+                .font(Typography.strong(13.5))
                 .foregroundStyle(Ink.text)
             Text(session.id)
                 .font(Typography.code(11))
@@ -133,7 +133,7 @@ struct TaskMonitorView: View {
             ForEach(session.processes, id: \.pid) { process in
                 HStack(spacing: Spacing.sm) {
                     Text(process.state.rawValue)
-                        .font(Typography.caption(10.5).weight(.bold))
+                        .font(Typography.strong(10.5))
                         .foregroundStyle(Color(hex: 0xC9D4E0))
                         .padding(.horizontal, 7)
                         .padding(.vertical, 1)

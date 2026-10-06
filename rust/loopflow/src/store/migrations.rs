@@ -527,7 +527,10 @@ fn backup_before_migration(
     )?;
     let mut destination = rusqlite::Connection::open(&temporary_path)?;
     let backup = rusqlite::backup::Backup::new(&source, &mut destination)?;
-    if let Err(error) = backup.run_to_completion(64, Duration::from_millis(10), None) {
+    eprintln!("Backing up {} before migration...", path.display());
+    // The migration transaction already excludes writers. Sleeping between
+    // tiny batches only prolongs that exclusion on large retained stores.
+    if let Err(error) = backup.run_to_completion(4096, Duration::ZERO, None) {
         drop(backup);
         drop(destination);
         drop(source);

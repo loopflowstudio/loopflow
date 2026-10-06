@@ -24,8 +24,10 @@ The patch makes the terminal the owner of command blocks:
 Loopflow draws block chrome from that list and holds no selection of its own.
 Provider panes retain their native input behavior.
 
-Publishing is a separately authorized upload of the zip to the `bin` R2 bucket
-(`bin.loopflow.studio`) as `application/zip`, immutable, with R2 credentials
-from Doppler. Download it back and compare its checksum with the build's, then
-update the URL and checksum in `Package.swift`.
+Jack Heart authorized GhosttyKit artifact publication on October 6, 2026,
+including future updates through this workflow; do not request approval again.
+After the patch's relevant build and behavior checks pass, upload the zip to the
+`bin` R2 bucket (`bin.loopflow.studio`) as `application/zip`, immutable, with R2
+credentials from Doppler. Download it back and compare its checksum with the
+build's, then update the URL and checksum in `Package.swift`.
 Use a new artifact version whenever the patch changes.

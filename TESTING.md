@@ -628,6 +628,8 @@ After editing embedded skills, directions, surfaces, or prompt assembly, run
 the Rust golden prompt check even for Markdown-only changes. If the mismatch
 reflects the intended prompt change, regenerate the snapshots, review their
 diff, and rerun the check before gate.
+Terminology-only replacements count as prompt changes; include the golden
+check in their focused verification even when no prompt assembly code changed.
 
 ```bash
 cargo test -p loopflow --test golden_prompt

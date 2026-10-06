@@ -27,7 +27,7 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
   1,270 displayed rows a day. Exempt the types readers skip. Usage moves
   its own revision, which only Wave detail reads, at most every 10 s.
 - An unreadable store must not read empty.
-- On the branch, unshipped: one `lf monitor workspace --watch` per window
+- Merged October 6 (#1452): one `lf monitor workspace --watch` per window
   replaces every timer loop. Reader on a copy of Jack's store: commit to
   frame 0.3 s for a Task, 0.13 s for a Session; a file written in a
   checkout about 2 s. The window was not re-measured.
@@ -91,11 +91,11 @@ driver keeps an append-only FlowExec (name, launched graph, each step's Exec and
 node) for every run, none primary for a Task. The outer record is the Task's
 Workflow (Jack, October 6: "lets just call TaskWorkflow Workflow"; "live
 state"): graph fixed when taken up, position stored, moves appended, `lf task
-move` sets a stage, edges named by what they run. Jack's words: run is the
+move` sets a node, edges named by what they run. Jack's words: run is the
 Workflow API's verb, exec the Flow's record. Built unreviewed in PR #1439,
 with one Task run retrying a failed Flow exec (three attempts, the agent's
-number); node/edge renaming, Project workflows, state from position, the
-Desktop graph and LOO-382 alignment remain. Lesson: the first build derived
+number), Project workflows, state read from position and the graph drawn
+beside a log of every Flow run; LOO-382 alignment remains. Lesson: the first build derived
 position from append-only rows and Jack sent it back; settle the model, store,
 CLI and Desktop contract before building a record.
 Built so: operations run through

@@ -115,9 +115,9 @@ at call sites. For the Workflow:
 - Desktop reads the Workflow and the Flow exec log from the `task` part
   (`TaskWork`), not `lf task status` or `lf flow show` per view; its buttons
   run `lf task run` or the set command, then `refresh`.
-- The two drafts collide: #1452 puts triggers on `flow_sessions`,
-  `flow_events` and `agent_sessions` columns this PR drops. Whichever lands
-  second reconciles in its own draft.
+- #1452 merged first (`c787c7530`, October 6); its triggers on
+  `flow_sessions`, `flow_events` and dropped `agent_sessions` columns are
+  reconciled in this PR's one draft. The rest of this layer is slice 12.
 
 Jack, October 6, on `lf task run` taking the only way out, erroring at a
 stage with several until one is named, erroring on a name that is not a way

@@ -189,27 +189,32 @@ Linear completion against an active Task.
     same kind of row. The log is not the Workflow's move history and is not
     filtered or grouped by it. Open: whether a single headless skill Run
     with no Flow also belongs in that log.
-    Done when the headless Desktop tests render `feature` and a no-PR
-    definition from the shared fixture with the position marked. **Built and
-    compressed, not yet realigned.** `WorkflowGraph` replaces the text row
-    on the Task page, the Wave page, the Flow preview and the catalogue
-    inspector; **Flow runs** sits beside it. A node is `name: skill` or
-    `name: {skill, description}`. Check: `swift test --filter
-    "DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests"` 36 passed
-    (rerun after compress);
-    `cargo test -p loopflow --lib engine::workflow` 3 passed. Choices:
-    [questions.md](questions.md). Demo item: how it looks, in particular
-    label widths, which are estimated from character counts.
+    **Done** — `ade9146a5`, compressed `0d5da8058`. `WorkflowGraph` replaces
+    the text row on the Task page, the Wave page, the Flow preview and the
+    catalogue inspector; **Flow runs** sits beside it. A node is `name: skill`
+    or `name: {skill, description}`. Rerun October 6: `swift test --filter
+    "DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests"` 36 passed,
+    drawing `feature` and no-PR `research` from the shared fixtures with the
+    position marked. Choices: [questions.md](questions.md). Demo item: how it
+    looks, in particular label widths, which are estimated from character
+    counts.
 
 12. **Align Desktop and the store with LOO-382.** Layer 4 of the contract in
-    [task-workflow.md](task-workflow.md). If #1452 has merged, merge main and
-    do all of it: domains and triggers for this PR's tables in the one draft,
-    its store test listing them, Desktop's Workflow and Flow exec log fed by
-    the `task` part, writes followed by `refresh`, and no per-view `lf task
-    status`, `lf flow show` or catalog re-read on activation. If it has not
-    merged, do what does not depend on it (stored state only; Desktop reads
-    confined to one place in `RegistryQuery`) and record the rest as owed to
-    whichever PR lands second. *Not done.*
+    [task-workflow.md](task-workflow.md). #1452 merged October 6 as
+    `c787c7530` and is merged into this branch, so this PR lands second and
+    owns the whole reconciliation. *Not done.* Exists from the sync: the one
+    draft bumps `flows` for `flow_execs` and `flow_exec_steps`, `planning`
+    for `task_workflows` and `task_workflow_moves`, and has triggers on
+    `session_activity`. Remains: confirm `session_activity` bumps `sessions`
+    only when Waiting could change, with quiet-time Waiting on the watch's
+    clock; the store test listing every table this PR adds; Desktop's
+    Workflow and Flow run log fed by the stream's `task` part; each write
+    followed by `refresh`; no per-view `lf task status`, `lf flow show` or
+    catalog re-read on activation (`RegistryQuery` still has `taskStatus`
+    and a `flow show --sessions` read). Done when the store test names the
+    new tables and a headless Desktop test shows a Workflow move and a new
+    Flow run arriving from a stream frame with no `lf task status` or
+    `lf flow show` call.
 
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task

@@ -50,13 +50,15 @@ struct TaskLink: Equatable, Sendable {
 final class WorkLinkRouter {
     private struct Target {
         weak var window: NSWindow?
+        let contains: (URL) -> Bool
         let receive: (URL) -> Void
     }
     private var targets: [UUID: Target] = [:]
     private var pending: URL?
 
-    func register(_ id: UUID, window: NSWindow, receive: @escaping (URL) -> Void) {
-        targets[id] = Target(window: window, receive: receive)
+    func register(_ id: UUID, window: NSWindow, contains: @escaping (URL) -> Bool = { _ in false },
+                  receive: @escaping (URL) -> Void) {
+        targets[id] = Target(window: window, contains: contains, receive: receive)
         if let pending {
             self.pending = nil
             receive(pending)
@@ -70,12 +72,16 @@ final class WorkLinkRouter {
     func deliver(_ url: URL) -> Bool {
         targets = targets.filter { $0.value.window != nil }
         let ordered = NSApp.orderedWindows
-        let target = ordered.lazy.compactMap { window in
-            self.targets.values.first { $0.window === window }
-        }.first ?? targets.values.first
+        let orderedTargets = ordered.compactMap { window in
+            targets.values.first { $0.window === window }
+        }
+        let target = orderedTargets.first { $0.contains(url) }
+            ?? targets.values.first { $0.contains(url) }
+            ?? orderedTargets.first ?? targets.values.first
         guard let target, let window = target.window else {
+            let windowRequested = pending != nil
             pending = url
-            return false
+            return windowRequested
         }
         window.makeKeyAndOrderFront(nil)
         target.receive(url)
@@ -85,20 +91,26 @@ final class WorkLinkRouter {
 
 struct WorkLinkReceiver: NSViewRepresentable {
     let router: WorkLinkRouter
+    let contains: (URL) -> Bool
     let receive: (URL) -> Void
 
     func makeNSView(context: Context) -> Receiver {
-        Receiver(router: router, receive: receive)
+        Receiver(router: router, contains: contains, receive: receive)
     }
-    func updateNSView(_ view: Receiver, context: Context) { view.receive = receive }
+    func updateNSView(_ view: Receiver, context: Context) {
+        view.contains = contains
+        view.receive = receive
+    }
     static func dismantleNSView(_ view: Receiver, coordinator: ()) { view.router.remove(view.id) }
 
     final class Receiver: NSView {
         let id = UUID()
         let router: WorkLinkRouter
+        var contains: (URL) -> Bool
         var receive: (URL) -> Void
-        init(router: WorkLinkRouter, receive: @escaping (URL) -> Void) {
+        init(router: WorkLinkRouter, contains: @escaping (URL) -> Bool, receive: @escaping (URL) -> Void) {
             self.router = router
+            self.contains = contains
             self.receive = receive
             super.init(frame: .zero)
         }
@@ -106,7 +118,9 @@ struct WorkLinkReceiver: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             router.remove(id)
             if let window {
-                router.register(id, window: window) { [weak self] url in self?.receive(url) }
+                router.register(id, window: window, contains: { [weak self] url in self?.contains(url) == true }) {
+                    [weak self] url in self?.receive(url)
+                }
             }
         }
     }

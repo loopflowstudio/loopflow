@@ -1,6 +1,6 @@
 # Reduce Loopflow's disk footprint (LOO-390)
 
-Status: implemented, awaiting gate. Jack Heart authorized autonomous design,
+Status: implemented and gated. Jack Heart authorized autonomous design,
 cleanup, implementation and delivery on 2026-10-06 (steer `ea6171d3`).
 
 Evidence, inventory, 5 Whys, growth model and producer audit are durable in
@@ -38,8 +38,6 @@ validation for pending migrations, and backup reuse by history fingerprint.
 
 ## Remaining
 
-- Gate: affected Rust suites. The two `session_record` tests that open a Home
-  fail under an inherited `LF_HOME`; run with `LF_*` cleared.
 - After a release installs this: observe the WAL shrink, no new `candidate.db`
   after a currency probe, backups pruned at the next migrating release, and the
   per-capture row count. None is observed yet.
@@ -55,4 +53,4 @@ Reconciled 2026-10-06 against `41b86d141` (no newer main): code, review, data
 doc and memory agree; the review's probe path and `MIGRATIONS.md` backup
 retention were corrected.
 
-Check: all `LF_*` unset, `cargo test -p loopflow --lib -- session_record` — 49 passed after compress; clippy `-D warnings` clean. Realign changed prose only, no rerun. Other suites unchanged since the 149-pass run; gate owns them.
+Gate at `9e5066cbc`, all `LF_*` unset: `uv run python scripts/test.py --reuse-passing` — PASS, 4 suites in 538 s (rustfmt, clippy `-D warnings`, nextest 2,334 passed/20 skipped, python 78 passed, architecture, website). Swift/e2e not in the plan; CI owns the matrix.

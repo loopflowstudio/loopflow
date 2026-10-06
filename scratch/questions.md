@@ -5,11 +5,11 @@ Jack Heart concluded review before the October 5 implementation attempt. The
 status and evidence; earlier review notes remain at
 `6dc8536fedce0852bd4931682c7ffb0a871cf17d:scratch/questions.md`.
 
-- Preservation mechanics need no product decision. Cold-detail ownership and
-  projection preservation now have focused proof. Reteam's full readbacks,
-  authorized Team acceptance and shared acquisition locks remain next, followed
-  by membership fencing. Created-successor recovery stays with binding/transition
-  replacement; name-based selection cannot recover preserved provider names.
+- Preservation mechanics need no product decision. Acceptance retains shared
+  acquisition guards through SQLite commit; cold detail re-reads ownership under
+  its guard, and reteam uses full readbacks and authorized Team reconciliation.
+  Registration/population fencing is next. Created-successor recovery stays with
+  binding/transition replacement; name selection cannot recover preserved names.
 - Chapter metadata representation and projection. Cross-Wave historical inspection
   remains proposed; Wave-scoped chapter creation is requested.
 - Skill/Flow composition and the retained Task-candidate format between KR planning,

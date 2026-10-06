@@ -275,17 +275,24 @@ uses a Home-local Wave-ID file; other policy keeps its owner. Earlier review:
 
 October 5 source permits empty Flow and preserves names. Jack Heart's comment
 `5419b87c-bfec-4f42-8914-021483249895` authorizes one historical name-only correction,
-retaining original evidence and strict subsequent conflicts. Atomic ingestion/projection (`ec5501f25`) and accepted-Initiative association
-(`b3d8a6366`) preserve entity ages and reject stale full/partial Wave association.
-Replay and generic planning writers are deleted; restart retains accepted facts.
-Rotation readbacks replace durable-only writes (`661622ee2`). Reteam lacks full readbacks, Team acceptance and acquisition locks. Lock Waves before reads through acceptance; reuse held locks.
+retaining original evidence and strict subsequent conflicts. Atomic ingestion and
+projection retain entity ages; accepted Initiative ownership rejects stale
+full/partial Wave association. Cold detail resolves configured ownership, with
+both durable-identity shortcuts deleted. Shared SQL ownership and focused tests
+preserve foreign/unmapped plans and legitimate same-Wave Task/PR identity.
+Replay/generic writers are deleted; restart retains accepted facts. Rotation now
+accepts confirmed readbacks. Exact source/evidence remains at `d4d77d8e22f4244ad83027ba9c85bb8644a622e6`.
+Reteam now accepts full issue readbacks and exact Team readbacks, preserving
+Initiative ownership and independently newer facts. The identifier-only writers
+are deleted; local recovery passes prove no configured acceptance.
 
-Cold detail overwrote retained plans from foreign-Initiative facts on October 5.
-Both shortcuts are deleted. Detail resolves configured Initiative/Wave ownership;
-association and projection commit together without advancing full-Wave age.
-Store/operation proofs cover same-Wave refresh, foreign/unmapped preservation and
-Task/PR identity. Reteam's full readbacks, authorized Team acceptance and acquisition
-locks remain; locks cannot supply ownership evidence. Installed recovery is unproved.
+October 5: queued SQLite acceptance now retains shared Wave guards through commit
+after caller cancellation. Multi-Wave operations acquire in stable ID order;
+held callers reuse guards. Cold discovery re-reads ownership under the lock.
+Null-detail invalidation retains exclusion and compares the queried revision/age
+so delayed absence cannot invalidate newer facts. Inspection follows UUID across
+identifier changes. Local cancellation/reteam proofs establish no registration/start
+fencing or installed recovery.
 
 Created-successor recovery retains Task/PR/Flow identity, then rejects
 `A — next` and `A — previous` under the old selector. Its proof therefore belongs
@@ -530,15 +537,10 @@ not checked. Current behavior belongs in [subscriptions](../../docs/subscription
   interrupted run remains failed evidence; accidental native credential reads
   or refresh effects were not audited.
 
-Recorded final isolated materialized Rust checks passed 2,192 tests (13 skipped),
-including seven public auth tests; website passed 78 (three skipped). Formatting,
-all-target Clippy, architecture, migration history and fresh-Home JSON checks
-passed. The original gate receipt remains failed after a screenshot timeout;
-separate successful checks do not rewrite it or provide a reusable final-tree
-receipt. This curation reruns no behavioral checks. Synthetic proofs establish
-neither live OAuth nor installed acceptance. State remains Home-local; recorded
-replay cannot recover another Home's custom database path. LOO-340 owns shared
-authority; this curation authorizes no installed-store repair.
+Exact check counts, failed gate and credential caveats remain at
+`d4d77d8e22f4244ad83027ba9c85bb8644a622e6:wave/infrastructure/MEMORY.md`.
+Synthetic passes prove no live OAuth or installed acceptance. State remains
+Home-local; LOO-340 owns shared authority. No installed repair is authorized.
 
 ## Account auth consolidation (LOO-320, curated 2026-10-04)
 

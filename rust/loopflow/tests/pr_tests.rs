@@ -533,7 +533,7 @@ fn task_snapshot_reads_its_current_parent_project() {
     project.revision = Some("2026-10-05T12:00:00Z".into());
     let project_id = project.id.clone();
     runtime
-        .block_on(task.store.put_pm_snapshot(planning))
+        .block_on(task.store.put_pm_snapshot(planning, None))
         .unwrap();
 
     let snapshot = task_snapshot(&task.task).expect("snapshot Task");
@@ -959,7 +959,7 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
     snapshot.snapshot.items[0].url = None;
     snapshot.snapshot.items[0].revision = Some("2026-09-30T00:00:00Z".into());
     runtime
-        .block_on(task.store.put_pm_snapshot(snapshot))
+        .block_on(task.store.put_pm_snapshot(snapshot, None))
         .expect("remove cached Task URL");
 
     let result = create_or_update_pr(

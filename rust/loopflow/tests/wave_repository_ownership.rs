@@ -190,13 +190,16 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         let snapshot: loopflow::pm::PmSnapshot =
             serde_json::from_str(include_str!("../../../tests/fixtures/dto/pm_show.json")).unwrap();
         store
-            .put_pm_snapshot(PmSnapshotRow {
-                wave_id: legacy.id().clone(),
-                provider: "linear".into(),
-                initiative: "initiative-infrastructure".into(),
-                synced_at: 1,
-                snapshot: snapshot.clone(),
-            })
+            .put_pm_snapshot(
+                PmSnapshotRow {
+                    wave_id: legacy.id().clone(),
+                    provider: "linear".into(),
+                    initiative: "initiative-infrastructure".into(),
+                    synced_at: 1,
+                    snapshot: snapshot.clone(),
+                },
+                None,
+            )
             .await
             .unwrap();
         let resolved = store
@@ -344,16 +347,19 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     );
 
     store
-        .put_pm_snapshot(PmSnapshotRow {
-            wave_id: alpha.id().clone(),
-            provider: "linear".to_string(),
-            initiative: "initiative-alpha".to_string(),
-            synced_at: 1,
-            snapshot: loopflow::pm::PmSnapshot {
-                projects: vec![],
-                items: vec![],
+        .put_pm_snapshot(
+            PmSnapshotRow {
+                wave_id: alpha.id().clone(),
+                provider: "linear".to_string(),
+                initiative: "initiative-alpha".to_string(),
+                synced_at: 1,
+                snapshot: loopflow::pm::PmSnapshot {
+                    projects: vec![],
+                    items: vec![],
+                },
             },
-        })
+            None,
+        )
         .await
         .unwrap();
     let project = project(&alpha);
@@ -400,16 +406,19 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let occupied = registered_wave(&repo_a, "occupied");
     store.create_wave(&occupied).await.unwrap();
     store
-        .put_pm_snapshot(PmSnapshotRow {
-            wave_id: occupied.id().clone(),
-            provider: "linear".to_string(),
-            initiative: "initiative-occupied".to_string(),
-            synced_at: 1,
-            snapshot: loopflow::pm::PmSnapshot {
-                projects: vec![],
-                items: vec![],
+        .put_pm_snapshot(
+            PmSnapshotRow {
+                wave_id: occupied.id().clone(),
+                provider: "linear".to_string(),
+                initiative: "initiative-occupied".to_string(),
+                synced_at: 1,
+                snapshot: loopflow::pm::PmSnapshot {
+                    projects: vec![],
+                    items: vec![],
+                },
             },
-        })
+            None,
+        )
         .await
         .unwrap();
     let collision = relocate_wave(&store, alpha.id(), &repo_a, None, Some("occupied"))
@@ -762,16 +771,19 @@ async fn relocation_refuses_meaningful_destination_history() {
     let pm_shadow = registered_wave(&target, "with-pm");
     store.create_wave(&pm_shadow).await.unwrap();
     store
-        .put_pm_snapshot(PmSnapshotRow {
-            wave_id: pm_shadow.id().clone(),
-            provider: "linear".to_string(),
-            initiative: "initiative-pm".to_string(),
-            synced_at: 1,
-            snapshot: loopflow::pm::PmSnapshot {
-                projects: vec![],
-                items: vec![],
+        .put_pm_snapshot(
+            PmSnapshotRow {
+                wave_id: pm_shadow.id().clone(),
+                provider: "linear".to_string(),
+                initiative: "initiative-pm".to_string(),
+                synced_at: 1,
+                snapshot: loopflow::pm::PmSnapshot {
+                    projects: vec![],
+                    items: vec![],
+                },
             },
-        })
+            None,
+        )
         .await
         .unwrap();
 

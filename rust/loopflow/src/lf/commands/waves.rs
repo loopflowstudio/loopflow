@@ -2223,13 +2223,16 @@ mod tests {
         ))
         .unwrap();
         store
-            .put_pm_snapshot(crate::store::PmSnapshotRow {
-                wave_id: wave.id().clone(),
-                provider: "linear".into(),
-                initiative: "initiative".into(),
-                synced_at: 1,
-                snapshot: planning.clone(),
-            })
+            .put_pm_snapshot(
+                crate::store::PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".into(),
+                    initiative: "initiative".into(),
+                    synced_at: 1,
+                    snapshot: planning.clone(),
+                },
+                None,
+            )
             .await
             .unwrap();
         let stored = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
@@ -2292,19 +2295,22 @@ mod tests {
             );
             store.create_wave(&wave).await.unwrap();
             store
-                .put_pm_snapshot(crate::store::PmSnapshotRow {
-                    wave_id: wave.id().clone(),
-                    provider: "linear".into(),
-                    initiative: "initiative".into(),
-                    synced_at: 2,
-                    snapshot: serde_json::from_value(serde_json::json!({"projects":[{
+                .put_pm_snapshot(
+                    crate::store::PmSnapshotRow {
+                        wave_id: wave.id().clone(),
+                        provider: "linear".into(),
+                        initiative: "initiative".into(),
+                        synced_at: 2,
+                        snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                     "id":format!("{repository}-{name}"), "slug":name, "name":name,
                     "summary":"", "metric_targets":[], "flow":"feature", "status":"started",
                     "krs":[{"text":"Retained planning is readable", "holds":false}],
                     "initiative_ids":["initiative"], "team_ids":["team"]
                 }], "items":[]}))
-                    .unwrap(),
-                })
+                        .unwrap(),
+                    },
+                    None,
+                )
                 .await
                 .unwrap();
             waves.push(wave);
@@ -2370,7 +2376,7 @@ mod tests {
             }], "items":items}))
             .unwrap(),
         };
-        store.put_pm_snapshot(snapshot.clone()).await.unwrap();
+        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
         // Old applied abandonment receipts do not imply native deletion.
         let before = super::wave_tasks(&store, &wave, false, None).await.unwrap();
         assert!(matches!(before.tasks, super::Evidence::Ok { items, .. } if items.len() == 2));
@@ -2393,7 +2399,7 @@ mod tests {
                     item.revision = Some("2026-09-30T00:00:01Z".into());
                 }
             }
-            store.put_pm_snapshot(stale).await.unwrap();
+            store.put_pm_snapshot(stale, None).await.unwrap();
             let reopened = Arc::new(
                 crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
                     database.clone(),
@@ -2453,7 +2459,7 @@ mod tests {
                 "metric_targets":[], "flow":"feature", "status":"started", "krs":[{"text":"Edited proof", "holds":false}],
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]})).unwrap(),
-        }).await.unwrap();
+        }, None).await.unwrap();
         let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
             panic!("Project plan unavailable");
         };
@@ -2463,7 +2469,7 @@ mod tests {
         let mut unreadable = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         unreadable.snapshot.projects.clear();
         unreadable.snapshot.items.clear();
-        assert!(store.put_pm_snapshot(unreadable).await.is_err());
+        assert!(store.put_pm_snapshot(unreadable, None).await.is_err());
         assert!(matches!(
             super::project_planning(&store, &wave).await,
             super::Evidence::Ok { items, .. } if items.len() == 1

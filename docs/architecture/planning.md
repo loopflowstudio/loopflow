@@ -94,9 +94,10 @@ back observation acceptance. It preserves execution fields and retained identity
 an unknown destination does not authorize a Task transfer. Restart changes
 execution without rewriting accepted planning. Rotation accepts confirmed Project
 and transfer readbacks through the same owner. A single Project observation does
-not advance the Wave's full-refresh timestamp. Reteam still writes identifiers
-independently; its full readbacks and serialized relationship reconciliation remain
-unfinished. Rotation's name-based recovery still requires replacement.
+not advance the Wave's full-refresh timestamp. Reteam accepts complete issue
+readbacks through that same owner and reconciles confirmed Team relationships
+without changing Initiative ownership or independently newer Project facts.
+Rotation's name-based recovery still requires replacement.
 
 Full and partial Wave ingestion validate the accepted Project's Initiative before
 recording membership or freshness. Detail refresh resolves that Initiative through
@@ -104,7 +105,13 @@ Wave configuration and the registry, then accepts the association and projects
 facts in one transaction. A durable Project row alone grants no Wave ownership.
 Unconfirmed cold detail retains durable plans; foreign or unmapped ownership at
 the operation boundary reports an error. Both Project and Task projection require
-an exact accepted Initiative match. Acquisition serialization remains unfinished.
+an exact accepted Initiative match. Snapshot acquisition and cold-detail readback
+hold the Wave planning lock through SQLite acceptance. Queued workers retain
+shared ownership after their async caller is canceled. Reteam and rotation acquire
+participating Wave locks in stable ID order; already-held refresh paths reuse them.
+Cold detail discovers ownership, locks, then reads ownership again. Null detail
+invalidates only the cached revision and observation it queried; it cannot invalidate
+a newer accepted Task. Readback follows the issue UUID across identifier changes.
 
 The `project_readiness` migration preserves original Linear Project bodies and
 acquisition evidence before a one-time name/slug correction from fresh provider
@@ -117,7 +124,8 @@ Without removal evidence, refresh fails and retains the previous observation.
 Project revisions do not establish ordering for separate Initiative/Team
 relationships. A contradictory relationship set stays unresolved, retains its
 last-good facts, and blocks managed readers. Replaying a list or detail does not
-clear that uncertainty; acquiring ordered relationship evidence remains future work.
+clear that uncertainty. Explicit reteam reconciles the exact confirmed Team set
+under acquisition ownership; it cannot reconcile a changed Initiative.
 
 Chapter rollover transfers unfinished work and settles backlog before completing
 each predecessor Project in Linear. It confirms provider completion before recording

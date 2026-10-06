@@ -59,7 +59,9 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
     let (url, _) = spawn(vec![
         team_response(),
         json_response(StatusCode::OK, issue(provider_project.clone())),
+        json_response(StatusCode::OK, issue(provider_project.clone())),
         team_response(),
+        json_response(StatusCode::OK, issue(provider_project.clone())),
         json_response(StatusCode::OK, issue(provider_project)),
     ])
     .await;
@@ -100,7 +102,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             let mut snapshot = snapshot(wave.id(), &record);
             fixture
                 .store
-                .put_pm_snapshot(snapshot.clone())
+                .put_pm_snapshot(snapshot.clone(), None)
                 .await
                 .unwrap();
             let refreshed = read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
@@ -114,7 +116,13 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             edited.observed_at += 1;
             fixture
                 .store
-                .put_pm_task(&repo.to_string_lossy(), "linear", edited.clone(), None)
+                .put_pm_task(
+                    &repo.to_string_lossy(),
+                    "linear",
+                    edited.clone(),
+                    None,
+                    None,
+                )
                 .await
                 .unwrap();
             assert_eq!(
@@ -130,7 +138,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             );
             snapshot.snapshot.items.clear();
             snapshot.synced_at += 2;
-            fixture.store.put_pm_snapshot(snapshot).await.unwrap();
+            fixture.store.put_pm_snapshot(snapshot, None).await.unwrap();
             assert_eq!(
                 read_task_planning_async(&repo, "fix-1", PmRefresh::Never)
                     .await
@@ -178,13 +186,13 @@ async fn rejected_project_snapshot_preserves_durable_project_facts() {
         },
         initiative: "initiative-1".into(),
     };
-    super::store_pm_snapshot(&repo, "product", &ctx, &snapshot, 1, &fixture.store)
+    super::store_pm_snapshot(&repo, "product", &ctx, &snapshot, 1, &fixture.store, None)
         .await
         .unwrap();
     let retained = fixture.store.list_projects(Some(wave.id())).await.unwrap();
     snapshot.projects[0].name = "Conflicting name".into();
     assert!(
-        super::store_pm_snapshot(&repo, "product", &ctx, &snapshot, 2, &fixture.store)
+        super::store_pm_snapshot(&repo, "product", &ctx, &snapshot, 2, &fixture.store, None)
             .await
             .is_err()
     );
@@ -272,6 +280,7 @@ async fn failed_refresh_preserves_the_last_observation_and_its_age() {
     let (url, _) = spawn(vec![
         team_response(),
         json_response(StatusCode::OK, issue(project())),
+        json_response(StatusCode::OK, issue(project())),
         team_response(),
         json_response(
             StatusCode::OK,
@@ -331,6 +340,7 @@ async fn omitted_detail_fields_do_not_clear_known_planning() {
     let mut responses = vec![
         team_response(),
         json_response(StatusCode::OK, issue(project())),
+        json_response(StatusCode::OK, issue(project())),
     ];
     for field in missing_fields {
         let mut incomplete = issue(project());
@@ -385,7 +395,9 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
     let (url, _) = spawn(vec![
         team_response(),
         json_response(StatusCode::OK, issue(project())),
+        json_response(StatusCode::OK, issue(project())),
         team_response(),
+        json_response(StatusCode::OK, json!({"data":{"issue":null}})),
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
     ])
     .await;
@@ -399,7 +411,7 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
                 .is_err());
             fixture
                 .store
-                .put_pm_snapshot(snapshot(wave.id(), &original))
+                .put_pm_snapshot(snapshot(wave.id(), &original), None)
                 .await
                 .unwrap();
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
@@ -439,7 +451,13 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
     .unwrap();
     fixture
         .store
-        .put_pm_task(&repo.to_string_lossy(), "linear", record.clone(), None)
+        .put_pm_task(
+            &repo.to_string_lossy(),
+            "linear",
+            record.clone(),
+            None,
+            None,
+        )
         .await
         .unwrap();
     let (url, _) = spawn(vec![
@@ -486,6 +504,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
     let (url, _) = spawn(vec![
         team_response(),
         json_response(StatusCode::OK, issue(project())),
+        json_response(StatusCode::OK, issue(project())),
     ])
     .await;
     PM_TEST_CONTEXT
@@ -495,7 +514,11 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                 .unwrap();
             let scope = repo.to_string_lossy();
             let mut list = snapshot(wave.id(), &original);
-            fixture.store.put_pm_snapshot(list.clone()).await.unwrap();
+            fixture
+                .store
+                .put_pm_snapshot(list.clone(), None)
+                .await
+                .unwrap();
             let mut confirmed = original.clone();
             confirmed.item.revision = Some("2026-09-29T12:00:00.124Z".into());
             confirmed.item.name = "Confirmed mutation".into();
@@ -503,11 +526,15 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             confirmed.observed_at -= 1;
             fixture
                 .store
-                .put_pm_task(&scope, "linear", confirmed.clone(), None)
+                .put_pm_task(&scope, "linear", confirmed.clone(), None, None)
                 .await
                 .unwrap();
             list.synced_at += 10;
-            fixture.store.put_pm_snapshot(list.clone()).await.unwrap();
+            fixture
+                .store
+                .put_pm_snapshot(list.clone(), None)
+                .await
+                .unwrap();
             assert_eq!(
                 read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                     .await
@@ -529,7 +556,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             conflicting.item.name = "Contradiction at the same revision".into();
             assert!(fixture
                 .store
-                .put_pm_task(&scope, "linear", conflicting, None)
+                .put_pm_task(&scope, "linear", conflicting, None, None)
                 .await
                 .is_err());
             assert_eq!(
@@ -547,7 +574,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             delayed.observed_at += 20;
             fixture
                 .store
-                .put_pm_task(&scope, "linear", delayed, None)
+                .put_pm_task(&scope, "linear", delayed, None, None)
                 .await
                 .unwrap();
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
@@ -567,7 +594,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             confirmed.item.completed = true;
             fixture
                 .store
-                .put_pm_task(&scope, "linear", confirmed.clone(), None)
+                .put_pm_task(&scope, "linear", confirmed.clone(), None, None)
                 .await
                 .unwrap();
             // Duplicate and older change receipts cannot invalidate an equal/newer observation.
@@ -595,7 +622,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                 .is_err());
             fixture
                 .store
-                .put_pm_task(&scope, "linear", confirmed.clone(), None)
+                .put_pm_task(&scope, "linear", confirmed.clone(), None, None)
                 .await
                 .unwrap();
             assert_eq!(
@@ -612,10 +639,10 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             confirmed.item.revision = Some("2026-09-29T12:00:00.126Z".into());
             fixture
                 .store
-                .put_pm_task(&scope, "linear", confirmed, None)
+                .put_pm_task(&scope, "linear", confirmed, None, None)
                 .await
                 .unwrap();
-            fixture.store.put_pm_snapshot(list).await.unwrap();
+            fixture.store.put_pm_snapshot(list, None).await.unwrap();
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
@@ -639,7 +666,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             uncached.item.identifier = "FIX-2".into();
             fixture
                 .store
-                .put_pm_task(&scope, "linear", uncached, None)
+                .put_pm_task(&scope, "linear", uncached, None, None)
                 .await
                 .unwrap();
             assert!(read_task_planning_async(&repo, "FIX-2", PmRefresh::Never)
@@ -658,7 +685,9 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
     let (url, _) = spawn(vec![
         team_response(),
         json_response(StatusCode::OK, issue(project())),
+        json_response(StatusCode::OK, issue(project())),
         team_response(),
+        json_response(StatusCode::OK, json!({"data":{"issue":null}})),
         json_response(StatusCode::OK, json!({"data":{"issue":null}})),
     ])
     .await;
@@ -669,7 +698,7 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
                 .unwrap();
             fixture
                 .store
-                .invalidate_pm_task(&repo.to_string_lossy(), "linear", "FIX-1")
+                .invalidate_pm_task(&repo.to_string_lossy(), "linear", original.clone(), None)
                 .await
                 .unwrap();
             let invalid = inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
@@ -725,8 +754,10 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
     let (url, _) = spawn(vec![
         team_response(),
         json_response(StatusCode::OK, issue(project())),
+        json_response(StatusCode::OK, issue(project())),
         team_response(),
         absent,
+        json_response(StatusCode::OK, json!({"data":{"issue":null}})),
     ])
     .await;
     PM_TEST_CONTEXT
@@ -769,6 +800,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
     let (url, _) = spawn(vec![
         team_response(),
         json_response(StatusCode::OK, issue(project())),
+        json_response(StatusCode::OK, issue(project())),
     ])
     .await;
     PM_TEST_CONTEXT
@@ -777,7 +809,11 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 .await
                 .unwrap();
             let mut list = snapshot(wave.id(), &original);
-            fixture.store.put_pm_snapshot(list.clone()).await.unwrap();
+            fixture
+                .store
+                .put_pm_snapshot(list.clone(), None)
+                .await
+                .unwrap();
             let mut newer = original.clone();
             let project = newer.project.as_mut().unwrap();
             project.revision = Some("2026-09-29T11:00:00.000000001Z".into());
@@ -787,12 +823,16 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             newer.observed_at -= 1;
             fixture
                 .store
-                .put_pm_task(&repo.to_string_lossy(), "linear", newer.clone(), None)
+                .put_pm_task(&repo.to_string_lossy(), "linear", newer.clone(), None, None)
                 .await
                 .unwrap();
             // The list arrived later but its provider revision is older.
             list.synced_at += 60;
-            fixture.store.put_pm_snapshot(list.clone()).await.unwrap();
+            fixture
+                .store
+                .put_pm_snapshot(list.clone(), None)
+                .await
+                .unwrap();
             let stored = read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .unwrap();
@@ -811,7 +851,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             omitted.snapshot.items.clear();
             assert!(fixture
                 .store
-                .put_pm_snapshot(omitted)
+                .put_pm_snapshot(omitted, None)
                 .await
                 .unwrap_err()
                 .to_string()
@@ -832,7 +872,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 project.initiative_ids = vec!["different-wave".into()];
                 let result = fixture
                     .store
-                    .put_pm_task(&repo.to_string_lossy(), "linear", conflicting, None)
+                    .put_pm_task(&repo.to_string_lossy(), "linear", conflicting, None, None)
                     .await;
                 if revision != Some("2026-09-29T11:00:00Z") {
                     assert!(result.is_err());
@@ -855,7 +895,11 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 );
             }
             // Replaying old membership cannot clear the explicit uncertainty.
-            fixture.store.put_pm_snapshot(list.clone()).await.unwrap();
+            fixture
+                .store
+                .put_pm_snapshot(list.clone(), None)
+                .await
+                .unwrap();
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
@@ -880,7 +924,7 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
                 .unwrap();
             list.snapshot.projects.clear();
             list.snapshot.items.clear();
-            fixture.store.put_pm_snapshot(list).await.unwrap();
+            fixture.store.put_pm_snapshot(list, None).await.unwrap();
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
         })
         .await;
@@ -918,7 +962,9 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
         let (url, _) = spawn(vec![
             team_response(),
             json_response(StatusCode::OK, issue(project())),
+            json_response(StatusCode::OK, issue(project())),
             team_response(),
+            json_response(StatusCode::OK, issue(refreshed.clone())),
             json_response(StatusCode::OK, issue(refreshed)),
         ])
         .await;
@@ -971,4 +1017,227 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
             })
             .await;
     }
+}
+
+#[tokio::test]
+async fn cancelled_detail_acceptance_keeps_wave_excluded_until_commit() {
+    cancelled_acceptance(true).await;
+}
+
+#[tokio::test]
+async fn cancelled_snapshot_acceptance_keeps_wave_excluded_until_commit() {
+    cancelled_acceptance(false).await;
+}
+
+async fn cancelled_acceptance(detail: bool) {
+    let fixture = Fixture::new().await;
+    let (repo, _) = fixture.planning_repo().await;
+    fixture.seed(now() + 3600).await;
+    let mut responses = if detail {
+        vec![
+            team_response(),
+            json_response(StatusCode::OK, issue(project())),
+            json_response(StatusCode::OK, issue(project())),
+        ]
+    } else {
+        vec![
+            team_response(),
+            json_response(
+                StatusCode::OK,
+                json!({"data":{"initiative":{"projects":{
+                    "nodes":[project()],"pageInfo":{"hasNextPage":false,"endCursor":null}
+                }}}}),
+            ),
+            json_response(
+                StatusCode::OK,
+                json!({"data":{"project":{"issues":{
+                    "nodes":[issue(project())["data"]["issue"]],"pageInfo":{"hasNextPage":false,"endCursor":null}
+                }}}}),
+            ),
+        ]
+    };
+    responses.extend([
+        json_response(StatusCode::OK, json!({"data":{"initiative":{"projects":{
+            "nodes":[project()],"pageInfo":{"hasNextPage":false,"endCursor":null}
+        }}}})),
+        json_response(StatusCode::OK, json!({"data":{"project":{"issues":{
+            "nodes":[issue(project())["data"]["issue"]],"pageInfo":{"hasNextPage":false,"endCursor":null}
+        }}}})),
+    ]);
+    let (url, _) = spawn(responses).await;
+    let reteam = super::ResolvedReteamContext {
+        repository: super::RepositoryPmContext {
+            client: crate::pm::linear::LinearClient::with_base_url(
+                "fixture".into(),
+                Some("team-1".into()),
+                url.clone(),
+            ),
+            provider: crate::pm::PmProviderKind::Linear,
+            repo_id: crate::repository::RepoId::parse("loopflowstudio/fixture").unwrap(),
+            team_id: "team-1".into(),
+        },
+        team_key: "FIX".into(),
+        store: crate::store::Store::from_sqlite_for_test(fixture.store.sqlite.clone()),
+    };
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let (release, blocked) = std::sync::mpsc::channel();
+    let context = fixture.context(&url);
+    let write_repo = repo.clone();
+    let gate = (entered.clone(), Arc::new(std::sync::Mutex::new(blocked)));
+    let writer = tokio::spawn(PM_TEST_CONTEXT.scope(
+        context,
+        crate::store::PLANNING_ACCEPTANCE_GATE.scope(gate, async move {
+            if detail {
+                inspect_task_planning_async(&write_repo, "FIX-1", PmRefresh::Force)
+                    .await
+                    .map(|_| ())
+            } else {
+                let ctx = super::resolve_context(&write_repo, "product").await?;
+                super::refresh_pm_snapshot(&write_repo, "product", &ctx)
+                    .await
+                    .map(|_| ())
+            }
+        }),
+    ));
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+        .await
+        .unwrap();
+    writer.abort();
+    assert!(writer.await.unwrap_err().is_cancelled());
+    let excluded = PM_TEST_CONTEXT
+        .scope(
+            fixture.context(&url),
+            tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                super::apply_or_plan_repository_reteam(
+                    &reteam,
+                    &repo,
+                    false,
+                    &crate::ops::NullProgress,
+                ),
+            ),
+        )
+        .await
+        .is_err();
+    release.send(()).unwrap();
+    let recovered = PM_TEST_CONTEXT
+        .scope(
+            fixture.context(&url),
+            super::apply_or_plan_repository_reteam(
+                &reteam,
+                &repo,
+                false,
+                &crate::ops::NullProgress,
+            ),
+        )
+        .await
+        .unwrap();
+    assert!(recovered.moves.is_empty());
+    let accepted = fixture
+        .store
+        .pm_task_observation(&repo.to_string_lossy(), "linear", "FIX-1")
+        .await
+        .unwrap();
+    assert!(
+        accepted.record.is_some(),
+        "cancelled caller's worker did not finish acceptance"
+    );
+    assert!(
+        excluded,
+        "a competing operation acquired the Wave before acceptance committed"
+    );
+}
+
+#[tokio::test]
+async fn cold_detail_rechecks_team_after_acquiring_wave() {
+    let fixture = Fixture::new().await;
+    let (repo, _) = fixture.planning_repo().await;
+    fixture.seed(now() + 3600).await;
+    let mut discovered = issue(project());
+    discovered["data"]["issue"]["team"]["id"] = "old-team".into();
+    discovered["data"]["issue"]["project"]["teams"] = json!({"nodes":[{"id":"old-team"}]});
+    let (url, _) = spawn(vec![
+        team_response(),
+        json_response(StatusCode::OK, discovered),
+        json_response(StatusCode::OK, issue(project())),
+    ])
+    .await;
+    let record = PM_TEST_CONTEXT
+        .scope(
+            fixture.context(&url),
+            read_task_planning_async(&repo, "FIX-1", PmRefresh::Force),
+        )
+        .await
+        .unwrap();
+    assert_eq!(record.item.team_id, "team-1");
+    assert_eq!(record.project.unwrap().team_ids, ["team-1"]);
+}
+
+#[tokio::test]
+async fn delayed_absence_preserves_a_newer_accepted_task() {
+    let fixture = Fixture::new().await;
+    let (repo, _) = fixture.planning_repo().await;
+    fixture.seed(now() + 3600).await;
+    let entered = Arc::new(Barrier::new(2));
+    let release = Arc::new(Barrier::new(2));
+    let mut absent = json_response(StatusCode::OK, json!({"data":{"issue":null}}));
+    absent.gate = Some((entered.clone(), release.clone()));
+    let (url, _) = spawn(vec![
+        team_response(),
+        json_response(StatusCode::OK, issue(project())),
+        json_response(StatusCode::OK, issue(project())),
+        team_response(),
+        absent,
+        json_response(StatusCode::OK, json!({"data":{"issue":null}})),
+    ])
+    .await;
+    PM_TEST_CONTEXT
+        .scope(fixture.context(&url), async {
+            let mut confirmed = read_task_planning_async(&repo, "FIX-1", PmRefresh::Force)
+                .await
+                .unwrap();
+            confirmed.item.revision = Some("2026-10-05T12:00:00Z".into());
+            confirmed.item.identifier = "FIX-2".into();
+            let (inspection, ()) = tokio::join!(
+                inspect_task_planning_async(&repo, "FIX-1", PmRefresh::Force),
+                async {
+                    entered.wait().await;
+                    fixture
+                        .store
+                        .put_pm_task(
+                            &repo.to_string_lossy(),
+                            "linear",
+                            confirmed.clone(),
+                            None,
+                            None,
+                        )
+                        .await
+                        .unwrap();
+                    release.wait().await;
+                }
+            );
+            // Stable-ID reobservation still finds a renamed Task after the requested identifier changes.
+            let stored = fixture
+                .store
+                .pm_task_observation(&repo.to_string_lossy(), "linear", "issue-1")
+                .await
+                .unwrap();
+            assert_eq!(stored.state, crate::store::PlanningState::Available);
+            assert_eq!(stored.record.unwrap().item.identifier, "FIX-2");
+            let inspection = inspection.unwrap();
+            assert!(
+                inspection.refresh_error.is_none(),
+                "{:?}",
+                inspection.refresh_error
+            );
+            assert_eq!(
+                inspection.observation.state,
+                crate::store::PlanningState::Available
+            );
+            assert_eq!(
+                inspection.observation.record.unwrap().item.identifier,
+                "FIX-2"
+            );
+        })
+        .await;
 }

@@ -115,7 +115,11 @@ fn restart_uses_old_valid_planning_and_preserves_invalid_work() {
             record.item.project_id = Some("another-project".into());
         }
         runtime
-            .block_on(registered.store.put_pm_task(&scope, "linear", record, None))
+            .block_on(
+                registered
+                    .store
+                    .put_pm_task(&scope, "linear", record, None, None),
+            )
             .unwrap();
         // Age the acquired facts without pretending a stale provider response won.
         rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -180,7 +184,11 @@ fn restart_uses_old_valid_planning_and_preserves_invalid_work() {
             record.item.revision = Some("2026-10-05T12:00:00Z".into());
             record.observed_at = OffsetDateTime::now_utc().unix_timestamp() + 1;
             runtime
-                .block_on(registered.store.put_pm_task(&scope, "linear", record, None))
+                .block_on(
+                    registered
+                        .store
+                        .put_pm_task(&scope, "linear", record, None, None),
+                )
                 .unwrap();
             accepted_plan = runtime
                 .block_on(registered.store.get_task(&registered.task.id))

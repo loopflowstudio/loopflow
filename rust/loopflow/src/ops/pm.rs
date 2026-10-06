@@ -6,8 +6,10 @@
 //! staleness policy (see `load_show_snapshot`).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
 use std::future::Future;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::future::try_join_all;
@@ -869,18 +871,22 @@ async fn store_pm_snapshot(
     snapshot: &PmSnapshot,
     observed_at: i64,
     store: &Store,
+    acquisition: Option<Arc<File>>,
 ) -> OpsResult<()> {
     let registered = crate::work::wave::ensure_wave_row(store, repo, wave)
         .await
         .map_err(|err| OpsError::Message(format!("failed to register PM Wave: {err}")))?;
     store
-        .put_pm_snapshot(PmSnapshotRow {
-            wave_id: registered.id().clone(),
-            provider: ctx.provider.as_str().to_string(),
-            initiative: ctx.initiative.clone(),
-            synced_at: observed_at,
-            snapshot: snapshot.clone(),
-        })
+        .put_pm_snapshot(
+            PmSnapshotRow {
+                wave_id: registered.id().clone(),
+                provider: ctx.provider.as_str().to_string(),
+                initiative: ctx.initiative.clone(),
+                synced_at: observed_at,
+                snapshot: snapshot.clone(),
+            },
+            acquisition,
+        )
         .await
         .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))
 }
@@ -890,10 +896,33 @@ pub(crate) async fn refresh_pm_snapshot(
     wave: &str,
     ctx: &PmContext,
 ) -> OpsResult<PmSnapshot> {
+    let store = pm_store().await?;
+    let registered = crate::work::wave::ensure_wave_row(&store, repo, wave)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let acquisition = super::chapter::rotation_lock(&registered).await?;
+    refresh_pm_snapshot_locked(repo, wave, ctx, acquisition).await
+}
+
+pub(crate) async fn refresh_pm_snapshot_locked(
+    repo: &Path,
+    wave: &str,
+    ctx: &PmContext,
+    acquisition: Arc<File>,
+) -> OpsResult<PmSnapshot> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let store = pm_store().await?;
     let snapshot = fetch_pm_snapshot_with_store(repo, wave, ctx, &store).await?;
-    store_pm_snapshot(repo, wave, ctx, &snapshot, observed_at, &store).await?;
+    store_pm_snapshot(
+        repo,
+        wave,
+        ctx,
+        &snapshot,
+        observed_at,
+        &store,
+        Some(acquisition),
+    )
+    .await?;
     Ok(snapshot)
 }
 
@@ -1174,9 +1203,9 @@ where
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message(format!("Wave {wave} is not initialized")))?;
     super::chapter::require_chapter_home(&store, &registered).await?;
-    let _lock = super::chapter::rotation_lock(&registered).await?;
+    let acquisition = super::chapter::rotation_lock(&registered).await?;
     let ctx = resolve_context(repo, wave).await?;
-    refresh_pm_snapshot(repo, wave, &ctx).await?;
+    refresh_pm_snapshot_locked(repo, wave, &ctx, acquisition.clone()).await?;
     let project = super::chapter::current_project(&store, &registered).await?;
     let find_existing = |items: Vec<PmItem>| {
         items
@@ -1721,31 +1750,30 @@ async fn inspect_task_planning_async(
             refresh_error: None,
         });
     }
+    let selector = existing
+        .record
+        .as_ref()
+        .map_or(issue, |record| record.item.id.as_str());
     let fetch = async {
         let repository = resolve_repository_context(repo).await?;
-        let selector = existing
-            .record
-            .as_ref()
-            .map_or(issue, |record| record.item.id.as_str());
-        let observation = repository
+        let mut observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        let mut observation = repository
             .client
             .issue_ownership(selector)
             .await
             .map_err(pm_to_ops)?;
-        let Some((item, project)) = observation else {
-            store
-                .invalidate_pm_task(&scope, provider.as_str(), selector)
-                .await
-                .map_err(|error| OpsError::Message(error.to_string()))?;
-            return Ok(false);
-        };
-        if item.team_id != repository.team_id {
-            return Err(OpsError::Message(format!(
-                "Linear task {} belongs to Team {}, expected repository Team {}",
-                item.identifier, item.team_id, repository.team_id
-            )));
-        }
-        let confirmed_wave = if let Some(project) = &project {
+        let discovered_project = observation
+            .as_ref()
+            .and_then(|(_, project)| project.as_ref())
+            .or_else(|| {
+                existing
+                    .record
+                    .as_ref()
+                    .and_then(|record| record.project.as_ref())
+            });
+        let mut acquisition = None;
+        let mut confirmed_wave = None;
+        if let Some(project) = discovered_project {
             let initiative = singular_project_initiative(project)?;
             let wave = wave_for_initiative(repo, &initiative)?;
             let locator = crate::work::wave::WaveLocator::discover(repo, &wave)
@@ -1755,10 +1783,37 @@ async fn inspect_task_planning_async(
                 .await
                 .map_err(|error| OpsError::Message(error.to_string()))?
                 .ok_or_else(|| OpsError::Message(format!("Wave {wave} is not initialized")))?;
-            Some((registered.id().clone(), initiative))
-        } else {
-            None
+            acquisition = Some(super::chapter::rotation_lock(&registered).await?);
+            observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+            observation = repository
+                .client
+                .issue_ownership(selector)
+                .await
+                .map_err(pm_to_ops)?;
+            if let Some((_, Some(project))) = &observation {
+                if project.initiative_ids.as_slice() != [initiative.as_str()] {
+                    return Err(OpsError::Message(format!(
+                        "Task {selector} ownership changed during discovery; retry planning"
+                    )));
+                }
+                confirmed_wave = Some((registered.id().clone(), initiative));
+            }
+        }
+        let Some((item, project)) = observation else {
+            if let Some(expected) = &existing.record {
+                store
+                    .invalidate_pm_task(&scope, provider.as_str(), expected.clone(), acquisition)
+                    .await
+                    .map_err(|error| OpsError::Message(error.to_string()))?;
+            }
+            return Ok(false);
         };
+        if item.team_id != repository.team_id {
+            return Err(OpsError::Message(format!(
+                "Linear task {} belongs to Team {}, expected repository Team {}",
+                item.identifier, item.team_id, repository.team_id
+            )));
+        }
         store
             .put_pm_task(
                 &scope,
@@ -1766,9 +1821,10 @@ async fn inspect_task_planning_async(
                 PmTaskRecord {
                     item,
                     project,
-                    observed_at: now,
+                    observed_at,
                 },
                 confirmed_wave,
+                acquisition,
             )
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -1783,11 +1839,11 @@ async fn inspect_task_planning_async(
     };
     // Read again: an event may have invalidated the record while acquisition ran.
     let mut observation = store
-        .pm_task_observation(&scope, provider.as_str(), issue)
+        .pm_task_observation(&scope, provider.as_str(), selector)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let refresh_error = match result {
-        Ok(false) if observation.state == PlanningState::Removed => None,
+        Ok(false) if matches!(observation.state, PlanningState::Removed | PlanningState::Available) => None,
         Ok(false) => {
             observation.state = PlanningState::Absent;
             Some(format!("task {issue:?} is absent from repository planning"))
@@ -1878,9 +1934,8 @@ fn project_needs_reteam(bound_team: &str, project_team_ids: &[String]) -> bool {
 
 #[derive(Debug)]
 struct ReteamIdentifierUpdate {
+    wave: String,
     issue_id: String,
-    old_identifier: String,
-    new_identifier: String,
 }
 
 struct ResolvedReteamContext {
@@ -1948,6 +2003,96 @@ async fn pm_reteam_async(
     apply_or_plan_repository_reteam(&resolved, repo, options.apply, progress).await
 }
 
+async fn accept_reteam_project(
+    resolved: &ResolvedReteamContext,
+    wave: &crate::work::wave::Wave,
+    project: &PmProject,
+    acquisition: Arc<File>,
+    expected_teams: &[String],
+) -> OpsResult<()> {
+    let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+    let confirmed = resolved
+        .repository
+        .client
+        .project_ownership(&project.id)
+        .await
+        .map_err(pm_to_ops)?;
+    if confirmed.initiative_ids != project.initiative_ids
+        || confirmed.team_ids.len() != expected_teams.len()
+        || !expected_teams
+            .iter()
+            .all(|team| confirmed.team_ids.contains(team))
+    {
+        return Err(OpsError::Message(format!(
+            "Project {} ownership changed during reteam",
+            project.id
+        )));
+    }
+    resolved
+        .store
+        .reconcile_pm_project_teams(
+            wave.id(),
+            resolved.repository.provider.as_str(),
+            &project.initiative_ids[0],
+            confirmed,
+            observed_at,
+            acquisition,
+        )
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))
+}
+
+async fn accept_reteam_task(
+    repo: &Path,
+    resolved: &ResolvedReteamContext,
+    wave: &crate::work::wave::Wave,
+    issue: &str,
+    acquisition: Arc<File>,
+) -> OpsResult<(String, bool)> {
+    let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+    let (item, project) = resolved
+        .repository
+        .client
+        .issue_ownership(issue)
+        .await
+        .map_err(pm_to_ops)?
+        .ok_or_else(|| OpsError::Message(format!("Task {issue} disappeared during reteam")))?;
+    let project = project
+        .ok_or_else(|| OpsError::Message(format!("Task {issue} lost its Project during reteam")))?;
+    let initiative = read_initiative(repo, wave.slug(), resolved.repository.provider)
+        .ok_or_else(|| OpsError::Message(format!("Wave {} lost its Initiative", wave.slug())))?;
+    if item.team_id != resolved.repository.team_id
+        || project.initiative_ids.as_slice() != [initiative.as_str()]
+    {
+        return Err(OpsError::Message(format!(
+            "Task {issue} ownership changed during reteam"
+        )));
+    }
+    let identifier = item.identifier.clone();
+    let changed = resolved
+        .store
+        .task_issue_identifier(issue)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .is_some_and(|previous| previous != identifier);
+    resolved
+        .store
+        .put_pm_task(
+            wave.repo(),
+            resolved.repository.provider.as_str(),
+            PmTaskRecord {
+                item,
+                project: Some(project),
+                observed_at,
+            },
+            Some((wave.id().clone(), initiative)),
+            Some(acquisition),
+        )
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    Ok((identifier, changed))
+}
+
 async fn apply_or_plan_repository_reteam(
     resolved: &ResolvedReteamContext,
     repo: &Path,
@@ -1963,6 +2108,41 @@ async fn apply_or_plan_repository_reteam(
             "repository has no Waves linked to Linear Initiatives".to_string(),
         ));
     }
+    if apply && repo.join(".git").exists() && !crate::engine::git::is_clean(repo)? {
+        return Err(OpsError::Message(
+            "`lf repo reteam --apply` requires a clean Git checkout so its repository PM config and Wave bindings can commit atomically; commit or stash existing changes, then rerun the dry-run"
+                .to_string(),
+        ));
+    }
+
+    let mut registered = Vec::new();
+    for wave in &waves {
+        if apply {
+            registered.push(
+                crate::work::wave::ensure_wave_row(store, repo, wave)
+                    .await
+                    .map_err(|error| OpsError::Message(error.to_string()))?,
+            );
+        } else {
+            let locator = crate::work::wave::WaveLocator::discover(repo, wave)
+                .map_err(|error| OpsError::Message(error.to_string()))?;
+            if let Some(wave) = store
+                .get_wave_at(&locator)
+                .await
+                .map_err(|error| OpsError::Message(error.to_string()))?
+            {
+                registered.push(wave);
+            }
+        }
+    }
+    registered.sort_by(|left, right| left.id().as_str().cmp(right.id().as_str()));
+    let mut acquisitions = BTreeMap::new();
+    for wave in &registered {
+        acquisitions.insert(
+            wave.slug().to_string(),
+            super::chapter::rotation_lock(wave).await?,
+        );
+    }
     let mut project_moves = Vec::new();
     let mut moves = Vec::new();
     let mut identifier_updates = Vec::new();
@@ -1971,13 +2151,6 @@ async fn apply_or_plan_repository_reteam(
     let mut seen_projects = BTreeSet::new();
     let mut already = 0usize;
     let mut task_updates = 0usize;
-
-    if apply && repo.join(".git").exists() && !crate::engine::git::is_clean(repo)? {
-        return Err(OpsError::Message(
-            "`lf repo reteam --apply` requires a clean Git checkout so its repository PM config and Wave bindings can commit atomically; commit or stash existing changes, then rerun the dry-run"
-                .to_string(),
-        ));
-    }
 
     for wave in &waves {
         let initiative =
@@ -2053,13 +2226,11 @@ async fn apply_or_plan_repository_reteam(
                         })?;
                 if item.team_id == *team_id {
                     already += 1;
-                    if let Some(old_identifier) =
-                        registered_identifier.filter(|identifier| identifier != &item.identifier)
+                    if registered_identifier.is_some_and(|identifier| identifier != item.identifier)
                     {
                         identifier_updates.push(ReteamIdentifierUpdate {
+                            wave: wave.clone(),
                             issue_id: item.id,
-                            old_identifier,
-                            new_identifier: item.identifier,
                         });
                     }
                 } else {
@@ -2097,22 +2268,41 @@ async fn apply_or_plan_repository_reteam(
             }
         }
 
+        for project in &projects {
+            let wave = registered
+                .iter()
+                .find(|wave| {
+                    read_initiative(repo, wave.slug(), resolved.repository.provider).as_ref()
+                        == project.initiative_ids.first()
+                })
+                .expect("preflight established the Project Wave");
+            let mut expected_teams = project.team_ids.clone();
+            if !expected_teams.contains(team_id) {
+                expected_teams.push(team_id.clone());
+            }
+            accept_reteam_project(
+                resolved,
+                wave,
+                project,
+                acquisitions[wave.slug()].clone(),
+                &expected_teams,
+            )
+            .await?;
+        }
         for update in identifier_updates {
-            task_updates += usize::from(
-                store
-                    .rebind_task_issue_identifier(
-                        &update.issue_id,
-                        &update.old_identifier,
-                        &update.new_identifier,
-                    )
-                    .await
-                    .map_err(|err| {
-                        OpsError::Message(format!(
-                            "failed to reconcile Task {}: {err}",
-                            update.new_identifier
-                        ))
-                    })?,
-            );
+            let wave = registered
+                .iter()
+                .find(|wave| wave.slug() == update.wave)
+                .expect("registered reteam Wave");
+            let (_, changed) = accept_reteam_task(
+                repo,
+                resolved,
+                wave,
+                &update.issue_id,
+                acquisitions[wave.slug()].clone(),
+            )
+            .await?;
+            task_updates += usize::from(changed);
         }
 
         for mv in &mut moves {
@@ -2145,17 +2335,25 @@ async fn apply_or_plan_repository_reteam(
                 .move_item_to_team(&mv.id, team_id)
                 .await
                 .map_err(pm_to_ops)?;
-            task_updates += usize::from(
-                store
-                    .rebind_task_issue_identifier(&mv.id, &mv.old_identifier, &new_identifier)
-                    .await
-                    .map_err(|err| {
-                        OpsError::Message(format!(
-                            "moved {} to {new_identifier}, but failed to reconcile its Task: {err}",
-                            mv.old_identifier
-                        ))
-                    })?,
-            );
+            let wave = registered
+                .iter()
+                .find(|wave| wave.slug() == mv.wave)
+                .expect("registered reteam Wave");
+            let (confirmed_identifier, changed) = accept_reteam_task(
+                repo,
+                resolved,
+                wave,
+                &mv.id,
+                acquisitions[wave.slug()].clone(),
+            )
+            .await?;
+            if confirmed_identifier != new_identifier {
+                return Err(OpsError::Message(format!(
+                    "Task {} move is not confirmed",
+                    mv.id
+                )));
+            }
+            task_updates += usize::from(changed);
             mv.new_identifier = Some(new_identifier);
         }
 
@@ -2174,6 +2372,24 @@ async fn apply_or_plan_repository_reteam(
             }
         }
 
+        for project in &projects {
+            let wave = registered
+                .iter()
+                .find(|wave| {
+                    read_initiative(repo, wave.slug(), resolved.repository.provider).as_ref()
+                        == project.initiative_ids.first()
+                })
+                .expect("preflight established the Project Wave");
+            accept_reteam_project(
+                resolved,
+                wave,
+                project,
+                acquisitions[wave.slug()].clone(),
+                std::slice::from_ref(team_id),
+            )
+            .await?;
+        }
+
         // Re-fetch and validate the complete repository before deleting any
         // migration sentinel. A crash before cleanup remains loudly resumable.
         for wave in &waves {
@@ -2186,7 +2402,16 @@ async fn apply_or_plan_repository_reteam(
             let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
             let projects = checked_projects_with_store(repo, &ctx, wave, store).await?;
             let snapshot = fetch_pm_snapshot_for_projects(&ctx, projects).await?;
-            store_pm_snapshot(repo, wave, &ctx, &snapshot, observed_at, store).await?;
+            store_pm_snapshot(
+                repo,
+                wave,
+                &ctx,
+                &snapshot,
+                observed_at,
+                store,
+                Some(acquisitions[wave].clone()),
+            )
+            .await?;
         }
         remove_legacy_pm_sentinels(repo, &waves)?;
         if repo.join(".git").exists() {
@@ -3221,6 +3446,32 @@ mod tests {
         assert!(error.to_string().contains("PRD-44"));
     }
 
+    async fn run_reteam_fixture(
+        resolved: &ResolvedReteamContext,
+        repo: &Path,
+        database: &Path,
+    ) -> OpsResult<PmReteamResult> {
+        PM_TEST_CONTEXT
+            .scope(
+                PmTestContext {
+                    path: database.to_path_buf(),
+                    store: Arc::new(Store::from_sqlite_for_test(resolved.store.sqlite.clone())),
+                    graphql_url: String::new(),
+                },
+                apply_or_plan_repository_reteam(resolved, repo, true, &NullProgress),
+            )
+            .await
+    }
+
+    fn project_readback(project: &Value) -> QueuedResponse {
+        json_response(StatusCode::OK, json!({"data": {"project": project}}))
+    }
+
+    fn issue_readback(mut issue: Value, project: &Value) -> QueuedResponse {
+        issue["project"] = project.clone();
+        json_response(StatusCode::OK, json!({"data": {"issue": issue}}))
+    }
+
     #[tokio::test]
     async fn repository_team_reteam_migrates_open_and_completed_issues_before_cleanup() {
         let repo = tempfile::tempdir().unwrap();
@@ -3273,6 +3524,10 @@ mod tests {
             "initiative-infrastructure",
             &["team-loo"],
         );
+        let mut expanded_survival = old_survival.clone();
+        expanded_survival["teams"] = json!({"nodes": [{"id":"team-old"},{"id":"team-loo"}]});
+        let mut expanded_infrastructure = old_infrastructure.clone();
+        expanded_infrastructure["teams"] = expanded_survival["teams"].clone();
         let responses = vec![
             projects_response(json!([old_survival])),
             issues_response(json!([migration_issue_node(
@@ -3294,6 +3549,8 @@ mod tests {
             )])),
             project_update_response("project-survival"),
             project_update_response("project-infrastructure"),
+            project_readback(&expanded_survival),
+            project_readback(&expanded_infrastructure),
             issue_comments_response(),
             json_response(
                 StatusCode::OK,
@@ -3302,6 +3559,17 @@ mod tests {
             json_response(
                 StatusCode::OK,
                 json!({ "data": { "issueUpdate": { "issue": { "id": "issue-open", "identifier": "LOO-1" } } } }),
+            ),
+            issue_readback(
+                migration_issue_node(
+                    "issue-open",
+                    "LOO-1",
+                    "project-survival",
+                    "Survival — A real task reaches done",
+                    "team-loo",
+                    false,
+                ),
+                &expanded_survival,
             ),
             issue_comments_response(),
             json_response(
@@ -3312,8 +3580,21 @@ mod tests {
                 StatusCode::OK,
                 json!({ "data": { "issueUpdate": { "issue": { "id": "issue-done", "identifier": "LOO-2" } } } }),
             ),
+            issue_readback(
+                migration_issue_node(
+                    "issue-done",
+                    "LOO-2",
+                    "project-infrastructure",
+                    "Infrastructure — Gmail",
+                    "team-loo",
+                    true,
+                ),
+                &expanded_infrastructure,
+            ),
             project_update_response("project-survival"),
             project_update_response("project-infrastructure"),
+            project_readback(&new_survival),
+            project_readback(&new_infrastructure),
             projects_response(json!([new_survival])),
             issues_response(json!([migration_issue_node(
                 "issue-open",
@@ -3350,7 +3631,7 @@ mod tests {
             store,
         };
 
-        let result = apply_or_plan_repository_reteam(&resolved, repo.path(), true, &NullProgress)
+        let result = run_reteam_fixture(&resolved, repo.path(), &database)
             .await
             .unwrap();
 
@@ -3414,15 +3695,25 @@ mod tests {
 
     #[tokio::test]
     async fn repository_team_reteam_resumes_after_an_interrupted_issue_move() {
-        interrupted_reteam(false).await;
+        interrupted_reteam(false, "move").await;
     }
 
     #[tokio::test]
     async fn repository_team_reteam_resumes_with_cached_project_membership() {
-        interrupted_reteam(true).await;
+        interrupted_reteam(true, "move").await;
     }
 
-    async fn interrupted_reteam(cache_planning: bool) {
+    #[tokio::test]
+    async fn repository_team_reteam_recovers_expansion_response_loss() {
+        interrupted_reteam(true, "expansion").await;
+    }
+
+    #[tokio::test]
+    async fn repository_team_reteam_recovers_narrowing_response_loss() {
+        interrupted_reteam(true, "narrowing").await;
+    }
+
+    async fn interrupted_reteam(cache_planning: bool, interruption: &str) {
         let repo = tempfile::tempdir().unwrap();
         write_repo_config(
             repo.path(),
@@ -3487,29 +3778,72 @@ mod tests {
             responses.push(projects_response(json!([old_project.clone()])));
             responses.push(issues_response(json!([old_issue.clone()])));
         }
+        let failure = || {
+            json_response(
+                StatusCode::OK,
+                json!({"errors":[{"message":format!("{interruption} interrupted")}]}),
+            )
+        };
+        let move_success = || {
+            json_response(
+                StatusCode::OK,
+                json!({"data":{"issueUpdate":{"issue":{"id":"issue-open","identifier":"LOO-1"}}}}),
+            )
+        };
+        let comment_success = || {
+            json_response(
+                StatusCode::OK,
+                json!({"data":{"commentCreate":{"comment":{"id":"comment-reteam"}}}}),
+            )
+        };
         responses.extend([
-            projects_response(json!([old_project])),
+            projects_response(json!([old_project.clone()])),
             issues_response(json!([old_issue.clone()])),
-            project_update_response("project-survival"),
-            issue_comments_response(),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "commentCreate": { "comment": { "id": "comment-reteam" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "errors": [{ "message": "move interrupted" }] }),
-            ),
-            projects_response(json!([expanded_project])),
-            issues_response(json!([old_issue])),
-            issue_comments_response_with(Some(&marker)),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueUpdate": { "issue": { "id": "issue-open", "identifier": "LOO-1" } } } }),
-            ),
-            project_update_response("project-survival"),
-            projects_response(json!([migrated_project])),
-            issues_response(json!([migrated_issue])),
+        ]);
+        if interruption == "expansion" {
+            responses.extend([
+                failure(),
+                projects_response(json!([expanded_project.clone()])),
+                issues_response(json!([old_issue.clone()])),
+                project_readback(&expanded_project),
+                issue_comments_response(),
+                comment_success(),
+            ]);
+        } else {
+            responses.extend([
+                project_update_response("project-survival"),
+                project_readback(&expanded_project),
+                issue_comments_response(),
+                comment_success(),
+            ]);
+            if interruption == "move" {
+                responses.extend([
+                    failure(),
+                    projects_response(json!([expanded_project.clone()])),
+                    issues_response(json!([old_issue.clone()])),
+                    project_readback(&expanded_project),
+                    issue_comments_response_with(Some(&marker)),
+                ]);
+            }
+        }
+        responses.extend([
+            move_success(),
+            issue_readback(migrated_issue.clone(), &expanded_project),
+        ]);
+        if interruption == "narrowing" {
+            responses.extend([
+                failure(),
+                projects_response(json!([migrated_project.clone()])),
+                issues_response(json!([migrated_issue.clone()])),
+                project_readback(&migrated_project),
+            ]);
+        } else {
+            responses.push(project_update_response("project-survival"));
+        }
+        responses.extend([
+            project_readback(&migrated_project),
+            projects_response(json!([migrated_project.clone()])),
+            issues_response(json!([migrated_issue.clone()])),
         ]);
         let (base_url, requests) = test_server::spawn(responses).await;
         let resolved = ResolvedReteamContext {
@@ -3542,27 +3876,47 @@ mod tests {
                 .unwrap();
             resolved
                 .store
-                .put_pm_snapshot(PmSnapshotRow {
-                    wave_id: wave.id().clone(),
-                    provider: "linear".into(),
-                    initiative: "initiative-survival".into(),
-                    synced_at: 1,
-                    snapshot: PmSnapshot { projects, items },
-                })
+                .put_pm_snapshot(
+                    PmSnapshotRow {
+                        wave_id: wave.id().clone(),
+                        provider: "linear".into(),
+                        initiative: "initiative-survival".into(),
+                        synced_at: 1,
+                        snapshot: PmSnapshot { projects, items },
+                    },
+                    None,
+                )
                 .await
                 .unwrap();
         }
 
-        let first = apply_or_plan_repository_reteam(&resolved, repo.path(), true, &NullProgress)
+        let first = run_reteam_fixture(&resolved, repo.path(), &database)
             .await
             .unwrap_err();
-        assert!(first.to_string().contains("move interrupted"));
+        assert!(
+            first
+                .to_string()
+                .contains(&format!("{interruption} interrupted")),
+            "{first}"
+        );
         assert!(!legacy_pm_sentinels(repo.path()).unwrap().is_empty());
 
-        let resumed = apply_or_plan_repository_reteam(&resolved, repo.path(), true, &NullProgress)
+        let resumed = run_reteam_fixture(&resolved, repo.path(), &database)
             .await
             .unwrap();
-        assert_eq!(resumed.moves[0].new_identifier.as_deref(), Some("LOO-1"));
+        if interruption == "narrowing" {
+            assert!(resumed.moves.is_empty());
+        } else {
+            assert_eq!(resumed.moves[0].new_identifier.as_deref(), Some("LOO-1"));
+        }
+        let planning = resolved
+            .store
+            .pm_snapshot(wave.id())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(planning.snapshot.projects[0].team_ids, ["team-loo"]);
+        assert_eq!(planning.snapshot.items[0].identifier, "LOO-1");
         assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
         let requests = requests.lock().await;
         assert_eq!(

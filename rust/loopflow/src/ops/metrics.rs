@@ -551,7 +551,7 @@ mod tests {
                 items: vec![],
             },
         };
-        store.put_pm_snapshot(snapshot.clone()).await.unwrap();
+        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
         let untargeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
             .unwrap();
@@ -572,7 +572,7 @@ mod tests {
             projects: vec![targeted_project],
             items: vec![],
         };
-        store.put_pm_snapshot(snapshot.clone()).await.unwrap();
+        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
         let targeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
             .unwrap();
@@ -585,7 +585,7 @@ mod tests {
             items: vec![],
         };
         snapshot.snapshot.projects[0].revision = Some("2026-09-30T00:00:02Z".into());
-        store.put_pm_snapshot(snapshot.clone()).await.unwrap();
+        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
         let ambiguous = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
             .unwrap();

@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -17,8 +18,8 @@ use crate::store::Store;
 use crate::work::wave::{Wave, WaveLocator};
 
 use super::pm::{
-    checked_projects, linear_project_name, pm_store, project_is_foreign, refresh_pm_snapshot,
-    resolve_context, PmContext,
+    checked_projects, linear_project_name, pm_store, project_is_foreign,
+    refresh_pm_snapshot_locked, resolve_context, PmContext,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,7 +72,7 @@ pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) ->
     tokio::runtime::Runtime::new()
         .map_err(error)?
         .block_on(async {
-            let _lock = rotation_lock(&wave).await?;
+            let acquisition = rotation_lock(&wave).await?;
             super::metrics::validate_chapter_targets(&wave, &content.metric_targets)
                 .map_err(error)?;
             let ctx = resolve_context(repo, wave.slug()).await?;
@@ -86,7 +87,7 @@ pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) ->
                 .update_project(&provider.id, &provider.name, content)
                 .await
                 .map_err(error)?;
-            refresh_pm_snapshot(repo, wave.slug(), &ctx).await?;
+            refresh_pm_snapshot_locked(repo, wave.slug(), &ctx, acquisition).await?;
             Ok(())
         })
 }
@@ -260,13 +261,18 @@ pub(crate) async fn rotate(repo: &Path, name: &str, dry_run: bool) -> OpsResult<
                 .await
                 .map_err(error)?
         };
-        if !dry_run {
-            locks.push(rotation_lock(&wave).await?);
-        }
         let ctx = resolve_context(repo, &wave_name).await?;
-        let projects = checked_projects(repo, &ctx, &wave_name).await?;
-        inventories.push((wave_name, ctx.initiative.clone(), projects));
         contexts.push((wave, ctx));
+    }
+    contexts.sort_by(|(left, _), (right, _)| left.id().as_str().cmp(right.id().as_str()));
+    if !dry_run {
+        for (wave, _) in &contexts {
+            locks.push(rotation_lock(wave).await?);
+        }
+    }
+    for (wave, ctx) in &contexts {
+        let projects = checked_projects(repo, ctx, wave.slug()).await?;
+        inventories.push((wave.slug().to_string(), ctx.initiative.clone(), projects));
     }
     let mut plan = plan_rotation(name, &inventories)?;
     // Evaluate every Wave before the first provider write, even if an earlier Wave is ready.
@@ -288,12 +294,12 @@ pub(crate) async fn rotate(repo: &Path, name: &str, dry_run: bool) -> OpsResult<
             )));
         }
     }
-    for (entry, (wave, ctx)) in plan.waves.iter_mut().zip(&contexts) {
+    for ((entry, (wave, ctx)), acquisition) in plan.waves.iter_mut().zip(&contexts).zip(&locks) {
         adopt_legacy_projects(repo, &store, wave.slug(), ctx, true).await?;
-        apply_rotation(repo, &store, wave, ctx, name, entry)
+        apply_rotation(repo, &store, wave, ctx, name, entry, acquisition)
             .await
             .map_err(|cause| error(format!("{cause}; retry `lf repo new-chapter {name}`")))?;
-        refresh_pm_snapshot(repo, wave.slug(), ctx).await?;
+        refresh_pm_snapshot_locked(repo, wave.slug(), ctx, acquisition.clone()).await?;
     }
     for (wave, ctx) in &contexts {
         let projects = checked_projects(repo, ctx, wave.slug()).await?;
@@ -484,6 +490,7 @@ async fn apply_rotation(
     ctx: &PmContext,
     name: &str,
     entry: &mut WaveRotation,
+    acquisition: &Arc<File>,
 ) -> OpsResult<()> {
     let linear_name = linear_project_name(repo, wave.slug(), name).await?;
     let mut project_observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -580,6 +587,7 @@ async fn apply_rotation(
             &ctx.initiative,
             successor.clone(),
             project_observed_at,
+            Some(acquisition.clone()),
         )
         .await
         .map_err(error)?;
@@ -596,6 +604,7 @@ async fn apply_rotation(
                     observed_at: items_observed_at,
                 },
                 Some((wave.id().clone(), ctx.initiative.clone())),
+                Some(acquisition.clone()),
             )
             .await
             .map_err(error)?;
@@ -640,6 +649,7 @@ async fn apply_rotation(
                         observed_at,
                     },
                     Some((wave.id().clone(), ctx.initiative.clone())),
+                    Some(acquisition.clone()),
                 )
                 .await
                 .map_err(error)?;
@@ -689,6 +699,7 @@ async fn apply_rotation(
                             observed_at,
                         },
                         Some((wave.id().clone(), ctx.initiative.clone())),
+                        Some(acquisition.clone()),
                     )
                     .await
                     .map_err(error)?;
@@ -781,6 +792,7 @@ async fn apply_rotation(
             &ctx.initiative,
             completed,
             observed_at,
+            Some(acquisition.clone()),
         )
         .await
         .map_err(error)?;
@@ -804,7 +816,7 @@ pub(crate) async fn require_chapter_home(store: &Store, wave: &Wave) -> OpsResul
     Ok(())
 }
 
-pub(crate) async fn rotation_lock(wave: &Wave) -> OpsResult<File> {
+pub(crate) async fn rotation_lock(wave: &Wave) -> OpsResult<Arc<File>> {
     let path = crate::store::lf_home_dir().join("chapter-locks");
     #[cfg(test)]
     let path = super::pm::PM_TEST_CONTEXT
@@ -821,7 +833,7 @@ pub(crate) async fn rotation_lock(wave: &Wave) -> OpsResult<File> {
     // OS ownership releases on crash; provider state makes the next holder a resumer.
     for _ in 0..300 {
         match fs2::FileExt::try_lock_exclusive(&file) {
-            Ok(()) => return Ok(file),
+            Ok(()) => return Ok(Arc::new(file)),
             Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
@@ -829,7 +841,7 @@ pub(crate) async fn rotation_lock(wave: &Wave) -> OpsResult<File> {
         }
     }
     Err(error(
-        "another chapter rotation is active; retry the same chapter id",
+        "another planning operation is active; retry after it finishes",
     ))
 }
 

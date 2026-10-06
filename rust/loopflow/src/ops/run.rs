@@ -1032,13 +1032,16 @@ mod tests {
             items: Vec::new(),
         };
         store
-            .put_pm_snapshot(PmSnapshotRow {
-                wave_id: wave.id().clone(),
-                provider: "linear".to_string(),
-                initiative: "initiative-1".to_string(),
-                synced_at: OffsetDateTime::now_utc().unix_timestamp(),
-                snapshot,
-            })
+            .put_pm_snapshot(
+                PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".to_string(),
+                    initiative: "initiative-1".to_string(),
+                    synced_at: OffsetDateTime::now_utc().unix_timestamp(),
+                    snapshot,
+                },
+                None,
+            )
             .await
             .unwrap();
 

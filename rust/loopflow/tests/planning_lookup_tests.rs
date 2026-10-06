@@ -26,29 +26,58 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
     .unwrap();
     let scope = repo.path().canonicalize().unwrap();
     runtime
-        .block_on(store.put_pm_task(&scope.to_string_lossy(), "linear", record.clone(), None))
+        .block_on(store.put_pm_task(
+            &scope.to_string_lossy(),
+            "linear",
+            record.clone(),
+            None,
+            None,
+        ))
         .unwrap();
     let mut stale = record.clone();
     stale.item.id = "issue-2".into();
     stale.item.identifier = "FIX-2".into();
     stale.observed_at -= 7 * 86400 + 1;
     runtime
-        .block_on(store.put_pm_task(&scope.to_string_lossy(), "linear", stale.clone(), None))
+        .block_on(store.put_pm_task(
+            &scope.to_string_lossy(),
+            "linear",
+            stale.clone(),
+            None,
+            None,
+        ))
         .unwrap();
     let mut invalid = record.clone();
     invalid.item.id = "issue-3".into();
     invalid.item.identifier = "FIX-3".into();
     runtime
-        .block_on(store.put_pm_task(&scope.to_string_lossy(), "linear", invalid.clone(), None))
+        .block_on(store.put_pm_task(
+            &scope.to_string_lossy(),
+            "linear",
+            invalid.clone(),
+            None,
+            None,
+        ))
         .unwrap();
     runtime
-        .block_on(store.invalidate_pm_task(&scope.to_string_lossy(), "linear", "FIX-3"))
+        .block_on(store.invalidate_pm_task(
+            &scope.to_string_lossy(),
+            "linear",
+            invalid.clone(),
+            None,
+        ))
         .unwrap();
     let mut removed = record.clone();
     removed.item.id = "issue-4".into();
     removed.item.identifier = "FIX-4".into();
     runtime
-        .block_on(store.put_pm_task(&scope.to_string_lossy(), "linear", removed.clone(), None))
+        .block_on(store.put_pm_task(
+            &scope.to_string_lossy(),
+            "linear",
+            removed.clone(),
+            None,
+            None,
+        ))
         .unwrap();
     runtime
         .block_on(store.observe_pm_issue_change("issue-4", None, true))

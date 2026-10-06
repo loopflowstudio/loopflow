@@ -1274,7 +1274,9 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
     PM_TEST_CONTEXT
         .scope(home, async {
             let ctx = super::resolve_context(&repo, "a").await.unwrap();
-            let snapshot = super::refresh_pm_snapshot(&repo, "a", &ctx).await.unwrap();
+            let snapshot = crate::ops::pm::refresh_pm_snapshot(&repo, "a", &ctx)
+                .await
+                .unwrap();
             assert_eq!(
                 super::select_current("a", &snapshot.projects).unwrap().id,
                 "a-current"

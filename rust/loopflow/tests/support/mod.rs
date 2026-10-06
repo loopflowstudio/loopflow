@@ -399,13 +399,16 @@ fn register_task_fixture(
             }]
         });
         store
-            .put_pm_snapshot(PmSnapshotRow {
-                wave_id: wave.id().clone(),
-                provider: "linear".to_string(),
-                initiative: "initiative-task-pr-tests".to_string(),
-                synced_at: now.unix_timestamp(),
-                snapshot: serde_json::from_value(pm_payload).unwrap(),
-            })
+            .put_pm_snapshot(
+                PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".to_string(),
+                    initiative: "initiative-task-pr-tests".to_string(),
+                    synced_at: now.unix_timestamp(),
+                    snapshot: serde_json::from_value(pm_payload).unwrap(),
+                },
+                None,
+            )
             .await
             .expect("cache Task PR context");
         store

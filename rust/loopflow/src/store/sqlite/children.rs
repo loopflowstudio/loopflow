@@ -169,49 +169,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn rebind_task_issue_identifier(
-        &self,
-        issue_id: &str,
-        old_identifier: &str,
-        new_identifier: &str,
-    ) -> StoreResult<bool> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let Some((task_id, current_identifier)) = tx
-            .query_row(
-                "SELECT id, issue_identifier FROM tasks WHERE external_issue_id=?1",
-                [issue_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()?
-        else {
-            return Ok(false);
-        };
-        if current_identifier == new_identifier {
-            return Ok(false);
-        }
-        if current_identifier != old_identifier {
-            return Err(StoreError::InvalidData(format!(
-                "Task {task_id} identifies issue {issue_id} as {current_identifier}, not {old_identifier}"
-            )));
-        }
-        let changed = tx.execute(
-            "UPDATE tasks SET issue_identifier=?3 WHERE id=?1 AND issue_identifier=?2",
-            params![task_id, old_identifier, new_identifier],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::InvalidData(format!(
-                "Task {task_id} changed during its team migration"
-            )));
-        }
-        tx.execute(
-            "UPDATE tasks SET updated_at=?2 WHERE id=?1",
-            params![task_id, now_unix()],
-        )?;
-        tx.commit()?;
-        Ok(true)
-    }
-
     pub fn complete_task(&self, task: &Task, skipped_pr: Option<&TaskPr>) -> StoreResult<()> {
         validate_task(task)?;
         if let Some(pr) = skipped_pr {

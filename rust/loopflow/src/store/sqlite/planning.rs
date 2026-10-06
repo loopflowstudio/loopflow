@@ -33,13 +33,62 @@ impl SqliteStore {
         validate_project_membership(&conn, &repo, provider, project)?;
         let tx = conn.transaction()?;
         put_project(&tx, &repo, provider, observed_at, project)?;
-        require_accepted_initiative(&tx, &repo, provider, &project.id, initiative)?;
-        tx.execute(
-            "INSERT INTO pm_wave_projects(wave_id,project_id,position)
-             VALUES(?1,?2,(SELECT COALESCE(MAX(position)+1,0) FROM pm_wave_projects WHERE wave_id=?1))
-             ON CONFLICT(wave_id,project_id) DO NOTHING",
-            params![wave,project.id],
+        associate_project(&tx, &repo, provider, &project.id, wave, initiative)?;
+        project_accepted_planning(
+            &tx,
+            &repo,
+            provider,
+            std::slice::from_ref(project),
+            &[],
+            Some((wave, initiative)),
         )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn reconcile_pm_project_teams(
+        &self,
+        wave: &WaveId,
+        provider: &str,
+        initiative: &str,
+        project: &PmProject,
+        observed_at: i64,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let repo: String = conn.query_row(
+            "SELECT repo FROM waves WHERE id=?1",
+            [wave.as_str()],
+            |row| row.get(0),
+        )?;
+        if project.initiative_ids.as_slice() != [initiative] {
+            return Err(StoreError::InvalidData(format!(
+                "Project {} changed Initiative during reteam",
+                project.id
+            )));
+        }
+        let tx = conn.transaction()?;
+        let previous: Option<String> = tx
+            .query_row(
+                "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+                params![repo, provider, project.id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(previous) = previous {
+            let mut previous: PmProject = serde_json::from_str(&previous)?;
+            if previous.initiative_ids.as_slice() != [initiative] {
+                return Err(StoreError::InvalidData(format!(
+                    "Project {} changed Initiative during reteam",
+                    project.id
+                )));
+            }
+            // Reteam orders Team relationships only. Retain independently newer entity facts.
+            previous.team_ids.clone_from(&project.team_ids);
+            tx.execute("UPDATE pm_projects SET body=?4,membership_unresolved=0 WHERE repo=?1 AND provider=?2 AND id=?3",
+                params![repo, provider, project.id, serde_json::to_string(&previous)?])?;
+        }
+        put_project(&tx, &repo, provider, observed_at, project)?;
+        associate_project(&tx, &repo, provider, &project.id, wave, initiative)?;
         project_accepted_planning(
             &tx,
             &repo,
@@ -86,22 +135,7 @@ impl SqliteStore {
             let project_id = record.item.project_id.as_deref().ok_or_else(|| {
                 StoreError::InvalidData("confirmed Wave requires a Project association".into())
             })?;
-            require_accepted_initiative(&tx, repo, provider, project_id, initiative)?;
-            let wave_repo: String =
-                tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
-                    row.get(0)
-                })?;
-            if wave_repo != repo {
-                return Err(StoreError::InvalidData(
-                    "confirmed Wave belongs to another repository".into(),
-                ));
-            }
-            tx.execute(
-                "INSERT INTO pm_wave_projects(wave_id,project_id,position)
-                 VALUES(?1,?2,(SELECT COALESCE(MAX(position)+1,0) FROM pm_wave_projects WHERE wave_id=?1))
-                 ON CONFLICT(wave_id,project_id) DO NOTHING",
-                params![wave,project_id],
-            )?;
+            associate_project(&tx, repo, provider, project_id, wave, initiative)?;
         }
         project_accepted_planning(
             &tx,
@@ -171,13 +205,22 @@ impl SqliteStore {
         &self,
         repo: &str,
         provider: &str,
-        selector: &str,
+        expected: &PmTaskRecord,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         // A null detail response invalidates cached admission, not provider history.
         // Only a complete detail observation can repair it; list omission is ambiguous.
-        conn.execute("UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider=?2 AND (id=?3 OR identifier=?3)",
-            params![repo,provider,selector])?;
+        conn.execute(
+            "UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider=?2 AND id=?3
+            AND observed_at=?4 AND json_extract(body,'$.revision') IS ?5",
+            params![
+                repo,
+                provider,
+                expected.item.id,
+                expected.observed_at,
+                expected.item.revision
+            ],
+        )?;
         Ok(())
     }
 
@@ -418,33 +461,29 @@ fn project_accepted_planning(
     let (confirmed_wave, confirmed_initiative) = confirmed_wave.unzip();
     let project_ids = serde_json::to_string(&projects.iter().map(|p| &p.id).collect::<Vec<_>>())?;
     let item_ids = serde_json::to_string(&items.iter().map(|i| &i.id).collect::<Vec<_>>())?;
-    let projects = {
-        let mut query = tx.prepare(&format!(
-            "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
-             SELECT body,observed_at,wave_id FROM accepted
-             WHERE id IN (SELECT value FROM json_each(?3))"
-        ))?;
-        let rows = query
-            .query_map(
-                params![
-                    repo,
-                    provider,
-                    project_ids,
-                    confirmed_wave,
-                    confirmed_initiative
-                ],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, WaveId>(2)?,
-                    ))
-                },
-            )?
-            .collect::<Result<Vec<_>, _>>()?;
-        rows
-    };
-    for (body, observed_at, wave_id) in projects {
+    let mut query = tx.prepare(&format!(
+        "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
+         SELECT body,observed_at,wave_id FROM accepted
+         WHERE id IN (SELECT value FROM json_each(?3))"
+    ))?;
+    let projects = query.query_map(
+        params![
+            repo,
+            provider,
+            project_ids,
+            confirmed_wave,
+            confirmed_initiative
+        ],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, WaveId>(2)?,
+            ))
+        },
+    )?;
+    for project in projects {
+        let (body, observed_at, wave_id) = project?;
         let project: PmProject = serde_json::from_str(&body)?;
         let existing: Option<(String, WaveId)> = tx
             .query_row(
@@ -453,21 +492,18 @@ fn project_accepted_planning(
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
-        if existing
-            .as_ref()
-            .is_some_and(|(_, owner)| owner != &wave_id)
-        {
-            return Err(StoreError::InvalidData(format!(
-                "Project {} changed Wave ownership",
-                project.id
-            )));
-        }
-        let id = existing
-            .map(|(id, _)| {
+        let id = match existing {
+            Some((_, owner)) if owner != wave_id => {
+                return Err(StoreError::InvalidData(format!(
+                    "Project {} changed Wave ownership",
+                    project.id
+                )));
+            }
+            Some((id, _)) => {
                 ProjectId::parse(&id).map_err(|error| StoreError::InvalidData(error.to_string()))
-            })
-            .transpose()?
-            .unwrap_or_else(ProjectId::new);
+            }?,
+            None => ProjectId::new(),
+        };
         tx.execute(
             "INSERT INTO projects(id,wave_id,external_project_id,project_slug,project_name,
              project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,flow,status)
@@ -504,6 +540,32 @@ fn project_accepted_planning(
 
 fn same_ids(left: &[String], right: &[String]) -> bool {
     left.iter().all(|id| right.contains(id)) && right.iter().all(|id| left.contains(id))
+}
+
+fn associate_project(
+    tx: &Transaction<'_>,
+    repo: &str,
+    provider: &str,
+    project_id: &str,
+    wave: &WaveId,
+    initiative: &str,
+) -> StoreResult<()> {
+    require_accepted_initiative(tx, repo, provider, project_id, initiative)?;
+    let wave_repo: String = tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
+        row.get(0)
+    })?;
+    if wave_repo != repo {
+        return Err(StoreError::InvalidData(
+            "confirmed Wave belongs to another repository".into(),
+        ));
+    }
+    tx.execute(
+        "INSERT INTO pm_wave_projects(wave_id,project_id,position)
+         VALUES(?1,?2,(SELECT COALESCE(MAX(position)+1,0) FROM pm_wave_projects WHERE wave_id=?1))
+         ON CONFLICT(wave_id,project_id) DO NOTHING",
+        params![wave, project_id],
+    )?;
+    Ok(())
 }
 
 fn require_accepted_initiative(
@@ -909,7 +971,7 @@ mod tests {
             .confirm_task_deletion(&wave, "issue", "FIX-1")
             .await
             .unwrap();
-        store.put_pm_snapshot(list).await.unwrap();
+        store.put_pm_snapshot(list, None).await.unwrap();
         let removed = store
             .pm_task_observation("/repo", "linear", "FIX-1")
             .await

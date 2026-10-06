@@ -151,3 +151,18 @@ line-editing keys beside standalone Ghostty. Proof for these
 is his eye on a real shell; the display suite
 (`LOOPFLOW_NATIVE_TESTS=1 swift test --filter GhosttyTerminalInputTests`) has still
 not run for `lf2`.
+
+## Second look, 2026-10-05: selection color
+
+Jack, on the build with the header and polish passes: "the selection state cant
+be burgundy if the fail is also red".
+
+Changed: red now means failed and nothing else. Selection is the terminal's
+cream (`#F5F1EA`): a 0.06 tint and a cream left bar on a successful block; on a
+failed block the red fill stays at 0.14 and only the bar turns cream. Hover is
+a 0.03 cream tint. This supersedes the burgundy and rose selection colors and
+the per-state red alphas in the plan's contrast table; the contrast test still
+holds every fill at 3:1 for palette 8. 16 focused tests pass. Loopflow Dev was
+relaunched on this build; Jack has not yet said whether cream reads right.
+The choice of cream is mine, not Jack's.
+

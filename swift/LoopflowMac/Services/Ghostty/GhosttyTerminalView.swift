@@ -295,28 +295,34 @@ func ghosttyBlockHeaderFrame(row: Int, bounds: CGRect, cellHeight: CGFloat) -> C
     )
 }
 
-/// Block chrome. A resting block has none; hover is faint; selection is the
-/// burgundy tint; a reported failure is red, selected or not. Every fill keeps
+/// Block chrome. A resting block has none; hover is faint; selection is a
+/// cream tint and bar; a reported failure is red, selected or not. Every fill keeps
 /// the dimmest palette color (8) at 3:1 or better, which caps red near 0.18.
 struct GhosttyCommandBlockStyle {
     let fill: NSColor
     let accent: NSColor
 
     init(block: GhosttyCommandBlockLayout, hovered: Bool) {
-        let burgundy = NSColor(red: 0x72 / 255, green: 0x2F / 255, blue: 0x37 / 255, alpha: 1)
-        let rose = NSColor(red: 0xB8 / 255, green: 0x62 / 255, blue: 0x6C / 255, alpha: 1)
+        // Red means failed and nothing else. Selection and hover are the
+        // terminal's cream, so a selected failure still reads as both.
+        let cream = NSColor(red: 0xF5 / 255, green: 0xF1 / 255, blue: 0xEA / 255, alpha: 1)
         let red = NSColor(red: 0xD4 / 255, green: 0x45 / 255, blue: 0x3A / 255, alpha: 1)
         if block.failed {
-            fill = red.withAlphaComponent(block.selected ? 0.18 : hovered ? 0.16 : 0.14)
-            accent = red.withAlphaComponent(block.selected ? 1 : 0.75)
+            fill = red.withAlphaComponent(0.14)
         } else if block.selected {
-            fill = burgundy.withAlphaComponent(0.28)
-            accent = rose.withAlphaComponent(0.95)
+            fill = cream.withAlphaComponent(0.06)
         } else if hovered {
-            fill = burgundy.withAlphaComponent(0.12)
-            accent = rose.withAlphaComponent(0.5)
+            fill = cream.withAlphaComponent(0.03)
         } else {
             fill = .clear
+        }
+        if block.selected {
+            accent = cream.withAlphaComponent(0.9)
+        } else if block.failed {
+            accent = red.withAlphaComponent(hovered ? 1 : 0.75)
+        } else if hovered {
+            accent = cream.withAlphaComponent(0.3)
+        } else {
             accent = .clear
         }
     }

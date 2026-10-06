@@ -281,6 +281,10 @@ News-heavy and not from Loopflow users. Jack has seen none of this on screen.
 4. **Dim text on the fills.** Palette 8 (`#7F766F`) fell below 3:1 on two red
    fills. Red is now 0.14 resting (as Jack saw it), 0.16 hovered, 0.18 selected.
 
+   Superseded for selection and hover on 2026-10-05: Jack rejected burgundy
+   beside red. Selection and hover are now cream; red stays 0.14 in every
+   state. See the demo note's second look.
+
    | Fill | Was | Now | Palette 8 | Header `#A39B93` | Foreground |
    | --- | --- | --- | --- | --- | --- |
    | none `#24211F` | | | 3.60 | 5.84 | 13.03 |

@@ -253,7 +253,11 @@ struct GhosttyShellBlockTests {
         #expect(isRed(style(exit: 1, selected: true).fill))
         #expect(!isRed(style(exit: 0, selected: true).fill))
         #expect(!isRed(style(exit: nil, hovered: true).fill))
-        #expect(style(exit: 1, selected: true).fill.alphaComponent > style(exit: 1).fill.alphaComponent)
+        // Selection is never red: a selected failure keeps its fill and changes its bar.
+        #expect(isRed(style(exit: 1).accent))
+        #expect(!isRed(style(exit: 1, selected: true).accent))
+        #expect(!isRed(style(exit: 0, selected: true).accent))
+        #expect(style(exit: 0, selected: true).accent == style(exit: 1, selected: true).accent)
     }
 
     @Test("dim text stays readable on every block fill")

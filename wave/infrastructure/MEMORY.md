@@ -323,9 +323,11 @@ This explicit ID supplies bootstrap selection, not a candidate heuristic.
 The active-Project adoption test proves no Backlog activation or installed repair.
 
 Registration exclusion/retry preserves unbound checkout Sessions, Flow membership
-and unset Started; primary scopes remain excluded and historical binding allowed.
-Both APIs still insert supplied planning under the Started-count selector.
-Accepted issue selection remains unfinished; rotation holds only Wave guards.
+and unset Started. October 5 source now takes the Wave guard before Project
+resolution and carries it into either registration worker through commit, even
+after caller cancellation. It releases before checkout setup and execution.
+Accepted issue ownership/content/age still need transactional selection; the
+Started-count selector and rotation's missing checkout exclusion remain.
 
 October 5's missing-root regressions failed in both admission orderings. The repair
 locks canonical workspace/explicit Task paths exclusively and ancestors shared,
@@ -1057,9 +1059,7 @@ the proposed synthetic workload harness remains unbuilt. Jack Heart's July 6
 
 ## Direct invocation and large inputs (curated 2026-10-05)
 
-`719226ef4:wave/infrastructure/MEMORY.md` retains the September 25 evidence.
-Direct bound contributions retain caller-owned checkpointing and the common
-invocation loader; reads and unopened reviews establish no execution. The current
-Session model supersedes the historical Run/Started writer. Claude's file-backed
-stdin avoids argv limits; curate scratch rather than truncate it. Codex's rejected
-`turn/start` remaining waiting is unresolved; Claude success proves no repair.
+`44fe36620:wave/infrastructure/MEMORY.md` retains direct-invocation and large-input
+evidence. Caller-owned checkpointing, common invocation loading and Claude's
+file-backed stdin remain required. Codex's rejected `turn/start` remaining waiting
+is unresolved; Claude success proves no repair.

@@ -412,7 +412,7 @@ fn register_task_fixture(
             .await
             .expect("cache Task PR context");
         store
-            .create_task(&task, &pr)
+            .create_task(&task, &pr, None)
             .await
             .expect("create test Task");
     });
@@ -451,7 +451,7 @@ pub fn register_sibling_task(
         ..registered.pr.clone()
     };
     runtime
-        .block_on(registered.store.create_task(&task, &pr))
+        .block_on(registered.store.create_task(&task, &pr, None))
         .expect("create sibling Task");
     task
 }

@@ -958,7 +958,7 @@ fi
                 updated_at: timestamp,
             };
             runtime
-                .block_on(fixture.store.create_task(&task, &pr))
+                .block_on(fixture.store.create_task(&task, &pr, None))
                 .unwrap();
             pr.abandoned_at = merge.is_none().then_some(timestamp);
             pr.publication = Some(PrPublication {
@@ -1422,7 +1422,7 @@ esac
                 updated_at: timestamp,
             };
             runtime
-                .block_on(fixture.store.create_task(&task, &pr))
+                .block_on(fixture.store.create_task(&task, &pr, None))
                 .unwrap();
             runtime
                 .block_on(fixture.store.start_task_flow(

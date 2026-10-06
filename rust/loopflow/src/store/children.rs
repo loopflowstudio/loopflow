@@ -1,5 +1,8 @@
 //! Durable Project and Task rows and their events.
 
+use std::fs::File;
+use std::sync::Arc;
+
 use crate::id::WaveId;
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::{
@@ -8,22 +11,35 @@ use crate::work::task::{
 };
 use time::OffsetDateTime;
 
-use super::{run_sqlite, Store, StoreResult};
+use super::{run_planning_write, run_sqlite, Store, StoreResult};
 
 impl Store {
     pub(crate) async fn task_checkouts(&self) -> StoreResult<Vec<super::sqlite::TaskCheckout>> {
         run_sqlite(&self.sqlite, |store| store.task_checkouts()).await
     }
-    pub async fn create_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
+    pub async fn create_task(
+        &self,
+        task: &Task,
+        pr: &TaskPr,
+        acquisition: Option<Arc<File>>,
+    ) -> StoreResult<()> {
         let task = task.clone();
         let pr = pr.clone();
-        run_sqlite(&self.sqlite, move |store| store.insert_task(&task, &pr)).await
+        run_planning_write(&self.sqlite, acquisition, move |store| {
+            store.insert_task(&task, &pr)
+        })
+        .await
     }
 
-    pub async fn create_task_with_worktree(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
+    pub async fn create_task_with_worktree(
+        &self,
+        task: &Task,
+        pr: &TaskPr,
+        acquisition: Option<Arc<File>>,
+    ) -> StoreResult<()> {
         let task = task.clone();
         let pr = pr.clone();
-        run_sqlite(&self.sqlite, move |store| {
+        run_planning_write(&self.sqlite, acquisition, move |store| {
             store.insert_task_with_worktree(&task, &pr)
         })
         .await

@@ -1596,6 +1596,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancelled_registration_retains_planning_exclusion_through_commit() {
+        for initializing in [false, true] {
+            let (directory, store, wave) = planning_store().await;
+            let project = make_project(&wave);
+            store.create_project(&project).await.unwrap();
+            let mut task = make_task(&wave, &project);
+            task.worktree = directory.path().join("checkout");
+            let pr = make_task_pr(&task);
+            let path = directory.path().join("wave.lock");
+            let acquisition = std::fs::File::create(&path).unwrap();
+            fs2::FileExt::try_lock_exclusive(&acquisition).unwrap();
+            let competing = std::fs::File::open(&path).unwrap();
+            let entered = std::sync::Arc::new(tokio::sync::Notify::new());
+            let (release, blocked) = std::sync::mpsc::channel();
+            let gate = (
+                entered.clone(),
+                std::sync::Arc::new(std::sync::Mutex::new(blocked)),
+            );
+            let writer_store = super::Store::from_sqlite_for_test(store.sqlite.clone());
+            let input = task.clone();
+            let input_pr = pr.clone();
+            let writer = tokio::spawn(super::PLANNING_ACCEPTANCE_GATE.scope(gate, async move {
+                let acquisition = Some(std::sync::Arc::new(acquisition));
+                if initializing {
+                    writer_store
+                        .create_task_with_worktree(&input, &input_pr, acquisition)
+                        .await
+                } else {
+                    writer_store
+                        .create_task(&input, &input_pr, acquisition)
+                        .await
+                }
+            }));
+            tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+                .await
+                .unwrap();
+            writer.abort();
+            assert!(writer.await.unwrap_err().is_cancelled());
+            let excluded = fs2::FileExt::try_lock_exclusive(&competing).is_err();
+            let absent = store.get_task(&task.id).await.unwrap().is_none();
+            release.send(()).unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    if fs2::FileExt::try_lock_exclusive(&competing).is_ok() {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            assert!(
+                excluded,
+                "cancellation released the Wave before registration committed"
+            );
+            assert!(absent, "queued registration partially wrote its Task");
+            assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
+            assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+            assert!(!store.task_started(&task.id).await.unwrap());
+        }
+    }
+
+    #[tokio::test]
     async fn interrupted_reteam_preserves_confirmed_identifier_on_detail_refresh() {
         let (_directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
@@ -1603,7 +1666,7 @@ mod tests {
         let mut task = make_task(&wave, &project);
         task.plan.pm_snapshot_synced_at = 1;
         let pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.snapshot.items[0].name = task.plan.title.clone();
         snapshot.snapshot.items[0].description = task.plan.description.clone();
@@ -1655,7 +1718,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.snapshot.projects[0].status = crate::pm::ProjectStatus::Started;
         store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
@@ -1699,7 +1762,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         snapshot.synced_at = 10;
         let mut other = make_task(&wave, &project);
@@ -1707,7 +1770,7 @@ mod tests {
         other.plan.identifier = "INF-124".into();
         other.worktree = PathBuf::from("/repo.inf-124");
         let other_pr = make_task_pr(&other);
-        store.create_task(&other, &other_pr).await.unwrap();
+        store.create_task(&other, &other_pr, None).await.unwrap();
         snapshot.snapshot.items.push(
             task_planning_snapshot(&wave, &project, &other)
                 .snapshot
@@ -1758,7 +1821,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         let snapshot = task_planning_snapshot(&wave, &project, &task);
         store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
         let retained = store.get_task(&task.id).await.unwrap().unwrap();
@@ -1812,7 +1875,7 @@ mod tests {
         store.create_project(&predecessor).await.unwrap();
         let task = make_task(&wave, &predecessor);
         let pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         let old = task_planning_snapshot(&wave, &predecessor, &task);
         store.put_pm_snapshot(old, None).await.unwrap();
         // The first refresh has accepted and loaded its response, then pauses.
@@ -1875,7 +1938,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         let mut observed_project = snapshot.snapshot.projects.remove(0);
         observed_project.initiative_ids = vec!["elsewhere".into()];
@@ -1913,7 +1976,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         let mut observed = snapshot.snapshot.projects.remove(0);
         observed.name = "Refreshed plan".into();
@@ -2068,7 +2131,7 @@ mod tests {
         successor.plan.id = crate::planning::LinearProjectId::new("successor-project").unwrap();
         let task = make_task(&wave, &predecessor);
         let pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         store.create_project(&successor).await.unwrap();
         let mut response = task_planning_snapshot(&wave, &predecessor, &task);
         let mut next = response.snapshot.projects[0].clone();
@@ -2118,7 +2181,7 @@ mod tests {
         store.create_project(&predecessor).await.unwrap();
         let task = make_task(&wave, &predecessor);
         let pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         let position = store
             .start_task_flow(
                 &task.id,
@@ -2199,7 +2262,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         store
-            .create_task(&task, &make_task_pr(&task))
+            .create_task(&task, &make_task_pr(&task), None)
             .await
             .unwrap();
         let position = store
@@ -2284,7 +2347,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         store
-            .create_task(&task, &make_task_pr(&task))
+            .create_task(&task, &make_task_pr(&task), None)
             .await
             .unwrap();
         let target = ChildRef::Task(task.id.clone());
@@ -2360,7 +2423,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         store
-            .create_task(&task, &make_task_pr(&task))
+            .create_task(&task, &make_task_pr(&task), None)
             .await
             .unwrap();
         let observed_at = task.created_at - time::Duration::SECOND;
@@ -2465,7 +2528,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         store
-            .create_task(&task, &make_task_pr(&task))
+            .create_task(&task, &make_task_pr(&task), None)
             .await
             .unwrap();
         let work = WorkRef::Task(task.id.clone());
@@ -2540,7 +2603,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         store
-            .create_task(&task, &make_task_pr(&task))
+            .create_task(&task, &make_task_pr(&task), None)
             .await
             .unwrap();
         let work = WorkRef::Task(task.id.clone());
@@ -2610,7 +2673,7 @@ mod tests {
             );
         }
         store
-            .create_task(&task, &make_task_pr(&task))
+            .create_task(&task, &make_task_pr(&task), None)
             .await
             .unwrap();
         assert_eq!(store.list_tasks(None).await.unwrap(), vec![task]);
@@ -2637,7 +2700,7 @@ mod tests {
             let task = make_task(&wave, &project);
             let pr = make_task_pr(&task);
             if registration_first {
-                store.create_task(&task, &pr).await.unwrap();
+                store.create_task(&task, &pr, None).await.unwrap();
                 store
                     .confirm_task_deletion(wave.id(), task.plan.id.as_str(), &task.plan.identifier)
                     .await
@@ -2654,7 +2717,7 @@ mod tests {
                     .confirm_task_deletion(wave.id(), task.plan.id.as_str(), &task.plan.identifier)
                     .await
                     .unwrap();
-                assert!(store.create_task(&task, &pr).await.is_err());
+                assert!(store.create_task(&task, &pr, None).await.is_err());
                 assert!(store.get_task(&task.id).await.unwrap().is_none());
                 assert_eq!(
                     store
@@ -2690,7 +2753,7 @@ mod tests {
         let pr = make_task_pr(&task);
 
         store
-            .create_task_with_worktree(&task, &pr)
+            .create_task_with_worktree(&task, &pr, None)
             .await
             .expect("generic Run identity is opaque provenance, not planning authority");
         let placement = store
@@ -2756,7 +2819,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let target = make_task(&wave, &project);
         store
-            .create_task(&target, &make_task_pr(&target))
+            .create_task(&target, &make_task_pr(&target), None)
             .await
             .unwrap();
         let target_work = WorkRef::Task(target.id.clone());
@@ -2768,7 +2831,7 @@ mod tests {
         sibling.plan.identifier = "INF-124".to_string();
         sibling.worktree = PathBuf::from("/repo.inf-124");
         store
-            .create_task(&sibling, &make_task_pr(&sibling))
+            .create_task(&sibling, &make_task_pr(&sibling), None)
             .await
             .unwrap();
         store
@@ -2803,7 +2866,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         store
-            .create_task(&task, &make_task_pr(&task))
+            .create_task(&task, &make_task_pr(&task), None)
             .await
             .unwrap();
 
@@ -2910,7 +2973,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         store
-            .create_task(&task, &make_task_pr(&task))
+            .create_task(&task, &make_task_pr(&task), None)
             .await
             .unwrap();
         let first = store
@@ -3057,7 +3120,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         store
-            .create_task(&task, &make_task_pr(&task))
+            .create_task(&task, &make_task_pr(&task), None)
             .await
             .unwrap();
         let persisted = store.get_task(&task.id).await.unwrap().unwrap();
@@ -3114,7 +3177,7 @@ mod tests {
         let task = make_task(&wave, &project);
 
         let missing = store
-            .create_task(&task, &make_task_pr(&task))
+            .create_task(&task, &make_task_pr(&task), None)
             .await
             .unwrap_err();
         assert!(missing.to_string().contains("requires Project"));
@@ -3124,7 +3187,7 @@ mod tests {
         store.create_wave(&other_wave).await.unwrap();
         let wrong_wave = make_task(&other_wave, &project);
         let mismatched = store
-            .create_task(&wrong_wave, &make_task_pr(&wrong_wave))
+            .create_task(&wrong_wave, &make_task_pr(&wrong_wave), None)
             .await
             .unwrap_err();
         assert!(mismatched.to_string().contains("does not belong"));
@@ -3144,7 +3207,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         store
-            .create_task(&task, &make_task_pr(&task))
+            .create_task(&task, &make_task_pr(&task), None)
             .await
             .unwrap();
 
@@ -3189,7 +3252,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         let mut pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
 
         pr.publication = Some(PrPublication {
             requested_at: pr.updated_at,
@@ -3246,7 +3309,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         let mut pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
 
         pr.linear_attachment_id = Some("att-1".to_string());
         pr.linear_comment_id = Some("comment-1".to_string());
@@ -3283,7 +3346,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         let mut first = make_task_pr(&task);
-        store.create_task(&task, &first).await.unwrap();
+        store.create_task(&task, &first, None).await.unwrap();
 
         first.publication = Some(PrPublication {
             requested_at: first.updated_at,
@@ -3405,7 +3468,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         let mut pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
 
         let first_abandonment = OffsetDateTime::now_utc();
         pr.abandoned_at = Some(first_abandonment);
@@ -3438,7 +3501,10 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let parent_task = make_task(&wave, &project);
         let mut parent = make_task_pr(&parent_task);
-        store.create_task(&parent_task, &parent).await.unwrap();
+        store
+            .create_task(&parent_task, &parent, None)
+            .await
+            .unwrap();
 
         // The parent is published but not merged — the child stacks on it.
         parent.publication = Some(PrPublication {
@@ -3477,7 +3543,7 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        store.create_task(&child, &child_pr).await.unwrap();
+        store.create_task(&child, &child_pr, None).await.unwrap();
 
         let active = store.active_task_pr(&child.id).await.unwrap().unwrap();
         assert_eq!(active.id, child_pr.id);
@@ -3544,7 +3610,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         let mut pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
 
         pr.publication = Some(PrPublication {
             requested_at: pr.updated_at,
@@ -3584,7 +3650,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
 
         let mut refreshed_plan = task.plan.clone();
         refreshed_plan.title = "Latest provider title".into();
@@ -4030,7 +4096,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         let task = make_task(&wave, &project);
         let pr = make_task_pr(&task);
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         let position = store
             .start_task_flow(
                 &task.id,

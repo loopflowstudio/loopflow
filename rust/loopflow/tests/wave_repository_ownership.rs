@@ -365,7 +365,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let project = project(&alpha);
     store.create_project(&project).await.unwrap();
     let (task, task_pr) = task(&alpha, &project, &repo_a);
-    store.create_task(&task, &task_pr).await.unwrap();
+    store.create_task(&task, &task_pr, None).await.unwrap();
     let placement = alpha_placement;
     let overlap = relocate_wave(
         &store,
@@ -761,7 +761,10 @@ async fn relocation_refuses_meaningful_destination_history() {
     let owned_project = project(&project_shadow);
     store.create_project(&owned_project).await.unwrap();
     let (owned_task, owned_pr) = task(&project_shadow, &owned_project, &target);
-    store.create_task(&owned_task, &owned_pr).await.unwrap();
+    store
+        .create_task(&owned_task, &owned_pr, None)
+        .await
+        .unwrap();
 
     let child_shadow = registered_wave(&target, "with-child");
     store.create_wave(&child_shadow).await.unwrap();

@@ -11,7 +11,8 @@ status and evidence; earlier review notes remain at
   The prior iteration’s reteam repair request is satisfied locally;
   hierarchical checkout admission now excludes registration at an unregistered
   missing ancestor, preserving sibling progress. Its Task-population scan is gone.
-  Accepted registration facts and the Wave planning boundary remain next; rotation
+  Registration now retains its Wave guard through commit, including cancellation.
+  Accepted registration facts remain next; rotation
   still holds no checkout exclusion. The rejected global guard remains in history.
   Configuration-switch and created-successor recovery proofs depend on the later
   binding/transition replacement; name selection cannot recover preserved names.

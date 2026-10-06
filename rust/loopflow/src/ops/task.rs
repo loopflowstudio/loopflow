@@ -902,6 +902,17 @@ fn create_prepared_task(
         requested_agent,
         directive,
     } = prepared;
+    let acquisition = block_on_task(async {
+        let store = task_store().await?;
+        let locator = crate::work::wave::WaveLocator::discover(&main_repo, &resolved.wave)
+            .map_err(task_error)?;
+        let wave = store
+            .get_wave_at(&locator)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("owning Wave is not initialized"))?;
+        super::chapter::rotation_lock(&wave).await
+    })?;
     let project = block_on_task(crate::ops::project::resolve_project_for_task(
         &main_repo,
         &resolved.wave,
@@ -990,7 +1001,11 @@ fn create_prepared_task(
             &task.worktree,
             "Task checkout",
         )?;
-        match store.create_task_with_worktree(&task, &pr).await {
+        let registration = store
+            .create_task_with_worktree(&task, &pr, Some(acquisition.clone()))
+            .await;
+        drop(acquisition);
+        match registration {
             Ok(()) => {
                 if let Some(direction) = directive.as_deref() {
                     let mut publication_task = task.clone();
@@ -5629,7 +5644,7 @@ mod tests {
         pr.id = TaskPrId::new();
         pr.task_id = child.id.clone();
         pr.branch = "test/child".into();
-        fixture.store.create_task(&child, &pr).await.unwrap();
+        fixture.store.create_task(&child, &pr, None).await.unwrap();
         let mut flow = managed.clone();
         flow.invocation.id = "child-flow".into();
         flow.task_id = Some(child.id.clone());
@@ -6706,7 +6721,7 @@ time.sleep(30)
         };
         store.create_wave(&wave).await.unwrap();
         store.create_project(&project).await.unwrap();
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         let work = store
             .work_for_child(&ChildRef::Task(task.id.clone()))
             .await
@@ -7702,7 +7717,10 @@ time.sleep(30)
         parent.task_id = parent_task.id.clone();
         parent.branch = "test/stack-parent".into();
         parent.slug = "stack-parent".into();
-        store.create_task(&parent_task, &parent).await.unwrap();
+        store
+            .create_task(&parent_task, &parent, None)
+            .await
+            .unwrap();
         parent.publication = Some(PrPublication {
             requested_at: parent.created_at,
             presentation: None,

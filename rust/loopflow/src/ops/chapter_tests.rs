@@ -541,7 +541,7 @@ async fn local_task(
         created_at: now,
         updated_at: now,
     };
-    context.store.create_task(&task, &pr).await.unwrap();
+    context.store.create_task(&task, &pr, None).await.unwrap();
     (task, pr)
 }
 

@@ -434,7 +434,7 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         task
     }
 

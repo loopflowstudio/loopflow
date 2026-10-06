@@ -503,7 +503,7 @@ mod planning_tests {
         };
         store.create_wave(&wave).await.unwrap();
         store.create_project(&project).await.unwrap();
-        store.create_task(&task, &pr).await.unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         let mut flow = super::start_task_flow(&task, "task-design").unwrap();
         flow.cursor.index = 1;
         (store, task, flow)

@@ -727,7 +727,7 @@ fn branch_heads(repo: &Path) -> HashMap<String, String> {
 
 /// What GitHub knows about each branch: the current head's PR state and
 /// whether the branch still exists there.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 struct GithubBranches {
     pull_requests: HashMap<String, PullRequestState>,
     existing: HashSet<String>,
@@ -742,13 +742,8 @@ struct GithubBranches {
 fn github_branches(
     repo: &Path,
     (owner, name): (String, String),
-    mut heads: HashMap<String, String>,
-    branches: &[String],
+    branch_heads: &[(String, String)],
 ) -> Result<GithubBranches, RemoteFailure> {
-    let branch_heads = branches
-        .iter()
-        .filter_map(|branch| heads.remove(branch).map(|head| (branch.clone(), head)))
-        .collect::<Vec<_>>();
     let requests: Vec<&[(String, String)]> =
         branch_heads.chunks(GITHUB_BRANCHES_PER_REQUEST).collect();
     whole_github_answer(concurrently(&requests, |branch_heads| {
@@ -756,7 +751,7 @@ fn github_branches(
     }))
 }
 
-/// One answer from every request's, or the failure that leaves it unknown.
+/// Every request's answer as one, or the failure that leaves all of it unknown.
 ///
 /// A partial answer would report the unanswered branches as deleted and
 /// without PRs. A request stopped at its limit has used the whole limit.
@@ -766,10 +761,7 @@ fn whole_github_answer(
     if answers.contains(&Err(RemoteFailure::TimedOut)) {
         return Err(RemoteFailure::TimedOut);
     }
-    let mut whole = GithubBranches {
-        pull_requests: HashMap::new(),
-        existing: HashSet::new(),
-    };
+    let mut whole = GithubBranches::default();
     for answer in answers {
         let answer = answer?;
         whole.pull_requests.extend(answer.pull_requests);
@@ -906,15 +898,14 @@ fn local_states(
     repo: &Path,
     default_branch: &str,
     items: Vec<(PathBuf, Option<String>)>,
+    branches: &HashMap<String, LocalBranch>,
 ) -> Vec<WorktreeState> {
     let merge_target = format!("origin/{default_branch}");
-    let (dirty, (branches, within, squash_merged)) = thread::scope(|scope| {
+    let (dirty, (within, squash_merged)) = thread::scope(|scope| {
         // A failed cleanliness check is not evidence that removal is safe.
         let dirty =
             scope.spawn(|| concurrently(&items, |(path, _)| !is_clean(path).unwrap_or(false)));
-        let within = scope.spawn(|| branches_within(repo, &merge_target));
-        let branches = local_branches(repo);
-        let within = within.join().expect("listing worker panicked");
+        let within = branches_within(repo, &merge_target);
         // Only a branch with commits of its own can have been squash-merged.
         let candidates: Vec<String> = items
             .iter()
@@ -932,7 +923,7 @@ fn local_states(
         };
         (
             dirty.join().expect("listing worker panicked"),
-            (branches, within, squash_merged),
+            (within, squash_merged),
         )
     });
 
@@ -986,28 +977,22 @@ fn remote_facts(
     repo: &Path,
     default_branch: &str,
     items: &[(PathBuf, Option<String>)],
+    branches: &HashMap<String, LocalBranch>,
 ) -> RemoteFacts {
-    let branches: Vec<String> = items
+    let branch_heads: Vec<(String, String)> = items
         .iter()
         .filter_map(|(_, branch)| branch.as_ref())
         .filter(|b| b.as_str() != default_branch)
-        .cloned()
+        .filter_map(|b| Some((b.clone(), branches.get(b)?.head.clone())))
         .collect();
-    if branches.is_empty() {
+    if branch_heads.is_empty() {
         return RemoteFacts {
             pull_requests: Some(HashMap::new()),
             branches: HashSet::new(),
             outcome: RemoteOutcome::NotAsked,
         };
     }
-    let (nwo, heads) = thread::scope(|scope| {
-        let heads = scope.spawn(|| branch_heads(repo));
-        (
-            github_repo_nwo(repo),
-            heads.join().expect("listing worker panicked"),
-        )
-    });
-    let Some(nwo) = nwo else {
+    let Some(nwo) = github_repo_nwo(repo) else {
         // A non-GitHub remote has no GitHub PR state: known, and empty.
         let listed = list_remote_branches(repo);
         return RemoteFacts {
@@ -1018,7 +1003,7 @@ fn remote_facts(
             branches: listed.unwrap_or_default(),
         };
     };
-    match github_branches(repo, nwo, heads, &branches) {
+    match github_branches(repo, nwo, &branch_heads) {
         Ok(mut github) => {
             // The listing compares against the default branch's remote head,
             // so a set naming no worktree branch still means "all gone".
@@ -1081,12 +1066,15 @@ fn apply_network_enrichment(
 /// `pull_request` unknown; it never fails or stalls the local listing.
 pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
     let started = Instant::now();
-    // The remote cannot be asked before both are read, so they are read together.
-    let (default_branch, items) = thread::scope(|scope| {
+    // The remote cannot be asked before all three are read, so they are read
+    // together.
+    let (default_branch, branches, items) = thread::scope(|scope| {
         let default_branch = scope.spawn(|| get_default_branch(repo));
+        let branches = scope.spawn(|| local_branches(repo));
         let items = list_porcelain(repo);
         (
             default_branch.join().expect("listing worker panicked"),
+            branches.join().expect("listing worker panicked"),
             items,
         )
     });
@@ -1094,9 +1082,12 @@ pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
     let ((remote, remote_time), mut worktrees, local_git) = thread::scope(|scope| {
         let remote = scope.spawn(|| {
             let asked = Instant::now();
-            (remote_facts(repo, &default_branch, &items), asked.elapsed())
+            (
+                remote_facts(repo, &default_branch, &items, &branches),
+                asked.elapsed(),
+            )
         });
-        let worktrees = local_states(repo, &default_branch, items.clone());
+        let worktrees = local_states(repo, &default_branch, items.clone(), &branches);
         let local_git = started.elapsed();
         (
             remote.join().expect("listing worker panicked"),

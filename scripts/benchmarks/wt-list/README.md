@@ -65,6 +65,9 @@ is this branch. Raw rows: [20261005/](20261005/) (`github-requests-*`).
   chances to land in a listing. Ten samples do not size that.
 - A fresh Home, so no store cost: 0.13.4 already measured that at 0.14 s on the
   main Home. Installed figures for this change come from `lf wt timing`.
+- After these rows the listing stopped reading branch heads twice: 72 and 68
+  Git processes, not 73 and 69. Its one check ran at load 112 (1.73 s and
+  1.29 s medians), which sizes nothing; the rows above were not re-measured.
 
 ## 2026-10-05: startup against a 1.1 GB store
 

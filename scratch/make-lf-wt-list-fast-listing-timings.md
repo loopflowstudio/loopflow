@@ -8,8 +8,8 @@ largest remaining cost. Installed 0.13.4 reads 1.80 s median (three samples),
 
 - GitHub is asked 16 branches per request, side by side; one failed or stopped
   request leaves every branch unknown (`engine/worktrees.rs`).
-- Default branch and worktree list, then origin URL and branch heads, are read
-  side by side before the request.
+- Default branch, worktree list and branch heads are read side by side, once,
+  and shared by the local and remote halves (72/68 Git processes, was 73/69).
 - Report: `scripts/benchmarks/wt-list/README.md`, section "GitHub's answer time".
 
 ## Remaining on the Task
@@ -25,3 +25,5 @@ largest remaining cost. Installed 0.13.4 reads 1.80 s median (three samples),
 
 `cargo test -p loopflow --lib engine::worktrees` 22 passed; `--test worktree_tests`
 26 passed; `cargo clippy --all-targets -- -D warnings` clean. Gate owns the suites.
+Timing after the shared head read was sampled only at load 112: not comparable,
+not re-measured; installed `lf wt timing` owns it.

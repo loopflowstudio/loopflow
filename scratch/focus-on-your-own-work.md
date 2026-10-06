@@ -231,7 +231,7 @@ runs nothing ends a Task over uncommitted changes and keeps its checkout) —
     "Start → pursue → End End", Start); the failure shown twice; the "Work"
     list of raw Execs (to Debug); Desktop reads that write Execs (`lf flow
     list --json`, a failing `lf task comment`).
-    **Built, not yet compressed or realigned.** The header, the one **+**
+    **Built and compressed, not yet realigned.** The header, the one **+**
     menu and the two panes are in; the Sessions list, sidebar toggle, file
     toggle, Monitor (pane, button, palette action and its second reader),
     toolbar Flow chip, old Flow card with its picker, position text and the

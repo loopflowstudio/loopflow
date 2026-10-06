@@ -221,11 +221,6 @@ public struct TaskSessionGroups: Sendable, Equatable {
         waiting = primaryFirst.filter { $0.attention == .waiting }
         working = primaryFirst.filter { $0.attention != .waiting }
     }
-
-    /// The conversation a Task opens on: its primary, else the first open one.
-    public var entry: SessionRecord? {
-        (waiting + working).first(where: \.taskPrimary) ?? waiting.first ?? working.first
-    }
 }
 
 /// A bounded inventory page; nil next marks a complete enumeration.

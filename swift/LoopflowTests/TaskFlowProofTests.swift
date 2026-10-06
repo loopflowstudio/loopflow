@@ -32,6 +32,17 @@ private func accessible(_ root: Any) -> [NSObject] {
     return [element] + ((ax(element, "Children") as? [Any]) ?? []).flatMap { accessible($0) }
 }
 
+/// Set LOOPFLOW_FLOW_CAPTURE_DIR to write what a window drew as `name`.png.
+@MainActor
+private func captureIfRequested(_ window: NSWindow, name: String) throws {
+    guard let directory = ProcessInfo.processInfo.environment["LOOPFLOW_FLOW_CAPTURE_DIR"],
+          let content = window.contentView,
+          let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
+    content.cacheDisplay(in: content.bounds, to: bitmap)
+    let png = try #require(bitmap.representation(using: .png, properties: [:]))
+    try png.write(to: URL(fileURLWithPath: directory).appendingPathComponent("\(name).png"))
+}
+
 @Suite("Task Flow")
 struct TaskFlowTests {
     @Test("Flow snapshots and the catalogue decode every record without defaults")
@@ -299,14 +310,7 @@ struct TaskFlowTests {
         panes.close(panes.focusedPaneId)
         try await settle()
 
-        // Set LOOPFLOW_FLOW_CAPTURE_DIR to write what was drawn.
-        if let directory = ProcessInfo.processInfo.environment["LOOPFLOW_FLOW_CAPTURE_DIR"],
-           let content = window.contentView,
-           let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
-            content.cacheDisplay(in: content.bounds, to: bitmap)
-            let png = try #require(bitmap.representation(using: .png, properties: [:]))
-            try png.write(to: URL(fileURLWithPath: directory).appendingPathComponent("task-workspace.png"))
-        }
+        try captureIfRequested(window, name: "task-workspace")
     }
 }
 
@@ -600,15 +604,6 @@ struct TaskFlowProofTests {
             content.cacheDisplay(in: content.bounds, to: bitmap)
         }
         try await Task.sleep(for: .milliseconds(100))
-    }
-
-    private func captureIfRequested(_ window: NSWindow, name: String) throws {
-        guard let directory = ProcessInfo.processInfo.environment["LOOPFLOW_FLOW_CAPTURE_DIR"],
-              let content = window.contentView,
-              let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
-        content.cacheDisplay(in: content.bounds, to: bitmap)
-        let png = try #require(bitmap.representation(using: .png, properties: [:]))
-        try png.write(to: URL(fileURLWithPath: directory).appendingPathComponent("\(name).png"))
     }
 
     private func terminalText(_ surface: ghostty_surface_t) -> String {

@@ -178,8 +178,6 @@ private struct TemplateDiagram: View {
 struct FlowDiagram: View {
     let graph: FlowGraph
     let latest: LatestTaskFlow?
-    /// Real state of the delivery operation (the `pr land` op), shown on its chip.
-    var delivery: String? = nil
     @Binding var inspected: UInt32?
     var templateSpans: [LoopSpan]? = nil
     /// Layout may fold nodes; detail reads the complete definition.
@@ -285,7 +283,6 @@ struct FlowDiagram: View {
     private func nodeText(_ node: FlowNode) -> String {
         switch node.kind {
         case .xor: "\(node.label) · \(node.paths.count) paths"
-        case .op where node.label.hasPrefix("pr ") && delivery != nil: "\(node.label) · \(delivery!)"
         case .op, .skill: node.label
         }
     }

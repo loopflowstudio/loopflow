@@ -325,7 +325,7 @@ struct DesktopHeadlessTests {
         #expect(lanes.size.height > lanes.arrows[3].label.y)
     }
 
-    @Test("A Task opens on its primary and lists waiting conversations before working ones")
+    @Test("A Task lists waiting conversations before working ones, its primary leading each")
     func taskSessions() throws {
         let base = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("session.json"))) as? [String: Any])
@@ -343,8 +343,6 @@ struct DesktopHeadlessTests {
         ])
         #expect(groups.waiting.map(\.id) == ["asks"])
         #expect(groups.working.map(\.id) == ["primary", "working"])
-        #expect(groups.entry?.id == "primary")
-        #expect(TaskSessionGroups([try session("working"), try session("asks", waiting: true)]).entry?.id == "asks")
         #expect(try session("run").statusLabel == "Session")
     }
 

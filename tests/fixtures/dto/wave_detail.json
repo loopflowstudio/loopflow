@@ -591,7 +591,8 @@
         "slug": "release-feedback",
         "name": "current",
         "flow": "task-design",
-        "status": "started", "current": true,
+        "status": "started",
+        "current": true,
         "metric_targets": [
           {
             "metric_id": "task-loop-trust",
@@ -610,5 +611,12 @@
       }
     ],
     "truncated": false
+  },
+  "project_readiness": {
+    "state": "ready",
+    "project_id": "project-1",
+    "observed_at": null,
+    "pending_successor": null,
+    "activation": null
   }
 }

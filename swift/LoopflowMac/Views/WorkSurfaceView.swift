@@ -20,6 +20,10 @@ struct WorkSurfaceView: View {
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
     private var queryError: String? { model.roadmap.errorMessage }
     private var visibleWaves: [WaveRoadmap] { model.visibleRoadmaps }
+    private var openedWave: WaveSnapshot? {
+        guard let selection = model.selection, selection.kind == .wave else { return nil }
+        return model.wave(id: selection.id)?.wave
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,6 +43,10 @@ struct WorkSurfaceView: View {
                 evidenceBanner(title: "New session failed", detail: error)
             }
             content
+        }
+        .onChange(of: openedWave?.id, initial: true) { _, _ in
+            guard let wave = openedWave else { return }
+            model.activateProject(id: wave.id, name: wave.name, repo: wave.repo)
         }
         .background(palette.background)
         .sheet(item: $model.historyWave) { wave in
@@ -127,6 +135,10 @@ struct WorkSurfaceView: View {
                     }
                 }
 
+                ProjectReadinessView(readiness: roadmap.projectReadiness,
+                                     transportError: model.projectCommandErrors[roadmap.wave.id]) {
+                    model.activateProject(id: roadmap.wave.id, name: roadmap.wave.name, repo: roadmap.wave.repo)
+                }
                 section {
                     WorkspaceSectionHeading(title: "Current KRs") {
                         Button("Project history") {
@@ -145,7 +157,7 @@ struct WorkSurfaceView: View {
                     }
                 }
 
-                if let name = roadmap.currentProject?.flow {
+                if let name = roadmap.currentProject?.flow, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     section {
                         WorkspaceSectionHeading("Flow · \(name)")
                         if let entry = model.flowCatalog.value?.first(where: { $0.name == name }),

@@ -4,9 +4,9 @@ use std::sync::Arc;
 use crate::ops::{OpsError, OpsResult};
 use crate::pm::{PmProject, ProjectContent, ProjectStatus};
 use crate::store::project_transitions::ProjectTransition;
+use crate::store::sqlite::project_selection::{read_project_binding, write_project_binding};
 use crate::store::{PlanningLocks, Store};
 use crate::work::project::Project;
-use crate::work::wave::project_binding::{read_project_binding, write_project_binding};
 use crate::work::wave::Wave;
 
 fn project_error(message: impl ToString) -> OpsError {
@@ -19,8 +19,7 @@ pub(crate) fn select_project<'a>(
     wave: &Wave,
     projects: &'a [PmProject],
 ) -> OpsResult<&'a PmProject> {
-    let home = store.sqlite.home_dir().map_err(project_error)?;
-    let selected = read_project_binding(&home, wave.id())
+    let selected = read_project_binding(&store.sqlite, wave.id())
         .map_err(project_error)?
         .ok_or_else(|| project_error(format!("Wave {} has no configured Project", wave.slug())))?;
     let project = projects
@@ -43,12 +42,11 @@ pub(crate) fn select_project<'a>(
 }
 
 pub(crate) async fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmProject> {
-    let snapshot = store
-        .pm_snapshot(wave.id())
-        .await
-        .map_err(project_error)?
-        .ok_or_else(|| project_error("Project planning is unavailable; refresh the Wave"))?;
-    select_project(store, wave, &snapshot.snapshot.projects).cloned()
+    let projects = store
+        .sqlite
+        .accepted_projects(wave.id())
+        .map_err(project_error)?;
+    select_project(store, wave, &projects).cloned()
 }
 
 pub(crate) async fn resolve_project_for_task(
@@ -83,8 +81,9 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
     .await
     .map_err(project_error)?;
     let acquisition = super::pm::lock_wave_planning(&wave).await?;
-    let home = store.sqlite.home_dir().map_err(project_error)?;
-    let selected = read_project_binding(&home, wave.id()).map_err(project_error)?;
+    let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
+    import_binding(&store, &wave, &ctx, &acquisition).await?;
+    let selected = read_project_binding(&store.sqlite, wave.id()).map_err(project_error)?;
     if selected.as_deref().is_some_and(|id| id != project_id) {
         return Err(project_error(
             "Wave already has a different configured Project; its binding is unchanged",
@@ -104,7 +103,6 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
             ));
         }
     }
-    let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let project = require_project(&ctx, project_id).await?;
     let project = accept_project(&store, &wave, &ctx, project, observed_at, &acquisition).await?;
@@ -117,7 +115,7 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
         ));
     }
     write_project_binding(
-        &home,
+        &store.sqlite,
         wave.id(),
         selected.as_deref(),
         project_id,
@@ -139,9 +137,14 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
     .await
     .map_err(project_error)?;
     super::pm::require_planning_home(&store, &wave).await?;
+    store
+        .sqlite
+        .record_project_activation(wave.id(), crate::journal::current_exec_id().as_ref())
+        .map_err(project_error)?;
     let acquisition = super::pm::lock_wave_planning(&wave).await?;
-    let home = store.sqlite.home_dir().map_err(project_error)?;
-    let selected = read_project_binding(&home, wave.id()).map_err(project_error)?;
+    let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
+    import_binding(&store, &wave, &ctx, &acquisition).await?;
+    let selected = read_project_binding(&store.sqlite, wave.id()).map_err(project_error)?;
     let pending = store
         .pending_project_transition(wave.id())
         .await
@@ -169,7 +172,6 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
             ));
         }
     }
-    let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
     if selected.is_none() && creation.is_none() {
         ctx.client
             .require_initiative(&ctx.initiative)
@@ -255,22 +257,20 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
             ));
         }
     }
-    write_project_binding(&home, wave.id(), selected.as_deref(), id, &acquisition)
-        .map_err(project_error)?;
-    if read_project_binding(&home, wave.id())
-        .map_err(project_error)?
-        .as_deref()
-        != Some(id)
-    {
-        return Err(project_error(
-            "Project binding confirmation changed; retry ensure",
-        ));
-    }
     if creation.is_some() {
         store
-            .settle_project_transition(wave.id(), id, acquisition)
-            .await
+            .sqlite
+            .finish_project_creation(wave.id(), selected.as_deref(), id, &acquisition)
             .map_err(project_error)?;
+    } else {
+        write_project_binding(
+            &store.sqlite,
+            wave.id(),
+            selected.as_deref(),
+            id,
+            &acquisition,
+        )
+        .map_err(project_error)?;
     }
     Ok(project)
 }
@@ -359,4 +359,63 @@ pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) ->
             super::pm::refresh_pm_snapshot_locked(repo, &wave, &ctx, &store, acquisition).await?;
             Ok(())
         })
+}
+
+/// One-time supported import at an explicit mutation boundary. A failed read is
+/// never permission to create; the original bytes remain durable evidence.
+pub(crate) async fn import_binding(
+    store: &Store,
+    wave: &Wave,
+    ctx: &super::pm::PmContext,
+    guard: &Arc<PlanningLocks>,
+) -> OpsResult<()> {
+    if store
+        .sqlite
+        .project_binding_imported(wave.id())
+        .map_err(project_error)?
+    {
+        return Ok(());
+    }
+    let path = store
+        .sqlite
+        .home_dir()
+        .map_err(project_error)?
+        .join("waves")
+        .join(wave.id().as_str())
+        .join("config.yaml");
+    let original = match std::fs::read_to_string(&path) {
+        Ok(content) => Some(content),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(project_error(format!(
+                "Project binding import at {}: {error}",
+                path.display()
+            )))
+        }
+    };
+    #[derive(serde::Deserialize)]
+    struct Config {
+        pm: Option<Binding>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Binding {
+        linear_project: Option<String>,
+    }
+    let selected = original
+        .as_deref()
+        .map(serde_yaml_ng::from_str::<Config>)
+        .transpose()
+        .map_err(project_error)?
+        .and_then(|config| config.pm)
+        .and_then(|pm| pm.linear_project);
+    if let Some(id) = &selected {
+        uuid::Uuid::parse_str(id).map_err(project_error)?;
+        let acquired = time::OffsetDateTime::now_utc().unix_timestamp();
+        let project = require_project(ctx, id).await?;
+        accept_project(store, wave, ctx, project, acquired, guard).await?;
+    }
+    store
+        .sqlite
+        .import_project_binding(wave.id(), original.as_deref(), selected.as_deref(), guard)
+        .map_err(project_error)
 }

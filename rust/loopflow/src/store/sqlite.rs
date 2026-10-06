@@ -30,12 +30,14 @@ mod flows;
 mod metrics;
 mod planning;
 mod pr_landings;
+pub(crate) mod project_selection;
 mod project_transitions;
 mod revisions;
 mod session_events;
 pub(crate) mod sessions;
 mod task_work;
 
+pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
 pub(crate) use task_work::OpenExecs;
 

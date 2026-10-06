@@ -495,6 +495,7 @@ public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
 }
 
 public struct WaveRoadmap: Decodable, Sendable, Hashable {
+    public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
     public let metricPortfolio: MetricPortfolio
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
@@ -503,6 +504,7 @@ public struct WaveRoadmap: Decodable, Sendable, Hashable {
     public let unavailableTasks: [UnavailableTaskEvidence]
 
     enum CodingKeys: String, CodingKey {
+        case projectReadiness = "project_readiness"
         case wave, projects, tasks
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
@@ -533,6 +535,7 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
 /// `lf wave status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot` without
 /// reshaping or dropping fields, so every Wave surface starts from one reading.
 public struct WaveDetailSnapshot: Decodable, Sendable {
+    public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
     public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
@@ -546,6 +549,7 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case projectReadiness = "project_readiness"
         case wave, projects, tasks, history
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
@@ -809,5 +813,28 @@ public struct ProjectRotationPreview: Decodable, Sendable {
         public let id: String
         public let identifier: String
         public let name: String
+    }
+}
+
+public struct ProjectReadiness: Decodable, Sendable, Hashable {
+    public enum State: String, Decodable, Sendable { case unconfigured, unavailable, inactive, ready, terminal }
+    public let state: State
+    public let projectId: String?
+    public let observedAt: Int64?
+    public let pendingSuccessor: String?
+    public let activation: Activation?
+
+    public struct Activation: Decodable, Sendable, Hashable {
+        public let execId: String
+        public let completedAt: Int64?
+        public let outcome: String?
+        public let error: String?
+        enum CodingKeys: String, CodingKey {
+            case execId = "exec_id", completedAt = "completed_at", outcome, error
+        }
+    }
+    enum CodingKeys: String, CodingKey {
+        case state, activation
+        case projectId = "project_id", observedAt = "observed_at", pendingSuccessor = "pending_successor"
     }
 }

@@ -948,6 +948,25 @@ final class PodiumModel {
         // Planning refresh owns that reconciliation once its evidence is complete.
     }
 
+    // Command ownership survives navigation. These are transport handles and feedback;
+    // selected Project, readiness and execution outcomes arrive in workspace frames.
+    private var projectCommands: [String: Task<Void, Never>] = [:]
+    private(set) var projectCommandErrors: [String: String] = [:]
+
+    @discardableResult
+    func activateProject(id: String, name: String, repo: String) -> Task<Void, Never>? {
+        guard !usesFixedFixture else { return nil }
+        if let command = projectCommands[id] { return command }
+        projectCommandErrors[id] = nil
+        let command = Task {
+            defer { projectCommands[id] = nil }
+            do { try await query.ensureProject(wave: name, cwd: repo) }
+            catch { projectCommandErrors[id] = error.localizedDescription }
+        }
+        projectCommands[id] = command
+        return command
+    }
+
     func setRepoPath(_ path: String?) {
         dismissTaskLink()
         let path = path.map(WaveOrigin.resolve)

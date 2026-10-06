@@ -7019,8 +7019,8 @@ time.sleep(30)
         };
         store.create_wave(&wave).await.unwrap();
         store.create_project(&project).await.unwrap();
-        crate::work::wave::project_binding::write_project_binding(
-            database.path(),
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
             wave.id(),
             None,
             project.plan.id.as_str(),

@@ -1735,8 +1735,8 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
     let (repo, wave) = runtime.block_on(fixture.planning_repo());
     runtime.block_on(fixture.seed(now() + 86_400));
     let selected = "00000000-0000-4000-8000-000000000001";
-    crate::work::wave::project_binding::write_project_binding(
-        &fixture.store.sqlite.home_dir().unwrap(),
+    crate::store::sqlite::project_selection::write_project_binding(
+        &fixture.store.sqlite,
         wave.id(),
         None,
         selected,

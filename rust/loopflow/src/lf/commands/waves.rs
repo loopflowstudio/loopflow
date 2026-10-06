@@ -65,6 +65,7 @@ pub struct WaveSnapshot {
 /// Wire type; no defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
+    pub project_readiness: crate::store::sqlite::ProjectReadiness,
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
     pub tasks: Evidence<TaskDetailSnapshot>,
@@ -383,6 +384,7 @@ pub struct RoadmapSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveRoadmap {
+    pub project_readiness: crate::store::sqlite::ProjectReadiness,
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
     pub metric_portfolio: MetricPortfolioDto,
@@ -405,20 +407,26 @@ pub struct ProjectSummary {
 
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
     let result = async {
-        let row = store
-            .pm_snapshot(wave.id())
-            .await?
-            .ok_or_else(|| anyhow!("Project planning has not been synced"))?;
-        let current = crate::ops::project::select_project(store, wave, &row.snapshot.projects)?
-            .id
-            .clone();
+        let row = store.pm_snapshot(wave.id()).await?;
+        let (observed, partial) = match row {
+            Some(row) => (row.snapshot.projects, false),
+            None => {
+                let projects = store.sqlite.accepted_projects(wave.id())?;
+                if projects.is_empty() {
+                    return Err(anyhow!("Project planning has not been synced"));
+                }
+                (projects, true)
+            }
+        };
+        let current = crate::store::sqlite::project_selection::read_project_binding(
+            &store.sqlite,
+            wave.id(),
+        )?;
         let registered = store.list_projects(Some(wave.id())).await?;
-        let projects = row
-            .snapshot
-            .projects
+        let projects = observed
             .into_iter()
             .map(|project| ProjectSummary {
-                current: project.id == current,
+                current: current.as_deref() == Some(project.id.as_str()),
                 work_id: registered
                     .iter()
                     .find(|work| work.plan.id.as_str() == project.id)
@@ -432,7 +440,7 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
                 krs: project.krs,
             })
             .collect();
-        Ok((projects, false))
+        Ok((projects, partial))
     }
     .await;
     Evidence::from_result(result)
@@ -559,6 +567,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
     let task_snapshots = wave_tasks(store, wave, true, None, &shared).await?;
     let metric_portfolio = crate::ops::metrics::wave_metric_portfolio(store, wave, now()).await?;
     Ok(WaveDetailSnapshot {
+        project_readiness: store.sqlite.project_readiness(wave.id())?,
         history: Evidence::from_result(
             crate::lf::commands::session_history::collect_recent_history(
                 crate::lf::commands::WorkFilter {
@@ -698,6 +707,7 @@ async fn roadmap_snapshot(
             continue;
         }
         roadmaps.push(WaveRoadmap {
+            project_readiness: store.sqlite.project_readiness(wave.id())?,
             wave: snapshot,
             projects: project_planning(store, wave).await,
             tasks: match task_snapshots.tasks {
@@ -2552,8 +2562,8 @@ mod tests {
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]})).unwrap(),
         }, None).await.unwrap();
-        crate::work::wave::project_binding::write_project_binding(
-            directory.path(),
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
             wave.id(),
             None,
             "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3",
@@ -2665,8 +2675,8 @@ mod tests {
             .is_err());
         assert!(!directory.path().join("waves").exists());
         let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
-        crate::work::wave::project_binding::write_project_binding(
-            directory.path(),
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
             wave.id(),
             None,
             selected,
@@ -2695,7 +2705,15 @@ mod tests {
                     .collect::<Vec<_>>(),
                 vec![selected]
             );
-            let tasks = super::wave_tasks(&store, &wave, false, None).await.unwrap();
+            let tasks = super::wave_tasks(
+                &store,
+                &wave,
+                false,
+                None,
+                &super::SharedTaskReads::read(&store).await.unwrap(),
+            )
+            .await
+            .unwrap();
             let super::Evidence::Ok { items, .. } = tasks.tasks else {
                 panic!("Task evidence unavailable")
             };
@@ -2707,19 +2725,26 @@ mod tests {
         let after = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         assert_eq!(before.snapshot, after.snapshot);
         assert_eq!(before.synced_at, after.synced_at);
-        // A different configured UUID never falls back to one of the Started Projects.
-        crate::work::wave::project_binding::write_project_binding(
-            directory.path(),
-            wave.id(),
-            Some(selected),
-            "5a3aaee8-a95a-4726-9578-22a4700270ac",
-            &guard,
+        // An unaccepted UUID cannot become a selection or silently pick another Project.
+        assert!(
+            crate::store::sqlite::project_selection::write_project_binding(
+                &store.sqlite,
+                wave.id(),
+                Some(selected),
+                "5a3aaee8-a95a-4726-9578-22a4700270ac",
+                &guard,
+            )
+            .is_err()
+        );
+        let retained = super::wave_tasks(
+            &store,
+            &wave,
+            false,
+            None,
+            &super::SharedTaskReads::read(&store).await.unwrap(),
         )
+        .await
         .unwrap();
-        assert!(crate::ops::project::current_project(&store, &wave)
-            .await
-            .is_err());
-        let retained = super::wave_tasks(&store, &wave, false, None).await.unwrap();
         assert!(
             matches!(retained.tasks, super::Evidence::Ok { items, .. } if items.len() == 1 && items[0].task.id == item.id)
         );

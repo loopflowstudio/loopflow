@@ -217,6 +217,9 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("wave_detail.json")
         let detail = try JSONDecoder().decode(WaveDetailSnapshot.self, from: data)
 
+        #expect(detail.projectReadiness.state == .ready)
+        #expect(detail.projectReadiness.projectId == detail.currentProject?.id)
+        #expect(detail.projectReadiness.activation == nil)
         #expect(detail.wave.home.id == "home_00000000000000000000000000000001")
         #expect(detail.wave.home.route == "ssh://jack@mini-heart")
 

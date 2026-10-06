@@ -112,10 +112,12 @@ lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run
 lf repo new-chapter 2026-10 --plan scratch/chapter.json
 ```
 
-The shared Wave binding selects its current Project by UUID. Status and roadmap
+The Wave's SQLite selection references its accepted Project by UUID. Status and roadmap
 retain other Projects and their Tasks, including unresolved predecessor backlog.
 JSON marks the selected Project with `current`; another In Progress Project does
-not change that selection. Reading never creates a binding or activates a Project.
+not change that selection. Reading never creates a binding or activates a Project. Explicit ensure imports a
+legacy Home-local YAML selection once, preserving its original bytes in SQLite;
+later file edits cannot change selection.
 
 Projects hold Tasks, KRs, metric targets and an optional default Flow. Projects
 created together share a chapter name, such as `2026-10`; there is no chapter table.

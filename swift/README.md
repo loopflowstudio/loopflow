@@ -380,7 +380,7 @@ codebase tree, and registry health.
 - `LoopflowMac/PodiumModel.swift` — shared readings, stable selection, and local scope
 - `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
-- `LoopflowMac/Views/WaveDetailPane.swift` — current Project plan, opening/retry preparation, Tasks and metrics
+- `LoopflowMac/Views/WaveDetailPane.swift` — streamed Project plan, Tasks and metrics
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `LoopflowMac/Services/RegistryQueryLocal.swift` — local `lf` subprocess
@@ -507,3 +507,9 @@ Gate and CI build the app and inspect production views and controls without
 launching a window. Display/terminal integration is opt-in with
 `LOOPFLOW_NATIVE_TESTS=1`; use it for configured-host diagnostics or demo.
 See [TESTING.md](../TESTING.md) for the full commands and CLI prerequisite.
+
+Wave opening and Retry call `PodiumModel.activateProject` from both WorkSurface and
+Portfolio. The command outlives the opened view; it never refreshes a view directly.
+The workspace stream supplies `project_readiness`: selected Project, dated accepted
+facts, unresolved transition and the exact activation Exec's outcome. Empty default
+Flows render no template section. Command transport errors remain scoped to the Wave.

@@ -143,6 +143,9 @@ struct WavesView: View {
         .onChange(of: model.workspaceScope) { _, _ in model.syncWorkspaceScope() }
         .onChange(of: selectedWave?.id, initial: true) { _, _ in
             model.detailWaveId = selectedWave.flatMap { $0.isRegistered ? $0.id : nil }
+            if let wave = selectedWave, wave.isRegistered {
+                model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave))
+            }
         }
         // Registered Waves arrive with every planning frame.
         .onChange(of: model.planningSequence) { _, _ in
@@ -315,6 +318,8 @@ struct WavesView: View {
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
                 streamed: model.waveDetail,
+                transportError: model.projectCommandErrors[wave.id],
+                onActivateProject: { model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave)) },
                 onClose: { selectedWaveId = nil },
                 onOpenTask: { id in
                     model.setRepoPath(waveRepoPath(for: wave))

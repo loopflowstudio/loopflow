@@ -111,6 +111,9 @@ impl Home {
                 snapshot: serde_json::from_value(payload).unwrap(),
             })
             .unwrap();
+        rusqlite::Connection::open(self.path().join("loopflow.db")).unwrap().execute(
+            "UPDATE waves SET current_project_id=(SELECT id FROM projects WHERE external_project_id=?2) WHERE id=?1 AND current_project_id IS NULL",
+            rusqlite::params![self.wave.id(),PROJECT]).unwrap();
     }
 
     /// Start FIX-1 in a real Git checkout with one commit, and return it.
@@ -175,7 +178,7 @@ impl Home {
             created_at: now,
             updated_at: now,
         };
-        self.store.insert_task(&task, &pr).unwrap();
+        self.store.insert_task(task.clone(), &pr, false).unwrap();
         worktree
     }
 
@@ -798,4 +801,40 @@ fn usage_rereads_only_wave_detail_and_not_for_every_row() {
     }
     let readings = after["wave"] - before["wave"];
     assert!((1..=2).contains(&readings), "wave read {readings} times");
+}
+
+#[test]
+fn selection_only_commit_reaches_two_open_workspace_readers() {
+    let home = Home::new();
+    let first = home.watch();
+    let second = home.watch();
+    let await_state = |watch: &Watch, expected| {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline {
+            if let Some(frame) = watch.next(Duration::from_millis(500)) {
+                if let WorkspaceContent::Planning(Some(planning)) = frame.content {
+                    let wave = &planning.roadmap.waves[0];
+                    if wave.project_readiness.state == expected {
+                        assert!(
+                            matches!(&wave.projects, Evidence::Ok { items, .. } if items.len()==1)
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+        panic!("selection change never reached reader");
+    };
+    use loopflow::store::sqlite::ProjectReadinessState;
+    await_state(&first, ProjectReadinessState::Ready);
+    await_state(&second, ProjectReadinessState::Ready);
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE waves SET current_project_id=NULL WHERE id=?1",
+            [home.wave.id()],
+        )
+        .unwrap();
+    await_state(&first, ProjectReadinessState::Unconfigured);
+    await_state(&second, ProjectReadinessState::Unconfigured);
 }

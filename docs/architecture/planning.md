@@ -23,8 +23,8 @@ lf wave bind-project product <project-uuid> --json
 lf wave ensure product --json
 ```
 
-Validate one existing Project and record `pm.linear_project` in
-`<Home>/waves/<WaveId>/config.yaml`. Repeating the same binding preserves it;
+Validate one existing Project and select its accepted local record on the Wave's
+SQLite row (`waves.current_project_id`). Repeating the same binding preserves it;
 a different existing binding is left unchanged. Setup preserves provider status,
 content and identity, including a Backlog Project without a Flow. It does not
 activate the Project. Operation routing and status select this exact ID; the JSON
@@ -36,13 +36,27 @@ predecessor Projects.
 
 `ensure` activates the configured Backlog or Planned Project with a status-only
 write. Without a binding it reserves one UUID in SQLite before creation, attaches
-it to the Wave's Initiative, activates it, then writes the shared binding. Retry
+it to the Wave's Initiative, activates it, then commits selection and creation settlement together. Retry
 reuses the reservation across uncertain responses and failed binding writes.
 Terminal, archived, paused or foreign Projects report their condition without
 replacement. Names, content and empty Flow remain intact. Ensure neither searches
 for candidates nor performs rotation; status and roadmap never call it. Desktop
 ensures on explicit opening or retry while retaining cached planning and independent
-Session reads. Periodic refresh remains observational.
+Session reads. Both primary and Portfolio surfaces render the same SQLite-derived
+`project_readiness` through `lf monitor workspace --watch --json`. Committed selection,
+accepted facts, transitions and exact activation Exec outcomes invalidate that reading.
+A pending transition or unfinished Exec is unresolved evidence, not proof of liveness.
+Watchers and status reads never provision or import.
+
+The first explicit ensure, binding setup or applied rotation imports an existing
+`<Home>/waves/<WaveId>/config.yaml` selection once, after exact provider ownership
+validation. SQLite commits the selected Project and original YAML bytes together in
+`project_binding_imports`; absent files are recorded too. Malformed files or failed
+provider reads leave import retryable and prohibit creation. After import, the file
+is inert, even if a stale checkout or old writer changes it. Other YAML bytes remain
+untouched. An imported completed Project stays selected history and cannot be reopened.
+Activation records its exact Exec on the Wave; that Exec remains the sole owner of
+its terminal outcome and error. Swift retains command transport feedback only.
 
 ## Rotate the plan, preserve the work
 

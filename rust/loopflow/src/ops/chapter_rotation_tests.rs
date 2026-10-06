@@ -1,3 +1,4 @@
+use crate::store::sqlite::project_selection::{read_project_binding, write_project_binding};
 use std::path::Path;
 
 use super::{
@@ -6,10 +7,7 @@ use super::{
 };
 use crate::ops::chapter::{rotate, ChapterPlan, WaveChapterPlan};
 use crate::pm::{PmKr, ProjectContent};
-use crate::work::wave::{
-    project_binding::{read_project_binding, write_project_binding},
-    WaveLocator,
-};
+use crate::work::wave::WaveLocator;
 use serde_json::json;
 
 fn copy_context(context: &PmTestContext) -> PmTestContext {
@@ -29,14 +27,21 @@ async fn plan(context: &PmTestContext, repo: &Path, waves: &[&str]) -> ChapterPl
             .await
             .unwrap()
             .unwrap();
-        let acquisition = crate::ops::pm::lock_wave_planning(&wave).await.unwrap();
-        let home = context.store.sqlite.home_dir().unwrap();
+        super::seed_project(
+            &context.store,
+            &wave,
+            &super::project(old_id(name), "previous", crate::pm::ProjectStatus::Started),
+        )
+        .await;
+        let guard = crate::ops::pm::lock_wave_planning(&wave).await.unwrap();
         write_project_binding(
-            &home,
+            &context.store.sqlite,
             wave.id(),
-            read_project_binding(&home, wave.id()).unwrap().as_deref(),
+            read_project_binding(&context.store.sqlite, wave.id())
+                .unwrap()
+                .as_deref(),
             old_id(name),
-            &acquisition,
+            &guard,
         )
         .unwrap();
         inputs.push(WaveChapterPlan {
@@ -113,9 +118,8 @@ async fn rotation_recovers_every_mutation_and_partial_repository_settlement() {
                 assert_eq!(provider.lock().await.mutations, mutations);
                 assert_eq!(provider.lock().await.projects.len(), 4);
                 for wave in &input.waves {
-                    let home = context.store.sqlite.home_dir().unwrap();
                     assert_eq!(
-                        read_project_binding(&home, &wave.wave_id).unwrap(),
+                        read_project_binding(&context.store.sqlite, &wave.wave_id).unwrap(),
                         Some(wave.successor_id.clone())
                     );
                     assert!(context
@@ -269,8 +273,7 @@ async fn rotation_after_switch_retains_selected_membership_and_external_moves() 
             let target = &input.waves[0];
             assert!(rotate(&repo, &input, None, false).await.is_err());
             assert_eq!(
-                read_project_binding(&context.store.sqlite.home_dir().unwrap(), &target.wave_id)
-                    .unwrap(),
+                read_project_binding(&context.store.sqlite, &target.wave_id).unwrap(),
                 Some(target.successor_id.clone())
             );
             assert_eq!(
@@ -324,7 +327,7 @@ async fn rotation_before_switch_reclassifies_new_work_after_lost_transfer_readba
             let target = &input.waves[0];
             assert!(rotate(&repo, &input, None, false).await.is_err());
             assert_eq!(
-                read_project_binding(&context.store.sqlite.home_dir().unwrap(), &target.wave_id)
+                read_project_binding(&context.store.sqlite, &target.wave_id)
                     .unwrap()
                     .as_deref(),
                 Some(old_id("a"))
@@ -637,12 +640,9 @@ async fn rotation_keeps_the_binding_when_a_project_is_canceled_during_transfer()
                     Some((changed.into(), "canceled".into()));
                 assert!(rotate(&repo, &input, None, false).await.is_err());
                 assert_eq!(
-                    read_project_binding(
-                        &context.store.sqlite.home_dir().unwrap(),
-                        &target.wave_id
-                    )
-                    .unwrap()
-                    .as_deref(),
+                    read_project_binding(&context.store.sqlite, &target.wave_id)
+                        .unwrap()
+                        .as_deref(),
                     Some(old_id("a"))
                 );
                 assert_eq!(
@@ -672,13 +672,13 @@ async fn rotation_without_a_predecessor_creates_once_but_unknown_work_still_bloc
                 .contains("unavailable"));
             assert_eq!(provider.lock().await.mutations, 0);
             let target = &input.waves[0];
-            let home = context.store.sqlite.home_dir().unwrap();
-            std::fs::remove_file(
-                home.join("waves")
-                    .join(target.wave_id.as_str())
-                    .join("config.yaml"),
-            )
-            .unwrap();
+            rusqlite::Connection::open(&context.path)
+                .unwrap()
+                .execute(
+                    "UPDATE waves SET current_project_id=NULL WHERE id=?1",
+                    [target.wave_id.as_str()],
+                )
+                .unwrap();
             let result = rotate(&repo, &input, None, false).await.unwrap();
             assert!(result.waves[0].predecessor.is_none());
             assert!(result.waves[0].tasks.is_empty());
@@ -690,7 +690,7 @@ async fn rotation_without_a_predecessor_creates_once_but_unknown_work_still_bloc
                 "started"
             );
             assert_eq!(
-                read_project_binding(&home, &target.wave_id).unwrap(),
+                read_project_binding(&context.store.sqlite, &target.wave_id).unwrap(),
                 Some(target.successor_id.clone())
             );
         })
@@ -710,21 +710,32 @@ async fn rotation_does_not_settle_over_an_intervening_binding() {
         .scope(copy_context(&context), async {
             let input = plan(&context, &repo, &["a"]).await;
             let target = &input.waves[0];
-            let home = context.store.sqlite.home_dir().unwrap();
             let replacement = uuid::Uuid::new_v4().to_string();
-            provider.lock().await.binding_replacement = Some((
-                home.join("waves")
-                    .join(target.wave_id.as_str())
-                    .join("config.yaml"),
-                replacement.clone(),
-            ));
+            let wave = context
+                .store
+                .get_wave(&target.wave_id)
+                .await
+                .unwrap()
+                .unwrap();
+            super::seed_project(
+                &context.store,
+                &wave,
+                &super::project(
+                    &replacement,
+                    "Intervening plan",
+                    crate::pm::ProjectStatus::Started,
+                ),
+            )
+            .await;
+            provider.lock().await.binding_replacement =
+                Some((context.path.clone(), replacement.clone()));
             assert!(rotate(&repo, &input, None, false)
                 .await
                 .unwrap_err()
                 .to_string()
                 .contains("binding changed before settlement"));
             assert_eq!(
-                read_project_binding(&home, &target.wave_id).unwrap(),
+                read_project_binding(&context.store.sqlite, &target.wave_id).unwrap(),
                 Some(replacement)
             );
             assert!(context

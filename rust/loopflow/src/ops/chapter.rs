@@ -11,8 +11,8 @@ use crate::id::WaveId;
 use crate::ops::{OpsError, OpsResult};
 use crate::pm::{PmItem, PmProject, ProjectContent, ProjectStatus};
 use crate::store::project_transitions::ProjectTransition;
+use crate::store::sqlite::project_selection::{read_project_binding, write_project_binding};
 use crate::store::{PlanningLocks, Store};
-use crate::work::wave::project_binding::{read_project_binding, write_project_binding};
 use crate::work::wave::{Wave, WaveLocator};
 
 use super::pm::{lock_wave_planning, pm_store, project_is_foreign, resolve_context, PmContext};
@@ -113,7 +113,6 @@ pub(crate) async fn rotate(
         return Err(error("chapter name must be 1–160 characters on one line"));
     }
     let store = pm_store().await?;
-    let home = store.sqlite.home_dir().map_err(error)?;
     let selected_wave = match only_wave {
         Some(name) => Some(
             store
@@ -201,7 +200,10 @@ pub(crate) async fn rotate(
     let mut prepared = Vec::new();
     for (input, wave, ctx, acquisition) in contexts {
         let acquisition = Arc::new(acquisition.with_checkouts(&checkouts));
-        let binding = read_project_binding(&home, wave.id()).map_err(error)?;
+        if !dry_run {
+            super::project::import_binding(&store, &wave, &ctx, &acquisition).await?;
+        }
+        let binding = read_project_binding(&store.sqlite, wave.id()).map_err(error)?;
         let existing = store
             .project_transition(wave.id(), &input.successor_id)
             .await
@@ -733,14 +735,19 @@ async fn apply_rotation(store: &Store, entry: &mut PreparedRotation) -> OpsResul
             ));
         }
     }
-    let home = store.sqlite.home_dir().map_err(error)?;
     let expected = if entry.switched {
         Some(id.as_str())
     } else {
         entry.transition.predecessor_id.as_deref()
     };
-    write_project_binding(&home, entry.wave.id(), expected, &id, &entry.acquisition)
-        .map_err(error)?;
+    write_project_binding(
+        &store.sqlite,
+        entry.wave.id(),
+        expected,
+        &id,
+        &entry.acquisition,
+    )
+    .map_err(error)?;
     if let Some(previous) = &entry.transition.predecessor_id {
         let mut project = read_project(store, entry, previous).await?;
         if !matches!(
@@ -764,15 +771,6 @@ async fn apply_rotation(store: &Store, entry: &mut PreparedRotation) -> OpsResul
                 return Err(error("predecessor completion is not confirmed"));
             }
         }
-    }
-    if read_project_binding(&home, entry.wave.id())
-        .map_err(error)?
-        .as_deref()
-        != Some(&id)
-    {
-        return Err(error(
-            "Project binding changed before settlement; preserve the intervening decision",
-        ));
     }
     store
         .settle_project_transition(entry.wave.id(), &id, entry.acquisition.clone())

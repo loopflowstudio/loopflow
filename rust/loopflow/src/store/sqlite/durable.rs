@@ -622,9 +622,7 @@ pub(super) fn require_selected_project(conn: &Connection, project: &ProjectId) -
         [project.as_str()],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )?;
-    let selected =
-        crate::work::wave::project_binding::read_project_binding(&super::home_dir_in(conn)?, &wave)
-            .map_err(invalid_durable)?;
+    let selected = super::project_selection::read_in(conn, &wave).map_err(invalid_durable)?;
     if selected.as_deref() != Some(provider_id.as_str()) {
         return Err(StoreError::InvalidAuthority(
             "Task Project is not the Wave's configured Project; ensure the Wave before starting new work".into(),
@@ -852,8 +850,8 @@ mod durable_store_tests {
             updated_at: now,
         };
         store.insert_project(&project).unwrap();
-        crate::work::wave::project_binding::write_project_binding(
-            dir.path(),
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store,
             &wave_id,
             None,
             project.plan.id.as_str(),
@@ -924,8 +922,8 @@ mod durable_store_tests {
         store.create_session(input, None, None).unwrap();
         assert!(store.task_started(&new_task.id).unwrap());
         let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
-        crate::work::wave::project_binding::write_project_binding(
-            dir.path(),
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store,
             &task.wave_id,
             Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3"),
             other.plan.id.as_str(),
@@ -975,30 +973,31 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn configured_project_admission_requires_a_readable_active_binding() {
-        let (dir, store, task_id) = store_with_task();
+    fn configured_project_admission_requires_a_selected_active_project() {
+        let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
-        let config = dir
-            .path()
-            .join("waves")
-            .join(task.wave_id.as_str())
-            .join("config.yaml");
-        let bound = std::fs::read_to_string(&config).unwrap();
         let flow = autonomous_position(&task_id);
-        for content in [
-            None,
-            Some("pm: ["),
-            Some("pm: {linear_project: 218967b6-a760-4b7c-9a46-11d9d61a42c2}"),
-        ] {
-            match content {
-                Some(content) => std::fs::write(&config, content).unwrap(),
-                None => std::fs::remove_file(&config).unwrap(),
-            }
-            assert!(store.start_task_flow(&task_id, &flow).is_err());
-            assert!(store.task_flow(&task_id).unwrap().is_none());
-            assert!(!store.task_started(&task_id).unwrap());
-        }
-        std::fs::write(&config, bound).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE waves SET current_project_id=NULL WHERE id=?1",
+                [&task.wave_id],
+            )
+            .unwrap();
+        assert!(store.start_task_flow(&task_id, &flow).is_err());
+        assert!(store.task_flow(&task_id).unwrap().is_none());
+        assert!(!store.task_started(&task_id).unwrap());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                rusqlite::params![task.wave_id, task.project_id.as_str()],
+            )
+            .unwrap();
         for status in ["backlog", "planned", "paused", "completed", "canceled"] {
             store
                 .conn
@@ -1415,7 +1414,7 @@ mod durable_store_tests {
         let error = writer.join().unwrap().unwrap_err();
         assert!(error
             .to_string()
-            .contains("Project would change AgentSession ancestry"));
+            .contains("selected Project cannot change Wave ownership"));
         let (run_wave, project_wave): (String, String) = conn
             .query_row(
                 "SELECT r.wave_id,p.wave_id FROM agent_sessions r JOIN tasks t ON t.id=r.task_id

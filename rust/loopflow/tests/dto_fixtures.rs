@@ -101,6 +101,11 @@ fn pm_show_requires_team_identity_even_without_project_ownership() {
 #[test]
 fn wave_detail_preserves_flow_and_requires_home() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
+    assert_eq!(
+        snapshot.project_readiness.state,
+        loopflow::store::sqlite::ProjectReadinessState::Ready
+    );
+    assert!(snapshot.project_readiness.activation.is_none());
     let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
     };

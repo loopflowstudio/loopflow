@@ -552,8 +552,8 @@ mod tests {
             },
         };
         store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
-        crate::work::wave::project_binding::write_project_binding(
-            directory.path(),
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
             wave.id(),
             None,
             &projects[0].id,

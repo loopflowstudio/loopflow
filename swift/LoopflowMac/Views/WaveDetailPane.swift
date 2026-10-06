@@ -32,35 +32,14 @@ struct WaveDetailReading {
     }
 }
 
-@MainActor
-@Observable
-final class ProjectPreparation {
-    private(set) var isPreparing = false
-    private(set) var errorMessage: String?
-    private var generation = 0
-
-    func open(wave: String, repo: String, query: RegistryQuery) async {
-        generation += 1
-        let attempt = generation
-        isPreparing = true
-        errorMessage = nil
-        do {
-            try await query.ensureProject(wave: wave, cwd: repo)
-            guard attempt == generation, !Task.isCancelled else { return }
-        } catch {
-            guard attempt == generation, !Task.isCancelled else { return }
-            errorMessage = "Project preparation failed: \(error.localizedDescription)"
-        }
-        isPreparing = false
-    }
-}
-
 /// The Wave's Project plan, Tasks and metrics, supplied by `lf wave status`.
 struct WaveDetailPane: View {
     let wave: WaveViewModel
     let repoPath: String
     /// The window's streamed reading of this Wave, once one has arrived.
     let streamed: StreamedWaveDetail?
+    let transportError: String?
+    let onActivateProject: () -> Void
     let onClose: () -> Void
     let onOpenTask: (String) -> Void
 
@@ -87,6 +66,8 @@ struct WaveDetailPane: View {
                     selection: $selection,
                     refreshSignal: workRefresh,
                     streamed: streamed,
+                    transportError: transportError,
+                    onActivateProject: onActivateProject,
                     onOpenTask: onOpenTask
                 )
                 .id("\(repoPath)|\(wave.id)")
@@ -136,14 +117,14 @@ private struct WavePlanView: View {
     @Binding var selection: WaveWorkSelection?
     let refreshSignal: UInt64
     let streamed: StreamedWaveDetail?
+    let transportError: String?
+    let onActivateProject: () -> Void
     let onOpenTask: (String) -> Void
 
     @Environment(\.palette) private var palette
     @State private var reading = WaveDetailReading()
     @State private var historyFilters: [String: TaskHistoryFilter] = [:]
     @State private var historyNow = Date()
-    @State private var preparation = ProjectPreparation()
-    @State private var preparationRetry = 0
     // True until the first live read resolves. It gates the loading affordance,
     // so an empty plan during the pre-snapshot window reads as loading.
     @State private var isAwaitingDetail = true
@@ -156,7 +137,12 @@ private struct WavePlanView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 objective
-                projectPreparation
+                if let readiness = reading.snapshot?.projectReadiness {
+                    ProjectReadinessView(readiness: readiness, transportError: transportError, retry: onActivateProject)
+                } else if let transportError {
+                    Text(transportError).foregroundStyle(Color.statusWarning)
+                    Button("Retry Project preparation", action: onActivateProject)
+                }
                 projectAndTasks
                 if let portfolio = reading.snapshot?.metricPortfolio {
                     WaveMetricPortfolioView(
@@ -191,19 +177,6 @@ private struct WavePlanView: View {
             reading.recordFailure(RegistryQueryError(streamed.reason ?? "Wave status unavailable"))
         }
         isAwaitingDetail = false
-    }
-
-    @ViewBuilder
-    private var projectPreparation: some View {
-        if preparation.isPreparing {
-            ProgressView("Preparing Project…")
-        }
-        if let error = preparation.errorMessage {
-            VStack(alignment: .leading) {
-                Text(error).foregroundStyle(Color.statusWarning).textSelection(.enabled)
-                Button("Retry Project preparation") { preparationRetry += 1 }
-            }
-        }
     }
 
     private var displayedPlan: WavePlan { reading.plan(cached: plan) }
@@ -326,30 +299,11 @@ private struct WavePlanView: View {
     private func refreshDetail() async {
         if AppTestMode.current() == .mockWaves {
             applyMockDetail()
-            return
+        } else {
+            applyStreamed()
         }
-        guard wave.isRegistered else {
-            reading.clear()
-            isAwaitingDetail = false
-            return
-        }
-        do {
-            let snapshot = try await RegistryQueryLocal.shared.status(
-                wave: wave.name,
-                cwd: repoPath
-            )
-            guard !Task.isCancelled else { return }
-            historyNow = Date()
-            reading.update(snapshot)
-        } catch {
-            guard !Task.isCancelled else { return }
-            reading.recordFailure(error)
-        }
-        isAwaitingDetail = false
     }
 
-    /// The `mock-waves` detail rendering: the fixture owns the state→reading
-    /// decision (see `MockWaveFixture.detailReading`); the view just applies it.
     private func applyMockDetail() {
         let outcome = MockWaveFixture.detailReading(
             waveName: wave.name,

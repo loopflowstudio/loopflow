@@ -1270,8 +1270,8 @@ async fn project_binding_preserves_exact_backlog_identity_and_retries() {
             assert_eq!(first.krs[0].text, "Preserve work");
             assert!(!first.krs[0].holds);
             assert_eq!(
-                crate::work::wave::project_binding::read_project_binding(
-                    fixture.directory.path(),
+                crate::store::sqlite::project_selection::read_project_binding(
+                    &fixture.store.sqlite,
                     wave.id()
                 )
                 .unwrap()
@@ -1295,8 +1295,8 @@ async fn project_binding_preserves_exact_backlog_identity_and_retries() {
             .await
             .is_err());
             assert_eq!(
-                crate::work::wave::project_binding::read_project_binding(
-                    fixture.directory.path(),
+                crate::store::sqlite::project_selection::read_project_binding(
+                    &fixture.store.sqlite,
                     wave.id()
                 )
                 .unwrap()
@@ -1350,8 +1350,8 @@ async fn project_binding_rejects_delayed_backlog_after_accepted_completion() {
                 "{error}"
             );
             assert_eq!(
-                crate::work::wave::project_binding::read_project_binding(
-                    fixture.directory.path(),
+                crate::store::sqlite::project_selection::read_project_binding(
+                    &fixture.store.sqlite,
                     wave.id()
                 )
                 .unwrap(),

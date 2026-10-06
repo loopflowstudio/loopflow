@@ -1573,12 +1573,13 @@ mod tests {
     }
 
     fn select_project(store: &super::Store, project: &Project) {
-        let home = store.sqlite.home_dir().unwrap();
-        let previous =
-            crate::work::wave::project_binding::read_project_binding(&home, &project.wave_id)
-                .unwrap();
-        crate::work::wave::project_binding::write_project_binding(
-            &home,
+        let previous = crate::store::sqlite::project_selection::read_project_binding(
+            &store.sqlite,
+            &project.wave_id,
+        )
+        .unwrap();
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
             &project.wave_id,
             previous.as_deref(),
             project.plan.id.as_str(),

@@ -120,7 +120,9 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let updated = conn.execute(
             "UPDATE project_transitions SET settled_at=COALESCE(settled_at, ?3)
-             WHERE wave_id=?1 AND successor_id=?2",
+             WHERE wave_id=?1 AND successor_id=?2
+               AND EXISTS(SELECT 1 FROM waves w JOIN projects p ON p.id=w.current_project_id
+                          WHERE w.id=?1 AND p.external_project_id=?2)",
             params![
                 wave.as_str(),
                 successor,
@@ -129,7 +131,7 @@ impl SqliteStore {
         )?;
         if updated != 1 {
             return Err(StoreError::InvalidData(
-                "Project transition is missing".into(),
+                "Project binding changed before settlement or transition is missing; preserve the intervening decision".into(),
             ));
         }
         Ok(())
@@ -153,6 +155,20 @@ mod tests {
             "project_readiness",
         ))
         .unwrap();
+        // The finished schema includes the reactive-stream dependency too.
+        if !conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='store_revisions')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+        {
+            conn.execute_batch(&crate::store::migrations::current_draft_sql(
+                "store_revisions",
+            ))
+            .unwrap();
+        }
         conn.execute("INSERT INTO project_transitions(wave_id,successor_id,created_at) VALUES('w','first',1)", []).unwrap();
         assert!(conn.execute("INSERT INTO project_transitions(wave_id,successor_id,created_at) VALUES('w','second',2)", []).is_err());
         conn.execute(

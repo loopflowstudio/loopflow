@@ -285,10 +285,10 @@ Chapter creation requires planned KRs, with new Task admission afterward.
 Unreviewed backlog survives rotation until explicit disposition. These decisions
 supersede the earlier status-selection and automatic-expiration proposals.
 
-Jack Heart's October 5 comment `f092d63a-a152-4920-af81-d676a576f694` selects one
-shared local Project binding across checkouts. Stale checkout files and settled
-receipts cannot select it; Git publication is no opening prerequisite. The design
-uses a Home-local Wave-ID file; other policy keeps its owner. Earlier review:
+Jack Heart selected one shared local binding across checkouts on October 5
+(`f092d63a-a152-4920-af81-d676a576f694`). October 6's SQLite decision below
+supersedes its file layout; stale files and settled receipts never select a Project.
+The earlier review remains at
 `e04c83513573cc09883fb2b92ebdb63e06a22c95:scratch/keep-every-wave-ready-for.md`.
 
 October 5 source permits empty Flow and preserves names. Jack Heart's comment
@@ -313,10 +313,9 @@ expansion/move/narrowing response loss. These supersede the unrepaired-reteam
 finding; the registration and rotation proofs below establish later boundaries,
 not installed acceptance.
 
-The earlier created-successor retry preserved Task/PR/Flow identity but rejected
-`A — next` and `A — previous`. Exact-ID rotation below supersedes that failure;
-restoring name stripping would violate Jack Heart’s policy. Cross-process CLI
-recovery remains unproved. Desktop activation
+Exact-ID rotation supersedes the name-selector failure retained at
+`42e6c2706b1:scratch/keep-every-wave-ready-for.md`; cross-process recovery remains
+unproved. Desktop activation
 must preserve #1447's cached plans and independent Session reads, outside polling.
 #1446's ongoing procedures retain started-Task follow-through; reads never provision.
 
@@ -361,14 +360,11 @@ a caller-owned lock alone would release exclusion before a queued commit. Automa
 backlog cancellation and its standalone retirement writer are deleted. Unreviewed
 backlog stays with its Project; unresolved abandonment keeps its separate settlement.
 
-October 5 binding preserves YAML bytes and accepted ownership. Routing, editing
-and SQLite admission select its exact ID; started Tasks continue in predecessors
-and remain visible. Malformed bodies stay errors. Earlier reader/store evidence
-and the unresolved output-handle leak remain at
-`1825a5a45c743833f625e8c8144949ed139b97f9:wave/infrastructure/MEMORY.md`.
+The October 5 file-binding implementation is superseded by the October 6
+SQLite decision below. Its exact preservation evidence and unresolved output-handle
+leak remain at `42e6c2706b1b35b2852e438ff94a49d060faccda:scratch/keep-every-wave-ready-for.md`.
 
-Ensure has six synthetic operation fixtures and one migration proof; post-binding
-recovery is seeded, not a crash. Accepted facts precede activation. Evidence:
+Ensure’s initial operation fixtures seed post-binding recovery, not a crash. Evidence:
 `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:scratch/keep-every-wave-ready-for.md`.
 
 October 5 rotation retains exact-ID input, selected issue membership and settled
@@ -381,17 +377,23 @@ Operation fixtures cover partial settlement and both sides of the switch;
 CLI crashes, Desktop and configured Intelligence acceptance remain open.
 Earlier counterexamples: `fc6df439424bd341ec3cd8182c19b13ed45cffd7:wave/infrastructure/MEMORY.md`.
 
-October 5 Desktop activation runs on explicit opening/retry, independently of
-polling and Session reads; cached plans survive and obsolete completions are rejected.
-Realignment preview now owns its report and exact input together. A failed Apply
-retains both for retry; rereading the file could otherwise change reviewed bytes.
-Chapter skills implement KR planning → exact-ID creation → separate admission,
-retaining backlog and candidate IDs. Eleven headless preparation/presentation tests
-passed; they do not exercise mounted retry or skill-driven provider outcomes.
-CLI/crash and configured Intelligence acceptance remain open. Release's child
-memory reinforces recovery proof through actual entry points. Details remain in
-`scratch/keep-every-wave-ready-for.md`; earlier reconciliation is preserved at
-`3a149bb7105a307bbe1feda293f4d92a59434afb`.
+October 6: Jack Heart authorized replacing the Home-local YAML selector and
+`ProjectPreparation` with SQLite selection and LOO-382's workspace stream.
+`e887a21c1` was integrated via supported sync at `66a3daa86`; its uncommitted
+changes remain outside this branch. Selection references the accepted Project on
+the Wave row. Explicit mutations import old YAML once, retaining original bytes;
+old file edits thereafter select nothing. Creation selection/settlement commit
+together. Readiness derives from accepted facts, original age, transition evidence
+and the actual activation Exec. An unfinished Exec proves no current liveness.
+Both Desktop surfaces share activation and streamed reads; absent Flow renders no
+template. Partial Project acceptance must remain visible before a full inventory
+sync without manufacturing Task absence or full-refresh freshness. Watchers never
+activate. The headless Desktop checks passed; source verification establishes no
+installed Intelligence repair, mounted acceptance or production outcome.
+Remaining proofs live in the design. Release retains operation-entry recovery
+and the published-installation boundary; source work grants no install authority.
+Earlier Desktop evidence remains at
+`42e6c2706b1b35b2852e438ff94a49d060faccda:scratch/keep-every-wave-ready-for.md`.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 

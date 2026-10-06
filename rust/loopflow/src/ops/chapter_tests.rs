@@ -279,12 +279,16 @@ async fn graphql(
     };
     if query.contains("mutation SetProjectStatus") && vars["statusId"] == "started" {
         if let Some(path) = provider.binding_collision.take() {
-            std::fs::create_dir_all(path).unwrap();
+            rusqlite::Connection::open(path).unwrap().execute_batch(
+                "CREATE TRIGGER fail_selection BEFORE UPDATE OF current_project_id ON waves
+                 WHEN NEW.current_project_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'fixture selection failure'); END;"
+            ).unwrap();
         }
     }
     if query.contains("mutation SetProjectStatus") && vars["statusId"] == "completed" {
         if let Some((path, project)) = provider.binding_replacement.take() {
-            std::fs::write(path, format!("pm:\n  linear_project: {project}\n")).unwrap();
+            rusqlite::Connection::open(path).unwrap().execute(
+                "UPDATE waves SET current_project_id=(SELECT id FROM projects WHERE external_project_id=?1 AND wave_id=waves.id) WHERE id=(SELECT wave_id FROM projects WHERE external_project_id=?1)", [&project]).unwrap();
         }
     }
     if query.starts_with("mutation") {
@@ -458,11 +462,13 @@ async fn local_task(
         created_at: now,
         updated_at: now,
     };
-    let home = context.store.sqlite.home_dir().unwrap();
-    let selected =
-        crate::work::wave::project_binding::read_project_binding(&home, wave.id()).unwrap();
-    crate::work::wave::project_binding::write_project_binding(
-        &home,
+    let selected = crate::store::sqlite::project_selection::read_project_binding(
+        &context.store.sqlite,
+        wave.id(),
+    )
+    .unwrap();
+    crate::store::sqlite::project_selection::write_project_binding(
+        &context.store.sqlite,
         wave.id(),
         selected.as_deref(),
         old_id(wave_name),
@@ -1129,8 +1135,8 @@ async fn project_ensure_retries_each_uncertain_mutation_with_one_identity() {
                     .unwrap()
                     .is_none());
                 assert_eq!(
-                    crate::work::wave::project_binding::read_project_binding(
-                        directory.path(),
+                    crate::store::sqlite::project_selection::read_project_binding(
+                        &store.sqlite,
                         wave.id()
                     )
                     .unwrap()
@@ -1196,17 +1202,52 @@ async fn project_ensure_activates_exact_backlog_without_changing_content_or_task
     let provider = Arc::new(Mutex::new(fixture));
     let (url, server) = serve_fixture(provider.clone()).await;
     let context = context(&directory.path().join("registry.db"), &repo, &url).await;
+    let store = context.store.clone();
+    let wave = store
+        .get_wave_at(&WaveLocator::discover(&repo, "a").unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let config = directory
+        .path()
+        .join("waves")
+        .join(wave.id().as_str())
+        .join("config.yaml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    let original =
+        format!("# historical binding\npm:\n  linear_project: {id}\nowner: 'keep bytes'\n");
+    std::fs::write(&config, &original).unwrap();
     PM_TEST_CONTEXT
         .scope(context, async {
-            crate::ops::project::bind_project(&repo, "a", id)
-                .await
-                .unwrap();
+            std::fs::write(&config, "pm: [").unwrap();
+            assert!(crate::ops::project::ensure(&repo, "a").await.is_err());
+            assert!(!store.sqlite.project_binding_imported(wave.id()).unwrap());
+            assert_eq!(provider.lock().await.mutations, 0);
+            std::fs::write(&config, &original).unwrap();
+            provider.lock().await.unavailable = true;
+            assert!(crate::ops::project::ensure(&repo, "a").await.is_err());
+            assert!(!store.sqlite.project_binding_imported(wave.id()).unwrap());
+            assert_eq!(provider.lock().await.mutations, 0);
+            provider.lock().await.unavailable = false;
             let first = crate::ops::project::ensure(&repo, "a").await.unwrap();
             assert_eq!(
                 first,
                 crate::ops::project::ensure(&repo, "a").await.unwrap()
             );
             assert_eq!(first.id, id);
+            assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+            // The old file is inert after import, including when unreadable.
+            std::fs::write(&config, "malformed: [").unwrap();
+            assert_eq!(
+                crate::ops::project::ensure(&repo, "a").await.unwrap().id,
+                id
+            );
+            let readiness = store.sqlite.project_readiness(wave.id()).unwrap();
+            assert_eq!(
+                readiness.state,
+                crate::store::sqlite::ProjectReadinessState::Ready
+            );
+            assert!(readiness.observed_at.is_some());
             assert_eq!(first.name, "Summer work — customer requests");
             assert_eq!(first.status, ProjectStatus::Started);
             assert!(first.flow.is_empty());
@@ -1292,12 +1333,7 @@ async fn project_ensure_recovers_failed_binding_and_post_binding_interruption() 
                     .await
                     .unwrap()
                     .unwrap();
-                let config = directory
-                    .path()
-                    .join("waves")
-                    .join(wave.id().as_str())
-                    .join("config.yaml");
-                provider.lock().await.binding_collision = Some(config.clone());
+                provider.lock().await.binding_collision = Some(store.sqlite.home_dir().unwrap().join("registry.db"));
                 assert!(crate::ops::project::ensure(&repo, "a").await.is_err());
                 let pending = store
                     .pending_project_transition(wave.id())
@@ -1308,18 +1344,12 @@ async fn project_ensure_recovers_failed_binding_and_post_binding_interruption() 
                     provider.lock().await.projects[&pending.successor_id]["status"]["type"],
                     "started"
                 );
-                std::fs::remove_dir(&config).unwrap();
-                // A real unrelated edit survives recovery. The second case models the
-                // complete binding write with its settlement response still missing.
-                let initial = if already_bound {
-                    format!(
-                        "# retained\npm:\n  linear_project: {}\nowner: 'policy'\n",
-                        pending.successor_id
-                    )
-                } else {
-                    "# retained\nowner: 'policy'\n".into()
-                };
-                std::fs::write(&config, &initial).unwrap();
+                let conn = rusqlite::Connection::open(directory.path().join("registry.db")).unwrap();
+                conn.execute_batch("DROP TRIGGER fail_selection").unwrap();
+                // Model a committed selection whose settlement was interrupted.
+                if already_bound {
+                    conn.execute("UPDATE waves SET current_project_id=(SELECT id FROM projects WHERE external_project_id=?2) WHERE id=?1", rusqlite::params![wave.id(), pending.successor_id]).unwrap();
+                }
                 let project = crate::ops::project::ensure(&repo, "a").await.unwrap();
                 assert_eq!(project.id, pending.successor_id);
                 assert_eq!(provider.lock().await.mutations, 3);
@@ -1329,12 +1359,7 @@ async fn project_ensure_recovers_failed_binding_and_post_binding_interruption() 
                     .await
                     .unwrap()
                     .is_none());
-                let saved = std::fs::read_to_string(config).unwrap();
-                assert!(saved.starts_with("# retained\n"));
-                assert!(saved.contains("owner: 'policy'\n"));
-                if already_bound {
-                    assert_eq!(saved, initial);
-                }
+
             })
             .await;
         server.abort();

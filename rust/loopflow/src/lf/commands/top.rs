@@ -15,7 +15,7 @@ use crate::harness::opencode_runtime::{
     reap_selected_orphaned_opencode_servers_at, registered_opencode_servers_at, OpenCodeServerEntry,
 };
 use crate::journal::{
-    read_exec_process_receipts_at, remove_exec_process_receipt_at, ExecProcessReceipt,
+    prune_exec_process_receipts_at, read_exec_process_receipts_at, ExecProcessReceipt,
 };
 use crate::lf::output::truncate;
 use crate::store::sqlite::SqliteStore;
@@ -360,14 +360,11 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
         errors: 0,
     };
     if !dry_run {
-        for pid in &report.stale_exec_receipt_pids {
-            match remove_exec_process_receipt_at(&lf_home, *pid) {
-                Ok(true) => report.removed_exec_receipts += 1,
-                Ok(false) => {}
-                Err(error) => {
-                    tracing::warn!(pid, error = %error, "failed to prune stale Exec receipt");
-                    report.errors += 1;
-                }
+        match prune_exec_process_receipts_at(&lf_home, &report.stale_exec_receipt_pids) {
+            Ok(removed) => report.removed_exec_receipts = removed,
+            Err(error) => {
+                tracing::warn!(error = %error, "failed to prune stale Exec receipts");
+                report.errors += 1;
             }
         }
         let selected = report
@@ -1034,21 +1031,17 @@ fn render_snapshot(snapshot: &ActivitySnapshot) -> String {
 }
 
 fn render_prune_report(report: &ProcessPruneReport) -> String {
-    let action = if report.dry_run {
-        "WOULD PRUNE"
-    } else {
-        "PRUNED"
-    };
+    let action = if report.dry_run { "PREVIEW" } else { "PRUNED" };
     let mut output = format!("LOOPFLOW PROCESS PRUNE · {action}\n");
     output.push_str(&format!(
-        "{} stale Exec receipts · {} orphaned OpenCode process groups · {} errors\n",
+        "{} stale Exec receipt PIDs · {} orphaned OpenCode process groups · {} errors\n",
         report.stale_exec_receipt_pids.len(),
         report.orphaned_opencode_process_groups.len(),
         report.errors,
     ));
     if !report.stale_exec_receipt_pids.is_empty() {
         output.push_str(&format!(
-            "Exec receipt PIDs: {}\n",
+            "Exec receipt PIDs (unfinished receipts retained): {}\n",
             report
                 .stale_exec_receipt_pids
                 .iter()

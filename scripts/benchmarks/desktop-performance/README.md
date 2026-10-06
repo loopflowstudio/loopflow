@@ -429,3 +429,42 @@ Clippy and architecture/boundary checks. The separate standard Xcode
 proofs at `/tmp/loo304-final-source-contained-20261006/`. Gate and Xcode logs:
 `/tmp/loo304-gate-20261006.log` and `/tmp/loo304-xcode-fallback-20261006.log`.
 These checks establish source behavior, not rendered responsiveness or installation.
+
+### Recorder capacity diagnosis (October 6)
+
+The recorder now preserves `trace-recording.json` and `xctrace.log`, requests a
+private `trace-tmp` directory, and records raw `.ktrace` paths observed open by
+its own child. Instruments can ignore TMPDIR: the final two-second diagnostic
+confirmed an account-temporary path through that child's open descriptor.
+The original 78.6 GiB trace still has only timestamp attribution and is untouched.
+
+Recording requires 8 GiB initial free space. It stops its own xctrace child after
+2 GiB volume consumption, below 6 GiB free, or after the requested duration plus
+30 seconds for shutdown. Storage is sampled, so these are stop thresholds rather
+than filesystem quotas; unrelated volume writes can also stop a recording.
+Failed captures and exact-path receipts remain intact. Recorder failure exits
+nonzero and cannot complete the combined journey. No tail window substitutes
+for full soak coverage.
+
+A smaller diagnostic template is available through the existing `--template`
+option plus repeated `--instrument` options: Xcode's full path to
+`Packages/Base.instrdst/Contents/Templates/Blank.tracetemplate`, with instruments
+`Hitches` and `Hangs`. The template's bare name is not discoverable. A 30-second
+owned-sleep probe retained both table schemas and dated trace clocks, but also
+798,774,536 bytes of raw trace (about 94 GiB/hour by linear extrapolation), while
+its final bundle was only 21 MiB. This does **not** establish Desktop metric
+quality or a sustainable hour recorder; the default template remains unchanged.
+Receipts: `/tmp/loo304-minimal-recorder-30s-path-20261006/`; final bounded
+record/export/summarize proof: `/tmp/loo304-bounded-recorder-final-20261006/`.
+Both earlier failed template-selection probes remain retained.
+
+Existing candidate evidence separates observer cost: all 21 retained observations
+have median reopen bitmap capture 29.5 ms versus 201.7 ms through OCR; warm Task
+capture 104.5 ms versus 276.4 ms through OCR. These include the first observation,
+so they are diagnostic medians, not the warm-only acceptance cohort. No endpoint
+or budget changed. Sampled RSS ended the first idle phase at 307.1 MiB, fourth
+at 308.6 MiB and seventh at 313.5 MiB, while the first sampler reading was
+256.6 MiB. This motivates separating initial/native/OCR allocation from retained
+app growth; it neither diagnoses a leak nor removes the measured fourth-round
+52.7 MiB failure. A capable recorder/storage environment and production allocation
+profiling remain necessary before a matched pair and both full hour soaks.

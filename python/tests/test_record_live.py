@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -252,3 +255,41 @@ def test_idle_clock_or_table_absence_never_means_zero_hitches(tmp_path: Path) ->
     assert result["covered_seconds"] is None
     assert result["hitch_ms_per_second"] is None
     assert result["hangs"] is None
+
+
+def test_recording_storage_limit_retains_failure_and_stops_owned_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_popen = subprocess.Popen
+    free = iter([10 * 1024**3, 7 * 1024**3])
+    monkeypatch.setattr(record_live.shutil, "which", lambda _: sys.executable)
+    monkeypatch.setattr(
+        record_live.shutil, "disk_usage", lambda _: shutil._ntuple_diskusage(0, 0, next(free))
+    )
+
+    def launch(*args, **kwargs):
+        return real_popen([sys.executable, "-c", "import time; time.sleep(60)"], **kwargs)
+
+    monkeypatch.setattr(record_live.subprocess, "Popen", launch)
+    reason = record_live._xctrace(1, 3600, tmp_path / "hitches.trace", "fixture")
+    receipt = json.loads((tmp_path / "trace-recording.json").read_text())
+    assert reason == "recording stopped at storage limit"
+    assert receipt["status"] == "failed"
+    assert receipt["exit_code"] is not None
+    assert receipt["maximum_volume_consumption_bytes"] == 2 * 1024**3
+    assert (tmp_path / "trace-tmp").is_dir()
+    assert (tmp_path / "xctrace.log").exists()
+
+
+def test_recording_refuses_inadequate_headroom_with_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(record_live.shutil, "which", lambda _: sys.executable)
+    monkeypatch.setattr(
+        record_live.shutil, "disk_usage", lambda _: shutil._ntuple_diskusage(0, 0, 7 * 1024**3)
+    )
+    reason = record_live._xctrace(1, 3600, tmp_path / "hitches.trace", "fixture")
+    receipt = json.loads((tmp_path / "trace-recording.json").read_text())
+    assert reason == "insufficient recording headroom"
+    assert receipt["status"] == "refused"
+    assert "pid" not in receipt

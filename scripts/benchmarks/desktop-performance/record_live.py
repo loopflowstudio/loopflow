@@ -14,8 +14,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
@@ -64,7 +66,9 @@ def _log_show(pid: int, start: datetime, end: datetime, path: Path) -> None:
         subprocess.run(command, stdout=out, stderr=subprocess.DEVNULL, check=False)
 
 
-def _xctrace(pid: int, seconds: int, trace: Path, template: str) -> str | None:
+def _xctrace(
+    pid: int, seconds: int, trace: Path, template: str, instruments: tuple[str, ...] = ()
+) -> str | None:
     if not shutil.which("xcrun"):
         return "xcrun is unavailable"
     command = [
@@ -80,9 +84,99 @@ def _xctrace(pid: int, seconds: int, trace: Path, template: str) -> str | None:
         "--output",
         str(trace),
     ]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
-    if result.returncode != 0 or not trace.exists():
-        return (result.stderr or result.stdout).strip()[-400:] or "xctrace produced no trace"
+    for instrument in instruments:
+        command.extend(["--instrument", instrument])
+    command.append("--no-prompt")
+    # A tail window discards soak coverage. Bound resource use instead, and retain
+    # an interrupted recording as failed evidence, never a shorter successful soak.
+    temporary = trace.parent / "trace-tmp"
+    temporary.mkdir(exist_ok=False)
+    environment = dict(os.environ, TMPDIR=str(temporary.resolve()) + "/")
+    initial_free = shutil.disk_usage(trace.parent).free
+    reserve = 6 * 1024**3
+    allowance = 2 * 1024**3
+    receipt = {
+        "command": command,
+        "temporary_directory_requested": str(temporary.resolve()),
+        "initial_free_bytes": initial_free,
+        "reserve_bytes": reserve,
+        "maximum_volume_consumption_bytes": allowance,
+        "status": "starting",
+    }
+    receipt_path = trace.parent / "trace-recording.json"
+
+    def save() -> None:
+        receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
+
+    save()
+    if initial_free < reserve + allowance:
+        receipt.update(status="refused", reason="insufficient recording headroom")
+        save()
+        return str(receipt["reason"])
+    started = time.monotonic()
+    reason = None
+    observed_paths: dict[str, int] = {}
+    next_paths = started
+    with (trace.parent / "xctrace.log").open("w") as log:
+        process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=environment)
+        receipt["pid"] = process.pid
+        try:
+            while process.poll() is None:
+                free = shutil.disk_usage(trace.parent).free
+                receipt.update(
+                    status="recording", free_bytes=free, elapsed_seconds=time.monotonic() - started
+                )
+                save()
+                if free < reserve or initial_free - free >= allowance:
+                    reason = "recording stopped at storage limit"
+                    break
+                if time.monotonic() - started > seconds + 30:
+                    reason = "recording exceeded duration and shutdown allowance"
+                    break
+                if time.monotonic() >= next_paths:
+                    # TMPDIR is only a request: Instruments can open its raw
+                    # ktrace in the account temp directory. Retain exact open
+                    # descriptors while this child is still ours to observe.
+                    try:
+                        opened = subprocess.run(
+                            ["lsof", "-a", "-p", str(process.pid), "-Fn"],
+                            capture_output=True,
+                            text=True,
+                            timeout=2,
+                            check=False,
+                        )
+                        for line in opened.stdout.splitlines():
+                            if line.startswith("n/") and line.endswith(".ktrace"):
+                                path = Path(line[1:])
+                                try:
+                                    observed_paths[str(path)] = path.stat().st_size
+                                except OSError:
+                                    pass
+                        receipt["observed_raw_trace_bytes"] = observed_paths
+                    except (OSError, subprocess.TimeoutExpired) as error:
+                        receipt["path_observation_error"] = str(error)
+                    next_paths = time.monotonic() + 1
+                time.sleep(0.25)
+        finally:
+            if process.poll() is None:
+                # Only our unreaped child: never infer authority over Instruments
+                # services or other recorders from their names or open paths.
+                process.send_signal(signal.SIGINT)
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            receipt.update(
+                exit_code=process.returncode,
+                reason=reason,
+                status="failed" if reason or process.returncode else "finished",
+            )
+            save()
+    if reason:
+        return reason
+    if process.returncode != 0 or not trace.exists():
+        return "xctrace failed; see xctrace.log and trace-recording.json"
     return None
 
 
@@ -96,9 +190,11 @@ def _export(trace: Path, table: str) -> str:
     ).stdout
 
 
-def _sample_resources(pid: int, seconds: int, path: Path) -> None:
+def _sample_resources(pid: int, seconds: int, path: Path, stop: threading.Event) -> None:
     with path.open("w", encoding="utf-8") as out:
         for _ in range(seconds):
+            if stop.is_set():
+                break
             reading = subprocess.run(
                 ["ps", "-o", "rss=,%cpu=", "-p", str(pid)],
                 capture_output=True,
@@ -113,7 +209,7 @@ def _sample_resources(pid: int, seconds: int, path: Path) -> None:
                 + "\n"
             )
             out.flush()
-            time.sleep(1)
+            stop.wait(1)
 
 
 def record(args: argparse.Namespace) -> Path:
@@ -126,15 +222,22 @@ def record(args: argparse.Namespace) -> Path:
         "Use the app normally."
     )
     trace_error: str | None = "skipped (--no-xctrace)"
+    stop = threading.Event()
     if args.xctrace:
         sampler = threading.Thread(
-            target=_sample_resources, args=(pid, args.seconds, output / "rss.jsonl"), daemon=True
+            target=_sample_resources,
+            args=(pid, args.seconds, output / "rss.jsonl", stop),
+            daemon=True,
         )
         sampler.start()
-        trace_error = _xctrace(pid, args.seconds, output / "hitches.trace", args.template)
+        trace_error = _xctrace(
+            pid, args.seconds, output / "hitches.trace", args.template, tuple(args.instrument)
+        )
+        if trace_error:
+            stop.set()
         sampler.join()
     else:
-        _sample_resources(pid, args.seconds, output / "rss.jsonl")
+        _sample_resources(pid, args.seconds, output / "rss.jsonl", stop)
     end = datetime.now()
     time.sleep(2)  # logd flushes signposts a moment after they are emitted.
     _log_show(pid, start, end, output / "signposts.ndjson")
@@ -159,6 +262,7 @@ def record(args: argparse.Namespace) -> Path:
                 "ended_at": end.isoformat(),
                 "xctrace": trace_error or "recorded",
                 "template": args.template,
+                "instruments": args.instrument,
                 "host": _host(),
             },
             indent=2,
@@ -507,6 +611,9 @@ def main(argv: list[str] | None = None) -> int:
         help="xctrace template; 'Time Profiler' attributes main-thread hangs "
         "(open hitches.trace in Instruments)",
     )
+    rec.add_argument(
+        "--instrument", action="append", default=[], help="Additional xctrace instrument"
+    )
     summ = commands.add_parser("summarize", help="rebuild report.json/report.md from a recording")
     summ.add_argument("directory")
     args = parser.parse_args(argv)
@@ -514,6 +621,8 @@ def main(argv: list[str] | None = None) -> int:
     report = summarize(output)
     print((output / "report.md").read_text(encoding="utf-8"))
     print(f"Report: {output / 'report.md'}")
+    if args.command == "record" and args.xctrace and report["run"]["xctrace"] != "recorded":
+        return 1
     return 0 if report else 1
 
 

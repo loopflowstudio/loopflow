@@ -597,3 +597,15 @@ def test_failed_teardown_cannot_complete_successful_rendered_endpoints(tmp_path:
     summary = _report(tmp_path, _events())
     summary["metadata"].update(outcome="failed", reason="teardown failed")
     assert not performance._has_complete_observations(summary)
+
+
+def test_failed_recorder_cannot_complete_preserved_soak(tmp_path: Path) -> None:
+    _report(tmp_path, _soak_events())
+    path = tmp_path / "run.json"
+    metadata = json.loads(path.read_text())
+    metadata["recorder_exit_code"] = 1
+    path.write_text(json.dumps(metadata))
+    result = performance._report(tmp_path, None)
+    assert result["status"] == "incomplete"
+    assert len(result["soak"]["rounds"]) == 4
+    assert result["soak"]["resources"] is None

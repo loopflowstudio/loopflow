@@ -278,6 +278,7 @@ def _has_complete_observations(summary: dict) -> bool:
         and summary["expected_attempts"] is not None
         and summary["not_started"] == 0
         and summary["soak"]["status"] != "incomplete"
+        and metadata.get("recorder_exit_code", 0) == 0
         and metadata.get("repository_configs_unchanged", True)
         and not summary["journey_errors"]
         and not summary["journal_errors"]

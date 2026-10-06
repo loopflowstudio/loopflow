@@ -781,13 +781,14 @@ only the candidate index added. Exact authored configs are read-only inputs;
 copied Sessions acquire no execution authority. Configured-repository fixtures
 must honor Team identity and resolve Task links from the Wave repository.
 
-October 6 candidate repetition retained twenty warm Task-opening samples, but
-the requested hour soak failed after seven preserved rounds on disk exhaustion.
-A 78.6 GiB Instruments temporary trace has matching timestamps, not an exact
-ownership receipt; it remains intact. Fourth-round RSS grew 52.7 MiB; full trace
-metrics, matched baseline and both hour soaks remain unproved. The benchmark
-guide and plan retain counts, failures and source limits. Source fixtures and
-published lf3 establish neither performance acceptance nor Task completion.
+October 6 retained twenty warm Task-opening samples, but the hour soak failed
+on disk exhaustion after seven rounds. Fourth-round RSS grew 52.7 MiB; matched
+baseline and both hours remain unproved. The original 78.6 GiB trace has timestamp
+attribution only and stays intact. Bounded recording now retains exact child-open
+raw paths and failed outcomes. A smaller Hitches/Hangs probe still generated
+799 MB in thirty seconds; TMPDIR was ignored. Final bundle size hides raw storage
+cost. The benchmark guide retains observer/RSS distinctions and failures. No
+production allocation cause or performance acceptance follows from these probes.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

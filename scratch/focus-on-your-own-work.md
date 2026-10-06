@@ -224,38 +224,21 @@ runs nothing ends a Task over uncommitted changes and keeps its checkout) —
     window on screen; a real `lf session ensure` starting a provider; label
     widths at small window sizes.
 
-15. **Merge main.** #1463 ("Prepare Wave Projects on opening and preserve
-    work through realignment") conflicts in 58 files: it changes Task
-    admission and restart through FlowSession, worker claims and
-    `tasks.work_state`, which this PR deletes. The headless sync resolver
-    declines it. Jack, October 6, approving the demo: "make whatever cleanups
-    yyou want"; the agent takes merging as one. The rule followed: keep this
-    PR's model everywhere, restate what #1463 is for on it, never keep both
-    sides.
-    **What #1463 is for** (LOO-366, read October 6): each Wave's Project
-    selection stored in SQLite; `lf wave bind-project` and `lf wave ensure`;
-    Desktop preparing the Project when a Wave opens, with Retry; chapter
-    rotation and Realign Projects that move started unfinished Tasks and
-    leave unreviewed backlog; Desktop's "workspace" renamed "work"
-    (`lf monitor work`, `WorkModel`). Jack: "Determine the higher level goal
-    of the diff and make suer we have a nother way of addressing ... ideally
-    is just a bunch unncessary code that is made trivial by the new model."
-    Finding, borne out: none of that needs the deleted machinery; the 58
-    conflicts were two rewrites of the same files. #1463's code is taken;
-    its admission is checked where a Task launches and where a driver starts
-    a Flow or a step; its tests set up work in flight as a Flow exec; its
-    Work rename is applied to this PR's Desktop code; `flow` on a Project is
-    `workflow`; this PR's draft declares it applies after main's. What was
-    not kept is in [questions.md](questions.md).
-    Merged at `MERGEHASH`. CHECKLINE
-16. **Cleanups after Jack's approval.** (a) Text `lf task status` heads a
-    Task with its Workflow state, not the last Flow's `blocked`. (b) An
-    opened Flow exec prints loop positions as words ("pass 2"), not raw
-    tuples, and its diagram fits or scrolls inside the pane. (c) The Desktop
-    fixture's opened Flow exec is a current-shape Flow, not an old `feature`
-    with a `demo` step. (d) Anything else left unused by slices 9–14. Done
-    when the headless render shows (b) and (c) and the suites pass.
-    *Not done.*
+15. **Merge main** is **done**: `b5948ab72` (#1463, by the pass) and
+    `f360cdcc3` (#1468, #1469, #1449, concluded by the managing conversation
+    after it stopped the pass by mistake at the moment it committed). Jack:
+    "Determine the higher level goal of the diff and make suer we have a
+    nother way of addressing ... ideally is just a bunch unncessary code that
+    is made trivial by the new model." Finding: #1463 (LOO-366: a Wave's
+    Project selection in SQLite, `lf wave bind-project`/`ensure`, Desktop
+    preparing a Project on opening, rotation and Realign Projects, the
+    workspace→work rename) needs none of the deleted machinery; only tests
+    used the worker to stage work in flight. Rerun October 6 at `f360cdcc3`:
+    all 56 integration suites, `--lib ops::chapter` alone (25), Clippy, 75
+    headless Desktop tests pass. In the full parallel library run 11
+    `ops::chapter` tests fail (10 rotation, 1 adoption) that pass alone.
+    Unreviewed: main lets a Project have no workflow; its Tasks read not
+    ready.
 
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task

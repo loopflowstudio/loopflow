@@ -232,7 +232,7 @@ The agent's, October 5, building slice 1. None is confirmed by Jack Heart.
   which a Task on a workflow refuses unless that Flow leaves its stage.
 - **Flow catalog.** `lf flow list` no longer lists `feature` or `code`, so a
   Project default of `feature` has no Flow graph for Desktop to draw until
-  slice 5 draws the workflow.
+  slice 6 draws the workflow.
 - **Test count.** The slice list said six tests; the build order at
   `26279a3d2:scratch/task-workflow.md` lists five behaviors, each covered.
   The list now says five.

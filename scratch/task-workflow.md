@@ -115,6 +115,6 @@ The agent's choices here are listed in [questions.md](questions.md) under
   column, workflow listing and authored-edge type removed): the same two
   commands, `dto_fixtures` 18 and all-target Clippy pass.
 
-Not built: a take-over command (open choice 2); Desktop drawing (slice 5);
-workflow defaults in Wave settings and source editing (slice 6); docs
-(slice 7).
+Not built: a take-over command (open choice 2); Desktop drawing (slice 6);
+workflow defaults in Wave settings and source editing (slice 7); docs
+(slice 8).

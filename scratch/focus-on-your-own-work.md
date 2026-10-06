@@ -211,20 +211,16 @@ Flow history below means FlowExec rows joined to their Execs.
    a_repeated_node_receives_only_task_direction_newer_than_its_last_run` and
    `the_research_workflow_ends_on_its_edge_that_runs_nothing` pass. The option
    is `--steers-after`.
-4. **Task primary.** `PrimaryScope::Task(TaskId)` under the existing scope
-   lock. Explicit choice wins; else the sole unfinished interactive Task
+4. **Task primary.** The Task names one of its conversations. Explicit choice wins; else the sole unfinished interactive Task
    conversation; else the most recent by `latest_interactive_session`'s
    ranking, restricted to unfinished Task members. Read-only inventory creates
-   nothing. Done when `session_lifecycle_tests` covers each rule. *Built
-   and compressed October 6, not yet realigned:* `lf session ensure --task
-   ISSUE [--choose SESSION]`; the Task row names its primary
-   (`tasks.primary_session_id`, in the one draft), so the conversation stays
-   a member and wire shapes are unchanged. `session_lifecycle_tests` 18
-   (`a_task_primary_is_one_of_its_own_conversations` covers each rule and
-   replacement), `--lib store:: ops::human_session::primary` 189,
-   `cli_discovery` 18 passed; all-target Clippy clean. After compress (selection
-   flattened, no behavior change): the `a_task_primary` test passes. Demo item: Desktop
-   opening a Task on its primary (slice 6).
+   nothing. Done when `session_lifecycle_tests` covers each rule. **Done** at
+   `3d416a655`, merged with main at `f3b277e73`: `session_lifecycle_tests` 18
+   passed (`a_task_primary_is_one_of_its_own_conversations` covers each rule
+   and replacement). `lf session ensure --task ISSUE [--choose SESSION]`; the
+   Task row names its primary (`tasks.primary_session_id`, in the one draft),
+   so the conversation stays a member and wire shapes are unchanged. Demo
+   item: Desktop opening a Task on its primary (slice 6).
 5. **Waiting.** Rust-owned; replaces Review/Reply attention,
    `SessionKind::FlowReview` and `--needs-me` with one Waiting value and
    `--waiting`. Immediate on explicit pending input or a successful

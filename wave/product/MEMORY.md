@@ -54,8 +54,8 @@ argument ("I hate __ and hidden arguments") and settled the record: each step
 is the plain command and "doesnt need to know its part of a flow"; the Flow's
 driver keeps an append-only FlowExec (name, launched graph, each step's Exec and
 node) for every run, none primary for a Task. The mutable outer record is
-TaskWorkflow: an agent draft Jack has not reviewed, unbuilt, and Jack gave two
-answers on whether it lands in PR #1439 or a following Task. Built so: operations run through
+TaskWorkflow, built in PR #1439 from an agent draft Jack has not reviewed.
+Built so: operations run through
 the ordinary CLI, the answer contract rides in the message with no provider
 schema, and a correction is `lf -b session resume ID MESSAGE`. The agent's
 unreviewed choices are in `scratch/questions.md`.
@@ -68,7 +68,8 @@ prose narrating a builtin Flow drifts when its YAML changes: `advance` and
 `launch-plan` described human steps two passes after they were removed. Fake-provider
 suites prove decisions, correction, routing and loop passes; a real provider
 step, a driver killed mid-turn, a populated-store migration and Desktop remain
-unproven, as do the Waiting, workflow, loop and Task-primary slices.
+unproven. Workflow, loop, steer and Task-primary slices have headless tests
+only; Waiting, Desktop, defaults and docs are unbuilt.
 
 Saved pursue retains demo although
 current source does not: templates cannot establish a saved invocation's shape.

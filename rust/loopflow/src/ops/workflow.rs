@@ -1,8 +1,9 @@
 //! A Task's Workflow: the workflow definition it took up, fixed from then
 //! on, and where the Task stands on it. Position is live state a person or a
-//! conversation moves: at a stage, or on an edge with the Flow run carrying
-//! it. `lf task run` chooses a way out and its process writes the arrival
-//! when the edge's Flow succeeds; `lf task move` sets a stage outright. Every
+//! conversation moves: at a stage, or on an edge with the Task run carrying
+//! it. `lf task run` chooses a way out, starts the edge's Flow, again when a
+//! Flow exec fails, and writes the arrival when one succeeds; `lf task move`
+//! sets a stage outright. Every
 //! change is appended to the Task's history. Nothing here launches or
 //! controls a Flow.
 
@@ -28,9 +29,10 @@ pub struct Workflow {
 pub enum WorkflowPosition {
     /// The Task waits on a person at this stage, or stands at `start` or `end`.
     Stage { stage: String },
-    /// The Task is on this edge. `exec_id` is its Flow's driver, and `running`
-    /// is read from that Exec: an edge whose driver no longer runs has stopped
-    /// and holds the Task until it is chosen again or the Task is moved.
+    /// The Task is on this edge. `exec_id` is the `lf task run` carrying it;
+    /// each Flow exec it starts is that Exec's child. `running` is read from
+    /// that Exec: an edge whose Task run has ended has stopped and holds the
+    /// Task until it is chosen again or the Task is moved.
     Edge {
         edge: u32,
         exec_id: String,
@@ -89,7 +91,7 @@ pub struct WorkflowMove {
     pub from: String,
     pub to: String,
     pub edge: Option<u32>,
-    /// The `lf` process that made the move; for an edge, its Flow's driver.
+    /// The `lf` process that made the move; for an edge, its Task run.
     pub exec_id: String,
     pub actor: WorkflowActor,
     /// The conversation that asked, when `actor` is one.
@@ -175,8 +177,8 @@ impl Workflow {
             WorkflowPosition::Edge { running: true, .. } => {
                 return format!("{summary}. A person takes part again when that Flow finishes.");
             }
-            WorkflowPosition::Edge { exec_id, .. } => vec![format!(
-                "{summary}. Read `lf flow show {exec_id}` before choosing: run it again, take another way out of {}, or move the Task.",
+            WorkflowPosition::Edge { .. } => vec![format!(
+                "{summary}. Read `lf flow list --for-task {issue}` before choosing: run it again, take another way out of {}, or move the Task.",
                 self.stage()
             )],
             WorkflowPosition::Stage { stage } => vec![match self.definition.stage(stage) {
@@ -254,7 +256,7 @@ mod tests {
             guidance.contains("stopped on pursue (design → demo)"),
             "{guidance}"
         );
-        assert!(guidance.contains("`lf flow show exec`"));
+        assert!(guidance.contains("`lf flow list --for-task INF-1`"));
         assert!(guidance.contains("`lf -b task run INF-1 pursue`"));
         assert!(guidance.contains("`lf -b task run INF-1 task-design`"));
     }

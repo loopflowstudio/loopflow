@@ -41,9 +41,11 @@ lf task run EXP-12 --reason "take the smaller approach"
 
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's
-worktree, defaults to its Project's Flow, then runs like
+worktree, defaults to its Project's Flow, then starts
 `lf --task ISSUE run FLOW`: it prints the Flow's output and returns when the
-Flow ends. Background it yourself when you will not wait. It never continues
+Flow ends. A Flow that fails is started again from its first step, three
+times at most; one that is blocked, interrupted or waiting on a landing is
+not. Background it yourself when you will not wait. It never continues
 an earlier Flow. `--reason` publishes direction to the Task first. Every
 Flow run for a Task is equally its work.
 
@@ -51,7 +53,7 @@ When the Project's default names a workflow, the Task moves through stages.
 Each `task run` takes one edge leaving the current stage: the only one, or the
 one whose Flow you name. At a stage the Task waits on you in its conversation;
 no command approves a stage. A Flow that does not leave the stage is refused
-with the edges that do. A Flow that stops leaves the Task on its edge until
+with the edges that do. A Flow that stops, or fails every attempt, leaves the Task on its edge until
 you choose again or `lf task move EXP-12 <stage>` puts it at a stage outright. `lf task run EXP-12 code` takes up another workflow from
 its start. See [workflows](authoring.md#workflows).
 

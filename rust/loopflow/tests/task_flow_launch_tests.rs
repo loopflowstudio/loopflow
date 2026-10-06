@@ -406,7 +406,8 @@ fn a_landing_that_settles_later_is_recorded_by_moving_the_task() {
     assert_eq!(set["note"], "merged by hand");
     assert_eq!(set["actor"], "person");
     assert_eq!(set["session_id"], serde_json::Value::Null);
-    assert_eq!(support::recorded_flows(task.home.path()).len(), 2);
+    // One Flow exec reached the stage; the failing edge was attempted three times.
+    assert_eq!(support::recorded_flows(task.home.path()).len(), 4);
     // Taking up another workflow starts over and keeps the history.
     let before = workflow["history"].as_array().unwrap().len();
     task.ok(&["-b", "task", "run", "INF-123", "findings"]);
@@ -476,4 +477,87 @@ fn a_plain_flow_run_in_the_worktree_does_not_move_the_task() {
     assert!(!refused.status.success());
     let error = String::from_utf8_lossy(&refused.stderr).to_string();
     assert!(error.contains("lf task run <issue> rounds"), "{error}");
+}
+
+/// The Flow execs started beneath `task_run`, by outcome, oldest first.
+fn attempts(home: &Path, task_run: &str) -> Vec<String> {
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    let mut rows = db
+        .prepare(
+            "SELECT d.outcome FROM flow_execs f JOIN execs d ON d.id=f.exec_id
+             WHERE d.parent_exec_id=?1 ORDER BY d.rowid",
+        )
+        .unwrap();
+    let outcomes = rows
+        .query_map([task_run], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    outcomes
+}
+
+#[test]
+fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_out() {
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "gated"]);
+    let carrier = |workflow: &serde_json::Value| {
+        let chose = workflow["history"].as_array().unwrap().last().unwrap();
+        chose["exec_id"].as_str().unwrap().to_string()
+    };
+    // Every attempt fails: the Task run gives up and the edge holds the Task.
+    let output = task.run(&["-b", "task", "run", "INF-123", "gate"]);
+    let error = refusal(output);
+    assert!(error.contains("Flow gate failed 3 times"), "{error}");
+    let stopped = task.workflow();
+    assert_eq!(stopped["position"]["edge"], 2);
+    assert_eq!(stopped["position"]["running"], false);
+    assert_eq!(stopped["position"]["exec_id"], carrier(&stopped).as_str());
+    assert_eq!(
+        attempts(task.home.path(), &carrier(&stopped)),
+        ["failed", "failed", "failed"]
+    );
+
+    // The cause clears as the third attempt starts: an `lf` that defines
+    // `late` the third time the gate asks for it.
+    let bin = tempfile::tempdir().unwrap();
+    let lf = bin.path().join("lf");
+    fs::write(
+        &lf,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in *'flow show late'*)\n  echo asked >> '{count}'\n  [ \"$(wc -l < '{count}')\" -ge 3 ] && printf -- '- cmd: task sync --plan\\n' > '{late}';;\nesac\nexec '{real}' \"$@\"\n",
+            count = bin.path().join("asked").display(),
+            late = task.repo.path().join(".lf/flows/late.yaml").display(),
+            real = env!("CARGO_BIN_EXE_lf"),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&lf, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let output = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "task", "run", "INF-123", "gate"],
+    )
+    .env("LF_BIN", &lf)
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let workflow = task.workflow();
+    assert_eq!(workflow["position"], at("end"));
+    // One Task run: chosen once, arrived once, three Flow execs beneath it.
+    let kinds: Vec<_> = moves(&workflow).into_iter().map(|(kind, _)| kind).collect();
+    assert_eq!(
+        kinds,
+        ["took_up", "chose", "arrived", "chose", "chose", "arrived"]
+    );
+    let arrived = workflow["history"].as_array().unwrap().last().unwrap();
+    let task_run = arrived["exec_id"].as_str().unwrap();
+    assert_eq!(
+        attempts(task.home.path(), task_run),
+        ["failed", "failed", "succeeded"]
+    );
+    assert_eq!(support::recorded_flows(task.home.path()).len(), 7);
 }

@@ -123,7 +123,8 @@ step Execs, with no separate record or driver.
 
 Every Flow naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
-driver. Each `task run` starts a fresh Flow; the Project's Flow
+driver. Each `task run` starts a fresh Flow as a child `lf run`, and a fresh
+one again when that Flow exec fails; the Project's Flow
 supplies the default and naming a Flow selects another. Flows hold autonomous
 steps only: launching one with a `human: true` step is rejected. Finishing
 retains history and chooses no successor; Flow completion alone does not

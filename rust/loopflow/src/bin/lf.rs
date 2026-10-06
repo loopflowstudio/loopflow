@@ -1508,14 +1508,10 @@ fn dispatch(
             );
             return Ok(());
         };
-        cli.task = Some(task.plan.identifier.clone());
-        cli.command = Some(Commands::Run {
-            name: flow,
-            args: Vec::new(),
-        });
-        // The process that ran the edge writes where it left the Task: at the
-        // edge's target once its Flow succeeded, otherwise still on the edge.
-        dispatch(cli, args, account_selection)?;
+        // This process carries the edge and writes where it left the Task: at
+        // the edge's target once an attempt at its Flow succeeded, otherwise
+        // still on the edge.
+        loopflow::lf::commands::flow::run_for_task(&cli, &task.plan.identifier, &flow)?;
         return Ok(loopflow::ops::task::workflow_arrive(&task)?);
     }
     if let Some(task) = cli.task.as_ref() {

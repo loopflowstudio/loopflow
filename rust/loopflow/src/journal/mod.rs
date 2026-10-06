@@ -310,6 +310,7 @@ pub fn observe_process(command: &[String]) {
 pub fn command_exit_code<T>(result: &anyhow::Result<T>) -> u8 {
     match result {
         Ok(_) => 0,
+        Err(error) if error.is::<crate::exec::FlowHeld>() => crate::exec::FlowHeld::EXIT,
         Err(error) => error
             .downcast_ref::<crate::exec::CommandExit>()
             .map_or(1, |exit| exit.0),

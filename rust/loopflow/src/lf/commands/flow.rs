@@ -103,6 +103,70 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
     Ok(())
 }
 
+/// How many times one `lf task run` starts its Flow before giving up.
+const TASK_RUN_ATTEMPTS: u32 = 3;
+
+/// Carry one Task run: start `flow` as the plain `lf --task ISSUE run FLOW`
+/// child, and again while a Flow exec fails. Each attempt is its own FlowExec
+/// beneath this process. A Flow held for a person or a watcher, an interrupted
+/// one, and a launch refused before any Flow started are returned as they
+/// ended.
+pub fn run_for_task(cli: &Cli, issue: &str, flow: &str) -> Result<()> {
+    let mut args = cli.step_args();
+    if !cli.batch {
+        args.retain(|arg| arg != "--batch");
+    }
+    if let Some(wave) = &cli.wave {
+        args.extend(["--wave".to_owned(), wave.clone()]);
+    }
+    args.extend(["--task", issue, "run", flow].map(str::to_owned));
+    let lf = crate::engine::process::resolve_pinned_lf_binary()?;
+    let store = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(open_flow_store())?;
+    let store = &store.sqlite;
+    let exec = journal::current_exec_id().context("a Task run requires a registered Exec")?;
+    // An interrupted Task run takes its running attempt with it.
+    static ATTEMPT_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    crate::engine::agent::register_interrupt_cleanup(|| {
+        let pid = ATTEMPT_PID.load(std::sync::atomic::Ordering::Acquire);
+        if pid != 0 {
+            crate::engine::platform::kill_process(pid);
+        }
+    });
+    for attempt in 1.. {
+        let mark = store.exec_mark()?;
+        let mut child = std::process::Command::new(&lf)
+            .args(&args)
+            .spawn()
+            .context("could not start the Task's Flow")?;
+        ATTEMPT_PID.store(child.id(), std::sync::atomic::Ordering::Release);
+        let status = child.wait();
+        ATTEMPT_PID.store(0, std::sync::atomic::Ordering::Release);
+        let status = status.context("could not wait for the Task's Flow")?;
+        if status.success() {
+            return Ok(());
+        }
+        // Only a Flow exec that failed is started again.
+        let failed = status.code() == Some(1)
+            && store
+                .child_exec_after(&exec, mark)?
+                .is_some_and(|child| matches!(store.flow_exec(child.as_str()), Ok(Some(_))));
+        if !failed || attempt == TASK_RUN_ATTEMPTS {
+            if failed {
+                eprintln!("Flow {flow} failed {attempt} times; this Task run stops here.");
+            }
+            let code = status.code().and_then(|code| u8::try_from(code).ok());
+            return Err(crate::exec::CommandExit(code.unwrap_or(130)).into());
+        }
+        eprintln!(
+            "Flow {flow} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again."
+        );
+    }
+    unreachable!("the attempt loop returns")
+}
+
 /// Drive the Flow in this process, bracketed by flow journal events.
 fn execute(
     flow_name: &str,
@@ -174,10 +238,13 @@ async fn open_flow_store() -> Result<SharedStore> {
 fn report_outcome(outcome: FlowOutcome) -> Result<()> {
     match outcome {
         FlowOutcome::Completed => Ok(()),
-        FlowOutcome::Waiting => {
-            anyhow::bail!("Flow stopped before its last step; inspect its history and effects")
+        FlowOutcome::Waiting => Err(crate::exec::FlowHeld(
+            "Flow stopped before its last step; inspect its history and effects".into(),
+        )
+        .into()),
+        FlowOutcome::Blocked(reason) => {
+            Err(crate::exec::FlowHeld(format!("Flow is blocked: {reason}")).into())
         }
-        FlowOutcome::Blocked(reason) => anyhow::bail!("Flow is blocked: {reason}"),
     }
 }
 

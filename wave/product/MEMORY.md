@@ -170,7 +170,7 @@ against real `lf`, a cron-fired Flow. September 30's workspace proof items
 (provider continuation, remote owning-Home association, cross-Task focus,
 symlink transitions, twenty layout actions against p95 <100 ms) are also
 unshown and have no Task of their own. Gate, October 6 (`scripts/test.py`):
-Rust 2265 (one stale migration test repaired), Clippy, Desktop and website
+Rust 2265 (one stale migration test repaired), Clippy, Desktop, website
 pass with `LF_*` cleared. Four `test_checkout_refresh` tests fail on Jack's
 host: branch `lf wt prune` refuses a Home lacking the draft; CI owns them.
 Eleven `ops::chapter` tests fail only in `cargo test --lib`.

@@ -1,4 +1,4 @@
-//! A Task workflow: the stages where a person takes part in the Task
+//! A workflow definition: the stages where a person takes part in the Task
 //! conversation, joined by edges that are operational Flows. `start` and `end`
 //! are implicit. A workflow executes nothing; `lf task run` traverses it by
 //! running an edge's Flow like any other.
@@ -37,6 +37,9 @@ pub struct WorkflowStage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowEdge {
+    /// What `lf task run ISSUE <name>` calls this edge when its Flow alone
+    /// would not tell it from another way out of the same stage.
+    pub name: Option<String>,
     pub from: String,
     pub to: String,
     /// The Flow that carries the Task along this edge. Only an edge into
@@ -45,21 +48,24 @@ pub struct WorkflowEdge {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Workflow {
+pub struct WorkflowDefinition {
     pub name: String,
     pub stages: Vec<WorkflowStage>,
     pub edges: Vec<WorkflowEdge>,
 }
 
 impl WorkflowEdge {
-    /// What `lf task run ISSUE <name>` calls this edge: its Flow, or the stage
-    /// it enters when it runs none.
+    /// What `lf task run ISSUE <name>` calls this edge: its own name, else
+    /// its Flow, else the stage it enters.
     pub fn name(&self) -> &str {
-        self.flow.as_deref().unwrap_or(&self.to)
+        self.name
+            .as_deref()
+            .or(self.flow.as_deref())
+            .unwrap_or(&self.to)
     }
 }
 
-impl Workflow {
+impl WorkflowDefinition {
     /// Edges leaving `node`, with their index in the authored order.
     pub fn outgoing<'a>(
         &'a self,
@@ -158,7 +164,7 @@ pub fn names_workflow(name: &str, repo: &Path) -> bool {
 
 /// Load `name` when it names a workflow. A repository's own file wins; a
 /// repository Flow of the same name keeps the name from a builtin workflow.
-pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<Workflow>, LoadError> {
+pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<WorkflowDefinition>, LoadError> {
     let content = match workflow_path(name, repo) {
         Some(path) => fs::read_to_string(path)?,
         None => match builtin_workflow(name, repo) {
@@ -171,7 +177,7 @@ pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<Workflow>, LoadEr
         .map_err(|error| LoadError::InvalidFlow(format!("workflow {name}: {error}")))
 }
 
-fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<Workflow, String> {
+fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<WorkflowDefinition, String> {
     let authored: AuthoredWorkflow =
         serde_yaml_ng::from_str(content).map_err(|error| error.to_string())?;
     let mut stages = Vec::new();
@@ -188,7 +194,7 @@ fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<Workflow, St
             skill: skill.to_string(),
         });
     }
-    let workflow = Workflow {
+    let workflow = WorkflowDefinition {
         name: name.to_string(),
         stages,
         edges: authored.edges,
@@ -297,6 +303,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(valid.outgoing(START).count(), 1);
+        // Two ways out may run the same Flow when each has its own name.
+        let named = load(
+            "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {name: again, from: review, to: review, flow: pursue}\n  - {name: accept, from: review, to: end, flow: pursue}\n",
+        )
+        .unwrap();
+        let names: Vec<_> = named.outgoing("review").map(|(_, e)| e.name()).collect();
+        assert_eq!(names, ["again", "accept"]);
         for (content, expected) in [
             (
                 "stages:\n  review: demo\n  lost: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n",
@@ -320,6 +333,10 @@ mod tests {
             ),
             (
                 "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {from: start, to: end, flow: pursue}\n",
+                "two outgoing edges",
+            ),
+            (
+                "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {name: pursue, from: start, to: end, flow: ship}\n",
                 "two outgoing edges",
             ),
         ] {

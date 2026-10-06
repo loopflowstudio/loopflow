@@ -30,10 +30,10 @@ pub mod task_flow;
 #[doc(hidden)]
 pub mod task_input;
 pub(crate) mod task_pm;
-pub mod task_workflow;
 pub(crate) mod telemetry;
 pub mod trace;
 pub(crate) mod util;
+pub mod workflow;
 pub mod wt;
 pub mod wt_timing;
 

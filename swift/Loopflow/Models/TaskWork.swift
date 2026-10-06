@@ -5,44 +5,65 @@ public struct TaskWork: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
     public let flows: [TaskFlowMember]
     public let execs: [Exec]
-    /// The Task's workflow and position; `nil` when it runs only ad hoc Flows.
-    public let workflow: TaskWorkflow?
+    /// The Task's Workflow; `nil` when it runs only ad hoc Flows.
+    public let workflow: Workflow?
 }
 
-/// Conversation stages joined by edges that are Flows. `start` and `end` are implicit.
-public struct TaskWorkflow: Codable, Sendable, Equatable {
+/// A Task's Workflow: the definition it took up, where the Task stands on it,
+/// and how it got there. `start` and `end` are implicit stages.
+public struct Workflow: Codable, Sendable, Equatable {
     public struct Stage: Codable, Sendable, Hashable {
         public let name: String
         public let skill: String
     }
 
     public struct Edge: Codable, Sendable, Hashable {
+        /// Set when its Flow alone would not tell it from another way on.
+        public let name: String?
         public let from: String
         public let to: String
         public let flow: String?
 
-        /// What `lf task run ISSUE <name>` takes to traverse it: its Flow, or
-        /// the stage it enters when it runs nothing.
-        public var launchName: String { flow ?? to }
+        /// What `lf task run ISSUE <name>` takes to choose it: its own name,
+        /// else its Flow, else the stage it enters.
+        public var launchName: String { name ?? flow ?? to }
     }
 
-    public struct Traversal: Codable, Sendable, Equatable {
-        public let edge: Int
+    /// One change to the Task's position.
+    public struct Move: Codable, Sendable, Equatable {
+        public enum Kind: String, Codable, Sendable {
+            case tookUp = "took_up"
+            case chose, arrived, set
+        }
+
+        public enum Actor: String, Codable, Sendable { case person, conversation, edge }
+
+        public let workflow: String
+        public let kind: Kind
+        public let from: String
+        public let to: String
+        public let edge: Int?
         public let execId: String
+        public let actor: Actor
+        public let sessionId: String?
+        public let note: String?
+        public let at: Int64
 
         enum CodingKeys: String, CodingKey {
-            case edge
+            case workflow, kind, from, to, edge, actor, note, at
             case execId = "exec_id"
+            case sessionId = "session_id"
         }
     }
 
-    /// At a stage the Task waits on a person; on an edge its Flow's driver Exec runs.
+    /// At a stage the Task waits on a person. On an edge its Flow's driver
+    /// Exec carries it; one that no longer runs has stopped and holds the Task.
     public enum Position: Codable, Sendable, Equatable {
         case stage(String)
-        case edge(index: Int, execId: String)
+        case edge(index: Int, execId: String, running: Bool)
 
         enum CodingKeys: String, CodingKey {
-            case kind, stage, edge
+            case kind, stage, edge, running
             case execId = "exec_id"
         }
 
@@ -54,7 +75,8 @@ public struct TaskWorkflow: Codable, Sendable, Equatable {
             case "edge":
                 self = .edge(
                     index: try container.decode(Int.self, forKey: .edge),
-                    execId: try container.decode(String.self, forKey: .execId))
+                    execId: try container.decode(String.self, forKey: .execId),
+                    running: try container.decode(Bool.self, forKey: .running))
             case let kind:
                 throw DecodingError.dataCorruptedError(
                     forKey: .kind, in: container, debugDescription: "unknown workflow position \(kind)")
@@ -67,10 +89,11 @@ public struct TaskWorkflow: Codable, Sendable, Equatable {
             case .stage(let stage):
                 try container.encode("stage", forKey: .kind)
                 try container.encode(stage, forKey: .stage)
-            case .edge(let index, let execId):
+            case .edge(let index, let execId, let running):
                 try container.encode("edge", forKey: .kind)
                 try container.encode(index, forKey: .edge)
                 try container.encode(execId, forKey: .execId)
+                try container.encode(running, forKey: .running)
             }
         }
     }
@@ -79,25 +102,25 @@ public struct TaskWorkflow: Codable, Sendable, Equatable {
     public let stages: [Stage]
     public let edges: [Edge]
     public let position: Position
-    public let traversals: [Traversal]
+    /// Edges `lf task run` can choose now, by their place among `edges`.
+    public let outgoing: [Int]
+    public let history: [Move]
 
-    /// The edge whose Flow runs now, with its place among `edges`.
-    public var running: (index: Int, edge: Edge)? {
-        guard case .edge(let index, _) = position, edges.indices.contains(index) else { return nil }
-        return (index, edges[index])
+    /// The edge the Task is on, and whether its Flow still runs.
+    public var onEdge: (index: Int, edge: Edge, running: Bool)? {
+        guard case .edge(let index, _, let running) = position, edges.indices.contains(index) else { return nil }
+        return (index, edges[index], running)
     }
 
-    /// Edges a person can start next: those leaving the stage the Task waits
-    /// at, or the one its running edge left.
-    public var outgoing: [(index: Int, edge: Edge)] {
-        if case .stage(let stage) = position { return edges.leaving(stage) }
-        return edges.leaving(running?.edge.from ?? "start")
+    /// Edges a person can choose next, as Rust lists them.
+    public var choices: [(index: Int, edge: Edge)] {
+        outgoing.filter(edges.indices.contains).map { ($0, edges[$0]) }
     }
 }
 
-extension Array where Element == TaskWorkflow.Edge {
+extension Array where Element == Workflow.Edge {
     /// Edges leaving `stage`, each with its place among the workflow's edges.
-    public func leaving(_ stage: String) -> [(index: Int, edge: TaskWorkflow.Edge)] {
+    public func leaving(_ stage: String) -> [(index: Int, edge: Workflow.Edge)] {
         enumerated().filter { $0.element.from == stage }.map { ($0.offset, $0.element) }
     }
 }

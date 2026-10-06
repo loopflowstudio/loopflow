@@ -144,8 +144,10 @@ There is no creation opt-out from checkout association. **Task details** opens t
 
 A Task on a workflow draws it: stages, the edges between them, and the current
 stage or running edge. At a stage the page reads **Waiting on you** and offers
-one **Start** per edge leaving it; each runs `lf -b task run` as a child of the
-app. Every Start is disabled while an edge runs. An unstarted Task previews its
+one button per edge leaving it; each runs `lf -b task run` as a child of the
+app. No edge is offered while one runs. An edge whose Flow stopped holds the
+Task, reads **Stopped on**, and is offered again with the others leaving its
+stage. **Move to** puts the Task at any stage through `lf task move`. An unstarted Task previews its
 Project's default workflow. A default that names nothing reads invalid, with
 Start disabled.
 Each Flow run of the Task is a row that opens to its graph, steps and output

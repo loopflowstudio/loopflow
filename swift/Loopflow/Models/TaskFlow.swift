@@ -246,8 +246,8 @@ public struct FlowCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
 /// An authored workflow before any Task has taken it up.
 public struct WorkflowDefinition: Decodable, Sendable, Hashable {
     public let name: String
-    public let stages: [TaskWorkflow.Stage]
-    public let edges: [TaskWorkflow.Edge]
+    public let stages: [Workflow.Stage]
+    public let edges: [Workflow.Edge]
 }
 
 extension Array where Element == FlowCatalogEntry {

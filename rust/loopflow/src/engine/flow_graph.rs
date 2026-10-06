@@ -16,7 +16,7 @@ use std::path::Path;
 
 use crate::engine::execution::{ExecutionCursor, NestedCursor};
 use crate::engine::flow::ConcreteStep;
-use crate::engine::workflow::{self, Workflow};
+use crate::engine::workflow::{self, WorkflowDefinition};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowGraph {
@@ -138,7 +138,7 @@ pub struct FlowCatalogEntry {
     pub graph: Option<FlowGraph>,
     pub template: Option<FlowTemplate>,
     /// A workflow's stages and edges; `None` for a Flow or an unusable definition.
-    pub workflow: Option<Workflow>,
+    pub workflow: Option<WorkflowDefinition>,
     /// Why the definition is unusable; set exactly when it has no topology.
     pub unavailable: Option<String>,
 }

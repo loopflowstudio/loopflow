@@ -776,6 +776,15 @@ pub enum TaskCommand {
         #[arg(long)]
         reason: Option<String>,
     },
+    /// Put a Task at a stage of its workflow without running anything
+    Move {
+        issue: String,
+        /// `start`, `end` or one of the workflow's stages
+        stage: String,
+        /// Why, kept in the Task's workflow history
+        #[arg(long)]
+        reason: Option<String>,
+    },
     /// File a Task in the current chapter
     Create {
         /// Wave name; defaults to the bound Wave
@@ -924,6 +933,7 @@ impl TaskCommand {
             Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
             Self::Checkout { issue, .. }
             | Self::Run { issue, .. }
+            | Self::Move { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }

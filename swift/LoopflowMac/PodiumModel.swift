@@ -983,6 +983,24 @@ final class PodiumModel {
         }
     }
 
+    /// Put the Task at a stage of its Workflow, then refresh the shared
+    /// reading. A refusal is kept on that Task's draft.
+    func moveTask(to stage: String, task: RoadmapTask, wave: WaveSnapshot) async {
+        let owner = navigation
+        let taskId = task.id
+        guard owner.flowDrafts[taskId]?.acting != true else { return }
+        owner.flowDrafts[taskId, default: TaskFlowDraft()].acting = true
+        owner.flowDrafts[taskId]?.error = nil
+        do {
+            try await query.moveTask(issue: task.task.identifier, stage: stage, cwd: WaveOrigin.resolve(wave.repo))
+            owner.flowDrafts[taskId] = nil
+            await loadTaskWork(task: task, wave: wave)
+        } catch {
+            owner.flowDrafts[taskId]?.acting = false
+            owner.flowDrafts[taskId]?.error = error.localizedDescription
+        }
+    }
+
     func beginSessionRename(_ record: SessionRecord) {
         guard navigation.renaming?.sessionId != record.id else { return }
         navigation.renaming = SessionRenameDraft(sessionId: record.id, text: record.title)

@@ -134,15 +134,28 @@ complete Task Work.
 A [workflow](../authoring.md#workflows) is the outer shape of a Task: stages
 where a person takes part in the Task conversation, and edges that each run
 one Flow. A Task takes one up on its first `lf task run` when its Project's
-default names one, or when a workflow is named. `task_workflows` keeps the
-graph as it was then, so a later edit to the YAML applies to Tasks that take
-it up afterwards.
+default names one, or when a workflow is named. `task_workflows` holds one
+row per Task: the graph as it was then, never edited, and the Task's
+position. A later edit to the YAML applies to Tasks that take it up
+afterwards; taking one up again starts over at `start`.
 
-`lf task run ISSUE [FLOW]` appends a traversal naming its own Exec, which is
-the edge Flow's driver, then runs the Flow. Position is derived: on the edge
-while that Exec may still run, at the edge's `to` when it succeeded, back at
-`from` when it stopped or failed. Nothing sets position directly, and a second
-`lf task run` is not refused while an edge runs.
+Position is stored: at a stage, or on an edge with the Exec carrying it.
+Whether that Exec still runs is read from the Exec, never stored. The store
+has one read and four writes, and every write appends to
+`task_workflow_moves`:
+
+| Call | Effect |
+| --- | --- |
+| take up | store the graph at `start` |
+| choose | from the edge's `from` stage, or from a stopped edge that left it: on the edge, carried by the choosing Exec; straight to `to` for an edge that runs nothing. Refused when the Task has moved since it was read |
+| arrive | the Exec that carried the edge, on success, puts the Task at `to` if it is still on that edge |
+| set | put the Task at a named stage |
+
+`lf task run ISSUE [NAME]` chooses, then runs the edge's Flow in the same
+process, which arrives when the Flow succeeds. A Flow that stops leaves the
+Task on its edge. `lf task move ISSUE STAGE` sets. An edge is not chosen
+while another runs. A move's author is its Exec's calling conversation, else
+a person; an arrival is the edge's own.
 
 ## Read each step's result
 

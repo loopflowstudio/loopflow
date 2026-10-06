@@ -2,8 +2,10 @@
 //! it never rewrites event attribution or follows causal parent Execs.
 
 use crate::durable::TaskId;
-use crate::engine::workflow::Workflow;
-use crate::ops::task_workflow::TaskWorkflowRecord;
+use crate::engine::workflow::{WorkflowDefinition, START};
+use crate::ops::workflow::{
+    Workflow, WorkflowActor, WorkflowMove, WorkflowMoveKind, WorkflowPosition,
+};
 use crate::store::StoreResult;
 use crate::task_work::{TaskSession, TaskWork};
 
@@ -61,38 +63,105 @@ pub(super) fn flows_of_task(
     )
 }
 
-fn workflow_of_task(
-    conn: &rusqlite::Connection,
-    task: &TaskId,
-) -> StoreResult<Option<TaskWorkflowRecord>> {
+/// The Task's workflow row: its definition, the stage it waits at or left,
+/// and the edge it is on with the Exec carrying it.
+type WorkflowRow = (WorkflowDefinition, String, Option<(u32, crate::exec::Exec)>);
+
+fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<WorkflowRow>> {
     use rusqlite::OptionalExtension;
-    let Some((id, graph)) = conn
+    let Some((graph, stage, edge, exec)) = conn
         .query_row(
-            "SELECT id,graph FROM task_workflows WHERE task_id=?1 ORDER BY id DESC LIMIT 1",
+            "SELECT graph,stage,edge,exec_id FROM task_workflows WHERE task_id=?1",
             [task.as_str()],
-            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<u32>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
         )
         .optional()?
     else {
         return Ok(None);
     };
-    let columns = super::execs::EXEC_SELECT
-        .strip_suffix(" FROM execs e")
-        .expect("Exec select ends with its table");
-    let traversals = conn
-        .prepare(&format!(
-            "{columns},t.edge FROM task_workflow_traversals t JOIN execs e ON e.id=t.exec_id
-             WHERE t.task_workflow_id=?1 ORDER BY t.seq"
-        ))?
-        .query_map([id], |row| {
-            Ok((row.get::<_, u32>(15)?, super::execs::read_exec(row)?))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(Some(TaskWorkflowRecord {
-        id,
-        workflow: serde_json::from_str::<Workflow>(&graph)?,
-        traversals,
-    }))
+    let edge = match edge.zip(exec) {
+        Some((edge, exec)) => Some((
+            edge,
+            conn.query_row(
+                &format!("{} WHERE e.id=?1", super::execs::EXEC_SELECT),
+                [exec],
+                super::execs::read_exec,
+            )?,
+        )),
+        None => None,
+    };
+    Ok(Some((serde_json::from_str(&graph)?, stage, edge)))
+}
+
+fn workflow_moves(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<WorkflowMove>> {
+    conn.prepare(
+        "SELECT m.workflow,m.kind,m.from_stage,m.to_stage,m.edge,m.exec_id,e.caller_session_id,m.note,m.at
+         FROM task_workflow_moves m JOIN execs e ON e.id=m.exec_id
+         WHERE m.task_id=?1 ORDER BY m.seq",
+    )?
+    .query_and_then([task.as_str()], |row| {
+        let kind: String = row.get(1)?;
+        let kind = WorkflowMoveKind::parse(&kind).ok_or_else(|| {
+            crate::store::StoreError::InvalidData(format!("unknown workflow move {kind:?}"))
+        })?;
+        // An arrival is the edge's own; any other move is its caller's.
+        let session_id = row
+            .get::<_, Option<String>>(6)?
+            .filter(|_| kind != WorkflowMoveKind::Arrived);
+        Ok(WorkflowMove {
+            workflow: row.get(0)?,
+            kind,
+            from: row.get(2)?,
+            to: row.get(3)?,
+            edge: row.get(4)?,
+            exec_id: row.get(5)?,
+            actor: match (kind, &session_id) {
+                (WorkflowMoveKind::Arrived, _) => WorkflowActor::Edge,
+                (_, Some(_)) => WorkflowActor::Conversation,
+                (_, None) => WorkflowActor::Person,
+            },
+            session_id,
+            note: row.get(7)?,
+            at: row.get(8)?,
+        })
+    })?
+    .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_workflow_move(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+    workflow: &str,
+    kind: WorkflowMoveKind,
+    (from, to): (&str, &str),
+    edge: Option<u32>,
+    by: &crate::id::ExecId,
+    note: Option<&str>,
+) -> StoreResult<()> {
+    conn.execute(
+        "INSERT INTO task_workflow_moves(task_id,workflow,kind,from_stage,to_stage,edge,exec_id,note,at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        rusqlite::params![
+            task.as_str(),
+            workflow,
+            kind.as_str(),
+            from,
+            to,
+            edge,
+            by,
+            note,
+            crate::store::rows::now_unix()
+        ],
+    )?;
+    Ok(())
 }
 
 impl SqliteStore {
@@ -143,13 +212,11 @@ impl SqliteStore {
             ))?
             .query_map([task.as_str()], super::execs::read_exec)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        let workflow = workflow_of_task(&tx, task)?;
+        let workflow = workflow_row(&tx, task)?;
+        let history = workflow_moves(&tx, task)?;
         tx.commit()?;
         drop(conn);
-        let workflow = workflow.map(|record| {
-            let position = record.position(|exec| self.exec_may_run(exec));
-            record.snapshot(position)
-        });
+        let workflow = workflow.map(|row| self.read_workflow(row, history));
         Ok(TaskWork {
             sessions,
             flows,
@@ -165,44 +232,180 @@ impl SqliteStore {
             != crate::journal::ProcessIdentityEvidence::Dead
     }
 
-    /// The Task's workflow with every edge it set out on.
-    pub(crate) fn task_workflow(&self, task: &TaskId) -> StoreResult<Option<TaskWorkflowRecord>> {
+    /// The Task's Workflow with its history.
+    pub(crate) fn workflow(&self, task: &TaskId) -> StoreResult<Option<Workflow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        workflow_of_task(&conn, task)
+        let Some(row) = workflow_row(&conn, task)? else {
+            return Ok(None);
+        };
+        let history = workflow_moves(&conn, task)?;
+        drop(conn);
+        Ok(Some(self.read_workflow(row, history)))
     }
 
-    /// Take up `workflow` for the Task as it is defined now, returning the
-    /// record's id. An earlier workflow and its traversals stay as history.
-    pub(crate) fn start_task_workflow(
+    /// Whether the carrying Flow still runs is its Exec's, read here.
+    fn read_workflow(
+        &self,
+        (definition, stage, edge): WorkflowRow,
+        history: Vec<WorkflowMove>,
+    ) -> Workflow {
+        let position = match edge {
+            None => WorkflowPosition::Stage { stage },
+            Some((edge, exec)) => WorkflowPosition::Edge {
+                edge,
+                exec_id: exec.id.to_string(),
+                running: exec.completed_at.is_none() && self.exec_may_run(&exec),
+            },
+        };
+        Workflow::new(definition, position, history)
+    }
+
+    /// Take up `definition` for the Task as it is defined now, at `start`.
+    /// It replaces the Task's earlier Workflow; the history stays.
+    pub(crate) fn take_up_workflow(
         &self,
         task: &TaskId,
-        workflow: &Workflow,
-    ) -> StoreResult<i64> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO task_workflows(task_id,graph,started_at) VALUES(?1,?2,?3)",
+        definition: &WorkflowDefinition,
+        by: &crate::id::ExecId,
+        note: Option<&str>,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT OR REPLACE INTO task_workflows(task_id,graph,stage,updated_at) VALUES(?1,?2,?3,?4)",
             rusqlite::params![
                 task.as_str(),
-                serde_json::to_string(workflow)?,
+                serde_json::to_string(definition)?,
+                START,
                 crate::store::rows::now_unix()
             ],
         )?;
-        Ok(conn.last_insert_rowid())
+        append_workflow_move(
+            &tx,
+            task,
+            &definition.name,
+            WorkflowMoveKind::TookUp,
+            (START, START),
+            None,
+            by,
+            note,
+        )?;
+        Ok(tx.commit()?)
     }
 
-    /// Record that `exec` set out on `edge` of the Task's workflow.
-    pub(crate) fn record_workflow_traversal(
+    /// Leave by `edge`, one of `workflow.outgoing`. An edge with a Flow puts
+    /// the Task on it, carried by `by`; one that runs nothing puts it at its
+    /// target. Returns false, writing nothing, when the Task is no longer
+    /// where `workflow` read it, so two choosers cannot both leave.
+    pub(crate) fn choose_workflow_edge(
         &self,
-        workflow: i64,
+        task: &TaskId,
+        workflow: &Workflow,
         edge: u32,
-        exec: &crate::id::ExecId,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO task_workflow_traversals(task_workflow_id,edge,exec_id) VALUES(?1,?2,?3)",
-            rusqlite::params![workflow, edge, exec],
+        by: &crate::id::ExecId,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
+        let chosen = &workflow.definition.edges[edge as usize];
+        let stopped = match &workflow.position {
+            WorkflowPosition::Stage { .. } => None,
+            WorkflowPosition::Edge { exec_id, .. } => Some(exec_id.as_str()),
+        };
+        let carried = chosen.flow.is_some();
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let left = tx.execute(
+            "UPDATE task_workflows SET stage=?2,edge=?3,exec_id=?4,updated_at=?5
+             WHERE task_id=?1 AND stage=?6 AND exec_id IS ?7",
+            rusqlite::params![
+                task.as_str(),
+                if carried { &chosen.from } else { &chosen.to },
+                carried.then_some(edge),
+                carried.then_some(by),
+                crate::store::rows::now_unix(),
+                chosen.from,
+                stopped
+            ],
         )?;
-        Ok(())
+        if left == 0 {
+            return Ok(false);
+        }
+        append_workflow_move(
+            &tx,
+            task,
+            &workflow.definition.name,
+            WorkflowMoveKind::Chose,
+            (&chosen.from, &chosen.to),
+            Some(edge),
+            by,
+            note,
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// The edge `by` carried the Task along succeeded: put the Task at its
+    /// target. A Task no longer on that edge stays where it was put.
+    pub(crate) fn arrive_workflow_edge(
+        &self,
+        task: &TaskId,
+        by: &crate::id::ExecId,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let Some((definition, _, Some((edge, carrier)))) = workflow_row(&tx, task)? else {
+            return Ok(());
+        };
+        if &carrier.id != by {
+            return Ok(());
+        }
+        let arrived = &definition.edges[edge as usize];
+        tx.execute(
+            "UPDATE task_workflows SET stage=?2,edge=NULL,exec_id=NULL,updated_at=?3 WHERE task_id=?1",
+            rusqlite::params![task.as_str(), arrived.to, crate::store::rows::now_unix()],
+        )?;
+        append_workflow_move(
+            &tx,
+            task,
+            &definition.name,
+            WorkflowMoveKind::Arrived,
+            (&arrived.from, &arrived.to),
+            Some(edge),
+            by,
+            None,
+        )?;
+        Ok(tx.commit()?)
+    }
+
+    /// Put the Task at `stage` of its Workflow, running nothing. Returns
+    /// false when the Task has no Workflow.
+    pub(crate) fn set_workflow_stage(
+        &self,
+        task: &TaskId,
+        stage: &str,
+        by: &crate::id::ExecId,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let Some((definition, from, edge)) = workflow_row(&tx, task)? else {
+            return Ok(false);
+        };
+        tx.execute(
+            "UPDATE task_workflows SET stage=?2,edge=NULL,exec_id=NULL,updated_at=?3 WHERE task_id=?1",
+            rusqlite::params![task.as_str(), stage, crate::store::rows::now_unix()],
+        )?;
+        append_workflow_move(
+            &tx,
+            task,
+            &definition.name,
+            WorkflowMoveKind::Set,
+            (&from, stage),
+            edge.map(|(edge, _)| edge),
+            by,
+            note,
+        )?;
+        tx.commit()?;
+        Ok(true)
     }
 
     /// Every Flow among the Task's work, oldest first.

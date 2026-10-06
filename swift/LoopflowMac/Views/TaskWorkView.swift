@@ -3,12 +3,13 @@ import SwiftUI
 
 /// A Task's workflow: the stages where a person takes part, joined by the
 /// Flows that move between them. Rust owns the graph and the position; this
-/// draws them and starts an edge through `lf task run`.
-struct TaskWorkflowView: View {
+/// draws them, chooses an edge through `lf task run` and sets a stage
+/// through `lf task move`.
+struct WorkflowView: View {
     let model: PodiumModel
     let task: RoadmapTask
     let wave: WaveSnapshot
-    let workflow: TaskWorkflow
+    let workflow: Workflow
     @Environment(\.palette) private var palette
 
     private var draft: TaskFlowDraft? { model.navigation.flowDrafts[task.id] }
@@ -22,15 +23,16 @@ struct TaskWorkflowView: View {
                 WorkflowGraphRow(
                     stages: workflow.stages, edges: workflow.edges,
                     current: { if case .stage(let stage) = workflow.position { stage } else { nil } }(),
-                    running: workflow.running?.index)
+                    running: workflow.onEdge.flatMap { $0.running ? $0.index : nil },
+                    stopped: workflow.onEdge.flatMap { $0.running ? nil : $0.index })
                 Text(position)
                     .font(Typography.body(13))
                     .foregroundStyle(palette.textSecondary)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-workflow-position")
                 HStack(spacing: Spacing.sm) {
-                    ForEach(workflow.outgoing, id: \.index) { index, edge in
-                        Button(edge.flow.map { "Run \($0)" } ?? "Finish") {
+                    ForEach(workflow.choices, id: \.index) { index, edge in
+                        Button(edge.name ?? edge.flow.map { "Run \($0)" } ?? "Finish") {
                             Task { await model.startFlow(edge.launchName, task: task, wave: wave) }
                         }
                         .buttonStyle(WorkspaceOutlineButtonStyle())
@@ -38,6 +40,17 @@ struct TaskWorkflowView: View {
                         .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.launchName) · to \(edge.to)")
                         .accessibilityIdentifier("task-workflow-run-\(index)")
                     }
+                    // Put the Task at a stage without running anything.
+                    Menu("Move to") {
+                        ForEach(["start"] + workflow.stages.map(\.name) + ["end"], id: \.self) { stage in
+                            Button(stage) { Task { await model.moveTask(to: stage, task: task, wave: wave) } }
+                                .accessibilityIdentifier("task-workflow-move-\(stage)")
+                        }
+                    }
+                    .fixedSize()
+                    .disabled(draft?.acting == true)
+                    .help("lf task move \(task.task.identifier) <stage>")
+                    .accessibilityIdentifier("task-workflow-move")
                     if draft?.acting == true { ProgressView().controlSize(.small) }
                 }
                 if let error = draft?.error {
@@ -53,11 +66,9 @@ struct TaskWorkflowView: View {
         .accessibilityIdentifier("task-workflow")
     }
 
-    /// Why no edge can be started now. A running edge is one: a second Start
-    /// would put two drivers in the checkout.
+    /// Why no edge can be started now.
     private var unavailable: String? {
         if draft?.acting == true { return "Starting" }
-        if let running = workflow.running { return "\(running.edge.flow ?? "An edge") is running" }
         return task.flow.control(.start)?.unavailable
     }
 
@@ -70,19 +81,20 @@ struct TaskWorkflowView: View {
             }
             return "Not started"
         case .edge:
-            guard let edge = workflow.running?.edge else { return "Running" }
-            return "Running \(edge.flow ?? "edge") · \(edge.from) to \(edge.to)"
+            guard let (_, edge, running) = workflow.onEdge else { return "On an edge" }
+            return "\(running ? "Running" : "Stopped on") \(edge.launchName) · \(edge.from) to \(edge.to)"
         }
     }
 }
 
 /// A workflow's stages in authored order, each followed by the edges leaving it.
 struct WorkflowGraphRow: View {
-    let stages: [TaskWorkflow.Stage]
-    let edges: [TaskWorkflow.Edge]
+    let stages: [Workflow.Stage]
+    let edges: [Workflow.Edge]
     /// The stage a Task waits at, and the edge it is running, when a Task has taken the workflow up.
     var current: String?
     var running: Int?
+    var stopped: Int?
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -93,10 +105,12 @@ struct WorkflowGraphRow: View {
                         .accessibilityIdentifier("task-workflow-stage-\(stage)")
                         .accessibilityValue(current == stage ? "Current" : "")
                     ForEach(edges.leaving(stage), id: \.index) { index, edge in
-                        Text("→ \(edge.flow ?? "no Flow") → \(edge.to)")
+                        Text("→ \(edge.name ?? edge.flow ?? "no Flow") → \(edge.to)")
                             .font(Typography.code(11))
-                            .foregroundStyle(running == index ? WorkspaceTone.running.ink : palette.textTertiary)
-                            .accessibilityValue(running == index ? "Running" : "")
+                            .foregroundStyle(
+                                running == index ? WorkspaceTone.running.ink
+                                    : stopped == index ? WorkspaceTone.blocked.ink : palette.textTertiary)
+                            .accessibilityValue(running == index ? "Running" : stopped == index ? "Stopped" : "")
                             .accessibilityIdentifier("task-workflow-edge-\(index)")
                     }
                 }

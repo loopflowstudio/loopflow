@@ -329,7 +329,7 @@ impl<'a> DefinitionLoader<'a> {
                 Ok(flow) => return Ok(Target::Flow(flow)),
                 Err(LoadError::FlowNotFound(_)) if kind.is_none() => {}
                 Err(LoadError::FlowNotFound(_)) if names_workflow(name, self.repo) => {
-                    return Err(LoadError::TaskWorkflow(name.to_string()))
+                    return Err(LoadError::Workflow(name.to_string()))
                 }
                 Err(error) => return Err(error),
             }
@@ -340,7 +340,7 @@ impl<'a> DefinitionLoader<'a> {
             Err(LoadError::SkillNotFound(_))
                 if kind.is_none() && names_workflow(name, self.repo) =>
             {
-                Err(LoadError::TaskWorkflow(name.to_string()))
+                Err(LoadError::Workflow(name.to_string()))
             }
             Err(LoadError::SkillNotFound(_)) if kind.is_none() => {
                 Err(LoadError::TargetNotFound(name.to_string()))

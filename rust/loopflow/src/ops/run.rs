@@ -151,8 +151,8 @@ pub async fn resolve_work_selection(
             .pop()
             .ok_or_else(|| run_error(format!("Task {} has no recorded PR", task.id)))?;
         let mut context = render_task_context(&task, &project.plan, &pr, wave.slug(), &steers);
-        if let Some(workflow) = crate::ops::task_workflow::guidance(&store.sqlite, &task) {
-            context.push_str(&format!("\n\n{workflow}"));
+        if let Ok(Some(workflow)) = store.sqlite.workflow(&task.id) {
+            context.push_str(&format!("\n\n{}", workflow.guidance(&task.plan.identifier)));
         }
         let cwd = if crate::engine::git::current_branch(repo)
             .ok()

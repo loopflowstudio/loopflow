@@ -907,6 +907,17 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             print_task(&task, *json)
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
+        TaskCommand::Move {
+            issue,
+            stage,
+            reason,
+        } => {
+            println!(
+                "{}",
+                loopflow::ops::task::workflow_set(issue, stage, reason.as_deref())?
+            );
+            Ok(())
+        }
         TaskCommand::Create {
             wave,
             title,
@@ -1497,11 +1508,15 @@ fn dispatch(
             );
             return Ok(());
         };
-        cli.task = Some(task.plan.identifier);
+        cli.task = Some(task.plan.identifier.clone());
         cli.command = Some(Commands::Run {
             name: flow,
             args: Vec::new(),
         });
+        // The process that ran the edge writes where it left the Task: at the
+        // edge's target once its Flow succeeded, otherwise still on the edge.
+        dispatch(cli, args, account_selection)?;
+        return Ok(loopflow::ops::task::workflow_arrive(&task)?);
     }
     if let Some(task) = cli.task.as_ref() {
         let directory = loopflow::repo::working_directory()?;

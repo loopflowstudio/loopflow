@@ -24,7 +24,7 @@ use crate::engine::git::{
     push_with_upstream, ref_exists, rev_parse, stash_including_untracked, stash_pop,
 };
 use crate::engine::naming::sanitize_for_branch;
-use crate::engine::workflow::{load_workflow, Workflow, END, START};
+use crate::engine::workflow::{load_workflow, WorkflowDefinition, END, START};
 use crate::engine::worktrees::{
     create_from_placement_plan, plan_branch_placement, PlacementPlan, PlacementStrategy,
     WorktreeSegment,
@@ -32,6 +32,7 @@ use crate::engine::worktrees::{
 use crate::engine::{compile_flow, load_flow, ConcreteStep};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
+use crate::ops::workflow::WorkflowPosition;
 use crate::planning::{LinearIssueId, TaskPlan};
 use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, Store,
@@ -445,10 +446,21 @@ pub fn task_place(
         reason,
         ..
     } = options.clone();
-    // An unknown name is refused before any worktree is placed for it.
-    // `end` may name an edge that runs nothing; the Task's stage decides.
-    if let Some(flow) = flow.as_deref().filter(|flow| *flow != END) {
-        if load_task_workflow(repo, flow)?.is_none() {
+    // An unknown name is refused before any worktree is placed for it. A
+    // name the Task's Workflow gives an edge is known; the stage decides.
+    if let Some(flow) = flow.as_deref() {
+        let names_edge = block_on_task(async {
+            let store = task_store().await?;
+            let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? else {
+                return Ok(false);
+            };
+            let workflow = store.sqlite.workflow(&task.id).map_err(task_error)?;
+            Ok(workflow.is_some_and(|workflow| {
+                let mut edges = workflow.definition.edges.iter();
+                edges.any(|edge| edge.name() == flow)
+            }))
+        })?;
+        if !names_edge && load_workflow_definition(repo, flow)?.is_none() {
             load_task_flow(repo, flow)?;
         }
     }
@@ -460,112 +472,203 @@ pub fn task_place(
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task Project is missing"))?;
-        let flow = traverse_task_workflow(&store, &task, flow.as_deref(), &project.plan.flow)?;
-        select_task_agent(&store, &mut task, agent.as_deref()).await?;
-        if let Some(reason) = reason
+        let reason = reason
             .as_deref()
             .map(str::trim)
-            .filter(|reason| !reason.is_empty())
-        {
+            .filter(|reason| !reason.is_empty());
+        let flow = traverse_workflow(&store, &task, flow.as_deref(), &project.plan.flow, reason)?;
+        select_task_agent(&store, &mut task, agent.as_deref()).await?;
+        if let Some(reason) = reason {
             super::linear_observe::publish_task_steer(&store, &task, reason).await?;
         }
         Ok((task, flow))
     })
 }
 
-fn load_task_workflow(repo: &Path, name: &str) -> OpsResult<Option<Workflow>> {
+fn load_workflow_definition(repo: &Path, name: &str) -> OpsResult<Option<WorkflowDefinition>> {
     load_workflow(name, repo)
-        .map_err(|error| task_error(format!("failed to load Task workflow {name:?}: {error}")))
+        .map_err(|error| task_error(format!("failed to load workflow {name:?}: {error}")))
 }
 
-/// Choose what `lf task run` runs and, for a Task on a workflow, record the
-/// edge this process sets out on. A Task takes up a workflow when one is named
-/// or when its Project's default names one; a Project whose default is a plain
-/// Flow leaves its Tasks running Flows ad hoc.
-fn traverse_task_workflow(
+/// Choose what `lf task run` runs and, for a Task on a Workflow, put the Task
+/// on the edge this process sets out on. A Task takes up a workflow when one
+/// is named or when its Project's default names one; a Project whose default
+/// is a plain Flow leaves its Tasks running Flows ad hoc.
+fn traverse_workflow(
     store: &SharedStore,
     task: &Task,
     requested: Option<&str>,
     default: &str,
+    note: Option<&str>,
 ) -> OpsResult<Option<String>> {
-    let may_run = |exec: &crate::exec::Exec| store.sqlite.exec_may_run(exec);
-    let current = store
-        .sqlite
-        .task_workflow(&task.id)
-        .map_err(task_error)?
-        .map(|record| (record.departure(may_run), record));
-    // A named Flow that leaves the current stage is that edge, whatever else
+    let current = store.sqlite.workflow(&task.id).map_err(task_error)?;
+    // A name that leaves the current stage is that edge, whatever else
     // shares its name.
     let names_edge = |name: &str| {
-        current.as_ref().is_some_and(|(stage, record)| {
-            record
-                .workflow
-                .outgoing(stage)
+        current.as_ref().is_some_and(|workflow| {
+            workflow
+                .definition
+                .outgoing(workflow.stage())
                 .any(|(_, edge)| edge.name() == name)
         })
     };
     let named = match requested {
-        Some(name) if !names_edge(name) => load_task_workflow(&task.worktree, name)?,
+        Some(name) if !names_edge(name) => load_workflow_definition(&task.worktree, name)?,
         _ => None,
     };
     // Naming a workflow names no edge of it.
     let requested = requested.filter(|_| named.is_none());
-    // `existing` is `None` for a workflow the Task takes up with this traversal.
-    let (existing, workflow, stage) = match (current, named) {
-        (Some((stage, record)), named)
+    let take_up = match (&current, named) {
+        (Some(workflow), named)
             if named
                 .as_ref()
-                .is_none_or(|named| named.name == record.workflow.name) =>
+                .is_none_or(|named| named.name == workflow.definition.name) =>
         {
-            (Some(record.id), record.workflow, stage)
+            None
         }
-        (_, Some(named)) => (None, named, START.to_string()),
-        (_, None) => match load_task_workflow(&task.worktree, default)? {
-            Some(workflow) => (None, workflow, START.to_string()),
+        (_, Some(named)) => Some(named),
+        (_, None) => match load_workflow_definition(&task.worktree, default)? {
+            Some(definition) => Some(definition),
             None => {
                 let (flow, _) = load_task_flow(&task.worktree, requested.unwrap_or(default))?;
                 return Ok(Some(flow));
             }
         },
     };
+    // Validate the choice against the Workflow the Task will be on before
+    // anything is written.
+    let workflow = match take_up.clone() {
+        Some(definition) => crate::ops::workflow::Workflow::new(
+            definition,
+            WorkflowPosition::Stage {
+                stage: START.to_string(),
+            },
+            Vec::new(),
+        ),
+        None => current.expect("a Task that takes nothing up keeps its Workflow"),
+    };
     let issue = &task.plan.identifier;
+    let name = &workflow.definition.name;
+    let stage = workflow.stage();
+    let refuse = |asked: String| {
+        task_error(format!(
+            "Task {issue} is at {stage} of workflow {name}: {asked}. Outgoing edges: {}. `lf task move {issue} <stage>` puts the Task at a stage without running anything; `lf task run {issue} <workflow>` takes up another workflow; `lf run <flow>` in the Task worktree runs a Flow without moving the Task",
+            workflow.describe_outgoing(),
+        ))
+    };
+    if let WorkflowPosition::Edge {
+        edge,
+        running: true,
+        ..
+    } = &workflow.position
+    {
+        return Err(refuse(format!(
+            "{} is running",
+            workflow.definition.edges[*edge as usize].name()
+        )));
+    }
     let mut edges = workflow
-        .outgoing(&stage)
+        .definition
+        .outgoing(stage)
         .filter(|(_, edge)| requested.is_none_or(|name| edge.name() == name));
     let (index, edge) = match (edges.next(), edges.next()) {
         (Some(edge), None) => edge,
         (None, _) | (Some(_), Some(_)) => {
-            let asked = match requested {
+            return Err(refuse(match requested {
                 Some(flow) => format!("{flow} does not leave {stage}"),
-                None if stage == END => format!("workflow {} has reached its end", workflow.name),
+                None if stage == END => format!("workflow {name} has reached its end"),
                 None => format!(
                     "{stage} has more than one outgoing edge; name one as `lf task run {issue} <name>`"
                 ),
-            };
-            return Err(task_error(format!(
-                "Task {issue} is at {stage} of workflow {}: {asked}. Outgoing edges: {}. `lf task run {issue} <workflow>` takes up another workflow; `lf run <flow>` in the Task worktree runs a Flow without moving the Task",
-                workflow.name,
-                crate::ops::task_workflow::describe_edges(&workflow, &stage),
-            )));
+            }));
         }
     };
     let exec = crate::journal::current_exec_id()
-        .ok_or_else(|| task_error("a workflow traversal requires a registered Exec"))?;
-    let record = match existing {
-        Some(id) => id,
-        None => store
+        .ok_or_else(|| task_error("a workflow move requires a registered Exec"))?;
+    if let Some(definition) = &take_up {
+        store
             .sqlite
-            .start_task_workflow(&task.id, &workflow)
-            .map_err(task_error)?,
-    };
-    store
+            .take_up_workflow(&task.id, definition, &exec, note)
+            .map_err(task_error)?;
+    }
+    if !store
         .sqlite
-        .record_workflow_traversal(record, index, &exec)
-        .map_err(task_error)?;
+        .choose_workflow_edge(&task.id, &workflow, index, &exec, note)
+        .map_err(task_error)?
+    {
+        return Err(task_error(format!(
+            "Task {issue} moved on workflow {name} while this run was choosing; read `lf task status {issue}` and choose again"
+        )));
+    }
     match &edge.flow {
         Some(flow) => Ok(Some(load_task_flow(&task.worktree, flow)?.0)),
         None => Ok(None),
     }
+}
+
+/// The edge this process carried the Task along succeeded: put the Task at
+/// its target. A Task moved elsewhere in the meantime stays where it was put.
+pub fn workflow_arrive(task: &Task) -> OpsResult<()> {
+    let Some(exec) = crate::journal::current_exec_id() else {
+        return Ok(());
+    };
+    block_on_task(async {
+        task_store()
+            .await?
+            .sqlite
+            .arrive_workflow_edge(&task.id, &exec)
+            .map_err(task_error)
+    })
+}
+
+/// Put the Task at `stage` of its Workflow without running anything: go back,
+/// skip ahead, or record work that finished elsewhere. A Flow still running
+/// on an edge is left alone and no longer moves the Task when it ends.
+pub fn workflow_set(issue: &str, stage: &str, note: Option<&str>) -> OpsResult<String> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let task = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        let issue = &task.plan.identifier;
+        let none = || {
+            task_error(format!(
+                "Task {issue} has no workflow; `lf task run {issue} <workflow>` takes one up"
+            ))
+        };
+        let workflow = store
+            .sqlite
+            .workflow(&task.id)
+            .map_err(task_error)?
+            .ok_or_else(none)?;
+        let definition = &workflow.definition;
+        if !workflow.names_stage(stage) {
+            let stages: Vec<&str> = std::iter::once(START)
+                .chain(definition.stages.iter().map(|stage| stage.name.as_str()))
+                .chain([END])
+                .collect();
+            return Err(task_error(format!(
+                "workflow {} has no stage {stage:?}. Stages: {}",
+                definition.name,
+                stages.join(", ")
+            )));
+        }
+        let exec = crate::journal::current_exec_id()
+            .ok_or_else(|| task_error("a workflow move requires a registered Exec"))?;
+        if !store
+            .sqlite
+            .set_workflow_stage(&task.id, stage, &exec, note)
+            .map_err(task_error)?
+        {
+            return Err(none());
+        }
+        Ok(format!(
+            "Task {issue} is at {stage} of workflow {}",
+            definition.name
+        ))
+    })
 }
 
 pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> OpsResult<Task> {

@@ -215,6 +215,11 @@ public struct RegistryQuery: Sendable {
         }
     }
 
+    /// Put the Task at a stage of its Workflow without running anything.
+    public func moveTask(issue: String, stage: String, cwd: String?) async throws {
+        _ = try await run(["task", "move", issue, stage], cwd)
+    }
+
     /// One Flow run from its driver's record, by driver Exec.
     public func flowRun(id: String, cwd: String?) async throws -> FlowDetail {
         let stdout = try await run(["flow", "show", id, "--sessions", "--json"], cwd)

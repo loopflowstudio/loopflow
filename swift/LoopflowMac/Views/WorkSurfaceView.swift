@@ -271,7 +271,7 @@ struct WorkSurfaceView: View {
                     .foregroundStyle(palette.accentInk)
                 }
                 if let workflow = model.taskWork[task.id].value?.workflow {
-                    TaskWorkflowView(model: model, task: task, wave: found.wave.wave, workflow: workflow)
+                    WorkflowView(model: model, task: task, wave: found.wave.wave, workflow: workflow)
                 }
                 if let unavailable = found.wave.unavailableTasks.first(where: { $0.taskId == task.id }) {
                     evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)

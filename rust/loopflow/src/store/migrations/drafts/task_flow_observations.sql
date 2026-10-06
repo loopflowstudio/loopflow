@@ -120,31 +120,42 @@ CREATE TRIGGER validate_task_started_update BEFORE UPDATE OF started_at ON tasks
     ) THEN RAISE(ABORT,'Started requires recorded Task work') END;
 END;
 
--- A Task's workflow: its named graph as captured when the Task took it up.
--- The newest row is the Task's; replacing a workflow appends another.
+-- A Task's workflow, one row per Task: the named graph as captured when the
+-- Task took it up, never edited, and where the Task stands on it. `stage` is
+-- where it waits; with `edge` set the Task is on that edge, which left `stage`,
+-- carried by the Flow run `exec_id`. Whether that run still runs is its Exec's.
+-- Taking up a workflow replaces the row.
 CREATE TABLE task_workflows (
-    id INTEGER PRIMARY KEY,
-    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     graph TEXT NOT NULL CHECK (json_valid(graph)),
-    started_at INTEGER NOT NULL
+    stage TEXT NOT NULL,
+    edge INTEGER,
+    exec_id TEXT REFERENCES execs(id),
+    updated_at INTEGER NOT NULL,
+    CHECK ((edge IS NULL) = (exec_id IS NULL))
 ) STRICT;
-CREATE INDEX task_workflows_task ON task_workflows(task_id, id);
 
--- One row per edge `lf task run` set out on, and the Exec that ran it: the
--- driver of that edge's Flow. Position is read from these and their Execs.
-CREATE TABLE task_workflow_traversals (
+-- Every change to a Task's position, oldest first. `exec_id` is the `lf`
+-- process that made it; who asked is that Exec's caller.
+CREATE TABLE task_workflow_moves (
     seq INTEGER PRIMARY KEY,
-    task_workflow_id INTEGER NOT NULL REFERENCES task_workflows(id) ON DELETE CASCADE,
-    edge INTEGER NOT NULL,
-    exec_id TEXT NOT NULL UNIQUE REFERENCES execs(id)
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    workflow TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('took_up', 'chose', 'arrived', 'set')),
+    from_stage TEXT NOT NULL,
+    to_stage TEXT NOT NULL,
+    edge INTEGER,
+    exec_id TEXT NOT NULL REFERENCES execs(id),
+    note TEXT,
+    at INTEGER NOT NULL
 ) STRICT;
-CREATE INDEX task_workflow_traversals_workflow ON task_workflow_traversals(task_workflow_id, seq);
+CREATE INDEX task_workflow_moves_task ON task_workflow_moves(task_id, seq);
 
-CREATE TRIGGER task_workflows_are_append_only BEFORE UPDATE ON task_workflows BEGIN
-    SELECT RAISE(ABORT,'A Task workflow record is append-only');
+CREATE TRIGGER task_workflow_graph_is_fixed BEFORE UPDATE OF graph ON task_workflows BEGIN
+    SELECT RAISE(ABORT,'A Workflow graph is fixed when taken up');
 END;
-CREATE TRIGGER task_workflow_traversals_are_append_only BEFORE UPDATE ON task_workflow_traversals BEGIN
-    SELECT RAISE(ABORT,'A Task workflow record is append-only');
+CREATE TRIGGER task_workflow_moves_are_append_only BEFORE UPDATE ON task_workflow_moves BEGIN
+    SELECT RAISE(ABORT,'Workflow history is append-only');
 END;
 
 -- A Task's primary conversation is one of its own, named here. The Session

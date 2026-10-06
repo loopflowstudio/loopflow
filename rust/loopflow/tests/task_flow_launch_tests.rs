@@ -229,6 +229,13 @@ impl WorkflowTask {
             (".lf/flows/proof.yaml", "- cmd: task sync --plan\n"),
             (".lf/flows/land-proof.yaml", "- cmd: task sync --plan\n"),
             (".lf/flows/broken.yaml", "- cmd: flow show no-such-flow\n"),
+            // Fails until the repository defines a Flow named `late`.
+            (".lf/flows/gate.yaml", "- cmd: flow show late\n"),
+            // Two ways out of one stage run the same Flow under their own names.
+            (
+                ".lf/workflows/gated.yaml",
+                "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {name: again, from: review, to: review, flow: gate}\n  - {name: accept, from: review, to: end, flow: gate}\n",
+            ),
             // No PR: the last edge runs nothing.
             (
                 ".lf/workflows/findings.yaml",
@@ -282,6 +289,26 @@ fn at(stage: &str) -> serde_json::Value {
     serde_json::json!({"kind": "stage", "stage": stage})
 }
 
+/// Each move's kind and the edge it names, oldest first.
+fn moves(workflow: &serde_json::Value) -> Vec<(String, Option<u64>)> {
+    workflow["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            (
+                entry["kind"].as_str().unwrap().into(),
+                entry["edge"].as_u64(),
+            )
+        })
+        .collect()
+}
+
+fn refusal(output: std::process::Output) -> String {
+    assert!(!output.status.success());
+    String::from_utf8_lossy(&output.stderr).to_string()
+}
+
 #[test]
 fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
     let task = WorkflowTask::new();
@@ -290,17 +317,32 @@ fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
     assert_eq!(workflow["name"], "findings");
     assert_eq!(workflow["stages"][0]["skill"], "research");
     assert_eq!(workflow["position"], at("findings"));
-    // The edge's Flow is an ordinary Flow run, and its driver is the traversal.
+    assert_eq!(workflow["outgoing"], serde_json::json!([1]));
+    // The edge's Flow is an ordinary Flow run; its driver chose the edge and,
+    // having succeeded, wrote the arrival.
     let flows = support::recorded_flows(task.home.path());
     assert_eq!(flows.len(), 1);
-    assert_eq!(workflow["traversals"].as_array().unwrap().len(), 1);
+    let chose = |edge| ("chose".to_string(), Some(edge));
+    assert_eq!(
+        moves(&workflow),
+        [
+            ("took_up".into(), None),
+            chose(0),
+            ("arrived".into(), Some(0))
+        ]
+    );
+    let history = workflow["history"].as_array().unwrap();
+    assert_eq!(history[1]["exec_id"], history[2]["exec_id"]);
+    assert_eq!(history[1]["actor"], "person");
+    assert_eq!(history[2]["actor"], "edge");
     task.ok(&["task", "run", "INF-123"]);
-    assert_eq!(task.workflow()["position"], at("end"));
+    let workflow = task.workflow();
+    assert_eq!(workflow["position"], at("end"));
+    assert_eq!(moves(&workflow).last(), Some(&chose(1)));
     assert_eq!(support::recorded_flows(task.home.path()).len(), 1);
     // Reaching the end neither completes the Task nor leaves an edge to run.
-    let refused = task.run(&["-b", "task", "run", "INF-123"]);
-    assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("reached its end"));
+    let error = refusal(task.run(&["-b", "task", "run", "INF-123"]));
+    assert!(error.contains("reached its end"), "{error}");
     let status = task.run(&["task", "status", "INF-123"]);
     assert!(String::from_utf8_lossy(&status.stdout).contains("Workflow findings: at end"));
 }
@@ -313,40 +355,116 @@ fn a_landing_edge_that_returns_to_its_stage_can_be_taken_again() {
         task.ok(&["-b", "task", "run", "INF-123", "land-proof"]);
         assert_eq!(task.workflow()["position"], at("review"));
     }
-    let workflow = task.workflow();
-    let edges: Vec<_> = workflow["traversals"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|traversal| traversal["edge"].as_u64().unwrap())
-        .collect();
-    assert_eq!(edges, [0, 1, 1]);
+    let chosen = |workflow: &serde_json::Value| -> Vec<u64> {
+        moves(workflow)
+            .into_iter()
+            .filter(|(kind, _)| kind == "chose")
+            .filter_map(|(_, edge)| edge)
+            .collect()
+    };
+    assert_eq!(chosen(&task.workflow()), [0, 1, 1]);
     // Two edges leave review, so the entry asks which, and names them.
-    let refused = task.run(&["-b", "task", "run", "INF-123"]);
-    assert!(!refused.status.success());
-    let error = String::from_utf8_lossy(&refused.stderr).to_string();
+    let error = refusal(task.run(&["-b", "task", "run", "INF-123"]));
     assert!(error.contains("land-proof (to review)"), "{error}");
-    let refused = task.run(&["-b", "task", "run", "INF-123", "proof"]);
-    assert!(!refused.status.success());
-    let error = String::from_utf8_lossy(&refused.stderr).to_string();
+    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "proof"]));
     assert!(error.contains("proof does not leave review"), "{error}");
-    assert_eq!(task.workflow()["traversals"].as_array().unwrap().len(), 3);
+    assert_eq!(chosen(&task.workflow()), [0, 1, 1]);
 }
 
 #[test]
-fn a_failed_edge_leaves_the_task_at_the_stage_it_left() {
+fn a_landing_that_settles_later_is_recorded_by_moving_the_task() {
     let task = WorkflowTask::new();
     task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
-    let failed = task.run(&["-b", "task", "run", "INF-123", "broken"]);
-    assert!(!failed.status.success());
+    // The landing edge's Flow stops before its end: the Task stays on it.
+    assert!(!task
+        .run(&["-b", "task", "run", "INF-123", "broken"])
+        .status
+        .success());
     let workflow = task.workflow();
-    assert_eq!(workflow["position"], at("review"));
-    assert_eq!(workflow["traversals"].as_array().unwrap().len(), 2);
-    // Taking up another workflow keeps that history and starts over.
+    assert_eq!(workflow["position"]["kind"], "edge");
+    assert_eq!(workflow["position"]["edge"], 2);
+    assert_eq!(workflow["position"]["running"], false);
+    assert_eq!(moves(&workflow).last().unwrap().0, "chose");
+    // The work finished elsewhere; a person says so.
+    task.ok(&[
+        "task",
+        "move",
+        "INF-123",
+        "end",
+        "--reason",
+        "merged by hand",
+    ]);
+    let workflow = task.workflow();
+    assert_eq!(workflow["position"], at("end"));
+    let set = workflow["history"].as_array().unwrap().last().unwrap();
+    assert_eq!(set["kind"], "set");
+    assert_eq!(
+        (&set["from"], &set["to"]),
+        (&"review".into(), &"end".into())
+    );
+    assert_eq!(set["edge"], 2);
+    assert_eq!(set["note"], "merged by hand");
+    assert_eq!(set["actor"], "person");
+    assert_eq!(set["session_id"], serde_json::Value::Null);
+    assert_eq!(support::recorded_flows(task.home.path()).len(), 2);
+    // Taking up another workflow starts over and keeps the history.
+    let before = workflow["history"].as_array().unwrap().len();
     task.ok(&["-b", "task", "run", "INF-123", "findings"]);
     let workflow = task.workflow();
     assert_eq!(workflow["name"], "findings");
-    assert_eq!(workflow["traversals"].as_array().unwrap().len(), 1);
+    assert_eq!(workflow["position"], at("findings"));
+    assert_eq!(workflow["history"].as_array().unwrap().len(), before + 3);
+    assert_eq!(workflow["history"][0]["workflow"], "rounds");
+}
+
+#[test]
+fn a_stopped_edge_is_chosen_again_by_name_and_the_task_can_go_back() {
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "gated"]);
+    // Both ways out of review run `gate`; each answers to its own name.
+    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "gate"]));
+    assert!(error.contains("gate does not leave review"), "{error}");
+    assert!(error.contains("again (runs gate, to review)"), "{error}");
+    assert!(error.contains("accept (runs gate, to end)"), "{error}");
+    assert!(!task
+        .run(&["-b", "task", "run", "INF-123", "accept"])
+        .status
+        .success());
+    let stopped = task.workflow();
+    assert_eq!(stopped["position"]["edge"], 2);
+    assert_eq!(stopped["position"]["running"], false);
+    assert_eq!(stopped["outgoing"], serde_json::json!([1, 2]));
+    let status = task.run(&["task", "status", "INF-123"]);
+    let status = String::from_utf8_lossy(&status.stdout).to_string();
+    assert!(
+        status.contains("Workflow gated: stopped on accept (review → end)"),
+        "{status}"
+    );
+    // Once its cause is fixed the same edge is chosen again and arrives.
+    let late = task.repo.path().join(".lf/flows/late.yaml");
+    fs::write(late, "- cmd: task sync --plan\n").unwrap();
+    task.ok(&["-b", "task", "run", "INF-123", "accept"]);
+    assert_eq!(task.workflow()["position"], at("end"));
+    // The demo was not good enough after all: go back and take the loop.
+    task.ok(&[
+        "task",
+        "move",
+        "INF-123",
+        "review",
+        "--reason",
+        "one more round",
+    ]);
+    assert_eq!(task.workflow()["position"], at("review"));
+    task.ok(&["-b", "task", "run", "INF-123", "again"]);
+    let workflow = task.workflow();
+    assert_eq!(workflow["position"], at("review"));
+    let kinds: Vec<_> = moves(&workflow).into_iter().map(|(kind, _)| kind).collect();
+    assert_eq!(
+        kinds,
+        ["took_up", "chose", "arrived", "chose", "chose", "arrived", "set", "chose", "arrived"]
+    );
+    let error = refusal(task.run(&["task", "move", "INF-123", "nowhere"]));
+    assert!(error.contains("Stages: start, review, end"), "{error}");
 }
 
 #[test]

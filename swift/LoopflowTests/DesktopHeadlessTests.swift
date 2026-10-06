@@ -96,7 +96,7 @@ struct DesktopHeadlessTests {
         #expect(try view("code").inspect().find(viewWithAccessibilityIdentifier: "wave-default-error").text().string() == "broken does not load")
     }
 
-    @Test("A Task's workflow shows its running edge, then offers the edges leaving the stage it waits at")
+    @Test("A Task's Workflow shows its running edge, offers a stopped edge again, and moves by choice or by stage")
     func taskWorkflow() async throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
@@ -105,31 +105,50 @@ struct DesktopHeadlessTests {
         var wire = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
         let started = Recorder()
-        let model = PodiumModel(query: RegistryQuery(start: { args, _ in await started.add(args) }, run: { _, _ in "{}" }))
-        func view() throws -> TaskWorkflowView {
+        let model = PodiumModel(query: RegistryQuery(
+            start: { args, _ in await started.add(args) },
+            run: { args, _ in
+                if args.prefix(2) == ["task", "move"] { await started.add(args) }
+                return "{}"
+            }))
+        func view(position: [String: Any]? = nil, outgoing: [Int] = []) throws -> WorkflowView {
+            var workflow = try #require(wire["workflow"] as? [String: Any])
+            if let position { workflow["position"] = position }
+            workflow["outgoing"] = outgoing
+            wire["workflow"] = workflow
             let work = try JSONDecoder().decode(TaskWork.self, from: JSONSerialization.data(withJSONObject: wire))
-            return TaskWorkflowView(model: model, task: task, wave: wave.wave, workflow: try #require(work.workflow))
+            return WorkflowView(model: model, task: task, wave: wave.wave, workflow: try #require(work.workflow))
+        }
+        func position(_ view: WorkflowView) throws -> String {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string()
         }
 
-        // The fixture's `pursue` edge is running: nothing else can be started beside it.
+        // The fixture's `pursue` edge is running: Rust lists no edge to choose beside it.
         let running = try view()
-        #expect(try running.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string()
-            == "Running pursue · design to demo")
-        #expect(try running.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run-1").button().isDisabled())
-
-        // Once it finishes the Task waits at `demo`, whose only edge runs nothing and enters `end`.
-        var workflow = try #require(wire["workflow"] as? [String: Any])
-        workflow["position"] = ["kind": "stage", "stage": "demo"]
-        wire["workflow"] = workflow
-        let waiting = try view()
-        #expect(try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-position").text().string()
-            == "Waiting on you at demo · demo")
+        #expect(try position(running) == "Running pursue · design to demo")
         #expect(throws: (any Error).self) {
-            try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run-1")
+            try running.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run-1")
         }
-        try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run-2").button().tap()
+
+        // Stopped, it holds the Task and is offered again.
+        let exec = "11111111-1111-4111-8111-111111111111"
+        let stopped = try view(
+            position: ["kind": "edge", "edge": 1, "exec_id": exec, "running": false], outgoing: [1])
+        #expect(try position(stopped) == "Stopped on pursue · design to demo")
+        #expect(try !stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run-1").button().isDisabled())
+
+        // At `demo` the only edge runs nothing and is chosen by its own name.
+        let waiting = try view(position: ["kind": "stage", "stage": "demo"], outgoing: [2])
+        #expect(try position(waiting) == "Waiting on you at demo · demo")
+        let accept = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run-2").button()
+        #expect(try accept.labelView().text().string() == "accept")
+        try accept.tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "end"]])
+        #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "accept"]])
+
+        // Going back is the same command a person would type.
+        await model.moveTask(to: "design", task: task, wave: wave.wave)
+        #expect(await started.calls.last == ["task", "move", task.task.identifier, "design"])
     }
 
     @Test("A Task opens on its primary and lists waiting conversations before working ones")

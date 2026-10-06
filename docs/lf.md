@@ -34,6 +34,7 @@ lf --wave exports : "Review the goal" # add context in the current directory
 lf -b task run EXP-12       # place the Task, run its default
 lf -b task run EXP-12 pursue # take the workflow edge that runs pursue
 lf task run EXP-12 end       # take an edge that runs nothing
+lf task move EXP-12 demo     # put the Task at a stage, running nothing
 lf --task EXP-12 run incident # run a Flow without moving the Task
 lf task run EXP-12 --reason "take the smaller approach"
 ```
@@ -50,7 +51,8 @@ When the Project's default names a workflow, the Task moves through stages.
 Each `task run` takes one edge leaving the current stage: the only one, or the
 one whose Flow you name. At a stage the Task waits on you in its conversation;
 no command approves a stage. A Flow that does not leave the stage is refused
-with the edges that do. `lf task run EXP-12 code` takes up another workflow from
+with the edges that do. A Flow that stops leaves the Task on its edge until
+you choose again or `lf task move EXP-12 <stage>` puts it at a stage outright. `lf task run EXP-12 code` takes up another workflow from
 its start. See [workflows](authoring.md#workflows).
 
 ```bash

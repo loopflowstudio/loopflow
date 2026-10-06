@@ -444,11 +444,23 @@ fn task_work_preserves_all_owners() {
     let workflow = work.workflow.as_ref().expect("fixture Task has a workflow");
     assert_eq!(
         workflow.position,
-        loopflow::ops::task_workflow::WorkflowPosition::Edge {
+        loopflow::ops::workflow::WorkflowPosition::Edge {
             edge: 1,
             exec_id: work.flows[0].summary.id.clone(),
+            running: true,
         }
     );
+    // A conversation's move names it; an edge's arrival names no one.
+    let asked = workflow.history.last().expect("fixture has history");
+    assert_eq!(
+        asked.actor,
+        loopflow::ops::workflow::WorkflowActor::Conversation
+    );
+    assert_eq!(
+        asked.session_id.as_deref(),
+        Some(work.sessions[0].id.as_str())
+    );
+    assert_eq!(workflow.definition.edges[2].name(), "accept");
     assert_eq!(
         serde_json::to_value(work).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()

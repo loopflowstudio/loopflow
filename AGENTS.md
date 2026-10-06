@@ -9,7 +9,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - Chapter = shared name of every Wave's In Progress Linear Project; no Chapter table
 - Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the default Flow
 - A Task's work is every Session, Flow and Exec in its checkout, plus explicit binds; no Flow is selected over another
-- TaskWorkflow = a Task's stages (a person, in its conversation) joined by edges (Flows); `lf task run` takes an edge
+- Workflow = a Task's stages (a person, in its conversation) joined by edges (Flows), with its stored position; `lf task run` chooses an edge, `lf task move` sets a stage
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
@@ -210,10 +210,12 @@ Flow authority and never rewrites historical usage. Every Flow naming the Task
 is equally its work; a stopped Flow is history its caller inspects, never a
 position to resume. The Project's `flow:` supplies the default for a fresh
 launch and may name a Flow or a workflow; explicit selection is allowed.
-A TaskWorkflow is the Task's outer shape: stages where a person takes part in
-the Task conversation, joined by edges that each run one Flow. Its record
-captures the graph when the Task takes it up and appends each edge
-`lf task run` sets out on; position is read from those Execs, never stored. It
+A Workflow is the Task's outer shape: the workflow definition it took up,
+whose stages are where a person takes part in the Task conversation and whose
+edges each run one Flow, plus the Task's stored position on it. The graph is
+fixed when taken up. `lf task run` chooses an edge and its process writes the
+arrival when the Flow succeeds; a stopped Flow leaves the Task on its edge;
+`lf task move` sets a stage. Each move is appended to the Task's history. It
 executes nothing, and no command approves or completes a stage.
 Taskless execution uses the same driver. A Flow is one driver Exec and the step
 Execs it starts; its id is the driver Exec id. The driver holds the cursor and

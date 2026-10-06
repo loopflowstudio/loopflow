@@ -222,21 +222,34 @@ edges:
 lf task run DES-123            # start: the only edge, task-design
 lf task run DES-123 pursue     # at design: build it
 lf task run DES-123 ship       # at demo: land it
-lf task status DES-123         # stage or running edge
+lf task status DES-123         # stage, or the edge it is on
+lf task move DES-123 design    # go back without running anything
 ```
 
 `start` and `end` are implicit. An edge runs anything `lf run` accepts, a
 skill included. Only an edge into `end` may omit `flow:`; take it with
 `lf task run ISSUE end`. A Task with no PR is a workflow with no landing edge,
-like builtin `research`. Two edges leaving one stage cannot run the same Flow.
+like builtin `research`. Two edges leaving one stage can run the same Flow
+when each has its own `name:`, which is then what `lf task run` takes:
+
+```yaml
+  - { name: again,  from: demo, to: demo, flow: pursue }
+  - { name: accept, from: demo, to: end,  flow: pursue }
+```
 
 A Task takes up a workflow on its first `lf task run` when its Project's
 default names one, or when you name one. It keeps the graph as it was then.
-The Task is on an edge while that Flow runs, at the edge's target when it
-succeeds, and back where it left when it stops or fails. Nothing else moves
-it: there is no approve or complete command. Give feedback in the Task
-conversation, which is told its stage's skill and the command for each edge
-leaving it. `lf --task ISSUE run FLOW` runs a Flow without moving the Task.
+The Task's position is stored. Choosing an edge puts the Task on it; the
+process that ran the edge puts the Task at its target when the Flow succeeds.
+A Flow that stops or fails leaves the Task on the edge, shown as stopped:
+choose that edge again, choose another one leaving the same stage, or
+`lf task move ISSUE STAGE`. `task move` puts the Task at any stage and runs
+nothing: go back for another round, skip ahead, or record a landing that
+settled after its Flow stopped. An edge cannot be chosen while another is
+running. `lf task status ISSUE --json` carries the position, the edges that
+can be chosen now and every move with who made it and its `--reason`. There
+is no approve or complete command. Give feedback in the Task conversation,
+which is told its stage's skill and the command for each edge leaving it. `lf --task ISSUE run FLOW` runs a Flow without moving the Task.
 
 Builtins are `feature` (design, demo, land), `code` (demo, land) and
 `research` (findings, no PR). `lf flow list` shows workflows beside Flows with

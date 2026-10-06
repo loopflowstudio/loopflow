@@ -166,6 +166,9 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             .unwrap()
             .iter()
             .all(|flow| flow["state"] == "completed"));
+        // The Project's default names a repository Flow, so the Task took up
+        // no workflow and ran every Flow ad hoc.
+        assert!(status["execution"]["work"]["workflow"].is_null());
         let task = runtime
             .block_on(registered.store.get_task(&registered.task.id))
             .unwrap()
@@ -197,4 +200,167 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         }
         assert_eq!(support::recorded_flows(home.path()).len(), 4);
     }
+}
+
+/// A registered Task whose repository defines the Flows and workflows below.
+struct WorkflowTask {
+    repo: TestRepo,
+    home: tempfile::TempDir,
+    _env: support::EnvGuard,
+}
+
+impl WorkflowTask {
+    fn new() -> Self {
+        let repo = TestRepo::new();
+        support::bind_task_planning(&repo);
+        repo.create_branch("launch-proof");
+        let home = tempfile::tempdir().unwrap();
+        let env = support::EnvGuard::new(&[
+            ("open", "#!/bin/sh\nexit 0\n"),
+            ("gh", "#!/bin/sh\nexit 1\n"),
+        ]);
+        support::register_task(
+            home.path(),
+            &repo.path().canonicalize().unwrap(),
+            "launch-proof",
+            &repo.head_sha(),
+        );
+        for (path, content) in [
+            (".lf/flows/proof.yaml", "- cmd: task sync --plan\n"),
+            (".lf/flows/land-proof.yaml", "- cmd: task sync --plan\n"),
+            (".lf/flows/broken.yaml", "- cmd: flow show no-such-flow\n"),
+            // No PR: the last edge runs nothing.
+            (
+                ".lf/workflows/findings.yaml",
+                "stages:\n  findings: research\nedges:\n  - {from: start, to: findings, flow: proof}\n  - {from: findings, to: end}\n",
+            ),
+            // Several PRs: the landing edge returns to its stage.
+            (
+                ".lf/workflows/rounds.yaml",
+                "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: review, flow: land-proof}\n  - {from: review, to: end, flow: broken}\n",
+            ),
+        ] {
+            let path = repo.path().join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content).unwrap();
+        }
+        Self {
+            repo,
+            home,
+            _env: env,
+        }
+    }
+
+    fn run(&self, args: &[&str]) -> std::process::Output {
+        command(self.repo.path(), self.home.path(), args)
+            .output()
+            .unwrap()
+    }
+
+    fn ok(&self, args: &[&str]) {
+        let output = self.run(args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn workflow(&self) -> serde_json::Value {
+        let status = self.run(&["task", "status", "INF-123", "--json"]);
+        assert!(
+            status.status.success(),
+            "{}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+        let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+        status["execution"]["work"]["workflow"].clone()
+    }
+}
+
+fn at(stage: &str) -> serde_json::Value {
+    serde_json::json!({"kind": "stage", "stage": stage})
+}
+
+#[test]
+fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
+    let workflow = task.workflow();
+    assert_eq!(workflow["name"], "findings");
+    assert_eq!(workflow["stages"][0]["skill"], "research");
+    assert_eq!(workflow["position"], at("findings"));
+    // The edge's Flow is an ordinary Flow run, and its driver is the traversal.
+    let flows = support::recorded_flows(task.home.path());
+    assert_eq!(flows.len(), 1);
+    assert_eq!(workflow["traversals"].as_array().unwrap().len(), 1);
+    task.ok(&["task", "run", "INF-123"]);
+    assert_eq!(task.workflow()["position"], at("end"));
+    assert_eq!(support::recorded_flows(task.home.path()).len(), 1);
+    // Reaching the end neither completes the Task nor leaves an edge to run.
+    let refused = task.run(&["-b", "task", "run", "INF-123"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("reached its end"));
+    let status = task.run(&["task", "status", "INF-123"]);
+    assert!(String::from_utf8_lossy(&status.stdout).contains("Workflow findings: at end"));
+}
+
+#[test]
+fn a_landing_edge_that_returns_to_its_stage_can_be_taken_again() {
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
+    for _ in 0..2 {
+        task.ok(&["-b", "task", "run", "INF-123", "land-proof"]);
+        assert_eq!(task.workflow()["position"], at("review"));
+    }
+    let workflow = task.workflow();
+    let edges: Vec<_> = workflow["traversals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|traversal| traversal["edge"].as_u64().unwrap())
+        .collect();
+    assert_eq!(edges, [0, 1, 1]);
+    // Two edges leave review, so the entry asks which, and names them.
+    let refused = task.run(&["-b", "task", "run", "INF-123"]);
+    assert!(!refused.status.success());
+    let error = String::from_utf8_lossy(&refused.stderr).to_string();
+    assert!(error.contains("land-proof (to review)"), "{error}");
+    let refused = task.run(&["-b", "task", "run", "INF-123", "proof"]);
+    assert!(!refused.status.success());
+    let error = String::from_utf8_lossy(&refused.stderr).to_string();
+    assert!(error.contains("proof does not leave review"), "{error}");
+    assert_eq!(task.workflow()["traversals"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn a_failed_edge_leaves_the_task_at_the_stage_it_left() {
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
+    let failed = task.run(&["-b", "task", "run", "INF-123", "broken"]);
+    assert!(!failed.status.success());
+    let workflow = task.workflow();
+    assert_eq!(workflow["position"], at("review"));
+    assert_eq!(workflow["traversals"].as_array().unwrap().len(), 2);
+    // Taking up another workflow keeps that history and starts over.
+    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
+    let workflow = task.workflow();
+    assert_eq!(workflow["name"], "findings");
+    assert_eq!(workflow["traversals"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn a_plain_flow_run_in_the_worktree_does_not_move_the_task() {
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
+    let before = task.workflow();
+    task.ok(&["-b", "run", "land-proof"]);
+    task.ok(&["-b", "--task", "INF-123", "run", "land-proof"]);
+    assert_eq!(support::recorded_flows(task.home.path()).len(), 3);
+    assert_eq!(task.workflow(), before);
+    // A workflow is traversed, never run as a Flow.
+    let refused = task.run(&["-b", "run", "rounds"]);
+    assert!(!refused.status.success());
+    let error = String::from_utf8_lossy(&refused.stderr).to_string();
+    assert!(error.contains("lf task run <issue> rounds"), "{error}");
 }

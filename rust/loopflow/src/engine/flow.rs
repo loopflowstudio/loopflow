@@ -344,16 +344,29 @@ impl<'a> DefinitionLoader<'a> {
             match self.load_flow(name) {
                 Ok(flow) => return Ok(Target::Flow(flow)),
                 Err(LoadError::FlowNotFound(_)) if kind.is_none() => {}
+                Err(LoadError::FlowNotFound(_)) if self.names_workflow(name) => {
+                    return Err(LoadError::TaskWorkflow(name.to_string()))
+                }
                 Err(error) => return Err(error),
             }
         }
         match load_skill(name, self.repo) {
             Ok(skill) => Ok(Target::Skill(skill)),
+            // A name that is only a workflow is traversed, never run.
+            Err(LoadError::SkillNotFound(_)) if kind.is_none() && self.names_workflow(name) => {
+                Err(LoadError::TaskWorkflow(name.to_string()))
+            }
             Err(LoadError::SkillNotFound(_)) if kind.is_none() => {
                 Err(LoadError::TargetNotFound(name.to_string()))
             }
             Err(error) => Err(error),
         }
+    }
+
+    fn names_workflow(&self, name: &str) -> bool {
+        crate::engine::workflow::workflow_names(self.repo)
+            .iter()
+            .any(|workflow| workflow == name)
     }
 
     fn load_flow(&mut self, name: &str) -> Result<Flow, LoadError> {
@@ -1170,7 +1183,7 @@ mod tests {
     #[test]
     fn human_reviews_do_not_own_return_edges() {
         let tmp = TempDir::new().unwrap();
-        let steps = compile_flow(&load_flow("feature", tmp.path()).unwrap(), tmp.path()).unwrap();
+        let steps = compile_flow(&load_flow("pursue", tmp.path()).unwrap(), tmp.path()).unwrap();
         let edges: Vec<_> = steps
             .iter()
             .filter_map(|step| match step {
@@ -1423,10 +1436,10 @@ Design the feature.
     #[test]
     fn load_flow_finds_builtin_flow() {
         let tmp = TempDir::new().unwrap();
-        let result = load_flow("code", tmp.path());
+        let result = load_flow("pursue", tmp.path());
         assert!(
             result.is_ok(),
-            "builtin 'code' flow should be found: {:?}",
+            "builtin 'pursue' flow should be found: {:?}",
             result.err()
         );
     }
@@ -1845,7 +1858,7 @@ Design the feature.
                             "fix".to_string(),
                             XorPath {
                                 steps: vec![Step::new(Target::Flow(
-                                    load_flow("code", tmp.path()).unwrap(),
+                                    load_flow("pursue", tmp.path()).unwrap(),
                                 ))],
                                 description: "Fix it".to_string(),
                             },

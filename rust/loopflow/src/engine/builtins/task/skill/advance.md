@@ -36,10 +36,13 @@ scope, constraints, and proof into its directive.
 
 Choose the next Flow from the actual catalog. An approved design can proceed
 directly to the `pursue` Flow (implement → compress → refresh
-→ loop-decide, repeated on Iterate, then pr-publish). Its PR review happens
-in the Task conversation, not as a Flow step. Do not repeat initial
+→ loop-decide, repeated on Iterate, then pr-publish): `lf task run <issue> code`
+takes up the `code` workflow, whose first edge is that Flow. Its PR review
+happens in the Task conversation, not as a Flow step. Do not repeat initial
 design work merely to launch implementation. For work that still
-needs design, use the complete feature Flow. Preserve any explicit User choice
+needs design, take up the `feature` workflow, whose first edge drafts the
+design. A Task on a workflow takes only the edges leaving its current stage;
+`lf task run <issue>` names them. Preserve any explicit User choice
 to perform implement → compress → refresh directly in this conversation.
 Ask only when intent or placement cannot be resolved from available evidence.
 

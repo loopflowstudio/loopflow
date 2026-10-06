@@ -49,10 +49,10 @@ We cant do this design correctly without it."
   generations, automatic recovery, resume, the pending-review pointer, the
   `replaced` state, steps reading a cursor.
 
-**TaskWorkflow** is drafted in [task-workflow.md](task-workflow.md), unreviewed
-by Jack. Whether it lands in PR #1439 or a following Task is unresolved (see
-that draft's open choice 4). It replaces the "Workflows" bullet under Later slices,
-including its "no runtime row" rule, and the Task-primary Flow idea.
+**TaskWorkflow** is built as [task-workflow.md](task-workflow.md) describes,
+unreviewed by Jack; his October 5 request to build every slice placed it in
+PR #1439. It replaces the earlier "no runtime row" rule and the Task-primary
+Flow idea.
 
 ## Outcome
 
@@ -105,8 +105,9 @@ October 5 (delivery review):
 
 ## Branch state after the FlowExec pass
 
-FlowExec and oblivious steps are built (`aa2f42289`, `70e76a7d3`); Jack Heart
-has not reviewed them. TaskWorkflow, takeover and resume are not built.
+FlowExec and oblivious steps are built (`aa2f42289`, `70e76a7d3`), and
+TaskWorkflow after them; Jack Heart has reviewed neither. Takeover and resume
+are not built.
 
 - **Task entry.** `lf task run ISSUE [FLOW]` places the Task (worktree,
   `--stack-on`, checkout restore), defaults to the Project's Flow, records `-m`
@@ -173,9 +174,14 @@ slice open. A pass that cannot finish its slice records why and stops blocked.
 Flow history below means FlowExec rows joined to their Execs.
 
 1. **TaskWorkflow.** Build order, defaults and tests are in
-   [task-workflow.md](task-workflow.md). Done when its six tests pass and
+   [task-workflow.md](task-workflow.md). Done when its five planned tests pass and
    `task status --json` carries the workflow graph, position and running
-   edge. *Not done.*
+   edge. *Built, awaiting realign:*
+   `task_flow_launch_tests` 5 passed, lib `engine::workflow`/`ops::task_workflow`
+   3 passed (stage guidance included), `dto_fixtures` 18 and Swift
+   `DTOFixtureTests` 22 passed, all-target Clippy clean. Demo items: a real
+   provider run of `feature`'s `task-design` edge; the stage guidance as a
+   live Task conversation reads it.
 2. **Loops.** One form: a deciding node last, `loop: <target>` with optional
    `step` defaulting to `loop-or-next`, replacing `loop-decide` and
    `repeat.from` in catalog, skills, templates, docs and tests with no alias.

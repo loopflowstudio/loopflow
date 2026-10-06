@@ -1,0 +1,7 @@
+# Investigate and report. The Task ends on accepted findings, with no PR.
+stages:
+  findings: research
+edges:
+  - { from: start, to: findings, flow: research }
+  - { from: findings, to: findings, flow: research }
+  - { from: findings, to: end }

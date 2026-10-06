@@ -722,6 +722,9 @@ fn print_task_snapshot(
             branch,
             pm_writeback,
         );
+        if let Some(workflow) = &snapshot.work.workflow {
+            println!("  {}", workflow.summary());
+        }
         println!("  latest Flow: {}", snapshot.execution.reason);
         if let Some(run) = &snapshot.execution.captured {
             println!("  Session event: {run}");
@@ -1477,6 +1480,14 @@ fn dispatch(
                 directive: directive.clone(),
             },
         )?;
+        let Some(flow) = flow else {
+            // An edge that runs nothing: setting out on it is the whole move.
+            println!(
+                "Task {} moved along a workflow edge that runs no Flow",
+                task.plan.identifier
+            );
+            return Ok(());
+        };
         cli.task = Some(task.plan.identifier);
         cli.command = Some(Commands::Run {
             name: flow,

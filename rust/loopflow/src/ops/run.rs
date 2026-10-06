@@ -150,7 +150,10 @@ pub async fn resolve_work_selection(
             .map_err(run_error)?
             .pop()
             .ok_or_else(|| run_error(format!("Task {} has no recorded PR", task.id)))?;
-        let context = render_task_context(&task, &project.plan, &pr, wave.slug(), &steers);
+        let mut context = render_task_context(&task, &project.plan, &pr, wave.slug(), &steers);
+        if let Some(workflow) = crate::ops::task_workflow::guidance(&store.sqlite, &task) {
+            context.push_str(&format!("\n\n{workflow}"));
+        }
         let cwd = if crate::engine::git::current_branch(repo)
             .ok()
             .flatten()
@@ -985,7 +988,7 @@ mod tests {
             .context
             .contains("Drive the 'runtime' Wave's goal forward"));
         assert!(binding.context.contains("- local-delivery\n"));
-        assert!(binding.context.contains("- feature\n"));
+        assert!(binding.context.contains("- pursue\n"));
         assert!(binding.context.contains("metric-portfolio"));
         assert!(resolve_work_binding(&store, &repo, "project:loopflow-api")
             .await

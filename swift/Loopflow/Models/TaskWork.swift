@@ -5,6 +5,77 @@ public struct TaskWork: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
     public let flows: [TaskFlowMember]
     public let execs: [Exec]
+    /// The Task's workflow and position; `nil` when it runs only ad hoc Flows.
+    public let workflow: TaskWorkflow?
+}
+
+/// Conversation stages joined by edges that are Flows. `start` and `end` are implicit.
+public struct TaskWorkflow: Codable, Sendable, Equatable {
+    public struct Stage: Codable, Sendable, Equatable {
+        public let name: String
+        public let skill: String
+    }
+
+    public struct Edge: Codable, Sendable, Equatable {
+        public let from: String
+        public let to: String
+        public let flow: String?
+    }
+
+    public struct Traversal: Codable, Sendable, Equatable {
+        public let edge: Int
+        public let execId: String
+
+        enum CodingKeys: String, CodingKey {
+            case edge
+            case execId = "exec_id"
+        }
+    }
+
+    /// At a stage the Task waits on a person; on an edge its Flow's driver Exec runs.
+    public enum Position: Codable, Sendable, Equatable {
+        case stage(String)
+        case edge(index: Int, execId: String)
+
+        enum CodingKeys: String, CodingKey {
+            case kind, stage, edge
+            case execId = "exec_id"
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            switch try container.decode(String.self, forKey: .kind) {
+            case "stage":
+                self = .stage(try container.decode(String.self, forKey: .stage))
+            case "edge":
+                self = .edge(
+                    index: try container.decode(Int.self, forKey: .edge),
+                    execId: try container.decode(String.self, forKey: .execId))
+            case let kind:
+                throw DecodingError.dataCorruptedError(
+                    forKey: .kind, in: container, debugDescription: "unknown workflow position \(kind)")
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            switch self {
+            case .stage(let stage):
+                try container.encode("stage", forKey: .kind)
+                try container.encode(stage, forKey: .stage)
+            case .edge(let index, let execId):
+                try container.encode("edge", forKey: .kind)
+                try container.encode(index, forKey: .edge)
+                try container.encode(execId, forKey: .execId)
+            }
+        }
+    }
+
+    public let name: String
+    public let stages: [Stage]
+    public let edges: [Edge]
+    public let position: Position
+    public let traversals: [Traversal]
 }
 
 public struct TaskSession: Codable, Sendable, Equatable, Identifiable {

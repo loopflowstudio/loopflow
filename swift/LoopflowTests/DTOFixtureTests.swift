@@ -17,6 +17,11 @@ struct DTOFixtureTests {
         #expect(work.flows[0].name == "feature")
         #expect(work.flows[0].state == .current)
         #expect(!work.execs.isEmpty)
+        let workflow = try #require(work.workflow)
+        #expect(workflow.stages.map(\.name) == ["design", "demo"])
+        #expect(workflow.edges.last?.flow == nil)
+        #expect(workflow.position == .edge(index: 1, execId: work.flows[0].id))
+        #expect(workflow.traversals.map(\.edge) == [0, 1])
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
     }
 

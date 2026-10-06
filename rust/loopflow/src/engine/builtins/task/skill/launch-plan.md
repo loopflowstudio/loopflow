@@ -95,9 +95,11 @@ launch; use staged preparation below when artifacts must cross contexts.
 
 For an approved design, `--flow pursue` enters implement → compress → refresh
 → loop-decide. Refresh runs sync → realign. Iterate returns to implementation;
-Advance publishes and ends the pursuit. `code` is the same pursuit; `feature`
-runs the initial design first; `ship` gates and lands an accepted PR. Design
-review and the demo happen in the Task conversation, never as a Flow step.
+Advance publishes and ends the pursuit. The `code` workflow starts with that
+pursuit; `feature` drafts the design first; both land an accepted PR through
+`ship`. Design review and the demo are workflow stages in the Task
+conversation, never Flow steps; `lf task run <issue> [flow]` takes an edge
+leaving the current stage.
 Preserve intent, constraints, and done-when
 proof in durable records so the Task remains useful after `scratch/` is cleared.
 

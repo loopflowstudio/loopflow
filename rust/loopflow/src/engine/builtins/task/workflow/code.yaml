@@ -1,0 +1,7 @@
+# Build and land. The demo happens in the Task conversation.
+stages:
+  demo: demo
+edges:
+  - { from: start, to: demo, flow: pursue }
+  - { from: demo, to: demo, flow: pursue }
+  - { from: demo, to: end, flow: ship }

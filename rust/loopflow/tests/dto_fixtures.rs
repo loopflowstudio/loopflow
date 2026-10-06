@@ -440,6 +440,14 @@ fn task_work_preserves_all_owners() {
     assert_eq!(work.sessions.len(), 2);
     assert_eq!(work.flows.len(), 1);
     assert!(!work.execs.is_empty());
+    let workflow = work.workflow.as_ref().expect("fixture Task has a workflow");
+    assert_eq!(
+        workflow.position,
+        loopflow::ops::task_workflow::WorkflowPosition::Edge {
+            edge: 1,
+            exec_id: work.flows[0].summary.id.clone(),
+        }
+    );
     assert_eq!(
         serde_json::to_value(work).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()

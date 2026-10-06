@@ -57,6 +57,7 @@
   "work": {
     "sessions": [],
     "flows": [],
-    "execs": []
+    "execs": [],
+    "workflow": null
   }
 }

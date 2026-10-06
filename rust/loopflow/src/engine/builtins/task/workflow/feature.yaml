@@ -1,0 +1,11 @@
+# Design, build and land. Design review and the demo happen in the Task
+# conversation; each edge is the Flow that carries the Task to the next stage.
+stages:
+  design: review-design
+  demo: demo
+edges:
+  - { from: start, to: design, flow: task-design }
+  - { from: design, to: design, flow: task-design }
+  - { from: design, to: demo, flow: pursue }
+  - { from: demo, to: demo, flow: pursue }
+  - { from: demo, to: end, flow: ship }

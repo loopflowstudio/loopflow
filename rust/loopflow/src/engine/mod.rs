@@ -23,6 +23,7 @@ pub mod structured_reply;
 pub mod target;
 pub mod transitions;
 pub mod wave_home;
+pub mod workflow;
 pub mod worktree;
 pub mod worktrees;
 

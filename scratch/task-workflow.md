@@ -89,23 +89,30 @@ the Task waits on a person. This replaces LOO-317's derived view.
    names the workflow's `start` edge through `lf task run`; a bare `lf run
    feature` outside a Task is an error that says so.
 
-## Build order for the pass
+## Built — October 5, unreviewed by Jack
 
-1. Loader and validator for `.lf/workflows/*.yaml`: stages, edges, implicit
-   `start`/`end`, every `flow` resolves to an operational Flow, unreachable
-   stages rejected. Builtins `feature`, `code`, `research`.
-2. The record and its migration, in the existing draft: one TaskWorkflow per
-   Task (name, captured graph) and a traversal table (edge, FlowExec, time).
-3. `lf task run ISSUE [FLOW]`: start the TaskWorkflow on first use from the
-   Project's default; resolve the edge; append the traversal; enter ordinary
-   `lf run`. Refuse a flow that is not an outgoing edge of the current stage,
-   naming the edges that are. Plain `lf run` stays ad hoc.
-4. `task status --json` and the Desktop DTO carry the workflow graph, the
-   position and the running edge's FlowExec. Text status prints one line.
-5. Stage guidance: the Task conversation's instructions name the current
-   stage's skill and the outgoing edges; builtin skills stop describing human
-   steps inside flows.
-6. Tests: a 0-PR workflow reaches `end` with no PR; a loop through a landing
-   edge twice; a failed edge returns to its `from` stage; a plain `lf run`
-   leaves position unchanged; a Task with no TaskWorkflow runs flows as
-   before.
+The agent's choices here are listed in [questions.md](questions.md) under
+"Choices the TaskWorkflow pass made without Jack".
+
+- **Loader.** `.lf/workflows/<name>.yaml`, else builtins `feature`, `code`,
+  `research` (`engine/workflow.rs`). Rejected: an unknown or unreachable
+  stage, a stage skill or edge Flow that does not load, a flowless edge that
+  does not enter `end`, two edges from one stage running the same Flow.
+- **Record.** `task_workflows` (Task, name, captured graph; the newest row is
+  the Task's) and `task_workflow_traversals` (edge, the Exec that ran it), in
+  the one draft, both append-only.
+- **Moving.** `lf task run ISSUE [FLOW]` takes the outgoing edge that runs
+  FLOW, or the only one; names a workflow to take it up; refuses anything
+  else, naming the edges. An edge with no Flow is recorded and returns.
+- **Reading.** `task status --json` carries `execution.work.workflow`: name,
+  stages, edges, position (`stage`, or `edge` with its driver Exec) and
+  traversals. Text status prints one line. Swift decodes the same fixture.
+- **Guidance.** A bound Task launch's context names the stage's skill and the
+  command for each outgoing edge.
+- **Check.** `cargo test -p loopflow --test task_flow_launch_tests` (5) and
+  `--lib engine::workflow ops::task_workflow` (3, stage guidance included)
+  pass; Swift `DTOFixtureTests` decodes the workflow.
+
+Not built: a take-over command (open choice 2); Desktop drawing (slice 5);
+workflow defaults in Wave settings and source editing (slice 6); docs
+(slice 7).

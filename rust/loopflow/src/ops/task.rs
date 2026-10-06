@@ -24,6 +24,7 @@ use crate::engine::git::{
     push_with_upstream, ref_exists, rev_parse, stash_including_untracked, stash_pop,
 };
 use crate::engine::naming::sanitize_for_branch;
+use crate::engine::workflow::{load_workflow, Workflow, END, START};
 use crate::engine::worktrees::{
     create_from_placement_plan, plan_branch_placement, PlacementPlan, PlacementStrategy,
     WorktreeSegment,
@@ -427,19 +428,28 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
     store.work_status(&work).await.map_err(task_error)
 }
 
-/// Place the Task and fill what a run leaves unsaid: the Project's Flow when
-/// none is named, `agent` as the Task's agent, `reason` as a steer. The caller
-/// then runs the returned Flow like any `lf --task ISSUE run FLOW`.
-pub fn task_place(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult<(Task, String)> {
+/// Place the Task and fill what a run leaves unsaid: `agent` as the Task's
+/// agent, `reason` as a steer, and the Flow. A Task on a workflow sets out on
+/// the outgoing edge that runs the named Flow, or on its only one; otherwise
+/// the Flow is the one named, else the Project's. The caller then runs the
+/// returned Flow like any `lf --task ISSUE run FLOW`; `None` is an edge that
+/// runs nothing.
+pub fn task_place(
+    repo: &Path,
+    issue: &str,
+    options: TaskExecOptions,
+) -> OpsResult<(Task, Option<String>)> {
     let TaskExecOptions {
         flow,
         agent,
         reason,
         ..
     } = options.clone();
-    // An unknown Flow is refused before any worktree is placed for it.
+    // An unknown name is refused before any worktree is placed for it.
     if let Some(flow) = flow.as_deref() {
-        load_task_flow(repo, flow)?;
+        if load_task_workflow(repo, flow)?.is_none() {
+            load_task_flow(repo, flow)?;
+        }
     }
     let mut task = prepare_task(repo, issue, options)?;
     block_on_task(async {
@@ -449,10 +459,7 @@ pub fn task_place(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResu
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task Project is missing"))?;
-        let (flow, _) = load_task_flow(
-            &task.worktree,
-            flow.as_deref().unwrap_or(&project.plan.flow),
-        )?;
+        let flow = traverse_task_workflow(&store, &task, flow.as_deref(), &project.plan.flow)?;
         select_task_agent(&store, &mut task, agent.as_deref()).await?;
         if let Some(reason) = reason
             .as_deref()
@@ -463,6 +470,103 @@ pub fn task_place(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResu
         }
         Ok((task, flow))
     })
+}
+
+fn load_task_workflow(repo: &Path, name: &str) -> OpsResult<Option<Workflow>> {
+    load_workflow(name, repo)
+        .map_err(|error| task_error(format!("failed to load Task workflow {name:?}: {error}")))
+}
+
+/// Choose what `lf task run` runs and, for a Task on a workflow, record the
+/// edge this process sets out on. A Task takes up a workflow when one is named
+/// or when its Project's default names one; a Project whose default is a plain
+/// Flow leaves its Tasks running Flows ad hoc.
+fn traverse_task_workflow(
+    store: &SharedStore,
+    task: &Task,
+    requested: Option<&str>,
+    default: &str,
+) -> OpsResult<Option<String>> {
+    let current = store.sqlite.task_workflow(&task.id).map_err(task_error)?;
+    let position = current
+        .as_ref()
+        .map(|record| record.position(|exec| store.sqlite.exec_may_run(exec)));
+    let departure = match (&current, &position) {
+        (Some(record), Some(position)) => Some(record.departure(position)),
+        _ => None,
+    };
+    // A named Flow that leaves the current stage is that edge, whatever else
+    // shares its name.
+    let names_edge = match (&current, &departure, requested) {
+        (Some(record), Some(stage), Some(name)) => record
+            .workflow
+            .outgoing(stage)
+            .any(|(_, edge)| edge.flow.as_deref() == Some(name)),
+        _ => false,
+    };
+    let named = match requested {
+        Some(name) if !names_edge => load_task_workflow(&task.worktree, name)?,
+        _ => None,
+    };
+    // `None` for a workflow the Task takes up with this traversal.
+    let (existing, workflow, stage, requested) = match (current, named) {
+        (Some(record), Some(named)) if record.workflow.name == named.name => (
+            Some(record.id),
+            record.workflow,
+            departure.expect("a workflow has a position"),
+            None,
+        ),
+        (_, Some(named)) => (None, named, START.to_string(), None),
+        (Some(record), None) => (
+            Some(record.id),
+            record.workflow,
+            departure.expect("a workflow has a position"),
+            requested,
+        ),
+        (None, None) => match load_task_workflow(&task.worktree, default)? {
+            Some(workflow) => (None, workflow, START.to_string(), requested),
+            None => {
+                let (flow, _) = load_task_flow(&task.worktree, requested.unwrap_or(default))?;
+                return Ok(Some(flow));
+            }
+        },
+    };
+    let issue = &task.plan.identifier;
+    let mut edges = workflow
+        .outgoing(&stage)
+        .filter(|(_, edge)| requested.is_none() || edge.flow.as_deref() == requested);
+    let (index, edge) = match (edges.next(), edges.next()) {
+        (Some(edge), None) => edge,
+        (None, _) | (Some(_), Some(_)) => {
+            let asked = match requested {
+                Some(flow) => format!("{flow} does not leave {stage}"),
+                None if stage == END => format!("workflow {} has reached its end", workflow.name),
+                None => format!("{stage} has more than one outgoing edge; name its Flow"),
+            };
+            return Err(task_error(format!(
+                "Task {issue} is at {stage} of workflow {}: {asked}. Outgoing edges: {}. `lf task run {issue} <workflow>` takes up another workflow; `lf run <flow>` in the Task worktree runs a Flow without moving the Task",
+                workflow.name,
+                crate::ops::task_workflow::describe_edges(&workflow, &stage),
+            )));
+        }
+    };
+    let exec = crate::journal::current_exec_id()
+        .ok_or_else(|| task_error("a workflow traversal requires a registered Exec"))?;
+    let record = match existing {
+        Some(id) => id,
+        None => store
+            .sqlite
+            .start_task_workflow(&task.id, &workflow)
+            .map_err(task_error)?,
+    };
+    store
+        .sqlite
+        .record_workflow_traversal(record, index, &exec)
+        .map_err(task_error)?;
+    match &edge.flow {
+        Some(flow) => Ok(Some(load_task_flow(&task.worktree, flow)?.0)),
+        None => Ok(None),
+    }
 }
 
 pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> OpsResult<Task> {

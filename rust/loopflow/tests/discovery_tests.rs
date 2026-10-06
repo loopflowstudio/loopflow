@@ -209,7 +209,7 @@ fn resolve_target_finds_skill() {
 fn resolve_target_finds_flow() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().expect("repo");
-    let target = resolve_definition(repo.path(), "code", None).expect("should find builtin flow");
+    let target = resolve_definition(repo.path(), "pursue", None).expect("should find builtin flow");
     assert!(matches!(target, Target::Flow(_)));
 }
 

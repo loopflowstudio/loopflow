@@ -119,3 +119,31 @@ CREATE TRIGGER validate_task_started_update BEFORE UPDATE OF started_at ON tasks
             AND json_extract(e.kind_json,'$.kind')='started')
     ) THEN RAISE(ABORT,'Started requires recorded Task work') END;
 END;
+
+-- A Task's workflow: its name and graph as captured when the Task took it up.
+-- The newest row is the Task's; replacing a workflow appends another.
+CREATE TABLE task_workflows (
+    id INTEGER PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    workflow TEXT NOT NULL,
+    graph TEXT NOT NULL CHECK (json_valid(graph)),
+    started_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX task_workflows_task ON task_workflows(task_id, id);
+
+-- One row per edge `lf task run` set out on, and the Exec that ran it: the
+-- driver of that edge's Flow. Position is read from these and their Execs.
+CREATE TABLE task_workflow_traversals (
+    seq INTEGER PRIMARY KEY,
+    task_workflow_id INTEGER NOT NULL REFERENCES task_workflows(id) ON DELETE CASCADE,
+    edge INTEGER NOT NULL,
+    exec_id TEXT NOT NULL UNIQUE REFERENCES execs(id)
+) STRICT;
+CREATE INDEX task_workflow_traversals_workflow ON task_workflow_traversals(task_workflow_id, seq);
+
+CREATE TRIGGER task_workflows_are_append_only BEFORE UPDATE ON task_workflows BEGIN
+    SELECT RAISE(ABORT,'A Task workflow record is append-only');
+END;
+CREATE TRIGGER task_workflow_traversals_are_append_only BEFORE UPDATE ON task_workflow_traversals BEGIN
+    SELECT RAISE(ABORT,'A Task workflow record is append-only');
+END;

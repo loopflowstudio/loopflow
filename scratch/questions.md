@@ -215,6 +215,50 @@ confirmed by Jack Heart.
   step row. The draft drops `agent_sessions.node`/`iterations`; a saved Flow's
   position survives in its `legacy_flow` observation.
 
+## Choices the TaskWorkflow pass made without Jack
+
+The agent's, October 5, building slice 1. None is confirmed by Jack Heart.
+
+- **`feature` and `code` are workflows only.** The builtin Flows of those
+  names are deleted. `lf run feature` fails and names `lf task run <issue>
+  feature`; it is not rerouted through the Task entry, inside a Task or out.
+- **A repository Flow keeps its name.** `.lf/flows/feature.yaml` hides the
+  builtin workflow `feature`, so a repository that customized it runs it ad
+  hoc as before. `.lf/workflows/feature.yaml` wins over both.
+- **Which Tasks get a workflow.** One whose Project default names a workflow,
+  on its first `lf task run`; or one that names a workflow explicitly. A
+  Project whose default is a plain Flow leaves its Tasks ad hoc.
+- **Naming a workflow replaces.** `lf task run ISSUE WORKFLOW` on a Task with
+  another workflow starts the named one at `start`; the earlier rows stay. A
+  name that is both an outgoing edge's Flow and a workflow means the edge.
+- **The traversal names the `lf task run` Exec,** which is the edge Flow's
+  driver, so the row needs no FlowExec to exist yet. A launch refused after
+  the row is written leaves a failed traversal: position unchanged.
+- **Position.** At `to` only when that Exec succeeded. A driver with no exit
+  record counts as running unless its process is known dead. A Flow that
+  stops at a watched landing has not succeeded, so `ship` returns the Task to
+  `demo` until a later run of it succeeds.
+- **No guard on a running edge.** A second `lf task run` while one runs
+  chooses among the edges leaving the running edge's `from`.
+- **Edges accept what `lf run` accepts,** a skill included: `research` runs
+  the `research` skill. Flowless edges are allowed only into `end`.
+- **`research` names a workflow and a skill.** `lf research` stays the skill.
+- **Wire placement.** The workflow rides in `TaskWork`, not the Task Flow
+  snapshot, so the roadmap does not carry it; Desktop reads it per Task.
+- **Guidance** is appended wherever a Task binding's context is rendered
+  (`resolve_work_binding`), headless launches included.
+- **Skill prose.** Only `advance` and `launch-plan` were corrected for the
+  deleted Flows; other skills still say `lf task run <issue> <chosen-flow>`,
+  which a Task on a workflow refuses unless that Flow leaves its stage.
+- **Flow catalog.** `lf flow list` no longer lists `feature` or `code`, so a
+  Project default of `feature` has no Flow graph for Desktop to draw until
+  slice 5 draws the workflow.
+- **Test count.** The slice list said six tests; the build order at
+  `26279a3d2:scratch/task-workflow.md` lists five behaviors, each covered.
+  The list now says five.
+- **Reaching `end` removes nothing:** the Task stays ready and
+  `lf task complete` stays separate (draft default 3).
+
 ## Choices the earlier pass made without Jack
 
 - **A killed driver leaves a running agent turn to its Session.** Nothing reads

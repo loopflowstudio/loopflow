@@ -2,6 +2,8 @@
 //! it never rewrites event attribution or follows causal parent Execs.
 
 use crate::durable::TaskId;
+use crate::engine::workflow::Workflow;
+use crate::ops::task_workflow::TaskWorkflowRecord;
 use crate::store::StoreResult;
 use crate::task_work::{TaskSession, TaskWork};
 
@@ -59,6 +61,40 @@ pub(super) fn flows_of_task(
     )
 }
 
+fn workflow_of_task(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<Option<TaskWorkflowRecord>> {
+    use rusqlite::OptionalExtension;
+    let Some((id, graph)) = conn
+        .query_row(
+            "SELECT id,graph FROM task_workflows WHERE task_id=?1 ORDER BY id DESC LIMIT 1",
+            [task.as_str()],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    let columns = super::execs::EXEC_SELECT
+        .strip_suffix(" FROM execs e")
+        .expect("Exec select ends with its table");
+    let traversals = conn
+        .prepare(&format!(
+            "{columns},t.edge FROM task_workflow_traversals t JOIN execs e ON e.id=t.exec_id
+             WHERE t.task_workflow_id=?1 ORDER BY t.seq"
+        ))?
+        .query_map([id], |row| {
+            Ok((row.get::<_, u32>(15)?, super::execs::read_exec(row)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(Some(TaskWorkflowRecord {
+        id,
+        workflow: serde_json::from_str::<Workflow>(&graph)?,
+        traversals,
+    }))
+}
+
 impl SqliteStore {
     pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -108,12 +144,67 @@ impl SqliteStore {
             ))?
             .query_map([task.as_str()], super::execs::read_exec)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        let workflow = workflow_of_task(&tx, task)?;
         tx.commit()?;
+        drop(conn);
+        let workflow = workflow.map(|record| {
+            let position = record.position(|exec| self.exec_may_run(exec));
+            record.snapshot(position)
+        });
         Ok(TaskWork {
             sessions,
             flows,
             execs,
+            workflow,
         })
+    }
+
+    /// Whether an Exec with no recorded exit may still have its process.
+    /// Unknown is not stopped.
+    pub(crate) fn exec_may_run(&self, exec: &crate::exec::Exec) -> bool {
+        crate::journal::exec_process_evidence(self, &exec.id)
+            != crate::journal::ProcessIdentityEvidence::Dead
+    }
+
+    /// The Task's workflow with every edge it set out on.
+    pub(crate) fn task_workflow(&self, task: &TaskId) -> StoreResult<Option<TaskWorkflowRecord>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        workflow_of_task(&conn, task)
+    }
+
+    /// Take up `workflow` for the Task as it is defined now, returning the
+    /// record's id. An earlier workflow and its traversals stay as history.
+    pub(crate) fn start_task_workflow(
+        &self,
+        task: &TaskId,
+        workflow: &Workflow,
+    ) -> StoreResult<i64> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO task_workflows(task_id,workflow,graph,started_at) VALUES(?1,?2,?3,?4)",
+            rusqlite::params![
+                task.as_str(),
+                workflow.name,
+                serde_json::to_string(workflow)?,
+                crate::store::rows::now_unix()
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// Record that `exec` set out on `edge` of the Task's workflow.
+    pub(crate) fn record_workflow_traversal(
+        &self,
+        workflow: i64,
+        edge: u32,
+        exec: &crate::id::ExecId,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO task_workflow_traversals(task_workflow_id,edge,exec_id) VALUES(?1,?2,?3)",
+            rusqlite::params![workflow, edge, exec],
+        )?;
+        Ok(())
     }
 
     /// Every Flow among the Task's work, oldest first.

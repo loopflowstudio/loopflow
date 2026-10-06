@@ -819,33 +819,6 @@ mod tests {
     fn builtin_flows_keep_their_delivery_boundaries_without_review_steps() {
         let repo = tempfile::tempdir().unwrap();
         let cases: &[(&str, &[&str], &[usize], usize)] = &[
-            (
-                "code",
-                &[
-                    "implement",
-                    "compress",
-                    "sync",
-                    "realign",
-                    "loop-decide",
-                    "pr-publish",
-                ],
-                &[],
-                1,
-            ),
-            (
-                "feature",
-                &[
-                    "kickoff",
-                    "implement",
-                    "compress",
-                    "sync",
-                    "realign",
-                    "loop-decide",
-                    "pr-publish",
-                ],
-                &[],
-                1,
-            ),
             ("queue", &["compress", "sync", "realign", "gate"], &[], 0),
             ("refresh", &["sync", "realign"], &[], 0),
             ("task-design", &["kickoff"], &[], 0),
@@ -913,15 +886,14 @@ mod tests {
     }
 
     #[test]
-    fn feature_designs_then_pursues_to_a_published_pr() {
+    fn pursue_loops_to_a_published_pr() {
         let repo = tempfile::tempdir().unwrap();
-        let flow = load_flow("feature", repo.path()).unwrap();
+        let flow = load_flow("pursue", repo.path()).unwrap();
         let graph = FlowGraph::new(&flow.name, &compile_flow(&flow, repo.path()).unwrap());
         let labels: Vec<_> = graph.steps.iter().map(|node| node.label.as_str()).collect();
         assert_eq!(
             labels,
             [
-                "kickoff",
                 "implement",
                 "compress",
                 "sync",
@@ -930,7 +902,7 @@ mod tests {
                 "pr-publish",
             ]
         );
-        let implement = graph.steps[1].key;
+        let implement = graph.steps[0].key;
         let returns: Vec<_> = graph
             .steps
             .iter()
@@ -943,7 +915,7 @@ mod tests {
             .steps
             .iter()
             .all(|node| node.kind != FlowNodeKind::Op || node.label == "sync"));
-        assert_eq!(graph.steps[4].sources, ["feature", "pursue", "refresh"]);
+        assert_eq!(graph.steps[3].sources, ["pursue", "refresh"]);
     }
 
     #[test]

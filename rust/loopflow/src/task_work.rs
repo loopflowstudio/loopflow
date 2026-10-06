@@ -12,6 +12,8 @@ pub struct TaskWork {
     pub sessions: Vec<TaskSession>,
     pub flows: Vec<FlowInventoryEntry>,
     pub execs: Vec<Exec>,
+    /// The Task's workflow and position; `None` when it runs only ad hoc Flows.
+    pub workflow: Option<crate::ops::task_workflow::TaskWorkflowSnapshot>,
 }
 
 /// Conversation identity and completion, without loading its input or transcript.

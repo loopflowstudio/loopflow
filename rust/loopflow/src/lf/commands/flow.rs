@@ -682,7 +682,7 @@ mod tests {
     #[test]
     fn builtin_task_flows_launch_as_operational_work() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for name in ["feature", "code", "task-design", "pursue", "queue", "ship"] {
+        for name in ["task-design", "pursue", "queue", "ship"] {
             let flow = crate::engine::load_flow(name, &repo).unwrap();
             let items = crate::engine::compile_flow(&flow, &repo).unwrap();
             super::require_autonomous_steps(&items)

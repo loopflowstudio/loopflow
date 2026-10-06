@@ -114,6 +114,7 @@ impl Home {
     }
 
     /// Start FIX-1 in a real Git checkout with one commit, and return it.
+    #[cfg(target_os = "macos")]
     fn checkout(&self) -> std::path::PathBuf {
         let worktree = repository(&self.path().join("checkout"));
         let head = git(&worktree, &["rev-parse", "HEAD"]);
@@ -213,6 +214,7 @@ impl Home {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn git(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .arg("-C")
@@ -226,6 +228,7 @@ fn git(repo: &Path, args: &[&str]) -> String {
 }
 
 /// A new repository at `path` holding one commit.
+#[cfg(target_os = "macos")]
 fn repository(path: &Path) -> std::path::PathBuf {
     std::fs::create_dir_all(path).unwrap();
     let repo = path.canonicalize().unwrap();
@@ -317,6 +320,7 @@ impl Watch {
 
     /// The next planning frame in which FIX-1's observed checkout is
     /// `(dirty, has commits past its PR base)`.
+    #[cfg(target_os = "macos")]
     fn checkout(&self, expected: (bool, bool)) {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {

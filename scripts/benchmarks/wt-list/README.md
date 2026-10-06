@@ -4,6 +4,7 @@
 uv run python scripts/benchmarks/wt-list/profile.py --lf target/release/lf --repo ~/src/loopflow --samples 20
 uv run python scripts/benchmarks/wt-list/profile.py --lf target/release/lf --repo ~/src/loopflow --samples 20 --offline
 uv run python scripts/benchmarks/wt-list/profile.py --lf ~/.local/bin/lf --repo ~/src/loopflow --home main   # installed CLI, main Home
+uv run python scripts/benchmarks/wt-list/profile.py --lf target/release/lf --repo ~/src/loopflow --store ~/.lf/loopflow.db   # copy of a real store
 ```
 
 ```sh
@@ -18,8 +19,55 @@ Each sample is one default (read-only) listing. Git's trace2 stream counts and
 times every Git process; a shim times `gh`; `lf home id` on the same executable
 and Home gives the cost of process start, Exec admission and both ledger writes
 with no repository work. `--home fresh` (default) points `LF_HOME` at a new empty
-directory so a branch build never opens the main Home. `--offline` routes every
-remote call to a closed local port.
+directory so a branch build never opens the main Home. `--store` copies a
+database into that fresh Home first (a copy-on-write clone on APFS), so the run
+pays for a store of real size and writes only to the copy. `--offline` routes
+every remote call to a closed local port.
+
+## 2026-10-05: startup against a 1.1 GB store
+
+The first sample from ordinary use (installed 0.13.3, JSON) read 8.09 s total:
+4.91 s before the listing began and 1.90 s writing two Exec receipts. The
+October 4 runs used an empty Home and could not see this.
+
+**Every store open scanned the whole database.** Opening validated the schema
+and then ran `PRAGMA foreign_key_check`, which reads every row: 0.24 s on an
+idle copy of the 1,145 MB store, more beside live writers. One `lf home id`
+opens the store five times (Wave attribution twice, each Exec receipt, the
+command), so a command with no work took 1.4 s on the idle copy and 2.6–4.0 s
+on the live Home. A sampled call graph attributes about 1,130 of 1,162 ms to the scan.
+
+Opening now validates the migration ledger and schema only. Every connection
+enforces foreign keys, so only a migration can break them, and a migration
+already checks before it commits. `lf home doctor` and installation preflight
+keep the full scan.
+
+Same host, same repository (58 worktrees), a fresh Home holding a clone of the
+1,145 MB store, one warm-up discarded. `baseline` is installed 0.13.3;
+`candidate` is this branch. Raw rows: [20261005/](20261005/).
+
+| Run | Mode | Samples | Median | p95 | Git processes | `gh` | `lf home id` on the same Home | Load (1 m) |
+|---|---|---|---|---|---|---|---|---|
+| baseline | text | 10 | 6.38 s | 11.00 s | 76 | 1.74 s | 10.46 s | 74 |
+| baseline | JSON | 10 | 7.87 s | 11.24 s | 72 | 1.80 s | 5.22 s | 82 |
+| candidate | text | 10 | 3.49 s | 10.95 s | 76 | 1.73 s | 0.15 s | 79 |
+| candidate | JSON | 10 | 2.04 s | 2.31 s | 72 | 1.44 s | 0.06 s | 71 |
+
+With nothing else changed, `lf home id` on the idle copy went from 1.40 s to
+0.03–0.04 s (three runs each, load about 30).
+
+- **≤1 s warm p95 is still not met online.** The GitHub round trip alone took
+  1.4–1.8 s in these runs; the JSON candidate finishes about 0.6 s after it.
+- **The host was busier than on October 4** (load 70–82, other workers plus
+  this profile). The text candidate's p95 is one 10.9 s sample; ten samples do
+  not separate a tail from noise. Baseline and candidate ran minutes apart, not
+  interleaved.
+- **A copy is not the live Home.** It has no concurrent writers and takes the
+  custom-Home open path; both paths ran the same scan and both now skip it. The
+  live figure comes from `lf wt timing` after a release carrying this is
+  installed.
+- The copy is taken file by file from a live database, so it is a size
+  fixture, not a consistent snapshot.
 
 ## 2026-10-04: 51 worktrees, Jack Heart's loopflow repository
 

@@ -156,9 +156,11 @@ the complete binding after a failed write; it does not interrupt a real process
 between binding and settlement. Cross-process/cross-checkout and crash proofs remain
 with gate. Existing check results cover the local `accept_project` consolidation.
 
-Step 5 now implements retained exact-ID input, selected issue membership, settled
-lookup, whole-input preflight/reservation and the shared-binding switch. Desktop
-activation/reset UI and skills remain next. The branch is not releasable.
+Step 5 implements retained exact-ID input, selected issue membership, settled
+lookup, whole-input preflight/reservation and the shared-binding switch. Steps 6–7
+are implemented in `587714e6d`, with retained-preview recovery in the working
+compression edits. The previous iteration direction to implement them is satisfied;
+gate acceptance remains unfinished.
 
 October 5 reconciliation at `7e91655ed`: the preceding iteration's “rotation remains
 unimplemented” direction is superseded by `dbd4d0a77` and the operation fixtures
@@ -648,8 +650,9 @@ Accepted October 4 boundary from Jack Heart:
 Candidate notes are authored planning output, not durable Tasks or another
 planning database. They must survive between these steps and remain available
 when Task admission fails. Use the existing planning artifact path; retain links
-to destination Project IDs after creation. The exact output format remains to
-be specified with the skills. No complete future Task inventory is required.
+to destination Project IDs after creation. The implemented skills use `scratch/chapter-plan.json` and separate
+`scratch/chapter-candidates.md` notes grouped by destination UUID, with stable
+local keys and recovered issue IDs. No complete future Task inventory is required.
 
 Preserving existing work belongs to rotation, not the optional creation of new
 Tasks. Review and planning account for old KRs and backlog; neither an empty new
@@ -761,6 +764,13 @@ rotation boundary. The unused post-switch flag assignment is removed; the shared
 binding remains the persisted selection. Provider reads and recovery boundaries
 are unchanged.
 
+Desktop compression removes the separate retained-input state: a preview owns its
+report and exact input together. An uncertain Apply keeps both for Retry apply;
+only a new preview rereads the file. Previously the error path discarded the
+report, forcing a reread that could change reviewed bytes. Busy cleanup uses one
+defer. Mounted retry verification remains at gate; focused tests cover preparation
+and report decoding, not that interaction. Ordinary pane symbols now say Project.
+
 Move reusable functions rather than copy them. Retain migration-marked conversion
 only for released-data preservation, removing its Flow refusal. Add no candidate
 selection, Project variants, chapter-required adapters, DTO defaults or generic
@@ -768,7 +778,10 @@ recovery framework.
 
 ## Acceptance at gate
 
-New test names below are implementation targets, not existing passing checks.
+Ensure/rotation operation fixtures and focused Desktop tests already exist.
+The cases below retain the full acceptance contract, not a claim that every case
+has passed. `rust/loopflow/tests/project_readiness.rs` is still absent; its
+cross-process CLI and crash cases remain to be implemented and run at gate.
 Use the repository's isolated fixture environment and compiled test CLI; prevent
 native providers and configured accounts from being launched by synthetic tests.
 
@@ -871,5 +884,4 @@ Release's operation-entry recovery lesson still applies; its publication and
 installation evidence establishes no Project-readiness acceptance. Registration
 compression and prior check evidence remain at `eb80d7198178a418cf44b3074f9b666f3e11cd40`.
 
-Checks: `scripts/test_desktop.sh -Xswiftc -gnone --filter 'ProjectPreparationTests|WaveDetailReadingTests'` passed 11/11; `cargo build -p loopflow --bin lf`, Swift boundary check, skill alignment (4/4),
-`git diff --check` and `lf context --skill implement` passed (both sources within budget). Gate retains mounted Desktop/skill, configured/CLI/crash acceptance, the output-handle leak and CI repair; prior rotation/Clippy evidence remains at `3a149bb7105a307bbe1feda293f4d92a59434afb`.
+Checks: `scripts/test_desktop.sh -Xswiftc -gnone --filter 'ProjectPreparationTests|WaveDetailReadingTests'` built Desktop and passed 11/11; `git diff --check` and `lf context --skill realign` passed after prose reconciliation; the unchanged focused Desktop result is reused. Gate retains mounted Desktop/skill, configured/CLI/crash acceptance, the output-handle leak and CI repair. Earlier build/boundary/skill checks remain at `587714e6d:scratch/keep-every-wave-ready-for.md`; rotation/Clippy evidence remains at `3a149bb7105a307bbe1feda293f4d92a59434afb`.

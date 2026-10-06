@@ -153,7 +153,7 @@ private struct WavePlanView: View {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 objective
                 projectPreparation
-                chapterAndTasks
+                projectAndTasks
                 if let portfolio = reading.snapshot?.metricPortfolio {
                     WaveMetricPortfolioView(
                         portfolio: portfolio
@@ -254,9 +254,9 @@ private struct WavePlanView: View {
         return result.trimmingCharacters(in: .whitespaces)
     }
 
-    private var chapterAndTasks: some View {
+    private var projectAndTasks: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            if let chapter = displayedPlan.currentProject { WaveProjectView(project: chapter) }
+            if let project = displayedPlan.currentProject { WaveProjectView(project: project) }
             if isAwaitingDetail {
                 WorkspaceSectionHeading("Tasks")
                 ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")

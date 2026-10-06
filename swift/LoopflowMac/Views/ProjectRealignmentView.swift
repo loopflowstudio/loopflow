@@ -8,11 +8,10 @@ struct ProjectRealignmentView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var plan = ""
-    @State private var preview: ProjectRotationPreview?
+    @State private var preview: (input: String, report: ProjectRotationPreview)?
     @State private var errorMessage: String?
     @State private var busy = false
     @State private var applied = false
-    @State private var retainedInput: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -25,7 +24,7 @@ struct ProjectRealignmentView: View {
             if let preview {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        ForEach(preview.waves, id: \.wave) { wave in
+                        ForEach(preview.report.waves, id: \.wave) { wave in
                             Text(wave.wave).font(.headline)
                             Text("\(wave.predecessor?.name ?? "No predecessor") → \(wave.successor?.name ?? "New Project")")
                             Text(wave.successor_id).font(.caption).textSelection(.enabled)
@@ -42,9 +41,9 @@ struct ProjectRealignmentView: View {
                 Button("Close") { dismiss() }.disabled(busy)
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }
-                Button(errorMessage == nil ? "Preview" : "Retry preview") { perform(previewOnly: true) }
+                Button(errorMessage != nil && preview == nil ? "Retry preview" : "Preview") { perform(previewOnly: true) }
                     .disabled(busy || name.isEmpty || plan.isEmpty)
-                Button("Apply") { perform(previewOnly: false) }
+                Button(errorMessage != nil && preview != nil ? "Retry apply" : "Apply") { perform(previewOnly: false) }
                     .disabled(busy || preview == nil || applied)
             }
         }
@@ -58,6 +57,7 @@ struct ProjectRealignmentView: View {
         busy = true
         errorMessage = nil
         Task {
+            defer { busy = false }
             do {
                 let input: String
                 if previewOnly {
@@ -65,21 +65,21 @@ struct ProjectRealignmentView: View {
                     input = try await Task.detached {
                         try String(contentsOfFile: path, encoding: .utf8)
                     }.value
-                    retainedInput = input
                 } else {
-                    guard let retainedInput else { busy = false; return }
-                    input = retainedInput
+                    guard let preview else { return }
+                    input = preview.input
                 }
-                preview = try await RegistryQueryLocal.shared.realignProjects(
+                let report = try await RegistryQueryLocal.shared.realignProjects(
                     name: name, plan: input, preview: previewOnly, cwd: repo
                 )
+                preview = (input, report)
                 applied = !previewOnly
                 if applied { onApplied() }
             } catch {
-                preview = nil
+                // An uncertain apply retries the reviewed bytes, even if the file changed.
+                if previewOnly { preview = nil }
                 errorMessage = error.localizedDescription
             }
-            busy = false
         }
     }
 }

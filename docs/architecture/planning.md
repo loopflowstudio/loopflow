@@ -40,7 +40,9 @@ it to the Wave's Initiative, activates it, then writes the shared binding. Retry
 reuses the reservation across uncertain responses and failed binding writes.
 Terminal, archived, paused or foreign Projects report their condition without
 replacement. Names, content and empty Flow remain intact. Ensure neither searches
-for candidates nor performs rotation; status and roadmap never call it. Desktop activation remains unfinished in this branch.
+for candidates nor performs rotation; status and roadmap never call it. Desktop
+ensures on explicit opening or retry while retaining cached planning and independent
+Session reads. Periodic refresh remains observational.
 
 ## Rotate the plan, preserve the work
 

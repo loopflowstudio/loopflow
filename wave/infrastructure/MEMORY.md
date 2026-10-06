@@ -381,17 +381,17 @@ Operation fixtures cover partial settlement and both sides of the switch;
 CLI crashes, Desktop and configured Intelligence acceptance remain open.
 Earlier counterexamples: `fc6df439424bd341ec3cd8182c19b13ed45cffd7:wave/infrastructure/MEMORY.md`.
 
-October 5 Desktop activation now runs only on explicit opening/retry, separate
-from status polling and Session reads. Cached plans remain visible; keyed state
-and generation checks reject obsolete completions. Realignment previews retained
-input and applies the same bytes through shared transport, preserving retry after
-partial effects. Ordinary presentation uses Project. Chapter skills now require
-KRs before exact-ID creation, retain backlog and admit candidate Tasks separately.
-Eleven headless preparation/presentation tests prove local behavior, not mounted
-Desktop, skill-driven provider outcomes or configured Intelligence acceptance.
-Release's child memory still requires recovery proof through actual entry points;
-gate retains CLI/crash and configured acceptance. Earlier reconciliation remains
-at `3a149bb7105a307bbe1feda293f4d92a59434afb`.
+October 5 Desktop activation runs on explicit opening/retry, independently of
+polling and Session reads; cached plans survive and obsolete completions are rejected.
+Realignment preview now owns its report and exact input together. A failed Apply
+retains both for retry; rereading the file could otherwise change reviewed bytes.
+Chapter skills implement KR planning → exact-ID creation → separate admission,
+retaining backlog and candidate IDs. Eleven headless preparation/presentation tests
+passed; they do not exercise mounted retry or skill-driven provider outcomes.
+CLI/crash and configured Intelligence acceptance remain open. Release's child
+memory reinforces recovery proof through actual entry points. Details remain in
+`scratch/keep-every-wave-ready-for.md`; earlier reconciliation is preserved at
+`3a149bb7105a307bbe1feda293f4d92a59434afb`.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 

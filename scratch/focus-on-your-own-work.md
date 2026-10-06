@@ -231,18 +231,20 @@ runs nothing ends a Task over uncommitted changes and keeps its checkout) —
     Unreviewed: main lets a Project have no workflow; its Tasks read not
     ready.
 
-16. **Cleanups after Jack's approval** ("make whatever cleanups yyou want").
-    Queued at `f8fe8aff0`, absent from this list at `f9e74029e` with no
-    reason recorded; restored by the implement pass. Built, not yet
-    realigned: (a) text `lf task status` heads a Task with its Workflow
-    state; the last Flow's reason stays on its own line. (b) Loop positions
-    read "pass 2", or "loop 1 pass 3, loop 2 pass 2", in Desktop, `lf flow
-    show` and `lf monitor`. The diagram already wraps to its pane and
-    scrolls sideways. (c) The fixture's Flow exec is a
-    `pursue` run on its second pass, its graph taken from `lf flow list`.
-    (d) Clippy finds nothing unused; Swift was not searched.
-    Check: `dto_fixtures` 20, `flow_tests` 27, `task_flow_launch_tests` 13,
-    Clippy, and the Swift filter under Checks (36) pass.
+16. **Cleanups after Jack's approval** ("make whatever cleanups yyou want")
+    is **done**: built `638fe0e6c`, compressed `25ce573aa`; its text is at
+    `25ce573aa:scratch/focus-on-your-own-work.md`. Queued at `f8fe8aff0`,
+    absent at `f9e74029e` with no reason recorded, restored by the agent.
+    Text `lf task status` heads a Task with its Workflow state; loop
+    positions read "pass 2" in Desktop, `lf flow show` and `lf monitor`; the
+    fixture's Flow exec is a `pursue` run on its second pass. Swift was not
+    searched for unused code. Rerun October 6 at `6e390e513` (main's #1470
+    and #1471, release scripts only, merged without conflict):
+    `cargo test -p loopflow --test dto_fixtures --test flow_tests --test
+    task_flow_launch_tests` 20, 27 and 13 passed. Demo item: the pass
+    wording on screen.
+
+Every slice in this list is done.
 
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task

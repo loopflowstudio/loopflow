@@ -166,22 +166,16 @@ impl Fixture {
             .unwrap()
     }
 
-    /// (session id, kind, title, title_source, completed) of the captured input’s Session.
-    fn session_row(&self, run_id: &str) -> (String, String, String, String, bool) {
+    /// (session id, title, title_source, completed) of the captured input’s Session.
+    fn session_row(&self, run_id: &str) -> (String, String, String, bool) {
         self.db()
             .query_row(
-                "SELECT s.id, s.kind, s.title, s.title_source, s.completed_at IS NOT NULL
+                "SELECT s.id, s.title, s.title_source, s.completed_at IS NOT NULL
                  FROM agent_sessions s JOIN session_events i ON i.session_id=s.id AND i.kind='captured'
                  WHERE i.receipt_key=?1",
                 [run_id],
                 |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
+Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
                 },
             )
             .unwrap_or_else(|error| panic!("Capture {run_id} has no Session: {error}"))
@@ -229,15 +223,12 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
 
     let (first, first_run) = fixture.attach(&LAUNCH);
     assert_eq!(fixture.sessions().len(), 1);
-    let (id, kind, title, source, completed) = fixture.session_row(&first_run);
+    let (id, title, source, completed) = fixture.session_row(&first_run);
     assert_ne!(
         id, first_run,
         "conversation identity differs from its captured input"
     );
-    assert_eq!(
-        (kind.as_str(), source.as_str(), completed),
-        ("conversation", "generated", false)
-    );
+    assert_eq!((source.as_str(), completed), ("generated", false));
     let (magical, musical) = title.split_once('-').expect("magical-musical pair");
     assert!(!magical.is_empty() && !musical.is_empty() && !musical.contains('-'));
     assert_eq!(fixture.run_parents(&first_run), (None, None, None));
@@ -245,7 +236,6 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
     let listed = fixture.sessions();
     assert_eq!(listed.len(), 1, "{listed:?}");
     assert_eq!(listed[0]["id"], id.as_str());
-    assert_eq!(listed[0]["kind"], "conversation");
     assert_eq!(listed[0]["title"], title.as_str());
     assert_eq!(listed[0]["title_source"], "generated");
     assert_eq!(listed[0]["state"], "active");
@@ -268,7 +258,7 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
         "--suggest",
         "--json",
     ]);
-    let (_, _, title, source, _) = fixture.session_row(&first_run);
+    let (_, title, source, _) = fixture.session_row(&first_run);
     assert_eq!(
         (title.as_str(), source.as_str()),
         ("Parser review", "human")
@@ -281,7 +271,7 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
         fixture.sessions().is_empty(),
         "exited orphans leave the working set"
     );
-    let (_, _, saved_title, saved_source, completed) = fixture.session_row(&first_run);
+    let (_, saved_title, saved_source, completed) = fixture.session_row(&first_run);
     assert!(completed);
     assert_eq!(
         (saved_title.as_str(), saved_source.as_str()),
@@ -320,7 +310,7 @@ fn sigint_records_session_interruption_and_retires_the_orphan() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(fixture.sessions().is_empty());
-    assert!(fixture.session_row(&input).4);
+    assert!(fixture.session_row(&input).3);
     let history = fixture.json(&["session", "history", &id, "--json"]);
     assert!(history
         .as_array()
@@ -366,7 +356,6 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             model: None,
             node: None,
             iterations: None,
-            kind: loopflow::session::SessionKind::Conversation,
             interactive: true,
             repo: None,
             title: format!(
@@ -762,6 +751,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert_eq!(chosen["id"], sole.as_str());
     // It stays an ordinary member of its Task.
     assert_eq!(chosen["primary_scope"], Value::Null);
+    assert_eq!(chosen["task_primary"], true);
     assert_eq!(members("INF-123"), std::slice::from_ref(&sole));
 
     // Among several, the most recently used one; the others stay open.
@@ -785,6 +775,16 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     let newest = converse(&several_path);
     assert_eq!(primary(&["INF-124"])["id"], earlier.as_str());
     assert_eq!(members("INF-124").len(), 3);
+    // The listing marks it, so a reader finds it without choosing one.
+    let marked: Vec<String> = fixture
+        .json(&["session", "list", "--all", "--task", "INF-124", "--json"])
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|session| session["task_primary"] == true)
+        .map(|session| session["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(marked, std::slice::from_ref(&earlier));
     assert!(members("INF-124").contains(&newest));
 
     // Another Task's conversation cannot be chosen.

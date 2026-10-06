@@ -276,27 +276,43 @@ struct WorkSurfaceView: View {
                     .tint(palette.accentInk)
                     .foregroundStyle(palette.accentInk)
                 }
+                if let workflow = model.taskWork[task.id].value?.workflow {
+                    TaskWorkflowView(model: model, task: task, wave: found.wave.wave, workflow: workflow)
+                }
                 if let unavailable = found.wave.unavailableTasks.first(where: { $0.taskId == task.id }) {
                     evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)
                     if case .latest = task.flow.record {
-                        TaskFlowView(model: model, task: task, wave: found.wave.wave, onOpenSession: onOpenSession).id(task.id)
+                        TaskFlowView(model: model, task: task, wave: found.wave.wave).id(task.id)
                     }
                 } else {
-                    TaskFlowView(model: model, task: task, wave: found.wave.wave, onOpenSession: onOpenSession).id(task.id)
+                    TaskFlowView(model: model, task: task, wave: found.wave.wave).id(task.id)
                 }
                 TaskWorkView(model: model, task: task, wave: found.wave.wave)
                 TaskHistoryView(model: model, task: task, wave: found.wave.wave)
                     .id(task.id)
                 if let sessions, !sessions.isEmpty {
-                    section {
-                        WorkspaceSectionHeading("Sessions", count: sessions.count)
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
-                                if index > 0 { Divider().overlay(palette.border.opacity(0.6)) }
-                                sessionRow(session)
+                    let groups = TaskSessionGroups(sessions)
+                    if !groups.waiting.isEmpty {
+                        section {
+                            WorkspaceSectionHeading("Waiting", count: groups.waiting.count)
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(groups.waiting.enumerated()), id: \.element.id) { index, session in
+                                    if index > 0 { Divider().overlay(palette.border.opacity(0.6)) }
+                                    sessionRow(session)
+                                }
+                            }
+                            .workspacePanel()
+                        }
+                        .accessibilityIdentifier("task-sessions-waiting")
+                    }
+                    if !groups.working.isEmpty {
+                        section {
+                            WorkspaceSectionHeading("Sessions", count: groups.working.count)
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(groups.working) { session in compactSessionRow(session) }
                             }
                         }
-                        .workspacePanel()
+                        .accessibilityIdentifier("task-sessions-working")
                     }
                 } else if sessions != nil, model.sessions.value != nil, model.sessions.errorMessage == nil {
                     Text("No open Sessions.")
@@ -347,9 +363,14 @@ struct WorkSurfaceView: View {
                     .foregroundStyle(palette.textTertiary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(session.title)
-                        .font(Typography.body(13).weight(.bold))
-                        .foregroundStyle(palette.text)
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                        Text(session.title)
+                            .font(Typography.body(13).weight(.bold))
+                            .foregroundStyle(palette.text)
+                        if session.taskPrimary {
+                            Text("primary").font(Typography.caption(10.5)).foregroundStyle(palette.textTertiary)
+                        }
+                    }
                     HStack(spacing: Spacing.xs) {
                         if let provider = session.provider {
                             Text(provider)
@@ -374,10 +395,34 @@ struct WorkSurfaceView: View {
                     }
                 }
                 Spacer(minLength: Spacing.sm)
-                WorkspaceChip(text: session.state.rawValue.capitalized, tone: sessionTone(session.state))
+                WorkspaceChip(text: session.statusLabel, tone: session.attention == nil ? sessionTone(session.state) : .human)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("task-session-\(session.id)")
+    }
+
+    /// One line for a conversation that is not waiting on anyone.
+    private func compactSessionRow(_ session: SessionRecord) -> some View {
+        Button { onOpenSession(session) } label: {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Text(session.title)
+                    .font(Typography.body(12.5))
+                    .foregroundStyle(palette.text)
+                    .lineLimit(1)
+                if session.taskPrimary {
+                    Text("primary").font(Typography.caption(10.5)).foregroundStyle(palette.textTertiary)
+                }
+                Spacer(minLength: Spacing.sm)
+                Text(session.statusLabel)
+                    .font(Typography.caption(11))
+                    .foregroundStyle(palette.textTertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -393,7 +438,6 @@ struct WorkSurfaceView: View {
         switch state {
         case .unknown: .neutral
         case .active: .running
-        case .waiting: .human
         case .closed, .interrupted: .stopped
         }
     }

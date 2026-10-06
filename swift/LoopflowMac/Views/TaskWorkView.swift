@@ -1,6 +1,108 @@
 import Loopflow
 import SwiftUI
 
+/// A Task's workflow: the stages where a person takes part, joined by the
+/// Flows that move between them. Rust owns the graph and the position; this
+/// draws them and starts an edge through `lf task run`.
+struct TaskWorkflowView: View {
+    let model: PodiumModel
+    let task: RoadmapTask
+    let wave: WaveSnapshot
+    let workflow: TaskWorkflow
+    @Environment(\.palette) private var palette
+
+    private var draft: TaskFlowDraft? { model.navigation.flowDrafts[task.id] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            WorkspaceSectionHeading(title: "Workflow") {
+                Text(workflow.name).font(Typography.code(12)).foregroundStyle(palette.textSecondary)
+            }
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Spacing.sm) {
+                        ForEach(["start"] + workflow.stages.map(\.name) + ["end"], id: \.self) { stage in
+                            stageChip(stage)
+                            ForEach(Array(workflow.edges.enumerated()).filter { $0.element.from == stage },
+                                    id: \.offset) { index, edge in
+                                edgeLabel(edge, running: workflow.runningEdge == index)
+                                    .accessibilityIdentifier("task-workflow-edge-\(index)")
+                            }
+                        }
+                    }
+                }
+                Text(position)
+                    .font(Typography.body(13))
+                    .foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("task-workflow-position")
+                HStack(spacing: Spacing.sm) {
+                    ForEach(Array(workflow.edges.enumerated()).filter { $0.element.from == workflow.departure },
+                            id: \.offset) { index, edge in
+                        Button(edge.flow.map { "Run \($0)" } ?? "Finish") {
+                            Task { await model.startFlow(workflow.launchName(edge), task: task, wave: wave) }
+                        }
+                        .buttonStyle(WorkspaceOutlineButtonStyle())
+                        .disabled(unavailable != nil)
+                        .help(unavailable ?? "lf task run \(task.task.identifier) \(workflow.launchName(edge)) · to \(edge.to)")
+                        .accessibilityIdentifier("task-workflow-run-\(index)")
+                    }
+                    if draft?.acting == true { ProgressView().controlSize(.small) }
+                }
+                if let error = draft?.error {
+                    Text(error)
+                        .font(Typography.body(12))
+                        .foregroundStyle(WorkspaceTone.blocked.ink)
+                        .textSelection(.enabled)
+                        .accessibilityIdentifier("task-workflow-error")
+                }
+            }
+            .workspacePanel(padding: 13)
+        }
+        .accessibilityIdentifier("task-workflow")
+    }
+
+    /// Why no edge can be started now. A running edge is one: a second Start
+    /// would put two drivers in the checkout.
+    private var unavailable: String? {
+        if draft?.acting == true { return "Starting" }
+        if let index = workflow.runningEdge, workflow.edges.indices.contains(index) {
+            return "\(workflow.edges[index].flow ?? "An edge") is running"
+        }
+        return task.flow.control(.start)?.unavailable
+    }
+
+    private var position: String {
+        switch workflow.position {
+        case .stage(let stage):
+            if stage == "end" { return "Ended" }
+            if let skill = workflow.stages.first(where: { $0.name == stage })?.skill {
+                return "Waiting on you at \(stage) · \(skill)"
+            }
+            return "Not started"
+        case .edge(let index, _):
+            guard workflow.edges.indices.contains(index) else { return "Running" }
+            let edge = workflow.edges[index]
+            return "Running \(edge.flow ?? "edge") · \(edge.from) to \(edge.to)"
+        }
+    }
+
+    private func stageChip(_ stage: String) -> some View {
+        let current = workflow.position == .stage(stage)
+        return WorkspaceChip(text: stage, tone: current ? .human : .neutral)
+            .accessibilityIdentifier("task-workflow-stage-\(stage)")
+            .accessibilityValue(current ? "Current" : "")
+    }
+
+    private func edgeLabel(_ edge: TaskWorkflow.Edge, running: Bool) -> some View {
+        let text = "→ \(edge.flow ?? "no Flow") → \(edge.to)"
+        return Text(text)
+            .font(Typography.code(11))
+            .foregroundStyle(running ? WorkspaceTone.running.ink : palette.textTertiary)
+            .accessibilityValue(running ? "Running" : "")
+    }
+}
+
 /// Every retained owner, including headless work and conversations without turns.
 struct TaskWorkView: View {
     let model: PodiumModel
@@ -11,16 +113,16 @@ struct TaskWorkView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             WorkspaceSectionHeading(title: "Work") {
-                Button("Refresh") { Task { await model.loadTaskWork(task: task, wave: wave) } }
+                Button("Refresh") { Task { await model.refreshShownTaskWork() } }
                     .disabled(model.taskWork.inFlight.contains(task.id))
             }
             if let work = model.taskWork[task.id].value {
                 ForEach(work.sessions) { session in
-                    row("Session", id: session.id, name: session.title,
+                    row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
                         state: session.completedAt == nil ? "open" : "completed")
                 }
                 ForEach(work.flows) { flow in
-                    row("Flow", id: flow.id, name: flow.name, state: flow.state.rawValue)
+                    FlowRunView(model: model, flow: flow, wave: wave)
                 }
                 ForEach(work.execs) { exec in
                     row("Exec", id: exec.id, name: exec.command ?? "Unknown command",
@@ -51,5 +153,74 @@ struct TaskWorkView: View {
             Text(id).font(Typography.code(10)).help(id)
         }
         .accessibilityIdentifier("task-work-\(id)")
+    }
+}
+
+/// One Flow run of the Task, opened to its launched graph, where it stands
+/// and each step it started. Every run reads the same way, whoever started it.
+struct FlowRunView: View {
+    let model: PodiumModel
+    let flow: TaskFlowMember
+    let wave: WaveSnapshot
+    @State private var inspected: UInt32?
+    @Environment(\.palette) private var palette
+
+    private var expanded: Bool { model.navigation.expandedFlowRuns.contains(flow.id) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Button {
+                if expanded {
+                    model.navigation.expandedFlowRuns.remove(flow.id)
+                } else {
+                    model.navigation.expandedFlowRuns.insert(flow.id)
+                    Task { await model.loadFlowRun(flow.id, wave: wave) }
+                }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .frame(width: 10)
+                        .accessibilityHidden(true)
+                    Text("Flow")
+                    Text(flow.name).font(Typography.code(12))
+                    Spacer()
+                    Text(flow.state.rawValue)
+                    Text(flow.id).font(Typography.code(10)).help(flow.id)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier("task-work-\(flow.id)")
+            if expanded { detail.padding(.leading, 18) }
+        }
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        let reading = model.flowRuns[flow.id]
+        if let run = reading.value {
+            let progress = run.progress
+            FlowDiagram(graph: run.graph, latest: progress, inspected: $inspected)
+            Text([progress.reason, flowIterationLabel(run.iterations).map { "iteration \($0)" }]
+                .compactMap { $0 }.joined(separator: " · "))
+                .accessibilityIdentifier("flow-run-status-\(flow.id)")
+            ForEach(run.steps) { step in
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                    Text(step.label).font(Typography.code(11))
+                    if let iteration = flowIterationLabel(step.iterations) { Text(iteration).monospacedDigit() }
+                    Spacer()
+                    Text(step.outcome ?? (step.completedAt == nil ? "running" : "no recorded exit"))
+                    Text(step.execId).font(Typography.code(10)).help(step.execId)
+                }
+                .accessibilityIdentifier("flow-run-step-\(step.execId)")
+            }
+        }
+        if let error = reading.errorMessage {
+            Text("Flow could not be read: \(error)")
+        } else if reading.value == nil {
+            Text("Reading Flow…")
+        }
     }
 }

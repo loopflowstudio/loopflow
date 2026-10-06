@@ -778,7 +778,6 @@ mod tests {
                 wave_id: None,
                 flow_id: None,
                 bound_at: None,
-                kind: crate::session::SessionKind::Conversation,
                 interactive: false,
                 repo: None,
                 title: "Investigation".into(),

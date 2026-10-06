@@ -10,7 +10,7 @@ use super::{
     lock_session_exec, publish_prepared_input, session_not_found, start_durable_session, surface,
     NativeSession, SessionRecord,
 };
-use crate::session::{AgentSession, PrimaryScope, SessionKind, TitleSource, WorkSource};
+use crate::session::{AgentSession, PrimaryScope, TitleSource, WorkSource};
 use crate::store::SharedStore;
 
 /// Find or admit the primary conversation of a Wave, or of the repository
@@ -236,7 +236,6 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
         flow_id: None,
         work_source: None,
         bound_at: None,
-        kind: SessionKind::Conversation,
         interactive: true,
         repo: None,
         title,
@@ -324,7 +323,6 @@ mod tests {
         SessionHome, CONVERSATION_LAUNCHERS, FAILED_CONVERSATION_LAUNCHERS,
     };
     use crate::ops::human_session::{action_test::NativeClients, conversation_background_name};
-    use crate::session::SessionKind;
 
     async fn wave(
         store: &crate::store::SharedStore,
@@ -359,7 +357,6 @@ mod tests {
                 .unwrap()
                 .contains(&conversation_background_name(&first.id)));
             let session = store.session(&first.id).await.unwrap().unwrap();
-            assert_eq!(session.kind, SessionKind::Conversation);
             assert!(session.interactive && session.input_published);
             assert_eq!(session.skill.as_deref(), Some("wave/session"));
             assert_eq!(session.wave_id.as_ref(), Some(wave.id()));

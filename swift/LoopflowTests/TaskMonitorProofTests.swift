@@ -255,14 +255,14 @@ struct TaskMonitorProofTests {
             .deletingLastPathComponent().deletingLastPathComponent()
         let roadmap = String(decoding: try placingTaskWorktrees(in: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")), at: "/src/loopflow"), as: UTF8.self)
         let records = """
-        [{"id":"monitor-review","run_id":"monitor-review", "interactive": true,"kind":"conversation",
+        [{"id":"monitor-review","run_id":"monitor-review", "interactive": true,
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Review Session","detail":"Owned cat PTY","cwd":"/src/loopflow",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "terminal_ids":[],"open_argv":["/bin/cat"]},
-         {"id":"monitor-other","run_id":"monitor-other", "interactive": true,"kind":"conversation",
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "terminal_ids":[],"open_argv":["/bin/cat"]},
+         {"id":"monitor-other","run_id":"monitor-other", "interactive": true,
           "work":{"kind":"task","id":"ts_now00000000000000000000000000000"},
           "title":"Other Task Session","detail":"Owned cat PTY","cwd":"/src/loopflow",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": ["ts_now00000000000000000000000000"], "terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": ["ts_now00000000000000000000000000"], "terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         var active = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/active_runs.json"))) as? [String: Any])
         var run = try #require((active["sessions"] as? [[String: Any]])?.first)

@@ -669,12 +669,7 @@ struct SessionsContentView: View {
     private var taskStage: some View {
         if let task = fileTask, case .latest(let latest) = task.task.flow.record,
            let current = latest.current, let node = latest.graph.node(current) {
-            Button {
-                if let session = participationSession(node: String(current), latest: latest,
-                                                      sessions: store.sessions.map(\.record)) {
-                    openSession(session)
-                } else { workspace.showsDetails = true }
-            } label: {
+            Button { workspace.showsDetails = true } label: {
                 Label(node.label, systemImage: node.human ? "bubble.left" : "arrow.triangle.branch")
                     .font(Typography.meta).lineLimit(1)
             }
@@ -718,7 +713,7 @@ struct SessionsContentView: View {
                             } label: {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(item.record.title).font(Typography.body(13)).lineLimit(2)
-                                    Text(item.error == nil ? item.record.participationLabel : "Needs recovery")
+                                    Text(item.error == nil ? item.record.statusLabel : "Needs recovery")
                                         .font(Typography.meta).foregroundStyle(palette.textSecondary)
                                     if let reason = item.record.workspace?.unavailable {
                                         Text(reason).font(Typography.meta).foregroundStyle(Color.statusWarning)
@@ -915,12 +910,7 @@ struct SessionsContentView: View {
             return
         }
         guard panes.layout.allPanes.allSatisfy({ $0.content == .empty }) else { return }
-        if let session = sessions.first(where: {
-            if $0.kind == .flow, case .step(_, _, _, _, _, .current) = $0.flowMembership { return true }
-            return false
-        }) ?? sessions.first(where: { $0.state != .closed }) {
-            openSession(session)
-        }
+        if let session = TaskSessionGroups(sessions).entry { openSession(session) }
     }
 
     private func showMonitor(_ taskId: String) {
@@ -1479,7 +1469,6 @@ private struct SessionPaneView: View {
         switch state {
         case .unknown: return TerminalPalette.divider
         case .active: return TerminalPalette.stateDot(.running)
-        case .waiting: return TerminalPalette.stateDot(.human)
         case .closed, .interrupted: return TerminalPalette.stateDot(.stopped)
         }
     }

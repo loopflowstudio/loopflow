@@ -76,26 +76,43 @@ public struct TaskWorkflow: Codable, Sendable, Equatable {
     public let edges: [Edge]
     public let position: Position
     public let traversals: [Traversal]
+
+    /// The stage the Task waits at, or the one its running edge left.
+    public var departure: String {
+        switch position {
+        case .stage(let stage): stage
+        case .edge(let index, _): edges.indices.contains(index) ? edges[index].from : "start"
+        }
+    }
+
+    /// Index of the edge whose Flow runs now.
+    public var runningEdge: Int? {
+        if case .edge(let index, _) = position { return index }
+        return nil
+    }
+
+    /// What `lf task run ISSUE <name>` takes to traverse `edge`: its Flow, or
+    /// the stage it enters when it runs nothing.
+    public func launchName(_ edge: Edge) -> String { edge.flow ?? edge.to }
 }
 
 public struct TaskSession: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let title: String
-    public let kind: String
     public let interactive: Bool
     /// Driver Exec of the Flow whose step opened the current input.
     public let flowId: String?
     public let completedAt: Int64?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, kind, interactive
+        case id, title, interactive
         case flowId = "flow_id"
         case completedAt = "completed_at"
     }
 }
 
 /// One Flow as its driver Exec records it; `id` is that Exec.
-public struct TaskFlowMember: Codable, Sendable, Equatable, Identifiable {
+public struct TaskFlowMember: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String
     public let state: TaskFlowState

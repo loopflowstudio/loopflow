@@ -227,9 +227,9 @@ struct ConversationLaunchTests {
         for (scope, binding, subject) in cases {
             let launch = ConversationLaunch(scope: scope)
             let command = launch.arguments(lf: "/App/lf")
-            #expect(Array(command.dropFirst(3).dropLast(2)) == binding)
+            #expect(Array(command.dropFirst(2).dropLast(2)) == binding)
             #expect(command.last?.contains(subject) == true)
-            #expect(command.contains("interactive"))
+            #expect(command.contains("--interactive"))
             #expect(!command.contains("tui"))
             #expect(!command.contains("ide"))
             #expect(!command.contains("wave/operate"))

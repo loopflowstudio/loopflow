@@ -21,7 +21,7 @@ SELECT s.id,'observed','legacy_flow_review',s.task_id,s.wave_id,unixepoch(),
         'pending',s.completed_at IS NULL AND EXISTS(SELECT 1 FROM flow_sessions f WHERE f.pending_session_id=s.id AND f.state='current'),
         'completed_at',s.completed_at),s.current_capture
 FROM agent_sessions s WHERE s.kind='flow_review';
-UPDATE agent_sessions SET kind='conversation' WHERE kind='flow_review';
+ALTER TABLE agent_sessions DROP COLUMN kind;
 
 -- Each saved Flow's name, state and last position stay as an observation on
 -- every conversation it opened. None of it is resumable state.

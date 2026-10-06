@@ -141,10 +141,10 @@ struct WorkspaceNavigationProofTests {
         func record(_ id: String, title: String, work: Any, cwd: String) -> [String: Any] {
             let binding = work as? [String: String]
             let taskIds = binding?["kind"] == "task" ? binding?["id"].map { [$0] } ?? [] : []
-            return ["id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": work, "title": title, "detail": "claude",
+            return ["id": id, "run_id": id, "interactive": true, "work": work, "title": title, "detail": "claude",
              "provider": "claude", "cwd": cwd, "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
-             "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated",
-             "flow_membership": ["kind": "independent"], "task_ids": taskIds, "terminal_ids": [], "open_argv": ["must-not-launch"]]
+             "actions": sessionActionFixture(state: "active"), "title_source": "generated",
+             "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": taskIds, "terminal_ids": [], "open_argv": ["must-not-launch"]]
         }
         let attached = [
             record("release-outcomes", title: "Release outcomes", work: ["kind": "task", "id": "work-0-0"], cwd: "/src/loopflow.calmer"),
@@ -264,7 +264,7 @@ struct WorkspaceNavigationProofTests {
             let record = try renameFixtureRecord(id, title: index == 0 ? "review-design" : "lyric-cadenza", work: task)
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
             value["state"] = "active"
-            value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
+            value["actions"] = sessionActionFixture(state: "active")
             value["terminal_ids"] = [shells[index]]
             value["wave_id"] = "wave-1"
             value["open_argv"] = ["must-not-launch"]
@@ -602,9 +602,9 @@ struct WorkspaceNavigationProofTests {
             let shell = workspace.multiplexer.layout.firstPane.id
             workspace.multiplexer.setFocusedPane(shell)
             records.append([
-                "id": "row-\(index)", "run_id": "row-\(index)", "interactive": true, "kind": "conversation", "work": NSNull(),
+                "id": "row-\(index)", "run_id": "row-\(index)", "interactive": true, "work": NSNull(),
                 "title": "Conversation \(index)", "detail": "Local shell", "cwd": path,
-                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "task_ids": [], "terminal_ids": [shell],
+                "state": "active", "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": [], "terminal_ids": [shell],
                 "open_argv": ["must-not-launch"],
             ])
         }
@@ -770,15 +770,15 @@ struct WorkspaceNavigationProofTests {
             "tests/fixtures/dto/roadmap_snapshot.json"
         )), at: "/src/loopflow"), as: UTF8.self)
         let records = """
-        [{"id":"navigation-split", "run_id": "navigation-split", "interactive": true,"kind":"conversation",
+        [{"id":"navigation-split", "run_id": "navigation-split", "interactive": true,
           "work":{"kind":"task","id":"ts_review00000000000000000000000000"},
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": ["ts_review00000000000000000000000000"], "terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         let otherRecords = """
-        [{"id":"context-session", "run_id": "context-session", "interactive": true,"kind":"conversation","work":null,
+        [{"id":"context-session", "run_id": "context-session", "interactive": true,"work":null,
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
-          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": [], "terminal_ids":[],"open_argv":["lf","session","connect","context-session"]}]
+          "state":"active","ready_summary":null,"work_path":null,"actions":\(sessionActionFixtureJSON(state: "active")),"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": [], "terminal_ids":[],"open_argv":["lf","session","connect","context-session"]}]
         """
         let query = RegistryQuery { args, cwd in
             switch args.first {

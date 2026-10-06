@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::durable::FlowInventoryEntry;
 use crate::exec::Exec;
-use crate::session::SessionKind;
 
 /// All retained work in a checkout, plus explicitly attributed work elsewhere.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,7 +20,6 @@ pub struct TaskWork {
 pub struct TaskSession {
     pub id: String,
     pub title: String,
-    pub kind: SessionKind,
     pub interactive: bool,
     /// The Flow whose step opened its current input.
     pub flow_id: Option<String>,

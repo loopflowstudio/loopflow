@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use loopflow::harness::codex_connection::CodexConnection;
 use loopflow::id::ExecId;
-use loopflow::session::{AgentSession, SessionKind, TitleSource};
+use loopflow::session::{AgentSession, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
@@ -817,7 +817,6 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 model: None,
                 node: None,
                 iterations: None,
-                kind: SessionKind::Conversation,
                 interactive: true,
                 repo: None,
                 title: "Engine ownership".into(),

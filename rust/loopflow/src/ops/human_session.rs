@@ -103,17 +103,9 @@ pub(crate) enum OpenMode {
 pub enum SessionState {
     /// Passive metadata has no trustworthy live/closed observation.
     Unknown,
-    Waiting,
     Active,
     Closed,
     Interrupted,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionKind {
-    Flow,
-    Conversation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,9 +123,9 @@ pub struct SessionAction {
     pub unavailable_reason: Option<String>,
 }
 
-pub(crate) fn session_actions(kind: SessionKind, state: SessionState) -> Vec<SessionAction> {
+pub(crate) fn session_actions(state: SessionState) -> Vec<SessionAction> {
     use SessionActionKind::{MoveHere, Open};
-    let active_client = kind == SessionKind::Conversation && state == SessionState::Active;
+    let active_client = state == SessionState::Active;
     let mut actions = vec![(
         Open,
         "Open here",
@@ -160,12 +152,8 @@ pub(crate) fn session_actions(kind: SessionKind, state: SessionState) -> Vec<Ses
         .collect()
 }
 
-fn require_session_action(
-    kind: SessionKind,
-    state: SessionState,
-    action: SessionActionKind,
-) -> Result<()> {
-    let projected = session_actions(kind, state)
+fn require_session_action(state: SessionState, action: SessionActionKind) -> Result<()> {
+    let projected = session_actions(state)
         .into_iter()
         .find(|item| item.kind == action)
         .ok_or_else(|| anyhow!("This action does not apply to this Session"))?;
@@ -187,10 +175,11 @@ pub struct SessionRecord {
     /// Waiting on a person, read from its provider's stream; absent when it is
     /// working or nothing current says.
     pub attention: Option<SessionAttention>,
+    /// Its Task names it as the Task's primary conversation.
+    pub task_primary: bool,
     pub task_ids: Vec<crate::durable::TaskId>,
     pub id: String,
     pub workspace: Option<SessionWorkspace>,
-    pub kind: SessionKind,
     pub interactive: bool,
     pub work: Option<WorkRef>,
     pub wave_id: Option<crate::id::WaveId>,
@@ -401,7 +390,6 @@ fn flow_occurrence(
 /// Passive listing reads record metadata and exact local client receipts only.
 /// Connect/complete still enter find_session and surface, with full validation.
 fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
-    let kind = SessionKind::Conversation;
     let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
@@ -458,7 +446,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         Vec::new()
     };
     let state = session_state(session, !clients.is_empty());
-    let mut actions = session_actions(kind, state);
+    let mut actions = session_actions(state);
     let open_argv = if unavailable.is_none() {
         match human_open_argv(remote, Some(&session.cwd), &session.id) {
             Ok(argv) => argv,
@@ -479,6 +467,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     SessionRecord {
         primary_scope: session.primary_scope.clone(),
         attention: session_attention(session),
+        task_primary: session.task_primary,
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
         workspace: remote.map(|home| SessionWorkspace {
@@ -487,7 +476,6 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             task_id: session.task_id.clone(),
             unavailable: Some("Checkout resolution is unavailable on this remote Home".into()),
         }),
-        kind,
         interactive: session.interactive,
         work,
         wave_id: session.wave_id.clone(),
@@ -715,11 +703,7 @@ pub(crate) async fn open(
         native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
     }
     if mode == OpenMode::Refuse && !native.clients()?.is_empty() {
-        require_session_action(
-            SessionKind::Conversation,
-            SessionState::Active,
-            SessionActionKind::Open,
-        )?;
+        require_session_action(SessionState::Active, SessionActionKind::Open)?;
     }
     let mut result = surface(store, session).await?;
     if resume {
@@ -897,7 +881,6 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
 
 /// A Session as its row and its current input describe it.
 async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionRecord> {
-    let kind = SessionKind::Conversation;
     let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
@@ -920,7 +903,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         )?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata, !clients.is_empty());
-    let actions = session_actions(kind, state);
+    let actions = session_actions(state);
     let flow_membership = match (&session.flow_id, &metadata.flow) {
         (None, _) if metadata.independent => SessionFlowMembership::Independent,
         (None, _) => SessionFlowMembership::Unknown {
@@ -941,6 +924,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
     let mut reading = SessionRecord {
         primary_scope: metadata.primary_scope.clone(),
         attention: session_attention(&metadata),
+        task_primary: metadata.task_primary,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
         workspace: remote.as_ref().map(|home| SessionWorkspace {
@@ -949,7 +933,6 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
             task_id: session.task_id.clone(),
             unavailable: Some("Checkout resolution is unavailable on this remote Home".into()),
         }),
-        kind,
         interactive: session.interactive,
         wave_id: session.wave_id.clone(),
         work_path: session_work_path(store, session).await?,
@@ -1353,6 +1336,7 @@ mod tests {
             driver_outcome: None,
             waiting: false,
             task_terminal: false,
+            task_primary: false,
             task_ids: vec![task.clone()],
             captured: Some(1),
             id: "metadata".into(),
@@ -1361,7 +1345,6 @@ mod tests {
             title_source: crate::session::TitleSource::Human,
             ready_summary: None,
             completed_at: None,
-            kind: crate::session::SessionKind::Conversation,
             interactive: true,
             task_id: Some(task.clone()),
             wave_id: Some(wave.clone()),
@@ -1513,7 +1496,6 @@ mod tests {
     fn session_action_fixtures_match_the_shared_boundary() {
         #[derive(serde::Deserialize)]
         struct Case {
-            kind: super::SessionKind,
             state: super::SessionState,
             actions: Vec<super::SessionAction>,
         }
@@ -1522,9 +1504,9 @@ mod tests {
         ))
         .unwrap();
         for case in cases {
-            assert_eq!(super::session_actions(case.kind, case.state), case.actions);
+            assert_eq!(super::session_actions(case.state), case.actions);
             for action in case.actions {
-                let outcome = super::require_session_action(case.kind, case.state, action.kind);
+                let outcome = super::require_session_action(case.state, action.kind);
                 assert_eq!(
                     outcome.err().map(|error| error.to_string()),
                     action.unavailable_reason
@@ -1540,10 +1522,7 @@ mod tests {
                 .to_string(),
         ] {
             let session: super::SessionRecord = serde_json::from_str(fixture).unwrap();
-            assert_eq!(
-                session.actions,
-                super::session_actions(session.kind, session.state)
-            );
+            assert_eq!(session.actions, super::session_actions(session.state));
             assert_eq!(session.work_path.as_deref(), Some("product / LOO-291"));
             let mut untitled = serde_json::to_value(&session).unwrap();
             untitled.as_object_mut().unwrap().remove("title_source");
@@ -1566,10 +1545,7 @@ mod tests {
         .unwrap();
         let mut kinds = Vec::new();
         for session in &sessions {
-            assert_eq!(
-                session.actions,
-                super::session_actions(session.kind, session.state)
-            );
+            assert_eq!(session.actions, super::session_actions(session.state));
             kinds.push(match &session.flow_membership {
                 super::SessionFlowMembership::Step { occurrence, .. } => match occurrence {
                     super::SessionFlowOccurrence::Unknown => "unknown_occurrence",
@@ -1670,7 +1646,6 @@ mod tests {
             flow_id: None,
             work_source: None,
             bound_at: None,
-            kind: crate::session::SessionKind::Conversation,
             interactive: true,
             repo: None,
             title: "Conversation".into(),

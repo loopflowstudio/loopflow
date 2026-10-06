@@ -49,29 +49,5 @@ struct SessionsPolishTests {
         #expect(registry.workspace(for: fixtureWorkspace("/tmp/repo")).multiplexer.focusedPane.content == .empty)
         #expect(other.multiplexer.focusedPane.content == .shell)
     }
-
-    private func record(kind: String, state: String = "active") throws -> SessionRecord {
-        try JSONDecoder().decode(
-            SessionRecord.self,
-            from: Data(
-                """
-                {
-                  "id": "polish", "run_id": "polish", "interactive": true,
-                  "kind": "\(kind)",
-                  "work": null,
-                  "title": "Polish fixture",
-                  "detail": "fixture-provider",
-                  "cwd": "/tmp",
-                  "state": "\(state)",
-                  "ready_summary": null,
-                  "work_path": "product / Desktop / LOO-291",
-                  "actions": \(sessionActionFixtureJSON(kind: kind, state: state)),
-                  "title_source": "generated", "flow_membership": {"kind": "independent"}, "task_ids": [], "terminal_ids": [],
-                  "open_argv": ["lf", "session", "connect", "polish"]
-                }
-                """.utf8
-            )
-        )
-    }
 }
 #endif

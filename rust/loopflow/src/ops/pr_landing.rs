@@ -350,7 +350,6 @@ fn admit_ci_fix(
                     .as_ref()
                     .map(|_| crate::session::WorkSource::Declared),
                 bound_at: None,
-                kind: crate::session::SessionKind::Conversation,
                 interactive: false,
                 repo: None,
                 title: format!("Repair PR #{}", landing.pr_number),

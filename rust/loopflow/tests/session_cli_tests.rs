@@ -459,7 +459,6 @@ fn prepare_conversation(
                 flow_id: None,
                 work_source: None,
                 bound_at: None,
-                kind: loopflow::session::SessionKind::Conversation,
                 interactive: true,
                 repo: None,
                 title: title.into(),
@@ -617,7 +616,6 @@ fn session_names_survive_capture_replacement() {
     assert_eq!(listed(home.path(), id)["title"], "Which release target?");
     let suggested = rename(home.path(), &[id, "Release target", "--suggest"]);
     assert_eq!(suggested["id"], id);
-    assert_eq!(suggested["kind"], "conversation");
     assert_eq!(suggested["title"], "Release target");
     let named = rename(home.path(), &[id, "Launch notes"]);
     assert_eq!(named["title_source"], "human");
@@ -690,7 +688,6 @@ fn session_names_survive_capture_replacement() {
     assert!(inside.status.success(), "{inside:?}");
     let inside: serde_json::Value = serde_json::from_slice(&inside.stdout).unwrap();
     assert_eq!(inside["id"], id);
-    assert_eq!(inside["kind"], "conversation");
     assert!(inside.get("run_id").is_none());
     assert_eq!(inside["title"], "Launch notes");
     assert_eq!(inside["title_source"], "human");

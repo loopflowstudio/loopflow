@@ -50,7 +50,7 @@ struct SessionChromeProofTests {
         var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
         value["state"] = "active"
         value["provider"] = "claude"
-        value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
+        value["actions"] = sessionActionFixture(state: "active")
         value["terminal_ids"] = [panes[0]]
         value["open_argv"] = ["must-not-launch"]
         value["flow_membership"] = ["kind": "step", "flow": "feature", "invocation_id": invocation,
@@ -259,7 +259,7 @@ struct SessionChromeProofTests {
         let records = try [record, companion].enumerated().map { index, record in
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
             value["state"] = "active"
-            value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
+            value["actions"] = sessionActionFixture(state: "active")
             if case .shell(let pane) = terminals[index].terminal { value["terminal_ids"] = [pane] }
             return value
         }

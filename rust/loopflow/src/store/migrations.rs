@@ -1964,14 +1964,11 @@ mod tests {
             )
             .unwrap();
         assert_eq!(feedback, ("Retained exact feedback".into(), None));
-        let boundary: (String, String, i64, Option<i64>) = conn.query_row(
-            "SELECT s.kind,json_extract(e.payload,'$.flow_id'),json_extract(e.payload,'$.pending'),s.completed_at FROM agent_sessions s JOIN session_events e ON e.session_id=s.id AND e.receipt_key='legacy_flow_review' WHERE s.id='review'",
-            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        let boundary: (String, i64, Option<i64>) = conn.query_row(
+            "SELECT json_extract(e.payload,'$.flow_id'),json_extract(e.payload,'$.pending'),s.completed_at FROM agent_sessions s JOIN session_events e ON e.session_id=s.id AND e.receipt_key='legacy_flow_review' WHERE s.id='review'",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         ).unwrap();
-        assert_eq!(
-            boundary,
-            ("conversation".into(), "legacy-flow".into(), 1, None)
-        );
+        assert_eq!(boundary, ("legacy-flow".into(), 1, None));
         // The saved Flow's name, state and last position stay on the
         // conversation it opened; nothing else of the Flow record remains.
         let history: (String, String, i64, i64) = conn.query_row(

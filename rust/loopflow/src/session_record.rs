@@ -2419,7 +2419,6 @@ impl SessionCapture {
                 work_source: work.as_ref().map(|work| work.source),
                 flow_id: None,
                 bound_at: None,
-                kind: crate::session::SessionKind::Conversation,
                 interactive: manifest.surface != "headless",
                 repo: None,
                 title: manifest.skill.clone().unwrap_or_else(|| {
@@ -3342,7 +3341,6 @@ mod tests {
             .unwrap();
         let run = session.clone();
         assert!(!session.interactive);
-        assert_eq!(session.kind, crate::session::SessionKind::Conversation);
         assert_eq!(session.title, "implement");
         assert_eq!(run.provider.as_deref(), Some("proof"));
         assert_eq!(

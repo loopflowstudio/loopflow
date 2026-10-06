@@ -204,6 +204,12 @@ public struct RegistryQuery: Sendable {
         }
     }
 
+    /// One Flow run from its driver's record, by driver Exec.
+    public func flowRun(id: String, cwd: String?) async throws -> FlowDetail {
+        let stdout = try await run(["flow", "show", id, "--sessions", "--json"], cwd)
+        return try Self.decode(FlowDetail.self, from: stdout)
+    }
+
     /// One planning Task's complete comment thread. Read-only; works before
     /// the Task is prepared or started.
     public func taskComments(id: String, wave: String, cwd: String) async throws -> TaskComments {

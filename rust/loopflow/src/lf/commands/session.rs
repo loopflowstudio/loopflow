@@ -230,7 +230,6 @@ async fn list(
                 match session.state {
                     _ if session.attention.is_some() => "waiting",
                     SessionState::Unknown => "unknown",
-                    SessionState::Waiting => "waiting",
                     SessionState::Active => "active",
                     SessionState::Closed => "closed",
                     SessionState::Interrupted => "interrupted",

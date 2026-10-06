@@ -116,7 +116,7 @@ impl SqliteStore {
         let tx = conn.transaction()?;
         let sessions = tx
             .prepare(&format!(
-                "SELECT s.id,s.title,s.kind,s.interactive,{},s.completed_at
+                "SELECT s.id,s.title,s.interactive,{},s.completed_at
             FROM agent_sessions s WHERE s.id IN ({}) ORDER BY s.created_at,s.id",
                 super::sessions::SESSION_FLOW,
                 session_ids("?1")
@@ -125,10 +125,9 @@ impl SqliteStore {
                 Ok(TaskSession {
                     id: row.get(0)?,
                     title: row.get(1)?,
-                    kind: serde_json::from_value(serde_json::Value::String(row.get(2)?))?,
-                    interactive: row.get(3)?,
-                    flow_id: row.get(4)?,
-                    completed_at: row.get(5)?,
+                    interactive: row.get(2)?,
+                    flow_id: row.get(3)?,
+                    completed_at: row.get(4)?,
                 })
             })?
             .collect::<StoreResult<Vec<_>>>()?;
@@ -405,8 +404,8 @@ mod tests {
                 ("sibling", "/missing/task%_-other", false, false),
                 ("wildcard", "/missing/taskAB", false, false),
             ] {
-                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id,kind,completed_at)
-                    VALUES(?1,?1,'human',1,0,?2,?3,?4,?5,?6)", params![id,cwd,bound.then(|| task.as_str()),bound.then_some(wave.as_str()),"conversation",complete.then_some(2)]).unwrap();
+                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id,completed_at)
+                    VALUES(?1,?1,'human',1,0,?2,?3,?4,?5)", params![id,cwd,bound.then(|| task.as_str()),bound.then_some(wave.as_str()),complete.then_some(2)]).unwrap();
             }
             for id in ["manual", "conversation", "history", "sibling", "wildcard"] {
                 super::super::sessions::test_capture(

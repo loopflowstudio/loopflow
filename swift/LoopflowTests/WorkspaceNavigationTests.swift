@@ -13,7 +13,7 @@ struct WorkspaceNavigationTests {
         let snapshot = try roadmap()
         var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(session("review", work: .task(id: "ts_review00000000000000000000000000")))) as? [String: Any])
         value["kind"] = "flow"
-        value["state"] = "waiting"
+        value["state"] = "unknown"
         let review = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         let idle = try session("idle", work: .task(id: "ts_review00000000000000000000000000"))
         let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: [idle, review])
@@ -84,7 +84,7 @@ struct WorkspaceNavigationTests {
             row["id"] = id
             row["interactive"] = id != "background"
             row["attention"] = NSNull()
-            row["state"] = id == "completed" ? "closed" : id == "active" ? "active" : "waiting"
+            row["state"] = id == "completed" ? "closed" : id == "active" ? "active" : "unknown"
             row["kind"] = id == "review" ? "flow" : "conversation"
             return row
         }
@@ -797,11 +797,11 @@ struct WorkspaceNavigationTests {
         let taskIdsJSON = String(decoding: try JSONEncoder().encode(taskIds), as: UTF8.self)
         let waveJSON = String(decoding: try JSONEncoder().encode(waveId ?? (id == "project" ? "wave-1" : nil)), as: UTF8.self)
         return try JSONDecoder().decode(SessionRecord.self, from: Data("""
-        {"id":"\(id)", "run_id": "\(id)", "interactive": true,"kind":"conversation","work":\(workJSON),"title":"\(id)",
+        {"id":"\(id)", "run_id": "\(id)", "interactive": true,"work":\(workJSON),"title":"\(id)",
          "workspace":{"home_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
-         "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: state.rawValue)),
-         "ready_summary":null,"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
+         "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(state: state.rawValue)),
+         "ready_summary":null,"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
         """.utf8))
     }
 }

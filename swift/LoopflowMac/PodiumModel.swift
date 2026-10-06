@@ -283,6 +283,8 @@ final class PodiumModel {
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
     private(set) var taskWork = TaskReadings<TaskWork>()
+    /// Flow runs keyed by driver Exec, read when their row is opened.
+    private(set) var flowRuns = TaskReadings<FlowDetail>()
     /// Conversation history, read only on disclosure.
     private(set) var sessionHistory = TaskReadings<[SessionHistory]>()
     private(set) var taskContext = TaskReadings<ContextReport>()
@@ -513,6 +515,7 @@ final class PodiumModel {
     private func keepPlanningCurrent() async {
         while !Task.isCancelled {
             await refreshPlanning()
+            await refreshShownTaskWork()
             do { try await Task.sleep(for: .seconds(15)) } catch { return }
         }
     }
@@ -872,6 +875,24 @@ final class PodiumModel {
         }
     }
 
+    /// The shown Task's work and its opened, unfinished Flow runs follow the
+    /// planning cadence, so progress moves without a view owning a loop.
+    func refreshShownTaskWork() async {
+        guard !usesFixedFixture, let selection, selection.kind == .task,
+              let found = task(id: selection.id) else { return }
+        await loadTaskWork(task: found.task, wave: found.wave.wave)
+        for flow in taskWork[found.task.id].value?.flows ?? []
+        where flow.state == .current && navigation.expandedFlowRuns.contains(flow.id) {
+            await loadFlowRun(flow.id, wave: found.wave.wave)
+        }
+    }
+
+    func loadFlowRun(_ id: String, wave: WaveSnapshot) async {
+        await loadTaskReading(\.flowRuns, task: id) { [query] in
+            try await query.flowRun(id: id, cwd: WaveOrigin.resolve(wave.repo))
+        }
+    }
+
     func loadSessionHistory(task: RoadmapTask, wave: WaveSnapshot) async {
         await loadTaskReading(\.sessionHistory, task: task.id) { [query] in
             try await query.taskHistory(task: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
@@ -926,6 +947,7 @@ final class PodiumModel {
         do {
             try await query.runTaskFlow(issue: issue, flow: flow, cwd: cwd)
             owner.flowDrafts[taskId] = nil
+            await loadTaskWork(task: task, wave: wave)
             await refresh()
         } catch {
             owner.flowDrafts[taskId]?.acting = false

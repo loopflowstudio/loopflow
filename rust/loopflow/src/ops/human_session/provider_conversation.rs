@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail, Result};
 use super::{local_capture_dir, lock_session_exec, publish_prepared_input};
 use crate::provider_account::activation::native_home;
 use crate::provider_auth::Provider;
-use crate::session::{AgentSession, SessionKind, TitleSource};
+use crate::session::{AgentSession, TitleSource};
 use crate::store::{ProviderAccountId, SharedStore};
 
 pub(super) async fn human_input_times<'a>(
@@ -239,7 +239,6 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<AgentS
             flow_id: None,
             work_source: None,
             bound_at: None,
-            kind: SessionKind::Conversation,
             interactive: true,
             repo: None,
             title: format!("{} {}", conversation.provider, &id[..8]),

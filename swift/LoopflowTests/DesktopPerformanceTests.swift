@@ -391,12 +391,12 @@ struct DesktopPerformanceTests {
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let planning = PerformancePlanning(roadmap: roadmap)
         let sessions = try JSONSerialization.data(withJSONObject: stride(from: 0, to: taskCount, by: 2).map { index in
-            ["id": "perf-session-\(index)", "run_id": "perf-run-\(index)", "interactive": true, "kind": "conversation",
+            ["id": "perf-session-\(index)", "run_id": "perf-run-\(index)", "interactive": true,
              "work": ["kind": "task", "id": "perf-work-\(index)"],
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
              "cwd": "/src/loopflow", "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
-             "actions": sessionActionFixture(kind: "conversation", state: "active"),
-             "title_source": "generated", "flow_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
+             "actions": sessionActionFixture(state: "active"),
+             "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
         let active = try JSONSerialization.data(withJSONObject: [
             "discovery": "ready", "home": "benchmark-fixture", "observed_at": 1790270400, "task": NSNull(), "gaps": [],

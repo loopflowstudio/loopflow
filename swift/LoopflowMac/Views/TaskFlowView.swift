@@ -49,21 +49,10 @@ private func state(of node: FlowNode, latest: LatestTaskFlow?) -> FlowNodeState 
     return node.human ? .pendingHuman : .pending
 }
 
-/// Match a current captured occurrence and pass; skill labels never select a conversation.
-func participationSession(node: String, latest: LatestTaskFlow, sessions: [SessionRecord]) -> SessionRecord? {
-    sessions.first { session in
-        guard session.kind == .flow,
-              case let .step(_, invocation, _, occurrence, iterations, .current) = session.flowMembership
-        else { return false }
-        return invocation == latest.invocationId && occurrence == UInt32(node) && iterations == latest.iterations
-    }
-}
-
 struct TaskFlowView: View {
     @Bindable var model: PodiumModel
     let task: RoadmapTask
     let wave: WaveSnapshot
-    var onOpenSession: ((SessionRecord) -> Void)?
 
     @Environment(\.palette) private var palette
     @State private var showsDetailedFlow = false
@@ -249,7 +238,8 @@ struct TaskFlowView: View {
             Task { await model.startFlow(previewName, task: task, wave: wave) }
         }
         .buttonStyle(WorkspaceOutlineButtonStyle())
-        .disabled(start?.unavailable != nil || draft.acting || previewEntry?.graph == nil)
+        .disabled(start?.unavailable != nil || draft.acting
+            || (previewEntry?.graph == nil && previewName != flow.recommended))
         .help(start?.unavailable ?? "Launch a fresh \(previewName) Flow from its first step")
         .accessibilityIdentifier("task-flow-start")
     }
@@ -325,6 +315,11 @@ struct TaskFlowView: View {
         } else if let reason = catalog.errorMessage {
             Text("Flow preview unavailable: \(reason)")
                 .font(Typography.caption(11)).foregroundStyle(Color.statusWarning)
+        } else if catalog.value != nil, previewName == flow.recommended {
+            // The Project default may name a workflow, which is drawn once the Task has one.
+            Text("\(previewName) is this Task's default; Start runs it.")
+                .font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                .accessibilityIdentifier("task-flow-default")
         } else if catalog.value != nil {
             Text("\(previewName) is not an available Flow here")
                 .font(Typography.caption(11)).foregroundStyle(Color.statusWarning)
@@ -342,13 +337,8 @@ struct TaskFlowView: View {
                     ForEach(["@start"] + graph.interactions.stages, id: \.self) { source in
                         if let node = UInt32(source).flatMap(graph.node) {
                             Button(node.label) {
-                                if let latest, let session = participationSession(node: source, latest: latest,
-                                    sessions: model.sessions.value ?? []) {
-                                    onOpenSession?(session)
-                                } else {
-                                    inspected.wrappedValue = UInt32(source)
-                                    showsDetailedFlow = true
-                                }
+                                inspected.wrappedValue = UInt32(source)
+                                showsDetailedFlow = true
                             }.buttonStyle(.bordered)
                             .accessibilityIdentifier("flow-stage-\(source)")
                         }

@@ -20,38 +20,6 @@ private func fixture(_ name: String) throws -> Data {
 
 @Suite("Task Flow")
 struct TaskFlowTests {
-    @Test("Participation opens only the captured occurrence in the current pass")
-    func exactParticipationSession() throws {
-        let snapshots = try JSONDecoder().decode([TaskFlowSnapshot].self, from: fixture("task_flow.json"))
-        guard case .latest(let latest) = snapshots[2].record else { Issue.record("latest"); return }
-        var value = try #require(JSONSerialization.jsonObject(with: fixture("session.json")) as? [String: Any])
-        value["kind"] = "flow"
-        value["id"] = "exact"
-        value["state"] = "waiting"
-        value["flow_membership"] = ["kind": "step", "flow": "feature", "invocation_id": latest.invocationId,
-            "step": "demo", "node": 4, "iterations": latest.iterations, "occurrence": "current"]
-        let exact = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
-        var wrong = value
-        wrong["id"] = "previous"
-        var membership = try #require(wrong["flow_membership"] as? [String: Any])
-        membership["iterations"] = [[0, 0]]
-        wrong["flow_membership"] = membership
-        let previous = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wrong))
-        #expect(participationSession(node: "4", latest: latest, sessions: [previous, exact])?.id == "exact")
-        #expect(participationSession(node: "4", latest: latest, sessions: [previous]) == nil)
-        #expect(participationSession(node: "7", latest: latest, sessions: [exact]) == nil)
-        #expect(exact.offersParticipation)
-        #expect(exact.participationLabel == "Available · preparing")
-        value["kind"] = "conversation"
-        let independent = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
-        #expect(!independent.offersParticipation)
-        value["kind"] = "flow"
-        value["actions"] = []
-        let failed = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
-        #expect(!failed.offersParticipation)
-        #expect(failed.participationLabel == "Needs recovery")
-    }
-
     @Test("Flow snapshots and the catalogue decode every record without defaults")
     func flowFixtures() throws {
         let snapshots = try JSONDecoder().decode([TaskFlowSnapshot].self, from: fixture("task_flow.json"))
@@ -226,7 +194,7 @@ struct TaskFlowProofTests {
             renameFixtureRecord("design", title: "review-design", work: reviewed)
         )) as? [String: Any])
         session["state"] = "active"
-        session["actions"] = sessionActionFixture(kind: "conversation", state: "active")
+        session["actions"] = sessionActionFixture(state: "active")
         session["terminal_ids"] = [shells[0]]
         session["open_argv"] = ["must-not-launch"]
         let source = try FlowSource(session: JSONSerialization.data(withJSONObject: [session]))

@@ -25,6 +25,21 @@ struct DTOFixtureTests {
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
     }
 
+    @Test("A Flow run keeps its launched graph and every step, and requires each field")
+    func flowDetailFixture() throws {
+        let data = try loadFixtureData("flow_detail.json")
+        let detail = try JSONDecoder().decode(FlowDetail.self, from: data)
+        #expect(detail.entry.state == .current)
+        #expect(detail.steps.map(\.label) == ["task-design", "implement", "realign", "loop-or-next", "implement"])
+        #expect(detail.steps.last?.completedAt == nil)
+        #expect(detail.progress.invocationId == detail.entry.id)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        wire.removeValue(forKey: "steps")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(FlowDetail.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
     @Test("A Flow whose driver exited early reads as stopped and requires its name")
     func flowInventoryFixture() throws {
         struct Page: Decodable { let entries: [TaskFlowMember] }
@@ -372,7 +387,7 @@ struct DTOFixtureTests {
         #expect(session.detail == "review-design")
         #expect(session.state == .active)
         #expect(session.workPath == "product / LOO-291")
-        #expect(session.actions.map(\.kind) == [.open])
+        #expect(session.actions.map(\.kind) == [.open, .moveHere])
 
         let encoded = try JSONEncoder().encode(sessions)
         let decoded = try JSONDecoder().decode([SessionRecord].self, from: encoded)
@@ -450,10 +465,13 @@ struct DTOFixtureTests {
             from: loadFixtureData("session.json")
         )
 
-        #expect(session.state == .waiting)
+        #expect(session.state == .unknown)
+        #expect(session.attention == .waiting)
+        #expect(!session.taskPrimary)
         #expect(session.titleSource == .generated)
         #expect(session.actions.map(\.kind) == [.open])
         #expect(session.actions.allSatisfy { $0.unavailableReason == nil })
+        #expect(session.statusLabel == "Waiting")
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")
         #expect(session.openArgv.suffix(3) == [
             "session", "connect", "task_00000000000000000000000000000001:task-design:review_kickoff:0"

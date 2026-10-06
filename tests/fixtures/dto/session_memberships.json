@@ -1,7 +1,6 @@
 [
   {
     "id": "task_00000000000000000000000000000001:task-design:review_kickoff:0",
-    "kind": "flow",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -30,6 +29,12 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
+        "unavailable_reason": "This Session is active in another terminal; use Move here to transfer it"
+      },
+      {
+        "kind": "move_here",
+        "label": "Move here",
+        "help": "Stop the other client and resume here; unsent text there is lost",
         "unavailable_reason": null
       }
     ],
@@ -52,11 +57,11 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": "waiting"
+    "attention": "waiting",
+    "task_primary": false
   },
   {
     "id": "run_00000000000000000000000000000002",
-    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -113,11 +118,11 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": null
+    "attention": null,
+    "task_primary": false
   },
   {
     "id": "run_00000000000000000000000000000003",
-    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -166,11 +171,11 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": null
+    "attention": null,
+    "task_primary": false
   },
   {
     "id": "run_00000000000000000000000000000004",
-    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -214,11 +219,11 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": null
+    "attention": null,
+    "task_primary": false
   },
   {
     "id": "run_00000000000000000000000000000006",
-    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -272,11 +277,11 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": null
+    "attention": null,
+    "task_primary": false
   },
   {
     "id": "run_00000000000000000000000000000007",
-    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -325,11 +330,11 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": null
+    "attention": null,
+    "task_primary": false
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
-    "kind": "flow",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -339,7 +344,7 @@
     "detail": "demo",
     "provider": null,
     "cwd": "/src/loopflow.task",
-    "state": "waiting",
+    "state": "unknown",
     "ready_summary": null,
     "open_argv": [
       "lf",
@@ -385,6 +390,7 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": "waiting"
+    "attention": "waiting",
+    "task_primary": false
   }
 ]

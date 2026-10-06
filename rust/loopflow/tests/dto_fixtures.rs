@@ -486,3 +486,18 @@ fn context_report_keeps_unknown_sources_distinct_from_zero() {
         .all(|usage| usage.tokens.is_none()));
     assert_eq!(ContextReport::new(report.steps.clone()), report);
 }
+
+#[test]
+fn flow_detail_keeps_its_launched_graph_and_every_step() {
+    let input = include_str!("../../../tests/fixtures/dto/flow_detail.json");
+    let detail: loopflow::durable::FlowDetail = serde_json::from_str(input).unwrap();
+    assert_eq!(detail.steps.len(), 5);
+    // The running step is the second pass of the node the loop returned to.
+    let running = detail.steps.last().unwrap();
+    assert_eq!((running.key, running.completed_at), (1, None));
+    assert_eq!(detail.current, Some(running.key));
+    assert_eq!(
+        serde_json::to_value(detail).unwrap(),
+        serde_json::from_str::<serde_json::Value>(input).unwrap()
+    );
+}

@@ -763,7 +763,7 @@ mod durable_store_tests {
 
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::session::{AgentSession, SessionKind, TitleSource, WorkSource};
+    use crate::session::{AgentSession, TitleSource, WorkSource};
     use crate::store::sqlite::SqliteStore;
 
     use crate::work::project::Project;
@@ -791,7 +791,6 @@ mod durable_store_tests {
             flow_id: None,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
-            kind: SessionKind::Conversation,
             interactive: false,
             repo: None,
             title: "Investigation".into(),
@@ -925,7 +924,6 @@ mod durable_store_tests {
             flow_id,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
-            kind: crate::session::SessionKind::Conversation,
             interactive: false,
             repo: None,
             title: "Implementation".into(),
@@ -1290,7 +1288,6 @@ mod durable_store_tests {
                 model: None,
                 node: None,
                 iterations: None,
-                kind: crate::session::SessionKind::Conversation,
                 interactive: true,
                 repo: None,
                 title: id.to_string(),

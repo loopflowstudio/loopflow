@@ -47,7 +47,7 @@ struct TaskCommentsProofTests {
                                 work: .task(id: "ts_review00000000000000000000000000"))
         )) as? [String: Any])
         session["state"] = "active"
-        session["actions"] = sessionActionFixture(kind: "conversation", state: "active")
+        session["actions"] = sessionActionFixture(state: "active")
         session["terminal_ids"] = [shells[0]]
         session["open_argv"] = ["must-not-launch"]
         let source = try CommentSource(session: JSONSerialization.data(withJSONObject: [session]))

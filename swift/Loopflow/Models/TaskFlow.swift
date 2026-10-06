@@ -120,6 +120,63 @@ public struct LatestTaskFlow: Decodable, Sendable, Hashable {
     }
 }
 
+/// One launched step and how its process ended.
+public struct FlowStepExec: Decodable, Sendable, Hashable, Identifiable {
+    public let execId: String
+    public let label: String
+    public let key: UInt32
+    public let iterations: [[UInt32]]
+    public let startedAt: Int64
+    public let completedAt: Int64?
+    public let outcome: String?
+    public let exitCode: Int32?
+
+    public var id: String { execId }
+
+    enum CodingKeys: String, CodingKey {
+        case label, key, iterations, outcome
+        case execId = "exec_id"
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+        case exitCode = "exit_code"
+    }
+}
+
+/// One Flow run as its driver recorded it: the graph captured at launch and
+/// every step it started. Any Flow reads the same way, ad hoc or a Task's edge.
+public struct FlowDetail: Decodable, Sendable, Hashable {
+    public let entry: TaskFlowMember
+    public let graph: FlowGraph
+    public let current: UInt32?
+    public let completed: [UInt32]
+    public let returns: [FlowReturn]
+    public let iterations: [[UInt32]]
+    public let cwd: String?
+    public let steps: [FlowStepExec]
+
+    /// The run in the shape the diagram draws. `current` records no driver
+    /// exit, which is not proof of a live process.
+    public var progress: LatestTaskFlow {
+        let last = steps.last
+        let execution: TaskFlowExecution
+        let reason: String
+        switch entry.state {
+        case .current:
+            execution = .running
+            reason = last.map { "Running \($0.label)" } ?? "Starting"
+        case .completed:
+            execution = .idle
+            reason = "Completed"
+        case .stopped:
+            let failed = last.flatMap { step in step.outcome.flatMap { $0 == "ok" ? nil : "\(step.label) · \($0)" } }
+            execution = failed == nil ? .idle : .blocked
+            reason = failed ?? "Stopped before its last step"
+        }
+        return LatestTaskFlow(invocationId: entry.id, graph: graph, current: current, completed: completed,
+                              returns: returns, iterations: iterations, execution: execution, reason: reason)
+    }
+}
+
 public enum TaskFlowRecord: Decodable, Sendable, Hashable {
     /// No Flow has been launched for this Task.
     case none

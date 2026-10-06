@@ -24,16 +24,16 @@ macro_rules! session_step {
 pub(super) const SESSION_FLOW: &str = session_flow!();
 
 const SESSION_SELECT: &str = concat!("SELECT s.id,COALESCE(c.receipt_key,'') AS artifact_key,s.title,s.title_source,
-    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.created_at,s.kind,s.request,s.interactive,s.repo,
+    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.created_at,s.request,s.interactive,s.repo,
     s.task_id,s.wave_id,", session_flow!(), ",s.work_source,s.bound_at,
     s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), ",", session_step!("iterations"), ",json_extract(c.payload,'$.caller_key'),s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<AgentSession>> {
     Ok((|| {
         Ok(AgentSession {
-            captured: row.get(24)?,
+            captured: row.get(23)?,
             caller_artifact_key: row
-                .get::<_, Option<String>>(23)?
+                .get::<_, Option<String>>(22)?
                 .map(|id| crate::session_record::parse_artifact_key(&id))
                 .transpose()
                 .map_err(invalid)?,
@@ -45,34 +45,33 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<AgentSe
             ready_summary: row.get(4)?,
             completed_at: row.get(5)?,
             created_at: row.get(6)?,
-            kind: serde_json::from_value(serde_json::Value::String(row.get(7)?))?,
-            request: row.get(8)?,
-            interactive: row.get(9)?,
-            repo: row.get(10)?,
+            request: row.get(7)?,
+            interactive: row.get(8)?,
+            repo: row.get(9)?,
             task_id: row
-                .get::<_, Option<String>>(11)?
+                .get::<_, Option<String>>(10)?
                 .map(|id| TaskId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
             wave_id: row
-                .get::<_, Option<String>>(12)?
+                .get::<_, Option<String>>(11)?
                 .map(|id| crate::id::WaveId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
-            flow_id: row.get(13)?,
+            flow_id: row.get(12)?,
             work_source: row
-                .get::<_, Option<String>>(14)?
+                .get::<_, Option<String>>(13)?
                 .map(|source| serde_json::from_value(serde_json::Value::String(source)))
                 .transpose()?,
-            bound_at: row.get(15)?,
-            input_published: row.get(16)?,
-            cwd: row.get::<_, String>(17)?.into(),
-            skill: row.get(18)?,
-            provider: row.get(19)?,
-            model: row.get(20)?,
-            node: row.get(21)?,
+            bound_at: row.get(14)?,
+            input_published: row.get(15)?,
+            cwd: row.get::<_, String>(16)?.into(),
+            skill: row.get(17)?,
+            provider: row.get(18)?,
+            model: row.get(19)?,
+            node: row.get(20)?,
             iterations: row
-                .get::<_, Option<String>>(22)?
+                .get::<_, Option<String>>(21)?
                 .map(|value| serde_json::from_str(&value))
                 .transpose()?,
         })
@@ -186,7 +185,7 @@ fn inventory_query(
 // Preserve the existing filters/order. Materialize only the selected metadata
 // before joining Flow/Work labels; no request or historical payload is selected.
 const SUMMARY_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
-    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.kind,s.interactive,s.task_id,s.wave_id,
+    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.interactive,s.task_id,s.wave_id,
     ", session_flow!(), ",s.cwd,s.skill,s.provider,s.model,", session_step!("node"), ",", session_step!("iterations"), ",s.current_capture
     FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
@@ -208,7 +207,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         (SELECT CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.outcome') END FROM session_events e INDEXED BY session_driver_exit
             WHERE e.session_id=s.id AND e.receipt_key='driver:'||(a.driver_generation-1)||':exit' AND e.kind='observed'),
         {waiting},
-        COALESCE(t.work_state IN ('done','abandoned'),0)
+        COALESCE(t.work_state IN ('done','abandoned'),0),
+        EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN flow_exec_steps fs ON fs.exec_id=captured.exec_id
@@ -225,43 +225,44 @@ fn read_summary(
 ) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
     Ok((|| {
         let task_id = row
-            .get::<_, Option<String>>(8)?
+            .get::<_, Option<String>>(7)?
             .map(|id| TaskId::parse(&id))
             .transpose()
             .map_err(invalid)?;
         let wave_id = row
-            .get::<_, Option<String>>(9)?
+            .get::<_, Option<String>>(8)?
             .map(|id| crate::id::WaveId::parse(&id))
             .transpose()
             .map_err(invalid)?;
-        let flow = match row.get::<_, Option<String>>(18)? {
+        let flow = match row.get::<_, Option<String>>(17)? {
             Some(driver) => {
-                let completed: Option<i64> = row.get(21)?;
-                let name: String = row.get(19)?;
+                let completed: Option<i64> = row.get(20)?;
+                let name: String = row.get(18)?;
                 Some(crate::session::FlowSummary {
                     id: driver,
                     name,
                     state: crate::session::FlowSummaryState::of_driver(
-                        row.get::<_, Option<String>>(20)?.as_deref(),
+                        row.get::<_, Option<String>>(19)?.as_deref(),
                         completed,
                     ),
                     task_id: task_id.clone(),
                     wave_id: wave_id.clone(),
                     updated_at: match completed {
                         Some(completed) => completed,
-                        None => row.get(22)?,
+                        None => row.get(21)?,
                     },
                 })
             }
             None => None,
         };
         Ok(crate::session::SessionSummary {
-            task_ids: serde_json::from_str(&row.get::<_, String>(27)?)?,
-            primary_scope: row.get(28)?,
-            driver_outcome: row.get(29)?,
-            waiting: row.get(30)?,
-            task_terminal: row.get(31)?,
-            captured: row.get(17)?,
+            task_ids: serde_json::from_str(&row.get::<_, String>(26)?)?,
+            primary_scope: row.get(27)?,
+            driver_outcome: row.get(28)?,
+            waiting: row.get(29)?,
+            task_terminal: row.get(30)?,
+            task_primary: row.get(31)?,
+            captured: row.get(16)?,
             id: row.get(0)?,
             artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)
                 .map_err(invalid)?,
@@ -269,25 +270,24 @@ fn read_summary(
             title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
             ready_summary: row.get(4)?,
             completed_at: row.get(5)?,
-            kind: serde_json::from_value(serde_json::Value::String(row.get(6)?))?,
-            interactive: row.get(7)?,
+            interactive: row.get(6)?,
             task_id,
             wave_id,
-            flow_id: row.get(10)?,
-            cwd: row.get::<_, String>(11)?.into(),
-            skill: row.get(12)?,
-            provider: row.get(13)?,
-            model: row.get(14)?,
-            node: row.get(15)?,
+            flow_id: row.get(9)?,
+            cwd: row.get::<_, String>(10)?.into(),
+            skill: row.get(11)?,
+            provider: row.get(12)?,
+            model: row.get(13)?,
+            node: row.get(14)?,
             iterations: row
-                .get::<_, Option<String>>(16)?
+                .get::<_, Option<String>>(15)?
                 .map(|raw| serde_json::from_str(&raw))
                 .transpose()?,
             flow,
-            flow_step_latest: row.get::<_, Option<bool>>(23)?.unwrap_or(false),
-            wave_name: row.get(24)?,
-            task_identifier: row.get(25)?,
-            independent: row.get::<_, Option<bool>>(26)?.unwrap_or(false),
+            flow_step_latest: row.get::<_, Option<bool>>(22)?.unwrap_or(false),
+            wave_name: row.get(23)?,
+            task_identifier: row.get(24)?,
+            independent: row.get::<_, Option<bool>>(25)?.unwrap_or(false),
         })
     })())
 }
@@ -1214,16 +1214,15 @@ fn insert_session_in(
 ) -> StoreResult<()> {
     conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,completed_at,
-        created_at,kind,request,interactive,repo,task_id,wave_id,work_source,bound_at,
+        created_at,request,interactive,repo,task_id,wave_id,work_source,bound_at,
         input_published,cwd,skill,provider,model)
-        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
+        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
         params![
             session.id,
             session.title,
             title_source(session.title_source),
             session.completed_at,
             session.created_at,
-            serde_json::to_value(session.kind)?.as_str(),
             session.request,
             session.interactive,
             session.repo,
@@ -1322,7 +1321,6 @@ impl SqliteStore {
                 flow_id: None,
                 work_source: None,
                 bound_at: None,
-                kind: crate::session::SessionKind::Conversation,
                 interactive: true,
                 repo: None,
                 title: "Retained".into(),
@@ -1488,9 +1486,9 @@ mod metadata_tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO agent_sessions(id,title,title_source,created_at,kind,
+                "INSERT INTO agent_sessions(id,title,title_source,created_at,
                 interactive,input_published,cwd,request)
-                VALUES('session','Session','human',1,'conversation',1,1,'/unavailable',?1)",
+                VALUES('session','Session','human',1,1,1,'/unavailable',?1)",
                 params!["large request".repeat(1000)],
             )
             .unwrap();
@@ -1621,9 +1619,9 @@ mod metadata_tests {
             ] {
                 let input = crate::session_record::new_artifact_key();
                 conn.execute(
-                    "INSERT INTO agent_sessions(id,title,title_source,created_at,kind,
+                    "INSERT INTO agent_sessions(id,title,title_source,created_at,
                     interactive,input_published,cwd,repo)
-                    VALUES(?1,?2,'human',1,'conversation',?3,1,'/unavailable',?4)",
+                    VALUES(?1,?2,'human',1,?3,1,'/unavailable',?4)",
                     params![id, title, interactive, repo],
                 )
                 .unwrap();

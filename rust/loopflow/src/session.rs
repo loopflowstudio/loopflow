@@ -80,7 +80,6 @@ pub struct AgentSession {
     pub work_source: Option<WorkSource>,
     /// Time of a prospective bind; absent for admission or unknown historical timing.
     pub bound_at: Option<i64>,
-    pub kind: SessionKind,
     pub interactive: bool,
     /// Canonical local repository at admission; absent when unknown or taskless outside Git.
     pub repo: Option<String>,
@@ -101,12 +100,6 @@ pub struct SessionBind {
     /// The Task's issue identifier.
     pub task: String,
     pub wave: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionKind {
-    Conversation,
 }
 
 /// Quiet time after which a conversation with no unresolved tool call waits
@@ -205,6 +198,8 @@ pub(crate) struct SessionSummary {
     /// Waiting on a person, as of the read's clock.
     pub waiting: bool,
     pub task_terminal: bool,
+    /// Its Task names it as the Task's primary conversation.
+    pub task_primary: bool,
     pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,
     pub id: String,
@@ -213,7 +208,6 @@ pub(crate) struct SessionSummary {
     pub title_source: TitleSource,
     pub ready_summary: Option<String>,
     pub completed_at: Option<i64>,
-    pub kind: SessionKind,
     pub interactive: bool,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,

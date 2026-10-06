@@ -30,7 +30,7 @@ observed Git state, so a list of bare columns would change what is shown.
 **The rule.** A reading of all current Waves and Tasks runs a fixed number of
 statements, never one per Task, and never reads finished history. Git is
 asked only about checkouts that exist. Under that rule re-reading every Task
-on a change costs milliseconds per hundred Tasks, so the four counters stay
+on a change costs milliseconds per hundred Tasks, so the revision counters stay
 the invalidation and the wire and Swift types do not change.
 
 Not built, and why: a light list type beside per-Task detail (the detail is
@@ -238,7 +238,8 @@ decides `lf task complete`; not a clear win), and stored derived rows.
 - **The latency budgets are targets, not a landing gate.** "Reasonable enough
   for now, but dont block landing on an unachieveable number": pursue them for
   about an hour of focused work; if they are not met, ship the measured result
-  with its numbers stated and file a follow-up Task for the gap.
+  with its numbers stated. He first asked for a follow-up Task for the gap;
+  in the second round he said none are needed.
 
 ## Problem
 
@@ -319,7 +320,7 @@ listed there by predicate, not by table.
 A Rust `StoreChanges` reader holds one `query_only` connection and waits on
 filesystem events for `loopflow.db-wal` (generalizing the existing
 `session_record/active/events.rs` subscription, re-arming when the file is
-recreated). On wake it reads the four revisions. A 1 s re-read and an explicit
+recreated). On wake it reads the revisions. A 1 s re-read and an explicit
 `refresh` cover missed events, checkpoints and sleep/wake. Revisions are the
 authority; events only say "look now".
 
@@ -457,7 +458,7 @@ one-shot commands. iOS is unchanged.
   routed, so it stays and follows the stream).
 - Still to delete: `roadmapGeneration` / `sessionsGeneration` and the one-shot
   bodies of `refresh`, `refreshPlanning`, `refreshSessions`,
-  `refreshProcessActivity`, `refreshWorkActivity` (remaining work 3). Do not
+  `refreshProcessActivity`, `refreshWorkActivity` (remaining work 4). Do not
   extend them.
 - Deleted in the second round: the 10 s comparison loop in `TaskFilesView`.
 - Kept by decision of slice 10: the separate `monitor active --watch`
@@ -522,3 +523,6 @@ Earlier passes are at commit `018083656`.
   -p loopflow --test workspace_watch` 10/10; `--lib -- workspace_watch
   engine::git` 30/30. Not re-measured; gate owns the suites.
 - 2026-10-05 sync: `cargo test -p loopflow --lib accepted_historical_uncertainty_completes_without_releasing_execution_protection` 1/1; bulk unfinished-Exec reads retain main's completion acceptance and Session-history API.
+- 2026-10-05 realign after the second round: every function, constant and
+  deletion the plan names was found by `grep` in the tree; no code changed
+  and nothing was re-run. Gate owns the suites.

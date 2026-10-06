@@ -10,7 +10,7 @@ Jack Heart requested that the open workspace show committed changes without a
 refresh (LOO-382). In design review he decided: one landing; Desktop reacts to
 the store only, with Linear arriving through sync (he prefers webhooks for
 scheduling it, unowned); latency budgets are targets pursued for about an hour,
-and a miss ships with numbers and a follow-up Task.
+and a miss ships with numbers. Later that day: no follow-up Tasks.
 
 - Polling was the largest writer in the store: about 63,000 of 65,043 daily
   Exec rows were Desktop's own reads, and that volume made the reads slow.
@@ -32,7 +32,7 @@ and a miss ships with numbers and a follow-up Task.
   frame 0.3 s for a Task, 0.13 s for a Session; a file written in a
   checkout about 2 s. The window was not re-measured.
 - Measure before merging readers: the second reader per window, listed as
-  a taboo, used 0.2% of a core and 25 MB alone. It stayed.
+  a taboo, used 0.2% of a core and 25 MB. It stayed.
 - Jack (2026-10-05): which Waves and Tasks are current must be simple and
   fast, and he wants derived state in the database. None is stored: sampling
   put 83% of the read in one per-Task statement, and reading it in bulk met

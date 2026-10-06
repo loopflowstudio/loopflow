@@ -10,7 +10,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the default Flow
 - A Task's work is every Session, Flow and Exec in its checkout, plus explicit binds; its managed Flow is one marked member
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
-- Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
+- Unreviewed backlog stays in its Project until explicit disposition; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
 - Definitions name the beneficiary and experienced improvement; KRs prove it
 
@@ -217,7 +217,7 @@ FlowSessions. Retry retains the pass; Iterate advances its return counters.
 Repository rotation converges on an explicit target through fresh provider facts
 and stable Project identities. Partial status changes remain retryable; unrelated
 competing plans remain unresolved. Preserve active Task identity, worktree, PR
-and execution. Retire only proven untouched backlog; missing evidence is unknown.
+and execution. Preserve unreviewed backlog until explicit disposition; missing evidence is unknown.
 Current navigation stays Wave → Task and Linear retains past Projects.
 
 Exec is one actual lf process, including direct and agent-issued nested commands.

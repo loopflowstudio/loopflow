@@ -503,7 +503,15 @@ mod planning_tests {
         };
         store.create_wave(&wave).await.unwrap();
         store.create_project(&project).await.unwrap();
-        store.create_task(&task, &pr).await.unwrap();
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
+            wave.id(),
+            None,
+            project.plan.id.as_str(),
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         let mut flow = super::start_task_flow(&task, "task-design").unwrap();
         flow.cursor.index = 1;
         (store, task, flow)
@@ -696,7 +704,7 @@ mod planning_tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // isolates Run capture and executable resolution
-    async fn task_agent_survives_refresh_and_selects_autonomous_and_human_steps() {
+    async fn task_agent_survives_restart_and_selects_autonomous_and_human_steps() {
         let _guard = super::TestLfBinGuard::pin();
         let (store, task, mut flow) = human_task_fixture().await;
         std::fs::create_dir_all(task.worktree.join(".lf")).unwrap();
@@ -711,8 +719,11 @@ mod planning_tests {
             .set_task_agent(&task.id, "claude:sonnet")
             .await
             .unwrap();
-        // A planning write made from an older snapshot cannot undo the choice.
-        store.update_task(&task).await.unwrap();
+        // Restart from an older Task snapshot cannot undo the selected agent.
+        store
+            .restart_task_flow(&task, None, "checkpoint")
+            .await
+            .unwrap();
         let resumed = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(resumed.agent.as_deref(), Some("claude:sonnet"));
         // Parking at the review reserves its capture; the choice lands on that row.

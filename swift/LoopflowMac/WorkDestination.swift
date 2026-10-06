@@ -4,7 +4,7 @@ import Loopflow
 import SwiftUI
 
 /// Inspection destinations never confer launch or process-control authority.
-enum WorkspaceDestination: Hashable {
+enum WorkDestination: Hashable {
     case wave(String)
     case task(String)
     case session(String)
@@ -45,9 +45,9 @@ struct TaskLink: Equatable, Sendable {
     }
 }
 
-/// Delivers to one Podium. A cold-start request waits for its first mounted window.
+/// Delivers to one repository window. A cold-start request waits for its first mounted window.
 @MainActor
-final class WorkspaceLinkRouter {
+final class WorkLinkRouter {
     private struct Target {
         weak var window: NSWindow?
         let receive: (URL) -> Void
@@ -65,7 +65,7 @@ final class WorkspaceLinkRouter {
 
     func remove(_ id: UUID) { targets[id] = nil }
 
-    /// Returns false when a Podium window must be opened.
+    /// Returns false when a repository window must be opened.
     @discardableResult
     func deliver(_ url: URL) -> Bool {
         targets = targets.filter { $0.value.window != nil }
@@ -83,8 +83,8 @@ final class WorkspaceLinkRouter {
     }
 }
 
-struct WorkspaceLinkReceiver: NSViewRepresentable {
-    let router: WorkspaceLinkRouter
+struct WorkLinkReceiver: NSViewRepresentable {
+    let router: WorkLinkRouter
     let receive: (URL) -> Void
 
     func makeNSView(context: Context) -> Receiver {
@@ -95,9 +95,9 @@ struct WorkspaceLinkReceiver: NSViewRepresentable {
 
     final class Receiver: NSView {
         let id = UUID()
-        let router: WorkspaceLinkRouter
+        let router: WorkLinkRouter
         var receive: (URL) -> Void
-        init(router: WorkspaceLinkRouter, receive: @escaping (URL) -> Void) {
+        init(router: WorkLinkRouter, receive: @escaping (URL) -> Void) {
             self.router = router
             self.receive = receive
             super.init(frame: .zero)

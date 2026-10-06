@@ -44,7 +44,7 @@ final class SessionsInteractionTests: XCTestCase {
 
             if fixture == .interactive {
                 for presentation in ["Full hierarchy", "Sessions", "Compact"] {
-                    element(app, id: "workspace-presentation").click()
+                    element(app, id: "work-presentation").click()
                     app.menuItems[presentation].click()
                     XCTAssertTrue(element(app, id: "session-row-\(fixture.id)").exists)
                     XCTAssertTrue(pane.exists)

@@ -11,7 +11,7 @@ private func enrichProcessPathForGUILaunch() {
 
 @main
 struct LoopflowApp: App {
-    @State private var taskLinks = WorkspaceLinkRouter()
+    @State private var taskLinks = WorkLinkRouter()
     @State private var portfolioService = PortfolioService()
     @Environment(\.openWindow) private var openWindow
     @State private var snapshotError: String?
@@ -41,7 +41,7 @@ struct LoopflowApp: App {
         let registryQuery = SessionFixture.query ?? RegistryQueryLocal.shared
 
         WindowGroup(id: "workspace") {
-            PodiumView(
+            RepoView(
                 portfolioService: portfolioService,
                 initialRepoPath: launchRepoURL?.path,
                 query: registryQuery,

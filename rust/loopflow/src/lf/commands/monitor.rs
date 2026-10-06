@@ -67,8 +67,8 @@ pub enum MonitorCommand {
         #[arg(long)]
         task: Option<String>,
     },
-    /// Stream what a workspace shows, each part again only when it changes
-    Workspace {
+    /// Stream planning and activity for the selected Work, each part again only when it changes
+    Work {
         #[arg(long, required = true)]
         json: bool,
         /// Stream NDJSON until stdin closes
@@ -158,7 +158,7 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
         MonitorCommand::Active { json, watch, task } => {
             super::session_history::list_active(*json, *watch, task.as_deref())
         }
-        MonitorCommand::Workspace { watch, .. } => super::workspace_watch::run(*watch),
+        MonitorCommand::Work { watch, .. } => super::work_watch::run(*watch),
         MonitorCommand::Ps { json } => super::top::run_ps(*json),
         MonitorCommand::Top { json } => super::top::run_top(*json),
         MonitorCommand::Prune { dry_run, json } => super::top::run_prune(*json, *dry_run),

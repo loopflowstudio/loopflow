@@ -809,7 +809,7 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let work = WorkRef::Task(task_id.clone());
         super::durable::require_ready_work(&tx, &work)?;
-        super::durable::require_current_task_chapter(&tx, &work)?;
+        super::durable::require_current_task_project(&tx, &work)?;
         if flow_in(&tx, flow.id())?.is_some() {
             return Err(StoreError::InvalidAuthority(format!(
                 "Flow invocation {} already exists",
@@ -1051,6 +1051,8 @@ impl SqliteStore {
         claim: Option<&TaskWorkerClaim>,
         exec: Option<&crate::id::ExecId>,
     ) -> StoreResult<Option<i64>> {
+        let expected = self.flow(id)?.ok_or(StoreError::NotFound)?;
+        let _admission = self.lock_task_checkouts(&[&expected.cwd], expected.task_id.as_ref())?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let flow = current_flow_in(&tx, id)?;
@@ -2739,6 +2741,12 @@ mod tests {
             ],
             0,
         );
+        let exclusion = store.lock_checkout(&flow.cwd).unwrap();
+        assert!(store
+            .begin_flow_operation(flow.id(), flow.version, None, None)
+            .is_err());
+        assert_eq!(store.flow(flow.id()).unwrap().unwrap(), flow);
+        drop(exclusion);
         let start = store
             .begin_flow_operation(flow.id(), flow.version, None, None)
             .unwrap()

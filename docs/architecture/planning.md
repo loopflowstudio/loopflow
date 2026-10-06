@@ -6,37 +6,110 @@ lf task status INF-124 --json
 lf checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf --task INF-124 flow start
-lf repo new-chapter 2026-10 --dry-run
+lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run
 ```
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
 cadence, budget and metric instruments across plans. Its one In Progress Linear
-Project owns Tasks, KRs, targets and the default Flow. A Chapter is the shared
-name of those current Projects across the repository. This page specifies the
-accepted model; [cutover status](../architecture-reference.md#cutover-status)
-records the remaining implementation and proof gaps.
+Project owns Tasks, KRs, targets and an optional default Flow. A Chapter is the shared
+name of those current Projects across the repository. The rotation below describes
+the explicit shared Project binding. Rotation retains exact destinations and selected
+issue IDs for recovery, while unreviewed backlog stays in its original Project.
+[Cutover status](../architecture-reference.md#cutover-status) records
+other implementation and proof gaps.
+
+```bash
+lf wave bind-project product <project-uuid> --json
+lf wave ensure product --json
+```
+
+Validate one existing Project and select its accepted local record on the Wave's
+SQLite row (`waves.current_project_id`). Repeating the same binding preserves it;
+a different existing binding is left unchanged. Setup preserves provider status,
+content and identity, including a Backlog Project without a Flow. It does not
+activate the Project. Operation routing and status select this exact ID; the JSON
+Project summary carries a required `current` boolean for Desktop. Status and
+roadmap retain predecessor Projects and Tasks. Registration and unstarted managed
+work require that exact Project to be In Progress; another In Progress Project
+does not compete with the binding. Already-started Tasks retain continuation in
+predecessor Projects.
+
+`ensure` activates the configured Backlog or Planned Project with a status-only
+write. Without a binding it reserves one UUID in SQLite before creation, attaches
+it to the Wave's Initiative, activates it, then commits selection and creation settlement together. Retry
+reuses the reservation across uncertain responses and failed binding writes.
+Terminal, archived, paused or foreign Projects report their condition without
+replacement. Names, content and empty Flow remain intact. Ensure neither searches
+for candidates nor performs rotation; status and roadmap never call it. Desktop
+ensures on explicit opening or retry while retaining cached planning and independent
+Session reads. Both primary and Portfolio surfaces render the same SQLite-derived
+`project_readiness` through `lf monitor work --watch --json`. Committed selection,
+accepted facts, transitions and exact activation Exec outcomes invalidate that reading.
+A pending transition or unfinished Exec is unresolved evidence, not proof of liveness.
+Watchers and status reads never provision or import.
+
+The first explicit ensure, binding setup or applied rotation imports an existing
+`<Home>/waves/<WaveId>/config.yaml` selection once, after exact provider ownership
+validation. SQLite commits the selected Project and original YAML bytes together in
+`project_binding_imports`; absent files are recorded too. Malformed files or failed
+provider reads leave import retryable and prohibit creation. After import, the file
+is inert, even if a stale checkout or old writer changes it. Other YAML bytes remain
+untouched. An imported completed Project stays selected history and cannot be reopened.
+Activation records its exact Exec on the Wave; that Exec remains the sole owner of
+its terminal outcome and error. Swift retains command transport feedback only.
 
 ## Rotate the plan, preserve the work
 
 ```bash
-lf repo new-chapter 2026-10
-lf refresh product
+lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run --json
+lf repo new-chapter 2026-10 --plan scratch/chapter.json --json
+lf wave new-chapter product 2026-10 --plan scratch/chapter.json --json
 ```
 
-A Planned Project expresses the next plan. Rotation reuses the explicitly named
-successor or creates one with the predecessor's Flow. Started unfinished Tasks
-move with identity, checkout, PR and captured execution intact. Proven untouched
-backlog is canceled; completed Tasks stay historical. Missing local or provider
-evidence cannot establish that work should be retired. Linear keeps the Projects
-and their Tasks.
+Retain one JSON input with `name` and `waves`. Each entry supplies `wave_id`,
+`successor_id`, `create`, `project_name` and `content`:
 
-Rotation reads fresh provider state after each interruption. A partial transition
-to the requested name is recoverable using stable Project identities and one
-unambiguous predecessor group. Unrelated competing current plans remain unresolved;
-newest-looking names never win. Status mutations do not form a distributed
-transaction. Another Home observes the new plan through normal synchronization.
-There is no Chapter row, packet or local switch. See [Waves](../waves.md#the-planning-model)
-for adoption, default Flow and disposition details.
+```json
+{
+  "name": "2026-10",
+  "waves": [{
+    "wave_id": "<registered-wave-id>",
+    "successor_id": "<new-or-existing-project-uuid>",
+    "create": true,
+    "project_name": "Autumn customer work",
+    "content": {
+      "flow": "",
+      "metric_targets": [],
+      "krs": [{"text": "Customers can resume unfinished work", "holds": false}]
+    }
+  }]
+}
+```
+
+Allocate a new UUID once when authoring a creation plan. Set `create` to false
+for an existing exact destination; absence never turns that instruction into
+creation. Every destination requires authored KRs before any provider write.
+Existing Projects keep their names, summaries and unrelated content; supplied
+KRs, targets and optional Flow replace only those planning fields.
+
+The repository operation validates all selected Waves, destinations, legacy
+conversions and Task evidence before reserving every pair and applying the first
+Wave. The Wave command consumes only its entry through the same operation.
+The shared binding identifies the predecessor. Names never select either endpoint.
+Started unfinished Tasks move with identity, checkout, PR and captured execution
+intact. Unreviewed backlog remains historical; unknown evidence blocks apply.
+
+Retry with the same file. SQLite retains exact endpoints, create/existing intent, and
+selected issue IDs; those records never select the current Project. Before the
+binding switch, retry permits corrected planning fields and reclassifies new work. After it, only retained
+selected issues are reconciled; new historical starts stay put and external moves
+remain conflicts. Predecessor completion follows the binding switch. Settled
+Waves can be retried alongside unfinished ones without new Projects, and an old
+plan cannot overwrite an intervening binding. No Chapter table is required.
+
+Task candidate admission follows Project creation separately. Retain those
+candidates alongside the input and use the existing Task creation operation;
+failure there does not undo the selected Projects or their KRs.
 
 ## Inspect planning before starting execution
 
@@ -85,17 +158,50 @@ carry `revision`; a newer Project observation updates independently of the issue
 revision. Older observations cannot overwrite it. Project responses must include
 nullable content fields and relationship sets.
 
+Snapshot and detail ingestion project accepted entities into durable Project and
+Task rows in the same SQLite transaction. Projection uses each stored entity's
+acquisition time, never the Wave's aggregate sync time. A projection failure rolls
+back observation acceptance. It preserves execution fields and retained identity;
+an unknown destination does not authorize a Task transfer. Restart changes
+execution without rewriting accepted planning. Rotation accepts confirmed Project
+and transfer readbacks through the same owner. A single Project observation does
+not advance the Wave's full-refresh timestamp. Reteam accepts complete issue
+readbacks through that same owner and reconciles confirmed Team relationships
+without changing Initiative ownership or independently newer Project facts.
+
+Full and partial Wave ingestion validate the accepted Project's Initiative before
+recording membership or freshness. Detail refresh resolves that Initiative through
+Wave configuration and the registry, then accepts the association and projects
+facts in one transaction. A durable Project row alone grants no Wave ownership.
+Unconfirmed cold detail retains durable plans; foreign or unmapped ownership at
+the operation boundary reports an error. Both Project and Task projection require
+an exact accepted Initiative match. Snapshot acquisition and cold-detail readback
+hold the Wave planning lock through SQLite acceptance. Queued workers retain
+shared ownership after their async caller is canceled. Reteam and rotation acquire
+participating Wave locks in stable ID order; already-held refresh paths reuse them.
+Cold detail discovers ownership, locks, then reads ownership again. Null detail
+invalidates only the cached revision and observation it queried; it cannot invalidate
+a newer accepted Task. Readback follows the issue UUID across identifier changes.
+
+The `project_readiness` migration preserves original Linear Project bodies and
+acquisition evidence before a one-time name/slug correction from fresh provider
+facts. Only pre-cutover rows receive this exception; all non-name conflict checks
+remain, and later equal-revision name conflicts are rejected. Rejected ingestion
+cannot consume the exception or update durable Project facts first.
+
 List coverage never removes a Project merely because a later response omits it.
 Without removal evidence, refresh fails and retains the previous observation.
 Project revisions do not establish ordering for separate Initiative/Team
 relationships. A contradictory relationship set stays unresolved, retains its
 last-good facts, and blocks managed readers. Replaying a list or detail does not
-clear that uncertainty; acquiring ordered relationship evidence remains future work.
+clear that uncertainty. Explicit reteam reconciles the exact confirmed Team set
+under acquisition ownership; it cannot reconcile a changed Initiative.
 
-Chapter rollover transfers unfinished work and settles backlog before completing
-each predecessor Project in Linear. It confirms provider completion before recording
-the Project. Closing the Project does not complete transferred Tasks or change
-historical KR results. Current Project selection follows provider status.
+Chapter rollover transfers started work and retains unreviewed backlog in its
+predecessor Project before completing that Project in Linear. It confirms provider
+completion before recording the Project. Closing it neither completes transferred
+Tasks nor changes historical KR results. Current Project readers follow the shared
+binding, which rotation switches before confirming predecessor completion.
 
 The planning store can retain explicit archival acknowledgements. Integrating
 archival into the provider-backed chapter operation and preserving old acknowledgements

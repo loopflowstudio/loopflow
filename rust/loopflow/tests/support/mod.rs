@@ -367,6 +367,17 @@ fn register_task_fixture(
     };
     runtime.block_on(async {
         store.create_wave(&wave).await.expect("create test wave");
+        store
+            .create_project(&project)
+            .await
+            .expect("create test project");
+        rusqlite::Connection::open(home.join("loopflow.db"))
+            .expect("open fixture database")
+            .execute(
+                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                rusqlite::params![wave.id(), project.id.as_str()],
+            )
+            .expect("select fixture Project");
         let pm_payload = serde_json::json!({
             "projects": [{
                 "id": project.plan.id.as_str(),
@@ -395,21 +406,20 @@ fn register_task_fixture(
             }]
         });
         store
-            .put_pm_snapshot(PmSnapshotRow {
-                wave_id: wave.id().clone(),
-                provider: "linear".to_string(),
-                initiative: "initiative-task-pr-tests".to_string(),
-                synced_at: now.unix_timestamp(),
-                snapshot: serde_json::from_value(pm_payload).unwrap(),
-            })
+            .put_pm_snapshot(
+                PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".to_string(),
+                    initiative: "initiative-task-pr-tests".to_string(),
+                    synced_at: now.unix_timestamp(),
+                    snapshot: serde_json::from_value(pm_payload).unwrap(),
+                },
+                None,
+            )
             .await
             .expect("cache Task PR context");
         store
-            .create_project(&project)
-            .await
-            .expect("create test project");
-        store
-            .create_task(&task, &pr)
+            .create_task(&task, &pr, None)
             .await
             .expect("create test Task");
     });
@@ -448,7 +458,7 @@ pub fn register_sibling_task(
         ..registered.pr.clone()
     };
     runtime
-        .block_on(registered.store.create_task(&task, &pr))
+        .block_on(registered.store.create_task(&task, &pr, None))
         .expect("create sibling Task");
     task
 }

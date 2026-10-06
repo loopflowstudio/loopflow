@@ -31,9 +31,9 @@ enum TerminalPalette {
         alpha: 1
     )
 
-    /// Pane-strip state dots: `WorkspaceTone`'s dark inks, fixed here because
+    /// Pane-strip state dots: `WorkTone`'s dark inks, fixed here because
     /// the strip is always dark whatever the window appearance.
-    static func stateDot(_ tone: WorkspaceTone) -> Color {
+    static func stateDot(_ tone: WorkTone) -> Color {
         switch tone {
         case .running: Color(hex: 0x86B0EA)
         case .done: Color(hex: 0x8DC79C)

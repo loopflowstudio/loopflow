@@ -40,7 +40,7 @@ public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
     private let runWithInput: @Sendable ([String], String?, String) async throws -> String
     private let observe: @Sendable () async throws -> ActiveSessionsObservation
-    private let observeWorkspace: (@Sendable () async throws -> WorkspaceObservation)?
+    private let observeWork: (@Sendable () async throws -> WorkObservation)?
 
     public init(
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
@@ -49,20 +49,20 @@ public struct RegistryQuery: Sendable {
         watchActiveSessions: @escaping @Sendable () async throws -> ActiveSessionsObservation = {
             throw RegistryQueryError("Active Session observation is unavailable on this transport")
         },
-        watchWorkspace: (@Sendable () async throws -> WorkspaceObservation)? = nil,
+        watchWork: (@Sendable () async throws -> WorkObservation)? = nil,
         run: @escaping RegistryRunner
     ) {
         self.runWithInput = runWithInput
         self.run = run
         self.observe = watchActiveSessions
-        self.observeWorkspace = watchWorkspace
+        self.observeWork = watchWork
     }
 
     /// A copy that also reports each successful read's wire text, so a caller
     /// can retain exactly what it decoded.
     public func recording(_ record: @escaping @Sendable (_ stdout: String) -> Void) -> RegistryQuery {
         RegistryQuery(runWithInput: runWithInput, watchActiveSessions: observe,
-                      watchWorkspace: observeWorkspace) { [run] args, cwd in
+                      watchWork: observeWork) { [run] args, cwd in
             let stdout = try await run(args, cwd)
             record(stdout)
             return stdout
@@ -93,6 +93,17 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
+
+    /// Explicit opening/retry operation. Periodic status reads remain observational.
+    public func ensureProject(wave: String, cwd: String) async throws {
+        _ = try await run(["wave", "ensure", wave, "--json"], cwd)
+    }
+
+    public func realignProjects(name: String, plan: String, preview: Bool, cwd: String) async throws -> ProjectRotationPreview {
+        var args = ["repo", "new-chapter", name, "--plan", "/dev/stdin", "--json"]
+        if preview { args.append("--dry-run") }
+        return try Self.decode(ProjectRotationPreview.self, from: await runWithInput(args, cwd, plan))
+    }
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
         var args = ["roadmap"]
@@ -134,13 +145,13 @@ public struct RegistryQuery: Sendable {
 
     /// Whether this transport keeps a workspace current by itself. Without one,
     /// a caller reads once and shows that reading until it asks again.
-    public var streamsWorkspace: Bool { observeWorkspace != nil }
+    public var streamsWork: Bool { observeWork != nil }
 
-    public func watchWorkspace() async throws -> WorkspaceObservation {
-        guard let observeWorkspace else {
-            throw RegistryQueryError("Workspace observation is unavailable on this transport")
+    public func watchWork() async throws -> WorkObservation {
+        guard let observeWork else {
+            throw RegistryQueryError("Work observation is unavailable on this transport")
         }
-        return try await observeWorkspace()
+        return try await observeWork()
     }
 
     /// Durable Work facts across creation, Session history, PR lifecycle, and Steers.
@@ -484,6 +495,7 @@ public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
 }
 
 public struct WaveRoadmap: Decodable, Sendable, Hashable {
+    public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
     public let metricPortfolio: MetricPortfolio
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
@@ -492,6 +504,7 @@ public struct WaveRoadmap: Decodable, Sendable, Hashable {
     public let unavailableTasks: [UnavailableTaskEvidence]
 
     enum CodingKeys: String, CodingKey {
+        case projectReadiness = "project_readiness"
         case wave, projects, tasks
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
@@ -522,6 +535,7 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
 /// `lf wave status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot` without
 /// reshaping or dropping fields, so every Wave surface starts from one reading.
 public struct WaveDetailSnapshot: Decodable, Sendable {
+    public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
     public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
@@ -535,6 +549,7 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case projectReadiness = "project_readiness"
         case wave, projects, tasks, history
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
@@ -768,4 +783,58 @@ public struct CodeSlice: Decodable, Sendable, Identifiable {
     public let ext: String
     public let lines: Int
     public let tokens: Int
+}
+
+/// Display projection of the rotation report; provider bodies stay owned by Rust.
+public struct ProjectRotationPreview: Decodable, Sendable {
+    public let name: String
+    public let waves: [WaveRotation]
+
+    public struct WaveRotation: Decodable, Sendable {
+        public let wave: String
+        public let successor_id: String
+        public let predecessor: Project?
+        public let successor: Project?
+        public let tasks: [Task]
+    }
+
+    public struct Project: Decodable, Sendable {
+        public let id: String
+        public let name: String
+    }
+
+    public struct Task: Decodable, Sendable {
+        public let task: Issue
+        public let disposition: String
+        public let reason: String
+    }
+
+    public struct Issue: Decodable, Sendable {
+        public let id: String
+        public let identifier: String
+        public let name: String
+    }
+}
+
+public struct ProjectReadiness: Decodable, Sendable, Hashable {
+    public enum State: String, Decodable, Sendable { case unconfigured, unavailable, inactive, ready, terminal }
+    public let state: State
+    public let projectId: String?
+    public let observedAt: Int64?
+    public let pendingSuccessor: String?
+    public let activation: Activation?
+
+    public struct Activation: Decodable, Sendable, Hashable {
+        public let execId: String
+        public let completedAt: Int64?
+        public let outcome: String?
+        public let error: String?
+        enum CodingKeys: String, CodingKey {
+            case execId = "exec_id", completedAt = "completed_at", outcome, error
+        }
+    }
+    enum CodingKeys: String, CodingKey {
+        case state, activation
+        case projectId = "project_id", observedAt = "observed_at", pendingSuccessor = "pending_successor"
+    }
 }

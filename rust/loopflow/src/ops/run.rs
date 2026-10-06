@@ -434,7 +434,15 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        store.create_task(&task, &pr).await.unwrap();
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
+            wave.id(),
+            None,
+            project.plan.id.as_str(),
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         task
     }
 
@@ -809,11 +817,9 @@ mod tests {
                 .await
                 .unwrap();
         let mut project = project(&wave, "desktop", "project-desktop");
+        project.plan.slug = "desktop-renamed".into();
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, directory.path().join("workspace")).await;
-        // Input ancestry names its Task by id, so Project renaming preserves history.
-        project.plan.slug = "desktop-renamed".into();
-        store.update_project(&project).await.unwrap();
         let session = |task_id: Option<TaskId>, caller: Option<String>| {
             let inherited = caller.is_some();
             crate::session::AgentSession {
@@ -1033,13 +1039,16 @@ mod tests {
             items: Vec::new(),
         };
         store
-            .put_pm_snapshot(PmSnapshotRow {
-                wave_id: wave.id().clone(),
-                provider: "linear".to_string(),
-                initiative: "initiative-1".to_string(),
-                synced_at: OffsetDateTime::now_utc().unix_timestamp(),
-                snapshot,
-            })
+            .put_pm_snapshot(
+                PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".to_string(),
+                    initiative: "initiative-1".to_string(),
+                    synced_at: OffsetDateTime::now_utc().unix_timestamp(),
+                    snapshot,
+                },
+                None,
+            )
             .await
             .unwrap();
 

@@ -23,7 +23,23 @@ interpretations are at `6f246fda4:scratch/questions.md`.
 
 - **Waiting (October 6).** On Waiting not seeing an interactive Claude or
   OpenCode conversation: "seems like not the right product experience, but OK
-  to defer to land this." Not fixed in this PR; needs its own Task.
+  to defer to land this." Deferred to LOO-384; 0-PR Task completion ("This seems deferable") to LOO-385. Filed October 6 as two Tasks at his request.
+
+- **Names (October 6).** "should we call the inner flows pipelines or
+  something? we dont need to do a whole rename now but worth filing an
+  architectural task". Filed as LOO-386. Settled, not for LOO-386: on `lf task run`
+  moving the Workflow while `lf run` does not, "fair feedback but I think
+  worth it to keep lf run simple and lf task run clean". Jack, on "Run" also naming a
+  headless conversation: "right headless converastions are also many : 1 w
+  execs". Then, defining them: "run is one conceptual attempt, exec is one
+  lf invocation and in this case of the flow object". A run has many execs,
+  at both layers. 
+
+- **Task state (October 6).** On Workflow at `end`, Task `ready` and a PR
+  slot being three kinds of done: "no separate Task is ready state; that is
+  derived from where it is in the graph"; "at start? ready at end? done".
+  "abandoned/deleted bool should still stay"; between start and end,
+  "active". Not built here; LOO-385.
 
 ## Step invocation — decided by Jack Heart (October 5)
 
@@ -173,33 +189,53 @@ The agent's, October 5, building slice 1. None is confirmed by Jack Heart.
 - **Naming a workflow replaces.** `lf task run ISSUE WORKFLOW` on a Task with
   another workflow starts the named one at `start`; the earlier rows stay. A
   name that is both an outgoing edge's Flow and a workflow means the edge.
-- **The traversal names the `lf task run` Exec,** which is the edge Flow's
-  driver, so the row needs no FlowExec to exist yet. A launch refused after
-  the row is written leaves a failed traversal: position unchanged.
-- **Position.** At `to` only when that Exec succeeded. A driver with no exit
-  record counts as running unless its process is known dead. A Flow that
-  stops at a watched landing has not succeeded, so `ship` returns the Task to
-  `demo` until a later run of it succeeds.
-- **No guard on a running edge.** A second `lf task run` while one runs
-  chooses among the edges leaving the running edge's `from`.
+- **Record and position:** replaced by the live-state pass below.
 - **Edges accept what `lf run` accepts,** a skill included: `research` runs
   the `research` skill. Flowless edges are allowed only into `end`.
 - **`research` names a workflow and a skill.** `lf research` stays the skill.
-- **Wire placement.** The workflow rides in `TaskWork`, not the Task Flow
-  snapshot, so the roadmap does not carry it; Desktop reads it per Task.
 - **Guidance** is appended wherever a Task binding's context is rendered
   (`resolve_work_binding`), headless launches included.
 - **Skill prose.** Only `advance` and `launch-plan` were corrected for the
   deleted Flows; other skills still say `lf task run <issue> <chosen-flow>`,
   which a Task on a workflow refuses unless that Flow leaves its stage.
-- **Flow catalog.** `lf flow list` no longer lists `feature` or `code`, so a
-  Project default of `feature` has no Flow graph; Desktop draws the workflow
-  once the Task's first run records it.
-- **Test count.** The slice list said six tests; the build order at
-  `26279a3d2:scratch/task-workflow.md` lists five behaviors, each covered.
-  The list now says five.
 - **Reaching `end` removes nothing:** the Task stays ready and
   `lf task complete` stays separate (draft default 3).
+
+## Choices the Workflow live-state pass made without Jack
+
+The agent's, October 6, building slice 9. None is confirmed by Jack Heart.
+
+- **The set command is `lf task move ISSUE STAGE [--reason NOTE]`.** It
+  accepts `start`, `end` and any stage, from a stage or an edge. A Flow still
+  running on the edge is not stopped; its arrival is then ignored.
+- **A running edge refuses a second choice** (the contract's "only from the
+  edge's `from` stage or from that stage's stopped edge"). This reverses
+  slice 1's "no guard on a running edge". Taking up another workflow by name
+  is still allowed while an edge runs.
+- **Stopped is read, not stored:** on an edge whose Exec has exited or whose
+  process is known dead. A driver that succeeded but died before writing its
+  arrival reads as stopped; `lf task move` corrects it.
+- **A stopped landing holds the Task on its edge** (slice 1 returned it to
+  the stage). `ship` left watched reads "stopped on ship" until it is chosen
+  again or the Task is moved to `end`.
+- **Who.** A move's author is its Exec's calling conversation, else a
+  person; an arrival is the edge's. A headless Run that calls `lf task run`
+  counts as a conversation.
+- **Notes.** `--reason` on `lf task run` is both the Task steer it already
+  was and the move's note; on `lf task move` it is only the note.
+- **History spans definitions.** Each move names the definition it was made
+  on; taking up another keeps earlier moves in the same list.
+- **Wire.** `position.edge` gains `running`; `traversals` is replaced by
+  `history`; `outgoing` lists the edges that can be chosen now (empty while
+  one runs).
+- **Types.** Rust `Workflow` is the Task's; the authored one is
+  `WorkflowDefinition`. Tables keep the contract's names, `task_workflows`
+  and `task_workflow_moves`. Swift `TaskWorkflow` became `Workflow`.
+- **Desktop** offers the edges Rust lists and a **Move to** menu of every
+  stage; it shows no history.
+- **Not tested:** the running-edge refusal and the lost-race refusal through
+  the CLI (no long-running fixture Flow); a conversation as author, beyond
+  the fixture.
 
 ## Choices the Loops, Review repairs and Task primary passes made without Jack
 

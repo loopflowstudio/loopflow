@@ -5,25 +5,12 @@ think you own TaskWorkflow. We cant do this design correctly without it."
 This draft is the agent's; nothing below the first section is decided. The
 inner record, FlowExec, is in [the design](focus-on-your-own-work.md).
 
-## Decided by Jack
+## Decided by Jack, October 5
 
-- Two notions of Flow: "One where there there is a start and a land node and
-  then in between are human sessions, and the edges are lf flows."
-- The outer one is called TaskWorkflow and belongs to LOO-353.
-- It is the mutable one: "the FlowSession is mutable, but the Flow exec is
-  not"; "in the same way the session api lets you replace / take over any lf
-  skill, the flow session api would let you replace / take over any running
-  flow". (Said before the outer thing was renamed TaskWorkflow.)
-- "might need to think about ones that dont end in land, multi-PR tasks or
-  0-PR tasks. (I am pretty confident we want 0 PR tasks; not sure we need
-  multi-PR tasks)".
-- Standing rules it must obey: Task helpers sit on top of ordinary `lf`, with
-  no parallel paths or drivers; no `session ready`/`complete` handshake or a
-  renamed one; every `lf` flow run is tracked the same, ad hoc or not.
-
-This reverses two earlier lines, deliberately: September 30 and LOO-367
-("there is no separate 'Task workflow' concept") and October 4 ("without a
-shared playhead"; "no runtime row"). TaskWorkflow executes nothing itself.
+His words are in [questions.md](questions.md), points 8–13 under "Step
+invocation": two notions of Flow, the outer one named and owned by LOO-353,
+0-PR and multi-PR Tasks. Standing rules: Task helpers sit on top of ordinary
+`lf`; no ready/complete handshake; every Flow exec is tracked the same.
 
 ## Direction from Jack Heart — October 6 (after seeing it built)
 
@@ -55,25 +42,82 @@ On the built record being append-only with derived position:
 - On 0-PR Tasks still carrying a PR slot and not completing at `end`: "This
   seems deferable".
 
-## Proposed mutable model (agent's, for Jack's review)
+## Workflow contract — four layers (agent's, for Jack's review)
 
-- **Live state.** One row per Task: the workflow's graph, fixed when loaded,
-  and the Task's position, stored: at a stage, or on an edge with the Flow
-  run carrying it. A separate append-only history records each move: who made
-  it (a person, a conversation, an edge finishing), from, to, the Flow run,
-  and a note.
-- **Choose.** One command picks a way out of the current stage and, when that
-  edge has a Flow, runs it; the note travels to the Flow as Task direction.
-  This is today's `lf task run ISSUE <choice>`. The process running the edge
-  writes the position when it ends: forward on success; otherwise the Task
-  stays on the edge, shown as stopped.
-- **Set.** One command puts the Task at a named stage without running
-  anything: go back, skip ahead, or correct the record after work done by
-  hand or a landing that settled later. This does not exist yet.
-- **Start over.** Taking up a workflow by name replaces the graph and resets
-  position; history stays.
-- **Read.** Graph, position, the ways out and the history, for the
-  conversation, `task status` and Desktop's buttons alike.
+**Name.** Jack, October 6: "lets just call TaskWorkflow Workflow". The
+Task's live thing is a *Workflow*; the authored YAML it takes up is a
+*workflow definition*. Slice 9 renames types, tables, wire fields, Swift
+mirrors and docs to match, with no alias.
+
+Jack, October 6: "lets use Edge and node instead of Stage and Way OUt". A
+Workflow has *nodes* and *edges*: `nodes:` in the YAML, node in types, wire
+fields, status text, errors, skills, Desktop and docs. "Stage" and "way
+out" go, with no alias. Where this note still says stage, read node.
+
+Jack, October 6: "we should make sure we understand what is the core data
+model at the center of this, what is the data model <--> db API, db <--> cli,
+db <--> swiftui". Slice 9 builds to this.
+
+**Projects.** Jack, October 6: "Then projects have workflows instead of
+default. project workflow and task worfklow both work and are the samle". A
+Project names a workflow, not a "default Flow"; a Task may name its own; both
+are the same definition and behave the same once taken up. Agent's reading:
+the Project's `flow:` field becomes `workflow:`, a Task's own choice wins,
+and a Project can no longer name a plain Flow as its default.
+
+**1. Model.**
+- *Workflow definition:* name, stages (name, skill), edges (from, to, optional
+  Flow or skill; unique among the edges leaving a node). Authored YAML.
+- *Workflow:* one per Task. The graph it took up, fixed from then on, and its
+  position.
+- *Position:* at a node, or on an edge with the `lf task run` Exec carrying
+  it. That Exec may start the edge's Flow more than once (slice 9a), so one
+  edge can have several Flow runs. Running or
+  stopped is that Exec's own state, never stored here.
+- *Move:* one history entry: when, who (a person, a conversation, an edge
+  ending), what (took up, chose, arrived, set), from, edge, to, Exec, note.
+
+**2. Model ↔ database.** Two tables in the one draft: `task_workflows` (Task,
+graph, position; one row, updated in place) and `task_workflow_moves`
+(append-only). Four store calls and no other SQL:
+- read a Task's workflow with its history;
+- take up a workflow: store the graph, position `start`, one move;
+- choose an edge: only from the edge's `from` stage or from that stage's
+  stopped edge, as one transaction, so two choosers cannot both leave;
+- arrive: the process that ran the edge, on success, moves the Task to `to`
+  if it is still on that edge;
+- set: put the Task at a named stage.
+
+**3. Database ↔ CLI.** The CLI calls the store, never SQL.
+- Read: `lf task status ISSUE [--json]` carries graph, position, the ways out
+  of the current stage and history.
+- Write: `lf task run ISSUE [CHOICE] [--reason NOTE]` chooses and runs, or
+  takes up a workflow by name; one new command sets a stage. Who is taken
+  from the calling conversation when there is one, else the person.
+
+**4. Store → stream → SwiftUI (aligned with LOO-382, PR #1452).** Jack,
+October 6: "Look at the work in 382. Figure out what their vision of the
+future is and align with it." That design: Desktop is reactive to the store
+and nothing else. SQLite triggers bump a revision per domain (`planning`,
+`sessions`, `flows`, `execs`, `usage`) on every write; one `lf monitor
+workspace --watch --json` per window streams parts whose bodies are the
+existing `--json` DTOs; after its own write Desktop sends `refresh` and waits
+for the frame that answers it. Forbidden there: polling beside the stream, a
+second cache, Desktop-only shapes, a read that writes an Exec, revision bumps
+at call sites. For the Workflow:
+- Position and moves are stored rows, so a change is a store write the
+  triggers see. Nothing Desktop shows is computed only at read time, except
+  liveness, which stays unknown until observed.
+- Every table this PR adds gets a domain: Workflow tables `planning`;
+  `flow_execs` and `flow_exec_steps` `flows`; `session_activity` `sessions`,
+  bumping only when Waiting could change, with quiet-time Waiting on the
+  watch's clock.
+- Desktop reads the Workflow and the Flow exec log from the `task` part
+  (`TaskWork`), not `lf task status` or `lf flow show` per view; its buttons
+  run `lf task run` or the set command, then `refresh`.
+- The two drafts collide: #1452 puts triggers on `flow_sessions`,
+  `flow_events` and `agent_sessions` columns this PR drops. Whichever lands
+  second reconciles in its own draft.
 
 Jack, October 6, on `lf task run` taking the only way out, erroring at a
 stage with several until one is named, erroring on a name that is not a way
@@ -85,32 +129,7 @@ on the edge (default: holds, shown as stopped); whether a finishing edge
 should reach the conversation beyond its own background tool or reading
 status (default: no).
 
-## Built — October 5, unreviewed by Jack
+## Built
 
-The agent's choices here are listed in [questions.md](questions.md) under
-"Choices the TaskWorkflow pass made without Jack".
-
-- **Loader.** `.lf/workflows/<name>.yaml`, else builtins `feature`, `code`,
-  `research` (`engine/workflow.rs`). Rejected: an unknown or unreachable
-  stage, a stage skill or edge Flow that does not load, a flowless edge that
-  does not enter `end`, two edges from one stage running the same Flow.
-- **Record.** `task_workflows` (Task, captured named graph; the newest row is
-  the Task's) and `task_workflow_traversals` (edge, the Exec that ran it), in
-  the one draft, both append-only.
-- **Moving.** `lf task run ISSUE [FLOW]` takes the outgoing edge that runs
-  FLOW, or the only one; names a workflow to take it up; refuses anything
-  else, naming the edges. An edge with no Flow is recorded and returns.
-- **Reading.** `task status --json` carries `execution.work.workflow`: name,
-  stages, edges, position (`stage`, or `edge` with its driver Exec) and
-  traversals. Text status prints one line. Swift decodes the same fixture.
-- **Guidance.** A bound Task launch's context names the stage's skill and the
-  command for each outgoing edge.
-- **Check.** `cargo test -p loopflow --test task_flow_launch_tests` (5) and
-  `--lib engine::workflow ops::task_workflow` (3, stage guidance included)
-  pass; Swift `DTOFixtureTests` decodes the workflow. After compress (name
-  column, workflow listing and authored-edge type removed): the same two
-  commands, `dto_fixtures` 18 and all-target Clippy pass.
-
-Desktop draws the workflow and starts its edges (slice 6); the catalog lists
-workflows, and the Wave page sets the default and opens sources (slice 7). Docs describe
-it (slice 8). Not built: a take-over command (open choice 2).
+Slice 1's account of what was built is at `74a738f72:scratch/task-workflow.md`;
+its unreviewed choices are in [questions.md](questions.md).

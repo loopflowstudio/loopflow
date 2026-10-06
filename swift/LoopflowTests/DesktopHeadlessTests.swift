@@ -137,14 +137,14 @@ struct DesktopHeadlessTests {
         #expect(try position(stopped) == "Stopped on pursue · design to demo")
         #expect(try !stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run-1").button().isDisabled())
 
-        // At `demo` the only edge runs nothing and is chosen by its own name.
+        // At `demo` the only edge runs nothing and is chosen as `end`.
         let waiting = try view(position: ["kind": "stage", "stage": "demo"], outgoing: [2])
         #expect(try position(waiting) == "Waiting on you at demo · demo")
         let accept = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run-2").button()
-        #expect(try accept.labelView().text().string() == "accept")
+        #expect(try accept.labelView().text().string() == "Finish")
         try accept.tap()
         for _ in 0..<200 where await started.calls.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
-        #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "accept"]])
+        #expect(await started.calls == [["-b", "task", "run", task.task.identifier, "end"]])
 
         // Going back is the same command a person would type.
         await model.moveTask(to: "design", task: task, wave: wave.wave)

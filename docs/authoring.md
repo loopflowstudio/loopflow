@@ -229,13 +229,8 @@ lf task move DES-123 design    # go back without running anything
 `start` and `end` are implicit. An edge runs anything `lf run` accepts, a
 skill included. Only an edge into `end` may omit `flow:`; take it with
 `lf task run ISSUE end`. A Task with no PR is a workflow with no landing edge,
-like builtin `research`. Two edges leaving one stage can run the same Flow
-when each has its own `name:`, which is then what `lf task run` takes:
-
-```yaml
-  - { name: again,  from: demo, to: demo, flow: pursue }
-  - { name: accept, from: demo, to: end,  flow: pursue }
-```
+like builtin `research`. An edge is named by what it runs, so two edges
+leaving one stage run different things.
 
 A Task takes up a workflow on its first `lf task run` when its Project's
 default names one, or when you name one. It keeps the graph as it was then.

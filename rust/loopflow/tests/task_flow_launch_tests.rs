@@ -231,10 +231,10 @@ impl WorkflowTask {
             (".lf/flows/broken.yaml", "- cmd: flow show no-such-flow\n"),
             // Fails until the repository defines a Flow named `late`.
             (".lf/flows/gate.yaml", "- cmd: flow show late\n"),
-            // Two ways out of one stage run the same Flow under their own names.
+            // Another round succeeds; accepting fails until `late` exists.
             (
                 ".lf/workflows/gated.yaml",
-                "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {name: again, from: review, to: review, flow: gate}\n  - {name: accept, from: review, to: end, flow: gate}\n",
+                "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: review, flow: proof}\n  - {from: review, to: end, flow: gate}\n",
             ),
             // No PR: the last edge runs nothing.
             (
@@ -418,16 +418,11 @@ fn a_landing_that_settles_later_is_recorded_by_moving_the_task() {
 }
 
 #[test]
-fn a_stopped_edge_is_chosen_again_by_name_and_the_task_can_go_back() {
+fn a_stopped_edge_is_chosen_again_and_the_task_can_go_back() {
     let task = WorkflowTask::new();
     task.ok(&["-b", "task", "run", "INF-123", "gated"]);
-    // Both ways out of review run `gate`; each answers to its own name.
-    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "gate"]));
-    assert!(error.contains("gate does not leave review"), "{error}");
-    assert!(error.contains("again (runs gate, to review)"), "{error}");
-    assert!(error.contains("accept (runs gate, to end)"), "{error}");
     assert!(!task
-        .run(&["-b", "task", "run", "INF-123", "accept"])
+        .run(&["-b", "task", "run", "INF-123", "gate"])
         .status
         .success());
     let stopped = task.workflow();
@@ -437,13 +432,13 @@ fn a_stopped_edge_is_chosen_again_by_name_and_the_task_can_go_back() {
     let status = task.run(&["task", "status", "INF-123"]);
     let status = String::from_utf8_lossy(&status.stdout).to_string();
     assert!(
-        status.contains("Workflow gated: stopped on accept (review → end)"),
+        status.contains("Workflow gated: stopped on gate (review → end)"),
         "{status}"
     );
     // Once its cause is fixed the same edge is chosen again and arrives.
     let late = task.repo.path().join(".lf/flows/late.yaml");
     fs::write(late, "- cmd: task sync --plan\n").unwrap();
-    task.ok(&["-b", "task", "run", "INF-123", "accept"]);
+    task.ok(&["-b", "task", "run", "INF-123", "gate"]);
     assert_eq!(task.workflow()["position"], at("end"));
     // The demo was not good enough after all: go back and take the loop.
     task.ok(&[
@@ -455,7 +450,7 @@ fn a_stopped_edge_is_chosen_again_by_name_and_the_task_can_go_back() {
         "one more round",
     ]);
     assert_eq!(task.workflow()["position"], at("review"));
-    task.ok(&["-b", "task", "run", "INF-123", "again"]);
+    task.ok(&["-b", "task", "run", "INF-123", "proof"]);
     let workflow = task.workflow();
     assert_eq!(workflow["position"], at("review"));
     let kinds: Vec<_> = moves(&workflow).into_iter().map(|(kind, _)| kind).collect();

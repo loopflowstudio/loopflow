@@ -77,19 +77,16 @@
     ],
     "edges": [
       {
-        "name": null,
         "from": "start",
         "to": "design",
         "flow": "task-design"
       },
       {
-        "name": null,
         "from": "design",
         "to": "demo",
         "flow": "pursue"
       },
       {
-        "name": "accept",
         "from": "demo",
         "to": "end",
         "flow": null

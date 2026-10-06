@@ -51,15 +51,6 @@ format, architecture check, 42 headless Desktop tests and the app build pass.
 The library suite has one failure in a full parallel run that passes alone.
 PR CI ran one job and skipped 14.
 
-## What only Jack can judge
-
-- Whether deriving position from edges run, with no take-over command, is the
-  mutable TaskWorkflow he meant.
-- Whether a Task at a stage should wait for him, as the operate skills now say.
-- Waiting being blind to a native `claude` or `opencode` terminal.
-- Structured output removed for every provider: untested on a real decision.
-- Desktop on screen.
-
 ## Not shown
 
 Any real provider step; a driver killed during an agent step; the migration

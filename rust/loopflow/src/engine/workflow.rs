@@ -37,9 +37,6 @@ pub struct WorkflowStage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowEdge {
-    /// What `lf task run ISSUE <name>` calls this edge when its Flow alone
-    /// would not tell it from another way out of the same stage.
-    pub name: Option<String>,
     pub from: String,
     pub to: String,
     /// The Flow that carries the Task along this edge. Only an edge into
@@ -55,13 +52,10 @@ pub struct WorkflowDefinition {
 }
 
 impl WorkflowEdge {
-    /// What `lf task run ISSUE <name>` calls this edge: its own name, else
-    /// its Flow, else the stage it enters.
+    /// What `lf task run ISSUE <name>` calls this edge: its Flow, or the stage
+    /// it enters when it runs none.
     pub fn name(&self) -> &str {
-        self.name
-            .as_deref()
-            .or(self.flow.as_deref())
-            .unwrap_or(&self.to)
+        self.flow.as_deref().unwrap_or(&self.to)
     }
 }
 
@@ -303,13 +297,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(valid.outgoing(START).count(), 1);
-        // Two ways out may run the same Flow when each has its own name.
-        let named = load(
-            "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {name: again, from: review, to: review, flow: pursue}\n  - {name: accept, from: review, to: end, flow: pursue}\n",
-        )
-        .unwrap();
-        let names: Vec<_> = named.outgoing("review").map(|(_, e)| e.name()).collect();
-        assert_eq!(names, ["again", "accept"]);
         for (content, expected) in [
             (
                 "stages:\n  review: demo\n  lost: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n",
@@ -333,10 +320,6 @@ mod tests {
             ),
             (
                 "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {from: start, to: end, flow: pursue}\n",
-                "two outgoing edges",
-            ),
-            (
-                "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {name: pursue, from: start, to: end, flow: ship}\n",
                 "two outgoing edges",
             ),
         ] {

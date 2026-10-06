@@ -32,7 +32,7 @@ struct WorkflowView: View {
                     .accessibilityIdentifier("task-workflow-position")
                 HStack(spacing: Spacing.sm) {
                     ForEach(workflow.choices, id: \.index) { index, edge in
-                        Button(edge.name ?? edge.flow.map { "Run \($0)" } ?? "Finish") {
+                        Button(edge.flow.map { "Run \($0)" } ?? "Finish") {
                             Task { await model.startFlow(edge.launchName, task: task, wave: wave) }
                         }
                         .buttonStyle(WorkspaceOutlineButtonStyle())
@@ -105,7 +105,7 @@ struct WorkflowGraphRow: View {
                         .accessibilityIdentifier("task-workflow-stage-\(stage)")
                         .accessibilityValue(current == stage ? "Current" : "")
                     ForEach(edges.leaving(stage), id: \.index) { index, edge in
-                        Text("→ \(edge.name ?? edge.flow ?? "no Flow") → \(edge.to)")
+                        Text("→ \(edge.flow ?? "no Flow") → \(edge.to)")
                             .font(Typography.code(11))
                             .foregroundStyle(
                                 running == index ? WorkspaceTone.running.ink

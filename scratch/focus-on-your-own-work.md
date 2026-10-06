@@ -105,37 +105,10 @@ October 5 (delivery review):
 
 ## Branch state after the FlowExec pass
 
-FlowExec and oblivious steps are built (`aa2f42289`, `70e76a7d3`), and
-TaskWorkflow after them; Jack Heart has reviewed neither. Takeover and resume
-are not built.
-
-- **Task entry.** `lf task run ISSUE [FLOW]` places the Task (worktree,
-  `--stack-on`, checkout restore), defaults to the Project's Flow, records `-m`
-  as the Task's agent and `--reason` as a steer, then continues as
-  `lf --task ISSUE run FLOW`. It honors `-b`/`-i`, prints and blocks.
-- **One path.** Every Flow launch that resolves to a Task, by the entry,
-  `--task` or its worktree, gets the same check: ready Work, matching
-  planning, current chapter, not being abandoned.
-- **FlowExec.** `flow_execs` (driver Exec, Flow name, graph compiled at launch)
-  and `flow_exec_steps` (child Exec, graph node key, per-edge iterations), both
-  append-only by trigger; a step row must name an Exec its driver started. The
-  driver writes the Flow row before its first step, marks its Task started,
-  and appends each step once the child's Exec appears.
-- **Oblivious steps.** A skill step is `lf -b [options] skill <name>
-  [message]`; an operation is its own `lf` command through the ordinary CLI;
-  a correction is `lf -b session resume SESSION MESSAGE`. Gone: `FlowStep`,
-  `--__flow-step`, the `__flow-step` command, `--__cwd` on steps, exit status
-  75, the in-process operation interpreter and its allowlist, per-node steer
-  acknowledgement, the Session's captured Flow position, and provider
-  structured-output requests (`--json-schema`, `outputSchema`, OpenCode
-  `format`). The answer contract is in the step's message; the driver reads
-  the turn's final answer and accepts JSON inside prose or a code fence.
-- **Readers.** `lf flow list/show`, `task status`, completion blockers,
-  chapter "started", `lf monitor`, Session Flow membership and the Desktop
-  DTOs read FlowExec joined to Execs. Wire shapes are unchanged, so fixtures
-  and Swift decoders are untouched. A past Flow keeps its launched graph.
-- **Migration.** The one draft also creates the two tables and reads Started
-  evidence from a Flow run in the Task's checkout.
+FlowExec, oblivious steps, the Task entry and their readers are built
+(`aa2f42289`, `70e76a7d3`); Jack Heart has not reviewed them. The itemized
+account is at `74a738f72:scratch/focus-on-your-own-work.md` under this
+heading. Takeover and resume are not built.
 
 ## Remaining from this pass
 
@@ -150,14 +123,8 @@ are not built.
   registering and that poll leaves the step's Exec without a step row.
 - **Publish after an unobserved merge** still reaches GitHub through
   `pr publish`; `lf pr reconcile` remains its owner.
-- **Leftovers.** Native history readers still parse `structured_output`, for
-  conversations recorded before this pass;
-  `SessionFlowMembership::Step` remains for older manifests. Task status
-  still lists every Exec.
 - **Failing before this pass, unchanged** (reproduced on `8535598ef`):
   `status_tests previous_release_merge_request_migrates_into_readable_status_and_roadmap`.
-  The Waiting pass repaired two `session_cli_tests` that still set up a
-  review row and called `session complete`.
 
 ## Slices — one looping Flow builds these in order
 
@@ -172,119 +139,105 @@ slice open. A pass that cannot finish its slice records why and stops blocked.
 
 Flow history below means FlowExec rows joined to their Execs.
 
-1. **TaskWorkflow.** Build order, defaults and tests are in
-   [task-workflow.md](task-workflow.md). Done when its five planned tests pass and
-   `task status --json` carries the workflow graph, position and running
-   edge. **Done** at `1f665b901` (the Flow stopped at sync before realign; marked by the managing conversation after rerunning the launch and workflow tests):
-   `task_flow_launch_tests` 5 passed, lib `engine::workflow`/`ops::task_workflow`
-   3 passed (stage guidance included), `dto_fixtures` 18 and Swift
-   `DTOFixtureTests` 22 passed, all-target Clippy clean. Demo items: a real
-   provider run of `feature`'s `task-design` edge; the stage guidance as a
-   live Task conversation reads it.
-2. **Loops.** One form: a deciding node last, `loop: <target>` with optional
-   `step` defaulting to `loop-or-next`, replacing `loop-decide` and
-   `repeat.from` in catalog, skills, templates, docs and tests with no alias.
-   Unique skill names resolve the target; one optional occurrence name
-   disambiguates. Advance, Iterate or Blocked; malformed output never
-   advances; shared and overlapping return edges are preserved. Done when
-   `git grep -E "loop-decide|repeat:"` matches only released migrations and
-   dated reviews, and `flow_tests` covers three nested loops. **Done** at
-   `1793a4ed0`, merged with main at `9d72242ce`: `flow_tests` 25 and
-   `task_flow_launch_tests` 5 passed, all-target Clippy clean. The old names
-   remain only in dated `performance/` baselines, `scripts/context_ablation.py`
-   and the loader's rejection of the old form.
-3. **Review repairs.** Two defects found on October 6. (a) Steers: Jack
-   Heart, on every step now receiving all of its Task's steers: "This seems
-   potentially bad as that was specifically added to address some runaway
-   token counts". Restore the saving without telling a step about its Flow:
-   the driver, which knows when it last ran this node, passes an ordinary
-   public option on the step's command that limits Task direction to steers
-   newer than a given one; the option works on any `lf` run. (b) A flowless
-   edge into `end` cannot be taken from a stage with another way out:
-   `lf task run ISSUE` answers "more than one outgoing edge; name its Flow"
-   and `end` is not a Flow, so builtin `research` can never end. Let
-   `lf task run ISSUE end` (the target stage's name) take it, and say so in
-   the refusal and the stage guidance. Done when a test shows a node's second
-   run receives only steers newer than its first, and a test walks `research`
-   to `end`. **Done** at `b30b193a0`: `flow_tests
-   a_repeated_node_receives_only_task_direction_newer_than_its_last_run` and
-   `the_research_workflow_ends_on_its_edge_that_runs_nothing` pass. The option
-   is `--steers-after`.
-4. **Task primary.** The Task names one of its conversations. Explicit choice wins; else the sole unfinished interactive Task
-   conversation; else the most recent by `latest_interactive_session`'s
-   ranking, restricted to unfinished Task members. Read-only inventory creates
-   nothing. Done when `session_lifecycle_tests` covers each rule. **Done** at
-   `3d416a655`, merged with main at `f3b277e73`: `session_lifecycle_tests` 18
-   passed (`a_task_primary_is_one_of_its_own_conversations` covers each rule
-   and replacement). `lf session ensure --task ISSUE [--choose SESSION]`; the
-   Task row names its primary (`tasks.primary_session_id`, in the one draft),
-   so the conversation stays a member and wire shapes are unchanged. Demo
-   item: Desktop opening a Task on its primary (slice 6).
-5. **Waiting.** Rust-owned; replaces Review/Reply attention,
-   `SessionKind::FlowReview` and `--needs-me` with one Waiting value and
-   `--waiting`. Immediate on explicit pending input or a successful
-   interactive yield with no outstanding tools; otherwise after 120 seconds
-   without provider activity and zero unresolved tool calls. No event yet is
-   opening/unknown; disconnection is unknown; new activity clears it;
-   filtering happens before paging. Provider evidence:
-   `ac91bf9e1:scratch/harness-attention.md`. Done when the injected-clock
-   and recorded-trace tests pass for Claude, Codex and OpenCode. **Done** at
-   `e3ab80c55` (built `92abbed56`; compress gave the read one clock, so the
-   store call's `now` judges filter and row): `--lib harness::attention` 8
-   passed. The driver that owns a provider's stream saves one reading per
-   Session (`session_activity`); one SQL rule judges Waiting for the row and
-   for `--waiting`. Demo items: a
-   live provider asking a question; a native Claude or OpenCode terminal,
-   which `lf` cannot hear (see questions.md).
-6. **Desktop.** The Task page draws its TaskWorkflow with the current stage
-   or running edge, and every Flow run of the Task gets the same
-   graph/progress/output view from FlowExec. Waiting first, working Sessions
-   in a compact group, no completion controls; Start runs `lf -b task run` as
-   an app-owned child. Done when `swift build --build-tests` and the headless
-   Desktop tests pass with shared DTO fixtures. **Done** at `f0b4196c1` (built
-   `e3ac73edb`; compress made the workflow model answer running and outgoing
-   edges once), merged with main at `9771ff7d7`: `swift build --build-tests`
-   clean and `swift test --filter "DesktopHeadlessTests|DTOFixtureTests"` 27
-   passed. A full `swift test` has one failure, `ActiveSessionsLifetimeTests
-   replacement`, which passes alone. Demo items: native rendering and
-   interaction; Start against a real `lf`; a Task opening on its primary; a
-   live run's progress moving.
-7. **Defaults and editing.** The Project's default names a workflow, shown and
-   set in Wave settings; Edit opens the real workflow or Flow source, with
-   builtin customization creating the `.lf/` file explicitly; an invalid file
-   stays saved and visibly invalid. Done when its headless tests pass.
-   **Done** at `f87d02872` (built `31f7861c0`; compress shared one
-   edges-leaving-a-stage helper between the Task workflow and the catalog
-   drawing): lib `engine::workflow` 3 and
-   `changing_the_default_flow_keeps_the_chapters_krs` pass, `dto_fixtures` 19,
-   Swift `DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests` 34 passed,
-   all-target Clippy clean. `lf flow list` also lists workflows (kind, source,
-   stages and edges); `lf flow customize NAME` writes a builtin to `.lf/`;
-   `lf wave update-plan --flow NAME` changes only the default and does not
-   check that NAME loads. Demo items: the Wave page's Task default menu and
-   Customize/Edit opening an editor; an unstarted Task previewing its workflow.
-8. **Docs and website.** README, `docs/`, AGENTS.md, the architecture
-   reference, builtin skills and the website describe TaskWorkflow, FlowExec,
-   Sessions and Runs, Waiting and `lf task run`; no resident, review-handshake
-   or worker text remains. Done when the website checks and
-   `scripts/check_architecture.py` pass. **Done** at `ce7648eed` (built
-   `0846e663d`; compress kept the workflow YAML in `docs/authoring.md` only):
-   `scripts/check_architecture.py` passes (SQLite 41/41) and `cd website &&
-   uv run python dev.py test` 78 passed, 3 skipped; prompt goldens
-   regenerated. Demo items: the website's five building blocks as
-   rendered; the two flow diagrams, unchanged, still say "flow".
+Slices 1–8 are **done**; each one's done-when, commit, check result and demo
+items are at `74a738f72:scratch/focus-on-your-own-work.md`.
 
-9. **Mutable TaskWorkflow.** The model under "Proposed mutable model" in
-   [task-workflow.md](task-workflow.md): position stored as live state and
+1. TaskWorkflow — `1f665b901`. 2. Loops (`loop:`, `loop-or-next`) —
+`1793a4ed0`. 3. Review repairs (`--steers-after`, `lf task run ISSUE end`) —
+`b30b193a0`. 4. Task primary — `3d416a655`. 5. Waiting — `e3ab80c55`.
+6. Desktop — `f0b4196c1`. 7. Defaults and editing — `f87d02872`. 8. Docs and
+website — `ce7648eed`.
+
+Demo items from those slices, for Jack and not for the loop: a real provider
+run of an edge and a live conversation reading stage guidance; a live
+provider asking a question; Desktop on screen (rendering, Start, a Task
+opening on its primary, progress moving, the Wave page's menu and Edit); the
+website as rendered.
+
+9. **Workflow as live state.** Jack: "lets just call TaskWorkflow Workflow";
+   October 6: "mutable is probably wrong word. live state or something". The
+   contract in [task-workflow.md](task-workflow.md): position stored and
    written by the process running the edge; an append-only history of moves
-   with who and a note; one new command that sets the Task at a named stage
-   without running anything; a stopped edge holds the Task on the edge;
-   edges may carry their own name so two ways out can run the same Flow.
-   `lf task run` keeps the behavior Jack confirmed. Reshape the two tables in
-   the one draft. Done when tests cover: set to a stage; a stopped edge then
-   retry and then go back; a late-settled landing corrected by set; two
-   same-Flow edges chosen by name; status, JSON and the Swift decoder carry
-   stored position and history. *Not done.*
+   with who and a note; `lf task move` sets a stage and runs nothing; a
+   stopped edge holds the Task on the edge; `lf task run` keeps the behavior
+   Jack confirmed. Done when tests cover: set to a stage; a stopped edge
+   retried, then going back; a late-settled landing corrected by set; status,
+   JSON and the Swift decoder carrying stored position and history. *Built
+   (`5cf71ffd7`) and compressed, not yet realigned.* Compression removed
+   authored edge names, as slice 10 asks. `task_flow_launch_tests` 6, lib
+   `workflow` 6, `dto_fixtures` 19, Swift
+   `DesktopHeadlessTests|DTOFixtureTests|TaskFlowProofTests` 34 pass;
+   all-target Clippy clean. Choices: [questions.md](questions.md). Demo
+   items: the Move to menu and a stopped edge on screen; a conversation
+   choosing an edge.
+
+9a. **One Task run, many Flow execs.** (Words: Jack, October 6, "i think
+    maybe cleaner to say run for task and exec for flow", then "er run for
+    workflow api and exec for flow datamodel": *run* is the Workflow API's
+    verb, *exec* is the Flow's record. A *Task run* is one
+    `lf task run` carrying one edge; a *Flow exec* is one execution of a
+    Flow, the FlowExec record. Say "Flow exec", not "Flow run", in status,
+    Desktop and docs; the Desktop log in slice 11 is the Flow exec log.
+    Collision to carry to LOO-386: "Run" is also the product word for a
+    headless conversation.) Jack, October 6: "lf task run should
+    in addition to finding the flow also have some amount of retry, i.e. we
+    shoudl allow task run has many flow runs". `lf task run` stops becoming
+    the Flow's driver: it stays the process that carries the edge and starts
+    the edge's Flow as a child, the plain `lf run FLOW` command, again when a
+    run fails. The Workflow's position names the task-run Exec; each attempt
+    is its own FlowExec beneath it and its own row in the Flow run log. The
+    Task arrives when an attempt succeeds and holds on the edge, stopped,
+    when attempts run out. Agent's defaults, not Jack's: three attempts; no
+    retry when the Flow ended blocked for a person or handed off a landing,
+    or when the task run itself was interrupted. Done when a test shows two
+    failed attempts then a success arriving once with three FlowExecs, and
+    exhausted attempts holding the edge. *Not done.*
+10. **Nodes and edges; Projects have workflows.** Jack, October 6: "it is ok for
+    now to require that each edge is a unique step (flow/skill)": an edge is
+    named by what it runs, edges leaving one node run different things, and
+    edges get no names of their own (slice 9's were removed when it was
+    compressed). First, wherever slice 9
+    left "stage" or "way out", rename to node and edge (Jack, quoted under
+    "Name" in [task-workflow.md](task-workflow.md)), definitions' `stages:`
+    key included. Then: Jack, October 6, quoted under "Projects" in
+    [task-workflow.md](task-workflow.md). Rename the Project's default Flow to
+    its workflow across the plan field, `lf wave update-plan`, status, wire
+    shapes, Desktop's Wave page and docs; a Task's own workflow wins. Done
+    when a Task with none takes its Project's, a Task naming one keeps it, and
+    no surface says "default Flow". *Not done.*
+
+11. **Desktop draws the Workflow as a graph.** Jack, October 6, on the
+    diagram in [pr-review.html](pr-review.html) ("The experience"): "this
+    looks good, lets try to replicate this as a rough structural outline of
+    what the loopflow desktop workflow viewer shows". Today Desktop lists
+    stages with text rows ("→ pursue → demo"). Draw it: `start` and `end` as
+    circles; each stage a box with its name and one line saying what the
+    person does there; one labelled arrow per way out, a loop back drawn as
+    an arc over its stage; the current stage or running edge marked; the ways
+    out of the current stage are the buttons. Reuse the existing Flow graph
+    renderer's drawing code. Agent's addition: a stage's one-line description
+    is an optional field in the definition, else its skill's description.
+    **Layout.** Jack: "we should put the graph side by side with a flow run
+    log. that log should incldue anything run, regardless of what theworkflow
+    was. it is *NOT* a workflow log". The graph sits beside a log of every
+    Flow run in the Task, newest first, each opening to its steps from
+    FlowExec. A run started ad hoc and a run that carried an edge are the
+    same kind of row. The log is not the Workflow's move history and is not
+    filtered or grouped by it. Open: whether a single headless skill Run
+    with no Flow also belongs in that log.
+    Done when the headless Desktop tests render `feature` and a no-PR
+    definition from the shared fixture with the position marked. Demo item:
+    how it looks. *Not done.*
+
+12. **Align Desktop and the store with LOO-382.** Layer 4 of the contract in
+    [task-workflow.md](task-workflow.md). If #1452 has merged, merge main and
+    do all of it: domains and triggers for this PR's tables in the one draft,
+    its store test listing them, Desktop's Workflow and Flow exec log fed by
+    the `task` part, writes followed by `refresh`, and no per-view `lf task
+    status`, `lf flow show` or catalog re-read on activation. If it has not
+    merged, do what does not depend on it (stored state only; Desktop reads
+    confined to one place in `RegistryQuery`) and record the rest as owed to
+    whichever PR lands second. *Not done.*
 
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task
@@ -302,7 +255,7 @@ Clear inherited `LF_*`/`LOOPFLOW_*` before Rust tests. Gate owns the full run.
 
 | Command | Proves |
 | --- | --- |
-| `cargo test -p loopflow --test task_flow_launch_tests` | The entry, `--task` and a worktree launch run in the foreground, leave identical step commands and get identical refusals; a refused launch records no Flow. |
+| `cargo test -p loopflow --test task_flow_launch_tests` | The entry, `--task` and a worktree launch run in the foreground, leave identical step commands and get identical refusals; a refused launch records no Flow. A Workflow's stored position: arrival, a stopped edge chosen again, `task move`, history. |
 | `cargo test -p loopflow --test session_lifecycle_tests` | Against a fake provider answering in prose: decisions from the message contract, correction by `session resume` bounded at three turns, routing, three loop passes under one driver, a blocked decision. |
 | `cargo test -p loopflow --test flow_tests --test flow_discovery_tests` | Flows read back from FlowExec; a killed driver's step stays recorded; a past Flow keeps its launched graph. |
 | `cargo test -p loopflow --test land_tests lf_pr_land_returns` | A Flow stops at a landing its plain `pr land` step left watched. |
@@ -311,11 +264,6 @@ Clear inherited `LF_*`/`LOOPFLOW_*` before Rust tests. Gate owns the full run.
 | `cargo test -p loopflow --lib harness::attention` | Recorded Claude, Codex and OpenCode streams under an injected clock: questions, open tools, hand-back, 120 seconds of quiet, a released driver, choice before paging. |
 | `swift test --filter "DesktopHeadlessTests\|DTOFixtureTests"` (in `swift/`) | The workflow's position and edge Start, a Flow run's graph and steps, Waiting-first order and the Task primary, from the shared fixtures. |
 | `git grep -nE "__flow-step\|FlowStep::\|execute_flow_command"` | No executable path. |
-
-October 5, after compress: the commands above except `land_tests` passed
-(`store::` 181, `session_lifecycle_tests` 17, `flow_tests` 24,
-`flow_discovery_tests` 3, `task_flow_launch_tests` 1, `dto_fixtures` 18);
-all-target Clippy clean. `land_tests` and the full suites are gate's.
 
 Configured demo, still separate: in a private Home, `lf -b task run INF-123
 proof` prints and blocks; `lf monitor` and `lf flow show ID --sessions` show a

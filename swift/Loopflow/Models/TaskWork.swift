@@ -18,15 +18,13 @@ public struct Workflow: Codable, Sendable, Equatable {
     }
 
     public struct Edge: Codable, Sendable, Hashable {
-        /// Set when its Flow alone would not tell it from another way on.
-        public let name: String?
         public let from: String
         public let to: String
         public let flow: String?
 
-        /// What `lf task run ISSUE <name>` takes to choose it: its own name,
-        /// else its Flow, else the stage it enters.
-        public var launchName: String { name ?? flow ?? to }
+        /// What `lf task run ISSUE <name>` takes to choose it: its Flow, or
+        /// the stage it enters when it runs none.
+        public var launchName: String { flow ?? to }
     }
 
     /// One change to the Task's position.

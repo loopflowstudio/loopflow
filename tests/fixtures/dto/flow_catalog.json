@@ -354,19 +354,16 @@
       ],
       "edges": [
         {
-          "name": null,
           "from": "start",
           "to": "demo",
           "flow": "pursue"
         },
         {
-          "name": null,
           "from": "demo",
           "to": "demo",
           "flow": "pursue"
         },
         {
-          "name": null,
           "from": "demo",
           "to": "end",
           "flow": "ship"

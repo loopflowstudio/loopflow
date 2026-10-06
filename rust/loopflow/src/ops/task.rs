@@ -446,21 +446,10 @@ pub fn task_place(
         reason,
         ..
     } = options.clone();
-    // An unknown name is refused before any worktree is placed for it. A
-    // name the Task's Workflow gives an edge is known; the stage decides.
-    if let Some(flow) = flow.as_deref() {
-        let names_edge = block_on_task(async {
-            let store = task_store().await?;
-            let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? else {
-                return Ok(false);
-            };
-            let workflow = store.sqlite.workflow(&task.id).map_err(task_error)?;
-            Ok(workflow.is_some_and(|workflow| {
-                let mut edges = workflow.definition.edges.iter();
-                edges.any(|edge| edge.name() == flow)
-            }))
-        })?;
-        if !names_edge && load_workflow_definition(repo, flow)?.is_none() {
+    // An unknown name is refused before any worktree is placed for it.
+    // `end` may name an edge that runs nothing; the Task's stage decides.
+    if let Some(flow) = flow.as_deref().filter(|flow| *flow != END) {
+        if load_workflow_definition(repo, flow)?.is_none() {
             load_task_flow(repo, flow)?;
         }
     }

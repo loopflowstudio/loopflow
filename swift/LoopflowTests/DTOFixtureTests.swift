@@ -20,7 +20,7 @@ struct DTOFixtureTests {
         let workflow = try #require(work.workflow)
         #expect(workflow.stages.map(\.name) == ["design", "demo"])
         #expect(workflow.edges.last?.flow == nil)
-        #expect(workflow.edges.last?.launchName == "accept")
+        #expect(workflow.edges.last?.launchName == "end")
         #expect(workflow.position == .edge(index: 1, execId: work.flows[0].id, running: true))
         #expect(workflow.outgoing.isEmpty)
         #expect(workflow.history.map(\.kind) == [.tookUp, .chose, .arrived, .chose])

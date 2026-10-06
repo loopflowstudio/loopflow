@@ -460,7 +460,6 @@ fn task_work_preserves_all_owners() {
         asked.session_id.as_deref(),
         Some(work.sessions[0].id.as_str())
     );
-    assert_eq!(workflow.definition.edges[2].name(), "accept");
     assert_eq!(
         serde_json::to_value(work).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()

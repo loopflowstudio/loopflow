@@ -132,9 +132,21 @@ impl Workflow {
         stage == START || stage == END || self.definition.stage(stage).is_some()
     }
 
-    /// The ways out, as a caller would name them.
+    /// The edges leaving the Task's stage, as a caller would name them.
     pub(crate) fn describe_outgoing(&self) -> String {
-        describe_edges(&self.definition, self.stage())
+        let edges: Vec<String> = self
+            .definition
+            .outgoing(self.stage())
+            .map(|(_, edge)| match &edge.flow {
+                Some(flow) => format!("{flow} (to {})", edge.to),
+                None => format!("{} (runs no Flow)", edge.to),
+            })
+            .collect();
+        if edges.is_empty() {
+            "none".to_string()
+        } else {
+            edges.join(", ")
+        }
     }
 
     /// One line for text status.
@@ -199,25 +211,6 @@ impl Workflow {
 
 fn leaving(definition: &WorkflowDefinition, stage: &str) -> Vec<u32> {
     definition.outgoing(stage).map(|(index, _)| index).collect()
-}
-
-/// The edges leaving `stage`, as a caller would name them.
-pub(crate) fn describe_edges(definition: &WorkflowDefinition, stage: &str) -> String {
-    let edges: Vec<String> = definition
-        .outgoing(stage)
-        .map(|(_, edge)| match &edge.flow {
-            Some(flow) if edge.name() != flow => {
-                format!("{} (runs {flow}, to {})", edge.name(), edge.to)
-            }
-            Some(flow) => format!("{flow} (to {})", edge.to),
-            None => format!("{} (runs no Flow)", edge.name()),
-        })
-        .collect();
-    if edges.is_empty() {
-        "none".to_string()
-    } else {
-        edges.join(", ")
-    }
 }
 
 #[cfg(test)]

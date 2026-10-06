@@ -259,7 +259,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
         updated_at: now,
     };
     store
-        .insert_task(&stale_task, &stale_pr)
+        .insert_task(stale_task.clone(), &stale_pr, false)
         .expect("seed orphaned Task");
     if abandon_stale_project {
         let stale_work = store

@@ -37,7 +37,7 @@ impl Store {
         let task = task.clone();
         let pr = pr.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.insert_task(&task, &pr)
+            store.insert_task(task, &pr, false)
         })
         .await
     }
@@ -51,7 +51,7 @@ impl Store {
         let task = task.clone();
         let pr = pr.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.insert_task_with_worktree(&task, &pr)
+            store.insert_task(task, &pr, true)
         })
         .await
     }
@@ -324,13 +324,10 @@ impl Store {
     ) -> StoreResult<TaskEvent> {
         let task_id = task_id.clone();
         let kind = kind.clone();
-        let write_task_id = task_id.clone();
-        let write_kind = kind.clone();
-        let event = run_sqlite(&self.sqlite, move |store| {
-            store.append_task_event(&write_task_id, &write_kind)
+        run_sqlite(&self.sqlite, move |store| {
+            store.append_task_event(&task_id, &kind)
         })
-        .await?;
-        Ok(event)
+        .await
     }
 
     pub async fn task_events_after(
@@ -390,13 +387,10 @@ impl Store {
     ) -> StoreResult<ProjectEvent> {
         let project_id = project_id.clone();
         let kind = kind.clone();
-        let write_project_id = project_id.clone();
-        let write_kind = kind.clone();
-        let event = run_sqlite(&self.sqlite, move |store| {
-            store.append_project_event(&write_project_id, &write_kind)
+        run_sqlite(&self.sqlite, move |store| {
+            store.append_project_event(&project_id, &kind)
         })
-        .await?;
-        Ok(event)
+        .await
     }
 
     pub async fn project_events_after(

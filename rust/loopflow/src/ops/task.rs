@@ -1001,11 +1001,10 @@ fn create_prepared_task(
             &task.worktree,
             "Task checkout",
         )?;
-        let registration = store
-            .create_task_with_worktree(&task, &pr, Some(acquisition.clone()))
-            .await;
-        drop(acquisition);
-        match registration {
+        match store
+            .create_task_with_worktree(&task, &pr, Some(acquisition))
+            .await
+        {
             Ok(accepted) => {
                 task = accepted;
                 if let Some(direction) = directive.as_deref() {

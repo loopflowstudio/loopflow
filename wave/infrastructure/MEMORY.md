@@ -227,47 +227,23 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Installed worker recovery (2026-10-02 PDT)
+## Installed worker recovery (curated 2026-10-05)
 
-Jack Heart authorized recovery of blocked workers and publication/installation
-of the prepared patch. [PR #1415](https://github.com/loopflowstudio/loopflow/pull/1415)
-merged as bfc681ee8; [v0.12.32](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.32)
-published from 8c72e591e78a68227255fd86bfff6a939ded5e8b after release
-[workflow 37099938065](https://github.com/loopflowstudio/loopflow/actions/runs/37099938065).
-The published installer promoted CLI/app after preflight recognized the existing
-Home exactly, with all 33 executable references resolving and no migration.
-GitHub's API identified v0.12.32 while its public latest redirect still selected
-v0.12.31; the checksum-verified published installer with --version v0.12.32
-completed installation. No source build was promoted or runtime data hand-edited.
+Jack Heart authorized the October 2 recovery and published installation of
+v0.12.32. Exact PR, workflow, installer and identity-preservation evidence remains
+at `596572efc19f305df8abf5ed0bdacdc44468fe1c:wave/infrastructure/MEMORY.md`
+under “Installed worker recovery”. LOO-367 resumed its saved Flow; historical
+unowned Execs no longer blocked it, while current ownership still did. LOO-285's
+resumption supplied neither cross-segment acceptance nor automatic settlements.
+October 4's operator acceptance above supersedes LOO-295's pending proof and
+LOO-292's review wait.
 
-Installed readback confirms LOO-367 resumed the same saved Flow, passed
-loop-decide and entered implementation iteration 1. Historical unowned Execs no
-longer block resumption; actual current process/Session/Flow ownership still does.
-LOO-285's integrated CI-repair child ownership fix passed focused tests and its
-saved Flow resumed beyond sync. Cross-segment continuation implementation and
-the two distinct automatic settlements remain, including retained telemetry
-failures; this operator-triggered release supplies none of that automatic proof.
-LOO-292 retains its demo review. LOO-370 owns retired Run-name cleanup.
-
-LOO-295's installed association and eight-file preservation evidence remain at
-`49ab053e7:wave/infrastructure/MEMORY.md` under this heading. October 4's
-operator acceptance above supersedes its then-unresolved continuation proof.
-
-A separate retained-data defect remains: `invalid stored landing placement: home`
-from store/sqlite/pr_landings.rs::map_landing fails repository reconciliation,
-including after LOO-295's successful association, and degrades the CI watcher.
-It also interrupted release settlement after #1417 merged. Supported re-entry
-recognized that existing merge and completed the same v0.12.32; no manual
-record/ref/worktree deletion occurred. The old placement reader/migration needs
-repair with preserved ownership evidence. This is not an empty/healthy backlog.
-
-Jack questioned serial releases. The operator committed to collecting further
-recovery defects into one repair batch, with installed-state preflight, instead
-of starting another immediate release for each discovery; this is an operating
-adjustment, not a claim that Jack approved a new release policy.
-
-Checks: PR and merge-queue CI, candidate workflow and publisher passed; installed
-LOO-367 progression and LOO-295 association/file-preservation readback passed.
+The retained `invalid stored landing placement: home` defect degraded repository
+reconciliation and interrupted release settlement. Supported re-entry recognized
+an existing merge and completed the same release without deleting records or
+worktrees. LOO-373 owns repair; Release memory retains its later recovery evidence.
+Collect related recovery defects into one repair batch with installed-state
+preflight; the operator's adjustment was not a new release policy approved by Jack.
 
 ## Optional chapters and Task workflows (2026-10-02)
 
@@ -310,12 +286,14 @@ ownership under the lock; delayed absence compares the queried revision/age.
 Inspection follows UUID across renames. Cancellation proofs exclude competing
 reteam preview until commit; separate apply fixtures cover cached recovery and
 expansion/move/narrowing response loss. These supersede the unrepaired-reteam
-finding, not registration/start fencing or installed acceptance.
+finding; the registration and rotation proofs below establish later boundaries,
+not installed acceptance.
 
 Created-successor retry retains Task/PR/Flow identity but rejects
 `A — next` and `A — previous`. Recovery needs shared binding and exact-ID
-transitions; restoring name stripping would violate Jack Heart’s policy. Relationship serialization and membership fencing
-remain before selection, ensure and rotation. Desktop activation
+transitions; restoring name stripping would violate Jack Heart’s policy.
+Relationship serialization and membership fencing are implemented below;
+configuration-switch recovery remains unproved. Desktop activation
 must preserve #1447's cached plans and independent Session reads, outside polling.
 #1446's ongoing procedures retain started-Task follow-through; reads never provision.
 Installed and configured acceptance remain unproved.
@@ -327,7 +305,8 @@ its Flow workspace and bound Task root too. Exclusion/retry regressions pass. CI
 repair acquires its explicit Task root at its outer boundary, without reacquiring
 inside reservation; its operation-entry proof remains open. Task-bound Flow cwd
 already derives from the Task, so claims and review reservation need no second
-path owner. Rotation exclusion and configured readiness remain unproved.
+path owner. The later rotation proof below establishes exclusion and failed-reset
+retry; configured readiness remains unproved.
 
 Collection preserves issue-reported ownership; listing Project IDs cannot override
 it. October 5’s failing loopback regression prompted removal; installed acceptance
@@ -352,6 +331,8 @@ remain at `be36cde18:wave/infrastructure/MEMORY.md`. Git leases remain separate.
 October 5 source now returns the inserted Task from registration and uses it for
 publication, checkout finishing and execution. Existing accepted issue facts win
 transactionally, preserving their own acquisition age and reserved placement.
+Both registration APIs now share one insertion transaction, including optional
+initialization evidence and committed readback; downstream effects use that Task.
 Initial supplied facts remain usable without an accepted observation; the old
 Started-count Project selector still awaits shared configured identity.
 
@@ -411,7 +392,8 @@ gap after the October 2 installed routing checks.
 ## Worktree listing and fenced dispatch (LOO-375, 2026-10-05)
 
 Jack Heart reported `lf wt list` at 44 s, 17 s after a deadlocked writer was
-killed. PR 1 shipped in v0.13.3; PR 2 is branch evidence. Numbers and method:
+killed. PR 1 shipped in v0.13.3; PR 2 merged as #1444 (`022a248df`)
+and is integrated here. Installed timing remains unproved. Numbers and method:
 [report](../../scripts/benchmarks/wt-list/README.md).
 
 - **Process count, not Git work, was the listing cost** (PR 1): about 370 serial

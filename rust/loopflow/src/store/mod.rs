@@ -1650,6 +1650,14 @@ mod tests {
             assert_eq!(accepted, expected);
             assert_eq!(store.get_task(&task.id).await.unwrap(), Some(expected));
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
+            let events = store.task_events_after(&task.id, 0).await.unwrap();
+            assert_eq!(events.len(), usize::from(initializing));
+            if initializing {
+                assert!(matches!(
+                    events[0].kind,
+                    TaskEventKind::WorktreeInitializing { .. }
+                ));
+            }
             assert!(!store.task_started(&task.id).await.unwrap());
         }
     }

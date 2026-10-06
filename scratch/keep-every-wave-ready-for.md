@@ -132,34 +132,24 @@ Wave acceptance.
 
 ## Remaining coherent cut
 
-Earlier acquisition/admission repairs and their 13-test checkpoint remain at
-`972a253559:scratch/keep-every-wave-ready-for.md`.
+Registration selects accepted issue ownership, content and acquisition age within
+its insertion transaction, rejecting invalid, removed or terminal observations.
+Both public APIs return the committed Task for publication, checkout finishing and
+execution. They now share one SQLite insertion path, including admission, optional
+initialization event and readback. The queued writer receives the existing Wave
+guard by ownership; cancellation cannot release it before commit. Planning is accepted
+into that owned Task without another full Task copy. Reserved Task/PR/
+checkout identity and initial facts without a cached observation remain intact.
 
-Registration now selects an existing accepted issue observation inside its insertion
-transaction, including ownership, invalidation/removal, terminal state and the
-issue's own acquisition time. Both APIs return the inserted Task read through the
-normal row mapper; publication, checkout finishing and optional execution use that
-result. Reserved Task/PR/checkout identity remains intact. Initial supplied facts
-remain usable when no accepted issue observation exists. The Started-count selector
-still awaits replacement by shared configured identity in step 3.
-
-Rotation acquires all participating Wave locks, enumerates their Task roots and
-acquires one canonical checkout lock set before provider classification. Exact
-Task roots remain distinct from workspace-to-Git-root resolution. `PlanningLocks`
-retains those locks in queued SQLite workers after caller cancellation. Failed
-rotation releases exclusion so ordinary starts and recovery can proceed.
-Automatic backlog cancellation and `retire_chapter_backlog` are deleted, including
-their exclusive retirement test. Unreviewed backlog stays historical; an unresolved
-prior abandonment requires explicit settlement. No selector or name heuristic was
-extended. Focused registration, both rotation/start orderings, failed-reset retry,
-queued cancellation and backlog-preservation regressions pass.
-
-Hierarchical admission repaired both missing-root orderings and preserves sibling
-progress; the population scan is deleted. **Preservation boundary** below owns the
-remaining lock contract. Earlier failures and detailed evidence remain at
-`1981e4e7a7d808c5b05015ea088e98784c00f5e6:scratch/keep-every-wave-ready-for.md`
-and `44fe36620:scratch/keep-every-wave-ready-for.md`. Git leases and admission are
-separate; these store proofs establish neither rotation recovery nor readiness.
+Rotation takes ordered Wave locks, enumerates exact Task roots and acquires one
+checkout lock set before classification. Queued writers retain both scopes through
+commit. Failed reset releases exclusion so starts can retry. Automatic backlog
+cancellation is deleted; unreviewed backlog remains historical and unresolved
+abandonment needs explicit settlement. Hierarchical admission covers missing roots
+without scanning Task population and permits sibling progress. Git leases remain
+separate. Detailed registration, rotation and admission evidence remains at
+`7e7204ddad0092beb1a633676f5d44af0853a9a8:scratch/keep-every-wave-ready-for.md`.
+These proofs establish neither configuration-switch recovery nor readiness.
 
 The branch is not releasable. Steps 3–7 still own shared binding, exact-ID ensure,
 transition recovery, KR-first rotation, Desktop and configured
@@ -230,7 +220,7 @@ SQLite; acquisition time does not order provider revisions.
   `find_project` now requests the previously omitted provider revision.
   Existing-successor interruption/re-entry preserves Task/PR/Flow identity. Created
   successor recovery still fails under the old name selector; see the sequencing
-  correction below. Cancellation/backlog policy remains a deletion target.
+  correction below. Automatic backlog cancellation is deleted.
 - Reteam accepts full exact issue readbacks after both moves and identifier
   reconciliation. Its SQL Team reconciler preserves independent entity revisions
   and timestamps and never authorizes Initiative replacement. Expansion and
@@ -275,12 +265,10 @@ The two-Wave backlog proof also failed on `A — previous, B — previous`. Its 
 fixture now uses matching predecessor names to isolate preservation; differing-name
 rotation remains unproved and requires the planned selector replacement.
 
-The rejected global fence's 31-test pass does not apply to this tree. The retained preservation reader reuses shared Session
-membership and started mechanical Flow history, including checkout-associated
-work without Started or attribution changes. Inspection Execs and an unexecuted
-Flow alone do not count. Its earlier tests prove membership; the new operation regression covers rotation exclusion.
-No new product decision is required. Shared binding, ensure, KR-first rotation,
-Desktop and installed Intelligence repair remain unfinished.
+The rejected global fence’s 31-test pass does not apply to this tree. The
+preservation reader and its operation proof are described below. Inspection Execs
+and unexecuted Flows do not count as started work. Shared binding, ensure, KR-first
+rotation, Desktop and installed Intelligence repair remain unfinished.
 
 ### Preservation boundary — October 5
 
@@ -748,6 +736,8 @@ rotation remain. Keep this one delivery boundary.
   remains local; behavioral updates use accepted observations.
 - Deleted: `project_params` and `task_params`, allocating parameter builders left
   behind by the generic update APIs; each insertion binds values beside its SQL.
+- Deleted: SQLite's separate `insert_task_with_worktree` transaction; both public
+  registration APIs use one insertion path, with an optional initialization event.
 - Deleted: `create_task_work`'s duplicate Task lookup/insert and fallback identity.
   Registration inserts the Task once; `inherit_task_placement` only inherits its
   Project placement in the same transaction.
@@ -836,10 +826,11 @@ native providers and configured accounts from being launched by synthetic tests.
   `global_commands::installation_reaches_candidate_verdict_with_an_unreadable_task_registry`
   and `exec_ownership_tests::early_observation_records_preflight_and_screenshot_child_ancestry`.
   Installation preflight/promotion resolves the OS account Home through `getpwuid`;
-  changing HOME/LF_HOME still copies the live database. PR #1444 moves the unchanged
-  assertions to `scripts/test_task_installation.py` under a disposable OS account.
-  Reuse that repair after integration; until then these proofs belong to isolated
-  CI. Preserve the checks and production Home authority. None ran in this pass.
+  changing HOME/LF_HOME still copies the live database. Integrated PR #1444
+  (`022a248df`, included by merge `596572efc`) marks these tests ignored in the
+  regular suite and registers them in `scripts/test_task_installation.py` under
+  a disposable OS account. Gate/CI retains that harness; the source change proves
+  isolation routing, not successful execution. None ran in this reconciliation.
 - Configured acceptance remains required after implementation: use explicitly
   designated fixture Waves for absent, ordinary Backlog/current and reopening
   scenarios, record provider UUID/status plus Task identities, and demonstrate
@@ -879,7 +870,12 @@ permanent Project IDs. Keep recovery receipts confined to mutation recovery;
 provider status/content and configured selection retain their respective owners.
 
 #1451's pending-version behavior retains the name-cutover fixture's same-batch
-boundary; no release-tree gate ran here.
+boundary; no release-tree gate ran here. Merge `596572efc` also includes the
+v0.13.4 version preparation at `99aa64dbd`; this is source integration, not
+publication or installation evidence. Release's child memory retains manual
+v0.13.3 verification and unresolved unattended settlements. Its operation-entry
+recovery lesson still applies to ensure and rotation: helper/store proofs do not
+establish recovery across the configuration switch.
 
 Checkout admission now lives in `store/sqlite/admission.rs`, shared by registration,
 Sessions, Flows and CI repair. Path modes accumulate directly in the ordered map;
@@ -894,4 +890,4 @@ Reteam's retained compression and earlier check evidence remain at
 `3555375af:scratch/keep-every-wave-ready-for.md`; its full preflight, exact readbacks
 and cancellation-safe acceptance remain required.
 
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4`, `cargo fmt`, `cargo clippy --all-targets --jobs 4 -- -D warnings` passed; isolated `scripts/test_network.py <lib-test> <filter> --test-threads=1` passed 13 tests across `registration_`, `cancelled_projection`, `rotation_excludes_checkout_starts`, `rotation_persists_confirmed_transfer`, `unreviewed_backlog`, `unresolved_abandonment`; gate retains full affected suites, CI repair and configured acceptance.
+Checks: reconciliation `git diff --check` passed; prior results retained without rerun: `cargo test -p loopflow --lib --no-run --jobs 4`, `cargo fmt`, `cargo clippy --all-targets --jobs 4 -- -D warnings` passed; isolated `scripts/test_network.py <lib-test> <filter> --test-threads=1` passed 13 tests across `registration`, `missing_root_exclusion`, `cancelled_projection`, `rotation_excludes_checkout_starts`; gate retains full affected suites, CI repair and configured acceptance. Earlier checks remain at `7e7204ddad:scratch/keep-every-wave-ready-for.md`.

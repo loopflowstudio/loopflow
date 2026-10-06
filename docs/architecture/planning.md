@@ -127,10 +127,10 @@ last-good facts, and blocks managed readers. Replaying a list or detail does not
 clear that uncertainty. Explicit reteam reconciles the exact confirmed Team set
 under acquisition ownership; it cannot reconcile a changed Initiative.
 
-Chapter rollover transfers unfinished work and settles backlog before completing
-each predecessor Project in Linear. It confirms provider completion before recording
-the Project. Closing the Project does not complete transferred Tasks or change
-historical KR results. Current Project selection follows provider status.
+Chapter rollover transfers started work and retains unreviewed backlog in its
+predecessor Project before completing that Project in Linear. It confirms provider
+completion before recording the Project. Closing it neither completes transferred
+Tasks nor changes historical KR results. Current Project selection follows provider status.
 
 The planning store can retain explicit archival acknowledgements. Integrating
 archival into the provider-backed chapter operation and preserving old acknowledgements

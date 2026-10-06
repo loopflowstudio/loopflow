@@ -871,7 +871,7 @@ mod durable_store_tests {
             created_at: now,
             updated_at: now,
         };
-        store.insert_task(&task, &pr).unwrap();
+        store.insert_task(task.clone(), &pr, false).unwrap();
         (dir, store, task_id)
     }
 
@@ -1331,13 +1331,7 @@ mod durable_store_tests {
             let mut earlier = unpublished_conversation(None, None, 1);
             earlier.cwd = cwd;
             earlier.work_source = None;
-            let register = || {
-                if initializing {
-                    store.insert_task_with_worktree(&task, &pr)
-                } else {
-                    store.insert_task(&task, &pr)
-                }
-            };
+            let register = || store.insert_task(task.clone(), &pr, initializing);
             assert!(register().is_err());
             assert!(store.task(&task.id).unwrap().is_none());
             assert!(store.task_prs(&task.id).unwrap().is_empty());
@@ -1367,7 +1361,7 @@ mod durable_store_tests {
         assert!(store.session(&conversation.id).unwrap().is_none());
         drop(exclusion);
         let session = store.create_session(conversation, None, None).unwrap();
-        store.insert_task_with_worktree(&task, &pr).unwrap();
+        store.insert_task(task.clone(), &pr, true).unwrap();
         assert_eq!(
             store.session_task_ids(&session.id).unwrap(),
             vec![task.id.clone()]
@@ -1385,7 +1379,7 @@ mod durable_store_tests {
         let _unrelated = store
             .lock_checkout(&dir.path().join("unrelated-checkout/missing/src"))
             .unwrap();
-        store.insert_task_with_worktree(&task, &pr).unwrap();
+        store.insert_task(task.clone(), &pr, true).unwrap();
         assert_eq!(
             store.task(&task.id).unwrap().unwrap().worktree,
             task.worktree
@@ -1405,13 +1399,7 @@ mod durable_store_tests {
             conversation.work_source = None;
             let session = store.create_session(conversation, None, None).unwrap();
             let exclusion = store.lock_checkout(&task.worktree).unwrap();
-            let register = || {
-                if initializing {
-                    store.insert_task_with_worktree(&task, &pr)
-                } else {
-                    store.insert_task(&task, &pr)
-                }
-            };
+            let register = || store.insert_task(task.clone(), &pr, initializing);
             assert!(register().is_err());
             assert!(store.task(&task.id).unwrap().is_none());
             assert!(store.task_prs(&task.id).unwrap().is_empty());

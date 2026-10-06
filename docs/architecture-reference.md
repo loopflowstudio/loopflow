@@ -293,7 +293,11 @@ it cannot settle an independent Flow by completing its Task. `lf flow end` ends
 one stopped Flow by request: no step result is invented, and its failure,
 Sessions and Execs remain. A review whose Flow ended awaits no one. An Exec or
 provider turn that began before the machine's last boot has exited; live or
-unknown execution since then still blocks. Passive membership grants no control.
+unknown execution since then still blocks by default. Explicit Task-history
+acceptance can release completion for exact historical Execs lacking process
+receipts and current Session/Flow owners. Completion rechecks those conditions;
+the Exec outcome stays unknown, and cleanup, admission and process control do
+not consume that acceptance. Passive membership grants no control.
 Template composition compiles into the graph.
 One started Flow is one FlowSession; loop passes are node/iteration positions and
 lenses over its history. They have no separate claim or lifecycle. Captured

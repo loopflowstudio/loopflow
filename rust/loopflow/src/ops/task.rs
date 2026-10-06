@@ -3972,8 +3972,13 @@ pub(crate) fn find_discardable_task_successor(repo: &Path) -> OpsResult<Option<S
     })
 }
 
-/// Complete planning-only work without allocating execution placement.
-pub fn task_complete(repo: &Path, issue: &str, summary: String) -> OpsResult<Option<Task>> {
+/// Complete delivered work, without allocating placement for planning-only Tasks.
+pub fn task_complete(
+    repo: &Path,
+    issue: &str,
+    summary: String,
+    accept_unknown_exec: &[crate::id::ExecId],
+) -> OpsResult<Option<Task>> {
     let summary = summary.trim().to_string();
     if summary.is_empty() {
         return Err(task_error("completion summary cannot be empty"));
@@ -3986,13 +3991,22 @@ pub fn task_complete(repo: &Path, issue: &str, summary: String) -> OpsResult<Opt
             .map_err(task_error)
     })?;
     if registered.is_some() {
-        return complete_task(issue, summary).map(Some);
+        return complete_task(issue, summary, accept_unknown_exec).map(Some);
+    }
+    if !accept_unknown_exec.is_empty() {
+        return Err(task_error(
+            "historical Exec acceptance requires a placed Task",
+        ));
     }
     block_on_task(super::pm::complete_planning_task(repo, issue, &summary))?;
     Ok(None)
 }
 
-fn complete_task(issue: &str, summary: String) -> OpsResult<Task> {
+fn complete_task(
+    issue: &str,
+    summary: String,
+    accept_unknown_exec: &[crate::id::ExecId],
+) -> OpsResult<Task> {
     block_on_task(async move {
         let store = task_store().await?;
         let mut task = store
@@ -4027,13 +4041,20 @@ fn complete_task(issue: &str, summary: String) -> OpsResult<Task> {
                 "Task worktree has uncommitted changes; publish or explicitly abandon them first",
             ));
         }
+        // Task history also carries placement initialization. Do not let a new
+        // acceptance event hide that unfinished placement from the gate.
+        if !accept_unknown_exec.is_empty() {
+            if let Some(blocker) = task_worktree_blocker(&store, &task).await? {
+                return Err(task_error(blocker.reason));
+            }
+        }
+        lifecycle::accept_historical_uncertainty(&store, &task, accept_unknown_exec, &summary)?;
         // The completion gate requires every active PR to be settled. Do not
         // bypass that fact or infer merge from a green head.
         let gate = task_completion_gate(&store, &task).await?;
         if let Some(refusal) = gate.refusal(&task.plan.identifier) {
-            // Nothing has been written. A refusal leaves a discardable
-            // successor active, so the Task keeps its PR and no rotation is
-            // provoked.
+            // Explicit historical acceptance survives retry. A refusal leaves
+            // delivery state unchanged, including any discardable successor.
             return Err(task_error(refusal));
         }
         reconcile_pm_writeback(&store, &mut task, None).await?;
@@ -4247,7 +4268,7 @@ pub(crate) async fn task_completion_gate(
     }
 
     gate.blockers
-        .extend(lifecycle::associated_work_blockers(store, task)?);
+        .extend(lifecycle::completion_work_blockers(store, task)?);
 
     // Work committed past the tip GitHub merged is owned by no PR; completing
     // would strand it outside the Task. Only the newest PR can still hold it: a
@@ -5882,6 +5903,171 @@ mod tests {
     }
 
     #[test]
+    fn accepted_historical_uncertainty_completes_without_releasing_execution_protection() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = runtime.block_on(task_fixture_at("ACCEPT-HISTORY", repo.path().into()));
+        let mut pr = runtime
+            .block_on(fixture.store.task_prs(&fixture.task.id))
+            .unwrap()
+            .remove(0);
+        repo.create_branch(&pr.branch);
+        pr.base_commit = repo.head_sha();
+        runtime
+            .block_on(fixture.store.heal_task_pr_base(&pr))
+            .unwrap();
+
+        let exec = crate::exec::Exec {
+            id: crate::id::ExecId::new(),
+            trace_id: crate::id::TraceId::new(),
+            parent_exec_id: None,
+            via_agent: None,
+            caller_session_id: None,
+            caller_provider_generation: None,
+            command: Some("historical diagnostic".into()),
+            repo: None,
+            cwd: Some(repo.path().to_string_lossy().into_owned()),
+            started_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+            completed_at: None,
+            outcome: None,
+            exit_code: None,
+            signal: None,
+            error: None,
+        };
+        fixture.store.sqlite.record_exec(&exec).unwrap();
+        let gate = || {
+            runtime
+                .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
+                .unwrap()
+        };
+        let accept = |ids: &[crate::id::ExecId]| {
+            super::lifecycle::accept_historical_uncertainty(
+                &fixture.store,
+                &fixture.task,
+                ids,
+                "Jack Heart accepted this historical uncertainty",
+            )
+        };
+        assert!(!gate().satisfied);
+        assert!(accept(&[crate::id::ExecId::new()]).is_err());
+        accept(std::slice::from_ref(&exec.id)).unwrap();
+        accept(std::slice::from_ref(&exec.id)).unwrap();
+        let events = fixture
+            .store
+            .sqlite
+            .task_events_after(&fixture.task.id, 0)
+            .unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event.kind,
+                    TaskEventKind::HistoricalUncertaintyAccepted { .. }
+                ))
+                .count(),
+            1
+        );
+        assert!(gate()
+            .blockers
+            .iter()
+            .all(|reason| !reason.contains(exec.id.as_str())));
+        assert!(
+            !gate().satisfied,
+            "acceptance cannot settle an unpublished PR"
+        );
+        pr.abandoned_at = Some(time::OffsetDateTime::now_utc());
+        runtime
+            .block_on(fixture.store.settle_task_pr(&pr, None))
+            .unwrap();
+        assert!(gate().satisfied);
+
+        // An exact acceptance never hides a different unfinished Exec.
+        let mut other = exec.clone();
+        other.id = crate::id::ExecId::new();
+        fixture.store.sqlite.record_exec(&other).unwrap();
+        assert!(gate()
+            .blockers
+            .iter()
+            .any(|reason| reason.contains(other.id.as_str())));
+        other.completed_at = Some(other.started_at + 1);
+        other.outcome = Some("succeeded".into());
+        other.exit_code = Some(0);
+        fixture.store.sqlite.record_exec(&other).unwrap();
+
+        // Current Session ownership blocks even after acceptance was recorded.
+        let session = fixture.store.sqlite.test_session(
+            "accept-current-session",
+            &crate::session_record::new_artifact_key(),
+        );
+        fixture
+            .store
+            .sqlite
+            .claim_session_driver(&session.id, None, &exec.id, true)
+            .unwrap();
+        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET cwd=?1,interactive=1 WHERE id=?2",
+            rusqlite::params![repo.path().to_str().unwrap(), session.id],
+        )
+        .unwrap();
+        assert!(accept(std::slice::from_ref(&exec.id)).is_err());
+        assert!(!gate().satisfied);
+        conn.execute(
+            "UPDATE agent_sessions SET completed_at=2 WHERE id=?1",
+            [&session.id],
+        )
+        .unwrap();
+        assert!(gate().satisfied);
+
+        // A later receipt keeps an observed live process protected.
+        let root = ledger.home().join(crate::journal::EXEC_PROCESS_ROOT);
+        std::fs::create_dir_all(&root).unwrap();
+        let pid = std::process::id();
+        let receipt = crate::journal::ExecProcessReceipt {
+            schema_version: 1,
+            trace_id: exec.trace_id.to_string(),
+            exec_id: exec.id.to_string(),
+            pid,
+            started_at: crate::journal::process_started_at(pid).unwrap().unwrap(),
+        };
+        let path = root.join(format!("{}.json", exec.id));
+        std::fs::write(&path, serde_json::to_vec(&receipt).unwrap()).unwrap();
+        assert!(accept(std::slice::from_ref(&exec.id)).is_err());
+        assert!(!gate().satisfied);
+        std::fs::remove_file(path).unwrap();
+        assert!(gate().satisfied);
+        assert!(
+            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .iter()
+                .any(|reason| reason.contains(exec.id.as_str()))
+        );
+        assert!(crate::ops::task_automation::admission_blocker(
+            &fixture.store.sqlite,
+            &fixture.task.id,
+            false,
+            None
+        )
+        .unwrap()
+        .is_some());
+        runtime
+            .block_on(fixture.store.complete_task(&fixture.task, None))
+            .unwrap();
+        runtime
+            .block_on(super::cleanup_completed_task(&fixture.store, &fixture.task))
+            .unwrap();
+        assert!(repo.path().exists());
+        assert_eq!(
+            runtime
+                .block_on(super::task_work_status(&fixture.store, &fixture.task))
+                .unwrap(),
+            WorkStatus::Done
+        );
+        assert_eq!(fixture.store.sqlite.exec(&exec.id).unwrap(), Some(exec));
+    }
+
+    #[test]
     fn task_work_recovery_keeps_history_without_treating_it_as_execution_authority() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -6895,7 +7081,7 @@ time.sleep(30)
         let caller = directory.path().to_path_buf();
         let identifier = fixture.task.plan.identifier.clone();
         let snapshot = tokio::task::spawn_blocking(move || {
-            let retried = super::task_complete(&caller, &identifier, "Retry cleanup".into())
+            let retried = super::task_complete(&caller, &identifier, "Retry cleanup".into(), &[])
                 .unwrap()
                 .unwrap();
             super::task_snapshot(&retried).unwrap()

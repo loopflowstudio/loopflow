@@ -84,6 +84,7 @@ fn prepare_pr(
                 &repo_root,
                 &issue,
                 "Completed over its merged pull request".to_string(),
+                &[],
             )?;
             progress.status("Completed Task over its merged pull request.");
             return Ok(None);

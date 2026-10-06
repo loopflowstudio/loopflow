@@ -1119,8 +1119,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
         TaskCommand::Complete {
             issue,
             summary,
+            accept_unknown_exec,
             json,
-        } => match loopflow::ops::task::task_complete(repo, issue, summary.clone())? {
+        } => match loopflow::ops::task::task_complete(
+            repo,
+            issue,
+            summary.clone(),
+            accept_unknown_exec,
+        )? {
             Some(task) => print_task(&task, *json),
             None => {
                 let resolved = loopflow::ops::pm::pm_resolve_task(repo, issue)?;

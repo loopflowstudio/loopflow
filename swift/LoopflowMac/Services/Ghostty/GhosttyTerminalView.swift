@@ -208,55 +208,6 @@ enum GhosttyTerminalPadding {
     static let y: CGFloat = 8
 }
 
-/// The directory line above a command. The Loopflow prompt prints it as
-/// concealed terminal text, so it scrolls, reflows and survives with its rows;
-/// the overlay reads it back and draws it smaller and dimmer than the command.
-enum GhosttyBlockHeader {
-    /// Starts a header row. Nothing a person types begins a prompt row with it.
-    static let marker = "\u{B6} "
-    /// The prompt truncates the directory to this many characters.
-    static let maxLength = 60
-    /// Columns read from each candidate row.
-    static let columns = marker.count + maxLength
-
-    /// Smaller than the terminal's 13pt body.
-    static let fontSize: CGFloat = 11
-    static let color = NSColor(TerminalPalette.dim)
-
-    /// The header a terminal row holds, or `nil` for any other row.
-    static func text(inRow row: String) -> String? {
-        guard row.hasPrefix(marker) else { return nil }
-        let text = row.dropFirst(marker.count).trimmingCharacters(in: .whitespaces)
-        return text.isEmpty ? nil : text
-    }
-
-    /// Viewport rows that can hold a header: a block's first two rows (its
-    /// first row when the blank row above scrolled away) and every row outside
-    /// a completed block, where the live prompt and empty prompts sit.
-    static func candidateRows(blocks: [GhosttyCommandBlockLayout], rows: Int) -> [Int] {
-        (0..<rows).filter { row in
-            guard let block = blocks.first(where: { $0.contains(row) }) else { return true }
-            return row <= block.startRow + 1
-        }
-    }
-}
-
-/// A completed shell command as Ghostty reports it: viewport rows, the exit
-/// status the shell gave, and whether it is the terminal's selected block.
-struct GhosttyCommandBlockLayout: Equatable {
-    let startRow: Int
-    let endRow: Int
-    /// `nil` when the shell reported no status; never drawn as a failure.
-    let exitCode: Int?
-    let selected: Bool
-
-    var failed: Bool { (exitCode ?? 0) > 0 }
-
-    func contains(_ row: Int) -> Bool {
-        startRow...endRow ~= row
-    }
-}
-
 func ghosttyViewportRow(
     at point: CGPoint,
     bounds: CGRect,
@@ -1367,6 +1318,58 @@ struct GhosttyTerminalView: View {
 }
 
 #endif
+
+// Block geometry and the header format stay outside the Ghostty build: the
+// shell bootstrap below names the header marker in every configuration.
+
+/// The directory line above a command. The Loopflow prompt prints it as
+/// concealed terminal text, so it scrolls, reflows and survives with its rows;
+/// the overlay reads it back and draws it smaller and dimmer than the command.
+enum GhosttyBlockHeader {
+    /// Starts a header row. Nothing a person types begins a prompt row with it.
+    static let marker = "\u{B6} "
+    /// The prompt truncates the directory to this many characters.
+    static let maxLength = 60
+    /// Columns read from each candidate row.
+    static let columns = marker.count + maxLength
+
+    /// Smaller than the terminal's 13pt body.
+    static let fontSize: CGFloat = 11
+    static let color = NSColor(TerminalPalette.dim)
+
+    /// The header a terminal row holds, or `nil` for any other row.
+    static func text(inRow row: String) -> String? {
+        guard row.hasPrefix(marker) else { return nil }
+        let text = row.dropFirst(marker.count).trimmingCharacters(in: .whitespaces)
+        return text.isEmpty ? nil : text
+    }
+
+    /// Viewport rows that can hold a header: a block's first two rows (its
+    /// first row when the blank row above scrolled away) and every row outside
+    /// a completed block, where the live prompt and empty prompts sit.
+    static func candidateRows(blocks: [GhosttyCommandBlockLayout], rows: Int) -> [Int] {
+        (0..<rows).filter { row in
+            guard let block = blocks.first(where: { $0.contains(row) }) else { return true }
+            return row <= block.startRow + 1
+        }
+    }
+}
+
+/// A completed shell command as Ghostty reports it: viewport rows, the exit
+/// status the shell gave, and whether it is the terminal's selected block.
+struct GhosttyCommandBlockLayout: Equatable {
+    let startRow: Int
+    let endRow: Int
+    /// `nil` when the shell reported no status; never drawn as a failure.
+    let exitCode: Int?
+    let selected: Bool
+
+    var failed: Bool { (exitCode ?? 0) > 0 }
+
+    func contains(_ row: Int) -> Bool {
+        startRow...endRow ~= row
+    }
+}
 
 let ghosttyDropTypes: [NSPasteboard.PasteboardType] = [
     .fileURL, .URL, .tiff, .png, .string,

@@ -5,15 +5,15 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-/// The pipes under `lf monitor workspace --watch --json`, driven by stand-in readers.
+/// The pipes under `lf monitor work --watch --json`, driven by stand-in readers.
 @Suite("Workspace reader transport", .serialized)
-struct WorkspaceObservationTransportTests {
+struct WorkObservationTransportTests {
     @Test("Reader startup failure preserves the CLI diagnostic", arguments: [false, true])
     func startupFailure(closesOutputFirst: Bool) async throws {
         let diagnosis = "Selected Home has an incompatible migration frontier"
         let shutdown = closesOutputFirst ? "exec 1>&-; IFS= read -r request; exit 23" : "exit 23"
         let process = shell("printf '%s\\n' '\(diagnosis)' >&2; \(shutdown)")
-        let reader = try LocalWorkspaceObservation.start(process: process, configurationChanged: { false })
+        let reader = try LocalWorkObservation.start(process: process, configurationChanged: { false })
         do {
             for try await _ in reader.frames {
                 Issue.record("Failed reader supplied a frame")
@@ -33,7 +33,7 @@ struct WorkspaceObservationTransportTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         try Data((1...200).map { frame($0) }.joined().utf8).write(to: directory.appendingPathComponent("frames"))
         let process = shell("/bin/cat frames; IFS= read -r request", cwd: directory)
-        let reader = try LocalWorkspaceObservation.start(process: process, configurationChanged: { false })
+        let reader = try LocalWorkObservation.start(process: process, configurationChanged: { false })
         var frames = reader.frames.makeAsyncIterator()
         for expected in 1...200 {
             #expect(try await frames.next()?.sequence == expected)
@@ -61,11 +61,11 @@ struct WorkspaceObservationTransportTests {
             esac
         done
         """, cwd: directory)
-        let reader = try LocalWorkspaceObservation.start(process: process, configurationChanged: { false })
+        let reader = try LocalWorkObservation.start(process: process, configurationChanged: { false })
         var frames = reader.frames.makeAsyncIterator()
         #expect(try await frames.next()?.sequence == 1)
         reader.request(.refresh(id: 1))
-        reader.request(.scope(id: 2, WorkspaceScope(repo: "/src/loopflow", headless: false, task: "LOO-1",
+        reader.request(.scope(id: 2, WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1",
                                                     wave: nil, activity: nil)))
         #expect(try await frames.next()?.sequence == 2)
         #expect(try await frames.next()?.sequence == 3)
@@ -83,7 +83,7 @@ struct WorkspaceObservationTransportTests {
         defer { if survivor.isRunning { survivor.terminate() } }
         // exec preserves the ignored TERM disposition; KILL must be the fallback.
         let process = shell("trap '' TERM; exec /bin/sleep 30")
-        let reader = try LocalWorkspaceObservation.start(process: process, configurationChanged: { false })
+        let reader = try LocalWorkObservation.start(process: process, configurationChanged: { false })
         try await Task.sleep(for: .milliseconds(100))
         let start = ContinuousClock.now
         await reader.cancel()
@@ -96,7 +96,7 @@ struct WorkspaceObservationTransportTests {
     @Test("Silence expires the reading and stops the reader")
     func stalled() async throws {
         let process = shell("exec /bin/sleep 30")
-        let reader = try LocalWorkspaceObservation.start(process: process, configurationChanged: { false })
+        let reader = try LocalWorkObservation.start(process: process, configurationChanged: { false })
         var iterator = reader.frames.makeAsyncIterator()
         do {
             _ = try await iterator.next()
@@ -123,7 +123,7 @@ struct WorkspaceObservationTransportTests {
         // Only the cut-off reader exits; the others stay open after their bad frame.
         let process = shell(kind == "partial-exit" ? "/bin/cat frame" : "/bin/cat frame; IFS= read -r request",
                             cwd: directory)
-        let reader = try LocalWorkspaceObservation.start(process: process, configurationChanged: { false })
+        let reader = try LocalWorkObservation.start(process: process, configurationChanged: { false })
         do {
             for try await _ in reader.frames {
                 Issue.record("Invalid transport supplied a frame")
@@ -146,7 +146,7 @@ struct WorkspaceObservationTransportTests {
         let marker = directory.appendingPathComponent("changed")
         try Data(frame(1).utf8).write(to: directory.appendingPathComponent("frame"))
         let process = shell("/bin/cat frame; IFS= read -r request", cwd: directory)
-        let reader = try LocalWorkspaceObservation.start(process: process, configurationChanged: {
+        let reader = try LocalWorkObservation.start(process: process, configurationChanged: {
             FileManager.default.fileExists(atPath: marker.path)
         })
         var iterator = reader.frames.makeAsyncIterator()
@@ -155,7 +155,7 @@ struct WorkspaceObservationTransportTests {
         do {
             _ = try await iterator.next()
             Issue.record("Configuration change was ignored")
-        } catch { #expect(error is WorkspaceObservationError) }
+        } catch { #expect(error is WorkObservationError) }
         await reader.cancel()
         #expect(!process.isRunning)
     }
@@ -166,7 +166,7 @@ struct WorkspaceObservationTransportTests {
         return url.resolvingSymlinksInPath()
     }
 
-    /// One line shaped like the `task` entry of `workspace_frame.json`.
+    /// One line shaped like the `task` entry of `work_frame.json`.
     private func frame(_ sequence: Int) -> String {
         #"{"part":"task","sequence":\#(sequence),"answers":null,"home":"/fixture","# +
             #""revisions":{"planning":911,"sessions":403,"flows":88,"execs":5120,"usage":77},"# +

@@ -313,8 +313,7 @@ fn repository_team_matrix() {
     let reopened = SqliteStore::new(&database).unwrap();
     assert_eq!(reopened.list_waves(None).unwrap().len(), 4);
 
-    // Acquire a Project with ambiguous ownership. Changing a known relationship
-    // would instead invalidate that Project before these readers see it.
+    // Reject ambiguous ownership before replacing accepted planning facts.
     let mut ambiguous = snapshot(
         "initiative-infrastructure",
         "project-ambiguous",
@@ -331,37 +330,32 @@ fn repository_team_matrix() {
         .get_wave_at(&WaveLocator::discover(&repo, "survival").unwrap())
         .unwrap()
         .unwrap();
-    let mut planning = reopened.pm_snapshot(survival.id()).unwrap().unwrap();
+    let accepted = reopened.pm_snapshot(survival.id()).unwrap().unwrap();
+    let mut planning = accepted.clone();
     planning.snapshot.projects.extend(ambiguous.projects);
     planning.snapshot.items.extend(ambiguous.items);
-    reopened.put_pm_snapshot(&planning).unwrap();
-    drop(reopened);
-    let ambiguous = run_lf(&home, &repo, &["task", "checkout", "LOO-4"]);
-    let error = String::from_utf8_lossy(&ambiguous.stderr);
-    assert!(!ambiguous.status.success());
-    assert!(error.contains("belongs to 2 Initiatives"), "{error}");
-    // Registry discovery remains available; planning reads reject ambiguity.
-    assert_success(
-        &run_lf(&home, &repo, &["wave", "list", "--json"]),
-        "Wave list",
+    let error = reopened.put_pm_snapshot(&planning).unwrap_err();
+    assert!(
+        error.to_string().contains("does not belong to Initiative"),
+        "{error}"
     );
+    assert_eq!(
+        reopened
+            .pm_snapshot(survival.id())
+            .unwrap()
+            .unwrap()
+            .snapshot,
+        accepted.snapshot
+    );
+    drop(reopened);
     for args in [
+        &["wave", "list", "--json"][..],
         &["wave", "status", "survival", "--json"][..],
         &["roadmap", "--json"][..],
         &["roadmap", "--wave", "survival", "--json"][..],
     ] {
-        let output = run_lf(&home, &repo, args);
-        let error = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            !output.status.success(),
-            "{} accepted ambiguous ownership",
-            args.join(" ")
-        );
-        assert!(
-            error.contains("belongs to Initiatives"),
-            "{} returned an unrelated error: {error}",
-            args.join(" ")
-        );
+        let output = assert_success(&run_lf(&home, &repo, args), "retained planning");
+        assert!(!output.contains("LOO-4"));
     }
     assert!(!fixture
         .path()
@@ -422,6 +416,11 @@ fn repository_team_matrix() {
             true,
         ),
     );
+    let legacy_wave = legacy_store.get_wave_at(&legacy_locator).unwrap().unwrap();
+    rusqlite::Connection::open(&database).unwrap().execute(
+        "UPDATE waves SET current_project_id=(SELECT id FROM projects WHERE wave_id=?1 AND external_project_id='project-api') WHERE id=?1",
+        [legacy_wave.id()],
+    ).unwrap();
     drop(legacy_store);
     assert_success(
         &run_lf(

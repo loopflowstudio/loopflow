@@ -7,7 +7,7 @@ import ViewInspector
 
 @Suite("Unified Work and Session navigation")
 @MainActor
-struct WorkspaceNavigationTests {
+struct WorkNavigationTests {
     @Test("A collapsed Wave exposes every Task Session, including idle conversations")
     func collapsedWaveParticipation() throws {
         let snapshot = try roadmap()
@@ -16,7 +16,7 @@ struct WorkspaceNavigationTests {
         value["state"] = "unknown"
         let review = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         let idle = try session("idle", work: .task(id: "ts_review00000000000000000000000000"))
-        let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: [idle, review])
+        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [idle, review])
         let wave = try #require(projection.waves.first)
         let rows = projection.outline(presentation: .full, collapsed: [wave.id], search: "", planningReadable: true)
         let waveRow = try #require(rows.first { $0.workKey == wave.id })
@@ -32,7 +32,7 @@ struct WorkspaceNavigationTests {
         json["workspace"] = ["home_id": "local", "worktree": "/src/loopflow.review",
                              "task_id": "ts_review00000000000000000000000000"]
         let associated = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [associated])
+        let projection = WorkProjection(roadmaps: roadmap.waves, sessions: [associated])
         let task = try #require(projection.waves.flatMap(\.tasks).first { !$0.sessions.isEmpty })
         #expect(task.task.runtime?.workId == associated.workspace?.taskId)
         #expect(associated.work == .task(id: "another-task"))
@@ -50,7 +50,7 @@ struct WorkspaceNavigationTests {
             var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
             json["task_ids"] = ["ts_review00000000000000000000000000"]
             let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
-            let projection = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [record])
+            let projection = WorkProjection(roadmaps: roadmap.waves, sessions: [record])
             #expect(record.work == work)
             #expect(projection.subject(for: "manual") == .task(id: "issue-review"))
             #expect(projection.unmatchedSessions.isEmpty)
@@ -67,7 +67,7 @@ struct WorkspaceNavigationTests {
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
             value["primary_scope"] = scope
             let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
-            let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: [record])
+            let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [record])
             #expect(projection.waves.flatMap(\.tasks).allSatisfy { $0.sessions.isEmpty })
             #expect(projection.unmatchedSessions.map(\.id) == ["scoped"])
             #expect(projection.subject(for: "scoped") == nil)
@@ -90,11 +90,11 @@ struct WorkspaceNavigationTests {
         }
         let source = try ReadingSource(roadmap: roadmapJSON(),
             sessions: String(decoding: JSONSerialization.data(withJSONObject: rows), as: UTF8.self))
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
-        let visible = model.visibleWorkspace.waves.flatMap(\.tasks).flatMap(\.sessions)
+        let visible = model.visibleWork.waves.flatMap(\.tasks).flatMap(\.sessions)
         #expect(visible.map(\.id) == ["idle", "active", "review"])
-        let outline = model.visibleWorkspace.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
+        let outline = model.visibleWork.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
         let taskRow = try #require(outline.first { $0.workKey?.work.id == "issue-review" })
         #expect(taskRow.inlineSessions.count == 3)
         #expect(model.paletteRows.filter { if case .session = $0.id { true } else { false } }.count == 3)
@@ -108,16 +108,16 @@ struct WorkspaceNavigationTests {
         let source = try ReadingSource(
             roadmap: roadmapJSON().replacingOccurrences(of: "\"/src/loopflow\"", with: "\"/src/loopflow/\""),
             sessions: sessionsJSON())
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         model.navigation.presentation = .full
-        let view = WorkspaceNavigator(model: model, onOpenSession: { _ in })
+        let view = WorkNavigator(model: model, onOpenSession: { _ in })
         let roots = try view.inspect().findAll(ViewType.Button.self) {
-            (try? $0.accessibilityIdentifier().hasPrefix("workspace-repository-")) == true
+            (try? $0.accessibilityIdentifier().hasPrefix("work-repository-")) == true
         }
         #expect(roots.count == 1)
-        #expect(try roots.first?.accessibilityIdentifier() == "workspace-repository-/src/loopflow")
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-count-issue-review")
+        #expect(try roots.first?.accessibilityIdentifier() == "work-repository-/src/loopflow")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-issue-review")
     }
 
     @Test("Compression promotes leaves without changing identity or hiding upcoming Tasks")
@@ -131,15 +131,15 @@ struct WorkspaceNavigationTests {
         let records = try [session("human", work: .task(id: "ts_review00000000000000000000000000")),
                            session("project", work: .project(id: "ps_11111111111111111111111111111111")),
                            session("unknown", work: .task(id: "absent"))]
-        let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: records)
-        func rows(_ mode: WorkspacePresentation, collapsed: Set<WorkspaceNodeKey> = [], readable: Bool = true) -> [WorkspaceOutlineRow] {
+        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: records)
+        func rows(_ mode: WorkPresentation, collapsed: Set<WorkNodeKey> = [], readable: Bool = true) -> [WorkOutlineRow] {
             projection.outline(presentation: mode, collapsed: collapsed, search: "", planningReadable: readable)
         }
         let full = rows(.full)
         let compact = rows(.compact)
         let flat = rows(.sessions)
         // Task Sessions ride their Task row; Wave and unmatched Sessions stay leaves.
-        func sessionIds(_ rows: [WorkspaceOutlineRow]) -> Set<String> {
+        func sessionIds(_ rows: [WorkOutlineRow]) -> Set<String> {
             Set(rows.flatMap { ($0.session.map { [$0.id] } ?? []) + $0.inlineSessions.map(\.id) })
         }
         #expect(sessionIds(full) == sessionIds(compact))
@@ -173,7 +173,7 @@ struct WorkspaceNavigationTests {
         wave["unavailable_tasks"] = []
         json["waves"] = [wave]
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: [])
+        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
         let rows = projection.outline(presentation: .compact, collapsed: [], search: "", planningReadable: true)
         #expect(rows.count == 1)
         #expect(rows.first?.workKey?.work.kind == .wave)
@@ -201,7 +201,7 @@ struct WorkspaceNavigationTests {
         }
         json["waves"] = waves
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: [])
+        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
         let rows = projection.outline(presentation: .compact, collapsed: [], search: "", planningReadable: true)
         let kinds = rows.compactMap { $0.workKey?.work.kind }
         #expect(!kinds.contains(.project))
@@ -217,7 +217,7 @@ struct WorkspaceNavigationTests {
             json["title"] = "Conversation"
             return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
         }
-        let projection = WorkspaceProjection(roadmaps: try roadmap().waves, sessions: records)
+        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: records)
         let rows = projection.outline(presentation: .sessions, collapsed: [], search: "", planningReadable: true)
         #expect(rows.count == 2)
         #expect(Set(rows.map(\.detail)).count == 2)
@@ -232,8 +232,8 @@ struct WorkspaceNavigationTests {
         let attached = try session("human", work: .task(id: "ts_review00000000000000000000000000"))
         let orphan = try session("demo", work: nil)
         let stray = try session("stray", work: .task(id: "absent"))
-        let projection = WorkspaceProjection(roadmaps: try roadmap().waves, sessions: [attached, orphan, stray])
-        for presentation in WorkspacePresentation.allCases {
+        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: [attached, orphan, stray])
+        for presentation in WorkPresentation.allCases {
             let rows = projection.outline(presentation: presentation, collapsed: [], search: "", planningReadable: true)
             #expect(!rows.contains { $0.session?.id == "demo" })
             #expect(rows.contains { $0.session?.id == "stray" })
@@ -248,11 +248,11 @@ struct WorkspaceNavigationTests {
         let source = try ReadingSource(
             roadmap: roadmapJSON(),
             sessions: String(decoding: try JSONEncoder().encode([attached, orphan]), as: UTF8.self))
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         var opened: [String] = []
-        let view = WorkspaceNavigator(model: model, onOpenSession: { opened.append($0.id) })
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-orphans-open") }
+        let view = WorkNavigator(model: model, onOpenSession: { opened.append($0.id) })
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-orphans-open") }
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-demo") }
         try view.inspect().find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo").button().tap()
         #expect(opened == ["demo"])
@@ -261,9 +261,9 @@ struct WorkspaceNavigationTests {
         // Zero orphans hides the section entirely.
         await source.replaceSessions(String(decoding: try JSONEncoder().encode([attached]), as: UTF8.self))
         await model.refreshSessions()
-        #expect(model.workspace.unmatchedSessions.isEmpty)
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-orphans-open") }
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-session-count-issue-review")
+        #expect(model.projection.unmatchedSessions.isEmpty)
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-orphans-open") }
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-issue-review")
     }
 
     @Test("Hierarchy rows open their Task; the Session list opens the exact Session")
@@ -274,14 +274,14 @@ struct WorkspaceNavigationTests {
         let selected = model.selection
         var opened: [String] = []
         var tasks: [WorkReference] = []
-        for presentation in WorkspacePresentation.allCases {
+        for presentation in WorkPresentation.allCases {
             model.navigation.presentation = presentation
-            let view = WorkspaceNavigator(model: model, onOpenSession: { opened.append($0.id) },
+            let view = WorkNavigator(model: model, onOpenSession: { opened.append($0.id) },
                                           onOpenTask: { tasks.append($0) })
             if presentation == .sessions {
                 try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-human").button().tap()
             } else {
-                try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
+                try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review").button().tap()
                 #expect(throws: (any Error).self) {
                     try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-human")
                 }
@@ -295,9 +295,9 @@ struct WorkspaceNavigationTests {
     @Test("Autonomous, upcoming and human work share stable ranked planning rows")
     func workDoesNotRequireSessions() throws {
         let roadmap = try roadmap()
-        let empty = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [])
+        let empty = WorkProjection(roadmaps: roadmap.waves, sessions: [])
         let interactive = try session("human", work: .task(id: "ts_review00000000000000000000000000"))
-        let joined = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [interactive])
+        let joined = WorkProjection(roadmaps: roadmap.waves, sessions: [interactive])
         let before = empty.waves[0].tasks
         let after = joined.waves[0].tasks
 
@@ -308,16 +308,16 @@ struct WorkspaceNavigationTests {
         #expect(after[1].sessions.map(\.id) == ["human"])
         #expect(after[3].sessions.isEmpty)
         #expect(joined.subject(for: "human") == .task(id: "issue-review"))
-        #expect(WorkspaceNavigation().presentation == .compact)
+        #expect(WorkNavigation().presentation == .compact)
     }
 
     @Test("The sidebar holds started work; inspection, a prepared checkout or a Session gap never changes it")
     func startedWorkingSet() async throws {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         func sidebar() -> [String] {
-            model.workspace.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
+            model.projection.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
                 .compactMap { $0.workKey?.work.kind == .task ? $0.workKey?.work.id : nil }
         }
         // Started (review), prepared-but-unstarted (now), upcoming (available),
@@ -330,7 +330,7 @@ struct WorkspaceNavigationTests {
         await model.refreshSessions()
         #expect(sidebar() == ["issue-review"])
         // All planned Tasks remain reachable in the Wave plan.
-        #expect(model.workspace.waves[0].tasks.count == 4)
+        #expect(model.projection.waves[0].tasks.count == 4)
     }
 
     @Test("Many started Tasks across Waves populate the sidebar while every planned Task stays reachable")
@@ -368,13 +368,13 @@ struct WorkspaceNavigationTests {
         }
         json["waves"] = waves
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkspaceProjection(roadmaps: snapshot.waves, sessions: [])
+        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
         let rows = projection.outline(presentation: .compact, collapsed: [], search: "", planningReadable: true)
         #expect(rows.filter { $0.workKey?.work.kind == .task }.count == 20)
         #expect(rows.filter { $0.workKey?.work.kind == .wave }.count == 3)
         #expect(projection.waves.allSatisfy { $0.tasks.count == 50 })
         // A poll that re-reads identical evidence yields identical rows.
-        let again = WorkspaceProjection(roadmaps: snapshot.waves, sessions: [])
+        let again = WorkProjection(roadmaps: snapshot.waves, sessions: [])
             .outline(presentation: .compact, collapsed: [], search: "", planningReadable: true)
         #expect(again.map(\.id) == rows.map(\.id))
     }
@@ -390,13 +390,13 @@ struct WorkspaceNavigationTests {
             session("wrong-kind", work: .project(id: "ts_review00000000000000000000000000")),
             session("planning-id-is-not-work", work: .task(id: "issue-review")),
         ]
-        let projection = WorkspaceProjection(roadmaps: try roadmap().waves, sessions: records)
+        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: records)
         #expect(projection.waves[0].sessions.map(\.id) == ["wave", "project"])
         let completed = try #require(projection.waves[0].tasks.first)
         #expect(completed.task.task.completed)
         #expect(completed.sessions.map(\.id) == ["completed", "another"])
         #expect(projection.unmatchedSessions.map(\.id) == ["repo", "wrong-kind", "planning-id-is-not-work"])
-        let missing = WorkspaceProjection(roadmaps: [], sessions: records)
+        let missing = WorkProjection(roadmaps: [], sessions: records)
         #expect(missing.unmatchedSessions == records)
     }
 
@@ -416,7 +416,7 @@ struct WorkspaceNavigationTests {
         let navigation = model.navigation
         navigation.selectedSessionId = "human"
         #expect(navigation.selection == .task(id: "issue-review"))
-        let group = model.workspace.waves[0].id
+        let group = model.projection.waves[0].id
         navigation.toggle(group)
         navigation.search = "upcoming"
         #expect(navigation.isExpanded(group))
@@ -446,24 +446,24 @@ struct WorkspaceNavigationTests {
     @Test("Failed reads keep last-good work and exact Sessions with a visible error")
     func unavailableIsNotEmpty() async throws {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
-        let keys = model.workspace.waves[0].tasks.map(\.id)
+        let keys = model.projection.waves[0].tasks.map(\.id)
         model.select(.task(id: "issue-review"))
         await source.fail()
         await model.refresh()
         #expect(model.roadmap.errorMessage == "offline")
         #expect(model.sessions.errorMessage == "offline")
-        #expect(model.workspace.waves[0].tasks.map(\.id) == keys)
-        #expect(model.workspace.subject(for: "human") == model.selection)
-        let view = WorkspaceNavigator(model: model, onOpenSession: { _ in })
+        #expect(model.projection.waves[0].tasks.map(\.id) == keys)
+        #expect(model.projection.subject(for: "human") == model.selection)
+        let view = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(throws: Never.self) { try view.inspect().find(text: "Couldn't update: offline") }
     }
 
     @Test("Returning to a repository retains its last-good Sessions when refresh fails")
     func lastGoodSessionsSurviveRepositorySwitch() async throws {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         model.setRepoPath("/src/context")
         #expect(model.sessions.value == nil)
@@ -482,7 +482,7 @@ struct WorkspaceNavigationTests {
     @Test("Incomplete planning preserves the repository's selected Task", arguments: [false, true])
     func unavailablePlanningPreservesRepositorySelection(truncated: Bool) async throws {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         model.select(.task(id: "issue-review"))
         var snapshot = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
@@ -501,7 +501,7 @@ struct WorkspaceNavigationTests {
         model.setRepoPath("/src/loopflow")
         #expect(model.selection == .task(id: "issue-review"))
         #expect(model.navigation.content == .details)
-        #expect(model.workspace.unmatchedSessions.map(\.id) == ["human"])
+        #expect(model.projection.unmatchedSessions.map(\.id) == ["human"])
     }
 
 
@@ -519,7 +519,7 @@ struct WorkspaceNavigationTests {
         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.wave.goal) }
         #expect(throws: Never.self) { try view.inspect().find(text: "Current KRs") }
         #expect(throws: Never.self) { try view.inspect().find(text: task.wave.currentProject!.krs[0].text) }
-        #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "podium-task-issue-available") }
+        #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-task-issue-available") }
     }
 
     @Test("A delayed New session failure stays with its Task across Task and repository navigation")
@@ -573,7 +573,7 @@ struct WorkspaceNavigationTests {
     @Test("Inspection distinguishes no Sessions from an unavailable reading", arguments: [true, false])
     func inspectorShowsSessionEvidence(hasSession: Bool) async throws {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         model.select(.task(id: hasSession ? "issue-review" : "issue-available"))
         let view = WorkSurfaceView(model: model)
@@ -594,10 +594,10 @@ struct WorkspaceNavigationTests {
     func unavailableTaskLivesInWaveDetails() async throws {
         let model = try model()
         await model.refresh()
-        let wave = try #require(model.workspace.waves.first)
+        let wave = try #require(model.projection.waves.first)
         let task = try #require(wave.roadmap.unavailableTasks.first)
         let text = "\(task.taskIdentifier): \(task.reason)"
-        let navigator = WorkspaceNavigator(model: model, onOpenSession: { _ in })
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: text) }
         model.select(wave.id.work)
         // One quiet line names the Task; Details discloses reason and recovery.
@@ -617,7 +617,7 @@ struct WorkspaceNavigationTests {
         if !hasUnplannedWork { wave["unavailable_tasks"] = [] }
         snapshot["waves"] = [wave]
         let planning = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
-        let model = PodiumModel(query: RegistryQuery { args, _ in
+        let model = WorkModel(query: RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": return planning
             case "wave" where args.dropFirst().first == "list": return "[]"
@@ -629,10 +629,10 @@ struct WorkspaceNavigationTests {
         await model.refresh()
         await model.refreshProcessActivity()
         #expect(model.processActivity.errorMessage == nil)
-        let navigator = WorkspaceNavigator(model: model, onOpenSession: { _ in })
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No active Tasks in this repository.") }
         if hasUnplannedWork {
-            let projected = try #require(model.workspace.waves.first)
+            let projected = try #require(model.projection.waves.first)
             try navigator.inspect().find(button: projected.roadmap.wave.displayName).tap()
             #expect(model.selection == projected.id.work)
             let task = try #require(projected.roadmap.unavailableTasks.first)
@@ -647,7 +647,7 @@ struct WorkspaceNavigationTests {
         let snapshot = try roadmapJSON()
         let records = try sessionsJSON()
         let gate = PlanningGate()
-        let model = PodiumModel(query: RegistryQuery { args, _ in
+        let model = WorkModel(query: RegistryQuery { args, _ in
             switch args.first {
             case "roadmap": await gate.wait(); return snapshot
             case "session": return #"{"entries":\#(records),"next":null}"#
@@ -659,11 +659,11 @@ struct WorkspaceNavigationTests {
         await gate.started()
         await model.refreshSessions()
         #expect(model.roadmap.isLoading)
-        #expect(model.workspace.unmatchedSessions.map(\.id) == ["human"])
+        #expect(model.projection.unmatchedSessions.map(\.id) == ["human"])
         await gate.release()
         await refresh.value
-        #expect(model.workspace.subject(for: "human") == .task(id: "issue-review"))
-        #expect(model.workspace.unmatchedSessions.isEmpty)
+        #expect(model.projection.subject(for: "human") == .task(id: "issue-review"))
+        #expect(model.projection.unmatchedSessions.isEmpty)
     }
 
     @Test("Bound Sessions retain ancestry and panes across planning loss and return",
@@ -685,9 +685,9 @@ struct WorkspaceNavigationTests {
         snapshot["waves"] = planning == "no-waves" ? [] : waves
         let missing = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let source = ReadingSource(roadmap: original, sessions: String(decoding: try JSONEncoder().encode(records), as: UTF8.self))
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
-        model.select(model.workspace.subject(for: "first"))
+        model.select(model.projection.subject(for: "first"))
         model.navigation.selectedSessionId = "first"
         model.navigation.content = .terminals
         model.beginSessionRename(records[0])
@@ -704,25 +704,25 @@ struct WorkspaceNavigationTests {
 
         await source.replaceRoadmap(missing)
         await model.refresh()
-        let crumb = try #require(model.workspace.breadcrumb(selection: model.selection, sessionId: "first"))
+        let crumb = try #require(model.projection.breadcrumb(selection: model.selection, sessionId: "first"))
         #expect(crumb.task == nil)
         #expect(crumb.taskWork == work)
         #expect(crumb.waveWork == .wave(id: "wave-1"))
         #expect(crumb.siblings.map(\.id) == ["first", "second"])
-        #expect(model.workspace.subject(for: "first") == work)
-        #expect(model.workspace.orphanSessions(search: "").isEmpty)
-        let bar = WorkspaceBreadcrumbBar(model: model, crumb: crumb, onOpenSession: { _ in })
+        #expect(model.projection.subject(for: "first") == work)
+        #expect(model.projection.orphanSessions(search: "").isEmpty)
+        let bar = WorkBreadcrumbBar(model: model, crumb: crumb, onOpenSession: { _ in })
         #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").text().string() == "Task \(work.id)")
-        for presentation in WorkspacePresentation.allCases {
-            let rows = model.workspace.outline(presentation: presentation, collapsed: [], search: work.id, planningReadable: false)
+        for presentation in WorkPresentation.allCases {
+            let rows = model.projection.outline(presentation: presentation, collapsed: [], search: work.id, planningReadable: false)
             #expect(Set(rows.compactMap { $0.session?.id }) == ["first", "second"])
             #expect(rows.filter { $0.session != nil }.allSatisfy { $0.ancestors.last?.key.work == work })
         }
 
         // Fresh discovery cannot depend on cached planning names or selection.
-        let cold = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let cold = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await cold.refresh()
-        cold.select(cold.workspace.subject(for: "first"))
+        cold.select(cold.projection.subject(for: "first"))
         cold.navigation.selectedSessionId = "first"
         #expect(cold.selection == work)
         await source.replaceRoadmap(original)
@@ -734,7 +734,7 @@ struct WorkspaceNavigationTests {
         #expect(model.navigation.selectedSessionId == "first")
         #expect(model.navigation.content == .terminals)
         #expect(model.navigation.renaming?.text == "Retained draft")
-        #expect(model.workspace.breadcrumb(selection: model.selection, sessionId: "first")?.task?.task.id == "issue-review")
+        #expect(model.projection.breadcrumb(selection: model.selection, sessionId: "first")?.task?.task.id == "issue-review")
         #expect(workspace.multiplexer.layout == layout)
         #expect(workspace.multiplexer.focusedPaneId == pane)
     }
@@ -746,7 +746,7 @@ struct WorkspaceNavigationTests {
         json["work_path"] = "wave-1/issue-review"
         json["title"] = "Task ts_review00000000000000000000000000"
         let unbound = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
-        let projection = WorkspaceProjection(roadmaps: try roadmap().waves, sessions: [unbound])
+        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: [unbound])
         let crumb = try #require(projection.breadcrumb(selection: nil, sessionId: unbound.id))
         #expect(projection.subject(for: unbound.id) == nil)
         #expect(crumb.waveWork == nil)
@@ -773,9 +773,9 @@ struct WorkspaceNavigationTests {
         guard case .task = model.conversationScope else { Issue.record("Expected restored Task context"); return }
     }
 
-    private func model() throws -> PodiumModel {
+    private func model() throws -> WorkModel {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
-        return PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        return WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
     }
     private func roadmap() throws -> RoadmapSnapshot {
         try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))

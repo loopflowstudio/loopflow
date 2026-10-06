@@ -6,11 +6,11 @@ import SwiftUI
 /// can be chosen now are buttons (`lf task run`) and **Move to** sets a node
 /// (`lf task move`). Rust owns the graph and the position.
 struct TaskWorkflowHeader: View {
-    let model: PodiumModel
+    let model: WorkModel
     let task: RoadmapTask
     let wave: WaveSnapshot
     /// The Task part of the workspace stream, as last read.
-    let work: PodiumReading<TaskWork>
+    let work: WorkReading<TaskWork>
     @Environment(\.palette) private var palette
 
     private var draft: TaskFlowDraft? { model.navigation.flowDrafts[task.id] }
@@ -41,7 +41,7 @@ struct TaskWorkflowHeader: View {
                     // A Task takes up its Project's workflow on its first run.
                     Text("No workflow yet").foregroundStyle(palette.textSecondary)
                     Button("Start") { Task { await model.startFlow(nil, task: task, wave: wave) } }
-                        .buttonStyle(WorkspaceOutlineButtonStyle())
+                        .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(unavailable != nil)
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
                         .accessibilityIdentifier("task-workflow-start")
@@ -58,13 +58,13 @@ struct TaskWorkflowHeader: View {
             if let conflict = task.runtime?.planningConflict {
                 HStack(spacing: Spacing.sm) {
                     Text(conflict)
-                        .foregroundStyle(WorkspaceTone.blocked.ink)
+                        .foregroundStyle(WorkTone.blocked.ink)
                         .textSelection(.enabled)
                         .accessibilityIdentifier("task-workflow-conflict")
                     Button("Complete anyway") {
                         Task { await model.moveTask(to: "end", force: true, task: task, wave: wave) }
                     }
-                    .buttonStyle(WorkspaceOutlineButtonStyle())
+                    .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(acting)
                     .help("lf task move \(task.task.identifier) end --force")
                     .accessibilityIdentifier("task-workflow-force-end")
@@ -72,7 +72,7 @@ struct TaskWorkflowHeader: View {
             }
             if let error = draft?.error ?? model.navigation.taskSessionErrors[task.id] {
                 Text(error)
-                    .foregroundStyle(WorkspaceTone.blocked.ink)
+                    .foregroundStyle(WorkTone.blocked.ink)
                     .lineLimit(3)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-workflow-error")
@@ -99,7 +99,7 @@ struct TaskWorkflowHeader: View {
 /// Workflow's history: an exec that carried an edge and one started ad hoc
 /// are the same kind of row. A multiplexer pane on the page surface.
 struct FlowExecLog: View {
-    let model: PodiumModel
+    let model: WorkModel
     let taskId: String
     @Environment(\.palette) private var palette
 
@@ -140,13 +140,13 @@ struct FlowExecLog: View {
 /// conversations without turns: raw records, shown under Debug. Its Flow
 /// execs are listed by `FlowExecLog`.
 struct TaskWorkView: View {
-    let model: PodiumModel
+    let model: WorkModel
     let task: RoadmapTask
     @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            WorkspaceSectionHeading(title: "Work") {
+            WorkSectionHeading(title: "Work") {
                 Button("Refresh") { Task { await model.refresh() } }
             }
             if let work = model.taskWork[task.id].value {
@@ -189,7 +189,7 @@ struct TaskWorkView: View {
 /// it ran, opening to its id, launched graph, where it stands and each step
 /// it started. Every exec reads the same way, whoever started it.
 struct FlowRunView: View {
-    let model: PodiumModel
+    let model: WorkModel
     let flow: TaskFlowMember
     @State private var inspected: UInt32?
     @Environment(\.palette) private var palette
@@ -242,7 +242,7 @@ struct FlowRunView: View {
         .padding(.vertical, 6)
     }
 
-    private var tone: WorkspaceTone? {
+    private var tone: WorkTone? {
         switch flow.state {
         case .current: .running
         case .stopped: .blocked

@@ -1168,17 +1168,19 @@ fn create_prepared_task(
         requested_agent,
         directive,
     } = prepared;
-    let project = block_on_task(crate::ops::project::resolve_project_for_task(
-        &main_repo,
-        &resolved.wave,
-        &resolved.project.id,
-    ))?;
-    let project_id = project.id.clone();
-    let wave_id = project.wave_id.clone();
-    let project_workflow = project.plan.workflow.clone();
-
     block_on_task(async move {
         let store = task_store().await?;
+        let locator = crate::work::wave::WaveLocator::discover(&main_repo, &resolved.wave)
+            .map_err(task_error)?;
+        let wave = store
+            .get_wave_at(&locator)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("owning Wave is not initialized"))?;
+        let acquisition = super::pm::lock_wave_planning(&wave).await?;
+        let project =
+            super::project::resolve_project_for_task(&store, &wave, &resolved.project.id).await?;
+        let project_workflow = project.plan.workflow.clone();
         // Re-resolve after worktree planning: a concurrent run may have created
         // the Task in the gap. Non-terminal Work wins. Terminal Work remains
         // authoritative and requires an explicit recovery transition.
@@ -1207,7 +1209,7 @@ fn create_prepared_task(
             }
         }
         let now = time::OffsetDateTime::now_utc();
-        let task = Task {
+        let mut task = Task {
             id: crate::work::task::TaskId::new(),
             plan: TaskPlan {
                 id: LinearIssueId::new(resolved.item.id.clone()).map_err(task_error)?,
@@ -1216,8 +1218,8 @@ fn create_prepared_task(
                 description: resolved.item.description.clone(),
                 pm_snapshot_synced_at: resolved.observed_at,
             },
-            wave_id,
-            project_id,
+            wave_id: project.wave_id,
+            project_id: project.id,
             pm_writeback: PmWritebackState::Current,
             worktree: plan.worktree_path.clone(),
             workspace_slug: workspace_slug.clone(),
@@ -1257,8 +1259,12 @@ fn create_prepared_task(
             &task.worktree,
             "Task checkout",
         )?;
-        match store.create_task_with_worktree(&task, &pr).await {
-            Ok(()) => {
+        match store
+            .create_task_with_worktree(&task, &pr, Some(acquisition))
+            .await
+        {
+            Ok(accepted) => {
+                task = accepted;
                 if let Some(direction) = directive.as_deref() {
                     let mut publication_task = task.clone();
                     publication_task.worktree = main_repo.clone();
@@ -1324,22 +1330,6 @@ fn create_prepared_task(
         }
         Ok(task)
     })
-}
-
-pub(crate) fn project_context(project: &crate::pm::PmProject) -> String {
-    let mut context = format!(
-        "Chapter metric targets:\n{}",
-        serde_json::to_string(&project.metric_targets).expect("metric targets serialize")
-    );
-    context.push_str(&format!("\n\nChapter Task workflow: {}", project.workflow));
-    if !project.krs.is_empty() {
-        context.push_str("\n\nKRs:");
-        for kr in &project.krs {
-            let mark = if kr.holds { "x" } else { " " };
-            context.push_str(&format!("\n- [{mark}] {}", kr.text));
-        }
-    }
-    context
 }
 
 pub fn task_create(
@@ -5139,6 +5129,107 @@ mod tests {
         );
         assert_eq!(fixture.store.sqlite.exec(&exec.id).unwrap(), Some(exec));
     }
+
+    #[test]
+    fn prepared_registration_consumes_accepted_facts_before_checkout_or_execution() {
+        let _ledger = crate::journal::TestLedgerGuard::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        for moved in [false, true] {
+            let repo = loopflow_test_support::TestRepo::new();
+            let fixture = runtime.block_on(task_fixture_at("EXISTING", repo.path().to_path_buf()));
+            std::env::set_var("LF_HOME", fixture._database.path());
+            std::fs::create_dir_all(repo.path().join("wave/task-recovery")).unwrap();
+            std::fs::write(
+                repo.path().join("wave/task-recovery/GOAL.md"),
+                "Recover work.",
+            )
+            .unwrap();
+            let mut snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+                "../../../../tests/fixtures/dto/task_history_planning.json"
+            ))
+            .unwrap();
+            snapshot.projects.truncate(1);
+            snapshot.items.truncate(1);
+            snapshot.projects[0].id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3".into();
+            snapshot.projects[0].status = crate::pm::ProjectStatus::Started;
+            snapshot.items[0].id = "new-issue".into();
+            snapshot.items[0].completed = false;
+            snapshot.items[0].completed_at = None;
+            snapshot.items[0].state = Some("unstarted".into());
+            snapshot.items[0].project_id = Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3".into());
+            snapshot.items[0].revision = Some("2026-10-05T12:00:00Z".into());
+            let resolved = crate::ops::task_pm::ResolvedTask {
+                wave: "task-recovery".into(),
+                observed_at: 1,
+                project: snapshot.projects[0].clone(),
+                item: snapshot.items[0].clone(),
+            };
+            snapshot.items[0].name = "Accepted after resolution".into();
+            snapshot.items[0].description = "Preserve this direction".into();
+            snapshot.items[0].revision = Some("2026-10-05T13:00:00Z".into());
+            if moved {
+                snapshot.items[0].project_id = Some("foreign-project".into());
+            }
+            runtime
+                .block_on(fixture.store.put_pm_snapshot(
+                    crate::store::PmSnapshotRow {
+                        wave_id: fixture.task.wave_id.clone(),
+                        provider: "linear".into(),
+                        initiative: snapshot.projects[0].initiative_ids[0].clone(),
+                        synced_at: 7,
+                        snapshot,
+                    },
+                    None,
+                ))
+                .unwrap();
+            let checkout = fixture._database.path().join("reserved-checkout");
+            if !moved {
+                std::fs::create_dir(&checkout).unwrap();
+            }
+            let prepared = super::PreparedTask {
+                plan: crate::engine::worktrees::PlacementPlan {
+                    base_ref: "retained-base".into(),
+                    branch: "retained-branch".into(),
+                    worktree_path: checkout.clone(),
+                    strategy: crate::engine::worktrees::PlacementStrategy::UseExistingWorktree,
+                },
+                workspace_slug: "reserved-checkout".into(),
+                stack_parent: None,
+                github: None,
+                requested_agent: None,
+                directive: None,
+            };
+            let result = super::create_prepared_task(repo.path().to_path_buf(), resolved, prepared);
+            if moved {
+                assert!(result.unwrap_err().to_string().contains("changed Project"));
+                assert!(runtime
+                    .block_on(fixture.store.get_task_by_issue("new-issue"))
+                    .unwrap()
+                    .is_none());
+                assert!(!checkout.exists());
+            } else {
+                let task = result.unwrap();
+                assert_eq!(task.plan.title, "Accepted after resolution");
+                assert_eq!(task.plan.description, "Preserve this direction");
+                assert_eq!(task.plan.pm_snapshot_synced_at, 7);
+                assert_eq!(task.worktree, checkout);
+                assert_eq!(
+                    runtime.block_on(fixture.store.get_task(&task.id)).unwrap(),
+                    Some(task.clone())
+                );
+                let pr = runtime
+                    .block_on(fixture.store.active_task_pr(&task.id))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(pr.branch, "retained-branch");
+                assert_eq!(pr.base_commit, "retained-base");
+            }
+            assert!(runtime
+                .block_on(fixture.store.get_task(&fixture.task.id))
+                .unwrap()
+                .is_some());
+        }
+    }
     #[test]
     fn explicit_reconciliation_recovers_merged_delivery_without_completing_work() {
         let _ledger = crate::journal::TestLedgerGuard::new();
@@ -5444,7 +5535,7 @@ mod tests {
             plan: ProjectPlan {
                 workflow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
-                id: LinearProjectId::new("task-recovery-project").unwrap(),
+                id: LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap(),
                 slug: "task-recovery".to_string(),
                 name: "Task recovery".to_string(),
                 prompt_context: "Keep automatic Task recovery bounded.".to_string(),
@@ -5497,7 +5588,15 @@ mod tests {
         };
         store.create_wave(&wave).await.unwrap();
         store.create_project(&project).await.unwrap();
-        store.create_task(&task, &pr).await.unwrap();
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
+            wave.id(),
+            None,
+            project.plan.id.as_str(),
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         let work = store
             .work_for_child(&ChildRef::Task(task.id.clone()))
             .await
@@ -6174,7 +6273,10 @@ mod tests {
         parent.task_id = parent_task.id.clone();
         parent.branch = "test/stack-parent".into();
         parent.slug = "stack-parent".into();
-        store.create_task(&parent_task, &parent).await.unwrap();
+        store
+            .create_task(&parent_task, &parent, None)
+            .await
+            .unwrap();
         parent.publication = Some(PrPublication {
             requested_at: parent.created_at,
             presentation: None,

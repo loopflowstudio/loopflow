@@ -118,26 +118,39 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         runtime.block_on(async {
             store.create_wave(&wave).await.unwrap();
             store.create_project(&project).await.unwrap();
+            rusqlite::Connection::open(home.path().join("loopflow.db"))
+                .unwrap()
+                .execute(
+                    "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                    rusqlite::params![wave.id(), project.id.as_str()],
+                )
+                .unwrap();
             let mut historical = snapshot.clone();
             historical.items[0].branch_name = None;
             store
-                .put_pm_snapshot(PmSnapshotRow {
-                    wave_id: wave.id().clone(),
-                    provider: "linear".into(),
-                    initiative: "initiative-1".into(),
-                    synced_at: now.unix_timestamp(),
-                    snapshot: historical,
-                })
+                .put_pm_snapshot(
+                    PmSnapshotRow {
+                        wave_id: wave.id().clone(),
+                        provider: "linear".into(),
+                        initiative: "initiative-1".into(),
+                        synced_at: now.unix_timestamp(),
+                        snapshot: historical,
+                    },
+                    None,
+                )
                 .await
                 .unwrap();
             store
-                .put_pm_snapshot(PmSnapshotRow {
-                    wave_id: wave.id().clone(),
-                    provider: "linear".into(),
-                    initiative: "initiative-1".into(),
-                    synced_at: now.unix_timestamp(),
-                    snapshot,
-                })
+                .put_pm_snapshot(
+                    PmSnapshotRow {
+                        wave_id: wave.id().clone(),
+                        provider: "linear".into(),
+                        initiative: "initiative-1".into(),
+                        synced_at: now.unix_timestamp(),
+                        snapshot,
+                    },
+                    None,
+                )
                 .await
                 .unwrap();
             assert!(store.list_tasks(None).await.unwrap().is_empty());
@@ -302,7 +315,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                     observed.project.as_mut().unwrap().id = "project-2".into();
                 }
                 runtime
-                    .block_on(store.put_pm_task(&scope, "linear", observed))
+                    .block_on(store.put_pm_task(&scope, "linear", observed, None, None))
                     .unwrap();
                 if condition == "connection" {
                     fs::write(

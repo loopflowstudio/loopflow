@@ -1,8 +1,8 @@
 import Loopflow
 import SwiftUI
 
-struct WorkspaceNavigator: View {
-    @Bindable var model: PodiumModel
+struct WorkNavigator: View {
+    @Bindable var model: WorkModel
     let onOpenSession: (SessionRecord) -> Void
     let onOpenTask: ((WorkReference) -> Void)?
     let onConversation: ((WorkReference?) -> Void)?
@@ -14,7 +14,7 @@ struct WorkspaceNavigator: View {
     @State private var hoveringPresentation = false
     @State private var choosingSessionSkill = false
 
-    init(model: PodiumModel, onOpenSession: @escaping (SessionRecord) -> Void,
+    init(model: WorkModel, onOpenSession: @escaping (SessionRecord) -> Void,
          onConversation: ((WorkReference?) -> Void)? = nil,
          onNewShell: (() -> Void)? = nil, onShowTerminals: (() -> Void)? = nil,
          onOpenTask: ((WorkReference) -> Void)? = nil,
@@ -29,7 +29,7 @@ struct WorkspaceNavigator: View {
         _scrollPosition = State(initialValue: ScrollPosition(y: model.navigation.listScrollOffset))
     }
 
-    private func rows(_ workspace: WorkspaceProjection) -> [WorkspaceOutlineRow] {
+    private func rows(_ workspace: WorkProjection) -> [WorkOutlineRow] {
         workspace.outline(
             presentation: model.navigation.presentation, collapsed: model.navigation.collapsed,
             search: model.navigation.search,
@@ -53,7 +53,7 @@ struct WorkspaceNavigator: View {
                         .frame(height: 34)
                         .contentShape(Rectangle())
                 }
-                .accessibilityIdentifier("workspace-create-task")
+                .accessibilityIdentifier("work-create-task")
                 Rectangle().fill(palette.textTertiary.opacity(0.25)).frame(width: 1)
                 Button { choosingSessionSkill.toggle() } label: {
                     HStack(spacing: 7) {
@@ -68,7 +68,7 @@ struct WorkspaceNavigator: View {
                     .contentShape(Rectangle())
                 }
                 .accessibilityLabel("Choose skill, currently \(launch.skill)")
-                .accessibilityIdentifier("workspace-session-skill")
+                .accessibilityIdentifier("work-session-skill")
                 .popover(isPresented: $choosingSessionSkill, arrowEdge: .bottom) {
                     SessionSkillPicker(model: model, repo: launch.repoPath) {
                         choosingSessionSkill = false
@@ -88,7 +88,7 @@ struct WorkspaceNavigator: View {
     var body: some View {
         @Bindable var navigation = model.navigation
         // One projection per render: rows and every row's menu share it.
-        let workspace = model.visibleWorkspace
+        let workspace = model.visibleWork
         let rows = rows(workspace)
         let orphans = workspace.orphanSessions(search: model.navigation.search)
         VStack(spacing: 0) {
@@ -98,7 +98,7 @@ struct WorkspaceNavigator: View {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     forReadErrors
                     ForEach(rows) { row in outlineRow(row, orphans) }
-                    if model.repoPath != nil, rows.isEmpty, model.workspaceStatus == .current {
+                    if model.repoPath != nil, rows.isEmpty, model.workStatus == .current {
                         Text(navigation.presentation == .sessions ? "No open Sessions." : "No matching Work.")
                             .foregroundStyle(palette.textSecondary).padding(8)
                     }
@@ -118,7 +118,7 @@ struct WorkspaceNavigator: View {
                     set: { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline"); navigation.search = $0 }))
                     .textFieldStyle(.plain)
                     .font(Typography.body(13))
-                    .accessibilityIdentifier("workspace-search")
+                    .accessibilityIdentifier("work-search")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -133,12 +133,12 @@ struct WorkspaceNavigator: View {
         .buttonStyle(.plain)
         .background(palette.surfaceMuted)
         .contextMenu { repositoryActions(orphans) }
-        .accessibilityIdentifier("workspace-navigator")
+        .accessibilityIdentifier("work-navigator")
         .onChange(of: model.repoPath) { _, _ in choosingSessionSkill = false }
         .onChange(of: rows.isEmpty, initial: true) { _, empty in
             guard !empty else { return }
             Perf.endAfterCommit(Perf.coldStart, id: "launch")
-            let source = model.showsSavedWorkspace ? "saved" : "fresh"
+            let source = model.showsSavedWork ? "saved" : "fresh"
             DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
         }
         .onChange(of: rows.map(\.id)) { _, _ in
@@ -153,7 +153,7 @@ struct WorkspaceNavigator: View {
             Menu {
                 ForEach(repositories, id: \.self) { repo in
                     Button(URL(fileURLWithPath: repo).lastPathComponent) { selectRepository(repo) }
-                        .accessibilityIdentifier("workspace-repository-\(repo)")
+                        .accessibilityIdentifier("work-repository-\(repo)")
                 }
                 Divider()
                 repositoryActions(orphans)
@@ -173,13 +173,13 @@ struct WorkspaceNavigator: View {
             .fixedSize()
             .help(model.repoPath ?? "Choose a repository")
             .accessibilityLabel("Repository")
-            .accessibilityIdentifier("workspace-repository")
+            .accessibilityIdentifier("work-repository")
             Spacer(minLength: 0)
             Menu {
                 Picker("Presentation", selection: Binding(
                     get: { navigation.presentation },
                     set: { Perf.begin(Perf.hierarchyInteraction, "presentation", id: "outline"); navigation.presentation = $0 })) {
-                    ForEach(WorkspacePresentation.allCases, id: \.self) { presentation in
+                    ForEach(WorkPresentation.allCases, id: \.self) { presentation in
                         Text(presentation.rawValue).tag(presentation)
                     }
                 }
@@ -189,11 +189,11 @@ struct WorkspaceNavigator: View {
                         navigation.showsHeadlessSessions = $0
                         Task { await model.refreshSessions() }
                     }))
-                    .accessibilityIdentifier("workspace-headless-sessions")
+                    .accessibilityIdentifier("work-headless-sessions")
                 if let onShowTerminals {
                     Divider()
                     Button("Show retained terminals", action: onShowTerminals)
-                        .accessibilityIdentifier("workspace-return-terminals")
+                        .accessibilityIdentifier("work-return-terminals")
                 }
             } label: {
                 Image(systemName: "line.3.horizontal.decrease")
@@ -208,7 +208,7 @@ struct WorkspaceNavigator: View {
             .onHover { hoveringPresentation = $0 }
             .help("Outline presentation")
             .accessibilityLabel("Outline presentation")
-            .accessibilityIdentifier("workspace-presentation")
+            .accessibilityIdentifier("work-presentation")
         }
         .foregroundStyle(palette.text)
         .padding(.leading, 18)
@@ -219,15 +219,15 @@ struct WorkspaceNavigator: View {
     }
 
     @ViewBuilder private var forReadErrors: some View {
-        let status = model.workspaceStatus
+        let status = model.workStatus
         if let message = status.message {
             Group {
                 if case .failed = status { warning(message) }
                 else { Text(message).foregroundStyle(palette.textSecondary).padding(4) }
             }
-            .accessibilityIdentifier("workspace-status")
+            .accessibilityIdentifier("work-status")
         }
-        ForEach(model.workspace.waves) { wave in
+        ForEach(model.projection.waves) { wave in
             if let reason = wave.roadmap.tasks.unavailableReason { warning(reason) }
             if case .available(_, let truncated) = wave.roadmap.tasks, truncated {
                 warning("Planning is partial; more Tasks exist.")
@@ -238,7 +238,7 @@ struct WorkspaceNavigator: View {
     /// One row component at two levels. A Wave is a sans section head with a
     /// chevron and nothing else; a Task carries a dot only while it needs eyes
     /// (running, blocked, waiting on you) and a count only while Sessions exist.
-    private func outlineRow(_ row: WorkspaceOutlineRow, _ orphans: [SessionRecord]) -> some View {
+    private func outlineRow(_ row: WorkOutlineRow, _ orphans: [SessionRecord]) -> some View {
         let isWave = row.workKey?.work.kind == .wave
         return HStack(spacing: 6) {
             if case .work(let subject, true, _) = row.content {
@@ -253,7 +253,7 @@ struct WorkspaceNavigator: View {
                         .frame(width: 14, height: 24)
                 }
                 .accessibilityLabel("Toggle \(row.title)")
-                .accessibilityIdentifier("workspace-disclose-\(key.work.kind.rawValue)-\(key.work.id)")
+                .accessibilityIdentifier("work-disclose-\(key.work.kind.rawValue)-\(key.work.id)")
             } else if row.session != nil {
                 Image(systemName: "terminal").font(.system(size: 11))
                     .foregroundStyle(palette.textTertiary).frame(width: 14)
@@ -336,13 +336,13 @@ struct WorkspaceNavigator: View {
         .fixedSize()
         .help(names)
         .accessibilityLabel("\(sessions.count) Task Sessions: \(names)")
-        .accessibilityIdentifier("workspace-session-count-\(work.id)")
+        .accessibilityIdentifier("work-session-count-\(work.id)")
     }
 
     @ViewBuilder private func subjectActions(_ work: WorkReference, title: String) -> some View {
         if work.kind == .wave, let onNewSession, let launch = model.sessionSkillLaunch(for: work) {
             Button("New Session · \(title)") { onNewSession(launch) }
-                .accessibilityIdentifier("workspace-capture-wave-\(work.id)")
+                .accessibilityIdentifier("work-capture-wave-\(work.id)")
         }
         Button("Inspect \(title)") { model.select(work) }
         if let onConversation { Button("New conversation · \(title)") { onConversation(work) } }
@@ -371,14 +371,14 @@ struct WorkspaceNavigator: View {
         Task.detached { try? saveLoopflowState(LoopflowState(selectedRepoPath: path.normalizedFilePath)) }
     }
 
-    private func identifier(_ row: WorkspaceOutlineRow) -> String {
+    private func identifier(_ row: WorkOutlineRow) -> String {
         switch row.id {
         case .session(let id): "session-row-\(id)"
-        case .work(let key): "workspace-\(key.work.kind.rawValue)-\(key.work.id)"
+        case .work(let key): "work-\(key.work.kind.rawValue)-\(key.work.id)"
         }
     }
 
-    private func isSelected(_ row: WorkspaceOutlineRow) -> Bool {
+    private func isSelected(_ row: WorkOutlineRow) -> Bool {
         if let session = row.session { return model.navigation.selectedSessionId == session.id }
         // A Task row carrying the open Session inline keeps its location visible.
         if let selected = model.navigation.selectedSessionId {
@@ -390,7 +390,7 @@ struct WorkspaceNavigator: View {
     /// The dot a Task row carries while it needs eyes, from its shared Flow
     /// projection: running, blocked, or stalled. Stopped and idle rows
     /// carry nothing.
-    private func taskTone(_ row: WorkspaceOutlineRow) -> WorkspaceTone? {
+    private func taskTone(_ row: WorkOutlineRow) -> WorkTone? {
         guard let work = row.workKey?.work, work.kind == .task, let found = model.task(id: work.id),
               case .latest(let latest) = found.task.flow.record else { return nil }
         let state = latest.execution.presentation

@@ -16,7 +16,7 @@ extension LoopflowPalette {
 }
 
 /// Every workspace section heading: small tracked caps, one system.
-struct WorkspaceSectionHeading<Trailing: View>: View {
+struct WorkSectionHeading<Trailing: View>: View {
     let title: String
     var count: Int?
     @ViewBuilder var trailing: Trailing
@@ -43,14 +43,14 @@ struct WorkspaceSectionHeading<Trailing: View>: View {
     }
 }
 
-extension WorkspaceSectionHeading where Trailing == EmptyView {
+extension WorkSectionHeading where Trailing == EmptyView {
     init(_ title: String, count: Int? = nil) {
         self.init(title: title, count: count) { EmptyView() }
     }
 }
 
 /// Tone shared by plan chips, Session state, status dots, and Flow nodes.
-enum WorkspaceTone {
+enum WorkTone {
     case running, done, human, blocked, stopped, neutral
 
     var ink: Color {
@@ -103,7 +103,7 @@ enum WorkspaceTone {
 
 extension TaskFlowExecution {
     /// Shared by Flow status, plan chips and navigation dots. Quiet states have no chip.
-    var presentation: (label: String?, tone: WorkspaceTone) {
+    var presentation: (label: String?, tone: WorkTone) {
         switch self {
         case .running, .starting: ("Running", .running)
         case .blocked: ("Blocked", .blocked)
@@ -125,9 +125,9 @@ extension Color {
 }
 
 /// Compact state label with an aligned column footprint.
-struct WorkspaceChip: View {
+struct WorkChip: View {
     let text: String
-    let tone: WorkspaceTone
+    let tone: WorkTone
 
     var body: some View {
         Text(text)
@@ -149,12 +149,12 @@ struct WorkspaceChip: View {
 extension View {
     /// A framed surface one ladder step above the canvas, with a hairline and
     /// no shadow: the only framed surfaces are Flow, Sessions, and plans.
-    func workspacePanel(padding: CGFloat = 0) -> some View {
-        modifier(WorkspacePanel(padding: padding))
+    func workPanel(padding: CGFloat = 0) -> some View {
+        modifier(WorkPanel(padding: padding))
     }
 }
 
-private struct WorkspacePanel: ViewModifier {
+private struct WorkPanel: ViewModifier {
     let padding: CGFloat
     @Environment(\.palette) private var palette
 
@@ -167,7 +167,7 @@ private struct WorkspacePanel: ViewModifier {
 }
 
 /// Primary actions as an accent outline: burgundy marks the action, never fills.
-struct WorkspaceOutlineButtonStyle: ButtonStyle {
+struct WorkOutlineButtonStyle: ButtonStyle {
     @Environment(\.palette) private var palette
     @Environment(\.isEnabled) private var isEnabled
 
@@ -191,7 +191,7 @@ struct WorkspaceOutlineButtonStyle: ButtonStyle {
 
 /// Collapsed heading for a demand-read Task section (Comments, Session history):
 /// chevron, caps title, optional count, and the read's progress or failure.
-struct WorkspaceDisclosureHeading: View {
+struct WorkDisclosureHeading: View {
     let title: String
     let count: Int?
     let expanded: Bool
@@ -234,13 +234,13 @@ struct WorkspaceDisclosureHeading: View {
             } else if let hasLastGood = failure {
                 Text(hasLastGood ? "May be out of date" : "Unavailable")
                     .font(Typography.caption(10.5).weight(.bold))
-                    .foregroundStyle(WorkspaceTone.human.text)
+                    .foregroundStyle(WorkTone.human.text)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 1)
-                    .background(WorkspaceTone.human.fill, in: RoundedRectangle(cornerRadius: 4))
+                    .background(WorkTone.human.fill, in: RoundedRectangle(cornerRadius: 4))
                     .accessibilityIdentifier("\(identifier)-stale")
                 Button("Retry", action: retry)
-                    .buttonStyle(WorkspaceOutlineButtonStyle())
+                    .buttonStyle(WorkOutlineButtonStyle())
                     .controlSize(.small)
                     .accessibilityIdentifier("\(identifier)-retry")
             }

@@ -100,7 +100,7 @@ struct TaskHistoryFilterTests {
         let row = try task("canceled", date: nil, runtime: "done", missing: true)
         #expect(visible(try task("canceled", date: nil, runtime: "done", missing: true, review: true), TaskHistoryFilter()))
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: Data(contentsOf: fixtures.appendingPathComponent("sessions.json")))
-        let retained = WorkspaceTask(id: WorkspaceNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: [try #require(sessions.first)])
+        let retained = TaskProjection(id: WorkNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: [try #require(sessions.first)])
         #expect(!visible(row, TaskHistoryFilter()))
         #expect(retained.inWorkingSet)
         #expect(retained.sessions.first?.id == sessions.first?.id)
@@ -229,7 +229,7 @@ struct TaskHistoryFilterTests {
         let query = RegistryQuery { args, _ in args == ["flow", "list", "--json"] ? catalog : payload }
         let roadmap = try await query.roadmap()
         let wave = try #require(roadmap.waves.first)
-        let model = PodiumModel(query: query)
+        let model = WorkModel(query: query)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.wave.toWave()]), processActivity: .loading, workActivity: .loading, repos: [])
         await model.loadFlowCatalog()
         model.select(.wave(id: wave.wave.id))
@@ -238,8 +238,8 @@ struct TaskHistoryFilterTests {
         let view = WorkSurfaceView(model: model, onOpenTask: { opened = $0 })
         func rows() throws -> [String] {
             try view.inspect().findAll(ViewType.Button.self).compactMap { button in
-                guard let id = try? button.accessibilityIdentifier(), id.hasPrefix("podium-task-") else { return nil }
-                return String(id.dropFirst("podium-task-".count))
+                guard let id = try? button.accessibilityIdentifier(), id.hasPrefix("loopflow-task-") else { return nil }
+                return String(id.dropFirst("loopflow-task-".count))
             }
         }
         func checkCount() throws {
@@ -249,7 +249,7 @@ struct TaskHistoryFilterTests {
             }
             #expect(visibleRows.contains("unresolved"))
             for id in visibleRows {
-                let button = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-task-\(id)").button()
+                let button = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-task-\(id)").button()
                 #expect(button.isDisabled() == false)
                 try button.tap()
                 #expect(opened == .task(id: id))

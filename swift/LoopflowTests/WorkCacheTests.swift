@@ -5,28 +5,41 @@ import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
 
-@Suite("Workspace cache")
+@Suite("Work cache")
 @MainActor
-struct WorkspaceCacheTests {
+struct WorkCacheTests {
     private static let repo = "/src/loopflow"
+
+    @Test("The existing workspace cache file retains Home and selection after the naming change")
+    func readsExistingCacheBytes() throws {
+        let directory = try temporaryDirectory()
+        let url = directory.appendingPathComponent("workspace.json")
+        let bytes = Data(#"{"version":1,"snapshot":{"homeId":"home-a","repositories":{"/src/loopflow":{"selection":{"kind":"task","id":"issue-now"},"savedAt":0}}}}"#.utf8)
+        try bytes.write(to: url)
+
+        let saved = try #require(WorkCache(directory: directory).load())
+        #expect(saved.homeId == "home-a")
+        #expect(saved.repositories[Self.repo]?.selection == .task(id: "issue-now"))
+        #expect(try Data(contentsOf: url) == bytes)
+    }
 
     @Test("A returning launch shows the saved workspace and selection before any read finishes")
     func returningLaunchRestores() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
-        let cache = WorkspaceCache(directory: directory)
-        let first = PodiumModel(query: source.query, repoPath: Self.repo, cache: cache)
-        #expect(first.workspaceStatus == .loading)
+        let cache = WorkCache(directory: directory)
+        let first = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
+        #expect(first.workStatus == .loading)
         await first.refresh()
-        #expect(first.workspaceStatus == .current)
+        #expect(first.workStatus == .current)
         first.select(.task(id: "issue-now"))
         first.confirmHome("home-a")
         cache.flush()
 
         let offline = RegistryQuery { _, _ in throw RegistryQueryError("offline") }
-        let returning = PodiumModel(query: offline, repoPath: Self.repo, cache: WorkspaceCache(directory: directory))
+        let returning = WorkModel(query: offline, repoPath: Self.repo, cache: WorkCache(directory: directory))
 
-        #expect(returning.workspaceStatus == .updating)
+        #expect(returning.workStatus == .updating)
         #expect(returning.savedHomeId == "home-a")
         #expect(returning.roadmap.value?.waves.map(\.wave.id) == first.roadmap.value?.waves.map(\.wave.id))
         #expect(returning.sessions.value?.map(\.id) == first.sessions.value?.map(\.id))
@@ -38,26 +51,26 @@ struct WorkspaceCacheTests {
     func savedTextIsQuiet() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
-        let saving = WorkspaceCache(directory: directory)
-        let first = PodiumModel(query: source.query, repoPath: Self.repo, cache: saving)
+        let saving = WorkCache(directory: directory)
+        let first = WorkModel(query: source.query, repoPath: Self.repo, cache: saving)
         await first.refresh()
         let liveFlow = try #require(first.task(id: "issue-now")?.task.flow)
         guard case .latest(let live) = liveFlow.record else { Issue.record("fixture Flow has no latest record"); return }
         #expect(live.execution == .running)
         #expect(first.sessions.value?.first?.state == .active)
-        #expect(first.task(id: "issue-now")?.task.condition.reason != WorkspaceCache.savedReason)
+        #expect(first.task(id: "issue-now")?.task.condition.reason != WorkCache.savedReason)
         saving.flush()
 
-        let returning = PodiumModel(query: RegistryQuery { _, _ in throw RegistryQueryError("offline") },
-                                    repoPath: Self.repo, cache: WorkspaceCache(directory: directory))
+        let returning = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("offline") },
+                                    repoPath: Self.repo, cache: WorkCache(directory: directory))
         let flow = try #require(returning.task(id: "issue-now")?.task.flow)
         guard case .latest(let latest) = flow.record else { Issue.record("saved Flow has no latest record"); return }
         #expect(latest.execution == .unknown)
         #expect(latest.current == live.current)
-        #expect(flow.controls.allSatisfy { $0.unavailable == WorkspaceCache.savedReason })
+        #expect(flow.controls.allSatisfy { $0.unavailable == WorkCache.savedReason })
         let conditions = returning.roadmap.value?.waves.flatMap { $0.tasks.items.map(\.condition) } ?? []
         #expect(!conditions.isEmpty)
-        #expect(conditions.allSatisfy { $0.state == .unknown && $0.reason == WorkspaceCache.savedReason })
+        #expect(conditions.allSatisfy { $0.state == .unknown && $0.reason == WorkCache.savedReason })
         let session = try #require(returning.sessions.value?.first)
         #expect(session.state == .unknown)
         #expect(session.actions.map(\.kind) == [.open])
@@ -67,24 +80,24 @@ struct WorkspaceCacheTests {
     func failedRefreshKeepsSaved() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
-        let saving = WorkspaceCache(directory: directory)
-        await PodiumModel(query: source.query, repoPath: Self.repo, cache: saving).refresh()
+        let saving = WorkCache(directory: directory)
+        await WorkModel(query: source.query, repoPath: Self.repo, cache: saving).refresh()
         saving.flush()
 
         await source.fail()
-        let returning = PodiumModel(query: source.query, repoPath: Self.repo, cache: WorkspaceCache(directory: directory))
+        let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: WorkCache(directory: directory))
         await returning.refresh()
 
-        #expect(returning.workspaceStatus == .failed("Couldn't update: offline"))
+        #expect(returning.workStatus == .failed("Couldn't update: offline"))
         #expect(returning.roadmap.value != nil)
         #expect(returning.sessions.value?.isEmpty == false)
-        let navigator = WorkspaceNavigator(model: returning, onOpenSession: { _ in })
-        let status = try navigator.inspect().findAll(where: { (try? $0.accessibilityIdentifier()) == "workspace-status" })
+        let navigator = WorkNavigator(model: returning, onOpenSession: { _ in })
+        let status = try navigator.inspect().findAll(where: { (try? $0.accessibilityIdentifier()) == "work-status" })
         #expect(status.count == 1)
 
         await source.recover()
         await returning.refresh()
-        #expect(returning.workspaceStatus == .current)
+        #expect(returning.workStatus == .current)
         guard case .latest(let latest) = returning.task(id: "issue-now")?.task.flow.record else {
             Issue.record("fresh Flow has no latest record"); return
         }
@@ -93,62 +106,62 @@ struct WorkspaceCacheTests {
 
     @Test("A first launch has one loading message")
     func firstLaunchLoadsOnce() throws {
-        let model = PodiumModel(query: RegistryQuery { _, _ in throw RegistryQueryError("unused") },
-                                repoPath: Self.repo, cache: WorkspaceCache(directory: try temporaryDirectory()))
-        let navigator = WorkspaceNavigator(model: model, onOpenSession: { _ in })
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("unused") },
+                                repoPath: Self.repo, cache: WorkCache(directory: try temporaryDirectory()))
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         let texts = try navigator.inspect().findAll(ViewType.Text.self).map { try $0.string() }
-        #expect(texts.filter { $0.contains("…") } == ["Loading workspace…"])
+        #expect(texts.filter { $0.contains("…") } == ["Loading work…"])
     }
 
     @Test("Absent, corrupt and incompatible files load as nothing and are removed")
     func unusableFilesRecover() throws {
         let directory = try temporaryDirectory()
         let file = directory.appendingPathComponent("workspace.json")
-        #expect(WorkspaceCache(directory: directory).load() == nil)
+        #expect(WorkCache(directory: directory).load() == nil)
 
         for text in ["{ not json", #"{"version":0,"snapshot":{"repositories":{}}}"#] {
             try Data(text.utf8).write(to: file)
-            #expect(WorkspaceCache(directory: directory).load() == nil)
+            #expect(WorkCache(directory: directory).load() == nil)
             #expect(!FileManager.default.fileExists(atPath: file.path))
         }
 
         try Data(#"{"version":1,"snapshot":{"roadmap":"{}","repositories":{}}}"#.utf8).write(to: file)
-        let model = PodiumModel(query: RegistryQuery { _, _ in throw RegistryQueryError("unused") },
-                                repoPath: Self.repo, cache: WorkspaceCache(directory: directory))
-        #expect(model.workspaceStatus == .loading)
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("unused") },
+                                repoPath: Self.repo, cache: WorkCache(directory: directory))
+        #expect(model.workStatus == .loading)
     }
 
     @Test("A workspace saved under another Home is dropped")
     func anotherHomeInvalidates() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
-        let saving = WorkspaceCache(directory: directory)
-        let first = PodiumModel(query: source.query, repoPath: Self.repo, cache: saving)
+        let saving = WorkCache(directory: directory)
+        let first = WorkModel(query: source.query, repoPath: Self.repo, cache: saving)
         await first.refresh()
         first.select(.task(id: "issue-now"))
         first.confirmHome("home-a")
         saving.flush()
 
-        let cache = WorkspaceCache(directory: directory)
-        let returning = PodiumModel(query: RegistryQuery { _, _ in throw RegistryQueryError("offline") },
+        let cache = WorkCache(directory: directory)
+        let returning = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("offline") },
                                     repoPath: Self.repo, cache: cache)
         returning.confirmHome("home-b")
         cache.flush()
 
-        #expect(returning.workspaceStatus == .loading)
+        #expect(returning.workStatus == .loading)
         #expect(returning.sessions.value == nil)
         #expect(returning.selection == nil)
         #expect(returning.task(id: "issue-now") == nil)
-        let saved = try #require(WorkspaceCache(directory: directory).load())
-        #expect(saved == WorkspaceSnapshot(homeId: "home-b"))
+        let saved = try #require(WorkCache(directory: directory).load())
+        #expect(saved == WorkSnapshot(homeId: "home-b"))
     }
 
     @Test("A Session read that finishes after a repository switch saves nothing")
     func staleSessionReadIsNotSaved() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
-        let cache = WorkspaceCache(directory: directory)
-        let model = PodiumModel(query: source.query, repoPath: Self.repo, cache: cache)
+        let cache = WorkCache(directory: directory)
+        let model = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
         await source.hold("session")
         let read = Task { await model.refreshSessions() }
         await source.waitForHeldRead()
@@ -158,46 +171,46 @@ struct WorkspaceCacheTests {
         cache.flush()
 
         #expect(model.sessions.value == nil)
-        #expect(WorkspaceCache(directory: directory).load()?.repositories[Self.repo]?.sessionPages == nil)
+        #expect(WorkCache(directory: directory).load()?.repositories[Self.repo]?.sessionPages == nil)
     }
 
     @Test("A slow provider keeps the saved workspace usable under Updating…")
     func slowProviderKeepsSaved() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
-        let saving = WorkspaceCache(directory: directory)
-        await PodiumModel(query: source.query, repoPath: Self.repo, cache: saving).refresh()
+        let saving = WorkCache(directory: directory)
+        await WorkModel(query: source.query, repoPath: Self.repo, cache: saving).refresh()
         saving.flush()
 
-        let returning = PodiumModel(query: source.query, repoPath: Self.repo, cache: WorkspaceCache(directory: directory))
+        let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: WorkCache(directory: directory))
         await source.hold("roadmap")
         let read = Task { await returning.refresh() }
         await source.waitForHeldRead()
 
-        #expect(returning.workspaceStatus == .updating)
+        #expect(returning.workStatus == .updating)
         #expect(returning.task(id: "issue-now") != nil)
         #expect(returning.sessions.value?.isEmpty == false)
-        let navigator = WorkspaceNavigator(model: returning, onOpenSession: { _ in })
+        let navigator = WorkNavigator(model: returning, onOpenSession: { _ in })
         let texts = try navigator.inspect().findAll(ViewType.Text.self).map { try $0.string() }
         #expect(texts.filter { $0.contains("…") } == ["Updating…"])
 
         await source.release()
         await read.value
-        #expect(returning.workspaceStatus == .current)
+        #expect(returning.workStatus == .current)
     }
 
     @Test("A refresh that finishes after a selection change keeps the newer selection")
     func refreshAfterSelectionChange() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
-        let saving = WorkspaceCache(directory: directory)
-        let first = PodiumModel(query: source.query, repoPath: Self.repo, cache: saving)
+        let saving = WorkCache(directory: directory)
+        let first = WorkModel(query: source.query, repoPath: Self.repo, cache: saving)
         await first.refresh()
         first.select(.task(id: "issue-now"))
         saving.flush()
 
-        let cache = WorkspaceCache(directory: directory)
-        let returning = PodiumModel(query: source.query, repoPath: Self.repo, cache: cache)
+        let cache = WorkCache(directory: directory)
+        let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
         #expect(returning.selection == .task(id: "issue-now"))
         await source.hold("roadmap")
         let read = Task { await returning.refresh() }
@@ -209,24 +222,24 @@ struct WorkspaceCacheTests {
 
         #expect(returning.selection == .wave(id: "wave-1"))
         #expect(returning.navigation.content == .details)
-        #expect(returning.workspaceStatus == .current)
-        #expect(WorkspaceCache(directory: directory).load()?.repositories[Self.repo]?.selection == .wave(id: "wave-1"))
+        #expect(returning.workStatus == .current)
+        #expect(WorkCache(directory: directory).load()?.repositories[Self.repo]?.selection == .wave(id: "wave-1"))
     }
 
     @Test("Another window in the same process opens from the workspace already held")
     func warmReopen() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
-        let cache = WorkspaceCache(directory: directory)
-        let first = PodiumModel(query: source.query, repoPath: Self.repo, cache: cache)
+        let cache = WorkCache(directory: directory)
+        let first = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
         await first.refresh()
         cache.flush()
         try FileManager.default.removeItem(at: directory.appendingPathComponent("workspace.json"))
 
         let reads = await source.reads
-        let reopened = PodiumModel(query: source.query, repoPath: Self.repo, cache: cache)
+        let reopened = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
 
-        #expect(reopened.workspaceStatus == .updating)
+        #expect(reopened.workStatus == .updating)
         #expect(reopened.roadmap.value?.waves.map(\.wave.id) == first.roadmap.value?.waves.map(\.wave.id))
         #expect(reopened.sessions.value?.map(\.id) == first.sessions.value?.map(\.id))
         #expect(await source.reads == reads)
@@ -236,16 +249,16 @@ struct WorkspaceCacheTests {
     func savedLaunchRepository() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
-        let saving = WorkspaceCache(directory: directory)
-        await PodiumModel(query: source.query, repoPath: Self.repo, cache: saving).refresh()
+        let saving = WorkCache(directory: directory)
+        await WorkModel(query: source.query, repoPath: Self.repo, cache: saving).refresh()
         saving.flush()
 
         // `/src/loopflow` is no repository here, so only the saved workspace can scope the window.
-        let unknown = PodiumModel(query: source.query, launchCandidates: [Self.repo],
-                                  cache: WorkspaceCache(directory: try temporaryDirectory()))
+        let unknown = WorkModel(query: source.query, launchCandidates: [Self.repo],
+                                  cache: WorkCache(directory: try temporaryDirectory()))
         #expect(unknown.repoPath == nil)
-        let returning = PodiumModel(query: source.query, launchCandidates: ["/src/missing", Self.repo],
-                                    cache: WorkspaceCache(directory: directory))
+        let returning = WorkModel(query: source.query, launchCandidates: ["/src/missing", Self.repo],
+                                    cache: WorkCache(directory: directory))
         #expect(returning.repoPath == Self.repo)
         #expect(returning.sessions.value?.isEmpty == false)
 
@@ -257,38 +270,38 @@ struct WorkspaceCacheTests {
     func headlessListingIsNotSaved() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
-        let cache = WorkspaceCache(directory: directory)
-        let model = PodiumModel(query: source.query, repoPath: Self.repo, cache: cache)
+        let cache = WorkCache(directory: directory)
+        let model = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
         model.navigation.showsHeadlessSessions = true
         await model.refreshSessions()
         cache.flush()
 
         #expect(model.sessions.value?.isEmpty == false)
-        #expect(WorkspaceCache(directory: directory).load()?.repositories[Self.repo]?.sessionPages == nil)
+        #expect(WorkCache(directory: directory).load()?.repositories[Self.repo]?.sessionPages == nil)
     }
 
     @Test("Only the most recently saved repositories are kept")
     func repositoriesAreBounded() throws {
         let directory = try temporaryDirectory()
-        let cache = WorkspaceCache(directory: directory)
+        let cache = WorkCache(directory: directory)
         let start = Date(timeIntervalSince1970: 1_000)
-        for index in 0..<(WorkspaceCache.maxRepositories + 3) {
+        for index in 0..<(WorkCache.maxRepositories + 3) {
             cache.saveSelection(.wave(id: "wave"), repo: "/src/\(index)", at: start.addingTimeInterval(Double(index)))
         }
         cache.flush()
 
-        let saved = try #require(WorkspaceCache(directory: directory).load())
-        #expect(saved.repositories.count == WorkspaceCache.maxRepositories)
+        let saved = try #require(WorkCache(directory: directory).load())
+        #expect(saved.repositories.count == WorkCache.maxRepositories)
         #expect(saved.repositories["/src/0"] == nil)
-        #expect(saved.repositories["/src/\(WorkspaceCache.maxRepositories + 2)"] != nil)
+        #expect(saved.repositories["/src/\(WorkCache.maxRepositories + 2)"] != nil)
     }
 
     @Test("An unchanged poll writes nothing")
     func unchangedPollDoesNotRewrite() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
-        let cache = WorkspaceCache(directory: directory)
-        let model = PodiumModel(query: source.query, repoPath: Self.repo, cache: cache)
+        let cache = WorkCache(directory: directory)
+        let model = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
         await model.refreshSessions()
         cache.flush()
         let file = directory.appendingPathComponent("workspace.json")
@@ -301,7 +314,7 @@ struct WorkspaceCacheTests {
     }
 
     private func temporaryDirectory() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("workspace-cache-\(UUID().uuidString)")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("work-cache-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

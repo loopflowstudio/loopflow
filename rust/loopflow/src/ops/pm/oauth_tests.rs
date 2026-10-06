@@ -52,7 +52,7 @@ impl Fixture {
                 items: vec![],
             },
         };
-        self.store.put_pm_snapshot(row.clone()).await.unwrap();
+        self.store.put_pm_snapshot(row.clone(), None).await.unwrap();
         row
     }
 }

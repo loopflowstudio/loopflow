@@ -18,7 +18,7 @@ pub(crate) async fn wave_metric_portfolio(
     wave: &Wave,
     evaluation_time: OffsetDateTime,
 ) -> Result<MetricPortfolioDto> {
-    match super::chapter::current_project(store, wave).await {
+    match super::project::current_project(store, wave) {
         Ok(project) => {
             chapter_metric_portfolio(store, wave, &project.metric_targets, evaluation_time).await
         }
@@ -499,7 +499,7 @@ mod tests {
         );
         store.create_wave(&wave).await.unwrap();
         let projects = [
-            project("project-api", "loopflow-api"),
+            project("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "loopflow-api"),
             project("project-surface", "mac-surface"),
         ];
         let unchanged_krs = projects
@@ -551,7 +551,15 @@ mod tests {
                 items: vec![],
             },
         };
-        store.put_pm_snapshot(snapshot.clone()).await.unwrap();
+        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
+            wave.id(),
+            None,
+            &projects[0].id,
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
         let untargeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
             .unwrap();
@@ -572,7 +580,7 @@ mod tests {
             projects: vec![targeted_project],
             items: vec![],
         };
-        store.put_pm_snapshot(snapshot.clone()).await.unwrap();
+        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
         let targeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
             .unwrap();
@@ -585,15 +593,12 @@ mod tests {
             items: vec![],
         };
         snapshot.snapshot.projects[0].revision = Some("2026-09-30T00:00:02Z".into());
-        store.put_pm_snapshot(snapshot.clone()).await.unwrap();
-        let ambiguous = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
+        store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        let selected = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
             .unwrap();
-        assert_eq!(ambiguous.metrics, portfolio.metrics);
-        assert!(matches!(
-            ambiguous.contract_issues.as_slice(),
-            [MetricContractIssueDto::ChapterUnavailable { .. }]
-        ));
+        assert_eq!(selected.metrics, untargeted.metrics);
+        assert!(selected.contract_issues.is_empty());
         assert_eq!(store.pm_snapshot(wave.id()).await.unwrap(), Some(snapshot));
 
         let owned = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))

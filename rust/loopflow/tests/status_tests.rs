@@ -47,7 +47,7 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
         plan: ProjectPlan {
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
-            id: LinearProjectId::new(format!("linear-{slug}")).expect("Linear Project id"),
+            id: LinearProjectId::new(uuid::Uuid::new_v4().to_string()).expect("Linear Project id"),
             slug: slug.to_string(),
             name: slug.replace('-', " "),
             prompt_context: "Keep status truthful.".to_string(),
@@ -61,15 +61,16 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
     }
 }
 
-fn select_project(store: &SqliteStore, wave: &Wave, project_id: &str) {
-    for mut project in store.list_projects(Some(wave.id())).unwrap() {
-        project.plan.status = if project.plan.id.as_str() == project_id {
-            loopflow::pm::ProjectStatus::Started
-        } else {
-            loopflow::pm::ProjectStatus::Completed
-        };
-        store.update_project(&project).unwrap();
-    }
+fn select_project(home: &Path, wave: &Wave, project_id: &str) {
+    let connection = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+    connection.execute(
+        "UPDATE waves SET current_project_id=(SELECT id FROM projects WHERE wave_id=?1 AND external_project_id=?2) WHERE id=?1",
+        rusqlite::params![wave.id().as_str(), project_id],
+    ).unwrap();
+    connection.execute(
+        "UPDATE projects SET status=CASE WHEN external_project_id=?2 THEN 'started' ELSE 'completed' END WHERE wave_id=?1",
+        rusqlite::params![wave.id().as_str(), project_id],
+    ).unwrap();
 }
 
 fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
@@ -88,7 +89,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
         "items": []
     });
     let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
-    select_project(&store, wave, project.plan.id.as_str());
+    select_project(home, wave, project.plan.id.as_str());
     store
         .put_pm_snapshot(&PmSnapshotRow {
             wave_id: wave.id().clone(),
@@ -222,6 +223,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
         updated_at: now,
     };
     store.insert_project(&stale).expect("seed stale Project");
+    select_project(home, &wave, stale.plan.id.as_str());
     let stale_task = Task {
         id: TaskId::parse(STALE_TASK_WORK_ID).expect("recorded Task Work id"),
         plan: TaskPlan {
@@ -262,7 +264,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
         updated_at: now,
     };
     store
-        .insert_task(&stale_task, &stale_pr)
+        .insert_task(stale_task.clone(), &stale_pr, false)
         .expect("seed orphaned Task");
     if abandon_stale_project {
         let stale_work = store
@@ -297,7 +299,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     store
         .insert_project(&current)
         .expect("seed current Project");
-    select_project(&store, &wave, current.plan.id.as_str());
+    select_project(home, &wave, current.plan.id.as_str());
 
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("test bin");
@@ -400,6 +402,11 @@ fn seed_previous_release_task_pr(home: &Path) {
     assert_eq!(frontier, "0.12.8.001_release");
     migrations::apply_sqlite(&connection)
         .expect("apply published migrations to historical fixture");
+    for draft in loopflow::build_info::migration_draft_manifest() {
+        connection
+            .execute_batch(draft.sql)
+            .expect("apply finished draft to historical fixture");
+    }
     drop(connection);
 
     let store = SqliteStore::new(&database).expect("open migrated previous release store");
@@ -414,7 +421,7 @@ fn seed_previous_release_task_pr(home: &Path) {
         PrMergeMode::User
     );
     let wave = store.list_waves(None).unwrap().pop().unwrap();
-    select_project(&store, &wave, "95159066-9098-4d0b-8903-01459dc7ec14");
+    select_project(home, &wave, "95159066-9098-4d0b-8903-01459dc7ec14");
     drop(store);
 
     let connection = rusqlite::Connection::open(&database).expect("reopen migrated store");
@@ -447,6 +454,7 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
             "name": project.plan.name,
             "workflow": "feature",
             "status": "started",
+            "current": true,
             "metric_targets": [],
             "krs": [{"text": "Current state and history stay distinct", "holds": false}]
         }],
@@ -599,7 +607,7 @@ Count dispatched Task loops that settle without rescue.
             snapshot: serde_json::from_value(project_payload.clone()).expect("parse PM snapshot"),
         })
         .expect("seed PM snapshot");
-    select_project(&sqlite, &wave, "d19956b2-9955-437d-aea6-d91766231c77");
+    select_project(home.path(), &wave, "d19956b2-9955-437d-aea6-d91766231c77");
     drop(sqlite);
 
     let contract = load_metric_contract(&contract_path, wave.id().as_str()).expect("contract");
@@ -730,7 +738,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
             assert_eq!(unavailable.len(), 1);
             assert_eq!(unavailable[0]["work_id"], PERSISTED_TASK_ID);
             assert_eq!(unavailable[0]["task_identifier"], "W2-127");
-            assert_eq!(unavailable[0]["status"], "ready");
+            assert_eq!(unavailable[0]["status"], "not_ready");
             assert_eq!(unavailable[0]["owner"], "wave");
             assert!(unavailable[0]["recovery"]
                 .as_str()

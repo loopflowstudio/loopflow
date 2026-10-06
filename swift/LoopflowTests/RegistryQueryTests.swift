@@ -195,6 +195,7 @@ struct RegistryQueryTests {
     "metrics": [],
     "contract_issues": []
   },
+  "project_readiness": {"state": "ready", "project_id": "project-1", "observed_at": null, "pending_successor": null, "activation": null},
   "projects": {
     "state": "ok",
     "items": [
@@ -204,7 +205,7 @@ struct RegistryQueryTests {
         "slug": "release-feedback",
         "name": "current",
         "workflow": "task-design",
-        "status": "started",
+        "status": "started", "current": true,
         "metric_targets": [],
         "krs": [
           {
@@ -378,6 +379,7 @@ struct RegistryQueryTests {
             "metrics": [],
             "contract_issues": []
           },
+          "project_readiness": {"state": "unavailable", "project_id": null, "observed_at": null, "pending_successor": null, "activation": null},
           "projects": {
             "state": "unavailable",
             "reason": "Project planning unavailable"

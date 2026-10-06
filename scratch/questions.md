@@ -210,47 +210,45 @@ nodes sit on one row and extra edges take lanes below it; each choosable
 edge's label is its button and **Move to** stays a menu; a single headless
 skill Run with no Flow is not in the Flow run log.
 
-## Choices the test repair pass made without Jack
+## Choices the merge of main made without Jack
 
-The agent's, October 6, slice 13. None is confirmed by Jack Heart.
+The agent's, October 6, slice 15 (#1463 and v0.13.7 merged). None is
+confirmed by Jack Heart.
 
-- **An edge that runs nothing keeps the checkout.** `lf task run ISSUE end`
-  on such an edge skips the clean-worktree refusal and the checkout cleanup,
-  and says the checkout was retained. `lf task move ISSUE end` and an edge
-  whose Flow lands still refuse uncommitted changes. The rule follows the
-  edge taken, not the whole definition: a workflow with both a landing edge
-  and an empty edge into `end` gets it on the empty one.
-- **PR refusals stay.** The plan's default also waived them; this pass did
-  not. A no-PR Task whose Flow committed must publish or `lf pr abandon`
-  before `end`. Left with 0-PR completion to LOO-385.
-- **Tests changed, not code,** for the other two; the plan names them.
+- **Kept from #1463, restated on this PR's model.** A Wave's selected
+  Project gates an unstarted Task at `lf task run` (the launch check), and a
+  started Task keeps running under a predecessor Project. Chapter evidence
+  counts a Flow exec's steps in the checkout where main counted Flow
+  operations. A rotation holding a Task's checkout refuses a Flow launch and
+  each step start there, as it refused a worker's attempt.
+- **Not kept: `lf task restart`** and its planning-preserving restart test.
+  The command is deleted by this PR; `lf task run` starts a fresh Flow.
+- **Not kept: checkout exclusion following a conversation's Flow.** Main
+  excluded a conversation started elsewhere whose Flow ran in the checkout.
+  A conversation's Flow is now read from the step that captured its input,
+  so nothing names it when the conversation is admitted. Exclusion still
+  follows the conversation's own directory and explicit Task.
+- **A Project's workflow may be empty,** as main made its Flow optional. The
+  line `lf` writes is still `workflow:`; `lf wave update-plan --workflow ""`
+  is no longer refused. A bare `lf task run` under such a Project still
+  needs a workflow named.
+- **Two drafts, not one.** Main's `project_readiness.sql` is its own
+  Task's draft and stays beside this PR's; neither touches what the other
+  creates.
+- **Desktop names.** Main renamed Podium and Workspace types to Work; this
+  PR's views follow. `WorkspaceIdentity` and the Task workspace keep their
+  names, as on main.
 
-## Choices the Task view pass made without Jack
+## Choices the test repair and Task view passes made without Jack
 
-The agent's, October 6, slice 14. None is confirmed by Jack Heart.
-
-- **Ensure is asked once.** Opening a Task opens the Session the store
-  already marks primary. Only when none is marked does Desktop run
-  `lf session ensure --task ISSUE`, once per Task per window, and only into
-  an empty workspace. A refusal shows in the header.
-- **The + menu has no "New conversation".** A second conversation is opened
-  from Task details (**New session**) or a shell.
-- **No Flow picker.** The card that chose any Flow and started it is gone
-  with its palette action. A Task with no workflow gets **Start**
-  (`lf task run ISSUE`); ad hoc Flows run from the conversation or a shell.
-- **Monitor is deleted whole,** with Desktop's `lf monitor active --watch`
-  reader; the CLI command stays. The benchmark runner's two Monitor
-  scenarios now open the exec log, so they do not compare with the
-  September baseline.
-- **Files is a pane,** so its width and visibility are the layout's, not a
-  remembered preference; nothing persists across relaunch.
-- **Raw Sessions and Execs** sit in a collapsed **Debug** group at the
-  bottom of Task details, not in the repository's Debug menu.
-- **The log and files panes are light** inside the dark multiplexer.
-- **The Session breadcrumb's Flow step text no longer navigates;** it had
-  pointed at the deleted card.
-- **Exec start time** is its first step's start, else its last update; a
-  running exec shows no length.
+The agent's, October 6, slices 13–14; none is confirmed by Jack Heart. Both
+lists are at `f8fe8aff0:scratch/questions.md` under each pass's heading.
+Most likely to matter: an edge that runs nothing keeps the checkout and
+skips the clean-worktree refusal, while PR refusals stay (LOO-385); opening
+a Task asks `lf session ensure --task` once and only into an empty
+workspace; the + menu has no "New conversation"; the Flow picker and Monitor
+are deleted and the benchmark's two Monitor scenarios no longer compare
+with the September baseline; Files is a pane and nothing about it persists.
 
 ## Choices the stream alignment pass made without Jack
 

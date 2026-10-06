@@ -439,7 +439,7 @@ fn observe_planning(task: &support::RegisteredTask, checkout: &Path) {
         .unwrap();
     record.item.revision = Some("2026-10-04T12:00:00Z".into());
     runtime
-        .block_on(task.store.put_pm_task(&scope, "linear", record))
+        .block_on(task.store.put_pm_task(&scope, "linear", record, None, None))
         .unwrap();
 }
 

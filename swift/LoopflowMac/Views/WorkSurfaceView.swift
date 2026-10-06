@@ -6,7 +6,7 @@ import Loopflow
 import SwiftUI
 
 struct WorkSurfaceView: View {
-    @Bindable var model: PodiumModel
+    @Bindable var model: WorkModel
     var onOpenSession: (SessionRecord) -> Void = { _ in }
     /// Opens a Task the way the sidebar does: its one Session, else its overview.
     var onOpenTask: ((WorkReference) -> Void)?
@@ -15,11 +15,15 @@ struct WorkSurfaceView: View {
 
     @Environment(\.palette) private var palette
     @State private var controlError: String?
-    @State private var editingTask: WorkTaskSelection?
+    @State private var editingTask: TaskSelection?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
     private var queryError: String? { model.roadmap.errorMessage }
     private var visibleWaves: [WaveRoadmap] { model.visibleRoadmaps }
+    private var openedWave: WaveSnapshot? {
+        guard let selection = model.selection, selection.kind == .wave else { return nil }
+        return model.wave(id: selection.id)?.wave
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -40,6 +44,10 @@ struct WorkSurfaceView: View {
             }
             content
         }
+        .onChange(of: openedWave?.id, initial: true) { _, _ in
+            guard let wave = openedWave else { return }
+            model.activateProject(id: wave.id, name: wave.name, repo: wave.repo)
+        }
         .background(palette.background)
         .sheet(item: $model.historyWave) { wave in
             ProjectHistoryView(wave: wave.name, repo: wave.repo, sourceReference: model.historyReference)
@@ -59,21 +67,21 @@ struct WorkSurfaceView: View {
         } else if snapshot == nil, queryError == nil {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityIdentifier("podium-work-loading")
+                .accessibilityIdentifier("loopflow-work-loading")
         } else if snapshot == nil {
             ContentUnavailableView(
                 "Work unavailable",
                 systemImage: "exclamationmark.triangle",
                 description: Text("Couldn't read the latest work. Refresh to try again.")
             )
-            .accessibilityIdentifier("podium-work-unavailable")
+            .accessibilityIdentifier("loopflow-work-unavailable")
         } else if visibleWaves.isEmpty, model.visibleWaves.isEmpty {
             ContentUnavailableView(
                 model.repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
                 systemImage: "map",
                 description: Text("Author a Wave to put work on the surface.")
             )
-            .accessibilityIdentifier("podium-work-empty")
+            .accessibilityIdentifier("loopflow-work-empty")
         } else {
             switch model.selection?.kind {
             case nil:
@@ -110,7 +118,7 @@ struct WorkSurfaceView: View {
     @ViewBuilder
     private var waveDetail: some View {
         if let selection = model.selection, let roadmap = model.wave(id: selection.id) {
-            scrollingDetail(identifier: "podium-detail-wave") {
+            scrollingDetail(identifier: "loopflow-detail-wave") {
                 VStack(alignment: .leading, spacing: Spacing.md) {
                     HStack(alignment: .center, spacing: Spacing.md) {
                         Text(roadmap.wave.displayName)
@@ -127,8 +135,13 @@ struct WorkSurfaceView: View {
                     }
                 }
 
+                ProjectReadinessView(readiness: roadmap.projectReadiness,
+                                     isPending: model.isProjectActivationPending(id: roadmap.wave.id),
+                                     transportError: model.projectCommandErrors[roadmap.wave.id]) {
+                    model.activateProject(id: roadmap.wave.id, name: roadmap.wave.name, repo: roadmap.wave.repo)
+                }
                 section {
-                    WorkspaceSectionHeading(title: "Current KRs") {
+                    WorkSectionHeading(title: "Current KRs") {
                         Button("Project history") {
                             model.historyReference = nil
                             model.historyWave = roadmap.wave
@@ -139,13 +152,14 @@ struct WorkSurfaceView: View {
                         .accessibilityIdentifier("wave-chapter-history")
                     }
                     if let chapter = roadmap.currentProject {
-                        WaveChapterView(chapter: chapter)
+                        WaveProjectView(project: chapter)
                     } else {
-                        Text("No current chapter plan.").font(Typography.body(13)).foregroundStyle(palette.textSecondary)
+                        Text("No current Project plan.").font(Typography.body(13)).foregroundStyle(palette.textSecondary)
                     }
                 }
 
-                if let name = roadmap.currentProject?.workflow {
+                if let project = roadmap.currentProject {
+                    let name = project.workflow.trimmingCharacters(in: .whitespacesAndNewlines)
                     section { WaveWorkflowView(model: model, wave: roadmap.wave, name: name) }
                         .task { await model.loadFlowCatalog() }
                 }
@@ -153,7 +167,7 @@ struct WorkSurfaceView: View {
                 switch roadmap.tasks {
                 case .unavailable(let reason):
                     section {
-                        WorkspaceSectionHeading("Tasks")
+                        WorkSectionHeading("Tasks")
                         Text(reason).font(Typography.body(13)).foregroundStyle(Color.statusWarning)
                     }
                 case .available(let inventory, let truncated):
@@ -162,7 +176,7 @@ struct WorkSurfaceView: View {
                         filter.includes($0.task, condition: $0.condition, now: model.taskHistoryNow)
                     }
                     section {
-                        WorkspaceSectionHeading(title: "Tasks", count: tasks.count) {
+                        WorkSectionHeading(title: "Tasks", count: tasks.count) {
                             TaskHistoryControls(filter: Binding(
                                 get: { model.taskHistoryFilters[roadmap.wave.id] ?? TaskHistoryFilter() },
                                 set: { model.taskHistoryFilters[roadmap.wave.id] = $0; model.taskHistoryNow = Date() }
@@ -179,7 +193,7 @@ struct WorkSurfaceView: View {
                                     planRow(task, rank: index + 1)
                                 }
                             }
-                            .workspacePanel()
+                            .workPanel()
                         }
                         if truncated {
                             Text("Planning is partial; more Tasks exist.").font(Typography.body(12)).foregroundStyle(Color.statusWarning)
@@ -193,7 +207,7 @@ struct WorkSurfaceView: View {
             }
         } else if let selection = model.selection, let roster = model.rosterWave(id: selection.id) {
             // Authored but never served: there is no roadmap to show yet.
-            scrollingDetail(identifier: "podium-detail-wave") {
+            scrollingDetail(identifier: "loopflow-detail-wave") {
                 surfaceHeader(roster.displayName, subtitle: "Authored — not yet served")
                 Text("Planning evidence is not available for this authored Wave.")
                     .font(Typography.body(12))
@@ -218,7 +232,7 @@ struct WorkSurfaceView: View {
                     } ?? false
                 }
             }
-            scrollingDetail(identifier: "podium-detail-task") {
+            scrollingDetail(identifier: "loopflow-detail-task") {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                         Text(task.task.name)
@@ -241,7 +255,7 @@ struct WorkSurfaceView: View {
                             } label: {
                                 Label("New session", systemImage: "plus.bubble")
                             }
-                            .buttonStyle(WorkspaceOutlineButtonStyle())
+                            .buttonStyle(WorkOutlineButtonStyle())
                             .disabled(model.navigation.startingTaskSessions.contains(task.id))
                             .help("Open an independent conversation with this Task's context in its worktree. No Flow is started.")
                             .accessibilityIdentifier("task-new-session")
@@ -280,20 +294,20 @@ struct WorkSurfaceView: View {
                     let groups = TaskSessionGroups(sessions)
                     if !groups.waiting.isEmpty {
                         section {
-                            WorkspaceSectionHeading("Waiting", count: groups.waiting.count)
+                            WorkSectionHeading("Waiting", count: groups.waiting.count)
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(Array(groups.waiting.enumerated()), id: \.element.id) { index, session in
                                     if index > 0 { Divider().overlay(palette.border.opacity(0.6)) }
                                     sessionRow(session)
                                 }
                             }
-                            .workspacePanel()
+                            .workPanel()
                         }
                         .accessibilityIdentifier("task-sessions-waiting")
                     }
                     if !groups.working.isEmpty {
                         section {
-                            WorkspaceSectionHeading("Sessions", count: groups.working.count)
+                            WorkSectionHeading("Sessions", count: groups.working.count)
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(groups.working) { session in compactSessionRow(session) }
                             }
@@ -304,17 +318,17 @@ struct WorkSurfaceView: View {
                     Text("No open Sessions.")
                         .font(Typography.body(12.5))
                         .foregroundStyle(palette.textTertiary)
-                        .accessibilityIdentifier("workspace-no-sessions")
+                        .accessibilityIdentifier("work-no-sessions")
                 }
                 section {
-                    WorkspaceSectionHeading(title: "Description") {
+                    WorkSectionHeading(title: "Description") {
                         Button("Edit description") {
-                            editingTask = WorkTaskSelection(wave: found.wave.wave, task: task)
+                            editingTask = TaskSelection(wave: found.wave.wave, task: task)
                         }
                         .buttonStyle(.plain)
                         .font(Typography.body(12.5))
                         .foregroundStyle(palette.textTertiary)
-                        .accessibilityIdentifier("workspace-edit-directive")
+                        .accessibilityIdentifier("work-edit-directive")
                     }
                     Group {
                         if task.task.description.isEmpty {
@@ -324,7 +338,7 @@ struct WorkSurfaceView: View {
                         }
                     }
                     .frame(maxWidth: 680, alignment: .leading)
-                    .accessibilityIdentifier("workspace-task-directive")
+                    .accessibilityIdentifier("work-task-directive")
                 }
                 TaskCommentsView(model: model, task: task, wave: found.wave.wave)
             }
@@ -379,7 +393,7 @@ struct WorkSurfaceView: View {
                     }
                 }
                 Spacer(minLength: Spacing.sm)
-                WorkspaceChip(text: session.statusLabel, tone: session.attention == nil ? sessionTone(session.state) : .human)
+                WorkChip(text: session.statusLabel, tone: session.attention == nil ? sessionTone(session.state) : .human)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -423,7 +437,7 @@ struct WorkSurfaceView: View {
         return palette.textTertiary
     }
 
-    private func sessionTone(_ state: SessionState) -> WorkspaceTone {
+    private func sessionTone(_ state: SessionState) -> WorkTone {
         switch state {
         case .unknown: .neutral
         case .active: .running
@@ -455,7 +469,7 @@ struct WorkSurfaceView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 // A chip only where a state needs eyes; the dot carries the rest.
                 Group {
-                    if let label = state.label { WorkspaceChip(text: label, tone: state.tone) }
+                    if let label = state.label { WorkChip(text: label, tone: state.tone) }
                 }
                 .frame(width: 96, alignment: .leading)
                 Text(task.task.identifier)
@@ -469,12 +483,12 @@ struct WorkSurfaceView: View {
         }
         .buttonStyle(.plain)
         .help(task.task.name)
-        .accessibilityIdentifier("podium-task-\(task.id)")
+        .accessibilityIdentifier("loopflow-task-\(task.id)")
     }
 
     /// The plan row's state, read from the shared Task projection. Only running,
     /// done, blocked and stalled earn a chip; stopped and unstarted rows keep the dot.
-    private func planState(_ task: RoadmapTask) -> (label: String?, tone: WorkspaceTone) {
+    private func planState(_ task: RoadmapTask) -> (label: String?, tone: WorkTone) {
         if let label = task.task.historyLabel {
             return (label, task.task.isSuccessful ? .done : .neutral)
         }
@@ -491,9 +505,9 @@ struct WorkSurfaceView: View {
         return VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 Image(systemName: "exclamationmark.circle")
-                    .foregroundStyle(WorkspaceTone.human.ink)
+                    .foregroundStyle(WorkTone.human.ink)
                 Text("\(task.taskIdentifier) is outside the current plan.")
-                    .foregroundStyle(WorkspaceTone.human.text)
+                    .foregroundStyle(WorkTone.human.text)
                 Spacer(minLength: Spacing.sm)
                 Button(open ? "Hide details" : "Details") {
                     if open { model.navigation.expandedNotices.remove(task.taskId) } else { model.navigation.expandedNotices.insert(task.taskId) }
@@ -521,7 +535,7 @@ struct WorkSurfaceView: View {
         .font(Typography.body(12.5))
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(WorkspaceTone.human.fill.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+        .background(WorkTone.human.fill.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityIdentifier("wave-notice-\(task.taskId)")
     }
 
@@ -569,14 +583,14 @@ struct WorkSurfaceView: View {
 
     // MARK: - Controls
 
-    private struct WorkTaskSelection: Identifiable {
+    private struct TaskSelection: Identifiable {
         let wave: WaveSnapshot
         let task: RoadmapTask
 
         var id: String { "\(wave.id):\(task.id)" }
     }
 
-    private func openWorktree(_ workspace: TaskWorkspaceSnapshot) {
+    private func openWorktree(_ workspace: TaskWorktreeSnapshot) {
         var components = URLComponents()
         components.scheme = "warp"
         components.host = "action"
@@ -642,7 +656,7 @@ struct WaveObjectiveView: View {
 }
 
 struct TaskDirectiveEditor: View {
-    let model: PodiumModel
+    let model: WorkModel
     let task: RoadmapTask
     let wave: WaveSnapshot
 
@@ -652,7 +666,7 @@ struct TaskDirectiveEditor: View {
     @State private var isSaving = false
     @State private var saveError: String?
 
-    init(model: PodiumModel, task: RoadmapTask, wave: WaveSnapshot) {
+    init(model: WorkModel, task: RoadmapTask, wave: WaveSnapshot) {
         self.model = model
         self.task = task
         self.wave = wave
@@ -710,7 +724,7 @@ struct TaskDirectiveEditor: View {
 /// The Project's workflow, taken up by a Task's first `lf task run`: what it
 /// draws and the file that defines it.
 struct WaveWorkflowView: View {
-    let model: PodiumModel
+    let model: WorkModel
     let wave: WaveSnapshot
     let name: String
     @Environment(\.palette) private var palette
@@ -721,8 +735,9 @@ struct WaveWorkflowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            WorkspaceSectionHeading(title: "Workflow") {
-                Menu(name) {
+            WorkSectionHeading(title: "Workflow") {
+                // A Project may name no workflow; the menu is where one is chosen.
+                Menu(name.isEmpty ? "None" : name) {
                     ForEach(choices) { choice in
                         Button(choice.unavailable == nil ? choice.name : "\(choice.name) (invalid)") {
                             Task { await model.setWorkflow(choice.name, wave: wave) }
@@ -741,7 +756,7 @@ struct WaveWorkflowView: View {
                             if let url = await model.definitionSource(entry, wave: wave) { NSWorkspace.shared.open(url) }
                         }
                     }
-                    .buttonStyle(WorkspaceOutlineButtonStyle())
+                    .buttonStyle(WorkOutlineButtonStyle())
                     .help(entry.source ?? "Write this builtin to .lf/ and open it")
                     .accessibilityIdentifier("wave-workflow-edit")
                 }
@@ -751,7 +766,7 @@ struct WaveWorkflowView: View {
                 .accessibilityIdentifier("wave-workflow-source")
             if let workflow = entry?.workflow {
                 WorkflowGraph(nodes: workflow.nodes, edges: workflow.edges)
-            } else {
+            } else if !name.isEmpty {
                 Text(entry?.unavailable.map { "\(name) is invalid: \($0)" }
                      ?? model.flowCatalog.errorMessage
                      ?? (model.flowCatalog.isLoading ? "Reading workflows…" : "\(name) names no workflow here"))
@@ -763,7 +778,7 @@ struct WaveWorkflowView: View {
             if let error = model.workflowErrors[wave.id] {
                 Text(error)
                     .font(Typography.body(12))
-                    .foregroundStyle(WorkspaceTone.blocked.ink)
+                    .foregroundStyle(WorkTone.blocked.ink)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("wave-workflow-error")
             }

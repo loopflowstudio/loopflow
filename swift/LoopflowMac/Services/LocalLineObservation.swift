@@ -199,7 +199,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
             if now - lastConfigurationCheck >= 2 {
                 lastConfigurationCheck = now
                 if try configurationChanged() {
-                    fail(WorkspaceObservationError.configurationChanged)
+                    fail(WorkObservationError.configurationChanged)
                     return
                 }
             }
@@ -252,16 +252,16 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
     }
 }
 
-enum LocalWorkspaceObservation {
+enum LocalWorkObservation {
     /// Every frame is kept: the reader already holds at most one per part.
     static func start(
         process: Process,
         configurationChanged: @escaping @Sendable () throws -> Bool
-    ) throws -> WorkspaceObservation {
-        let reader = try LocalLineObservation<WorkspaceFrame>.start(
+    ) throws -> WorkObservation {
+        let reader = try LocalLineObservation<WorkFrame>.start(
             name: "Workspace", process: process, frameLimit: 64 * 1024 * 1024,
-            configurationChanged: configurationChanged, decode: WorkspaceFrame.decode(line:))
-        return WorkspaceObservation(frames: reader.frames, request: { request in
+            configurationChanged: configurationChanged, decode: WorkFrame.decode(line:))
+        return WorkObservation(frames: reader.frames, request: { request in
             reader.send(request.line)
         }, cancel: reader.cancel)
     }

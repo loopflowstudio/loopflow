@@ -339,7 +339,7 @@ private final class SessionsLatencyMetrics {
 }
 
 struct SessionsView: View {
-    let model: PodiumModel
+    let model: WorkModel
     let repoPath: String
     let workspaces: SessionsWorkspaceRegistry
     var query: RegistryQuery = RegistryQueryLocal.shared
@@ -351,7 +351,7 @@ struct SessionsView: View {
                                     homeId: home, query: query)
             } else {
                 HStack {
-                    WorkspaceNavigator(model: model, onOpenSession: { _ in })
+                    WorkNavigator(model: model, onOpenSession: { _ in })
                     if let error = workspaces.homeError {
                         ContentUnavailableView("Workspace unavailable", systemImage: "folder", description: Text(error))
                     } else {
@@ -381,7 +381,7 @@ struct SessionsContentView: View {
         return taskIdentity ?? worktreeLayout.focusedPath ?? rootIdentity
     }
     private var workspace: SessionsWorkspace { workspaces.workspace(for: currentIdentity) }
-    @Bindable var model: PodiumModel
+    @Bindable var model: WorkModel
     private let workspaces: SessionsWorkspaceRegistry
     private let query: RegistryQuery
     private let worktreeLayout: WorktreeLayoutStore
@@ -412,7 +412,7 @@ struct SessionsContentView: View {
         worktreeLayout.knownPaths.union(store.sessions.compactMap { $0.record.workspace?.identity }).sorted { ($0.homeId, $0.worktree) < ($1.homeId, $1.worktree) }
     }
 
-    init(model: PodiumModel, repoPath: String, workspaces: SessionsWorkspaceRegistry,
+    init(model: WorkModel, repoPath: String, workspaces: SessionsWorkspaceRegistry,
          homeId: String, query: RegistryQuery = RegistryQueryLocal.shared) {
         self.homeId = homeId
         self.model = model
@@ -423,12 +423,12 @@ struct SessionsContentView: View {
         _store = ObservedObject(wrappedValue: store)
     }
 
-    private var navigation: WorkspaceNavigation { model.navigation }
+    private var navigation: WorkNavigation { model.navigation }
     private var usesWorktreeLayout: Bool {
         navigation.showsRetainedTerminals || taskPath == nil && fileTask == nil
     }
     private var terminalsVisible: Bool { model.selection?.kind == .task || navigation.content == .terminals }
-    private var fileTask: WorkspaceTask? {
+    private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's
         // retained terminals while SwiftUI replaces its hierarchy.
         guard model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return nil }
@@ -439,7 +439,7 @@ struct SessionsContentView: View {
         let _ = layoutRevision
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                WorkspaceNavigator(model: model, onOpenSession: openSession, onConversation: { work in
+                WorkNavigator(model: model, onOpenSession: openSession, onConversation: { work in
                     model.select(work)
                     startConversation()
                 }, onNewShell: {
@@ -451,7 +451,7 @@ struct SessionsContentView: View {
                 Rectangle().fill(palette.border).frame(width: 1)
                 HSplitView {
                     VStack(spacing: 0) {
-                        WorkspaceBreadcrumbBar(
+                        WorkBreadcrumbBar(
                             model: model,
                             crumb: model.breadcrumb,
                             onOpenSession: openSession,
@@ -470,7 +470,7 @@ struct SessionsContentView: View {
                                 }
                                 if multiplexer.zoomedPaneId != nil {
                                     Button("Restore") { workspace.toggleFocus(multiplexer.focusedPaneId) }
-                                        .accessibilityIdentifier("workspace-restore")
+                                        .accessibilityIdentifier("work-restore")
                                 }
                             }
                         }
@@ -535,7 +535,7 @@ struct SessionsContentView: View {
             }
         }
         .background {
-            WorkspacePaletteShortcut(presented: navigation.palette != nil, restoreFocus: restorePaletteFocus) {
+            WorkPaletteShortcut(presented: navigation.palette != nil, restoreFocus: restorePaletteFocus) {
                 restorePaletteFocus = true
                 navigation.palette = .search
             }.frame(width: 0, height: 0)
@@ -548,7 +548,7 @@ struct SessionsContentView: View {
             case .flow(let name):
                 FlowCatalogInspector(entry: model.flowCatalog.value?.named(name), navigation: navigation)
             case .search:
-                WorkspacePalette(model: model, activate: navigate)
+                WorkPalette(model: model, activate: navigate)
             case nil:
                 EmptyView()
             }
@@ -625,18 +625,18 @@ struct SessionsContentView: View {
         Menu {
             Button("New shell", systemImage: "terminal") { multiplexer.newShell() }
                 .disabled(taskIdentity?.homeId != homeId)
-                .accessibilityIdentifier("workspace-add-shell")
+                .accessibilityIdentifier("work-add-shell")
             if let task = fileTask?.task.id {
                 Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task)) }
-                    .accessibilityIdentifier("workspace-add-files")
+                    .accessibilityIdentifier("work-add-files")
                 Button("Flow execs", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task)) }
-                    .accessibilityIdentifier("workspace-add-flow-log")
+                    .accessibilityIdentifier("work-add-flow-log")
             }
         } label: { Image(systemName: "plus") }
         .menuStyle(.borderlessButton).fixedSize()
         .help("Add a shell, files or the Flow exec log")
         .accessibilityLabel("Add a shell, files or the Flow exec log")
-        .accessibilityIdentifier("workspace-create")
+        .accessibilityIdentifier("work-create")
     }
 
     @ViewBuilder
@@ -654,7 +654,7 @@ struct SessionsContentView: View {
             }
             .font(Typography.meta).foregroundStyle(palette.textSecondary)
             .padding(.horizontal, 14).padding(.vertical, 6)
-            .accessibilityIdentifier("workspace-missing-checkout")
+            .accessibilityIdentifier("work-missing-checkout")
         }
     }
 
@@ -678,7 +678,7 @@ struct SessionsContentView: View {
         }
     }
 
-    private func navigate(_ destination: WorkspaceDestination) {
+    private func navigate(_ destination: WorkDestination) {
         // Refreshes can remove an action while the palette is open.
         guard model.paletteRows.contains(where: { $0.id == destination }) else { return }
         restorePaletteFocus = false
@@ -707,7 +707,7 @@ struct SessionsContentView: View {
     }
 
     private func openSession(_ record: SessionRecord) {
-        let subject = model.workspace.subject(for: record.id)
+        let subject = model.projection.subject(for: record.id)
         model.select(subject)
         Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id)
         navigation.selectedSessionId = record.id
@@ -792,7 +792,7 @@ struct SessionsContentView: View {
     /// `navigation` belongs to the repository that requested the launch; a
     /// launch that finishes after the human switched repositories must not
     /// redirect the repository now on screen.
-    private func launch(_ scope: ConversationScope, in navigation: WorkspaceNavigation, identity requestedIdentity: WorkspaceIdentity? = nil) throws {
+    private func launch(_ scope: ConversationScope, in navigation: WorkNavigation, identity requestedIdentity: WorkspaceIdentity? = nil) throws {
         let lf = try LocalWaveAgentLauncher.controlLfPath()
         let identity = requestedIdentity ?? taskIdentity ?? WorkspaceIdentity(homeId: homeId, worktree: scope.repoPath)
         guard identity.homeId == homeId else { throw RegistryQueryError("Open a conversation on its owning Home") }
@@ -1164,7 +1164,7 @@ private struct SplitDivider: View {
 }
 
 private struct SessionPaneView: View {
-    @Environment(PodiumModel.self) private var model
+    @Environment(WorkModel.self) private var model
     @Environment(SessionsWorkspace.self) private var workspace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let pane: PaneState
@@ -1331,7 +1331,7 @@ private struct SessionPaneView: View {
         // context. Companion shells retain the current breadcrumb.
         guard paneSessions.count == 1, let session = paneSessions.first,
               model.navigation.selectedSessionId != session.id else { return }
-        model.select(model.workspace.subject(for: session.id))
+        model.select(model.projection.subject(for: session.id))
         model.navigation.selectedSessionId = session.id
         model.navigation.content = .terminals
     }

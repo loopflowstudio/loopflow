@@ -222,7 +222,7 @@ struct TaskFlowTests {
         let reader = ScriptedReader(repo: repo, planning: ["roadmap": roadmap, "waves": waves],
                                     work: work, runs: [run])
         let calls = CallLog()
-        let query = RegistryQuery(watchWorkspace: { await reader.open() }) { args, _ in
+        let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
             await calls.add(args)
             switch (args.first, args.dropFirst().first) {
             case ("session", "ensure"):
@@ -231,8 +231,8 @@ struct TaskFlowTests {
             default: throw RegistryQueryError("The fixture has no \(args.prefix(2).joined(separator: " "))")
             }
         }
-        let model = PodiumModel(query: query, repoPath: repo)
-        let keeping = Task { await model.keepWorkspaceCurrent() }
+        let model = WorkModel(query: query, repoPath: repo)
+        let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
@@ -246,7 +246,7 @@ struct TaskFlowTests {
         }
         func eventually(_ what: String, _ condition: @MainActor () async -> Bool) async throws {
             for _ in 0..<200 where !(await condition()) {
-                model.syncWorkspaceScope()
+                model.syncWorkScope()
                 try await settle()
             }
             #expect(await condition(), "\(what)")
@@ -282,13 +282,13 @@ struct TaskFlowTests {
         let header = drawn()
         #expect(header.contains("task-workflow-node-demo"), "the accessibility tree is readable")
         #expect(header.isDisjoint(with: [
-            "workspace-materials", "workspace-toggle-materials", "workspace-toggle-files",
-            "workspace-current-stage", "task-show-monitor-\(task.id)", "task-workflow-position",
+            "work-materials", "work-toggle-materials", "work-toggle-files",
+            "work-current-stage", "task-show-monitor-\(task.id)", "task-workflow-position",
             "task-flow-runs", "task-work", "task-flow-start",
         ]))
 
         // One menu adds the Flow exec log as a pane beside the Session.
-        try find("workspace-add-flow-log").button().tap()
+        try find("work-add-flow-log").button().tap()
         try await settle()
         #expect(panes.focusedPane.content == .flowLog(taskId: task.id))
         #expect(panes.layout.allPanes.count == 2)
@@ -304,7 +304,7 @@ struct TaskFlowTests {
         #expect(drawn().isSuperset(of: ["task-flow-runs", "flow-run-status-\(runId)"]))
 
         // The same menu adds the Task's files as a pane.
-        try find("workspace-add-files").button().tap()
+        try find("work-add-files").button().tap()
         try await settle()
         #expect(panes.focusedPane.content == .files(taskId: task.id))
         panes.close(panes.focusedPaneId)
@@ -320,7 +320,7 @@ private actor CallLog {
 }
 
 /// A scripted workspace reader: every request is answered with the planning,
-/// Sessions and Task parts as they stand, the way `lf monitor workspace` does.
+/// Sessions and Task parts as they stand, the way `lf monitor work` does.
 @MainActor
 private final class ScriptedReader {
     private let repo: String
@@ -328,7 +328,7 @@ private final class ScriptedReader {
     private let work: [String: Any]
     private let runs: [[String: Any]]
     private var sessions: [[String: Any]] = []
-    private var continuation: AsyncThrowingStream<WorkspaceFrame, any Error>.Continuation?
+    private var continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation?
     private var sequence = 0
     private var task: String?
 
@@ -336,10 +336,10 @@ private final class ScriptedReader {
         (self.repo, self.planning, self.work, self.runs) = (repo, planning, work, runs)
     }
 
-    func open() -> WorkspaceObservation {
-        let (stream, continuation) = AsyncThrowingStream<WorkspaceFrame, any Error>.makeStream()
+    func open() -> WorkObservation {
+        let (stream, continuation) = AsyncThrowingStream<WorkFrame, any Error>.makeStream()
         self.continuation = continuation
-        return WorkspaceObservation(frames: stream, request: { request in
+        return WorkObservation(frames: stream, request: { request in
             Task { @MainActor in self.answer(request) }
         }, cancel: { continuation.finish() })
     }
@@ -360,7 +360,7 @@ private final class ScriptedReader {
         return String(decoding: try JSONSerialization.data(withJSONObject: session), as: UTF8.self)
     }
 
-    private func answer(_ request: WorkspaceRequest) {
+    private func answer(_ request: WorkRequest) {
         let id: Int
         switch request {
         case .scope(let request, let scope): (id, task) = (request, scope.task)
@@ -376,7 +376,7 @@ private final class ScriptedReader {
         let line: [String: Any] = ["part": part, "sequence": sequence, "answers": answers, "home": "/home",
                                    "revisions": NSNull(), "unavailable": NSNull(), "body": body]
         guard let data = try? JSONSerialization.data(withJSONObject: line),
-              let frame = try? WorkspaceFrame.decode(line: data) else { return }
+              let frame = try? WorkFrame.decode(line: data) else { return }
         continuation?.yield(frame)
     }
 }
@@ -419,7 +419,7 @@ struct TaskFlowProofTests {
         session["open_argv"] = ["must-not-launch"]
         let source = try FlowSource(session: JSONSerialization.data(withJSONObject: [session]))
         let query = RegistryQuery { args, _ in try await source.respond(args) }
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
@@ -550,7 +550,7 @@ struct TaskFlowProofTests {
         try await settle(window)
         _ = try find("task-workflow")
         #expect((try? find("task-flow-start")) == nil)
-        #expect((try? find("workspace-materials")) == nil)
+        #expect((try? find("work-materials")) == nil)
         try captureIfRequested(window, name: "task-workspace-native")
 
         // The Session and its companion survived every Flow interaction.

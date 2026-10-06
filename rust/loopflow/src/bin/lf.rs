@@ -13,7 +13,7 @@ use loopflow::lf::{
     Cli, Commands, FlowCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
 };
 
-use loopflow::ops::chapter::{update_plan, PlanChange};
+use loopflow::ops::project::{update_plan, PlanChange};
 use loopflow::ops::task_execution::TaskExecutionState;
 
 #[derive(Clone, Default)]
@@ -821,6 +821,52 @@ fn print_task_control(
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     match command {
+        WaveCommand::NewChapter {
+            wave,
+            name,
+            plan,
+            dry_run,
+            json,
+        } => {
+            let rotation =
+                loopflow::ops::chapter::new_chapter(repo, name, plan, Some(wave), *dry_run)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&rotation)?);
+            } else {
+                println!(
+                    "Chapter {}: {}",
+                    rotation.name, rotation.waves[0].successor_id
+                );
+            }
+            Ok(())
+        }
+        WaveCommand::Ensure { wave, json } => {
+            let result = tokio::runtime::Runtime::new()?
+                .block_on(loopflow::ops::project::ensure(repo, wave))?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!(
+                    "Wave {wave}: Project {} ({}) is active",
+                    result.name, result.id
+                );
+            }
+            Ok(())
+        }
+        WaveCommand::BindProject {
+            wave,
+            project,
+            json,
+        } => {
+            let result = tokio::runtime::Runtime::new()?
+                .block_on(loopflow::ops::project::bind_project(repo, wave, project))?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("Wave {wave}: bound Project {} ({})", result.name, result.id);
+            }
+            Ok(())
+        }
         WaveCommand::Cron { .. } => unreachable!("cron dispatches separately"),
         WaveCommand::List { .. } | WaveCommand::Status { .. } => {
             unreachable!("read commands dispatch separately")

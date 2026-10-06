@@ -7,7 +7,7 @@ is a parse error or an explicit null.
 `task_status.json` pins the planning/execution envelope for available, unavailable,
 invalid, removed and absent planning. Rust round-trips it. This CLI-only contract
 has no Swift mirror: the Mac app reads a Task's work from the workspace stream's
-`task` part (`workspace_frame.json`). These cases have no execution.
+`task` part (`work_frame.json`). These cases have no execution.
 
 `task_execution.json` pins the execution boundary inside the status envelope's
 optional Task snapshot (`execution.execution`).
@@ -30,7 +30,7 @@ reconstruct the condition from process flags.
 `activity_snapshot.json` pins `lf ps --json`: exact live Exec and provider
 processes carry OS-derived state, while a provider without exact ownership
 stays separate from the call tree. Rust and Swift both round-trip it; The
-Podium derives no process state of its own.
+Loopflow Desktop derives no process state of its own.
 
 `session_history_summary.json` and `wave_detail.json` pin the `SessionHistory`
 shape used by `lf usage --json` and Wave detail. Captured event sequences

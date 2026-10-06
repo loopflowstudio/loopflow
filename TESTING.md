@@ -1034,6 +1034,18 @@ When a subprocess fixture signals readiness with file contents, write a sibling
 temporary file and rename it into place after closing it. File existence alone
 can expose an empty file between creation and the first write.
 
+### Project readiness fixtures
+
+Task fixtures must create their Wave and Project, select the Project in SQLite,
+and retain Home placement before creating work. YAML binding imports belong to
+explicit activation tests; passive status reads do not import them. Keep readiness
+fields in inline Swift responses as well as shared DTO fixtures.
+
+Changes to Project selection or planning admission require the full materialized
+Rust suite and headless Swift tests, including Task consumers and status readers.
+Run the installation harness for migration changes; its released-source proof
+must retain Wave placement before projecting accepted Projects.
+
 ### Shared identity fixtures
 
 Exercise Session fixtures through Rust as well as Swift after ancestry changes.

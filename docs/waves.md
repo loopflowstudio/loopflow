@@ -1,6 +1,15 @@
 # Waves
 
 ```bash
+lf wave ensure product --json
+```
+
+Prepare the Wave's configured Project for work. With no binding, reserve and create
+one ordinary Project; retries reuse its identity. To select an existing Project,
+run `lf wave bind-project product <project-uuid>` first. Ensure activates Backlog
+or Planned status without changing its name, content, Tasks or optional Flow.
+
+```bash
 lf --wave shipper wave/operate "invoices first"
 lf wave status shipper
 ```
@@ -100,40 +109,41 @@ track remaining implementation and acceptance.
 
 ```bash
 lf roadmap --json
-lf repo new-chapter 2026-10 --dry-run
-lf repo new-chapter 2026-10
+lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run
+lf repo new-chapter 2026-10 --plan scratch/chapter.json
 ```
 
-A Wave's one In Progress Linear Project holds its current Tasks, KRs, metric
-targets and workflow. Projects created together share a chapter name, such
-as `2026-10`. The chapter is that group of Projects; there is no chapter table,
-plan packet or local switch. Current navigation stays Wave → Task. Completed
-Projects retain previous plans and Tasks in Linear.
+The Wave's SQLite selection references its accepted Project by UUID. Status and roadmap
+retain other Projects and their Tasks, including unresolved predecessor backlog.
+JSON marks the selected Project with `current`; another In Progress Project does
+not change that selection. Reading never creates a binding or activates a Project. Explicit ensure imports a
+legacy Home-local YAML selection once, preserving its original bytes in SQLite;
+later file edits cannot change selection.
 
-Create a Planned Project in Linear to prepare the next plan. Rotation reuses the
-Planned Project with the requested name in each Wave, or creates an empty one
-with the predecessor's `workflow:`. It never copies checked KRs or metric targets.
-Every Wave participates, including Waves with no Tasks. A new Wave with no
-Projects starts with `workflow: feature`, or uses its explicitly Planned successor.
+Projects hold Tasks, KRs, metric targets and an optional workflow. Projects
+created together share a chapter name, such as `2026-10`; there is no chapter table.
+Current navigation stays Wave → Task. Completed Projects retain their history.
 
-The preview lists every successor and Task disposition. Started unfinished Tasks
-keep identity, checkout, PR and captured execution when moved. Proven untouched
-backlog is canceled; its issues and local history remain. Completed Tasks stay
-with the predecessor. Missing checkout, provider or execution evidence remains
-unresolved and prevents automatic retirement.
+Author and retain a [chapter plan](architecture/planning.md#rotate-the-plan-preserve-the-work)
+with exact Wave/destination IDs and nonempty KRs. Select `create: false` for an
+existing Project or allocate one UUID for creation. The repository operation
+rotates the listed Waves; `lf wave new-chapter` consumes one entry. Ordinary
+Project ensure needs neither a chapter nor KRs.
 
-Retry the same command after interruption. Rotation reads fresh provider state,
-activates each successor, moves or cancels Tasks, then completes its predecessor.
-During that sequence both Projects can be In Progress. A mix of the requested
-name and one shared predecessor name is recoverable; competing predecessor
-names are reported for resolution in Linear. Nothing wins because its name is
-newer. A Wave without a current Project requires an unambiguous predecessor;
-the command never selects an arbitrary historical plan.
+The preview lists each successor and Task disposition. Started unfinished Tasks
+keep identity, checkout, PR and captured execution when moved. Unreviewed backlog
+stays with the predecessor until explicit disposition, alongside completed Tasks.
+Missing checkout, provider or execution evidence remains unresolved.
 
-There is no transaction across Linear mutations or across Homes. A second Home
-observes the same statuses on `lf refresh <wave>` or its next normal
-planning refresh. Lost responses are reconciled by stable Project and issue IDs.
-Recheck external reassignments after previewing.
+Retry with the same plan file after interruption. Rotation validates all destinations
+before provider writes and retains reservations and selected issue IDs. It activates
+the successor, moves selected work, switches the shared binding, then completes the
+predecessor. After the switch, new historical starts stay put. An external move of
+selected work remains a conflict. Earlier settled Waves remain settled during retry;
+Project names never choose an endpoint or overwrite a later binding.
+
+The operation is recoverable within its owning Home, not atomic across provider
+mutations. Read-only planning and unrelated Wave ensure remain independent of it.
 
 Name the workflow the Project's Tasks take up in its content:
 
@@ -160,7 +170,9 @@ predecessors stay historical even if their old status says In Progress.
 
 If no receipt identifies the old current Project, adoption requires a single
 unambiguous candidate. Resolve competing plans in Linear; names and dates never
-break the tie. A missing workflow stays missing: set `workflow:` before rotation.
+break the tie. A missing workflow stays missing. Creation, adoption, plan edits and
+rotation do not require one; a bare `lf task run` still needs the Task or its
+Project to name a workflow.
 Unobserved backlog on another Home is unresolved, so a missing local Task row
 never establishes that work should be canceled.
 
@@ -366,9 +378,9 @@ lf task move 1207... end --reason "Dark mode delivered"
 ```
 
 A managed Project belongs to exactly one Initiative and exactly the repository
-Team. Project titles include the canonical Wave ancestry for orientation
-(`Survival / Infrastructure — Gmail`), but stable ids and Project membership —
-never titles or issue prefixes — resolve Work.
+Team. Project titles remain as authored in Linear, including ordinary names such
+as `Summer work — customer requests`. Refresh, sync and reteam preserve them;
+stable IDs and Project membership resolve Work.
 
 ## Tasks
 

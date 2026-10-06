@@ -2,12 +2,12 @@ import Loopflow
 import SwiftUI
 
 struct SessionSkillPicker: View {
-    let model: PodiumModel
+    let model: WorkModel
     let repo: String
     let dismiss: () -> Void
     @Environment(\.palette) private var palette
     @FocusState private var searching: Bool
-    @State private var skills: PodiumReading<[DiscoveryEntry]> = .loading
+    @State private var skills: WorkReading<[DiscoveryEntry]> = .loading
     @State private var search = ""
     @State private var active: String?
 

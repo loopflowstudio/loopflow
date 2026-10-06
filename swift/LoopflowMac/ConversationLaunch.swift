@@ -39,7 +39,7 @@ struct ConversationLaunch: Equatable {
     }
 }
 
-extension PodiumModel {
+extension WorkModel {
     var conversationScope: ConversationScope? {
         guard let repoPath else { return nil }
         guard navigation.content != .overview, let selection else { return .repo(repoPath) }
@@ -76,7 +76,7 @@ struct SessionSkillLaunch: Equatable {
     }
 }
 
-extension PodiumModel {
+extension WorkModel {
     var sessionSkillLaunch: SessionSkillLaunch? {
         sessionSkillLaunch(for: navigation.content == .overview ? nil : selection)
     }

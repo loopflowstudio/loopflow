@@ -39,8 +39,8 @@ struct WaveSurfacePrimaryHierarchyTests {
         }
     }
 
-    @Test("the primary Podium Wave detail renders the shared metric portfolio")
-    func podiumWaveDetailRendersMetricPortfolio() throws {
+    @Test("the primary Work Wave detail renders the shared metric portfolio")
+    func loopflowWaveDetailRendersMetricPortfolio() throws {
         let source = try Self.paneSource("WorkSurfaceView.swift")
 
         #expect(source.contains("WaveMetricPortfolioView("))

@@ -11,14 +11,14 @@ enum RegistryQueryLocal {
         try await Task.detached(priority: .userInitiated) {
             try LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
         }.value
-    }, watchWorkspace: {
+    }, watchWork: {
         try await Task.detached(priority: .userInitiated) {
             let configuration = try ReaderLaunchConfiguration.current()
             let process = LocalWaveAgentLauncher.queryProcess(
-                [configuration.helper, "monitor", "workspace", "--watch", "--json"]
+                [configuration.helper, "monitor", "work", "--watch", "--json"]
             )
             process.environment = configuration.environment
-            return try LocalWorkspaceObservation.start(
+            return try LocalWorkObservation.start(
                 process: process,
                 configurationChanged: { try ReaderLaunchConfiguration.current() != configuration }
             )

@@ -1,82 +1,46 @@
 ---
-requires: a bound Wave or a proposed new Wave in the accepted direction
-produces: one proposed Project plan, available repository preview, agree or challenge upward
+requires: a named Wave and accepted direction
+produces: exact-ID successor proposal, KRs, separate Task candidates and evidence gaps
 ---
-Shape this Wave's next chapter from accepted user direction and dated evidence.
-The Wave endures. Its current plan is one In Progress Linear Project; Planned
-Projects hold future plans and Completed Projects retain history. The chapter
-name is shared across Waves. Users choose Waves and Tasks; never introduce a
-Project planning tier or treat past Projects as disposable.
+Shape this Wave's next chapter from accepted direction and dated evidence.
+Read its goal, memory, available review and `lf wave status <wave> --no-sync --json`.
+Use exact Project IDs; names and current status never reconstruct history.
+Return material challenges to the requesting conversation. Headless work lacking
+accepted direction reports the missing decision and stops. Existing acceptance
+remains valid.
 
-## Ground the proposal
+Name the beneficiary and experienced improvement. Author nonempty KRs before
+chapter creation, with targets and evidence windows where useful. Never carry
+forward checked verdicts. Flow is optional; an empty string is valid. Ordinary
+Project ensure has no chapter or KR requirement.
 
-Read this exact Wave's GOAL.md, MEMORY.md, available chapter review, and
-`lf wave status <wave> --no-sync --json`. Inspect the relevant Linear Projects
-through available read-only access; record stable IDs, statuses and source dates.
-The mandate and memory endure; new KRs, targets and backlog need their own
-justification. Use the parent's accepted direction when supplied. Return a
-material challenge to that parent instead of opening another session. In an
-interactive session, ask in the conversation. Standalone headless work without
-accepted direction explains the missing judgment and stops before settling the proposal.
-Existing acceptance remains valid; do not ask again.
-
-Name the beneficiary and what improves in their experience. Keep the objective
-on the Wave. Author proof-shaped KRs and metric targets with the full window
-and denominator where applicable. Multiple outcomes can belong to one plan;
-implementation steps belong in Tasks. Do not copy checked KRs or old targets.
-A newly created successor inherits only the predecessor's workflow; an existing
-Planned successor keeps its authored content. Preserve that proposal unless
-accepted direction calls for a change. A missing workflow requires resolution.
-
-Produce a complete proposed Project content object:
+Return one entry for the retained chapter plan:
 
 ```json
-{"metric_targets":[{"metric_id":"example-metric","target":{"kind":"at_least","value":0.95}}],"workflow":"feature","krs":[{"text":"Observable proof","holds":false}]}
+{"wave_id":"<Wave UUID>","successor_id":"<Project UUID>","create":true,"project_name":"October — reliability","content":{"metric_targets":[],"workflow":"","krs":[{"text":"Observable improvement","holds":false}]}}
 ```
 
-Use the actual selected Flow as a nonempty string, not an assumed `feature`.
-Omitted targets stay unset. Instruments and observations remain Wave-owned;
-Project status changes do not copy metric readings. Historical judgments need
-dated observations and the targets and revisions applicable to their interval;
-unavailable evidence stays unknown.
+Allocate a new UUID v4 once, or preserve an explicitly selected existing Project
+UUID with `create:false`. Keep proposed Task candidates separately, keyed locally
+and grouped by destination UUID; include title, brief and acceptance. Candidates
+are optional and are admitted only after chapter Projects exist.
 
-## Preview the fixed boundary
-
-Keep the proposal under `scratch/` or return it directly. With an accepted
-repository target name, request a read-only preview:
+With a complete retained plan, preview this Wave independently:
 
 ```bash
-lf repo new-chapter <name> --dry-run --json
+lf wave new-chapter <wave> <name> --plan scratch/chapter-plan.json --dry-run --json
 ```
 
-This previews every Wave, not just this contribution. There is no plan-file or
-Wave filter on rotation. Return its exact dated output and identify this Wave's
-entry; it describes existing provider content, not the unapplied JSON proposal.
-Report unavailable initialization or other-Wave conflicts without changing them.
+Return agree/challenge, exact input, dated preview and evidence gaps. Started
+work carries identity and execution intact; unreviewed backlog remains in its
+original Project. Unknown work stays unresolved. The operation owns classification;
+do not substitute prose cancellation rules. Preserve predecessor KRs and history.
 
-The operation owns classification: started unfinished Tasks move with identity,
-Started timestamp, worktree, PR and captured execution intact. Proven untouched
-backlog becomes abandoned locally and canceled in Linear, retaining its issues
-and history. Terminal work stays historical unless current execution evidence
-conflicts. Missing local or remote work evidence cannot justify cancellation;
-unresolved dispositions stay pending. Preparing a Task alone is not execution;
-authored work and publication still count. Never replace this classifier with prose rules.
-Author new Tasks against the objective and proposed KRs, accounting for carried
-work without carrying earlier KR verdicts forward.
-
-## Return, do not apply
-
-Return `agree` or `challenge` against the accepted Wave boundary, with reasons,
-exact JSON content, available preview output, proposed new Tasks, next review
-date and evidence gaps. The repository start-chapter owner reconciles and applies
-accepted changes. A standalone invocation returns the same scoped proposal; it
-does not rotate, cancel Tasks, create Projects or edit the parent mandate.
-
-Future plan authoring needs an available Linear writer; there is no
-`lf` writer for a Planned Project. `lf update-plan --wave <wave> --plan
-<plan.json>` replaces only the current Project's complete content. Never apply
-next-chapter JSON to the predecessor as a shortcut. If the writer is unavailable,
-return the exact pending operation without inventing a command or local owner.
+This contribution proposes only. The caller reconciles acceptance and applies
+through repository or Wave new-chapter with the retained plan. Never write the
+future plan into the current Project, rotate on a read, or create empty-KR
+successors awaiting later planning. Separate Task admission retains candidate
+notes and recovered issue IDs so failure can resume without duplicating work.
 
 ## Task briefs
 

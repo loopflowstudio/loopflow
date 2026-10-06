@@ -27,8 +27,7 @@ fn checkout(cwd: &str) -> String {
 
 fn session_membership(session: &str) -> String {
     format!(
-        "NOT EXISTS(SELECT 1 FROM agent_sessions scoped WHERE scoped.id={session}.id
-         AND scoped.primary_scope IS NOT NULL)
+        "{session}.primary_scope IS NULL
          AND ({session}.task_id=tw.id OR ({}))",
         checkout(&format!("{session}.cwd")),
     )
@@ -49,7 +48,7 @@ pub(super) fn session_tasks(session: &str) -> String {
     )
 }
 
-fn exec_ids(selector: &str) -> String {
+pub(super) fn exec_ids(selector: &str) -> String {
     format!("SELECT ae.id FROM execs ae JOIN ({}) tw ON ({})
         UNION SELECT se.exec_id FROM session_events se WHERE se.session_id IN ({}) AND se.exec_id IS NOT NULL
         UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN ({}) AND a.driver_exec_id IS NOT NULL",

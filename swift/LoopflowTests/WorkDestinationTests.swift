@@ -6,15 +6,15 @@ import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
 
-@Suite("Workspace destinations", .serialized)
+@Suite("Work destinations", .serialized)
 @MainActor
-struct WorkspaceDestinationTests {
+struct WorkDestinationTests {
     @Test func paletteBindingTargetsOnlyTheSelectedUnassignedSession() async throws {
         let scopes: [WorkReference?] = [nil, .wave(id: "wave-product"), .task(id: "task-bound")]
         for work in scopes {
             let record = try renameFixtureRecord("binding-session", title: "Conversation", work: work)
             let sessions = String(decoding: try JSONEncoder().encode([record]), as: UTF8.self)
-            let model = PodiumModel(query: RegistryQuery { args, _ in
+            let model = WorkModel(query: RegistryQuery { args, _ in
                 if args.first == "session" { return #"{"entries":\#(sessions),"next":null}"# }
                 throw RegistryQueryError("No other read or mutation permitted")
             }, repoPath: "/src/loopflow")
@@ -53,7 +53,7 @@ struct WorkspaceDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let unrelated = try renameFixtureRecord("unrelated", title: "Other work", work: .task(id: "other-task"))
         let otherEncoded = String(decoding: try JSONEncoder().encode(unrelated), as: UTF8.self)
-        let model = PodiumModel(query: RegistryQuery { args, cwd in
+        let model = WorkModel(query: RegistryQuery { args, cwd in
             if args.contains("--task") { return exact }
             if args.first == "session", cwd == wave.wave.repo {
                 if args.contains("--after") { return #"{"entries":[\#(encoded),\#(otherEncoded)],"next":null}"# }
@@ -92,7 +92,7 @@ struct WorkspaceDestinationTests {
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
         }
-        let destination = PodiumModel(query: exactQuery)
+        let destination = WorkModel(query: exactQuery)
         await destination.openTaskLink(try #require(URL(string: "loopflow://task/\(task.task.identifier)")))
         #expect(destination.selection == .task(id: task.id))
         #expect(destination.navigation.content == .details)
@@ -119,7 +119,7 @@ struct WorkspaceDestinationTests {
         #expect(workspace.multiplexer.layout == layout)
         #expect(document.editor.string == "unsaved draft")
         #expect(throws: Never.self) {
-            try WorkSurfaceView(model: destination).inspect().find(viewWithAccessibilityIdentifier: "podium-detail-task")
+            try WorkSurfaceView(model: destination).inspect().find(viewWithAccessibilityIdentifier: "loopflow-detail-task")
         }
     }
 
@@ -131,7 +131,7 @@ struct WorkspaceDestinationTests {
         let exact = try oneTask(data, taskId: task.id)
         // Keep the Wave, but remove the historical Task from the current plan.
         let current = try oneTask(data, taskId: "absent")
-        let model = PodiumModel(query: RegistryQuery { args, _ in
+        let model = WorkModel(query: RegistryQuery { args, _ in
             if args.contains("--task") { return exact }
             if args.first == "roadmap" { return current }
             if args.first == "session" { return #"{"entries":[],"next":null}"# }
@@ -162,7 +162,7 @@ struct WorkspaceDestinationTests {
         let current = try oneTask(data, taskId: "absent")
         // Successful lookup of another ID must not redirect a saved destination.
         for response in ["failure", data, current] {
-            let model = PodiumModel(query: RegistryQuery { args, _ in
+            let model = WorkModel(query: RegistryQuery { args, _ in
                 if args.contains("--task") {
                     if response == "failure" { throw RegistryQueryError("Home unavailable") }
                     return response
@@ -196,7 +196,7 @@ struct WorkspaceDestinationTests {
         let data = try fixture()
         let records = try (0..<30).map { try renameFixtureRecord("\($0)", title: "Session \($0)") }
         let sessions = String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
-        let model = PodiumModel(query: RegistryQuery { args, _ in
+        let model = WorkModel(query: RegistryQuery { args, _ in
             if args.first == "roadmap" { return data }
             if args.first == "session" { return #"{"entries":\#(sessions),"next":null}"# }
             if args.first == "wave" { return "[]" }
@@ -207,7 +207,7 @@ struct WorkspaceDestinationTests {
         let task = try #require(tasks.first)
         #expect(model.searchDestinations(task.task.identifier).first?.id == .task(task.id))
         #expect(model.paletteRows.filter { if case .task = $0.id { true } else { false } }.count == tasks.count)
-        let matchingSessions = ([1] + Array(10...19)).map { WorkspaceDestination.session(String($0)) }
+        let matchingSessions = ([1] + Array(10...19)).map { WorkDestination.session(String($0)) }
         model.remember(.session("19"))
         #expect(model.searchDestinations(" session 1 ").map(\.id) == matchingSessions)
         model.remember(.task(task.id))
@@ -225,7 +225,7 @@ struct WorkspaceDestinationTests {
         snapshot["waves"] = waves
         let data = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let exact = try oneTask(data, taskId: "issue-available")
-        let model = PodiumModel(query: RegistryQuery { _, _ in exact })
+        let model = WorkModel(query: RegistryQuery { _, _ in exact })
         await model.openTaskLink(try #require(URL(string: "loopflow://task/PRD-52")))
         #expect(model.selection == .task(id: "issue-available"))
         #expect(model.paletteRows.contains { $0.id == .flowLog("issue-available") })
@@ -234,7 +234,7 @@ struct WorkspaceDestinationTests {
     @Test func ambiguousAndUnavailableLinksPreserveTheWorkspace() async throws {
         let data = try fixture()
         for response in [data, #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"#, "transport-error"] {
-            let model = PodiumModel(query: RegistryQuery { args, _ in
+            let model = WorkModel(query: RegistryQuery { args, _ in
                 if args.contains("--task") {
                     if response == "transport-error" { throw RegistryQueryError("Home unavailable") }
                     return response
@@ -274,7 +274,7 @@ struct WorkspaceDestinationTests {
         waves[other]["tasks"] = ["state": "unavailable", "reason": "Chapter unavailable"]
         result["waves"] = waves
         let response = String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
-        let model = PodiumModel(query: RegistryQuery { _, _ in response })
+        let model = WorkModel(query: RegistryQuery { _, _ in response })
         var link = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
         if scoped { link.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)] }
         await model.openTaskLink(try #require(link.url))
@@ -284,7 +284,7 @@ struct WorkspaceDestinationTests {
 
     @Test func coldAndWarmLinksReachOnlyOneWorkspace() throws {
         _ = NSApplication.shared
-        let router = WorkspaceLinkRouter()
+        let router = WorkLinkRouter()
         let url = try #require(URL(string: "loopflow://task/LOO-303"))
         #expect(!router.deliver(url))
         let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
@@ -324,7 +324,7 @@ struct WorkspaceDestinationTests {
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No mutation permitted")
         }
-        let model = PodiumModel(query: query, repoPath: wave.wave.repo)
+        let model = WorkModel(query: query, repoPath: wave.wave.repo)
         await model.refresh()
         model.select(.wave(id: wave.wave.id))
         let firstURL = try #require(URL(string: "loopflow://task/\(first.task.identifier)"))

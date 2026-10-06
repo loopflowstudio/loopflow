@@ -217,53 +217,37 @@ runs nothing ends a Task over uncommitted changes and keeps its checkout) —
     - on the worktree chip reading `.tmp5q776G`: "this .tmp is weird ?" It is
       the checkout's directory name, odd only because the fixture lives in a
       temporary directory; no change.
-    **Build.** The Task workspace header holds the Workflow graph, scaled to
-    fit, current node or running edge marked, the edges out of the current
-    node as buttons on it and **Move to** beside them; then one **+** menu
-    that changes what the multiplexer shows. The multiplexer holds the Task's one
-    Session (opening a Task calls `lf session ensure --task`), shells, the
-    Flow exec log as a pane (hidden until opened; one line per exec: Flow,
-    state, when, how long; id in the opened row) and the file browser. No
-    Sessions list.
-    **Remove,** as seen in his screenshot (agent's reading): the half-width
-    clipped graph panel; "Waiting on you at demo · demo"; UUIDs wrapping in
-    rows headed "Flow runs"; the old Flow card ("feature ▾ Latest: pursue",
-    "Start → pursue → End End", Start); the failure shown twice; the "Work"
-    list of raw Execs (to Debug); Desktop reads that write Execs (`lf flow
-    list --json`, a failing `lf task comment`).
-    ****Done** at `975d9f727`; the Flow stopped at sync, so marked by the managing conversation after rerunning nine suites and looking at the render.
-    menu and the two panes are in; the Sessions list, sidebar toggle, file
-    toggle, Monitor (pane, button, palette action and its second reader),
-    toolbar Flow chip, old Flow card with its picker, position text and the
-    Task sheet's graph, Flow runs and Work list are deleted. Work is under
-    **Task details → Debug**. The details surface mounts only when shown, so
-    opening a Task no longer runs `lf flow list` or `lf task comment`.
-    **Proof.** `TaskFlowTests taskWorkspace` hosts the real workspace on the
-    shared fixtures with a scripted reader, checks the ensure call, header,
-    menu and panes, and writes a PNG when `LOOPFLOW_FLOW_CAPTURE_DIR` is set.
-    The agent looked at the image: graph, marked node, edge buttons, **Move
-    to**, Session beside an opened exec log. Fixture times are near zero, so
-    its dates read 1969. No image committed.
-    **Delete — do not maintain:** nothing left from this slice.
-    Choices: [questions.md](questions.md). Demo items: the window on screen;
-    a real `lf session ensure` starting a provider; label widths at small
-    window sizes (the graph stops shrinking at 60% and scrolls).
+    **Done** at `975d9f727`, marked by the managing conversation after
+    rerunning nine suites and looking at the render. What was built, removed
+    and proved is at `f8fe8aff0:scratch/focus-on-your-own-work.md` under
+    this slice; choices are in [questions.md](questions.md). Demo items: the
+    window on screen; a real `lf session ensure` starting a provider; label
+    widths at small window sizes.
 
 15. **Merge main.** #1463 ("Prepare Wave Projects on opening and preserve
     work through realignment") conflicts in 58 files: it changes Task
     admission and restart through FlowSession, worker claims and
     `tasks.work_state`, which this PR deletes. The headless sync resolver
     declines it. Jack, October 6, approving the demo: "make whatever cleanups
-    yyou want"; the agent takes merging as one. **The implement step does the
-    merge itself:** `git fetch origin main`, `git merge origin/main`, resolve
-    every conflict, commit the merge. Keep this PR's model everywhere
-    (Workflow position, Flow execs, no FlowSession, no worker, no stored Task
-    status); bring across what #1463 is for (a Wave's Project prepared when it
-    is opened; work preserved through realignment) by restating it on that
-    model, and record in questions.md each behavior of #1463 that could not
-    be kept and why. Never keep both sides. Done when the branch contains
-    `origin/main`, the nine integration suites, `--lib ops::chapter`, Clippy
-    and `swift build --build-tests` pass. *Not done.*
+    yyou want"; the agent takes merging as one. The rule followed: keep this
+    PR's model everywhere, restate what #1463 is for on it, never keep both
+    sides.
+    **What #1463 is for** (LOO-366, read October 6): each Wave's Project
+    selection stored in SQLite; `lf wave bind-project` and `lf wave ensure`;
+    Desktop preparing the Project when a Wave opens, with Retry; chapter
+    rotation and Realign Projects that move started unfinished Tasks and
+    leave unreviewed backlog; Desktop's "workspace" renamed "work"
+    (`lf monitor work`, `WorkModel`). Jack: "Determine the higher level goal
+    of the diff and make suer we have a nother way of addressing ... ideally
+    is just a bunch unncessary code that is made trivial by the new model."
+    Finding, borne out: none of that needs the deleted machinery; the 58
+    conflicts were two rewrites of the same files. #1463's code is taken;
+    its admission is checked where a Task launches and where a driver starts
+    a Flow or a step; its tests set up work in flight as a Flow exec; its
+    Work rename is applied to this PR's Desktop code; `flow` on a Project is
+    `workflow`; this PR's draft declares it applies after main's. What was
+    not kept is in [questions.md](questions.md).
+    Merged at `MERGEHASH`. CHECKLINE
 16. **Cleanups after Jack's approval.** (a) Text `lf task status` heads a
     Task with its Workflow state, not the last Flow's `blocked`. (b) An
     opened Flow exec prints loop positions as words ("pass 2"), not raw

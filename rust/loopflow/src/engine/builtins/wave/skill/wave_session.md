@@ -35,6 +35,17 @@ watch, check back or follow up later.
 - This conversation keeps the instructions it launched with.
   `lf session replace <id>` gives the Wave a fresh conversation after an install.
 
+## Begin work in a Wave
+
+At explicit Wave opening or beginning new planning work, run
+`lf wave ensure <wave> --json`. It reuses the shared exact Project binding or
+recovers one reserved creation; ordinary Projects need no chapter or workflow.
+An outage is not absence. Report the cause and retry the same operation. Keep
+status and operator refresh passes observational; do not ensure on each poll.
+Started Tasks in prior Projects retain their execution and follow-through.
+Chapter changes use start-chapter's KR planning, exact-ID creation and separate
+Task admission. Never rotate merely to make ordinary work possible.
+
 ## Develop direction
 
 When the user brings an idea, read `lf help capture-tasks` and follow it in

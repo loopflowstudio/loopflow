@@ -20,19 +20,19 @@ private actor Recorder {
 /// A scripted workspace reader: the test decides which frames arrive.
 @MainActor
 private final class Feed {
-    private var continuation: AsyncThrowingStream<WorkspaceFrame, any Error>.Continuation?
-    private(set) var requests: [WorkspaceRequest] = []
+    private var continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation?
+    private(set) var requests: [WorkRequest] = []
     var isOpen: Bool { continuation != nil }
 
-    func open() -> WorkspaceObservation {
-        let (stream, continuation) = AsyncThrowingStream<WorkspaceFrame, any Error>.makeStream()
+    func open() -> WorkObservation {
+        let (stream, continuation) = AsyncThrowingStream<WorkFrame, any Error>.makeStream()
         self.continuation = continuation
-        return WorkspaceObservation(frames: stream, request: { request in
+        return WorkObservation(frames: stream, request: { request in
             Task { @MainActor in self.requests.append(request) }
         }, cancel: { continuation.finish() })
     }
 
-    func send(_ frame: WorkspaceFrame) { continuation?.yield(frame) }
+    func send(_ frame: WorkFrame) { continuation?.yield(frame) }
 }
 
 @Suite("Desktop without a display")
@@ -44,12 +44,12 @@ struct DesktopHeadlessTests {
             try #require(JSONSerialization.jsonObject(
                 with: Data(contentsOf: fixtures.appendingPathComponent(name))) as? [String: Any])
         }
-        func frame(_ part: String, sequence: Int, answers: Int, body: [String: Any]) throws -> WorkspaceFrame {
+        func frame(_ part: String, sequence: Int, answers: Int, body: [String: Any]) throws -> WorkFrame {
             let line: [String: Any] = [
                 "part": part, "sequence": sequence, "answers": answers, "home": "/home",
                 "revisions": NSNull(), "unavailable": NSNull(), "body": body,
             ]
-            return try WorkspaceFrame.decode(line: JSONSerialization.data(withJSONObject: line))
+            return try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: line))
         }
         let roadmap = try object("roadmap_snapshot.json")
         let waves = try #require(roadmap["waves"] as? [[String: Any]]).map { try #require($0["wave"]) }
@@ -59,11 +59,11 @@ struct DesktopHeadlessTests {
 
         let calls = Recorder()
         let feed = Feed()
-        let model = PodiumModel(query: RegistryQuery(watchWorkspace: { await feed.open() }) { args, _ in
+        let model = WorkModel(query: RegistryQuery(watchWork: { await feed.open() }) { args, _ in
             await calls.add(args)
             return ""
         })
-        let keeping = Task { await model.keepWorkspaceCurrent() }
+        let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
         func eventually(_ condition: @MainActor () -> Bool) async throws {
             for _ in 0..<600 where !condition() { try await Task.sleep(for: .milliseconds(5)) }
@@ -76,7 +76,7 @@ struct DesktopHeadlessTests {
         let found = try #require(model.task(id: "issue-now"))
         let (task, wave) = (found.task, found.wave.wave)
         model.select(.task(id: task.id))
-        model.syncWorkspaceScope()
+        model.syncWorkScope()
         try await eventually { feed.requests.last?.id == 2 }
         guard case .scope(_, let scope) = try #require(feed.requests.last) else {
             Issue.record("selecting a Task scopes the reader to it")
@@ -149,7 +149,7 @@ struct DesktopHeadlessTests {
         let wave = try #require(roadmap.waves.first).wave
         let catalog = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("flow_catalog.json")), as: UTF8.self)
         let calls = Recorder()
-        let model = PodiumModel(query: RegistryQuery { args, _ in
+        let model = WorkModel(query: RegistryQuery { args, _ in
             await calls.add(args)
             if args.prefix(2) == ["flow", "list"] { return catalog }
             if args.prefix(2) == ["flow", "customize"] { return "/repo/.lf/workflows/\(args[2]).yaml\n" }
@@ -192,7 +192,7 @@ struct DesktopHeadlessTests {
         var wire = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
         let started = Recorder()
-        let model = PodiumModel(query: RegistryQuery(
+        let model = WorkModel(query: RegistryQuery(
             start: { args, _ in await started.add(args) },
             run: { args, _ in
                 if args.prefix(2) == ["task", "move"] { await started.add(args) }
@@ -261,7 +261,7 @@ struct DesktopHeadlessTests {
         let wave = try #require(roadmap.waves.first)
         let task = try #require(wave.tasks.items.first { $0.flow.control(.start)?.unavailable == nil })
         let started = Recorder()
-        let model = PodiumModel(query: RegistryQuery(start: { args, _ in await started.add(args) }, run: { _, _ in "{}" }))
+        let model = WorkModel(query: RegistryQuery(start: { args, _ in await started.add(args) }, run: { _, _ in "{}" }))
         var wire = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
         var drawnWorkflow: Workflow?
@@ -349,16 +349,16 @@ struct DesktopHeadlessTests {
     @Test("Loading, unavailable, empty and selected Work have distinct content")
     func workStates() throws {
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Unexpected external read") }
-        let model = PodiumModel(query: query)
+        let model = WorkModel(query: query)
         let view = WorkSurfaceView(model: model)
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-work-loading")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
 
         model.applyFixture(roadmap: .unavailable(lastGood: nil, reason: "offline"),
                            waves: .available([]), processActivity: .loading,
                            workActivity: .loading, repos: [])
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-work-unavailable")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-unavailable")
         #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "podium-work-empty")
+            try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-empty")
         }
 
         let data = try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json"))
@@ -367,23 +367,23 @@ struct DesktopHeadlessTests {
         let empty = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
         model.applyFixture(roadmap: .available(empty), waves: .available([]),
                            processActivity: .loading, workActivity: .loading, repos: [])
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-work-empty")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-empty")
 
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: data)
         let wave = try #require(roadmap.waves.first).wave
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.toWave()]),
                            processActivity: .loading, workActivity: .loading, repos: [])
         model.navigation.presentation = .full
-        let navigator = WorkspaceNavigator(model: model, onOpenSession: { _ in })
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         try navigator.inspect()
-            .find(viewWithAccessibilityIdentifier: "workspace-wave-\(wave.id)").button().tap()
+            .find(viewWithAccessibilityIdentifier: "work-wave-\(wave.id)").button().tap()
 
         #expect(model.selection == .wave(id: wave.id))
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-detail-wave")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-detail-wave")
         let title = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string()
         #expect(title == "Product")
         #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "podium-work-loading")
+            try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
         }
     }
 }

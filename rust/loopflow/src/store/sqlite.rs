@@ -18,6 +18,7 @@ use crate::store::{
 };
 use crate::work::wave::{Wave, WaveLocator};
 
+mod admission;
 mod automation;
 mod chapters;
 mod children;
@@ -28,6 +29,8 @@ mod flow_inventory;
 mod metrics;
 mod planning;
 mod pr_landings;
+pub(crate) mod project_selection;
+mod project_transitions;
 mod revisions;
 mod session_events;
 pub(crate) mod sessions;
@@ -35,6 +38,7 @@ mod task_work;
 
 #[cfg(test)]
 pub(crate) use durable::task_state_sql;
+pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
 pub(crate) use task_work::{EndMove, OpenExecs};
 
@@ -63,6 +67,20 @@ fn configure_write_connection(conn: &Connection, path: &Path) -> StoreResult<()>
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
+}
+
+impl SqliteStore {
+    pub(crate) fn home_dir(&self) -> StoreResult<PathBuf> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        home_dir_in(&conn)
+    }
+}
+
+fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
+    conn.path()
+        .and_then(|path| Path::new(path).parent())
+        .map(Path::to_path_buf)
+        .ok_or_else(|| StoreError::InvalidData("store has no owning Home path".into()))
 }
 
 /// Recorded checkout evidence remains usable without chapter metadata.
@@ -1845,7 +1863,12 @@ impl SqliteStore {
         // Canonicalization changes one repository identity, including every Wave
         // and shared planning entity under that alias. Move them atomically;
         // uniqueness conflicts must preserve both observations, never merge them.
-        for table in ["waves", "pm_projects", "pm_items"] {
+        for table in [
+            "waves",
+            "pm_projects",
+            "pm_items",
+            "pm_project_name_cutover",
+        ] {
             tx.execute(
                 &format!("UPDATE {table} SET repo = ?2 WHERE repo = ?1"),
                 params![expected_repo, target_repo],

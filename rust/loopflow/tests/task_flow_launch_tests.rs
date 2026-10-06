@@ -77,7 +77,11 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             record.item.project_id = Some("another-project".into());
         }
         runtime
-            .block_on(registered.store.put_pm_task(&scope, "linear", record))
+            .block_on(
+                registered
+                    .store
+                    .put_pm_task(&scope, "linear", record, None, None),
+            )
             .unwrap();
         // Old valid planning still admits a launch without reaching the provider.
         rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -301,7 +305,7 @@ impl WorkflowTask {
         record.item.state = Some("completed".into());
         record.item.completed = true;
         runtime
-            .block_on(store.put_pm_task(&scope, "linear", record))
+            .block_on(store.put_pm_task(&scope, "linear", record, None, None))
             .unwrap();
     }
 

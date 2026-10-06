@@ -5,13 +5,13 @@ import ViewInspector
 @testable import Loopflow
 @testable import LoopflowMac
 
-@Suite("Podium model")
+@Suite("Work model")
 @MainActor
-struct PodiumModelTests {
+struct WorkModelTests {
     @Test("Repository scope filters one shared snapshot and clears outside selection")
     func repositoryScopeFiltersSharedSnapshot() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let model = PodiumModel(query: fixture.query)
+        let fixture = try WorkTestFixture.load()
+        let model = WorkModel(query: fixture.query)
 
         await model.refresh()
         #expect(model.visibleRoadmaps.map(\.wave.name) == ["product", "context"])
@@ -26,14 +26,14 @@ struct PodiumModelTests {
 
     @Test("Registry Wave paths cannot create repository choices")
     func registryWavesDoNotCreateRepos() throws {
-        let fixture = try PodiumTestFixture.load()
+        let fixture = try WorkTestFixture.load()
         let staleWorktree = Wave(
             id: "stale",
             name: "stale",
             repo: "/tmp/loopflow.old-task",
             status: .ready
         )
-        let model = PodiumModel(query: fixture.query)
+        let model = WorkModel(query: fixture.query)
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available([staleWorktree]),
@@ -47,8 +47,8 @@ struct PodiumModelTests {
 
     @Test("Stable Work selection resolves against the latest snapshot")
     func stableSelectionSurvivesRefresh() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let model = PodiumModel(query: fixture.query)
+        let fixture = try WorkTestFixture.load()
+        let model = WorkModel(query: fixture.query)
 
         await model.refresh()
         model.select(.task(id: "issue-now"))
@@ -64,8 +64,8 @@ struct PodiumModelTests {
 
     @Test("Current chapter source references navigate directly to the Wave")
     func chapterReferencesSelectWave() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let model = PodiumModel(query: fixture.query)
+        let fixture = try WorkTestFixture.load()
+        let model = WorkModel(query: fixture.query)
         await model.refresh()
         let wave = try #require(fixture.roadmap.waves.first)
         let chapter = try #require(wave.currentProject)
@@ -77,8 +77,8 @@ struct PodiumModelTests {
 
     @Test("Selected Task survives a chapter transfer with temporarily absent membership")
     func selectedTaskSurvivesChapterTransfer() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let model = PodiumModel(query: fixture.query)
+        let fixture = try WorkTestFixture.load()
+        let model = WorkModel(query: fixture.query)
         await model.refresh()
         model.select(.task(id: "issue-now"))
         var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
@@ -101,6 +101,7 @@ struct PodiumModelTests {
         var successor = plans[0]
         successor["id"] = "next"
         successor["name"] = "Next chapter"
+        plans[0]["current"] = false
         plans.append(successor)
         projects["items"] = plans
         waves[0]["projects"] = projects
@@ -117,13 +118,13 @@ struct PodiumModelTests {
 
     @Test("Chapter history remains reachable when the current plan is unavailable")
     func historyOpensWithoutCurrentChapter() throws {
-        let fixture = try PodiumTestFixture.load()
+        let fixture = try WorkTestFixture.load()
         var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
         var waves = try #require(wire["waves"] as? [[String: Any]])
         waves[0]["projects"] = ["state": "unavailable", "reason": "Provider unavailable"]
         wire["waves"] = waves
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
-        let model = PodiumModel(query: fixture.query)
+        let model = WorkModel(query: fixture.query)
         model.applyFixture(roadmap: .available(roadmap), waves: .available(fixture.waves),
             processActivity: .available(fixture.processActivity), workActivity: .available(fixture.workActivity), repos: [])
         model.select(.wave(id: "wave-1"))
@@ -137,9 +138,9 @@ struct PodiumModelTests {
 
     @Test("A delayed historical reference cannot replace newer navigation", arguments: ["history", "task", "repo"])
     func historicalReferenceRespectsNavigation(destination: String) async throws {
-        let fixture = try PodiumTestFixture.load()
+        let fixture = try WorkTestFixture.load()
         let deferred = DeferredActivityResponse()
-        let model = PodiumModel(query: RegistryQuery { _, _ in await deferred.response() }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { _, _ in await deferred.response() }, repoPath: "/src/loopflow")
         model.applyFixture(roadmap: .available(fixture.roadmap), waves: .available(fixture.waves),
             processActivity: .available(fixture.processActivity), workActivity: .available(fixture.workActivity), repos: [])
         model.select(.project(id: "old-plan"))
@@ -152,7 +153,7 @@ struct PodiumModelTests {
         var historical = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("wave_detail.json"))) as? [String: Any])
         historical["projects"] = ["state": "ok", "truncated": false, "items": [[
             "id": "old-plan", "work_id": NSNull(), "slug": "old", "name": "Previous",
-            "workflow": "feature", "status": "completed", "metric_targets": [], "krs": []
+            "workflow": "feature", "status": "completed", "current": false, "metric_targets": [], "krs": []
         ]]]
         let reply = try JSONSerialization.data(withJSONObject: historical)
         await deferred.release(try #require(String(data: reply, encoding: .utf8)))
@@ -174,11 +175,11 @@ struct PodiumModelTests {
 
     @Test("Refresh failure preserves last-good evidence and exposes the reason")
     func refreshFailurePreservesLastGoodEvidence() async throws {
-        let fixture = try PodiumTestFixture.load()
+        let fixture = try WorkTestFixture.load()
         let failing = RegistryQuery { _, _ in
             throw RegistryQueryError("registry unavailable")
         }
-        let model = PodiumModel(query: failing)
+        let model = WorkModel(query: failing)
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available(fixture.waves),
@@ -203,7 +204,7 @@ struct PodiumModelTests {
 
     @Test("A slow process read does not hold back fleet, Sessions, or roadmap")
     func slowProcessReadDoesNotBlockDurableState() async throws {
-        let fixture = try PodiumTestFixture.load()
+        let fixture = try WorkTestFixture.load()
         let deferred = DeferredProcessResponse()
         let query = RegistryQuery { args, _ in
             switch args.first {
@@ -215,7 +216,7 @@ struct PodiumModelTests {
             default: throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")
             }
         }
-        let model = PodiumModel(query: query)
+        let model = WorkModel(query: query)
 
         let processRefresh = Task { await model.refreshProcessActivity() }
         await deferred.waitUntilRequested()
@@ -233,7 +234,7 @@ struct PodiumModelTests {
 
     @Test("Live refresh changes only process evidence and preserves its last good frame")
     func liveRefreshChangesOnlyProcessEvidence() async throws {
-        let fixture = try PodiumTestFixture.load()
+        let fixture = try WorkTestFixture.load()
         let frames = LiveProcessFrames(frames: [
             try fixture.processActivityJSON(providersLive: true, observedAt: 1),
             try fixture.processActivityJSON(providersLive: true, observedAt: 2),
@@ -241,7 +242,7 @@ struct PodiumModelTests {
         let query = RegistryQuery { args, _ in
             try await frames.next(args: args)
         }
-        let model = PodiumModel(query: query)
+        let model = WorkModel(query: query)
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available(fixture.waves),
@@ -270,12 +271,12 @@ struct PodiumModelTests {
 
     @Test("Live process refreshes never overlap")
     func liveProcessRefreshesNeverOverlap() async throws {
-        let fixture = try PodiumTestFixture.load()
+        let fixture = try WorkTestFixture.load()
         let deferred = DeferredProcessResponse()
         let query = RegistryQuery { args, _ in
             try await deferred.response(args: args)
         }
-        let model = PodiumModel(query: query)
+        let model = WorkModel(query: query)
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available(fixture.waves),
@@ -296,9 +297,9 @@ struct PodiumModelTests {
 
     @Test("Authored Waves remain visible without active Runs")
     func authoredWavesRemainVisible() async throws {
-        let fixture = try PodiumTestFixture.load()
+        let fixture = try WorkTestFixture.load()
         let repo = FileManager.default.temporaryDirectory
-            .appendingPathComponent("podium-authored-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("loopflow-authored-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: repo) }
         for name in ["infrastructure", "intelligence", "product"] {
             let wave = repo
@@ -309,7 +310,7 @@ struct PodiumModelTests {
         }
         try git(["init", "-q"], at: repo)
 
-        let model = PodiumModel(query: fixture.query)
+        let model = WorkModel(query: fixture.query)
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available([]),
@@ -330,9 +331,9 @@ struct PodiumModelTests {
 
     @Test("A checkout's repository identity follows its origin once that is resolved")
     func repoIdentityFollowsResolvedOrigin() throws {
-        let fixture = try PodiumTestFixture.load()
+        let fixture = try WorkTestFixture.load()
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("podium-identity-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("loopflow-identity-\(UUID().uuidString)", isDirectory: true)
         let origin = root.appendingPathComponent("repo", isDirectory: true)
         let worktree = root.appendingPathComponent("repo.wt", isDirectory: true)
         try FileManager.default.createDirectory(at: origin, withIntermediateDirectories: true)
@@ -344,7 +345,7 @@ struct PodiumModelTests {
         )
         try git(["worktree", "add", "-q", worktree.path], at: origin)
 
-        let model = PodiumModel(query: fixture.query, repoPath: origin.path)
+        let model = WorkModel(query: fixture.query, repoPath: origin.path)
         #expect(model.repoIdentity(worktree.path) != model.repoIdentity(origin.path))
         _ = WaveOrigin.resolve(worktree.path)
         #expect(model.repoIdentity(worktree.path) == model.repoIdentity(origin.path))
@@ -352,9 +353,9 @@ struct PodiumModelTests {
 
     @Test("A development worktree becomes one main-repository choice")
     func developmentWorktreeBecomesMainRepositoryChoice() async throws {
-        let fixture = try PodiumTestFixture.load()
+        let fixture = try WorkTestFixture.load()
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("podium-worktree-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("loopflow-worktree-\(UUID().uuidString)", isDirectory: true)
         let origin = root.appendingPathComponent("repo", isDirectory: true)
         let worktree = root.appendingPathComponent("repo.wt", isDirectory: true)
         try FileManager.default.createDirectory(
@@ -381,7 +382,7 @@ struct PodiumModelTests {
             status: .ready,
             
         )
-        let model = PodiumModel(query: fixture.query, repoPath: worktree.path)
+        let model = WorkModel(query: fixture.query, repoPath: worktree.path)
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available([registered]),
@@ -406,7 +407,7 @@ struct PodiumModelTests {
         #expect(model.visibleWaves.map(\.displayName) == ["Product"])
         #expect(model.visibleWaves.map(\.isRegistered) == [true])
 
-        let restored = PodiumModel(query: fixture.query, repoPath: worktree.path)
+        let restored = WorkModel(query: fixture.query, repoPath: worktree.path)
         await restored.refreshPortfolio(initialRepoPath: nil)
         #expect(restored.repoPath?.normalizedFilePath == origin.path.normalizedFilePath)
         #expect(restored.allRepos.contains {
@@ -416,8 +417,8 @@ struct PodiumModelTests {
 
     @Test("Work selection becomes one server-side Activity filter")
     func workActivityFollowsSelection() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let model = PodiumModel(query: fixture.query)
+        let fixture = try WorkTestFixture.load()
+        let model = WorkModel(query: fixture.query)
         await model.refresh()
 
         model.select(.wave(id: "wave-1"))
@@ -445,7 +446,7 @@ struct PodiumModelTests {
 
     @Test("A late Activity query cannot replace evidence for a newer selection")
     func staleActivityQueryDoesNotReplaceNewSelection() async throws {
-        let fixture = try PodiumTestFixture.load()
+        let fixture = try WorkTestFixture.load()
         let staleJSON = try fixture.workActivityJSON(replacingFirstSubjectWith: "stale-wave")
         let selectedJSON = try fixture.workActivityJSON(replacingFirstSubjectWith: "W2-144")
         let deferred = DeferredActivityResponse()
@@ -456,7 +457,7 @@ struct PodiumModelTests {
             if args.contains("W2-144") { return selectedJSON }
             return await deferred.response()
         }
-        let model = PodiumModel(query: query)
+        let model = WorkModel(query: query)
         model.applyFixture(
             roadmap: .available(fixture.roadmap),
             waves: .available(fixture.waves),
@@ -496,7 +497,7 @@ struct PodiumModelTests {
             #expect(cwd == "/src/loopflow")
             return #"{"entries":\#(json),"next":null}"#
         }
-        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
 
         await model.refreshSessions()
 
@@ -520,7 +521,7 @@ struct PodiumModelTests {
             #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             return #"{"entries":\#(json),"next":null}"#
         }
-        let model = PodiumModel(query: query, repoPath: "/src/first")
+        let model = WorkModel(query: query, repoPath: "/src/first")
         await model.refreshSessions()
         #expect(model.sessions.value?.count == 1)
 
@@ -545,7 +546,7 @@ struct PodiumModelTests {
             #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
             return #"{"entries":\#(await deferred.response()),"next":null}"#
         }
-        let model = PodiumModel(query: query, repoPath: "/src/first")
+        let model = WorkModel(query: query, repoPath: "/src/first")
         let refresh = Task { await model.refreshSessions() }
         await deferred.waitUntilRequested()
 
@@ -568,20 +569,20 @@ struct PodiumModelTests {
     }
 }
 
-@Suite("Podium process signal")
-struct PodiumOutputSignalTests {
+@Suite("Work process signal")
+struct WorkOutputSignalTests {
     @Test("Exact provider process state drives the signal")
     func processStateDrivesSignal() throws {
-        let fixture = try PodiumTestFixture.load()
+        let fixture = try WorkTestFixture.load()
         let empty = try JSONDecoder().decode(
             ActivitySnapshot.self,
             from: Data(fixture.processActivityJSON(providersLive: false, observedAt: 1).utf8)
         )
 
-        #expect(PodiumSignalState.from(empty) == .off)
-        #expect(PodiumSignalState.from(empty).lens == .black)
-        #expect(PodiumSignalState.from(fixture.processActivity) == .blocked)
-        #expect(PodiumSignalState.from(fixture.processActivity).lens == .blue)
+        #expect(WorkSignalState.from(empty) == .off)
+        #expect(WorkSignalState.from(empty).lens == .black)
+        #expect(WorkSignalState.from(fixture.processActivity) == .blocked)
+        #expect(WorkSignalState.from(fixture.processActivity).lens == .blue)
 
         let silentWorker = ActivityNode(
             id: "provider:1",
@@ -595,19 +596,19 @@ struct PodiumOutputSignalTests {
             startedAt: 1,
             state: .working
         )
-        #expect(PodiumSignalState.from(nodes: [silentWorker]) == .producing)
+        #expect(WorkSignalState.from(nodes: [silentWorker]) == .producing)
     }
 }
 
-@Suite("Podium workspace stream", .serialized)
+@Suite("Work observation stream", .serialized)
 @MainActor
-struct PodiumModelStreamTests {
+struct WorkModelStreamTests {
     @Test("Frames update planning in place and an older frame cannot replace a newer one")
     func framesReplaceReadings() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let feed = WorkspaceFeed()
-        let model = PodiumModel(query: fixture.streaming(feed))
-        let keeping = Task { await model.keepWorkspaceCurrent() }
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let model = WorkModel(query: fixture.streaming(feed))
+        let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
 
         try await feed.opened(1)
@@ -618,7 +619,7 @@ struct PodiumModelStreamTests {
         await feed.send(renamed)
         try await eventually { model.task(id: "issue-now")?.task.task.name == "Renamed elsewhere" }
         #expect(model.selection == .task(id: "issue-now"))
-        #expect(model.workspaceStatus == .current)
+        #expect(model.workStatus == .current)
 
         // Sequence 2 was read before sequence 3; another Home's frame names nothing here.
         await feed.send(try fixture.planningFrame(sequence: 2, answers: nil))
@@ -630,10 +631,10 @@ struct PodiumModelStreamTests {
 
     @Test("Another Home's frame replaces what the previous Home showed")
     func anotherHomeDropsPreviousContent() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let feed = WorkspaceFeed()
-        let model = PodiumModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
-        let keeping = Task { await model.keepWorkspaceCurrent() }
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
+        let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
 
         try await feed.opened(1)
@@ -656,10 +657,10 @@ struct PodiumModelStreamTests {
 
     @Test("A Task completed elsewhere leaves the working set and stays under Completed")
     func completedTaskLeavesWorkingSet() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let feed = WorkspaceFeed()
-        let model = PodiumModel(query: fixture.streaming(feed))
-        let keeping = Task { await model.keepWorkspaceCurrent() }
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let model = WorkModel(query: fixture.streaming(feed))
+        let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
         let listed = { (filter: TaskHistoryFilter) -> Bool in
             guard let row = model.task(id: "issue-now")?.task else { return false }
@@ -685,10 +686,10 @@ struct PodiumModelStreamTests {
 
     @Test("Refresh returns when a planning frame answers it")
     func refreshWaitsForItsAnswer() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let feed = WorkspaceFeed()
-        let model = PodiumModel(query: fixture.streaming(feed))
-        let keeping = Task { await model.keepWorkspaceCurrent() }
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let model = WorkModel(query: fixture.streaming(feed))
+        let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
 
         try await feed.opened(1)
@@ -711,10 +712,10 @@ struct PodiumModelStreamTests {
 
     @Test("A reader that ends leaves the last reading marked unavailable, then recovers")
     func readerEndRecovers() async throws {
-        let fixture = try PodiumTestFixture.load()
-        let feed = WorkspaceFeed()
-        let model = PodiumModel(query: fixture.streaming(feed))
-        let keeping = Task { await model.keepWorkspaceCurrent() }
+        let fixture = try WorkTestFixture.load()
+        let feed = WorkFeed()
+        let model = WorkModel(query: fixture.streaming(feed))
+        let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
 
         try await feed.opened(1)
@@ -750,24 +751,24 @@ private actor Flag {
 }
 
 /// A scripted reader: the test decides which frames arrive and when.
-private actor WorkspaceFeed {
-    private var continuations: [AsyncThrowingStream<WorkspaceFrame, any Error>.Continuation] = []
-    private var requests: [WorkspaceRequest] = []
+private actor WorkFeed {
+    private var continuations: [AsyncThrowingStream<WorkFrame, any Error>.Continuation] = []
+    private var requests: [WorkRequest] = []
 
-    nonisolated func open() async -> WorkspaceObservation {
-        let (stream, continuation) = AsyncThrowingStream<WorkspaceFrame, any Error>.makeStream()
+    nonisolated func open() async -> WorkObservation {
+        let (stream, continuation) = AsyncThrowingStream<WorkFrame, any Error>.makeStream()
         await add(continuation)
-        return WorkspaceObservation(frames: stream, request: { request in
+        return WorkObservation(frames: stream, request: { request in
             Task { await self.record(request) }
         }, cancel: { continuation.finish() })
     }
 
-    private func add(_ continuation: AsyncThrowingStream<WorkspaceFrame, any Error>.Continuation) {
+    private func add(_ continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation) {
         continuations.append(continuation)
     }
 
-    private func record(_ request: WorkspaceRequest) { requests.append(request) }
-    func send(_ frame: WorkspaceFrame) { continuations.last?.yield(frame) }
+    private func record(_ request: WorkRequest) { requests.append(request) }
+    func send(_ frame: WorkFrame) { continuations.last?.yield(frame) }
     func fail(_ error: any Error) { continuations.last?.finish(throwing: error) }
 
     func opened(_ count: Int, within: Duration = .seconds(3)) async throws {
@@ -779,7 +780,7 @@ private actor WorkspaceFeed {
     }
 
     /// The request with this id, once it has been made.
-    func request(_ id: Int) async throws -> WorkspaceRequest {
+    func request(_ id: Int) async throws -> WorkRequest {
         let deadline = ContinuousClock.now + .seconds(3)
         while true {
             if let request = requests.first(where: { $0.id == id }) { return request }
@@ -789,7 +790,7 @@ private actor WorkspaceFeed {
     }
 }
 
-private struct PodiumTestFixture {
+private struct WorkTestFixture {
     let roadmap: RoadmapSnapshot
     let waves: [Wave]
     let processActivity: ActivitySnapshot
@@ -801,7 +802,7 @@ private struct PodiumTestFixture {
     let activityArguments: ActivityArguments
     let query: RegistryQuery
 
-    static func load(sourceFile: String = #filePath) throws -> PodiumTestFixture {
+    static func load(sourceFile: String = #filePath) throws -> WorkTestFixture {
         let fixtures = URL(fileURLWithPath: sourceFile)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -846,7 +847,7 @@ private struct PodiumTestFixture {
             default: throw RegistryQueryError("unexpected command \(args.joined(separator: " "))")
             }
         }
-        return PodiumTestFixture(
+        return WorkTestFixture(
             roadmap: roadmap,
             waves: waves,
             processActivity: processActivity,
@@ -860,25 +861,25 @@ private struct PodiumTestFixture {
         )
     }
 
-    func streaming(_ feed: WorkspaceFeed) -> RegistryQuery {
-        RegistryQuery(watchWorkspace: { await feed.open() }) { args, _ in
+    func streaming(_ feed: WorkFeed) -> RegistryQuery {
+        RegistryQuery(watchWork: { await feed.open() }) { args, _ in
             throw RegistryQueryError("a streamed window ran lf \(args.joined(separator: " "))")
         }
     }
 
     private func frame(
         _ part: String, sequence: Int, answers: Int?, home: String = "/home", body: String
-    ) throws -> WorkspaceFrame {
+    ) throws -> WorkFrame {
         let answers = answers.map(String.init) ?? "null"
         let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"\#(home)","revisions":null,"unavailable":null,"body":\#(body)}"#
-        return try WorkspaceFrame.decode(line: Data(line.utf8))
+        return try WorkFrame.decode(line: Data(line.utf8))
     }
 
     /// `completing` settles that Task successfully a minute ago, with no runtime left.
     func planningFrame(
         sequence: Int, answers: Int?, renaming name: String? = nil, completing task: String? = nil,
         home: String = "/home"
-    ) throws -> WorkspaceFrame {
+    ) throws -> WorkFrame {
         var roadmap = roadmapJSON
         if let name {
             roadmap = roadmap.replacingOccurrences(of: "Make lf roadmap the machine-wide view", with: name)
@@ -911,12 +912,12 @@ private struct PodiumTestFixture {
                          body: #"{"roadmap":\#(roadmap),"waves":\#(wavesJSON)}"#)
     }
 
-    func sessionsFrame(sequence: Int, answers: Int?, repo: String, entries: String) throws -> WorkspaceFrame {
+    func sessionsFrame(sequence: Int, answers: Int?, repo: String, entries: String) throws -> WorkFrame {
         try frame("sessions", sequence: sequence, answers: answers,
                   body: #"{"repo":"\#(repo)","includes_headless":false,"entries":\#(entries)}"#)
     }
 
-    func heartbeat(sequence: Int, home: String = "/home") throws -> WorkspaceFrame {
+    func heartbeat(sequence: Int, home: String = "/home") throws -> WorkFrame {
         try frame("heartbeat", sequence: sequence, answers: nil, home: home, body: #"{"projections":{}}"#)
     }
 

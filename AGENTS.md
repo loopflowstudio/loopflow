@@ -12,7 +12,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - Workflow = a Task's nodes (a person, in its conversation) joined by edges (Flows), with its stored position; `lf task run` chooses an edge, `lf task move` sets a node
 - A Task's state is its Workflow position: ready at `start`, active between, done at `end`; reaching `end` is completion, abandoned is its own mark
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
-- Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
+- Unreviewed backlog stays in its Project until explicit disposition; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
 - Definitions name the beneficiary and experienced improvement; KRs prove it
 
@@ -232,7 +232,7 @@ positions on step rows, not child Flows.
 Repository rotation converges on an explicit target through fresh provider facts
 and stable Project identities. Partial status changes remain retryable; unrelated
 competing plans remain unresolved. Preserve active Task identity, worktree, PR
-and execution. Retire only proven untouched backlog; missing evidence is unknown.
+and execution. Preserve unreviewed backlog until explicit disposition; missing evidence is unknown.
 Current navigation stays Wave → Task and Linear retains past Projects.
 
 Exec is one actual lf process, including direct and agent-issued nested commands.

@@ -122,6 +122,13 @@ enum MockWaveFixture {
 
     static let detailJSON = #"""
         {
+          "project_readiness": {
+            "state": "ready",
+            "project_id": "project-1",
+            "observed_at": null,
+            "pending_successor": null,
+            "activation": null
+          },
           "wave": {
             "id": "wave-1",
             "name": "infrastructure",
@@ -295,7 +302,7 @@ enum MockWaveFixture {
                 "slug": "release-feedback",
                 "name": "current",
                 "workflow": "incident",
-                "status": "started",
+                "status": "started", "current": true,
                 "metric_targets": [],
                 "krs": [
                   {

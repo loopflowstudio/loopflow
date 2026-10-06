@@ -125,17 +125,6 @@ const UPDATE_PROJECT_MUTATION: &str = r#"mutation UpdateProject($id: String!, $n
   }
 }"#;
 
-// Sets the Project's teams to exactly `[$teamId]` — a replacement, not an add —
-// so a Project stranded on legacy Teams lands on the repository Team. Projects
-// keep their id/slug across a team move (only issues renumber).
-const MOVE_PROJECT_TO_TEAM_MUTATION: &str = r#"mutation MoveProjectToTeam($id: String!, $teamId: String!) {
-  projectUpdate(id: $id, input: { teamIds: [$teamId] }) {
-    project {
-      id
-    }
-  }
-}"#;
-
 const SET_PROJECT_TEAMS_MUTATION: &str = r#"mutation SetProjectTeams($id: String!, $teamIds: [String!]!) {
   projectUpdate(id: $id, input: { teamIds: $teamIds }) {
     project {
@@ -450,6 +439,25 @@ pub struct LinearClient {
     token: String,
     team_id: Option<String>,
     base_url: String,
+}
+
+fn replace_project_plan(original: &str, content: &ProjectContent) -> String {
+    let mut retained = String::new();
+    let mut managed_section = false;
+    for line in original.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            managed_section = matches!(trimmed, "## KRs" | "## Metric targets");
+        }
+        if !managed_section && !trimmed.starts_with("flow:") {
+            retained.push_str(line);
+        }
+    }
+    if !retained.is_empty() && !retained.ends_with('\n') {
+        retained.push('\n');
+    }
+    retained.push_str(&render_project_content(content));
+    retained
 }
 
 impl LinearClient {
@@ -807,23 +815,6 @@ impl LinearClient {
             })
     }
 
-    pub async fn rename_project(&self, project_id: &str, name: &str) -> PmResult<()> {
-        let response: Value = self
-            .graphql(
-                r#"mutation RenameProject($id: String!, $name: String!) {
-                projectUpdate(id: $id, input: { name: $name }) { success }
-            }"#,
-                json!({ "id": project_id, "name": name }),
-            )
-            .await?;
-        if response["projectUpdate"]["success"] != true {
-            return Err(PmError::Message(
-                "Linear did not confirm Project rename".into(),
-            ));
-        }
-        Ok(())
-    }
-
     pub async fn set_project_status(
         &self,
         project_id: &str,
@@ -854,11 +845,6 @@ impl LinearClient {
         id: Option<&str>,
     ) -> PmResult<String> {
         content.validate()?;
-        if content.workflow.trim().is_empty() {
-            return Err(PmError::Message(
-                "new Projects require a nonempty workflow: line".into(),
-            ));
-        }
         let team_id = self.require_team_id()?;
         let status_id = self
             .project_status_id(crate::pm::ProjectStatus::Planned)
@@ -879,6 +865,22 @@ impl LinearClient {
         let project_id = response.project_create.project.id;
         self.attach_project(initiative_id, &project_id).await?;
         Ok(project_id)
+    }
+
+    /// Check the exact destination before reserving or creating an ordinary Project.
+    pub(crate) async fn require_initiative(&self, initiative_id: &str) -> PmResult<()> {
+        let response: Value = self
+            .graphql(
+                "query ProjectInitiative($id: String!) { initiative(id: $id) { id } }",
+                json!({"id": initiative_id}),
+            )
+            .await?;
+        if response["initiative"]["id"].as_str() != Some(initiative_id) {
+            return Err(PmError::Message(format!(
+                "Initiative {initiative_id} is unavailable"
+            )));
+        }
+        Ok(())
     }
 
     pub async fn attach_project(&self, initiative_id: &str, project_id: &str) -> PmResult<()> {
@@ -911,6 +913,35 @@ impl LinearClient {
                 }),
             )
             .await?;
+        Ok(())
+    }
+
+    /// Replace authored planning fields while retaining the Project's other text and name.
+    pub(crate) async fn apply_project_plan(
+        &self,
+        project_id: &str,
+        content: &ProjectContent,
+    ) -> PmResult<()> {
+        content.validate()?;
+        let node = self.project_node(project_id).await?;
+        let original = node.content.as_deref().unwrap_or("");
+        if crate::pm::parse_project_content(original)? == *content {
+            return Ok(());
+        }
+        let updated = replace_project_plan(original, content);
+        let response: Value = self
+            .graphql(
+                r#"mutation ApplyProjectPlan($id: String!, $content: String!) {
+                projectUpdate(id: $id, input: { content: $content }) { success }
+            }"#,
+                json!({"id":project_id,"content":updated}),
+            )
+            .await?;
+        if response["projectUpdate"]["success"] != true {
+            return Err(PmError::Message(
+                "Linear did not confirm Project plan update".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -1173,23 +1204,7 @@ impl LinearClient {
         Ok(response.issue_update.issue.identifier)
     }
 
-    /// Reassign a Project to exactly one team. `teamIds` is a set replacement, so
-    /// this pulls the Project off whatever team(s) it was on (e.g. the shared
-    /// teams) and onto the repository Team. Unlike issues, a Project keeps its id and
-    /// slug across the move.
-    pub async fn move_project_to_team(&self, project_id: &str, team_id: &str) -> PmResult<()> {
-        let _: Value = self
-            .graphql(
-                MOVE_PROJECT_TO_TEAM_MUTATION,
-                json!({
-                    "id": project_id,
-                    "teamId": team_id,
-                }),
-            )
-            .await?;
-        Ok(())
-    }
-
+    /// Replace the Project's Team set, preserving its identity and content.
     pub async fn set_project_teams(&self, project_id: &str, team_ids: &[String]) -> PmResult<()> {
         let _: Value = self
             .graphql(
@@ -1220,7 +1235,7 @@ impl LinearClient {
             .graphql(
                 r#"query FindProject($id: ID!) {
                 projects(filter: { id: { eq: $id } }, first: 2, includeArchived: true) {
-                    nodes { id name archivedAt description content status { type }
+                    nodes { id name updatedAt archivedAt description content status { type }
                         initiatives(first: 50) { nodes { id } }
                         teams(first: 50) { nodes { id } }
                     }
@@ -1276,12 +1291,6 @@ impl LinearClient {
         }
         let mut project = node.into_pm_project()?;
         crate::pm::validate_project_ownership("adoption", initiative, Some(team), &project)?;
-        if project.workflow.trim().is_empty() && project.status == crate::pm::ProjectStatus::Started
-        {
-            return Err(PmError::Message(format!(
-                "Project {project_id} names no workflow; set workflow: in Linear before adoption"
-            )));
-        }
         if apply && (converted != original || promote) {
             let mut input = json!({"content":converted});
             if promote {
@@ -2466,6 +2475,33 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn migration_adoption_accepts_a_started_project_without_flow() {
+        let original = "Original prose.\n\n## KRs\n- [ ] Preserve this proof\n";
+        let response = json!({"data":{"project": {
+            "id":"project-1", "name":"Summer work — customer requests",
+            "description":"Original description", "content":original,
+            "status":{"type":"started"}, "archivedAt":null,
+            "initiatives":{"nodes":[{"id":"initiative-1"}]},
+            "teams":{"nodes":[{"id":"team-1"}]}
+        }}});
+        let (base_url, _) = test_server::spawn(vec![
+            json_response(StatusCode::OK, response.clone()),
+            json_response(StatusCode::OK, response),
+        ])
+        .await;
+        let client = LinearClient::with_base_url("fixture".into(), Some("team-1".into()), base_url);
+        let adopted = client
+            .adopt_project("project-1", "initiative-1", "team-1", false, true)
+            .await
+            .unwrap();
+        assert_eq!(adopted.id, "project-1");
+        assert_eq!(adopted.name, "Summer work — customer requests");
+        assert!(adopted.workflow.is_empty());
+        assert_eq!(adopted.krs[0].text, "Preserve this proof");
+        assert_eq!(adopted.status, crate::pm::ProjectStatus::Started);
+    }
+
     #[test]
     fn issue_mutations_use_linear_string_ids() {
         for query in [
@@ -2807,7 +2843,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_project_writes_content_then_attaches_to_initiative() {
+    async fn create_project_without_flow_retains_krs_and_attaches_to_initiative() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(StatusCode::OK, json!({"data":{"projectStatuses":{
                 "nodes":[{"id":"planned","type":"planned","position":0.0,"teamId":null}],
@@ -2835,7 +2871,7 @@ mod tests {
                 "Wave Chat",
                 &ProjectContent {
                     metric_targets: Vec::new(),
-                    workflow: "feature".into(),
+                    workflow: String::new(),
                     krs: vec![PmKr {
                         text: "Replies stream".to_string(),
                         holds: false,
@@ -2850,10 +2886,9 @@ mod tests {
         let requests = requests.lock().await;
         let create: Value = serde_json::from_str(&requests[1].body).expect("create json");
         assert_eq!(create["variables"]["name"], "Wave Chat");
-        assert!(create["variables"]["content"]
-            .as_str()
-            .expect("content")
-            .contains("- [ ] Replies stream"));
+        let content = create["variables"]["content"].as_str().unwrap();
+        assert!(content.contains("- [ ] Replies stream"));
+        assert!(!content.contains("flow:"));
         let attach: Value = serde_json::from_str(&requests[2].body).expect("attach json");
         assert_eq!(attach["variables"]["initiativeId"], "initiative-1");
         assert_eq!(attach["variables"]["projectId"], "project-1");
@@ -3068,35 +3103,6 @@ mod tests {
             .contains("issueUpdate"));
         assert_eq!(body["variables"]["id"], "issue-9");
         assert_eq!(body["variables"]["teamId"], "team-prd");
-    }
-
-    #[tokio::test]
-    async fn move_project_to_team_sets_the_team_ids() {
-        let (base_url, requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "projectUpdate": { "project": { "id": "project-1" } } } }),
-        )])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-old".to_string()),
-            base_url,
-        );
-
-        client
-            .move_project_to_team("project-1", "team-cadenza")
-            .await
-            .expect("move project succeeds");
-
-        let requests = requests.lock().await;
-        let body: Value = serde_json::from_str(&requests[0].body).expect("move json");
-        let query = body["query"].as_str().expect("query");
-        assert!(query.contains("projectUpdate"));
-        // teamIds is a set replacement: exactly the repository Team, pulling
-        // the Project off legacy Wave Teams.
-        assert!(query.contains("teamIds: [$teamId]"));
-        assert_eq!(body["variables"]["id"], "project-1");
-        assert_eq!(body["variables"]["teamId"], "team-cadenza");
     }
 
     #[tokio::test]

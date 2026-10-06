@@ -198,7 +198,7 @@ struct WorkflowGraph: View {
         if case .edge(edge, _, let running) = position { running } else { nil }
     }
 
-    private func tone(_ edge: Int) -> WorkspaceTone? {
+    private func tone(_ edge: Int) -> WorkTone? {
         running(edge).map { $0 ? .running : .blocked }
     }
 
@@ -208,18 +208,18 @@ struct WorkflowGraph: View {
         return VStack(spacing: 1) {
             Text(box.name)
                 .font(Typography.code(box.terminal ? 11 : 12))
-                .foregroundStyle(marked ? WorkspaceTone.human.text : palette.text)
+                .foregroundStyle(marked ? WorkTone.human.text : palette.text)
             if let description = box.description {
                 Text(description)
                     .font(Typography.caption(10.5))
-                    .foregroundStyle(marked ? WorkspaceTone.human.text : palette.textSecondary)
+                    .foregroundStyle(marked ? WorkTone.human.text : palette.textSecondary)
             }
         }
         .lineLimit(1)
         .padding(.horizontal, box.terminal ? 0 : 8)
         .frame(width: box.frame.width, height: box.frame.height)
-        .background(shape.fill(marked ? WorkspaceTone.human.fill : palette.surface))
-        .overlay(shape.stroke(marked ? WorkspaceTone.human.stroke : palette.borderStrong, lineWidth: marked ? 2 : 1))
+        .background(shape.fill(marked ? WorkTone.human.fill : palette.surface))
+        .overlay(shape.stroke(marked ? WorkTone.human.stroke : palette.borderStrong, lineWidth: marked ? 2 : 1))
         .offset(x: box.frame.minX, y: box.frame.minY)
         .accessibilityElement(children: .combine)
         .accessibilityValue(marked ? "Current" : "")
@@ -232,7 +232,7 @@ struct WorkflowGraph: View {
         Group {
             if choices.contains(arrow.index) {
                 Button(arrow.text) { choose(arrow.edge) }
-                    .buttonStyle(WorkspaceOutlineButtonStyle())
+                    .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(unavailable != nil)
                     .help(unavailable ?? hint(arrow.edge))
                     .accessibilityValue(state)

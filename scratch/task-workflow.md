@@ -104,21 +104,9 @@ workspace --watch --json` per window streams parts whose bodies are the
 existing `--json` DTOs; after its own write Desktop sends `refresh` and waits
 for the frame that answers it. Forbidden there: polling beside the stream, a
 second cache, Desktop-only shapes, a read that writes an Exec, revision bumps
-at call sites. For the Workflow:
-- Position and moves are stored rows, so a change is a store write the
-  triggers see. Nothing Desktop shows is computed only at read time, except
-  liveness, which stays unknown until observed.
-- Every table this PR adds gets a domain: Workflow tables `planning`;
-  `flow_execs` and `flow_exec_steps` `flows`; `session_activity` `sessions`,
-  bumping only when Waiting could change, with quiet-time Waiting on the
-  watch's clock.
-- Desktop reads the Workflow and the Flow exec log from the `task` part
-  (`TaskWork`), not `lf task status` or `lf flow show` per view; its buttons
-  run `lf task run` or the set command, then `refresh`.
-- #1452 merged first (`c787c7530`, October 6); its triggers on
-  `flow_sessions`, `flow_events` and dropped `agent_sessions` columns are
-  reconciled in this PR's one draft. The rest of this layer is built as
-  slice 12; the Flow exec log rides in the `task` part beside `TaskWork`.
+at call sites. Built as slice 12: every table this PR adds has a domain, and
+Desktop reads the Workflow and the Flow exec log from the stream's `task`
+part. The per-table rules are at `f8fe8aff0:scratch/task-workflow.md`.
 
 Jack, October 6, on `lf task run` taking the only way out, erroring at a
 stage with several until one is named, erroring on a name that is not a way

@@ -146,6 +146,32 @@ struct DTOFixtureTests {
         }
     }
 
+    @Test("Configured Project selection survives competing statuses and provider renames")
+    func configuredProjectSelection() throws {
+        var root = try #require(JSONSerialization.jsonObject(with: loadFixtureData("wave_detail.json")) as? [String: Any])
+        var projects = try #require(root["projects"] as? [String: Any])
+        let rows = try #require(projects["items"] as? [[String: Any]])
+        var previous = try #require(rows.first)
+        previous["current"] = false
+        var selected = previous
+        selected["id"] = "configured-project"
+        selected["name"] = "Summer work — customer requests"
+        selected["current"] = true
+        selected["workflow"] = ""
+        projects["items"] = [previous, selected]
+        root["projects"] = projects
+        let status = try JSONDecoder().decode(WaveDetailSnapshot.self, from: JSONSerialization.data(withJSONObject: root))
+        #expect(status.currentProject?.id == "configured-project")
+        #expect(status.currentProject?.workflow == "")
+        #expect(status.projects.items.count == 2)
+        selected.removeValue(forKey: "current")
+        projects["items"] = [selected]
+        root["projects"] = projects
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(WaveDetailSnapshot.self, from: JSONSerialization.data(withJSONObject: root))
+        }
+    }
+
     @Test("Wave plan uses the same chapter as status")
     func planUsesChapterSnapshot() async throws {
         let json = String(decoding: try loadFixtureData("wave_detail.json"), as: UTF8.self)
@@ -155,6 +181,7 @@ struct DTOFixtureTests {
         }
         let plan = try await query.plan(wave: "infrastructure", objective: "Make releases boring.", cwd: "/fixture")
         #expect(plan.currentProject?.workflow == "task-design")
+        #expect(plan.currentProject?.current == true)
         #expect(plan.currentProject?.krs.count == 1)
     }
 
@@ -213,6 +240,9 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("wave_detail.json")
         let detail = try JSONDecoder().decode(WaveDetailSnapshot.self, from: data)
 
+        #expect(detail.projectReadiness.state == .ready)
+        #expect(detail.projectReadiness.projectId == detail.currentProject?.id)
+        #expect(detail.projectReadiness.activation == nil)
         #expect(detail.wave.home.id == "home_00000000000000000000000000000001")
         #expect(detail.wave.home.route == "ssh://jack@mini-heart")
 
@@ -468,11 +498,11 @@ struct DTOFixtureTests {
         #expect(decoded == session)
     }
 
-    @Test("Workspace frames decode every part and keep the wire text a saved workspace needs")
+    @Test("Work frames decode every part and keep the wire text a saved workspace needs")
     func workspaceFramesDecode() throws {
-        let data = try loadFixtureData("workspace_frame.json")
+        let data = try loadFixtureData("work_frame.json")
         let lines = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
-        let frames = try lines.map { try WorkspaceFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
+        let frames = try lines.map { try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
 
         #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task"])
         #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7])
@@ -511,7 +541,7 @@ struct DTOFixtureTests {
         var missing = lines[0]
         missing.removeValue(forKey: "answers")
         #expect(throws: (any Error).self) {
-            try WorkspaceFrame.decode(line: JSONSerialization.data(withJSONObject: missing))
+            try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: missing))
         }
     }
 

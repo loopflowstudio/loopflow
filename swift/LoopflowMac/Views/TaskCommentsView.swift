@@ -7,19 +7,19 @@ import SwiftUI
 /// thread visible and says it may be out of date. Comments are never derived
 /// from the Description.
 struct TaskCommentsView: View {
-    let model: PodiumModel
+    let model: WorkModel
     let task: RoadmapTask
     let wave: WaveSnapshot
     @Environment(\.palette) private var palette
 
-    private var reading: PodiumReading<TaskComments> { model.comments[task.id] }
+    private var reading: WorkReading<TaskComments> { model.comments[task.id] }
     private var thread: TaskComments? { reading.value }
     private var expanded: Bool { model.navigation.expandedComments.contains(task.id) }
     private var inFlight: Bool { model.comments.inFlight.contains(task.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            WorkspaceDisclosureHeading(
+            WorkDisclosureHeading(
                 title: "Comments",
                 count: thread?.comments.count,
                 expanded: expanded,

@@ -190,6 +190,11 @@ fn execute(
             task: task.clone(),
             steers: Mutex::default(),
         };
+        // A chapter rotation moving this checkout's Task excludes new work in it.
+        let admission = driver
+            .store
+            .sqlite
+            .lock_task_checkouts(&[driver.cwd], driver.task.as_ref())?;
         // The driver's one record of its Flow, written before any step runs.
         driver.store.sqlite.record_flow_exec(
             &driver.exec,
@@ -203,6 +208,7 @@ fn execute(
                 tracing::warn!(%error, "Flow launch did not record its Task as started");
             }
         }
+        drop(admission);
         let outcome = drive(&driver, accounts).await?;
         // A step that completed its Task could not clean up under its own live
         // Flow; the finished Flow can.
@@ -470,7 +476,12 @@ impl Driver<'_> {
         }
         command.args(args);
         let mark = self.store.sqlite.exec_mark()?;
+        let admission = self
+            .store
+            .sqlite
+            .lock_task_checkouts(&[self.cwd], self.task.as_ref())?;
         let mut child = command.spawn().context("could not execute Flow step")?;
+        drop(admission);
         let mut step = None;
         let status = loop {
             tokio::select! {

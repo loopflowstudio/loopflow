@@ -19,7 +19,7 @@ and shows **Updating…** until this launch's reads replace it. Saved rows open
 and navigate; Flow state, Task condition, Session state and every action except
 opening a Session wait for the fresh read. The Portfolio window opens from the
 same saved workspace. A failed refresh keeps what is shown under one
-**Couldn't update** line. Delete the file to start from **Loading workspace…**.
+**Couldn't update** line. Delete the file to start from **Loading work…**.
 
 ```sh
 uv run python scripts/benchmarks/desktop-performance/timings.py   # how long your launches took
@@ -309,7 +309,7 @@ that window and are never mounted twice.
 Session reads and preparation run in the opened repository rather than a
 machine-wide aggregate.
 
-Planning and Sessions share the Podium readings; there is no separate
+Planning and Sessions share the WorkModel readings; there is no separate
 Sessions-only roadmap query. A failed read keeps its last useful evidence and
 exposes the error. Inspection shows the planning snapshot's generation time,
 which does not establish a fresh provider sync, and an explicit no-Session state
@@ -376,15 +376,15 @@ codebase tree, and registry health.
 
 ## Code map
 
-- `LoopflowMac/Views/PodiumView.swift` — one repository/Wave/Task/Session outline and retained workspace
+- `LoopflowMac/Views/RepoView.swift` — one repository/Wave/Task/Session outline and retained workspace
 - `LoopflowMac/Views/SessionsView.swift` — every Session in a native split multiplexer
 - `Loopflow/Models/MultiplexerLayout.swift` — immutable pane split tree
 - `Loopflow/Models/MultiplexerStore.swift` — reference-owned layout, focus, zoom, and undo
 - `LoopflowMac/Views/WorkActivityView.swift` — filtered durable Activity and proof links
-- `LoopflowMac/PodiumModel.swift` — shared readings, stable selection, and local scope
+- `LoopflowMac/WorkModel.swift` — shared readings, stable selection, and local scope
 - `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
-- `LoopflowMac/Views/WaveDetailPane.swift` — current chapter plan, Tasks and Runs
+- `LoopflowMac/Views/WaveDetailPane.swift` — streamed Project plan, Tasks and metrics
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `LoopflowMac/Services/RegistryQueryLocal.swift` — local `lf` subprocess
@@ -472,10 +472,10 @@ xcodebuild -quiet \
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
 ```bash
-lf monitor workspace --watch --json    # what a window shows, as it changes
+lf monitor work --watch --json    # what a window shows, as it changes
 ```
 
-Each window keeps one such reader open through `RegistryQuery.watchWorkspace()`.
+Each window keeps one such reader open through `RegistryQuery.watchWork()`.
 Its frames carry planning, the repository's Sessions, the shown Task's work
 with its Workflow and every Flow exec, the shown Wave's detail and activity.
 The Task page reads nothing else: after `lf task run` or `lf task move` the
@@ -505,3 +505,21 @@ Gate and CI build the app and inspect production views and controls without
 launching a window. Display/terminal integration is opt-in with
 `LOOPFLOW_NATIVE_TESTS=1`; use it for configured-host diagnostics or demo.
 See [TESTING.md](../TESTING.md) for the full commands and CLI prerequisite.
+
+Wave opening and Retry call `WorkModel.activateProject` from both WorkSurface and
+Portfolio. The command outlives the opened view; it never refreshes a view directly.
+Both surfaces show “Preparing Project…” while that Wave's local command is pending,
+retaining cached planning. Retry appears after failure. An unfinished persisted
+Exec without a pending local command remains an unknown outcome.
+The Work stream supplies `project_readiness`: selected Project, dated accepted
+facts, unresolved transition and the exact activation Exec's outcome. Empty default
+Flows render no template section. Command transport errors remain scoped to the Wave.
+
+Work observation and navigation project durable Waves, Projects and Tasks with
+associated Sessions and Execs; they introduce no additional Work kinds.
+`RepoView` shows one selected repository; `WorkModel` also serves Portfolio.
+`TaskProjection` and `WaveProjection` join planning with associated conversations.
+`TaskWorktreeSnapshot` describes a Task's Git worktree. `WorkspaceIdentity` and
+`SessionWorkspace` retain their names because primary Sessions can use a non-Git
+directory. Terminal workspaces own pane layouts. Saved cache paths, selection keys
+and placement JSON fields retain their existing bytes across these source renames.

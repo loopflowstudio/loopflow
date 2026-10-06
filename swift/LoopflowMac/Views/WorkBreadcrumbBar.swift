@@ -7,9 +7,9 @@ import SwiftUI
 /// navigation read as one inverted L. Ancestors navigate upward; the final
 /// crumb names the exact Session, chooses among its siblings, and renames it
 /// in place through the shared Session authority.
-struct WorkspaceBreadcrumbBar<Trailing: View>: View {
-    @Bindable var model: PodiumModel
-    let crumb: WorkspaceBreadcrumb?
+struct WorkBreadcrumbBar<Trailing: View>: View {
+    @Bindable var model: WorkModel
+    let crumb: WorkBreadcrumb?
     let onOpenSession: (SessionRecord) -> Void
     var onTaskDetails: (() -> Void)? = nil
     @ViewBuilder var trailing: Trailing
@@ -21,10 +21,10 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
             Spacer(minLength: 10)
             trailing
             if model.navigation.content == .details {
-                WorkspaceGlyphButton(
+                WorkGlyphButton(
                     "sidebar.right",
                     label: model.navigation.showsActivity ? "Hide Activity" : "Show Activity",
-                    identifier: "workspace-toggle-activity"
+                    identifier: "work-toggle-activity"
                 ) { model.navigation.showsActivity.toggle() }
             }
         }
@@ -35,10 +35,10 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
         .frame(height: TaskFileChrome.headerHeight)
         .background(palette.surfaceMuted)
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
-        .accessibilityIdentifier("workspace-toolbar")
+        .accessibilityIdentifier("work-toolbar")
     }
 
-    private func crumbs(_ crumb: WorkspaceBreadcrumb) -> some View {
+    private func crumbs(_ crumb: WorkBreadcrumb) -> some View {
         HStack(spacing: 6) {
             if let work = crumb.waveWork {
                 Button(crumb.wave?.roadmap.wave.name ?? "Wave \(work.id)") { model.select(work) }
@@ -240,15 +240,15 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
     }
 }
 
-extension WorkspaceBreadcrumbBar where Trailing == EmptyView {
-    init(model: PodiumModel, crumb: WorkspaceBreadcrumb?,
+extension WorkBreadcrumbBar where Trailing == EmptyView {
+    init(model: WorkModel, crumb: WorkBreadcrumb?,
          onOpenSession: @escaping (SessionRecord) -> Void) {
         self.init(model: model, crumb: crumb, onOpenSession: onOpenSession) { EmptyView() }
     }
 }
 
 /// A toolbar action as a quiet glyph: no border, a hover tint, a 28pt target.
-struct WorkspaceGlyphButton: View {
+struct WorkGlyphButton: View {
     let systemImage: String
     let label: String
     let identifier: String

@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use crate::id::WaveId;
 use crate::pm::{PmItem, PmProject, PmSnapshot};
@@ -6,13 +6,107 @@ use crate::store::sqlite::SqliteStore;
 use crate::store::{
     PlanningState, PmSnapshotRow, PmTaskObservation, PmTaskRecord, StoreError, StoreResult,
 };
+use crate::work::project::ProjectId;
 
 impl SqliteStore {
+    /// Accept one confirmed Project without claiming a complete Wave refresh.
+    pub fn put_pm_project(
+        &self,
+        wave: &WaveId,
+        provider: &str,
+        initiative: &str,
+        project: &PmProject,
+        observed_at: i64,
+    ) -> StoreResult<PmProject> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let repo: String = conn.query_row(
+            "SELECT repo FROM waves WHERE id=?1",
+            [wave.as_str()],
+            |row| row.get(0),
+        )?;
+        if project.initiative_ids.as_slice() != [initiative] {
+            return Err(StoreError::InvalidData(format!(
+                "Project {} does not belong to Initiative {initiative}",
+                project.id
+            )));
+        }
+        validate_project_membership(&conn, &repo, provider, project)?;
+        let tx = conn.transaction()?;
+        put_project(&tx, &repo, provider, observed_at, project)?;
+        let accepted = associate_project(&tx, &repo, provider, &project.id, wave, initiative)?;
+        project_accepted_planning(
+            &tx,
+            &repo,
+            provider,
+            std::slice::from_ref(project),
+            &[],
+            Some((wave, initiative)),
+        )?;
+        tx.commit()?;
+        Ok(accepted)
+    }
+
+    pub(crate) fn reconcile_pm_project_teams(
+        &self,
+        wave: &WaveId,
+        provider: &str,
+        initiative: &str,
+        project: &PmProject,
+        observed_at: i64,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let repo: String = conn.query_row(
+            "SELECT repo FROM waves WHERE id=?1",
+            [wave.as_str()],
+            |row| row.get(0),
+        )?;
+        if project.initiative_ids.as_slice() != [initiative] {
+            return Err(StoreError::InvalidData(format!(
+                "Project {} changed Initiative during reteam",
+                project.id
+            )));
+        }
+        let tx = conn.transaction()?;
+        let previous: Option<String> = tx
+            .query_row(
+                "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+                params![repo, provider, project.id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(previous) = previous {
+            let mut previous: PmProject = serde_json::from_str(&previous)?;
+            if previous.initiative_ids.as_slice() != [initiative] {
+                return Err(StoreError::InvalidData(format!(
+                    "Project {} changed Initiative during reteam",
+                    project.id
+                )));
+            }
+            // Reteam orders Team relationships only. Retain independently newer entity facts.
+            previous.team_ids.clone_from(&project.team_ids);
+            tx.execute("UPDATE pm_projects SET body=?4,membership_unresolved=0 WHERE repo=?1 AND provider=?2 AND id=?3",
+                params![repo, provider, project.id, serde_json::to_string(&previous)?])?;
+        }
+        put_project(&tx, &repo, provider, observed_at, project)?;
+        associate_project(&tx, &repo, provider, &project.id, wave, initiative)?;
+        project_accepted_planning(
+            &tx,
+            &repo,
+            provider,
+            std::slice::from_ref(project),
+            &[],
+            Some((wave, initiative)),
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn put_pm_task(
         &self,
         repo: &str,
         provider: &str,
         record: &PmTaskRecord,
+        confirmed_wave: Option<(&WaveId, &str)>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         if let Some(project) = &record.project {
@@ -37,6 +131,20 @@ impl SqliteStore {
                 params![repo, provider, record.item.id],
             )?;
         }
+        if let Some((wave, initiative)) = confirmed_wave {
+            let project_id = record.item.project_id.as_deref().ok_or_else(|| {
+                StoreError::InvalidData("confirmed Wave requires a Project association".into())
+            })?;
+            associate_project(&tx, repo, provider, project_id, wave, initiative)?;
+        }
+        project_accepted_planning(
+            &tx,
+            repo,
+            provider,
+            record.project.as_slice(),
+            std::slice::from_ref(&record.item),
+            confirmed_wave,
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -97,13 +205,22 @@ impl SqliteStore {
         &self,
         repo: &str,
         provider: &str,
-        selector: &str,
+        expected: &PmTaskRecord,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         // A null detail response invalidates cached admission, not provider history.
         // Only a complete detail observation can repair it; list omission is ambiguous.
-        conn.execute("UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider=?2 AND (id=?3 OR identifier=?3)",
-            params![repo,provider,selector])?;
+        conn.execute(
+            "UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider=?2 AND id=?3
+            AND observed_at=?4 AND json_extract(body,'$.revision') IS ?5",
+            params![
+                repo,
+                provider,
+                expected.item.id,
+                expected.observed_at,
+                expected.item.revision
+            ],
+        )?;
         Ok(())
     }
 
@@ -114,69 +231,7 @@ impl SqliteStore {
         selector: &str,
     ) -> StoreResult<PmTaskObservation> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT i.body,p.body,i.observed_at,i.needs_refresh OR COALESCE(p.membership_unresolved,0) OR COALESCE(p.archived,0),
-             EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
-                    WHERE w.repo=i.repo AND d.issue_id=i.id)
-             OR EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id
-                       AND i.provider='linear' AND c.removed=1)
-             FROM pm_items i LEFT JOIN pm_projects p
-             ON p.repo=i.repo AND p.provider=i.provider AND p.id=i.project_id
-             WHERE i.repo=?1 AND i.provider=?2 AND (i.id=?3 OR i.identifier=?3)",
-        )?;
-        let rows = query
-            .query_map(params![repo, provider, selector], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, bool>(3)?,
-                    row.get::<_, bool>(4)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        if rows.len() > 1 {
-            return Err(StoreError::InvalidData(format!(
-                "ambiguous planning selector {selector:?}; use a Task UUID"
-            )));
-        }
-        let Some((item, project, observed_at, invalid, removed)) = rows.into_iter().next() else {
-            let removed = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND removed=1 AND ?2='linear')
-                 OR EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
-                           WHERE w.repo=?3 AND (d.issue_id=?1 OR d.identifier=?1 COLLATE NOCASE))",
-                params![selector, provider, repo], |row| row.get::<_, bool>(0),
-            )?;
-            return Ok(PmTaskObservation {
-                record: None,
-                state: if removed {
-                    PlanningState::Removed
-                } else {
-                    PlanningState::Unavailable
-                },
-            });
-        };
-        let mut item: PmItem = serde_json::from_str(&item)?;
-        let project: Option<PmProject> = project
-            .map(|body| serde_json::from_str(&body))
-            .transpose()?;
-        if let Some(project) = &project {
-            item.project = Some(project.slug.clone());
-        }
-        Ok(PmTaskObservation {
-            record: Some(PmTaskRecord {
-                item,
-                project,
-                observed_at,
-            }),
-            state: if removed {
-                PlanningState::Removed
-            } else if invalid {
-                PlanningState::Invalid
-            } else {
-                PlanningState::Available
-            },
-        })
+        pm_task_observation_in(&conn, repo, provider, selector)
     }
 
     pub fn put_pm_snapshot(&self, snapshot: &PmSnapshotRow) -> StoreResult<()> {
@@ -215,6 +270,13 @@ impl SqliteStore {
         }
         for project in &snapshot.snapshot.projects {
             put_project(&tx, &repo, &snapshot.provider, snapshot.synced_at, project)?;
+            require_accepted_initiative(
+                &tx,
+                &repo,
+                &snapshot.provider,
+                &project.id,
+                &snapshot.initiative,
+            )?;
         }
         for item in &snapshot.snapshot.items {
             put_item(&tx, &repo, &snapshot.provider, snapshot.synced_at, item)?;
@@ -237,6 +299,14 @@ impl SqliteStore {
                 params![snapshot.wave_id, project.id, position as i64],
             )?;
         }
+        project_accepted_planning(
+            &tx,
+            &repo,
+            &snapshot.provider,
+            &snapshot.snapshot.projects,
+            &snapshot.snapshot.items,
+            None,
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -265,15 +335,17 @@ impl SqliteStore {
         let mut query = tx.prepare(
             "SELECT p.body FROM pm_wave_projects m JOIN pm_projects p ON p.id=m.project_id
              WHERE m.wave_id=?1 AND p.repo=?2 AND p.provider=?3 AND p.archived=0 AND p.membership_unresolved=0
-             AND EXISTS(SELECT 1 FROM json_each(p.body,'$.initiative_ids') WHERE value=?4)
              ORDER BY m.position,p.id",
         )?;
-        let projects = query
-            .query_map(params![wave_id, repo, provider, initiative], |row| {
+        // Decode before membership filtering: malformed retained bodies are unavailable
+        // evidence, not an empty plan.
+        let mut projects = query
+            .query_map(params![wave_id, repo, provider], |row| {
                 row.get::<_, String>(0)
             })?
             .map(|row| Ok(serde_json::from_str::<PmProject>(&row?)?))
             .collect::<StoreResult<Vec<_>>>()?;
+        projects.retain(|project| project.initiative_ids.contains(&initiative));
         let mut query = tx.prepare(
             "SELECT i.body,json_extract(p.body,'$.slug') FROM pm_items i JOIN pm_wave_projects m ON m.project_id=i.project_id
              JOIN pm_projects p ON p.id=i.project_id AND p.repo=i.repo AND p.provider=i.provider
@@ -305,8 +377,227 @@ impl SqliteStore {
     }
 }
 
+pub(super) fn pm_task_observation_in(
+    conn: &Connection,
+    repo: &str,
+    provider: &str,
+    selector: &str,
+) -> StoreResult<PmTaskObservation> {
+    let mut query = conn.prepare(
+            "SELECT i.body,p.body,i.observed_at,i.needs_refresh OR COALESCE(p.membership_unresolved,0) OR COALESCE(p.archived,0),
+             EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
+                    WHERE w.repo=i.repo AND d.issue_id=i.id)
+             OR EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id
+                       AND i.provider='linear' AND c.removed=1)
+             FROM pm_items i LEFT JOIN pm_projects p
+             ON p.repo=i.repo AND p.provider=i.provider AND p.id=i.project_id
+             WHERE i.repo=?1 AND i.provider=?2 AND (i.id=?3 OR i.identifier=?3)",
+        )?;
+    let rows = query
+        .query_map(params![repo, provider, selector], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, bool>(3)?,
+                row.get::<_, bool>(4)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    if rows.len() > 1 {
+        return Err(StoreError::InvalidData(format!(
+            "ambiguous planning selector {selector:?}; use a Task UUID"
+        )));
+    }
+    let Some((item, project, observed_at, invalid, removed)) = rows.into_iter().next() else {
+        let removed = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND removed=1 AND ?2='linear')
+                 OR EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
+                           WHERE w.repo=?3 AND (d.issue_id=?1 OR d.identifier=?1 COLLATE NOCASE))",
+                params![selector, provider, repo], |row| row.get::<_, bool>(0),
+            )?;
+        return Ok(PmTaskObservation {
+            record: None,
+            state: if removed {
+                PlanningState::Removed
+            } else {
+                PlanningState::Unavailable
+            },
+        });
+    };
+    let mut item: PmItem = serde_json::from_str(&item)?;
+    let project: Option<PmProject> = project
+        .map(|body| serde_json::from_str(&body))
+        .transpose()?;
+    if let Some(project) = &project {
+        item.project = Some(project.slug.clone());
+    }
+    Ok(PmTaskObservation {
+        record: Some(PmTaskRecord {
+            item,
+            project,
+            observed_at,
+        }),
+        state: if removed {
+            PlanningState::Removed
+        } else if invalid {
+            PlanningState::Invalid
+        } else {
+            PlanningState::Available
+        },
+    })
+}
+
+// Both durable projections require the same confirmed Initiative/Wave association.
+// A partial read supplies that association without advancing full-Wave freshness.
+const ACCEPTED_WAVE_PROJECTS: &str = "
+    SELECT p.id,p.body,p.observed_at,m.wave_id FROM pm_projects p
+    JOIN pm_wave_projects m ON m.project_id=p.id
+    LEFT JOIN pm_wave_sync sync ON sync.wave_id=m.wave_id AND sync.provider=p.provider
+    JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo
+    WHERE p.repo=?1 AND p.provider=?2 AND p.archived=0 AND p.membership_unresolved=0
+    AND json_array_length(p.body,'$.initiative_ids')=1
+    AND json_extract(p.body,'$.initiative_ids[0]')=
+        CASE WHEN m.wave_id=?4 THEN ?5 ELSE sync.initiative END";
+
+/// Inputs select IDs only; project their accepted rows inside the ingestion transaction.
+fn project_accepted_planning(
+    tx: &Transaction<'_>,
+    repo: &str,
+    provider: &str,
+    projects: &[PmProject],
+    items: &[PmItem],
+    confirmed_wave: Option<(&WaveId, &str)>,
+) -> StoreResult<()> {
+    let (confirmed_wave, confirmed_initiative) = confirmed_wave.unzip();
+    let project_ids = serde_json::to_string(&projects.iter().map(|p| &p.id).collect::<Vec<_>>())?;
+    let item_ids = serde_json::to_string(&items.iter().map(|i| &i.id).collect::<Vec<_>>())?;
+    let mut query = tx.prepare(&format!(
+        "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
+         SELECT body,observed_at,wave_id FROM accepted
+         WHERE id IN (SELECT value FROM json_each(?3))"
+    ))?;
+    let projects = query.query_map(
+        params![
+            repo,
+            provider,
+            project_ids,
+            confirmed_wave,
+            confirmed_initiative
+        ],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, WaveId>(2)?,
+            ))
+        },
+    )?;
+    for project in projects {
+        let (body, observed_at, wave_id) = project?;
+        let project: PmProject = serde_json::from_str(&body)?;
+        let existing: Option<(String, WaveId)> = tx
+            .query_row(
+                "SELECT id,wave_id FROM projects WHERE external_project_id=?1",
+                [&project.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let id = match existing {
+            Some((_, owner)) if owner != wave_id => {
+                return Err(StoreError::InvalidData(format!(
+                    "Project {} changed Wave ownership",
+                    project.id
+                )));
+            }
+            Some((id, _)) => {
+                ProjectId::parse(&id).map_err(|error| StoreError::InvalidData(error.to_string()))
+            }?,
+            None => ProjectId::new(),
+        };
+        tx.execute(
+            "INSERT INTO projects(id,wave_id,external_project_id,project_slug,project_name,
+             project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,workflow,status)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,?10)
+             ON CONFLICT(id) DO UPDATE SET project_slug=excluded.project_slug,
+             project_name=excluded.project_name,project_prompt_context=excluded.project_prompt_context,
+             pm_snapshot_synced_at=excluded.pm_snapshot_synced_at,workflow=excluded.workflow,status=excluded.status",
+            params![id.as_str(),wave_id,project.id,project.slug,project.name,
+                project.prompt_context(),observed_at,super::super::rows::now_unix(),project.workflow,project.status.as_str()],
+        )?;
+        super::durable::inherit_project_placement(tx, &id)?;
+    }
+    // Copy accepted facts directly; execution fields and unobserved Tasks stay intact.
+    tx.execute(
+        &format!("WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
+         UPDATE tasks AS target SET
+             issue_identifier=json_extract(i.body,'$.identifier'),
+             issue_title=json_extract(i.body,'$.name'),
+             issue_description=json_extract(i.body,'$.description'),
+             pm_snapshot_synced_at=i.observed_at,project_id=p.id
+         FROM pm_items i
+         JOIN projects p ON p.external_project_id=i.project_id
+         JOIN projects current ON current.wave_id=p.wave_id
+         JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
+         WHERE target.external_issue_id=i.id AND target.project_id=current.id
+         AND i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
+         AND i.id IN (SELECT value FROM json_each(?3))
+         AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=current.wave_id AND d.issue_id=i.id)
+         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND i.provider='linear' AND c.removed=1)"),
+        params![repo, provider, item_ids, confirmed_wave, confirmed_initiative],
+    )?;
+    Ok(())
+}
+
 fn same_ids(left: &[String], right: &[String]) -> bool {
     left.iter().all(|id| right.contains(id)) && right.iter().all(|id| left.contains(id))
+}
+
+fn associate_project(
+    tx: &Transaction<'_>,
+    repo: &str,
+    provider: &str,
+    project_id: &str,
+    wave: &WaveId,
+    initiative: &str,
+) -> StoreResult<PmProject> {
+    let accepted = require_accepted_initiative(tx, repo, provider, project_id, initiative)?;
+    let wave_repo: String = tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
+        row.get(0)
+    })?;
+    if wave_repo != repo {
+        return Err(StoreError::InvalidData(
+            "confirmed Wave belongs to another repository".into(),
+        ));
+    }
+    tx.execute(
+        "INSERT INTO pm_wave_projects(wave_id,project_id,position)
+         VALUES(?1,?2,(SELECT COALESCE(MAX(position)+1,0) FROM pm_wave_projects WHERE wave_id=?1))
+         ON CONFLICT(wave_id,project_id) DO NOTHING",
+        params![wave, project_id],
+    )?;
+    Ok(accepted)
+}
+
+fn require_accepted_initiative(
+    conn: &Connection,
+    repo: &str,
+    provider: &str,
+    project_id: &str,
+    initiative: &str,
+) -> StoreResult<PmProject> {
+    let body: String = conn.query_row(
+        "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+        params![repo, provider, project_id],
+        |row| row.get(0),
+    )?;
+    let accepted: PmProject = serde_json::from_str(&body)?;
+    if accepted.initiative_ids.as_slice() != [initiative] {
+        return Err(StoreError::InvalidData(format!(
+            "accepted Project {project_id} does not belong to Initiative {initiative}"
+        )));
+    }
+    Ok(accepted)
 }
 
 fn validate_project_membership(
@@ -365,6 +656,12 @@ fn put_project(
     if previous.as_ref().is_some_and(|(_, _, archived)| *archived) {
         return Ok(());
     }
+    let pending_name_cutover: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pm_project_name_cutover
+         WHERE repo=?1 AND provider=?2 AND id=?3 AND converted_at IS NULL)",
+        params![repo, provider, project.id],
+        |row| row.get(0),
+    )?;
     let revision = revision_nanos(project.revision.as_deref())?;
     if let Some((previous, acquired, _)) = previous {
         let previous: PmProject = serde_json::from_str(&previous)?;
@@ -377,6 +674,10 @@ fn put_project(
         // Relationship sets were checked independently; their traversal order is immaterial.
         comparable.initiative_ids = previous.initiative_ids.clone();
         comparable.team_ids = previous.team_ids.clone();
+        if pending_name_cutover {
+            comparable.name.clone_from(&previous.name);
+            comparable.slug.clone_from(&previous.slug);
+        }
         if comparable != previous && (revision.is_none() || revision == previous_revision) {
             return Err(StoreError::InvalidData(format!(
                 "unordered or conflicting Project facts for {}; refresh planning",
@@ -394,6 +695,13 @@ fn put_project(
          ON CONFLICT(repo,provider,id) DO UPDATE SET observed_at=excluded.observed_at,body=excluded.body",
         params![repo,provider,project.id,observed_at,serde_json::to_string(project)?],
     )?;
+    if pending_name_cutover {
+        conn.execute(
+            "UPDATE pm_project_name_cutover SET converted_at=?4
+             WHERE repo=?1 AND provider=?2 AND id=?3 AND converted_at IS NULL",
+            params![repo, provider, project.id, observed_at],
+        )?;
+    }
     Ok(())
 }
 
@@ -493,6 +801,82 @@ mod tests {
     use crate::store::{FrontierAdvance, PlanningState, Store};
 
     #[test]
+    fn project_name_cutover_retains_both_histories_and_rejects_later_conflicts() {
+        // "Customer requests" represents both a projected prefixed name and a
+        // verbatim plain provider name. The same input must accept both histories.
+        // An already exact prefixed name also consumes the exception once.
+        for historical_name in ["Customer requests", "Product — Customer requests"] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            crate::store::migrations::apply_before_current_draft(&conn, "project_readiness");
+            let snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+                "../../../../../tests/fixtures/dto/task_history_planning.json"
+            ))
+            .unwrap();
+            let mut project = snapshot.projects[0].clone();
+            project.revision = Some("2026-10-05T12:00:00Z".into());
+            project.name = historical_name.into();
+            project.slug = crate::pm::project_slug(historical_name);
+            let original = serde_json::to_string(&project).unwrap();
+            conn.execute(
+                "INSERT INTO pm_projects(repo,provider,id,observed_at,body)
+                VALUES('/repo','linear',?1,10,?2)",
+                params![project.id, original],
+            )
+            .unwrap();
+            conn.execute_batch(&crate::store::migrations::current_draft_sql(
+                "project_readiness",
+            ))
+            .unwrap();
+            project.name = "Product — Customer requests".into();
+            project.slug = crate::pm::project_slug(&project.name);
+
+            let mut conflict = project.clone();
+            conflict.summary.push_str("conflict");
+            assert!(super::put_project(&conn, "/repo", "linear", 11, &conflict).is_err());
+            super::put_project(&conn, "/repo", "linear", 9, &project).unwrap();
+            let retained: String = conn
+                .query_row("SELECT body FROM pm_projects", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(retained, original);
+            // Failed outer work cannot spend the one-time exception.
+            {
+                let tx = conn.transaction().unwrap();
+                super::put_project(&tx, "/repo", "linear", 11, &project).unwrap();
+            }
+            let pending: Option<i64> = conn
+                .query_row(
+                    "SELECT converted_at FROM pm_project_name_cutover",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(pending, None);
+            let tx = conn.transaction().unwrap();
+            super::put_project(&tx, "/repo", "linear", 12, &project).unwrap();
+            tx.commit().unwrap();
+            let evidence: (String, i64, Option<i64>) = conn
+                .query_row(
+                    "SELECT body,observed_at,converted_at FROM pm_project_name_cutover",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(evidence, (original, 10, Some(12)));
+            let accepted = serde_json::to_string(&project).unwrap();
+            project.name = "Another name".into();
+            assert!(super::put_project(&conn, "/repo", "linear", 13, &project).is_err());
+            let retained: String = conn
+                .query_row("SELECT body FROM pm_projects", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(retained, accepted);
+            project.id = "post-cutover".into();
+            super::put_project(&conn, "/repo", "linear", 13, &project).unwrap();
+            project.name = "Conflict on a new record".into();
+            assert!(super::put_project(&conn, "/repo", "linear", 14, &project).is_err());
+        }
+    }
+
+    #[test]
     fn task_history_enriches_only_absent_completion_dates_at_equal_revision() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("CREATE TABLE pm_items(repo TEXT,provider TEXT,id TEXT,identifier TEXT,project_id TEXT,observed_at INTEGER,body TEXT,PRIMARY KEY(repo,provider,id)); CREATE TABLE pm_issue_changes(issue_id TEXT,revision_ns INTEGER,removed INTEGER);").unwrap();
@@ -570,10 +954,17 @@ mod tests {
             "normalize_pm_planning",
             "pm_issue_revisions",
             "pm_project_evidence",
+            "project_readiness",
             "task_flow_observations",
         ] {
             sqlite.apply_migration_for_test(name).unwrap();
         }
+        sqlite
+            .place_work(
+                &crate::durable::WorkRef::Wave(wave.clone()),
+                &sqlite.local_home().unwrap().id,
+            )
+            .unwrap();
         let store = Store { sqlite };
         let observation = store
             .pm_task_observation("/repo", "linear", "fix-1")
@@ -599,7 +990,7 @@ mod tests {
             .confirm_task_deletion(&wave, "issue", "FIX-1")
             .await
             .unwrap();
-        store.put_pm_snapshot(list).await.unwrap();
+        store.put_pm_snapshot(list, None).await.unwrap();
         let removed = store
             .pm_task_observation("/repo", "linear", "FIX-1")
             .await

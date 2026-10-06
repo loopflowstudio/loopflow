@@ -27,7 +27,7 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
   1,270 displayed rows a day. Exempt the types readers skip. Usage moves
   its own revision, which only Wave detail reads, at most every 10 s.
 - An unreadable store must not read empty.
-- Merged October 6 (#1452): one `lf monitor workspace --watch` per window
+- Merged October 6 (#1452): one `lf monitor work --watch` per window (renamed by #1463)
   replaces every timer loop. Reader on a copy of Jack's store: commit to
   frame 0.3 s for a Task, 0.13 s for a Session; a file written in a
   checkout about 2 s. The window was not re-measured.
@@ -129,6 +129,16 @@ dropped column or changed exit code breaks tests outside a slice's
 filter: run touched suites whole first. The agent's
 repair, unreviewed: an edge that runs nothing ends a Task over uncommitted
 changes and keeps its checkout; PR refusals stay (LOO-385).
+
+Main's #1463 and v0.13.7 were merged into the branch on October 6 by the
+agent, unreviewed by Jack. Kept on this model: the Wave's selected Project
+gates an unstarted Task at `lf task run`; a rotation holding a checkout
+refuses a Flow launch and each step start. Not kept: `lf task restart`, and
+checkout exclusion following a conversation's Flow. A Project's `workflow:`
+may be empty, as main made its Flow optional. Lessons: when main renames
+types under conflicting hunks, take one side and apply the rename from the
+two trees' token sets; SQL in strings compiles against a dropped column, so
+grep for every dropped name and run the suites before trusting a build.
 
 ## Session and operate pairs (2026-10-05)
 
@@ -1057,28 +1067,13 @@ replaces their mechanism with Exec evidence. What still holds:
 
 ### Shared viewing boundary
 
-Native launch plus explicit Move here remains the main path. The requested behavior is
-optional simultaneous Warp/Loopflow viewing: second attachment view-only, then
-explicit **Take control**. Earlier research recommending default tmux presentation
-is superseded. `4d5e96383` shared raw resume argv, not a live PTY; `90c871805` and
-`7889d65bc` established native presentation. Separate feedback reported tmux
-color distortion and terminal bugs; those were not stated in the commit messages.
-
-Compare an opt-in tmux configuration with a transparent PTY relay before changing
-that contract. Prove truecolor, keyboard/image input, independent sizes, late
-attachment, one provider PID/draft, clean takeover, and view-only enforcement at
-the owner. Client-local scroll/selection is separate from durable process state.
-Native concurrent resume cannot prove shared PTY continuity. The prior research
-reported clipboard-image failures inside tmux (anthropics/claude-code#25672);
-retest the exact stack. Control-mode integration requires its own protocol/render
-client; a broker also owns replay, flow control, resize, and failure recovery.
-App-quit survival and remote Home attachment remain separate scope decisions.
-Client provenance is absent today; keep ELSEWHERE generic until the shared API
-can name the recorded terminal/location.
-
-Filed 2026-09-22 under Mac Surface UX: LOO-280 build/resource parity; LOO-281
-real-shell blocks, geometry, long-output measurements and visual proof; LOO-282
-client provenance; LOO-283 the bounded shared-viewing comparison.
+Native launch plus explicit Move here stays the main path. Optional
+simultaneous Warp/Loopflow viewing (second attachment view-only, explicit
+**Take control**) is unbuilt; compare an opt-in tmux configuration with a
+transparent PTY relay before changing the contract. The proof list and tmux
+findings are at `f8fe8aff0:wave/product/MEMORY.md` under this heading. Filed
+2026-09-22: LOO-280 build/resource parity; LOO-281 shell blocks and visual
+proof; LOO-282 client provenance; LOO-283 the shared-viewing comparison.
 
 ## Learnings
 

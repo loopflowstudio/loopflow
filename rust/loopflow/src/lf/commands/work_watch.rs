@@ -1,4 +1,4 @@
-//! `lf monitor workspace --watch --json`: one foreground reader per window.
+//! `lf monitor work --watch --json`: one foreground reader per window.
 //!
 //! The store's change revisions say which parts a commit can have changed. A
 //! part is projected again only then, on a read-only connection, and sent only
@@ -54,7 +54,7 @@ const WORK_ACTIVITY_LIMIT: usize = 50;
 /// One line of the stream. `sequence` orders every frame of one process;
 /// `answers` is the newest request handled before this frame's reading began.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkspaceFrame {
+pub struct WorkFrame {
     pub sequence: u64,
     pub answers: Option<u64>,
     pub home: String,
@@ -63,13 +63,13 @@ pub struct WorkspaceFrame {
     /// Why this part could not be read. Its body is then `null`.
     pub unavailable: Option<String>,
     #[serde(flatten)]
-    pub content: WorkspaceContent,
+    pub content: WorkContent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "part", content = "body", rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum WorkspaceContent {
+pub enum WorkContent {
     Planning(Option<Box<PlanningPart>>),
     Sessions(Option<SessionsPart>),
     Task(Option<TaskPart>),
@@ -265,7 +265,7 @@ struct Mailbox {
     closed: bool,
     error: Option<String>,
     /// At most one unsent frame per part; a newer one replaces it in place.
-    unsent: VecDeque<(&'static str, WorkspaceFrame)>,
+    unsent: VecDeque<(&'static str, WorkFrame)>,
     sequence: u64,
     answers: Option<u64>,
     revisions: Option<StoreRevisions>,
@@ -275,7 +275,7 @@ struct Mailbox {
 type Shared = Arc<(Mutex<Mailbox>, Condvar)>;
 
 fn lock(shared: &Shared) -> MutexGuard<'_, Mailbox> {
-    shared.0.lock().expect("workspace reader mailbox poisoned")
+    shared.0.lock().expect("work reader mailbox poisoned")
 }
 
 fn enqueue(
@@ -283,10 +283,10 @@ fn enqueue(
     key: &'static str,
     home: &str,
     unavailable: Option<String>,
-    content: WorkspaceContent,
+    content: WorkContent,
 ) {
     mailbox.sequence += 1;
-    let frame = WorkspaceFrame {
+    let frame = WorkFrame {
         sequence: mailbox.sequence,
         answers: mailbox.answers,
         home: home.to_owned(),
@@ -300,12 +300,12 @@ fn enqueue(
     }
 }
 
-fn encode(frame: &WorkspaceFrame) -> Result<Vec<u8>> {
+fn encode(frame: &WorkFrame) -> Result<Vec<u8>> {
     let mut bytes = serde_json::to_vec(frame)?;
     if bytes.len() > MAX_FRAME {
         // Only a part's body can be this large; a heartbeat never is.
         let mut value = serde_json::to_value(frame)?;
-        value["unavailable"] = "workspace frame exceeds the 64 MiB transport limit".into();
+        value["unavailable"] = "work frame exceeds the 64 MiB transport limit".into();
         value["body"] = serde_json::Value::Null;
         bytes = serde_json::to_vec(&value)?;
     }
@@ -314,7 +314,7 @@ fn encode(frame: &WorkspaceFrame) -> Result<Vec<u8>> {
 }
 
 /// Content identity, ignoring the fields that restate when it was read.
-fn fingerprint(unavailable: &Option<String>, content: &WorkspaceContent) -> Result<[u8; 32]> {
+fn fingerprint(unavailable: &Option<String>, content: &WorkContent) -> Result<[u8; 32]> {
     fn strip(value: &mut serde_json::Value) {
         match value {
             serde_json::Value::Object(fields) => {
@@ -333,13 +333,13 @@ fn fingerprint(unavailable: &Option<String>, content: &WorkspaceContent) -> Resu
     let mut value = serde_json::to_value(content)?;
     strip(&mut value);
     match content {
-        WorkspaceContent::Activity(_) => {
+        WorkContent::Activity(_) => {
             value
                 .pointer_mut("/body")
                 .and_then(|body| body.as_object_mut())
                 .map(|body| body.remove("observed_at"));
         }
-        WorkspaceContent::WorkActivity(_) => {
+        WorkContent::WorkActivity(_) => {
             value
                 .pointer_mut("/body/snapshot")
                 .and_then(|body| body.as_object_mut())
@@ -386,7 +386,7 @@ impl Reader {
             Err(error) => {
                 let reason = format!("{error:#}");
                 if self.refused.as_ref() != Some(&reason) {
-                    tracing::warn!(%error, "workspace reader cannot open the store");
+                    tracing::warn!(%error, "work reader cannot open the store");
                 }
                 self.refused = Some(reason);
             }
@@ -529,7 +529,7 @@ impl Reader {
             .min(CHECK)
     }
 
-    fn project(&self, part: Part) -> Result<WorkspaceContent> {
+    fn project(&self, part: Part) -> Result<WorkContent> {
         let Some(store) = &self.store else {
             // A store that cannot be opened is not an empty one.
             return match &self.refused {
@@ -541,7 +541,7 @@ impl Reader {
         };
         self.runtime.block_on(async {
             Ok(match part {
-                Part::Planning => WorkspaceContent::Planning(Some(Box::new(PlanningPart {
+                Part::Planning => WorkContent::Planning(Some(Box::new(PlanningPart {
                     roadmap: super::waves::roadmap_all(store).await?,
                     waves: super::waves::wave_snapshots(store, true, true).await?,
                 }))),
@@ -558,7 +558,7 @@ impl Reader {
                         after: Some(String::new()),
                         ..Default::default()
                     };
-                    WorkspaceContent::Sessions(Some(SessionsPart {
+                    WorkContent::Sessions(Some(SessionsPart {
                         repo,
                         includes_headless: self.scope.headless,
                         entries: crate::ops::human_session::list(store, &filter).await?,
@@ -580,7 +580,7 @@ impl Reader {
                             .ok_or_else(|| anyhow!("Flow {id} has no driver record"))?;
                         flow_runs.push(exec.detail(entry));
                     }
-                    WorkspaceContent::Task(Some(TaskPart {
+                    WorkContent::Task(Some(TaskPart {
                         task: selector,
                         work,
                         flow_runs,
@@ -592,7 +592,7 @@ impl Reader {
                         .get_wave(&crate::id::WaveId::parse(&id)?)
                         .await?
                         .ok_or_else(|| anyhow!("Wave {id} is not registered"))?;
-                    WorkspaceContent::Wave(Some(Box::new(WavePart {
+                    WorkContent::Wave(Some(Box::new(WavePart {
                         wave: id,
                         detail: super::waves::wave_detail(store, &wave).await?,
                     })))
@@ -611,17 +611,17 @@ impl Reader {
                             task: scope.task.as_deref(),
                         },
                     )?;
-                    WorkspaceContent::WorkActivity(Some(WorkActivityPart { scope, snapshot }))
+                    WorkContent::WorkActivity(Some(WorkActivityPart { scope, snapshot }))
                 }
-                Part::Activity => WorkspaceContent::Activity(Some(super::top::load_snapshot()?)),
+                Part::Activity => WorkContent::Activity(Some(super::top::load_snapshot()?)),
             })
         })
     }
 
     /// Before a store exists there is nothing registered, which is a reading.
-    fn absent(&self, part: Part) -> Result<WorkspaceContent> {
+    fn absent(&self, part: Part) -> Result<WorkContent> {
         Ok(match part {
-            Part::Planning => WorkspaceContent::Planning(Some(Box::new(PlanningPart {
+            Part::Planning => WorkContent::Planning(Some(Box::new(PlanningPart {
                 roadmap: RoadmapSnapshot {
                     generated_at: time::OffsetDateTime::now_utc()
                         .format(&time::format_description::well_known::Rfc3339)?,
@@ -629,12 +629,12 @@ impl Reader {
                 },
                 waves: Vec::new(),
             }))),
-            Part::Sessions => WorkspaceContent::Sessions(Some(SessionsPart {
+            Part::Sessions => WorkContent::Sessions(Some(SessionsPart {
                 repo: self.scope.repo.clone().context("no repository in scope")?,
                 includes_headless: self.scope.headless,
                 entries: Vec::new(),
             })),
-            Part::Activity => WorkspaceContent::Activity(Some(super::top::load_snapshot()?)),
+            Part::Activity => WorkContent::Activity(Some(super::top::load_snapshot()?)),
             Part::Task | Part::Wave | Part::WorkActivity => {
                 anyhow::bail!("no Loopflow store exists in this Home yet")
             }
@@ -642,14 +642,14 @@ impl Reader {
     }
 }
 
-fn unavailable(part: Part) -> WorkspaceContent {
+fn unavailable(part: Part) -> WorkContent {
     match part {
-        Part::Planning => WorkspaceContent::Planning(None),
-        Part::Sessions => WorkspaceContent::Sessions(None),
-        Part::Task => WorkspaceContent::Task(None),
-        Part::Wave => WorkspaceContent::Wave(None),
-        Part::WorkActivity => WorkspaceContent::WorkActivity(None),
-        Part::Activity => WorkspaceContent::Activity(None),
+        Part::Planning => WorkContent::Planning(None),
+        Part::Sessions => WorkContent::Sessions(None),
+        Part::Task => WorkContent::Task(None),
+        Part::Wave => WorkContent::Wave(None),
+        Part::WorkActivity => WorkContent::WorkActivity(None),
+        Part::Activity => WorkContent::Activity(None),
     }
 }
 
@@ -694,7 +694,7 @@ fn write_frames(shared: &Shared) {
                 mailbox = shared
                     .1
                     .wait(mailbox)
-                    .expect("workspace reader mailbox poisoned");
+                    .expect("work reader mailbox poisoned");
             }
         };
         let written = encode(&frame)
@@ -717,7 +717,7 @@ fn settle(shared: &Shared) {
         let (mut mailbox, _) = shared
             .1
             .wait_timeout_while(mailbox, QUIET, |mailbox| !mailbox.look && !mailbox.closed)
-            .expect("workspace reader mailbox poisoned");
+            .expect("work reader mailbox poisoned");
         let again = std::mem::take(&mut mailbox.look);
         if !again || first.elapsed() >= BURST {
             break;
@@ -782,7 +782,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
                 "heartbeat",
                 &heartbeat_home,
                 None,
-                WorkspaceContent::Heartbeat(Heartbeat { projections }),
+                WorkContent::Heartbeat(Heartbeat { projections }),
             );
             heartbeat.1.notify_all();
         });
@@ -872,13 +872,13 @@ pub(super) fn run(watch: bool) -> Result<()> {
                             && !mailbox.closed
                             && mailbox.error.is_none()
                     })
-                    .expect("workspace reader mailbox poisoned"),
+                    .expect("work reader mailbox poisoned"),
             );
         }
     })();
     lock(&shared).closed = true;
     shared.1.notify_all();
-    writer.join().expect("workspace reader output panicked");
+    writer.join().expect("work reader output panicked");
     result
 }
 
@@ -886,7 +886,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use super::{fingerprint, Part, PartState, StoreRevisions, WorkspaceContent};
+    use super::{fingerprint, Part, PartState, StoreRevisions, WorkContent};
     use crate::lf::commands::top::ActivitySnapshot;
 
     fn revisions(planning: i64, sessions: i64, flows: i64, execs: i64) -> StoreRevisions {
@@ -946,7 +946,7 @@ mod tests {
     #[test]
     fn the_time_of_a_reading_is_not_a_change() {
         let at = |observed_at| {
-            WorkspaceContent::Activity(Some(ActivitySnapshot {
+            WorkContent::Activity(Some(ActivitySnapshot {
                 schema_version: 1,
                 observed_at,
                 nodes: Vec::new(),

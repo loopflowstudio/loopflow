@@ -59,6 +59,9 @@ pub(crate) fn apply_released_planning_fixture(conn: &rusqlite::Connection) {
     apply_set(conn, &MIGRATIONS[..count]).unwrap();
 }
 
+#[cfg(test)]
+pub(crate) use tests::{apply_before_current_draft, current_draft_sql};
+
 /// The exact branch-local history that reached one production ledger before
 /// main established `0.11.008_interactive_handoffs`. These ids were never
 /// released. They remain here only long enough to recognize and converge that
@@ -1942,7 +1945,7 @@ mod tests {
         conn.execute_batch(&sql[body_start..body_end]).unwrap();
     }
 
-    fn apply_before_current_draft(conn: &rusqlite::Connection, name: &str) {
+    pub(crate) fn apply_before_current_draft(conn: &rusqlite::Connection, name: &str) {
         if _draft_is_canonical(name) {
             apply_before_draft(conn, name);
         } else {
@@ -1950,7 +1953,7 @@ mod tests {
         }
     }
 
-    fn current_draft_sql(name: &str) -> String {
+    pub(crate) fn current_draft_sql(name: &str) -> String {
         if !_draft_is_canonical(name) {
             return migration_sql_for_test(name);
         }

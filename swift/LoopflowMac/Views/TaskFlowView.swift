@@ -53,7 +53,7 @@ private func state(of node: FlowNode, latest: LatestTaskFlow?) -> FlowNodeState 
 struct FlowTemplateView: View {
     let graph: FlowGraph
     let template: FlowTemplate
-    @Bindable var navigation: WorkspaceNavigation
+    @Bindable var navigation: WorkNavigation
 
     private var expanded: Binding<Set<String>> {
         Binding(get: { navigation.expandedTemplateGroups[template.revision] ?? [] },
@@ -609,7 +609,7 @@ enum FlowPalette {
     /// Loop tints in authored order; running shares the first.
     static let loops = [Color.adaptive(light: 0x3A74C4, dark: 0x86B0EA), Color.adaptive(light: 0x24508F, dark: 0xB4CDEF)]
 
-    static func tone(_ state: FlowNodeState) -> WorkspaceTone {
+    static func tone(_ state: FlowNodeState) -> WorkTone {
         switch state {
         case .completed: .done
         case .running: .running

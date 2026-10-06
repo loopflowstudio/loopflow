@@ -2,8 +2,8 @@ import Foundation
 import Loopflow
 
 @MainActor
-enum PodiumFixture {
-    static func applyIfRequested(to model: PodiumModel, sourceFile: String = #filePath) {
+enum WorkFixture {
+    static func applyIfRequested(to model: WorkModel, sourceFile: String = #filePath) {
         guard let mode = AppTestMode.current(), mode != .live else { return }
         do {
             switch mode {
@@ -22,9 +22,9 @@ enum PodiumFixture {
                 )
             case .mockWaves, .sessionFixtures:
                 let fixture = try loadRoadmap(sourceFile: sourceFile)
-                let reading: PodiumReading<RoadmapSnapshot>
-                let processActivity: PodiumReading<ActivitySnapshot>
-                let workActivity: PodiumReading<WorkActivitySnapshot>
+                let reading: WorkReading<RoadmapSnapshot>
+                let processActivity: WorkReading<ActivitySnapshot>
+                let workActivity: WorkReading<WorkActivitySnapshot>
                 switch MockWaveFixture.detailState {
                 case .selected:
                     reading = .available(fixture.roadmap)
@@ -67,7 +67,7 @@ enum PodiumFixture {
             model.applyFixture(
                 roadmap: .unavailable(
                     lastGood: nil,
-                    reason: "Podium fixture unavailable: \(error.localizedDescription)"
+                    reason: "Work fixture unavailable: \(error.localizedDescription)"
                 ),
                 waves: .unavailable(lastGood: nil, reason: error.localizedDescription),
                 processActivity: .unavailable(lastGood: nil, reason: error.localizedDescription),

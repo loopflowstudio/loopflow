@@ -20,7 +20,7 @@ struct DesktopHeadlessTests {
         let work = try JSONDecoder().decode(TaskWork.self, from: data)
         let payload = "{\"work\":\(String(decoding: data, as: UTF8.self))}"
         let query = RegistryQuery { _, _ in payload }
-        let model = PodiumModel(query: query)
+        let model = WorkModel(query: query)
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
         let wave = try #require(roadmap.waves.first)
@@ -38,16 +38,16 @@ struct DesktopHeadlessTests {
     @Test("Loading, unavailable, empty and selected Work have distinct content")
     func workStates() throws {
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Unexpected external read") }
-        let model = PodiumModel(query: query)
+        let model = WorkModel(query: query)
         let view = WorkSurfaceView(model: model)
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-work-loading")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
 
         model.applyFixture(roadmap: .unavailable(lastGood: nil, reason: "offline"),
                            waves: .available([]), processActivity: .loading,
                            workActivity: .loading, repos: [])
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-work-unavailable")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-unavailable")
         #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "podium-work-empty")
+            try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-empty")
         }
 
         let fixture = URL(fileURLWithPath: #filePath)
@@ -59,23 +59,23 @@ struct DesktopHeadlessTests {
         let empty = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
         model.applyFixture(roadmap: .available(empty), waves: .available([]),
                            processActivity: .loading, workActivity: .loading, repos: [])
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-work-empty")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-empty")
 
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: data)
         let wave = try #require(roadmap.waves.first).wave
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.toWave()]),
                            processActivity: .loading, workActivity: .loading, repos: [])
         model.navigation.presentation = .full
-        let navigator = WorkspaceNavigator(model: model, onOpenSession: { _ in })
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         try navigator.inspect()
-            .find(viewWithAccessibilityIdentifier: "workspace-wave-\(wave.id)").button().tap()
+            .find(viewWithAccessibilityIdentifier: "work-wave-\(wave.id)").button().tap()
 
         #expect(model.selection == .wave(id: wave.id))
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-detail-wave")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-detail-wave")
         let title = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string()
         #expect(title == "Product")
         #expect(throws: (any Error).self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "podium-work-loading")
+            try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
         }
     }
 }

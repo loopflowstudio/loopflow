@@ -18,6 +18,7 @@ public enum ProjectStatus: String, Decodable, Sendable, Hashable {
 }
 
 public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
+    public let current: Bool
     public let id: String
     public let workId: String?
     public let slug: String
@@ -28,7 +29,7 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
     public let krs: [PlanningKeyResult]
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, flow, status, krs
+        case id, slug, name, flow, status, krs, current
         case workId = "work_id"
         case metricTargets = "metric_targets"
     }
@@ -36,7 +37,7 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
 
 extension WorkEvidence where Item == ProjectPlanningSnapshot {
     public var currentProject: ProjectPlanningSnapshot? {
-        let current = items.filter { $0.status == .started }
+        let current = items.filter { $0.current }
         return current.count == 1 ? current[0] : nil
     }
 }
@@ -122,7 +123,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
 /// Task Work and remains after execution finishes.
 public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
     public let issueUrl: URL?
-    public let workspace: TaskWorkspaceSnapshot?
+    public let workspace: TaskWorktreeSnapshot?
 
     enum CodingKeys: String, CodingKey {
         case workspace
@@ -130,7 +131,7 @@ public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-public struct TaskWorkspaceSnapshot: Decodable, Sendable, Hashable {
+public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
     public let homeId: String?
     public var identity: WorkspaceIdentity? { homeId.map { WorkspaceIdentity(homeId: $0, worktree: worktree) } }
     public let slug: String

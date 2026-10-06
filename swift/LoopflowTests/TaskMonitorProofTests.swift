@@ -17,7 +17,7 @@ struct TaskMonitorProofTests {
     func paneFocusPreservesTaskChoice() async throws {
         _ = NSApplication.shared
         let query = try query()
-        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
         let multiplexer = registry.workspace(for: fixtureWorkspace("/src/loopflow")).multiplexer
@@ -32,7 +32,7 @@ struct TaskMonitorProofTests {
         window.contentView = NSHostingView(rootView: view)
         defer { window.contentView = nil }
         try await settle(window)
-        let navigator = try view.inspect().find(WorkspaceNavigator.self).actualView()
+        let navigator = try view.inspect().find(WorkNavigator.self).actualView()
         navigator.onOpenSession(try #require(model.sessions.value?.first))
         try await settle(window)
         multiplexer.setFocusedPane(otherPane)
@@ -55,14 +55,14 @@ struct TaskMonitorProofTests {
     @Test("Returning to a Task never restores another Task's Session in a reused pane")
     func returningTaskDoesNotRestoreReusedSessionPane() async throws {
         let query = try query()
-        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
         let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
         let records = try #require(model.sessions.value)
         let store = registry.workspace(for: fixtureWorkspace("/src/loopflow")).sessionStore(repoPath: "/src/loopflow", query: query)
         store.reconcile(records)
-        let navigator = try view.inspect().find(WorkspaceNavigator.self).actualView()
+        let navigator = try view.inspect().find(WorkNavigator.self).actualView()
         navigator.onOpenSession(records[0])
         let multiplexer = registry.workspace(for: fixtureWorkspace("/src/loopflow")).multiplexer
         let firstPane = multiplexer.focusedPaneId
@@ -84,7 +84,7 @@ struct TaskMonitorProofTests {
         try #require(GhosttyManager.shared.state == .ready)
         let feed = ActiveSessionsTestFeed()
         let query = try query(feed: feed)
-        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
         let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
@@ -138,12 +138,13 @@ struct TaskMonitorProofTests {
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var waves = try #require(wire["waves"] as? [[String: Any]])
         var projects = try #require(waves[0]["projects"] as? [String: Any])
-        let plans = try #require(projects["items"] as? [[String: Any]])
+        var plans = try #require(projects["items"] as? [[String: Any]])
         let tasks = try #require(waves[0]["tasks"] as? [String: Any])
         var successor = plans[0]
         successor["name"] = "next-chapter"
         successor["id"] = "successor-project"
         successor["work_id"] = "successor-work"
+        plans[0]["current"] = false
         for transferring in [true, false] {
             projects["items"] = transferring ? plans + [successor] : [successor]
             waves[0]["projects"] = projects
@@ -209,7 +210,7 @@ struct TaskMonitorProofTests {
         multiplexer.toggleZoom(monitorPane)
         multiplexer.updateRatio(between: sessionPane, and: monitorPane, ratio: 0.65)
         try await settle(window)
-        let navigator = try view.inspect().find(WorkspaceNavigator.self).actualView()
+        let navigator = try view.inspect().find(WorkNavigator.self).actualView()
         navigator.onOpenSession(try #require(model.sessions.value?.first))
         try await settle(window)
         #expect(multiplexer.focusedPaneId == sessionPane)

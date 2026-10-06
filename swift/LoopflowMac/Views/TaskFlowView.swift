@@ -61,7 +61,7 @@ func participationSession(node: String, pinned: PinnedTaskFlow, sessions: [Sessi
 }
 
 struct TaskFlowView: View {
-    @Bindable var model: PodiumModel
+    @Bindable var model: WorkModel
     let task: RoadmapTask
     let wave: WaveSnapshot
     var onOpenSession: ((SessionRecord) -> Void)?
@@ -77,7 +77,7 @@ struct TaskFlowView: View {
     private enum HeaderFocus: Hashable { case name, restart, search }
 
     private var flow: TaskFlowSnapshot { task.flow }
-    private var catalog: PodiumReading<[FlowCatalogEntry]> { model.flowCatalog }
+    private var catalog: WorkReading<[FlowCatalogEntry]> { model.flowCatalog }
 
     private var draft: TaskFlowDraft {
         get { model.navigation.flowDrafts[task.id] ?? TaskFlowDraft() }
@@ -116,13 +116,13 @@ struct TaskFlowView: View {
                 if let error = draft.error {
                     Text(error)
                         .font(Typography.body(12))
-                        .foregroundStyle(WorkspaceTone.blocked.ink)
+                        .foregroundStyle(WorkTone.blocked.ink)
                         .textSelection(.enabled)
                         .accessibilityIdentifier("task-flow-error")
                 }
                 diagram
             }
-            .workspacePanel(padding: 13)
+            .workPanel(padding: 13)
             HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                 Circle().fill(statusTone.ink).frame(width: 7, height: 7)
                     .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
@@ -185,7 +185,7 @@ struct TaskFlowView: View {
         }
     }
 
-    private var statusTone: WorkspaceTone {
+    private var statusTone: WorkTone {
         switch flow.record {
         case .pinned(let pinned): pinned.execution.presentation.tone
         case .finished: .done
@@ -262,14 +262,14 @@ struct TaskFlowView: View {
         if pinned != nil {
             let resume = flow.control(.resume)
             Button("Resume") { run(.resume) }
-                .buttonStyle(WorkspaceOutlineButtonStyle())
+                .buttonStyle(WorkOutlineButtonStyle())
                 .disabled(resume?.unavailable != nil || draft.acting)
                 .help(resume?.unavailable ?? "Continue from the saved boundary")
                 .accessibilityIdentifier("task-flow-resume")
         } else {
             let start = flow.control(.start)
             Button("Start") { run(.start(flow: previewName)) }
-                .buttonStyle(WorkspaceOutlineButtonStyle())
+                .buttonStyle(WorkOutlineButtonStyle())
                 .disabled(start?.unavailable != nil || draft.acting || previewEntry?.graph == nil)
                 .help(start?.unavailable ?? "Pin \(previewName) and start its first step")
                 .accessibilityIdentifier("task-flow-start")
@@ -341,7 +341,7 @@ struct TaskFlowView: View {
                 Button("Cancel") { dismissTransient() }
                     .accessibilityIdentifier("task-flow-restart-cancel")
                 Button("Stop & restart") { run(.restart(flow: replacement)) }
-                    .buttonStyle(WorkspaceOutlineButtonStyle())
+                    .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(draft.acting)
                     .accessibilityIdentifier("task-flow-restart-confirm")
             }
@@ -533,7 +533,7 @@ struct TaskFlowView: View {
 struct FlowTemplateView: View {
     let graph: FlowGraph
     let template: FlowTemplate
-    @Bindable var navigation: WorkspaceNavigation
+    @Bindable var navigation: WorkNavigation
 
     private var expanded: Binding<Set<String>> {
         Binding(get: { navigation.expandedTemplateGroups[template.revision] ?? [] },
@@ -1092,7 +1092,7 @@ enum FlowPalette {
     /// Loop tints in authored order; running shares the first.
     static let loops = [Color.adaptive(light: 0x3A74C4, dark: 0x86B0EA), Color.adaptive(light: 0x24508F, dark: 0xB4CDEF)]
 
-    static func tone(_ state: FlowNodeState) -> WorkspaceTone {
+    static func tone(_ state: FlowNodeState) -> WorkTone {
         switch state {
         case .completed: .done
         case .running: .running

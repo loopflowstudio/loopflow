@@ -3,24 +3,24 @@ import Foundation
 import Loopflow
 import SwiftUI
 
-struct PodiumView: View {
+struct RepoView: View {
     let portfolioService: PortfolioService
     let initialRepoPath: String?
 
     @Environment(\.palette) private var palette
     @State private var showsAutomation = false
-    @State private var model: PodiumModel
+    @State private var model: WorkModel
     /// Per-window terminal workspaces: this window's panes and surfaces are
     /// never shared with another window showing the same repository.
     @State private var sessionWorkspaces: SessionsWorkspaceRegistry
-    private let taskLinks: WorkspaceLinkRouter?
+    private let taskLinks: WorkLinkRouter?
     private let query: RegistryQuery
 
     init(
         portfolioService: PortfolioService,
         initialRepoPath: String? = nil,
         query: RegistryQuery = RegistryQueryLocal.shared,
-        taskLinks: WorkspaceLinkRouter? = nil
+        taskLinks: WorkLinkRouter? = nil
     ) {
         self.portfolioService = portfolioService
         self.initialRepoPath = initialRepoPath
@@ -28,7 +28,7 @@ struct PodiumView: View {
         self.taskLinks = taskLinks
         let restored = initialRepoPath == nil && !AppTestMode.shouldBypassRegistry
             ? loadLoopflowState()?.selectedRepoPath : nil
-        let model = PodiumModel.window(query: query, launchCandidates: [initialRepoPath, restored].compactMap { $0 })
+        let model = WorkModel.window(query: query, launchCandidates: [initialRepoPath, restored].compactMap { $0 })
         _model = State(initialValue: model)
         _sessionWorkspaces = State(initialValue: SessionsWorkspaceRegistry(localHomeId: model.savedHomeId))
     }
@@ -44,7 +44,7 @@ struct PodiumView: View {
                     )
                     .id(repoPath.normalizedFilePath)
                 } else {
-                    WorkspaceNavigator(model: model, onOpenSession: { _ in })
+                    WorkNavigator(model: model, onOpenSession: { _ in })
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -59,11 +59,11 @@ struct PodiumView: View {
                     .popover(isPresented: $showsAutomation) { TaskAutomationView(query: query, repo: repo) }
             }
         }
-        .accessibilityLabel("The Podium")
-        .accessibilityIdentifier("podium")
+        .accessibilityLabel("Loopflow Desktop")
+        .accessibilityIdentifier("loopflow")
         .background {
             if let taskLinks {
-                WorkspaceLinkReceiver(router: taskLinks) { url in
+                WorkLinkReceiver(router: taskLinks) { url in
                     Task { await model.openTaskLink(url) }
                 }.frame(width: 0, height: 0)
             }
@@ -77,7 +77,7 @@ struct PodiumView: View {
         .onAppear { LaunchJournal.home.markAfterCommit(.firstFrame) }
         .task { await model.activeSessionsLifetime() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
-            model.rescanWorkspace()
+            model.rescanWork()
             Task { await model.rescanActiveSessions() }
         }
         .task {
@@ -86,8 +86,8 @@ struct PodiumView: View {
                 persistedRepos: portfolioService.repos
             )
         }
-        .task { await model.keepWorkspaceCurrent() }
-        .onChange(of: model.workspaceScope) { _, _ in model.syncWorkspaceScope() }
+        .task { await model.keepWorkCurrent() }
+        .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
         .task(id: model.repoPath) {
             // Fixture and UI-test runs render without background helpers.
             guard let repo = model.repoPath, AppTestMode.current() == nil else { return }
@@ -108,18 +108,18 @@ struct PodiumView: View {
     }
 }
 
-enum PodiumSignalState: Equatable {
+enum WorkSignalState: Equatable {
     case off
     case producing
     case blocked
     case waiting
     case unknown
 
-    static func from(_ snapshot: ActivitySnapshot) -> PodiumSignalState {
+    static func from(_ snapshot: ActivitySnapshot) -> WorkSignalState {
         from(nodes: snapshot.nodes)
     }
 
-    static func from(nodes: [ActivityNode]) -> PodiumSignalState {
+    static func from(nodes: [ActivityNode]) -> WorkSignalState {
         let providers = nodes.filter { $0.kind == .providerProcess }
         if providers.contains(where: { $0.state == .stalled }) { return .blocked }
         if providers.contains(where: { $0.state == .working }) { return .producing }

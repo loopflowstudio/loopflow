@@ -12,7 +12,7 @@ import GhosttyKit
 
 @Suite("Unified workspace navigation proof", .requiresDisplay)
 @MainActor
-struct WorkspaceNavigationProofTests {
+struct WorkNavigationProofTests {
     @Test("The work list retains its viewport through presentations, refresh and repository return")
     func navigatorRetainsScroll() async throws {
         _ = NSApplication.shared
@@ -50,7 +50,7 @@ struct WorkspaceNavigationProofTests {
             default: throw RegistryQueryError("Unexpected operation in navigator proof")
             }
         }
-        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
         let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
@@ -170,7 +170,7 @@ struct WorkspaceNavigationProofTests {
             default: throw RegistryQueryError("Unexpected operation in sidebar density proof")
             }
         }
-        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         model.select(.task(id: "task-0-7"))
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
@@ -189,21 +189,21 @@ struct WorkspaceNavigationProofTests {
             defer { window.contentView = nil }
             try await settle(window)
             let suffix = "\(Int(size.width))x\(Int(size.height))"
-            let navigator = try view.inspect().find(WorkspaceNavigator.self).actualView()
+            let navigator = try view.inspect().find(WorkNavigator.self).actualView()
             let outline = try navigator.inspect()
             // 20 started Tasks under three sans Wave heads; no lens, no Wave count.
             #expect(try outline.findAll(ViewType.Button.self) {
-                (try? $0.accessibilityIdentifier().hasPrefix("workspace-task-")) == true
+                (try? $0.accessibilityIdentifier().hasPrefix("work-task-")) == true
             }.count == 20)
             #expect(try outline.findAll(ViewType.Button.self) {
-                (try? $0.accessibilityIdentifier().hasPrefix("workspace-disclose-wave-")) == true
+                (try? $0.accessibilityIdentifier().hasPrefix("work-disclose-wave-")) == true
             }.count == 3)
             #expect(throws: (any Error).self) { try outline.find(WaveLensView.self) }
             // Counts only where Sessions exist.
-            _ = try outline.find(viewWithAccessibilityIdentifier: "workspace-session-count-task-0-0")
-            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "workspace-session-count-task-0-7") }
+            _ = try outline.find(viewWithAccessibilityIdentifier: "work-session-count-task-0-0")
+            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-session-count-task-0-7") }
             // Diagnostic Sessions do not consume main navigation space.
-            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "workspace-orphans-open") }
+            #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "work-orphans-open") }
             #expect(throws: (any Error).self) { try outline.find(viewWithAccessibilityIdentifier: "session-row-demo") }
             _ = try outline.find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo")
             try capture(window, "density-debug-orphans-\(suffix)")
@@ -217,10 +217,10 @@ struct WorkspaceNavigationProofTests {
         host.frame = window.contentLayoutRect
         defer { window.contentView = nil }
         try await settle(window)
-        #expect(model.workspace.unmatchedSessions.isEmpty)
+        #expect(model.projection.unmatchedSessions.isEmpty)
         #expect(throws: (any Error).self) {
-            try view.inspect().find(WorkspaceNavigator.self).actualView().inspect()
-                .find(viewWithAccessibilityIdentifier: "workspace-orphans-open")
+            try view.inspect().find(WorkNavigator.self).actualView().inspect()
+                .find(viewWithAccessibilityIdentifier: "work-orphans-open")
         }
         try capture(window, "density-no-orphans-1440x900")
     }
@@ -301,7 +301,7 @@ struct WorkspaceNavigationProofTests {
             default: throw RegistryQueryError("A named local Session must not relaunch: \(args)")
             }
         }
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
@@ -314,7 +314,7 @@ struct WorkspaceNavigationProofTests {
         draft.withCString { ghostty_surface_text(surfaces[0], $0, UInt(draft.utf8.count)) }
 
         // Two open Sessions: the Task row opens its overview, which names each.
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review").button().tap()
         try await settle(window)
         #expect(model.navigation.content == .details)
         #expect(model.navigation.selectedSessionId == nil)
@@ -328,7 +328,7 @@ struct WorkspaceNavigationProofTests {
             == "Show the all-wave roadmap and launch or attach")
         #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "session-flow-membership").text().string() == "Independent")
 
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review").button().tap()
         try await settle(window)
         try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-second").button().tap()
         try await settle(window)
@@ -360,7 +360,7 @@ struct WorkspaceNavigationProofTests {
             }
         }
 
-        try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-task-issue-review").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review").button().tap()
         try await settle(window)
         try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-first").button().tap()
         try await settle(window)
@@ -410,7 +410,7 @@ struct WorkspaceNavigationProofTests {
         await model.refresh()
         await model.commitSessionBinding()
         try await settle(window)
-        #expect(model.workspace.breadcrumb(selection: model.selection, sessionId: "first")?.taskWork == task)
+        #expect(model.projection.breadcrumb(selection: model.selection, sessionId: "first")?.taskWork == task)
         #expect(workspace.multiplexer.layout == layout)
         for index in terminals.indices { #expect(terminals[index].surface == surfaces[index]) }
         #expect(window.firstResponder === terminals[0])
@@ -435,7 +435,7 @@ struct WorkspaceNavigationProofTests {
             await planning.replace(reading)
             await model.refresh()
             try await settle(window)
-            let crumb = try #require(model.workspace.breadcrumb(selection: model.selection, sessionId: "first"))
+            let crumb = try #require(model.projection.breadcrumb(selection: model.selection, sessionId: "first"))
             #expect(crumb.taskWork == task)
             #expect(crumb.waveWork == .wave(id: "wave-1"))
             #expect(crumb.siblings.map(\.id) == ["first", "second"])
@@ -447,7 +447,7 @@ struct WorkspaceNavigationProofTests {
             for index in terminals.indices { #expect(terminals[index].surface == surfaces[index]) }
             if reading != roadmap {
                 #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").text().string() == "Task \(task.id)")
-                #expect(model.workspace.orphanSessions(search: "").isEmpty)
+                #expect(model.projection.orphanSessions(search: "").isEmpty)
             } else {
                 #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").button().labelView().text().string()
                     == "Show the all-wave roadmap and launch or attach")
@@ -620,7 +620,7 @@ struct WorkspaceNavigationProofTests {
             default: throw RegistryQueryError("Local row must focus its existing shell")
             }
         }
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refreshSessions()
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
@@ -709,7 +709,7 @@ struct WorkspaceNavigationProofTests {
             default: throw RegistryQueryError("Unexpected operation in shell completion proof")
             }
         }
-        let model = PodiumModel(query: query, repoPath: "/tmp")
+        let model = WorkModel(query: query, repoPath: "/tmp")
         await model.refreshSessions()
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: "/tmp", workspaces: registry, query: query)
@@ -782,7 +782,7 @@ struct WorkspaceNavigationProofTests {
             default: throw RegistryQueryError("Unexpected read in decision proof")
             }
         }
-        let model = PodiumModel(query: query, repoPath: "/tmp")
+        let model = WorkModel(query: query, repoPath: "/tmp")
         await model.refreshSessions()
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: "/tmp", workspaces: registry, query: query)
@@ -935,7 +935,7 @@ struct WorkspaceNavigationProofTests {
             default: throw RegistryQueryError("Unexpected operation in navigation proof")
             }
         }
-        let model = PodiumModel(query: query, repoPath: "/src/loopflow")
+        let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
         let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
@@ -993,21 +993,21 @@ struct WorkspaceNavigationProofTests {
         let draft = "split-draft"
         draft.withCString { ghostty_surface_text(sessionSurface, $0, UInt(draft.utf8.count)) }
 
-        for presentation in WorkspacePresentation.allCases {
+        for presentation in WorkPresentation.allCases {
             model.navigation.presentation = presentation
             model.navigation.content = presentation == .full ? .details : .terminals
             try await settle(window)
             if model.navigation.content == .details {
                 #expect(!model.navigation.showsActivity)
                 #expect(throws: (any Error).self) {
-                    try view.inspect().find(viewWithAccessibilityIdentifier: "podium-activity")
+                    try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-activity")
                 }
-                try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-toggle-activity").button().tap()
+                try view.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-activity").button().tap()
                 try await settle(window)
                 #expect(throws: Never.self) {
-                    try view.inspect().find(viewWithAccessibilityIdentifier: "podium-activity")
+                    try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-activity")
                 }
-                try view.inspect().find(viewWithAccessibilityIdentifier: "workspace-toggle-activity").button().tap()
+                try view.inspect().find(viewWithAccessibilityIdentifier: "work-toggle-activity").button().tap()
                 try await settle(window)
                 #expect(!model.navigation.showsActivity)
             }
@@ -1118,7 +1118,7 @@ struct WorkspaceNavigationProofTests {
         #expect(model.task(id: "issue-review")?.task.task.completed == false)
         model.select(.task(id: "issue-review"))
         try await settle(window)
-        #expect(model.workspace.subject(for: "human") == nil)
+        #expect(model.projection.subject(for: "human") == nil)
         model.navigation.content = .terminals
         try await settle(window)
         #expect(window.firstResponder === terminals[1])

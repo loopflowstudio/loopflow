@@ -1,5 +1,7 @@
 //! Session transactions share the invocation's SQLite transaction and fences.
 
+use std::fs::File;
+
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::durable::{FlowSession, TaskId};
@@ -190,7 +192,7 @@ fn summary_query(page: &str, by_id: bool) -> String {
         LEFT JOIN tasks t ON t.id=s.task_id
         LEFT JOIN work_placements p ON p.task_id=t.id AND COALESCE(t.current_invocation_id=s.flow_session_id,0)
         LEFT JOIN homes h ON h.id=p.home_id
-        ORDER BY {order}", super::flows::FLOW_METADATA_COLUMNS, super::task_work::session_tasks("s"))
+        ORDER BY {order}", super::flows::FLOW_METADATA_COLUMNS, super::task_work::session_tasks("a"))
 }
 
 fn read_summary(
@@ -803,6 +805,31 @@ impl SqliteStore {
         .transpose()
     }
 
+    fn lock_session_checkouts(
+        &self,
+        session: &AgentSession,
+        review: Option<&FlowSession>,
+    ) -> StoreResult<Vec<File>> {
+        let flow = match session.flow_session_id.as_deref() {
+            Some(id) => match review.filter(|flow| flow.id() == id) {
+                Some(flow) => Some(flow.clone()),
+                None => self.flow(id)?,
+            },
+            None => None,
+        };
+        let mut workspaces = vec![session.cwd.as_path()];
+        if let Some(flow) = &flow {
+            workspaces.push(&flow.cwd);
+        }
+        self.lock_task_checkouts(
+            &workspaces,
+            session
+                .task_id
+                .as_ref()
+                .or_else(|| flow.as_ref().and_then(|flow| flow.task_id.as_ref())),
+        )
+    }
+
     /// Admit the conversation and its captured input before provider effects.
     pub fn create_session(
         &self,
@@ -810,7 +837,7 @@ impl SqliteStore {
         review: Option<&FlowSession>,
         caller_exec: Option<&crate::id::ExecId>,
     ) -> StoreResult<AgentSession> {
-        let _admission = self.lock_checkout(&session.cwd)?;
+        let _admission = self.lock_session_checkouts(&session, review)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(existing) = session_in(&tx, &session.id)? {
@@ -938,14 +965,15 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Replace captured input under the existing conversation. Native history,
-    /// title, feedback and assignment remain on their owners.
+    /// Replace captured input, retaining the conversation's workspace, native
+    /// history, title, feedback and assignment.
     pub fn replace_session_input(
         &self,
         expected_input: Option<i64>,
         mut session: AgentSession,
     ) -> StoreResult<AgentSession> {
-        let _admission = self.lock_checkout(&session.cwd)?;
+        let stored = self.session(&session.id)?.ok_or(StoreError::NotFound)?;
+        let _admission = self.lock_session_checkouts(&stored, None)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
@@ -994,9 +1022,16 @@ impl SqliteStore {
         expected_capture: Option<i64>,
         task: &TaskId,
     ) -> StoreResult<AgentSession> {
+        let before = self.session(id)?.ok_or(StoreError::NotFound)?;
+        let _admission = self.lock_task_checkouts(&[&before.cwd], Some(task))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if session.cwd != before.cwd {
+            return Err(StoreError::InvalidAuthority(
+                "Session workspace changed before binding".into(),
+            ));
+        }
         if session.captured != expected_capture {
             return Err(StoreError::InvalidAuthority(
                 "Session changed before binding".into(),
@@ -1520,6 +1555,14 @@ pub(super) fn replace_input_in(
     session: &mut AgentSession,
     exec: Option<&crate::id::ExecId>,
 ) -> StoreResult<()> {
+    // Workspace admission owns location; replacing input cannot move Task membership.
+    session.cwd = conn
+        .query_row(
+            "SELECT cwd FROM agent_sessions WHERE id=?1",
+            [&session.id],
+            |row| row.get::<_, String>(0),
+        )?
+        .into();
     if conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM session_events WHERE kind='captured' AND receipt_key=?1)",
         [&session.artifact_key],
@@ -1535,9 +1578,9 @@ pub(super) fn replace_input_in(
         crate::store::rows::now_unix(),
         exec,
     )?);
-    conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,cwd=?4,skill=?5,provider=?6,model=?7
+    conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,skill=?4,provider=?5,model=?6
         WHERE id=?1 AND completed_at IS NULL",
-        params![session.id,session.captured,session.input_published,session.cwd.to_string_lossy(),
+        params![session.id,session.captured,session.input_published,
             session.skill,session.provider,session.model])?;
     Ok(())
 }
@@ -1625,6 +1668,46 @@ mod metadata_tests {
     use super::SqliteStore;
 
     use crate::session::{FlowSummaryState, SessionFilter};
+
+    #[test]
+    fn input_replacement_retains_workspace_and_task_membership() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let session = store.test_session("moving", &crate::session_record::new_artifact_key());
+        let wave = crate::id::WaveId::new();
+        let project = crate::work::project::ProjectId::new();
+        let task = crate::durable::TaskId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1',?3,1)", params![task.as_str(), project.as_str(), session.cwd.to_str().unwrap()]).unwrap();
+        }
+        assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
+        let exclusion = store.lock_checkout(&session.cwd).unwrap();
+        let mut next = session.clone();
+        next.cwd = home.path().join("destination");
+        next.artifact_key = crate::session_record::new_artifact_key();
+        assert!(store
+            .replace_session_input(session.captured, next.clone())
+            .is_err());
+        let retained = store.task_work(&task).unwrap().sessions;
+        drop(exclusion);
+        assert_eq!(
+            retained.len(),
+            1,
+            "input replacement removed Task work while its source checkout was excluded"
+        );
+        let replacement = store.replace_session_input(session.captured, next).unwrap();
+        assert_eq!(replacement.cwd, session.cwd);
+        assert_eq!(replacement.task_id, None);
+        assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
+        assert_ne!(replacement.captured, session.captured);
+    }
 
     #[test]
     fn resume_candidates_keep_completed_conversations_and_original_opening_times() {

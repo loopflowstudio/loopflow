@@ -24,7 +24,7 @@ children check their destination's access before starting a provider.
 Account observations distinguish unavailable, expired and measured capacity.
 
 JSON readers emit one document; `monitor active --watch --json` and
-`monitor workspace --watch --json` emit NDJSON until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
+`monitor work --watch --json` emit NDJSON until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
 operation succeeded; 1 denotes an operational failure, 2 a syntax or lookup
 failure, and 130 interruption. A successful auto-merge request is not a merge.
 
@@ -328,9 +328,9 @@ Observe active conversations and missing process evidence
 | `--task` | task |
 | `--help / -h` | Print help |
 
-## lf monitor workspace
+## lf monitor work
 
-Stream what a workspace shows, each part again only when it changes
+Stream planning and activity for the selected Work, each part again only when it changes
 
 | Argument | What it does |
 |---|---|
@@ -713,11 +713,12 @@ Refresh shared planning from Linear
 
 ## lf repo new-chapter
 
-Advance every Wave to the named Project plan
+Rotate selected Waves using exact destinations and KRs in a retained plan
 
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
+| `--plan <path>` | Required retained JSON plan with exact Wave and successor IDs |
 | `--dry-run` | dry run Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1042,6 +1043,38 @@ Manage Wave identity, placement and planning
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf wave new-chapter
+
+Rotate one Wave through the repository rotation operation.
+
+| Argument | What it does |
+|---|---|
+| `<wave> <name>` | Select the Wave and chapter name |
+| `--plan <path>` | Required retained JSON plan; consumes this Wave's exact entry |
+| `--dry-run` | Preview without provider writes |
+| `--json` | Emit the rotation result as JSON |
+
+## lf wave ensure
+
+Ensure the configured Project is active, or create one with a durable identity
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave bind-project
+
+Bind an existing Project UUID as this Wave's shared current selection
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `<project>` | project |
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron

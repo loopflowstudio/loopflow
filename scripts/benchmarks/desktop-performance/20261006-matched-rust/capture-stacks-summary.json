@@ -1,0 +1,218 @@
+{
+  "source_head": "142918e72a498fc4746a3eb367e7d727ae7b4b1c",
+  "kind": "contained allocation diagnosis, not acceptance",
+  "commands": [
+    "uv run python /tmp/loo304-capture-stacks-probe.py",
+    "uv run python /tmp/loo304-capture-events-probe.py"
+  ],
+  "limits": [
+    "Standalone cat PTY, not the realistic workspace.",
+    "Intrusive stack logging changes allocation and timing costs.",
+    "The diagnostic deliberately retains its first bitmap.",
+    "Requested no-compaction history returned only ALLOC and VM_ALLOC; free lifetime is unproved.",
+    "Virtual region sizes are not resident or live-object bytes.",
+    "Retained executable was hashed, not rebuilt; checkout HEAD is not authenticated binary build provenance."
+  ],
+  "phases": [
+    {
+      "phase": "blank",
+      "pid": 90891,
+      "rss_bytes": 93192192
+    },
+    {
+      "phase": "blank_captured",
+      "pid": 90891,
+      "rss_bytes": 169771008
+    },
+    {
+      "phase": "terminal_rendered",
+      "pid": 90891,
+      "rss_bytes": 159072256
+    },
+    {
+      "phase": "terminal_bitmap",
+      "pid": 90891,
+      "rss_bytes": 240271360
+    },
+    {
+      "phase": "terminal_ocr",
+      "pid": 90891,
+      "rss_bytes": 308183040
+    },
+    {
+      "phase": "terminal_recaptured",
+      "pid": 90891,
+      "rss_bytes": 386613248
+    }
+  ],
+  "capture_vm_regions": [
+    {
+      "size_bytes": 17924096,
+      "stack": [
+        "(com.apple.AppKit) -[NSView cacheDisplayInRect:toBitmapImageRep:includeSubviews:]",
+        "(com.apple.AppKit) -[NSBitmapImageRep _captureDrawing:]",
+        "(com.apple.AppKit) +[NSGraphicsContext graphicsContextWithBitmapImageRep:]",
+        "(com.apple.AppKit) -[NSBitmapGraphicsContext _initWithBitmapImageRep:]",
+        "(com.apple.AppKit) -[NSBitmapImageRep bitmapData]",
+        "(com.apple.AppKit) -[NSBitmapImageRep getBitmapDataPlanes:]",
+        "(com.apple.AppKit) -[NSBitmapImageRep _performBlockUsingBackingMutableData:]",
+        "(com.apple.AppKit) __57-[NSBitmapImageRep _performBlockUsingBackingMutableData:]_block_invoke",
+        "(com.apple.AppKit) -[NSBitmapImageRep _withoutChangingBackingPerformBlockUsingBackingMutableData:]",
+        "(com.apple.AppKit) __79-[NSBitmapImageRep _withoutChangingBackingPerformBlockUsingBackingMutableData:]_block_invoke",
+        "(com.apple.AppKit) NSNewBitmapBackingStore",
+        "(com.apple.CoreGraphics) CGBitmapAllocateData",
+        "(libsystem_kernel.dylib) mmap"
+      ]
+    },
+    {
+      "size_bytes": 18038784,
+      "stack": [
+        "(com.apple.AppKit) -[NSView cacheDisplayInRect:toBitmapImageRep:includeSubviews:]",
+        "(com.apple.AppKit) -[NSBitmapImageRep _captureDrawing:]",
+        "(com.apple.AppKit) __62-[NSView cacheDisplayInRect:toBitmapImageRep:includeSubviews:]_block_invoke",
+        "(com.apple.AppKit) -[NSView displayRectIgnoringOpacity:inContext:]",
+        "(com.apple.AppKit) NSPerformVisuallyAtomicChange",
+        "(com.apple.AppKit) __47-[NSView displayRectIgnoringOpacity:inContext:]_block_invoke",
+        "(com.apple.AppKit) -[NSView _recursive:displayRectIgnoringOpacity:inContext:stopAtLayerBackedViews:]",
+        "(com.apple.AppKit) -[NSView _renderLayerInContext:]",
+        "(com.apple.QuartzCore) -[CALayer renderInContext:]",
+        "(com.apple.QuartzCore) -[CALayer _renderForegroundInContext:]",
+        "(com.apple.CoreGraphics) CGContextDrawImage",
+        "(com.apple.CoreGraphics) CGContextDrawImageWithOptions",
+        "(com.apple.CoreGraphics) ripc_DrawImage",
+        "(com.apple.CoreGraphics) ripc_AcquireRIPImageData",
+        "(com.apple.CoreGraphics) CGSImageDataLock",
+        "(com.apple.CoreGraphics) img_data_lock",
+        "(com.apple.CoreGraphics) CGAccessSessionCreate",
+        "(com.apple.CoreGraphics) CGDataProviderRetainData",
+        "(com.apple.CoreGraphics) provider_for_destination_retain_data",
+        "(com.apple.CoreGraphics) CGDataProviderRetainData",
+        "(com.apple.CoreGraphics) imageProvider_retain_data",
+        "(com.apple.QuartzCore) copy_image_block_set(void*, CGImageProvider*, CGRect, CGSize, __CFDictionary const*)",
+        "(libsystem_malloc.dylib) _malloc",
+        "(libsystem_malloc.dylib) _malloc_zone_malloc_instrumented_or_legacy",
+        "(com.apple.MallocStackLogging) stack_logging_lite_malloc",
+        "(libsystem_malloc.dylib) _xzm_malloc_large_huge",
+        "(libsystem_malloc.dylib) xzm_segment_group_alloc_chunk",
+        "(libsystem_malloc.dylib) _xzm_segment_group_alloc_segment",
+        "(libsystem_malloc.dylib) _xzm_range_group_alloc_anywhere_segment",
+        "(libsystem_kernel.dylib) mach_vm_map"
+      ]
+    },
+    {
+      "size_bytes": 17956864,
+      "stack": [
+        "(com.apple.AppKit) -[NSView cacheDisplayInRect:toBitmapImageRep:includeSubviews:]",
+        "(com.apple.AppKit) -[NSBitmapImageRep _captureDrawing:]",
+        "(com.apple.AppKit) __62-[NSView cacheDisplayInRect:toBitmapImageRep:includeSubviews:]_block_invoke",
+        "(com.apple.AppKit) -[NSView displayRectIgnoringOpacity:inContext:]",
+        "(com.apple.AppKit) NSPerformVisuallyAtomicChange",
+        "(com.apple.AppKit) __47-[NSView displayRectIgnoringOpacity:inContext:]_block_invoke",
+        "(com.apple.AppKit) -[NSView _recursive:displayRectIgnoringOpacity:inContext:stopAtLayerBackedViews:]",
+        "(com.apple.AppKit) -[NSView _renderLayerInContext:]",
+        "(com.apple.QuartzCore) -[CALayer renderInContext:]",
+        "(com.apple.QuartzCore) -[CALayer _renderForegroundInContext:]",
+        "(com.apple.CoreGraphics) CGContextDrawImage",
+        "(com.apple.CoreGraphics) CGContextDrawImageWithOptions",
+        "(com.apple.CoreGraphics) ripc_DrawImage",
+        "(com.apple.CoreGraphics) ripc_AcquireRIPImageData",
+        "(com.apple.CoreGraphics) CGSImageDataLock",
+        "(com.apple.CoreGraphics) img_data_lock",
+        "(com.apple.CoreGraphics) create_image_data_handle",
+        "(libsystem_malloc.dylib) _malloc_zone_calloc",
+        "(libsystem_malloc.dylib) _malloc_zone_calloc_instrumented_or_legacy",
+        "(libsystem_malloc.dylib) _xzm_malloc_large_huge",
+        "(libsystem_malloc.dylib) xzm_segment_group_alloc_chunk",
+        "(libsystem_malloc.dylib) _xzm_segment_group_alloc_segment",
+        "(libsystem_malloc.dylib) _xzm_range_group_alloc_anywhere_segment",
+        "(libsystem_kernel.dylib) mach_vm_map"
+      ]
+    }
+  ],
+  "event_types": {
+    "ALLOC": 55961,
+    "VM_ALLOC": 208
+  },
+  "receipts": [
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/blank.stacks",
+      "bytes": 40092374,
+      "sha256": "3c039545cfbb112605070973eea6b00af09c8f96b04fac11ce630b42d8a99803"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/blank_captured.stacks",
+      "bytes": 63907182,
+      "sha256": "9ef48377671dd7343162a485382a27832b7190c740947509e9932ccd1f00e8b9"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/native-fixture.json",
+      "bytes": 1681,
+      "sha256": "f2395e85316929c1aa5294f226801c7fe52eb4068a5576bd02c3d5016e23a47c"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/native.log",
+      "bytes": 417,
+      "sha256": "f01234a45c3b99e6293c938620805f51034aeaaff0c64a1772a3e92caf7331c6"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/phases.jsonl",
+      "bytes": 811,
+      "sha256": "7045ddc4792abaf3954d70500fea4fd5bfa7b1457e97602cfe5972a6decb00c9"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/terminal_bitmap.stacks",
+      "bytes": 68104641,
+      "sha256": "311f1e11401169bc6a0e3668e944b49dfed8fc4fc1fcb6f9a6529f59eb99e068"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/terminal_ocr.stacks",
+      "bytes": 68948330,
+      "sha256": "4e736602d205cf360309445ac0858ff360f8bfccd911b6228e120df027bd60f6"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/terminal_recaptured.stacks",
+      "bytes": 69037499,
+      "sha256": "8c5a25af1f732bfa1f95b04b7758a2b23c0c0c597281bd879f1b249f7840efbf"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/terminal_rendered.stacks",
+      "bytes": 68483318,
+      "sha256": "b6e4a36fabf30ec7fd3d5c81ef9ce209ef2f37c3603fd0f015f761865a080ec3"
+    },
+    {
+      "path": "/tmp/loo304-capture-events-20261006/native-fixture.json",
+      "bytes": 1682,
+      "sha256": "23ef828a97a3c506305d6c911371c055470303b44ba936b5101ad39686134865"
+    },
+    {
+      "path": "/tmp/loo304-capture-events-20261006/native.log",
+      "bytes": 417,
+      "sha256": "a21dffcfc84505e3ce5355e8ce600e126ffaf907de4227d3fae27b6795b508e0"
+    },
+    {
+      "path": "/tmp/loo304-capture-events-20261006/phases.jsonl",
+      "bytes": 811,
+      "sha256": "651200ce31953029ad1a42bbce4f592cd7c6e48e183601cbee8c591ee730a9c5"
+    },
+    {
+      "path": "/tmp/loo304-capture-events-20261006/terminal_bitmap.stacks",
+      "bytes": 288630548,
+      "sha256": "32c4e3fb41c9b49d93c226864bcbd8bb45e516e1b962d6606cf69846f9959e8c"
+    },
+    {
+      "path": "/private/tmp/loo304-capture-stacks-probe.py",
+      "bytes": 1584,
+      "sha256": "acd916388663405d5ebfd94efc993b45c294afe3e6bb6aa1a7614218899e5897"
+    },
+    {
+      "path": "/private/tmp/loo304-capture-events-probe.py",
+      "bytes": 1638,
+      "sha256": "8b4b74c595fd09ce1bbd83ff3d444001f328e326991204b25e15b7c435f67764"
+    },
+    {
+      "path": "/Users/jack/src/loopflow.make-the-current-desktop-workspace/swift/.build/arm64-apple-macosx/debug/LoopflowSwiftPackageTests.xctest/Contents/MacOS/LoopflowSwiftPackageTests",
+      "bytes": 56538840,
+      "sha256": "38afba05e92aba57d1c3bd85b02210e584cf54a1b3515504b66c4ad70416a378"
+    }
+  ]
+}

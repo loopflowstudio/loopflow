@@ -770,3 +770,49 @@ compositor/input proof, independent Swift attribution and both original full-hou
 variants remain open. The next measured read costs are the remaining existing-
 checkout Git resolution and Task-work reads; preserve fresh configuration and
 exact execution authority when investigating them. Publication only.
+
+## Capture allocation stacks — October 6
+
+Jack Heart requested bounded attribution of the remaining +43.8/+41.1 MiB
+matched growth failure, without revising observation or acceptance. Two contained
+`terminalMemoryPhases` probes completed with the retained test executable and
+owned cat PTY. No production or ordinary observer code changed. The
+[capture stack summary](capture-stacks-summary.json) records executable/receipt
+hashes, exact private paths and selected stacks. The retained executable was not
+rebuilt; checkout HEAD identifies the investigation, not authenticated build provenance.
+
+The first probe recorded RSS 151.7→229.1 MiB at terminal bitmap capture, then
+293.9 MiB after OCR and 368.7 MiB after recapture. Stack logging and external
+inspection are intrusive; this diagnostic deliberately retains the first bitmap.
+These figures neither replace the matched failure nor measure a production leak.
+
+`malloc_history -allBySize` found the same three Ghostty `renderer.Metal.initTarget`
+regions (54,067,200 bytes total) before capture, after capture and after recapture.
+The retained bitmap's `CGBitmapAllocateData` allocation was 17,924,096 bytes.
+The second probe's VM allocation stacks additionally identify two capture-created
+allocator regions: 18,038,784 bytes beneath QuartzCore `copy_image_block_set`, and
+17,956,864 bytes beneath CoreGraphics `create_image_data_handle`. Both paths run
+through AppKit `cacheDisplayInRect`, layer rendering and `CGContextDrawImage`.
+This attributes capture-created VM storage, extending the earlier anonymous maps;
+it does not equate mapped bytes with live objects or resident bytes.
+
+The no-compaction/full-events attempt returned 55,961 ALLOC and 208 VM_ALLOC
+records, **no free events**, with stack-logging-lite frames. It therefore failed
+to establish allocation/free lifetimes. Do not interpret absent free records as
+a leak. The live size summaries retain the bitmap but do not list those two
+large capture allocations; this is consistent with allocator-retained storage,
+not proof of when or how every byte was released. The two runs took about twenty
+seconds each; retained receipts total under 600 MiB. No full-hour trace ran.
+
+No supported production repair follows: the existing render targets did not grow,
+and deleting bitmap observation or purging memory would not meet the contract.
+Next useful check: capture-stack attribution in the realistic workspace, or a
+same-pixel capture implementation comparison targeting those CoreGraphics copies.
+Any candidate must preserve full resolution, both recognizers, identity/input
+checks and deadlines, then pass the original matched workload; no observer
+subtraction or warm-up change is accepted. Latency, growth, independent Swift,
+compositor/input, trace coverage/capacity and both full hours remain open.
+
+Check: both contained phase probes PASS; free-history attribution INCOMPLETE;
+receipt hash/summary verification PASS. No implementation change, matched rerun,
+publication, merge or Task completion.

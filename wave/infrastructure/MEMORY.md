@@ -817,6 +817,12 @@ trace-enabled completion with missing tables or endpoint gaps. Starting recordin
 after `soak_begin` still needs a readiness barrier. Faithful lower-volume recording,
 compositor/input proof and both hours remain unresolved. Receipts remain in the report; the installed Home was untouched.
 
+October 6 stacks attribute two ~17 MiB VM regions to CoreGraphics copying under
+AppKit capture; Ghostty targets stayed unchanged. Free-history collection failed,
+so lifetime/live-byte ownership remains unproved. The retained executable was
+hashed, not rebuilt. No repair or acceptance follows. The matched report owns
+receipts and the next realistic-workspace/equivalent-pixel investigation.
+
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 
 The detailed September 23–25 observations, historical schemas, test counts and
@@ -932,16 +938,12 @@ commands belong in docs/lf.md and TESTING.md.
 
 ## Installation and checkout closure (LOO-292, 2026-10-04)
 
-Jack Heart closed LOO-292 on actual machine evidence. Published v0.13.0 passed
-natural login catch-up, two launchd 5min firings, matching public/installed
-artifacts, fresh Ubuntu installation without Git, and isolated dirty-checkout
-sync preservation. Weekly Monday 09:00 was restored unchanged. Install owns
-machine artifacts; Task sync owns checkouts. Detailed receipts and counterevidence
-remain at `3a5ea2ffe19ce02d4373afecda4f179db14268a7:wave/infrastructure/MEMORY.md`
-under this heading; no Monday/wake-coalescing proof or interactive app acceptance
-follows. A one-off false currency probe, interrupted redundant download and
-hand-truncated entry gate remain unresolved, nonblocking observations. No new
-installation claim is made by this curation.
+Jack Heart closed LOO-292 on actual machine evidence: v0.13.0 login catch-up, two
+launchd firings, artifact agreement, fresh Ubuntu installation and dirty-checkout
+preservation. Install owns artifacts; Task sync owns checkouts. Weekly Monday
+09:00 remains unchanged. Exact receipts and unresolved nonblocking observations
+remain at `3a5ea2ffe19ce02d4373afecda4f179db14268a7:wave/infrastructure/MEMORY.md`.
+No Monday/wake-coalescing or interactive app acceptance follows.
 
 ## Shipped history
 

@@ -296,7 +296,9 @@ them. `main` has not moved since the base, and the `lf2` URL still returns 404.
 
 Check: against the local `lf2` framework (pin swapped to a path, then restored),
 `swift test --filter "GhosttyShellBlockTests|LocalWaveAgentLauncherTests"` —
-14 passed after the header pass. Display suite and Zig tests not rerun; gate owns them.
+13 passed after compression (the two zsh hook tests are one; header constants and
+terminal text reads each have one owner). Display suite and Zig tests not rerun;
+gate owns them. The Zig patch was left alone: any edit needs a new artifact.
 
 Check: kickoff PTY capture of the Codex 0.160.0 footer per environment (throwaway
 script, not in the repository) — colored under Ghostty and Warp environments,

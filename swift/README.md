@@ -216,6 +216,9 @@ outside the current chapter, without starting a Task Flow. A repository-qualifie
 link opens its exact match even when another Wave's planning is unavailable.
 Ambiguous links offer repository-qualified choices; failed reads keep the current
 workspace and offer Retry. Only one workspace window receives a link.
+Links prefer a window already selecting the destination. Reopening its Task keeps
+the selected conversation and pane layout. Loaded repository-qualified links reuse
+observed planning; successful opens do not present a Task-finding sheet.
 Add `session` to open an existing Task conversation in its terminal pane. A
 missing or unrelated Session leaves the current workspace intact and offers Retry.
 Opening a conversation does not complete a review or start a Task Flow.

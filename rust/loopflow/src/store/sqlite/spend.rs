@@ -141,6 +141,11 @@ impl SqliteStore {
                 return Err(spend::invalid("billing authority is immutable"));
             }
             tx.execute("INSERT INTO spend_sources(id,authority,credential,payload) VALUES (?1,?2,?3,?4) ON CONFLICT(id) DO UPDATE SET credential=excluded.credential,payload=excluded.payload", params![source.id.0, source.authority, source.credential.as_ref().map(|c| &c.0), encode(source)?])?;
+            // Current scope can shrink without deleting historical invoices.
+            tx.execute(
+                "DELETE FROM spend_source_accounts WHERE source=?1",
+                [&source.id.0],
+            )?;
             for account in &source.accounts {
                 tx.execute(
                     "INSERT OR IGNORE INTO spend_source_accounts(source,account) VALUES (?1,?2)",

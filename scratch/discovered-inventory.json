@@ -1,0 +1,308 @@
+{
+  "provenance": "October 6, 2026 metadata-only discovery recorded in the approved LOO-389 design; no values or provider permissions observed.",
+  "effective_from": "2026-10-06",
+  "dependencies": [
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "consumers": [],
+      "accounts": [],
+      "resources": [],
+      "sources": [],
+      "requirements": [],
+      "coverage": [
+        "Account identity, consumers, permissions and cost remain unknown.",
+        "Credential discovery hint: hootro/prd/ANTHROPIC_API_KEY; not a confirmed dependency requirement.",
+        "Credential discovery hint: loopflow/dev_personal/ANTHROPIC_API_KEY; not a confirmed dependency requirement.",
+        "Credential discovery hint: nonna/dev_personal/ANTHROPIC_API_KEY; not a confirmed dependency requirement.",
+        "Credential discovery hint: loopflow/dev_billing/ANTHROPIC_ADMIN_KEY; not a confirmed dependency requirement."
+      ],
+      "recurring_estimate": null
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "consumers": [],
+      "accounts": [],
+      "resources": [],
+      "sources": [],
+      "requirements": [],
+      "coverage": [
+        "Account identity, consumers, permissions and cost remain unknown.",
+        "No explicitly OpenAI-named credential discovered."
+      ],
+      "recurring_estimate": null
+    },
+    {
+      "id": "mercury",
+      "name": "Mercury",
+      "consumers": [],
+      "accounts": [],
+      "resources": [],
+      "sources": [],
+      "requirements": [],
+      "coverage": [
+        "Account identity, consumers, permissions and cost remain unknown.",
+        "Credential discovery hint: loopflow/dev_billing/MERCURY_API_TOKEN; not a confirmed dependency requirement."
+      ],
+      "recurring_estimate": null
+    },
+    {
+      "id": "aws",
+      "name": "AWS or S3-compatible storage",
+      "consumers": [],
+      "accounts": [],
+      "resources": [],
+      "sources": [],
+      "requirements": [],
+      "coverage": [
+        "Account identity, consumers, permissions and cost remain unknown.",
+        "Credential discovery hint: cadenza/prd/AWS_ACCESS_KEY_ID; not a confirmed dependency requirement.",
+        "Credential discovery hint: cadenza/prd/AWS_SECRET_ACCESS_KEY; not a confirmed dependency requirement.",
+        "Credential discovery hint: kata/prd/AWS_ACCESS_KEY_ID; not a confirmed dependency requirement.",
+        "Credential discovery hint: kata/prd/AWS_SECRET_ACCESS_KEY; not a confirmed dependency requirement."
+      ],
+      "recurring_estimate": null
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "consumers": [],
+      "accounts": [],
+      "resources": [],
+      "sources": [],
+      "requirements": [],
+      "coverage": [
+        "Account identity, consumers, permissions and cost remain unknown.",
+        "Credential discovery hint: loopflow/prd/DEPENDABOT_MERGE_TOKEN; not a confirmed dependency requirement."
+      ],
+      "recurring_estimate": null
+    },
+    {
+      "id": "fly",
+      "name": "Fly.io",
+      "consumers": [],
+      "accounts": [],
+      "resources": [],
+      "sources": [],
+      "requirements": [],
+      "coverage": [
+        "Account identity, consumers, permissions and cost remain unknown.",
+        "Credential discovery hint: loopflow/dev_billing/FLY_API_TOKEN; not a confirmed dependency requirement.",
+        "Credential discovery hint: loopflow/prd/FLY_API_TOKEN; not a confirmed dependency requirement."
+      ],
+      "recurring_estimate": null
+    },
+    {
+      "id": "runpod",
+      "name": "Runpod",
+      "consumers": [],
+      "accounts": [],
+      "resources": [],
+      "sources": [],
+      "requirements": [],
+      "coverage": [
+        "Account identity, consumers, permissions and cost remain unknown.",
+        "Credential discovery hint: etude/prd/RUNPOD_API_KEY; not a confirmed dependency requirement."
+      ],
+      "recurring_estimate": null
+    }
+  ],
+  "accounts": [],
+  "resources": [],
+  "sources": [],
+  "credentials": [
+    {
+      "id": "hootro/prd/ANTHROPIC_API_KEY",
+      "reference": {
+        "project": "hootro",
+        "config": "prd",
+        "name": "ANTHROPIC_API_KEY"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "discovery hint; purpose and account association unverified",
+      "declared_permissions": [],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    {
+      "id": "loopflow/dev_personal/ANTHROPIC_API_KEY",
+      "reference": {
+        "project": "loopflow",
+        "config": "dev_personal",
+        "name": "ANTHROPIC_API_KEY"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "discovery hint; purpose and account association unverified",
+      "declared_permissions": [],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    {
+      "id": "nonna/dev_personal/ANTHROPIC_API_KEY",
+      "reference": {
+        "project": "nonna",
+        "config": "dev_personal",
+        "name": "ANTHROPIC_API_KEY"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "discovery hint; purpose and account association unverified",
+      "declared_permissions": [],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    {
+      "id": "loopflow/dev_billing/ANTHROPIC_ADMIN_KEY",
+      "reference": {
+        "project": "loopflow",
+        "config": "dev_billing",
+        "name": "ANTHROPIC_ADMIN_KEY"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "discovery hint; purpose and account association unverified",
+      "declared_permissions": [],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    {
+      "id": "loopflow/dev_billing/MERCURY_API_TOKEN",
+      "reference": {
+        "project": "loopflow",
+        "config": "dev_billing",
+        "name": "MERCURY_API_TOKEN"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "discovery hint; purpose and account association unverified",
+      "declared_permissions": [],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    {
+      "id": "cadenza/prd/AWS_ACCESS_KEY_ID",
+      "reference": {
+        "project": "cadenza",
+        "config": "prd",
+        "name": "AWS_ACCESS_KEY_ID"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "discovery hint; purpose and account association unverified",
+      "declared_permissions": [],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    {
+      "id": "cadenza/prd/AWS_SECRET_ACCESS_KEY",
+      "reference": {
+        "project": "cadenza",
+        "config": "prd",
+        "name": "AWS_SECRET_ACCESS_KEY"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "discovery hint; purpose and account association unverified",
+      "declared_permissions": [],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    {
+      "id": "kata/prd/AWS_ACCESS_KEY_ID",
+      "reference": {
+        "project": "kata",
+        "config": "prd",
+        "name": "AWS_ACCESS_KEY_ID"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "discovery hint; purpose and account association unverified",
+      "declared_permissions": [],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    {
+      "id": "kata/prd/AWS_SECRET_ACCESS_KEY",
+      "reference": {
+        "project": "kata",
+        "config": "prd",
+        "name": "AWS_SECRET_ACCESS_KEY"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "discovery hint; purpose and account association unverified",
+      "declared_permissions": [],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    {
+      "id": "loopflow/prd/DEPENDABOT_MERGE_TOKEN",
+      "reference": {
+        "project": "loopflow",
+        "config": "prd",
+        "name": "DEPENDABOT_MERGE_TOKEN"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "discovery hint; purpose and account association unverified",
+      "declared_permissions": [],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    {
+      "id": "loopflow/dev_billing/FLY_API_TOKEN",
+      "reference": {
+        "project": "loopflow",
+        "config": "dev_billing",
+        "name": "FLY_API_TOKEN"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "discovery hint; purpose and account association unverified",
+      "declared_permissions": [],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    {
+      "id": "loopflow/prd/FLY_API_TOKEN",
+      "reference": {
+        "project": "loopflow",
+        "config": "prd",
+        "name": "FLY_API_TOKEN"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "discovery hint; purpose and account association unverified",
+      "declared_permissions": [],
+      "expires_at": null,
+      "rotation_evidence": null
+    },
+    {
+      "id": "etude/prd/RUNPOD_API_KEY",
+      "reference": {
+        "project": "etude",
+        "config": "prd",
+        "name": "RUNPOD_API_KEY"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "discovery hint; purpose and account association unverified",
+      "declared_permissions": [],
+      "expires_at": null,
+      "rotation_evidence": null
+    }
+  ],
+  "environments": [],
+  "requirements": [],
+  "rules": [],
+  "discovery_gaps": [
+    "Six visible Doppler projects and 25 listed configs were inspected; organizational visibility beyond those scopes is unknown.",
+    "Visible projects: cadenza, etude, hootro, kata, loopflow, nonna. Each lists dev, dev_personal, stg and prd; loopflow also lists dev_billing.",
+    "Secret names do not establish account identity, shared accounts, consumers or read-only enforcement.",
+    "Other service hints: Cloudflare/R2, Apple/App Store, Google, Twilio, Letta, Asana, WorkOS, Discord, Linear, Notion, Cargo registry, CubeCobra, database and signing credentials. Exact relationships remain unresolved.",
+    "Mercury connectivity is excluded. No live billing source is connected."
+  ]
+}

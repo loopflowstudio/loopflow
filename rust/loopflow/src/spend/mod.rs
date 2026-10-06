@@ -48,6 +48,13 @@ pub struct Consumer {
     pub wave_id: Option<crate::id::WaveId>,
 }
 
+impl Consumer {
+    fn matches(&self, repo: Option<&str>, wave: Option<&crate::id::WaveId>) -> bool {
+        repo.is_none_or(|repo| self.repo == repo)
+            && wave.is_none_or(|wave| self.wave_id.as_ref() == Some(wave))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Dependency {
@@ -106,7 +113,7 @@ pub struct BillingSource {
     /// Stable provider billing authority, shared by API and export transports.
     pub authority: String,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Credential {
     pub id: CredentialId,
@@ -378,12 +385,8 @@ pub(crate) fn totals(
             .iter()
             .flat_map(|c| &c.attribution)
             .filter(|a| {
-                repo.is_none_or(|r| a.consumer.as_ref().is_some_and(|c| c.repo == r))
-                    && wave.is_none_or(|w| {
-                        a.consumer
-                            .as_ref()
-                            .is_some_and(|c| c.wave_id.as_ref() == Some(w))
-                    })
+                ((repo.is_none() && wave.is_none())
+                    || a.consumer.as_ref().is_some_and(|c| c.matches(repo, wave)))
                     && dependency.is_none_or(|d| a.dependency.as_ref() == Some(d))
             })
             .peekable();
@@ -517,11 +520,7 @@ impl Report {
                 let Some(consumer) = &attribution.consumer else {
                     continue;
                 };
-                if consumer.repo != repo
-                    || wave_id
-                        .as_ref()
-                        .is_some_and(|w| consumer.wave_id.as_ref() != Some(w))
-                {
+                if !consumer.matches(Some(&repo), wave_id.as_ref()) {
                     continue;
                 }
                 amounts.push(ExportAmount {

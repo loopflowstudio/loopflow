@@ -101,6 +101,26 @@ fn dependency_cost_round_trip() {
     assert_eq!(first["totals"][0]["direct"], "90.00");
     assert_eq!(first["totals"][0]["allocated"], "60.00");
     assert_eq!(first["totals"][0]["unassigned"], "20.00");
+    let wave = serde_json::from_value(
+        inventory["rules"][0]["assignments"][0]["consumer"]["wave_id"].clone(),
+    )
+    .unwrap();
+    let scoped = runtime
+        .block_on(store.spend_report("2026-09".into(), Some("example/one".into()), Some(wave)))
+        .unwrap();
+    let export = scoped
+        .export("example/one".into(), scoped.wave_id.clone())
+        .unwrap();
+    assert_eq!(export.totals[0].billed.0.to_string(), "120.00");
+    assert!(export
+        .amounts
+        .iter()
+        .all(|amount| amount.wave_id == scoped.wave_id));
+    let other_repo = scoped
+        .export("example/two".into(), scoped.wave_id.clone())
+        .unwrap();
+    assert!(other_repo.amounts.is_empty());
+    assert!(other_repo.totals.is_empty());
     invoice["charges"].as_array_mut().unwrap().reverse();
     document(&invoice_path, &invoice);
     assert_eq!(serde_json::from_str::<Value>(&import()).unwrap(), initial);
@@ -544,4 +564,67 @@ fn inspection_output_fixtures_round_trip() {
     round_trip::<Report>(&fixture["report"]);
     round_trip::<ReportExport>(&fixture["export"]);
     round_trip::<Vec<DependencyHistory>>(&fixture["history"]);
+}
+
+#[tokio::test]
+async fn source_scope_can_shrink_without_losing_billed_evidence() {
+    let home = tempfile::tempdir().unwrap();
+    let store = open_ephemeral_store(&StorageConfig::sqlite(home.path().join("loopflow.db")))
+        .await
+        .unwrap();
+    let mut inventory: Inventory = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/inventory.json"
+    ))
+    .unwrap();
+    let mut invoice: Invoice = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/spend/invoice.json"
+    ))
+    .unwrap();
+    store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .unwrap();
+    let original = store.import_spend_invoice(invoice.clone()).await.unwrap();
+    inventory.sources[0].accounts.clear();
+    store
+        .import_spend_inventory(inventory.clone())
+        .await
+        .unwrap();
+    let report = store
+        .spend_report("2026-09".into(), None, None)
+        .await
+        .unwrap();
+    assert_eq!(report.invoices[0].revision, original.revision);
+    assert_eq!(report.totals[0].billed.0.to_string(), "170.00");
+    // Existing evidence remains idempotent; new documents use the current scope.
+    assert_eq!(
+        store
+            .import_spend_invoice(invoice.clone())
+            .await
+            .unwrap()
+            .revision,
+        original.revision
+    );
+    invoice.document_id = "outside-current-scope".into();
+    assert!(store.import_spend_invoice(invoice).await.is_err());
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let links: i64 = db
+        .query_row("SELECT count(*) FROM spend_source_accounts", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(links, 0);
+    inventory.sources[0]
+        .accounts
+        .push(loopflow::spend::ServiceAccountId("missing".into()));
+    assert!(store.import_spend_inventory(inventory).await.is_err());
+    assert_eq!(
+        store
+            .spend_report("2026-09".into(), None, None)
+            .await
+            .unwrap()
+            .invoices[0]
+            .revision,
+        original.revision
+    );
 }

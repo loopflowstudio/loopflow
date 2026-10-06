@@ -245,7 +245,7 @@ fn validate_rotation_inventory(
     for expected in [&expected_active, &rotation.candidate] {
         let actual: Credential = record(conn, "spend_credentials", &expected.id.0)?
             .ok_or_else(|| spend::invalid("rotation credential missing"))?;
-        if encode(&actual)? != encode(expected)? {
+        if &actual != expected {
             return Err(spend::invalid(
                 "rotation credential changed; reconcile before continuing",
             ));

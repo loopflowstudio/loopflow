@@ -43,6 +43,13 @@ provider billing, production provisioning and live acceptance remain outstanding
 invoice revision retains its evaluated attribution; a new correction evaluates
 the rules present at import, while repeat imports reuse the stored evaluation.
 
+October 6 source reconciliation separates a billing source's current account
+scope from historical invoice ownership. The working tree replaces current scope
+links without deleting billed evidence. Existing revisions remain replayable;
+new documents and corrections require current membership. Durable invoices must
+reference stable account/source identities, not mutable membership rows. Removing
+access or inventory scope must not erase prior spending or rewrite its attribution.
+
 October 6 public-provider research found that Runpod's current billing API returns
 time-bucketed spending with resource detail and reconciliation totals, without an
 invoice identity/finality contract. Usage-ledger evidence must remain distinct

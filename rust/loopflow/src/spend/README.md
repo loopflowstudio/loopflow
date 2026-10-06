@@ -15,7 +15,9 @@ Use the [inventory](../../../../tests/fixtures/dto/spend/inventory.json) and
 examples. They contain synthetic metadata, never credentials. Import only
 non-secret JSON. Unknown fields are rejected. Imports upsert named records in
 one transaction; omitted records remain. Include the complete current discovery
-gap list in each inventory import.
+gap list in each inventory import. A source’s account list replaces its current
+scope; removing an account preserves its imported invoices and rejects new documents
+for that account.
 
 Name local repositories by checkout path; imports resolve existing paths to the
 canonical checkout. Name external repositories by `owner/repo`. Wave references

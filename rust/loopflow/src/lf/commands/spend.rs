@@ -1,4 +1,4 @@
-//! Offline dependency and billing inspections. Only explicit imports write the Store.
+//! Dependency, access and billing operations. Inspections never fetch credentials.
 use std::fs;
 use std::path::PathBuf;
 
@@ -200,38 +200,31 @@ async fn run_async(command: &AuthCommand) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&rotation)?);
         }
         AuthCommand::Access {
-            cmd: cmd @ (AccessCommand::Show { .. } | AccessCommand::Verify { .. }),
+            cmd: AccessCommand::Show { environment, json },
         } => {
-            let (inspection, json) = match cmd {
-                AccessCommand::Show { environment, json } => (
-                    open_read_only_store(&config)
-                        .await?
-                        .spend_access(crate::spend::EnvironmentId(environment.clone()))
-                        .await?
-                        .context("access environment not found")?,
-                    json,
-                ),
+            let inspection = open_read_only_store(&config)
+                .await?
+                .spend_access(crate::spend::EnvironmentId(environment.clone()))
+                .await?
+                .context("access environment not found")?;
+            print_access_output(&inspection, *json)?;
+        }
+        AuthCommand::Access {
+            cmd:
                 AccessCommand::Verify {
                     environment,
                     period,
                     json,
-                } => (
-                    open_store(&config)
-                        .await?
-                        .verify_spend_access(
-                            crate::spend::EnvironmentId(environment.clone()),
-                            period.clone(),
-                        )
-                        .await?,
-                    json,
-                ),
-                _ => unreachable!("show and verify matched above"),
-            };
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&inspection)?);
-            } else {
-                print_access(&inspection);
-            }
+                },
+        } => {
+            let inspection = open_store(&config)
+                .await?
+                .verify_spend_access(
+                    crate::spend::EnvironmentId(environment.clone()),
+                    period.clone(),
+                )
+                .await?;
+            print_access_output(&inspection, *json)?;
         }
 
         AuthCommand::Inventory {
@@ -399,6 +392,15 @@ async fn run_async(command: &AuthCommand) -> Result<()> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+fn print_access_output(inspection: &crate::spend::AccessInspection, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(inspection)?);
+    } else {
+        print_access(inspection);
     }
     Ok(())
 }

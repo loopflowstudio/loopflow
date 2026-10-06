@@ -301,16 +301,6 @@ struct GhosttyShellBlockTests {
         #expect(!ghosttyRightClickKeepsBlock(row: nil, blocks: blocks))
     }
 
-    @Test("keys that go to the shell end a block selection; Command chords do not")
-    func keysReachingShell() {
-        #expect(ghosttyKeyReachesShell(modifiers: []))
-        #expect(ghosttyKeyReachesShell(modifiers: .shift))
-        #expect(ghosttyKeyReachesShell(modifiers: .control))
-        #expect(ghosttyKeyReachesShell(modifiers: .option))
-        #expect(!ghosttyKeyReachesShell(modifiers: .command))
-        #expect(!ghosttyKeyReachesShell(modifiers: [.command, .shift]))
-    }
-
     @Test("the embedded config parses, and Command-Up and Command-Down jump between prompts")
     @MainActor
     func embeddedConfigBindsPromptJumps() throws {

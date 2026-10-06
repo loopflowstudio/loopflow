@@ -221,7 +221,7 @@ enum GhosttyBlockHeader {
 
     /// Smaller than the terminal's 13pt body.
     static let fontSize: CGFloat = 11
-    static let color = NSColor(red: 0xA3 / 255, green: 0x9B / 255, blue: 0x93 / 255, alpha: 1)
+    static let color = NSColor(TerminalPalette.dim)
 
     /// The header a terminal row holds, or `nil` for any other row.
     static func text(inRow row: String) -> String? {
@@ -328,12 +328,6 @@ struct GhosttyCommandBlockStyle {
 func ghosttyRightClickKeepsBlock(row: Int?, blocks: [GhosttyCommandBlockLayout]) -> Bool {
     guard let row else { return false }
     return blocks.contains { $0.selected && $0.contains(row) }
-}
-
-/// Command chords are app and Ghostty bindings such as copy and jump to
-/// prompt. Every other key press, Escape included, goes to the shell.
-func ghosttyKeyReachesShell(modifiers: NSEvent.ModifierFlags) -> Bool {
-    !modifiers.contains(.command)
 }
 
 @MainActor
@@ -568,7 +562,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     /// A selected block is for copying. Once input goes to the shell the
-    /// highlight would sit stale above the new command, so it ends there.
+    /// highlight would sit stale above the new command, so it ends there:
+    /// on text and on every key, Escape included, except Command chords,
+    /// which are app and Ghostty bindings such as copy and jump to prompt.
     private func clearBlockSelection() {
         guard isShellPane, let surface, commandBlocks.contains(where: \.selected) else { return }
         // No block holds this row, which clears the selection.
@@ -781,7 +777,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             }
         }
 
-        if ghosttyKeyReachesShell(modifiers: mods) { clearBlockSelection() }
+        if !mods.contains(.command) { clearBlockSelection() }
 
         // Let other command shortcuts through to the terminal
         let key = translateKey(event)
@@ -796,7 +792,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         if keyToDraw == nil {
             keyToDraw = Perf.signposter.beginInterval(Perf.terminalKeyToDraw, id: Perf.signposter.makeSignpostID())
         }
-        if ghosttyKeyReachesShell(modifiers: event.modifierFlags) { clearBlockSelection() }
+        if !event.modifierFlags.contains(.command) { clearBlockSelection() }
 
         if ghosttyShouldHandleKeyDownDirectly(
             characters: event.characters,

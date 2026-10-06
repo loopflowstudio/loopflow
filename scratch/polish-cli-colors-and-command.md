@@ -375,6 +375,6 @@ Check: kickoff PTY capture of the Codex 0.160.0 footer per environment (throwawa
 script, not in the repository) — colored under Ghostty and Warp environments,
 colorless with `NO_COLOR=1`.
 
-Check: after the polish pass, same filter against the local framework — 17 passed (adds fill contrast, right-click, shell keys, embedded config parsed by Ghostty). Pin restored.
+Check: after the polish pass and its compression, same filter against the local framework — 16 passed (adds fill contrast, right-click, embedded config parsed by Ghostty; the Command-chord rule is inline, covered only by the display suite). Pin restored.
 
 Check: realign by source inspection and `lf context --skill realign` — memory 15992/16000 tokens, scratch in budget; no code changed, no tests rerun (gate owns them).

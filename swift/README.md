@@ -52,8 +52,7 @@ background. Click anywhere in a block to select the whole unit; drag to select
 text instead. There is one selection at a time, and Command-C or the context
 menu copies it: a block copies its command and all of its output. Right-click
 keeps the selection it lands on. A selected block clears when you type or press
-Escape. Command-Up and Command-Down jump between prompts.
-Command-Up/Down navigates between prompts. The live prompt remains ungrouped;
+Escape. Command-Up and Command-Down jump between prompts. The live prompt remains ungrouped;
 Session/provider panes keep their native TUI behavior and do not expose shell
 command blocks.
 Automatic integration depends on the configured shell; macOS `/bin/bash` is

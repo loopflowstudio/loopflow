@@ -36,6 +36,7 @@ use crate::engine::{compile_flow, load_flow, ConcreteStep};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::planning::{LinearIssueId, TaskPlan};
+use crate::store::sqlite::OpenExecs;
 use crate::store::{
     open_existing_store, open_registry_for_authority, ProviderAccountId, RegistryUnavailable,
     SharedStore, Store, StoreError,
@@ -4231,6 +4232,16 @@ pub(crate) async fn task_completion_gate(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<CompletionGate> {
+    let open = store.sqlite.open_execs().map_err(task_error)?;
+    task_completion_gate_among(store, task, &open).await
+}
+
+/// The gate for one Task of many, against unfinished Execs read once.
+pub(crate) async fn task_completion_gate_among(
+    store: &SharedStore,
+    task: &Task,
+    open: &OpenExecs,
+) -> OpsResult<CompletionGate> {
     let mut gate = CompletionGate {
         satisfied: true,
         blockers: Vec::new(),
@@ -4247,7 +4258,9 @@ pub(crate) async fn task_completion_gate(
     }
 
     gate.blockers
-        .extend(lifecycle::associated_work_blockers(store, task)?);
+        .extend(lifecycle::associated_work_blockers_among(
+            store, task, open,
+        )?);
 
     // Work committed past the tip GitHub merged is owned by no PR; completing
     // would strand it outside the Task. Only the newest PR can still hold it: a

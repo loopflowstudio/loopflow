@@ -10,11 +10,12 @@ CREATE TABLE store_revisions (
 INSERT INTO store_revisions(domain, revision)
 VALUES ('planning', 0), ('sessions', 0), ('flows', 0), ('execs', 0);
 
--- The completion gate asks only about unfinished execution, and reaches it
--- from the few unfinished Execs instead of every Exec a checkout ever ran.
+-- The completion gate asks only about unfinished execution. One statement
+-- pairs the few unfinished Execs with their Sessions and Flows, and these
+-- answer it from the index without reading an event row.
 CREATE INDEX execs_unfinished ON execs(started_at, id) WHERE completed_at IS NULL;
-CREATE INDEX session_events_exec ON session_events(exec_id) WHERE exec_id IS NOT NULL;
-CREATE INDEX flow_events_exec ON flow_events(exec_id) WHERE exec_id IS NOT NULL;
+CREATE INDEX session_events_exec ON session_events(exec_id, session_id) WHERE exec_id IS NOT NULL;
+CREATE INDEX flow_events_exec ON flow_events(exec_id, flow_id) WHERE exec_id IS NOT NULL;
 
 
 -- planning

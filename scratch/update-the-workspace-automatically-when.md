@@ -1,9 +1,63 @@
 # Update the workspace automatically when Loopflow data changes (LOO-382)
 
-Status: **built except what Remaining work lists, 2026-10-05.** Jack Heart requested the Task and made the
-decisions below in design review; the mechanism was proposed, not separately
-accepted. Product decisions in the Task brief are binding. Open choices are in
-[questions.md](questions.md).
+Status: **stream built; the planning read is being rebuilt to be simple and
+fast, 2026-10-05.** Jack Heart requested the Task and made the decisions below
+in design review. After reading the PR walkthrough he set the direction in the
+next section. Open choices are in [questions.md](questions.md).
+
+## Simple, fast planning read (direction 2026-10-05)
+
+Jack Heart, after the walkthrough: seeing which Waves and Tasks are current is
+a basic part of the UX and the architecture should make it very simple and
+fast; each thing moves to its right owner, Swift or the database; build on the
+performant, scalable shape from the start.
+
+Measured on a snapshot copy of Jack's store (1.75 GB, debug `lf`, load 32):
+
+- The current plans hold 140 Tasks in 45 Waves; 80 Tasks have local work, 32
+  a checkout. 30 of the Waves are dead test repositories.
+- A warm planning reading in the watch took 2.8–6.6 s. Sampled, 83% of it is
+  one statement: the completion gate's unfinished-Exec membership query, run
+  once per unfinished Task. Everything else in the reading is about 300 ms.
+- A first reading took 16 s and a one-shot `wave list` 4.9 s, half of it in
+  the kernel: Git subprocesses per Wave and per checkout.
+
+So the list is slow because of one per-Task query and cold Git, not because
+it carries each Task's detail. Rows in the Wave Task list show condition,
+status and next owner, and the working set of a finished Task depends on
+observed Git state, so a list of bare columns would change what is shown.
+
+**The rule.** A reading of all current Waves and Tasks runs a fixed number of
+statements, never one per Task, and never reads finished history. Git is
+asked only about checkouts that exist. Under that rule re-reading every Task
+on a change costs milliseconds per hundred Tasks, so the four counters stay
+the invalidation and the wire and Swift types do not change.
+
+Not built, and why: a light list type beside per-Task detail (the detail is
+cheap once read in bulk, and splitting it changes many views); stored derived
+rows and a per-row change log (the next step when a bulk reading stops fitting
+its budget; nothing here blocks it). Jack said he wants derived state in the
+database; this plan stores none (question 23).
+
+### Slices
+
+Each is implemented, compressed and realigned before the next.
+
+1. **Built: one membership read.** `SqliteStore::open_execs` pairs every
+   unfinished Exec with its Tasks in one statement, by the SQL membership
+   rule the full read uses; the gate takes each Task's Execs from it. The
+   index and join order are pinned, because the bundled SQLite otherwise
+   scans every Exec (350 ms against 23 ms). Warm planning in the watch,
+   release `lf`, request to answering frame: 0.30–0.69 s at load 71, against
+   2.8–6.6 s at load 32 before. Six samples; the machine was never quiet.
+2. **Cold cost.** Profile the first reading and `wave list`; stop asking Git
+   about repositories and checkouts that no longer exist.
+3. **Whatever the warm profile shows next**, until a warm planning reading is
+   at most 300 ms on the copy. Then commit-to-frame for a Task and a Session.
+4. **A failing part backs off** instead of being re-read every second.
+5. **Rust owns the working-set rule.** Whether a finished Task still has
+   unresolved execution is derived once in Rust and sent; Swift keeps only
+   the window's own filters.
 
 ## Remaining work
 

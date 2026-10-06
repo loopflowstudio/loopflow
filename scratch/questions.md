@@ -97,3 +97,25 @@ Added 2026-10-05 in realign. Nobody has confirmed these.
     unstarted Tasks, or only new ones, is Jack's to decide; nothing was
     changed. Desktop's own Create uses `--run`, so that Task appears once
     its Run is recorded.
+
+Added 2026-10-05 after Jack Heart read the PR walkthrough.
+
+23. **Direction (Jack Heart, 2026-10-05): seeing which Waves and Tasks
+    are current is a basic part of the UX, and the architecture should make
+    it very simple and fast.** Two principles: move each thing to its right
+    owner, Swift or the database; build on the performant, scalable
+    architecture from the start. The database serves the Loopflow UX overall.
+    Measured since: the list is slow because of one per-Task query and
+    cold Git, not because it carries detail (plan, "Simple, fast planning
+    read"). **Chosen without Jack's confirmation:** keep the wire and Swift
+    types, read in bulk, store no derived state and add no change log. Jack
+    said "i think we want it in the db" about derived state; that is not
+    built. He also said not to over-index on a keyed Swift store.
+24. **A failing part is re-read about every second with no backoff.** Seen
+    in a throwaway Home: planning read 3 times in 2 s while failing. On a
+    store where planning takes 2 s this would likely hold the one loop;
+    unmeasured.
+    Jack added: "this db's only purpose really is to serve this UX." Read as:
+    display-shaped rows are the store's primary tables, not a cache beside
+    them. The store also holds execution authority (Flow position, claims,
+    landing locks); how those relate to display rows is not worked out.

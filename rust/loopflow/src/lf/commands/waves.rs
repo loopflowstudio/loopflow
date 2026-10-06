@@ -22,6 +22,7 @@ use crate::lf::commands::runs::{format_tokens, SessionHistory};
 use crate::lf::output::Colors;
 use crate::ops::task_execution::TaskExecutionState;
 use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot};
+use crate::store::sqlite::OpenExecs;
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
 use crate::work::task::{
@@ -546,7 +547,8 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
     validate_pm_portfolio(store, &repository_waves).await?;
     let snapshot = snapshot_wave(store, wave).await?;
-    let task_snapshots = wave_tasks(store, wave, true, None).await?;
+    let shared = SharedTaskReads::read(store).await?;
+    let task_snapshots = wave_tasks(store, wave, true, None, &shared).await?;
     let metric_portfolio = crate::ops::metrics::wave_metric_portfolio(store, wave, now()).await?;
     Ok(WaveDetailSnapshot {
         runs: Evidence::from_result(crate::lf::commands::runs::collect_runs(
@@ -665,13 +667,14 @@ async fn roadmap_snapshot(
         waves.clone()
     };
     validate_pm_portfolio(store, &ownership_waves).await?;
+    let shared = SharedTaskReads::read(store).await?;
     let mut roadmaps = Vec::with_capacity(waves.len());
     for wave in &waves {
         let snapshot = snapshot_wave(store, wave).await?;
         if !include_history && !current_wave(&snapshot) {
             continue;
         }
-        let task_snapshots = wave_tasks(store, wave, false, task)
+        let task_snapshots = wave_tasks(store, wave, false, task, &shared)
             .await
             .unwrap_or_else(|error| WaveTasks {
                 tasks: Evidence::Unavailable {
@@ -710,6 +713,25 @@ async fn roadmap_snapshot(
     })
 }
 
+/// What a reading asks once and every Task's detail then shares, so the cost
+/// of a plan does not grow by a statement per Task.
+#[derive(Debug)]
+struct SharedTaskReads {
+    checkouts: Vec<crate::store::sqlite::TaskCheckout>,
+    local_home: crate::durable::HomeId,
+    open: OpenExecs,
+}
+
+impl SharedTaskReads {
+    async fn read(store: &SharedStore) -> Result<Self> {
+        Ok(Self {
+            checkouts: store.task_checkouts().await?,
+            local_home: store.local_home().await?.id,
+            open: store.sqlite.open_execs()?,
+        })
+    }
+}
+
 #[derive(Debug)]
 struct WaveTasks {
     tasks: Evidence<TaskDetailSnapshot>,
@@ -722,6 +744,7 @@ async fn wave_tasks(
     wave: &Wave,
     probe_pr_empty: bool,
     identifier: Option<&str>,
+    shared: &SharedTaskReads,
 ) -> Result<WaveTasks> {
     let projects = store.list_projects(Some(wave.id())).await?;
     let mut tasks = store.list_tasks(Some(wave.id())).await?;
@@ -770,6 +793,7 @@ async fn wave_tasks(
         planning,
         probe_pr_empty,
         identifier.is_some(),
+        shared,
     )
     .await?;
     Ok(WaveTasks {
@@ -971,9 +995,8 @@ async fn snapshot_tasks(
     planning: PmSnapshot,
     probe_pr_empty: bool,
     include_retained: bool,
+    shared: &SharedTaskReads,
 ) -> Result<(Vec<TaskDetailSnapshot>, Vec<UnavailableTaskEvidence>)> {
-    let checkouts = store.task_checkouts().await?;
-    let local_home = store.local_home().await?;
     let mut details = Vec::new();
     let mut unavailable_tasks = Vec::new();
     for item in planning.items {
@@ -988,8 +1011,7 @@ async fn snapshot_tasks(
                 runtime_task,
                 recommended,
                 probe_pr_empty,
-                &checkouts,
-                &local_home.id,
+                shared,
             )
             .await?,
         );
@@ -1044,16 +1066,8 @@ async fn snapshot_tasks(
             .map_or("feature", |plan| plan.flow.as_str())
             .to_string();
         details.push(
-            snapshot_task_detail(
-                store,
-                item,
-                Some(task),
-                recommended,
-                probe_pr_empty,
-                &checkouts,
-                &local_home.id,
-            )
-            .await?,
+            snapshot_task_detail(store, item, Some(task), recommended, probe_pr_empty, shared)
+                .await?,
         );
     }
     details.sort_by(|left, right| {
@@ -1098,8 +1112,7 @@ async fn snapshot_task_detail(
     task: Option<&Task>,
     recommended: String,
     probe_pr_empty: bool,
-    checkouts: &[crate::store::sqlite::TaskCheckout],
-    local_home: &crate::durable::HomeId,
+    shared: &SharedTaskReads,
 ) -> Result<TaskDetailSnapshot> {
     let prs = match task {
         Some(task) => store.task_prs(&task.id).await?,
@@ -1126,9 +1139,9 @@ async fn snapshot_task_detail(
         None => (None, None, crate::ops::task_flow::TaskFlowRecord::None),
     };
     let home_id = task
-        .and_then(|task| checkouts.iter().find(|row| row.task_id == task.id))
+        .and_then(|task| shared.checkouts.iter().find(|row| row.task_id == task.id))
         .and_then(|row| row.home_id.clone());
-    let reference = task_reference(&item, task, active, &prs, home_id, local_home);
+    let reference = task_reference(&item, task, active, &prs, home_id, &shared.local_home);
     let worktree_blocker = match task {
         Some(task) => crate::ops::task::task_worktree_blocker(store, task).await?,
         None => None,
@@ -1183,7 +1196,7 @@ async fn snapshot_task_detail(
         task_local_progress(task, runtime.as_ref(), active, worktree_blocker.as_ref());
     let completion_refusal = match (task, runtime.as_ref()) {
         (Some(task), Some(runtime)) if !work_status_is_terminal(&runtime.status) => {
-            crate::ops::task::task_completion_gate(store, task)
+            crate::ops::task::task_completion_gate_among(store, task, &shared.open)
                 .await?
                 .refusal(&task.plan.identifier)
         }
@@ -2265,10 +2278,17 @@ mod tests {
             .await
             .unwrap();
         let stored = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        let (details, gaps) =
-            super::snapshot_tasks(&store, vec![], vec![], stored.snapshot, false, false)
-                .await
-                .unwrap();
+        let (details, gaps) = super::snapshot_tasks(
+            &store,
+            vec![],
+            vec![],
+            stored.snapshot,
+            false,
+            false,
+            &super::SharedTaskReads::read(&store).await.unwrap(),
+        )
+        .await
+        .unwrap();
         assert!(gaps.is_empty());
         assert_eq!(details.len(), planning.items.len());
         for detail in &details {
@@ -2404,7 +2424,10 @@ mod tests {
         };
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
         // Old applied abandonment receipts do not imply native deletion.
-        let before = super::wave_tasks(&store, &wave, false, None).await.unwrap();
+        let shared = super::SharedTaskReads::read(&store).await.unwrap();
+        let before = super::wave_tasks(&store, &wave, false, None, &shared)
+            .await
+            .unwrap();
         assert!(matches!(before.tasks, super::Evidence::Ok { items, .. } if items.len() == 2));
         store
             .confirm_task_deletion(wave.id(), "removed", "FIX-1")
@@ -2433,7 +2456,7 @@ mod tests {
                 .await
                 .unwrap(),
             );
-            let detail = super::wave_tasks(&reopened, &wave, false, None)
+            let detail = super::wave_tasks(&reopened, &wave, false, None, &shared)
                 .await
                 .unwrap();
             let super::Evidence::Ok { items, .. } = detail.tasks else {

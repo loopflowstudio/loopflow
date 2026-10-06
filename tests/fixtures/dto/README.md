@@ -19,7 +19,7 @@ condition, reason, and actions through the existing Wave Task row.
 session, its explicit readiness state, and its exact Home-local attach route.
 
 `session_memberships.json` pins each Session's required `flow_membership`:
-the current Flow step, an earlier step, an independent conversation, a Run that
+the current Flow step, an earlier step, an independent conversation, a Session that
 predates recorded membership (unknown, never independent), and a remote Flow
 Session whose canonical name lives on its Home (`title_source: unavailable`).
 
@@ -31,10 +31,10 @@ reconstruct the condition from process flags.
 `activity_snapshot.json` pins `lf ps --json`: exact live Exec and provider
 processes carry OS-derived state, while a provider without exact ownership
 stays separate from the call tree. Rust and Swift both round-trip it; The
-Podium derives no process state of its own.
+Loopflow Desktop derives no process state of its own.
 
 `session_history_summary.json` and `wave_detail.json` pin the `SessionHistory`
-shape shared by `lf runs --json` and `lf usage --json`. Captured event sequences
+shape used by `lf usage --json` and Wave detail. Captured event sequences
 and native thread/turn references retain distinct outcomes. Optional counters,
 missing capture/start membership, stream finality and evidence gaps stay explicit.
 The optional `task_pr_id` retains the PR captured by the managed Flow;
@@ -51,7 +51,7 @@ The shared `LOO-*` identifier and canonical Project name remain presentation;
 the provider's Wave-qualified title is normalized before this reader returns.
 It is not a CLI/app DTO; Wave detail and roadmap fixtures cover those boundaries.
 
-`task_execution_stalled.json` and `task_flow_stalled.json` retain the same stalled Run and interrupt → resume reason across CLI and desktop.
+`task_execution_stalled.json` and `task_flow_stalled.json` retain the same stalled Session and interrupt → resume reason across CLI and desktop.
 
 `task_files.json` pins `lf diff --files`, `lf diff`, `lf file` and `lf save` JSON:
 exact comparison bases,
@@ -64,7 +64,7 @@ resolved checkout. Rust round-trips the full Task snapshot; Swift reads the
 workspace identity used before the next roadmap refresh. Flow graph fixtures
 include the derived interaction stages and route references alongside steps.
 
-`ask_session.json` keeps the caller Run separate from the Ask conversation Run.
+`ask_session.json` keeps the caller capture separate from the Ask conversation.
 A waiting Ask is available before its summary permits Complete.
 
 `context_report.json` pins `lf usage --context --json`: each recorded step's

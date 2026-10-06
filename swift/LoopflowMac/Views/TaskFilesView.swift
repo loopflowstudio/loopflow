@@ -11,6 +11,8 @@ enum TaskFileChrome {
 struct TaskFilesView: View {
     @Bindable var store: TaskFilesStore
     let prURL: URL?
+    /// The recorded base moves with a store commit, not a file.
+    let prBase: String?
     @Environment(\.palette) private var palette
     @FocusState private var navigatorFocused: Bool
 
@@ -24,15 +26,9 @@ struct TaskFilesView: View {
             documentPane
         }
         .background(palette.background)
-        .task(id: "\(store.base)|\(store.needsComparison)") {
-            guard store.needsComparison else { return }
-            await store.refreshChanges()
-            // Linked-worktree Git metadata may live outside the watched checkout.
-            // Refresh membership/base only; document synchronization is event-driven.
-            while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(10)) } catch { return }
-                await store.refreshChanges()
-            }
+        .task(id: "\(store.base)|\(store.needsComparison)|\(prBase ?? "")") {
+            // Later readings follow the checkout and its Git metadata changing.
+            if store.needsComparison { await store.refreshChanges() }
         }
         .task(id: store.showIgnored) {
             store.observeFiles()

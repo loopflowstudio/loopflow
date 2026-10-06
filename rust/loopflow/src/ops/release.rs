@@ -54,7 +54,7 @@ const FALLBACK_NOTES_MAX_PRS: usize = 50;
 const RELEASE_NOTES_STATUS_PREFIX: &str = "<!-- loopflow:release-notes=";
 const RELEASE_WORKTREE_CONTEXT_ENV: [&str; 3] = [
     crate::lf::WORK_DECLARATION_ENV,
-    crate::durable::RUN_ID_ENV,
+    crate::session_record::CAPTURE_KEY_ENV,
     crate::work::wave::context::WAVE_ID_ENV,
 ];
 

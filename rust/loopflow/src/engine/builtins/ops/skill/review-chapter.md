@@ -51,14 +51,14 @@ Lead with experienced changes for users, operators, maintainers and agents,
 organized by Wave. Preserve exact claims, evidence dates, counterexamples,
 Task/PR references, changed claims and coverage gaps underneath. Report actual
 Task transfers and cancellations only where dated evidence establishes them.
-If a next chapter name is supplied, `lf repo new-chapter <name> --dry-run --json`
+If an exact-ID plan is supplied, `lf repo new-chapter <name> --plan <plan.json> --dry-run --json`
 can supply prospective dispositions for the entire repository. Label that dated
 preview separately from historical facts; it does not apply
 rotation. Never invent a second Task classifier in prose.
 
 Separate next-chapter proposals: valuable goals, changed assumptions, goals not
 evidenced as priorities, and misplaced or unowned active work. Judge Wave
-boundaries without creating Projects or preserving backlog by inertia. State
+boundaries without creating Projects or retiring unreviewed backlog. State
 `Coverage: complete` or `Coverage: incomplete` for each Wave and the repository,
 naming missing sources. Preserve corrections as dated observations. A review
 with incomplete history cannot claim an accepted starting boundary.

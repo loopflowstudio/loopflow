@@ -3,6 +3,10 @@
 
 uv run python scripts/desktop_performance.py run --output /tmp/desktop-baseline
 uv run python scripts/desktop_performance.py run --output /tmp/after --baseline /tmp/baseline
+
+# A commit from another process, to the row rendered, on a private copy of a Home.
+uv run python scripts/desktop_performance.py write-visible \\
+    --home /tmp/desktop-launch/home --repo ~/src/loopflow --output /tmp/write-visible
 """
 
 from __future__ import annotations
@@ -37,6 +41,34 @@ BUILD_COMMAND = [
     "--jobs",
     "4",
 ]
+ENDPOINTS = {
+    "snapshot": [
+        "Endpoint: in-process native bitmap capture with text verification.",
+        "**Not compositor paint time. Frame-hitch evidence is unavailable.**",
+        "",
+        "Production workspace, router and local CLI reads over an isolated SQLite snapshot. "
+        "Copied provider connections are refused. "
+        "Cold workspace construction is not OS app launch. "
+        "Session input readiness is unmeasured. "
+        "Key-window and intermediate-sheet observations remain in each attempt.",
+    ],
+    "run": [
+        "Endpoint: in-process native bitmap capture with text verification; "
+        "Session return also waits for owned PTY replies.",
+        "**Not compositor paint time. Frame-hitch evidence is unavailable.**",
+        "",
+        "Fixture data excludes CLI/registry discovery, network and provider startup. "
+        "Three retained cat PTYs per population.",
+    ],
+    "write-visible": [
+        "Endpoint: another process's commit to a private Home's store, through the real "
+        "`lf monitor work --watch` reader, to native bitmap capture with text verification.",
+        "**Not compositor paint time. Frame-hitch evidence is unavailable.**",
+        "",
+        "The interval starts when the writing process has exited. Rows are written with "
+        "sqlite3, so no Exec, sync or provider is involved. Each write waits for an idle reader.",
+    ],
+}
 
 
 def _sources() -> str:
@@ -158,7 +190,17 @@ def _summarize(events: list[dict]) -> dict:
 def _comparison(current: dict, baseline: dict) -> dict:
     # Different source builds are the purpose of comparison; different measurement
     # contracts, host or population would make the latency delta misleading.
-    for key in ["host", "build_mode", "command", "measurement_source", "snapshot", "repo", "issue"]:
+    for key in [
+        "host",
+        "build_mode",
+        "command",
+        "measurement_source",
+        "snapshot",
+        "repo",
+        "issue",
+        "journey",
+        "inputs",
+    ]:
         if current["metadata"].get(key) != baseline["metadata"].get(key):
             return {"available": False, "reason": f"Different {key}"}
     for key in ["population_version", "populations", "scenarios", "endpoint", "poll_interval_ms"]:
@@ -232,24 +274,16 @@ def _report(output: Path, baseline: Path | None) -> dict:
     lines = [
         f"# Desktop measurements: {summary['status']}",
         "",
-        "Endpoint: in-process native bitmap capture with text verification."
-        + ("" if snapshot_run else " Session return also waits for owned PTY replies."),
-        "**Not compositor paint time. Frame-hitch evidence is unavailable.**",
-        "",
-        (
-            "Production Podium, router and local CLI reads over an isolated SQLite snapshot. "
-            "Copied provider connections are refused. "
-            "Cold workspace construction is not OS app launch. "
-            "Session input readiness is unmeasured. "
-            "Key-window and intermediate-sheet observations remain in each attempt."
-            if snapshot_run
-            else "Fixture data excludes CLI/registry discovery, network and provider startup. "
-            "Three retained cat PTYs per population."
-        ),
+        *(ENDPOINTS["snapshot"] if snapshot_run else ENDPOINTS[metadata.get("journey", "run")]),
         f"Attempts: {len(summary['attempts'])}/{summary['expected_attempts']}; "
         f"not started: {summary['not_started']}.",
         "First interaction and warm samples are separate. "
         "p95 requires 20 successful samples. No budget is scored.",
+        *(
+            ["Targets, not gates: a created Task within 1000 ms p95, a Session row within 500 ms."]
+            if metadata.get("journey") == "write-visible"
+            else []
+        ),
         "",
         "| Population | Scenario | State | Pass/attempt | p50 ms | p95 ms |",
         "|---|---|---|---:|---:|---:|",
@@ -402,6 +436,34 @@ def _run_process(
         signal.signal(signal.SIGTERM, previous)
 
 
+def _private_home(home: Path, lf: Path) -> Path:
+    """The store the benchmark writes rows into: never the one in use."""
+    home = home.resolve()
+    live = Path(os.environ.get("LF_HOME") or Path.home() / ".lf").resolve()
+    if home == live:
+        raise SystemExit(
+            f"{home} is the Home in use. Copy it first: "
+            "scripts/benchmarks/desktop-performance/launch.py writes <work>/home."
+        )
+    if not (home / "loopflow.db").exists():
+        raise SystemExit(f"{home} has no loopflow.db")
+    if not lf.exists():
+        raise SystemExit(f"{lf} does not exist; build it or pass --lf")
+    # The copy must already have the schema this lf reads; say so before a
+    # five-minute wait for a reading that cannot come.
+    environment = {k: v for k, v in os.environ.items() if not k.startswith(("LF_", "LOOPFLOW_"))}
+    probe = subprocess.run(
+        [str(lf), "wave", "list", "--json"],
+        cwd=home,
+        env={**environment, "LF_HOME": str(home)},
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode != 0:
+        raise SystemExit(f"{lf} cannot read {home}:\n{probe.stderr.strip()}")
+    return home
+
+
 def _run(
     output: Path,
     samples: int,
@@ -410,15 +472,22 @@ def _run(
     binary: Path | None = None,
     repo: Path | None = None,
     issue: str | None = None,
+    journey: str = "run",
+    extra: dict[str, str] | None = None,
 ) -> int:
     output.mkdir(parents=True, exist_ok=False)
+    extra = extra or {}
     test_filter = (
         "DesktopPerformanceTests.measureSnapshotTaskOpening"
         if snapshot
+        else "DesktopPerformanceTests.measureWriteToVisible"
+        if journey == "write-visible"
         else "DesktopPerformanceTests.measureExperiences"
     )
     metadata = {
         "schema": 1,
+        "journey": journey,
+        "inputs": extra,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "host": {"name": platform.node(), "os": platform.platform(), "arch": platform.machine()},
         "build_mode": "SwiftPM debug -gnone",
@@ -435,7 +504,9 @@ def _run(
                 ]
             )
         ).hexdigest(),
-        "population_source": "isolated DTO fixtures; no configured Home",
+        "population_source": "isolated DTO fixtures; no configured Home"
+        if journey == "run"
+        else "a private copy of a Home; the rows written are removed after each attempt",
         "resources_before": {
             "load_average": os.getloadavg(),
             "free_bytes": shutil.disk_usage(output).free,
@@ -464,10 +535,14 @@ def _run(
         )
     else:
         environment = os.environ.copy()
+        journal = "LF_DESKTOP_PERF_OUTPUT" if journey == "run" else "LF_DESKTOP_PERF_WRITE_OUTPUT"
+        environment.pop("LF_DESKTOP_PERF_OUTPUT", None)
+        environment.pop("LF_DESKTOP_PERF_WRITE_OUTPUT", None)
         environment.update(
+            {journal: str(output / "attempts.jsonl")},
             LOOPFLOW_NATIVE_TESTS="1",
-            LF_DESKTOP_PERF_OUTPUT=str(output / "attempts.jsonl"),
             LF_DESKTOP_PERF_SAMPLES=str(samples),
+            **extra,
         )
         if snapshot:
             environment.update(
@@ -545,6 +620,29 @@ def main() -> int:
     )
     snapshot_command.add_argument("--database", type=Path, required=True)
     snapshot_command.add_argument("--output", type=Path, required=True)
+    written = commands.add_parser(
+        "write-visible",
+        help="Commit from another process to a private Home and time the row appearing",
+    )
+    written.add_argument(
+        "--output", type=Path, required=True, help="New directory; never overwrites evidence"
+    )
+    written.add_argument(
+        "--home", type=Path, required=True, help="A private copy of a Home; rows are written to it"
+    )
+    written.add_argument(
+        "--repo", type=Path, required=True, help="Repository whose Waves the window shows"
+    )
+    written.add_argument(
+        "--lf",
+        type=Path,
+        default=REPO / "target/release/lf",
+        help="The lf whose reader is measured; its schema must match the copy",
+    )
+    written.add_argument(
+        "--samples", type=int, default=21, help="Attempts per write; default 1 first + 20 warm"
+    )
+    written.add_argument("--baseline", type=Path)
     report = commands.add_parser(
         "report", help="Rebuild reports, including interrupted invocation evidence"
     )
@@ -555,6 +653,8 @@ def main() -> int:
         _snapshot(args.database, args.output)
         print(args.output / "snapshot.json")
         return 0
+    if args.command != "report" and args.samples < 1:
+        parser.error("--samples must be positive")
     if args.command == "run":
         if args.samples < 1:
             parser.error("--samples must be positive")
@@ -568,6 +668,19 @@ def main() -> int:
             args.binary.resolve() if args.binary else None,
             args.repo.resolve() if args.repo else None,
             args.issue,
+        )
+    if args.command == "write-visible":
+        lf = args.lf.resolve()
+        return _run(
+            args.output.resolve(),
+            args.samples,
+            args.baseline,
+            journey="write-visible",
+            extra={
+                "LF_DESKTOP_PERF_LF": str(lf),
+                "LF_DESKTOP_PERF_HOME": str(_private_home(args.home, lf)),
+                "LF_DESKTOP_PERF_REPO": str(args.repo.expanduser().resolve()),
+            },
         )
     summary = _report(args.output, args.baseline)
     print(args.output / "report.md")

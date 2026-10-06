@@ -76,9 +76,9 @@ pub(crate) fn capture_membership() -> Result<StepExec> {
         flow.version == token.version && !flow.finished,
         "stale Flow step launch"
     );
-    let reserved = match &flow.current_attempt {
+    let reserved = match &flow.selected_capture {
         Some(attempt) if !attempt.published && flow.pending_session_id.is_none() => {
-            (attempt.captured, attempt.run_id.clone())
+            (attempt.captured, attempt.artifact_key.clone())
         }
         _ => return Ok(independent),
     };

@@ -232,7 +232,7 @@ struct TaskFlowProofTests {
         session["open_argv"] = ["must-not-launch"]
         let source = try FlowSource(session: JSONSerialization.data(withJSONObject: [session]))
         let query = RegistryQuery { args, _ in try await source.respond(args) }
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)

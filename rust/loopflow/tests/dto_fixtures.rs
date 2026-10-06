@@ -10,13 +10,13 @@ const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_
 
 #[test]
 fn active_sessions_preserve_identity_waiting_clients_and_incomplete_evidence() {
-    use loopflow::lf::commands::runs::ActiveSessionsSnapshot;
+    use loopflow::lf::commands::session_history::ActiveSessionsSnapshot;
     use loopflow::lf::commands::top::ActivityState;
     let json = include_str!("../../../tests/fixtures/dto/active_runs.json");
     let snapshot: ActiveSessionsSnapshot = serde_json::from_str(json).unwrap();
     assert_eq!(
         snapshot.discovery,
-        loopflow::lf::commands::runs::DiscoveryState::Ready
+        loopflow::lf::commands::session_history::DiscoveryState::Ready
     );
     assert_eq!(snapshot.sessions[0].work, snapshot.task);
     assert_eq!(
@@ -101,7 +101,12 @@ fn pm_show_requires_team_identity_even_without_project_ownership() {
 #[test]
 fn wave_detail_preserves_flow_and_requires_home() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
-    let Evidence::Ok { items: runs, .. } = &snapshot.runs else {
+    assert_eq!(
+        snapshot.project_readiness.state,
+        loopflow::store::sqlite::ProjectReadinessState::Ready
+    );
+    assert!(snapshot.project_readiness.activation.is_none());
+    let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
     };
     assert_eq!(runs[0].first_provider_attempt_at, Some(1784052010));
@@ -114,6 +119,7 @@ fn wave_detail_preserves_flow_and_requires_home() {
         panic!("missing Projects")
     };
     assert_eq!(items[0].flow, "task-design");
+    assert!(items[0].current);
     assert_eq!(items[0].status, loopflow::pm::ProjectStatus::Started);
 
     let encoded = serde_json::to_string(&snapshot).unwrap();
@@ -323,9 +329,9 @@ fn exec_page_retains_outcomes_unknowns_and_continuation() {
 
 #[test]
 fn session_input_history_retains_distinct_native_results_and_unknown_exec() {
-    let value: loopflow::lf::commands::runs::SessionHistory = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/session_history_summary.json"
-    ))
+    let value: loopflow::lf::commands::session_history::SessionHistory = serde_json::from_str(
+        include_str!("../../../tests/fixtures/dto/session_history_summary.json"),
+    )
     .unwrap();
     assert_eq!(value.providers.len(), 2);
     assert_eq!(value.providers[0].outcome.as_deref(), Some("failed"));
@@ -337,7 +343,8 @@ fn session_input_history_retains_distinct_native_results_and_unknown_exec() {
     assert!(encoded.get("subjects").is_none());
     assert!(encoded.get("outcome").is_none());
     assert_eq!(
-        serde_json::from_value::<loopflow::lf::commands::runs::SessionHistory>(encoded).unwrap(),
+        serde_json::from_value::<loopflow::lf::commands::session_history::SessionHistory>(encoded)
+            .unwrap(),
         value
     );
 }
@@ -478,4 +485,30 @@ fn context_report_keeps_unknown_sources_distinct_from_zero() {
         .iter()
         .all(|usage| usage.tokens.is_none()));
     assert_eq!(ContextReport::new(report.steps.clone()), report);
+}
+
+#[test]
+fn work_frames_keep_each_part_and_require_every_envelope_field() {
+    use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
+    let json = include_str!("../../../tests/fixtures/dto/work_frame.json");
+    let frames: Vec<WorkFrame> = serde_json::from_str(json).unwrap();
+    let source: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert_eq!(serde_json::to_value(&frames).unwrap(), source);
+    assert!(matches!(frames[0].content, WorkContent::Planning(Some(_))));
+    assert_eq!(frames[0].answers, None);
+    assert!(matches!(frames[2].content, WorkContent::Task(None)));
+    assert!(frames[2].unavailable.is_some());
+    assert!(frames[4].revisions.is_none());
+    let WorkContent::Heartbeat(heartbeat) = &frames[5].content else {
+        panic!("last fixture frame is a heartbeat");
+    };
+    assert_eq!(heartbeat.projections["planning"], 3);
+    for field in ["sequence", "home", "part"] {
+        let mut missing = source[0].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<WorkFrame>(missing).is_err(),
+            "{field} must be required"
+        );
+    }
 }

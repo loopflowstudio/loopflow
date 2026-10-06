@@ -5,6 +5,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from scripts import lifecycle_scorecard as scorecard
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -127,15 +129,15 @@ def test_run_window_includes_long_runs_and_excludes_foreign_unfinished_and_futur
         _run(tmp_path / "other", id="foreign"),
     ]
     path.write_text(json.dumps(runs))
-    selected = scorecard.load_runs(path, tmp_path)
+    selected = scorecard.load_history(path, tmp_path)
     assert [run["id"] for run in selected] == ["long", "boundary", "unfinished", "old", "future"]
     report = scorecard.build_report(
         _policy(), tmp_path, NOW.replace(microsecond=500000), selected, [], []
     )
     rows = {row["id"]: row for row in report["rows"]}
-    assert rows["run_elapsed_seconds"]["eligible"] == 2
-    assert rows["run_elapsed_seconds"]["p50"] == 60
-    assert rows["run_elapsed_seconds"]["p95"] == 180
+    assert rows["session_elapsed_seconds"]["eligible"] == 2
+    assert rows["session_elapsed_seconds"]["p50"] == 60
+    assert rows["session_elapsed_seconds"]["p95"] == 180
 
 
 def test_recorded_attempt_joins_exact_pr_across_run_windows(tmp_path: Path) -> None:
@@ -210,13 +212,13 @@ def test_usage_keeps_missing_nonfinal_and_gapped_receipts_unknown(tmp_path: Path
             None,
         )
     }
-    assert rows["run_total_input_tokens"]["eligible"] == 4
-    assert rows["run_total_input_tokens"]["measured"] == 1
-    assert rows["run_total_input_tokens"]["p50"] == 100
-    assert rows["run_cost_usd"]["measured"] == 0
-    assert rows["run_cost_usd"]["p50"] is None
-    assert rows["run_cost_usd"]["verdict"] == "unknown"
-    assert rows["run_elapsed_seconds"]["measured"] == 4
+    assert rows["session_total_input_tokens"]["eligible"] == 4
+    assert rows["session_total_input_tokens"]["measured"] == 1
+    assert rows["session_total_input_tokens"]["p50"] == 100
+    assert rows["session_cost_usd"]["measured"] == 0
+    assert rows["session_cost_usd"]["p50"] is None
+    assert rows["session_cost_usd"]["verdict"] == "unknown"
+    assert rows["session_elapsed_seconds"]["measured"] == 4
 
 
 def test_current_pr_owners_measure_intervals_and_preserve_missing_coverage(tmp_path: Path) -> None:
@@ -268,8 +270,9 @@ def test_recorded_repair_breaches_even_when_other_coverage_is_missing(tmp_path: 
     assert (row["eligible"], row["measured"], row["p50"], row["verdict"]) == (2, 1, 1, "fail")
 
 
+@pytest.mark.parametrize("missing", [None, "loopflow.db", "runs.json", "performance/budgets.json"])
 def test_generator_runs_with_current_tables_and_current_run_projection(
-    tmp_path: Path, capsys
+    tmp_path: Path, capsys, missing: str | None
 ) -> None:
     policy_dir = tmp_path / "performance"
     policy_dir.mkdir()
@@ -301,26 +304,33 @@ def test_generator_runs_with_current_tables_and_current_run_projection(
             ]
         )
     )
-    assert (
-        scorecard.main(
-            [
-                "--repo",
-                str(tmp_path),
-                "--database",
-                str(database),
-                "--runs",
-                str(runs),
-                "--envelope",
-            ]
-        )
-        == 0
+    if missing is not None:
+        (tmp_path / missing).unlink()
+    result = scorecard.main(
+        [
+            "--repo",
+            str(tmp_path),
+            "--database",
+            str(database),
+            "--history",
+            str(runs),
+            "--envelope",
+        ]
     )
+    if missing is not None:
+        assert result == 1
+        output = capsys.readouterr()
+        assert output.out == ""
+        assert "lifecycle-scorecard:" in output.err
+        return
+    assert result == 0
     envelope = json.loads(capsys.readouterr().out)
     rows = {row["id"]: row for row in envelope["report"]["rows"]}
-    assert rows["run_elapsed_seconds"]["p50"] == 59
-    assert rows["run_total_input_tokens"]["p50"] == 100
+    assert rows["session_elapsed_seconds"]["p50"] == 59
+    assert rows["session_total_input_tokens"]["p50"] == 100
     attempt = rows["recorded_attempt_to_merge_seconds"]
     assert (attempt["eligible"], attempt["measured"], attempt["p50"]) == (1, 1, 40)
     assert "Observed lower bound" in envelope["text"]
-    assert envelope["metric_observations"][0]["kind"] == "unavailable"
-    assert "Task-loop intervals" in envelope["metric_observations"][0]["reason"]
+    # The accepted chapter retired task-loop-trust; reporting needs no metric contract.
+    assert not (tmp_path / "wave/product/metrics/task-loop-trust.md").exists()
+    assert envelope["metric_observations"] == []

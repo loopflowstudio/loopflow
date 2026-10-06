@@ -9,6 +9,7 @@ use crate::engine::worktrees::main_repo_root;
 use crate::ops::pm::PmResolvedTask;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
+use crate::store::sqlite::OpenExecs;
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
 use crate::work::task::{PrPhase, Task, TaskPr};
 
@@ -105,7 +106,7 @@ async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore
     let store = match open_registry_for_authority().await {
         Ok(store) => Arc::new(store),
         Err(RegistryUnavailable::MissingFile { .. })
-            if std::env::var_os(crate::durable::RUN_ID_ENV).is_none() =>
+            if crate::journal::agent_caller().is_none() =>
         {
             return Ok(None)
         }
@@ -548,10 +549,149 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
         .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
 }
 
-/// Completion cannot implicitly settle another Flow's work.
-pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
+/// A Task decision, never an Exec outcome or process-control receipt.
+pub(super) fn accept_historical_uncertainty(
+    store: &SharedStore,
+    task: &Task,
+    exec_ids: &[crate::id::ExecId],
+    reason: &str,
+) -> OpsResult<()> {
+    if exec_ids.is_empty() {
+        return Ok(());
+    }
     let work = store.sqlite.task_work(&task.id).map_err(task_error)?;
-    let mut blockers = execution_blockers(store, &work, ExecutionCheck::RetainWork)?;
+    for id in exec_ids {
+        if !historical_unknown_exec(store, &work, id)? {
+            return Err(task_error(format!(
+                "Exec {id} is not an unowned historical unknown in Task {}; retained all execution protection",
+                task.plan.identifier
+            )));
+        }
+    }
+    let accepted = store
+        .sqlite
+        .task_accepted_unknown_execs(&task.id)
+        .map_err(task_error)?;
+    let mut new_ids: Vec<_> = exec_ids
+        .iter()
+        .filter(|id| !accepted.contains(*id))
+        .cloned()
+        .collect();
+    new_ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    new_ids.dedup();
+    if !new_ids.is_empty() {
+        store
+            .sqlite
+            .append_task_event(
+                &task.id,
+                &crate::work::task::TaskEventKind::HistoricalUncertaintyAccepted {
+                    exec_ids: new_ids,
+                    reason: reason.to_string(),
+                },
+            )
+            .map_err(task_error)?;
+    }
+    Ok(())
+}
+
+fn historical_unknown_exec(
+    store: &SharedStore,
+    work: &crate::task_work::TaskWork,
+    id: &crate::id::ExecId,
+) -> OpsResult<bool> {
+    let Some(exec) = work.execs.iter().find(|exec| &exec.id == id) else {
+        return Ok(false);
+    };
+    // Any process receipt disqualifies acceptance, regardless of liveness.
+    // Without a receipt, completion or a previous boot already proves exit.
+    if crate::journal::current_exec_id().as_ref() == Some(id)
+        || exec.completed_at.is_some()
+        || crate::journal::began_before_boot(exec.started_at)
+        || crate::journal::read_exec_process_receipts_at(&crate::store::lf_home_dir())
+            .map_err(task_error)?
+            .iter()
+            .any(|receipt| receipt.exec_id == id.as_str())
+    {
+        return Ok(false);
+    }
+    if let Some(caller) = &exec.caller_session_id {
+        if !store
+            .sqlite
+            .session(caller)
+            .map_err(task_error)?
+            .is_some_and(|session| session.completed_at.is_some())
+        {
+            return Ok(false);
+        }
+    }
+    for session in work
+        .sessions
+        .iter()
+        .filter(|session| session.completed_at.is_none())
+    {
+        if let Some(driver) = store
+            .sqlite
+            .session_driver(&session.id)
+            .map_err(task_error)?
+        {
+            if driver.exec_id.as_ref() == Some(id) || &driver.provider_exec_id == id {
+                return Ok(false);
+            }
+        }
+    }
+    for flow in work
+        .flows
+        .iter()
+        .filter(|flow| flow.summary.state == crate::session::FlowSummaryState::Current)
+    {
+        if store
+            .sqlite
+            .flow_exec_ids(&flow.summary.id)
+            .map_err(task_error)?
+            .contains(id)
+            || store
+                .sqlite
+                .flow(&flow.summary.id)
+                .map_err(task_error)?
+                .and_then(|flow| flow.claim)
+                .is_some_and(|claim| &claim.owner.exec_id == id)
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+pub(super) fn completion_work_blockers(
+    store: &SharedStore,
+    task: &Task,
+    open: &OpenExecs,
+) -> OpsResult<Vec<String>> {
+    let mut work = store
+        .sqlite
+        .task_open_work(&task.id, open)
+        .map_err(task_error)?;
+    let mut accepted = HashSet::new();
+    for id in store
+        .sqlite
+        .task_accepted_unknown_execs(&task.id)
+        .map_err(task_error)?
+    {
+        // Acceptance cannot hide a newly observed process or current owner.
+        if historical_unknown_exec(store, &work, &id)? {
+            accepted.insert(id);
+        }
+    }
+    work.execs.retain(|exec| !accepted.contains(&exec.id));
+    work_blockers(store, &work)
+}
+
+pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
+    work_blockers(store, &open_work(store, task)?)
+}
+
+fn work_blockers(store: &SharedStore, work: &crate::task_work::TaskWork) -> OpsResult<Vec<String>> {
+    let mut blockers = execution_blockers(store, work, ExecutionCheck::RetainWork)?;
     for flow in work.flows.iter().filter(|flow| !flow.managed) {
         if flow.summary.state == crate::session::FlowSummaryState::Current {
             blockers.push(format!(
@@ -563,16 +703,20 @@ pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsR
     Ok(blockers)
 }
 
+fn open_work(store: &SharedStore, task: &Task) -> OpsResult<crate::task_work::TaskWork> {
+    let open = store.sqlite.open_execs().map_err(task_error)?;
+    store
+        .sqlite
+        .task_open_work(&task.id, &open)
+        .map_err(task_error)
+}
+
 /// Restoring a checkout preserves idle Flows; only unresolved execution waits.
 pub(super) fn associated_execution_blockers(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<Vec<String>> {
-    execution_blockers(
-        store,
-        &store.sqlite.task_work(&task.id).map_err(task_error)?,
-        ExecutionCheck::RetainWork,
-    )
+    execution_blockers(store, &open_work(store, task)?, ExecutionCheck::RetainWork)
 }
 
 /// Resumption acquires exact Flow authority; unrelated history is not a claim.
@@ -580,11 +724,7 @@ pub(super) fn recovery_execution_blockers(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<Vec<String>> {
-    execution_blockers(
-        store,
-        &store.sqlite.task_work(&task.id).map_err(task_error)?,
-        ExecutionCheck::ResumeFlow,
-    )
+    execution_blockers(store, &open_work(store, task)?, ExecutionCheck::ResumeFlow)
 }
 
 #[derive(Clone, Copy)]

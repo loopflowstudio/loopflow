@@ -314,11 +314,12 @@ fn _copy_store_for_candidate(source_path: &Path, destination_path: &Path) -> Res
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     source.busy_timeout(Duration::from_secs(5))?;
+    let snapshot = source.unchecked_transaction()?;
+    // BEGIN is deferred: read a page to pin the WAL snapshot before backing up.
+    // Otherwise every intervening writer can restart the incremental backup.
+    snapshot.query_row("SELECT count(*) FROM sqlite_schema", [], |_| Ok(()))?;
     let mut destination = rusqlite::Connection::open(destination_path)?;
-    let backup = rusqlite::backup::Backup::new(&source, &mut destination)?;
-    // Finish a typical Home snapshot between controller writes. Tiny chunks
-    // repeatedly restart against the live WAL and can make a read-only
-    // preflight effectively unbounded.
+    let backup = rusqlite::backup::Backup::new(&snapshot, &mut destination)?;
     backup.run_to_completion(4096, Duration::from_millis(1), None)?;
     Ok(())
 }
@@ -589,6 +590,71 @@ mod compatibility_tests {
         Compatibility, ExecutableCompatibility, Verdict,
     };
     use crate::build_info::MigrationAuthority::{Published, ValidationOnly};
+
+    #[test]
+    fn candidate_snapshot_finishes_while_wal_writes_continue() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc, Arc,
+        };
+        use std::time::{Duration, Instant};
+
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.db");
+        let destination = directory.path().join("candidate.db");
+        let writer = rusqlite::Connection::open(&source).unwrap();
+        writer
+            .execute_batch(
+                "PRAGMA journal_mode=WAL;
+             CREATE TABLE history (id INTEGER PRIMARY KEY, value INTEGER, payload BLOB);
+             INSERT INTO history VALUES (0, 0, zeroblob(67108864));",
+            )
+            .unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let finished = Arc::new(AtomicBool::new(false));
+        let (ready, started) = mpsc::channel();
+        let stop_writer = Arc::clone(&stop);
+        let writer_finished = Arc::clone(&finished);
+        let handle = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            writer
+                .execute("UPDATE history SET value=value+1 WHERE id=0", [])
+                .unwrap();
+            ready.send(()).unwrap();
+            while !stop_writer.load(Ordering::Relaxed) && Instant::now() < deadline {
+                writer
+                    .execute("UPDATE history SET value=value+1 WHERE id=0", [])
+                    .unwrap();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            writer_finished.store(true, Ordering::Relaxed);
+        });
+        started.recv().unwrap();
+        let result = super::_copy_store_for_candidate(&source, &destination);
+        let completed_during_writes = !finished.load(Ordering::Relaxed);
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+        result.unwrap();
+        assert!(
+            completed_during_writes,
+            "snapshot waited for the writer to stop"
+        );
+        let copy = rusqlite::Connection::open(&destination).unwrap();
+        let (version, bytes): (i64, i64) = copy
+            .query_row(
+                "SELECT value, length(payload) FROM history WHERE id=0",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(version > 0);
+        assert_eq!(bytes, 67108864);
+        assert_eq!(
+            copy.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+    }
 
     fn executable() -> ExecutableCompatibility {
         ExecutableCompatibility::Compatible { references: 0 }
@@ -1174,7 +1240,7 @@ fn read_binary_preflight(binary: &Path) -> Result<BinaryPreflight> {
 fn isolate_candidate_command(command: &mut Command) {
     for name in [
         crate::machine_install::INSTALL_SWITCH_ENV,
-        crate::durable::RUN_ID_ENV,
+        crate::session_record::CAPTURE_KEY_ENV,
         "LF_BIN",
         "LF_HOME",
     ] {

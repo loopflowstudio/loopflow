@@ -119,26 +119,39 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
         runtime.block_on(async {
             store.create_wave(&wave).await.unwrap();
             store.create_project(&project).await.unwrap();
+            rusqlite::Connection::open(home.path().join("loopflow.db"))
+                .unwrap()
+                .execute(
+                    "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                    rusqlite::params![wave.id(), project.id.as_str()],
+                )
+                .unwrap();
             let mut historical = snapshot.clone();
             historical.items[0].branch_name = None;
             store
-                .put_pm_snapshot(PmSnapshotRow {
-                    wave_id: wave.id().clone(),
-                    provider: "linear".into(),
-                    initiative: "initiative-1".into(),
-                    synced_at: now.unix_timestamp(),
-                    snapshot: historical,
-                })
+                .put_pm_snapshot(
+                    PmSnapshotRow {
+                        wave_id: wave.id().clone(),
+                        provider: "linear".into(),
+                        initiative: "initiative-1".into(),
+                        synced_at: now.unix_timestamp(),
+                        snapshot: historical,
+                    },
+                    None,
+                )
                 .await
                 .unwrap();
             store
-                .put_pm_snapshot(PmSnapshotRow {
-                    wave_id: wave.id().clone(),
-                    provider: "linear".into(),
-                    initiative: "initiative-1".into(),
-                    synced_at: now.unix_timestamp(),
-                    snapshot,
-                })
+                .put_pm_snapshot(
+                    PmSnapshotRow {
+                        wave_id: wave.id().clone(),
+                        provider: "linear".into(),
+                        initiative: "initiative-1".into(),
+                        synced_at: now.unix_timestamp(),
+                        snapshot,
+                    },
+                    None,
+                )
                 .await
                 .unwrap();
             assert!(store.list_tasks(None).await.unwrap().is_empty());
@@ -250,7 +263,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                         cwd: checkout.clone(),
                         message: None,
                         model: None,
-                        current_attempt: None,
+                        selected_capture: None,
                         pending_session_id: None,
                         ready_summary: None,
                         worker_generation: 0,
@@ -344,7 +357,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
                     observed.project.as_mut().unwrap().id = "project-2".into();
                 }
                 runtime
-                    .block_on(store.put_pm_task(&scope, "linear", observed))
+                    .block_on(store.put_pm_task(&scope, "linear", observed, None, None))
                     .unwrap();
                 if condition == "connection" {
                     fs::write(
@@ -395,7 +408,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
             worker.invocation = QueuedInvocation::load(&checkout, "adoption").unwrap();
             worker.cursor = Default::default();
             worker.version = 0;
-            worker.current_attempt = None;
+            worker.selected_capture = None;
             worker.pending_session_id = None;
             worker.ready_summary = None;
             let worker = runtime
@@ -439,7 +452,7 @@ fn task_adopts_linear_checkout_and_preserves_saved_progress() {
             assert_eq!(stopped.invocation, worker.invocation);
             assert_eq!(stopped.cursor, worker.cursor);
             assert_eq!(stopped.pending_session_id, worker.pending_session_id);
-            assert_eq!(stopped.current_attempt, worker.current_attempt);
+            assert_eq!(stopped.selected_capture, worker.selected_capture);
             assert_eq!(stopped.failure, worker.failure);
             // Independent execution keeps working after the planning Task is gone.
             let output = run(&checkout, &["flow", "adoption"]);

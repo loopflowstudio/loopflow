@@ -54,7 +54,7 @@ DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
 GHOSTTY_REVISION = "4c838723173da757a16a2f3afd4c94f16732ef6a"
-GHOSTTY_ARTIFACT = "GhosttyKit-4c83872-lf1.xcframework.zip"
+GHOSTTY_ARTIFACT = "GhosttyKit-4c83872-lf2.xcframework.zip"
 
 
 def _app_environment(repo: Path) -> dict[str, str]:
@@ -217,6 +217,15 @@ def cmd_ghostty_build() -> int:
         if result.returncode != 0:
             return result.returncode
 
+    # The patch's own tests, plus upstream's prompt tests it changes.
+    result = run(
+        ["zig", "build", "test", "-Dtest-filter=command", "-Dtest-filter=semantic prompt"],
+        cwd=source,
+        check=False,
+    )
+    if result.returncode != 0:
+        return result.returncode
+
     result = run(["zig", "build", "-Doptimize=ReleaseFast"], cwd=source, check=False)
     if result.returncode != 0:
         return result.returncode
@@ -296,7 +305,7 @@ def cmd_run_debug(repo: Path = REPO_ROOT) -> int:
     print("Logs: ~/Library/Logs/Loopflow/")
     print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
     # The app resolves `lf` from its own bundle before PATH, so the dashboard
-    # reads this branch's ledger surfaces (`lf runs/trace/doctor --json`) rather
+    # reads this branch's ledger surfaces (`lf session list/trace/doctor --json`) rather
     # than whatever `lf` happens to be installed.
     print(f"Bundled lf: {DEV_APP}/Contents/MacOS/lf")
     print("Telemetry dashboard: Go → Telemetry (⌘1)")

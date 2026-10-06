@@ -1,7 +1,11 @@
 //! One association rule for CLI and Desktop. Membership is additive to binding;
 //! it never rewrites event attribution or follows causal parent Execs.
 
+use std::collections::HashMap;
+
 use crate::durable::TaskId;
+use crate::exec::Exec;
+use crate::id::ExecId;
 use crate::store::StoreResult;
 use crate::task_work::{TaskSession, TaskWork};
 
@@ -30,8 +34,7 @@ pub(super) fn flow_ids(selector: &str) -> String {
 
 fn session_membership(session: &str) -> String {
     format!(
-        "NOT EXISTS(SELECT 1 FROM agent_sessions scoped WHERE scoped.id={session}.id
-         AND scoped.primary_scope IS NOT NULL)
+        "{session}.primary_scope IS NULL
          AND ({session}.task_id=tw.id OR ({}) OR EXISTS(SELECT 1 FROM flow_sessions af
          WHERE af.id={session}.flow_session_id AND (af.task_id=tw.id OR ({}))))",
         checkout(&format!("{session}.cwd")),
@@ -62,6 +65,77 @@ fn exec_ids(selector: &str) -> String {
         tasks(selector), checkout("ae.cwd"), session_ids(selector), session_ids(selector), flow_ids(selector))
 }
 
+/// Every unfinished Exec paired with each Task it belongs to: the same
+/// membership as `exec_ids`, reached from the few unfinished Execs instead of
+/// from every Session a Task has, and for all Tasks in one statement. The
+/// index and join order are pinned: left to itself the planner scans every
+/// Exec and every event that names one.
+fn open_exec_tasks() -> String {
+    let session = session_membership("a");
+    format!(
+        "WITH open AS MATERIALIZED (SELECT id,cwd FROM execs INDEXED BY execs_unfinished
+            WHERE completed_at IS NULL),
+        sessions AS (SELECT DISTINCT se.exec_id AS exec,se.session_id AS session
+            FROM open CROSS JOIN session_events se ON se.exec_id=open.id
+            UNION SELECT a.driver_exec_id,a.id FROM open CROSS JOIN agent_sessions a ON a.driver_exec_id=open.id),
+        flows AS (SELECT DISTINCT fe.exec_id AS exec,fe.flow_id AS flow
+            FROM open CROSS JOIN flow_events fe ON fe.exec_id=open.id)
+        SELECT open.id,tw.id FROM open JOIN tasks tw ON {}
+        UNION SELECT s.exec,tw.id FROM sessions s JOIN agent_sessions a ON a.id=s.session
+            JOIN tasks tw ON ({session})
+        UNION SELECT f.exec,tw.id FROM flows f JOIN flow_sessions af ON af.id=f.flow
+            JOIN tasks tw ON af.task_id=tw.id OR ({})",
+        checkout("open.cwd"),
+        checkout(FLOW_CWD)
+    )
+}
+
+/// The unfinished Execs of every Task, read once for a reading of many Tasks.
+/// Unfinished Execs are few; a checkout's Exec history grows without bound.
+#[derive(Debug)]
+pub(crate) struct OpenExecs {
+    by_task: HashMap<String, Vec<Exec>>,
+}
+
+fn members(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+) -> StoreResult<(Vec<TaskSession>, Vec<crate::durable::FlowInventoryEntry>)> {
+    let sessions = tx
+        .prepare(&format!(
+            "SELECT s.id,s.title,s.kind,s.interactive,s.flow_session_id,s.completed_at,
+            COALESCE(s.flow_session_id=(SELECT current_invocation_id FROM tasks WHERE id=?1),0)
+            FROM agent_sessions s WHERE s.id IN ({}) ORDER BY s.created_at,s.id",
+            session_ids("?1")
+        ))?
+        .query_and_then([task.as_str()], |row| {
+            Ok(TaskSession {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                kind: serde_json::from_value(serde_json::Value::String(row.get(2)?))?,
+                interactive: row.get(3)?,
+                flow_session_id: row.get(4)?,
+                completed_at: row.get(5)?,
+                managed: row.get(6)?,
+            })
+        })?
+        .collect::<StoreResult<Vec<_>>>()?;
+    let mut flows = tx
+        .prepare(&format!(
+            "SELECT {},{} {} WHERE f.id IN ({}) ORDER BY f.id",
+            super::flows::FLOW_METADATA_COLUMNS,
+            super::flow_inventory::INVENTORY_EXTRA,
+            super::flow_inventory::INVENTORY_FROM,
+            flow_ids("?1")
+        ))?
+        .query_map([task.as_str()], super::flow_inventory::read_entry)?
+        .collect::<rusqlite::Result<StoreResult<Vec<_>>>>()??;
+    for flow in &mut flows {
+        flow.managed &= flow.summary.task_id.as_ref() == Some(task);
+    }
+    Ok((sessions, flows))
+}
+
 impl SqliteStore {
     pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -81,38 +155,7 @@ impl SqliteStore {
     pub fn task_work(&self, task: &TaskId) -> StoreResult<TaskWork> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let sessions = tx
-            .prepare(&format!(
-                "SELECT s.id,s.title,s.kind,s.interactive,s.flow_session_id,s.completed_at,
-            COALESCE(s.flow_session_id=(SELECT current_invocation_id FROM tasks WHERE id=?1),0)
-            FROM agent_sessions s WHERE s.id IN ({}) ORDER BY s.created_at,s.id",
-                session_ids("?1")
-            ))?
-            .query_and_then([task.as_str()], |row| {
-                Ok(TaskSession {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    kind: serde_json::from_value(serde_json::Value::String(row.get(2)?))?,
-                    interactive: row.get(3)?,
-                    flow_session_id: row.get(4)?,
-                    completed_at: row.get(5)?,
-                    managed: row.get(6)?,
-                })
-            })?
-            .collect::<StoreResult<Vec<_>>>()?;
-        let mut flows = tx
-            .prepare(&format!(
-                "SELECT {},{} {} WHERE f.id IN ({}) ORDER BY f.id",
-                super::flows::FLOW_METADATA_COLUMNS,
-                super::flow_inventory::INVENTORY_EXTRA,
-                super::flow_inventory::INVENTORY_FROM,
-                flow_ids("?1")
-            ))?
-            .query_map([task.as_str()], super::flow_inventory::read_entry)?
-            .collect::<rusqlite::Result<StoreResult<Vec<_>>>>()??;
-        for flow in &mut flows {
-            flow.managed &= flow.summary.task_id.as_ref() == Some(task);
-        }
+        let (sessions, flows) = members(&tx, task)?;
         let execs = tx
             .prepare(&format!(
                 "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
@@ -126,6 +169,50 @@ impl SqliteStore {
             sessions,
             flows,
             execs,
+        })
+    }
+
+    pub(crate) fn open_execs(&self) -> StoreResult<OpenExecs> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let execs = tx
+            .prepare(&format!(
+                "{} INDEXED BY execs_unfinished WHERE e.completed_at IS NULL
+                ORDER BY e.started_at DESC,e.id",
+                super::execs::EXEC_SELECT
+            ))?
+            .query_map([], super::execs::read_exec)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut tasks: HashMap<ExecId, Vec<String>> = HashMap::new();
+        let mut query = tx.prepare(&open_exec_tasks())?;
+        let mut rows = query.query([])?;
+        while let Some(row) = rows.next()? {
+            tasks.entry(row.get(0)?).or_default().push(row.get(1)?);
+        }
+        drop(rows);
+        drop(query);
+        tx.commit()?;
+        let mut by_task: HashMap<String, Vec<Exec>> = HashMap::new();
+        // Each Task's Execs keep the newest-first order they were read in.
+        for exec in execs {
+            for task in tasks.remove(&exec.id).unwrap_or_default() {
+                by_task.entry(task).or_default().push(exec.clone());
+            }
+        }
+        Ok(OpenExecs { by_task })
+    }
+
+    /// Sessions and Flows in full, with only the Execs still unfinished.
+    /// Completion and recovery ask nothing of finished execution.
+    pub(crate) fn task_open_work(&self, task: &TaskId, open: &OpenExecs) -> StoreResult<TaskWork> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let (sessions, flows) = members(&tx, task)?;
+        tx.commit()?;
+        Ok(TaskWork {
+            sessions,
+            flows,
+            execs: open.by_task.get(task.as_str()).cloned().unwrap_or_default(),
         })
     }
 
@@ -166,6 +253,7 @@ mod tests {
     use crate::id::{ExecId, TraceId, WaveId};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
+    use crate::task_work::TaskWork;
 
     #[tokio::test]
     async fn task_and_orphan_filters_resolve_aliases_before_pagination() {
@@ -386,6 +474,67 @@ mod tests {
             [("independent", false), ("managed", true)]
         );
         assert_eq!(work.execs.len(), 2);
+        // The open reading agrees with the full one about unfinished Execs.
+        assert!(store
+            .task_open_work(&task, &store.open_execs().unwrap())
+            .unwrap()
+            .execs
+            .is_empty());
+        let unfinished = ExecId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?1,?2,'/elsewhere',1)",
+                params![unfinished, TraceId::new()],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload) VALUES('history','started','open',?1,1,'{}')", [&unfinished]).unwrap();
+        }
+        let open = store
+            .task_open_work(&task, &store.open_execs().unwrap())
+            .unwrap();
+        assert_eq!(open.sessions, store.task_work(&task).unwrap().sessions);
+        assert_eq!(
+            open.execs.iter().map(|exec| &exec.id).collect::<Vec<_>>(),
+            [&unfinished]
+        );
+        // With every Exec unfinished, each membership path agrees: checkout,
+        // Session event, driver and Flow event.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TEMP TABLE finished AS SELECT id,completed_at FROM execs;
+             UPDATE execs SET completed_at=NULL;",
+            )
+            .unwrap();
+        let ids = |work: TaskWork| {
+            work.execs
+                .into_iter()
+                .map(|exec| exec.id)
+                .collect::<Vec<_>>()
+        };
+        let all = ids(store.task_work(&task).unwrap());
+        assert_eq!(all.len(), 3);
+        assert_eq!(
+            ids(store
+                .task_open_work(&task, &store.open_execs().unwrap())
+                .unwrap()),
+            all
+        );
+        store.conn.lock().unwrap().execute_batch(
+            "UPDATE execs SET completed_at=(SELECT completed_at FROM finished WHERE finished.id=execs.id);
+             DROP TABLE finished;",
+        )
+        .unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("DELETE FROM session_events WHERE receipt_key='open'", [])
+                .unwrap();
+            conn.execute("DELETE FROM execs WHERE id=?1", [&unfinished])
+                .unwrap();
+        }
         assert!(work.execs.iter().any(|exec| exec.id == mechanical));
         assert!(work.execs.iter().any(|exec| exec.id == bound_exec));
         assert_eq!(

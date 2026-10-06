@@ -225,7 +225,7 @@ fn admit_ci_fix(
         let store = landing_store().await?;
         let lock = store
             .sqlite
-            .lock_checkout(&landing.worktree)
+            .lock_task_checkouts(&[&landing.worktree], landing.task_id.as_ref())
             .map_err(repair_error)?;
         let reservation = store
             .sqlite

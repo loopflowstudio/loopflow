@@ -1,12 +1,13 @@
 // RegistryQuery — typed `lf` reads over the machine registry.
 //
-// Planning and history are one-shot queries. Active Sessions use one foreground
-// observation per window so native receipt discovery survives between samples.
+// History and explicit lookups are one-shot queries. What a window shows is kept
+// current by one foreground workspace reader per window; active Sessions use a
+// second so native receipt discovery survives between samples.
 //
 // This runs `lf wave list`, `lf wave status`, and the roadmap, ps, and activity
 // readers with `--json` as subprocesses and decodes the wire
 // snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
-// `lf/commands/runs.rs`) into the app models the stores hold. The subprocess
+// `lf/commands/session_history.rs`) into the app models the stores hold. The subprocess
 // runner is injected: on macOS it execs the `lf` shipped inside the app. There is no
 // HTTP fallback for reads; remote reads need to become proxied `lf` queries.
 
@@ -22,7 +23,7 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// Runs an `lf` argv (already including the subcommand, e.g. `["wave", "list","--json"]`)
 /// and returns captured stdout. Throws on a non-zero exit or spawn failure.
 /// `cwd` seeds ambient resolution for verbs that want it (`lf wave status` with no
-/// wave); the machine-wide reads (`lf wave list`, `lf runs`) ignore it.
+/// wave); the machine-wide reads (`lf wave list`, `lf usage --days 0 --task ID --json`) ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
 /// Entry emitted by `lf list --json`.
@@ -39,6 +40,7 @@ public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
     private let runWithInput: @Sendable ([String], String?, String) async throws -> String
     private let observe: @Sendable () async throws -> ActiveSessionsObservation
+    private let observeWork: (@Sendable () async throws -> WorkObservation)?
 
     public init(
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
@@ -47,17 +49,20 @@ public struct RegistryQuery: Sendable {
         watchActiveSessions: @escaping @Sendable () async throws -> ActiveSessionsObservation = {
             throw RegistryQueryError("Active Session observation is unavailable on this transport")
         },
+        watchWork: (@Sendable () async throws -> WorkObservation)? = nil,
         run: @escaping RegistryRunner
     ) {
         self.runWithInput = runWithInput
         self.run = run
         self.observe = watchActiveSessions
+        self.observeWork = watchWork
     }
 
     /// A copy that also reports each successful read's wire text, so a caller
     /// can retain exactly what it decoded.
     public func recording(_ record: @escaping @Sendable (_ stdout: String) -> Void) -> RegistryQuery {
-        RegistryQuery(runWithInput: runWithInput, watchActiveSessions: observe) { [run] args, cwd in
+        RegistryQuery(runWithInput: runWithInput, watchActiveSessions: observe,
+                      watchWork: observeWork) { [run] args, cwd in
             let stdout = try await run(args, cwd)
             record(stdout)
             return stdout
@@ -88,6 +93,17 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
+
+    /// Explicit opening/retry operation. Periodic status reads remain observational.
+    public func ensureProject(wave: String, cwd: String) async throws {
+        _ = try await run(["wave", "ensure", wave, "--json"], cwd)
+    }
+
+    public func realignProjects(name: String, plan: String, preview: Bool, cwd: String) async throws -> ProjectRotationPreview {
+        var args = ["repo", "new-chapter", name, "--plan", "/dev/stdin", "--json"]
+        if preview { args.append("--dry-run") }
+        return try Self.decode(ProjectRotationPreview.self, from: await runWithInput(args, cwd, plan))
+    }
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
         var args = ["roadmap"]
@@ -125,6 +141,17 @@ public struct RegistryQuery: Sendable {
 
     public func watchActiveSessions() async throws -> ActiveSessionsObservation {
         try await observe()
+    }
+
+    /// Whether this transport keeps a workspace current by itself. Without one,
+    /// a caller reads once and shows that reading until it asks again.
+    public var streamsWork: Bool { observeWork != nil }
+
+    public func watchWork() async throws -> WorkObservation {
+        guard let observeWork else {
+            throw RegistryQueryError("Work observation is unavailable on this transport")
+        }
+        return try await observeWork()
     }
 
     /// Durable Work facts across creation, Session history, PR lifecycle, and Steers.
@@ -213,7 +240,7 @@ public struct RegistryQuery: Sendable {
 
     /// Complete Task-attributed Session input/provider history. Read-only; querying
     /// an unstarted Task neither prepares nor starts it.
-    public func taskRuns(task: String, cwd: String?) async throws -> [SessionHistory] {
+    public func taskHistory(task: String, cwd: String?) async throws -> [SessionHistory] {
         let stdout = try await run(["usage", "--days", "0", "--task", task, "--json"], cwd)
         return try Self.decode([SessionHistory].self, from: stdout)
     }
@@ -301,7 +328,7 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Give one Session a human-assigned name and return the authoritative
-    /// record. A Run ID reaches the conversation or Flow boundary that owns it.
+    /// record. The durable Session ID selects the conversation or Flow boundary.
     public func renameSession(
         id: String,
         name: String,
@@ -468,6 +495,7 @@ public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
 }
 
 public struct WaveRoadmap: Decodable, Sendable, Hashable {
+    public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
     public let metricPortfolio: MetricPortfolio
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
@@ -476,6 +504,7 @@ public struct WaveRoadmap: Decodable, Sendable, Hashable {
     public let unavailableTasks: [UnavailableTaskEvidence]
 
     enum CodingKeys: String, CodingKey {
+        case projectReadiness = "project_readiness"
         case wave, projects, tasks
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
@@ -506,20 +535,22 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
 /// `lf wave status <wave>` snapshot. Mirrors Rust `WaveDetailSnapshot` without
 /// reshaping or dropping fields, so every Wave surface starts from one reading.
 public struct WaveDetailSnapshot: Decodable, Sendable {
+    public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
     public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
     public let tasks: WorkEvidence<WaveTaskWork>
     public let metricPortfolio: MetricPortfolio
     public let unavailableTasks: [UnavailableTaskEvidence]
-    public let runs: WorkEvidence<SessionHistory>
+    public let history: WorkEvidence<SessionHistory>
 
     public var workMap: WaveWorkMap {
         WaveWorkMap(objective: wave.goal, projects: projects, tasks: tasks)
     }
 
     enum CodingKeys: String, CodingKey {
-        case wave, projects, tasks, runs
+        case projectReadiness = "project_readiness"
+        case wave, projects, tasks, history
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
     }
@@ -752,4 +783,58 @@ public struct CodeSlice: Decodable, Sendable, Identifiable {
     public let ext: String
     public let lines: Int
     public let tokens: Int
+}
+
+/// Display projection of the rotation report; provider bodies stay owned by Rust.
+public struct ProjectRotationPreview: Decodable, Sendable {
+    public let name: String
+    public let waves: [WaveRotation]
+
+    public struct WaveRotation: Decodable, Sendable {
+        public let wave: String
+        public let successor_id: String
+        public let predecessor: Project?
+        public let successor: Project?
+        public let tasks: [Task]
+    }
+
+    public struct Project: Decodable, Sendable {
+        public let id: String
+        public let name: String
+    }
+
+    public struct Task: Decodable, Sendable {
+        public let task: Issue
+        public let disposition: String
+        public let reason: String
+    }
+
+    public struct Issue: Decodable, Sendable {
+        public let id: String
+        public let identifier: String
+        public let name: String
+    }
+}
+
+public struct ProjectReadiness: Decodable, Sendable, Hashable {
+    public enum State: String, Decodable, Sendable { case unconfigured, unavailable, inactive, ready, terminal }
+    public let state: State
+    public let projectId: String?
+    public let observedAt: Int64?
+    public let pendingSuccessor: String?
+    public let activation: Activation?
+
+    public struct Activation: Decodable, Sendable, Hashable {
+        public let execId: String
+        public let completedAt: Int64?
+        public let outcome: String?
+        public let error: String?
+        enum CodingKeys: String, CodingKey {
+            case execId = "exec_id", completedAt = "completed_at", outcome, error
+        }
+    }
+    enum CodingKeys: String, CodingKey {
+        case state, activation
+        case projectId = "project_id", observedAt = "observed_at", pendingSuccessor = "pending_successor"
+    }
 }

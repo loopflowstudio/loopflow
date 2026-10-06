@@ -10,6 +10,8 @@ listing is the default read-only one.
 
 `--home fresh` points LF_HOME at a new empty directory so a branch build never
 touches the main Home. `--home main` measures the installed CLI where it runs.
+`--store ~/.lf/loopflow.db` copies that database into the fresh Home first, so
+the listing pays for a store of real size without writing to the original.
 """
 
 import argparse
@@ -74,7 +76,21 @@ def _run(command: list[str], cwd: Path, env: dict[str, str]) -> float:
     return time.perf_counter() - started
 
 
-def profile(lf: Path, repo: Path, samples: int, mode: str, home: str, offline: bool) -> dict:
+def _copy_store(store: Path, home: Path) -> None:
+    """Copy a database and its write-ahead log; a clone where the filesystem allows."""
+    home.mkdir(parents=True)
+    for suffix in ("", "-wal"):
+        source = Path(f"{store}{suffix}")
+        if not source.exists():
+            continue
+        target = home / f"loopflow.db{suffix}"
+        if subprocess.run(["cp", "-c", source, target], capture_output=True).returncode != 0:
+            shutil.copyfile(source, target)
+
+
+def profile(
+    lf: Path, repo: Path, samples: int, mode: str, home: str, offline: bool, store: Path | None
+) -> dict:
     work = Path(tempfile.mkdtemp(prefix="wt-list-profile-"))
     shim_dir = work / "bin"
     shim_dir.mkdir()
@@ -90,6 +106,8 @@ def profile(lf: Path, repo: Path, samples: int, mode: str, home: str, offline: b
         env["PATH"] = f"{shim_dir}:{env['PATH']}"
     if home == "fresh":
         env["LF_HOME"] = str(work / "home")
+        if store:
+            _copy_store(store, work / "home")
     if offline:
         # Unroutable proxy: every remote call fails instead of reaching GitHub.
         for name in ("https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "ALL_PROXY"):
@@ -133,6 +151,7 @@ def profile(lf: Path, repo: Path, samples: int, mode: str, home: str, offline: b
         "repo": str(repo),
         "mode": mode,
         "home": home,
+        "store_mb": round(store.stat().st_size / 1e6) if store and home == "fresh" else None,
         "offline": offline,
         "samples": samples,
         "load_average_1m": round(os.getloadavg()[0], 1),
@@ -169,6 +188,7 @@ def main() -> None:
     parser.add_argument("--mode", choices=["json", "text", "both"], default="both")
     parser.add_argument("--home", choices=["fresh", "main"], default="fresh")
     parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--store", type=Path, help="database to copy into the fresh Home")
     args = parser.parse_args()
     modes = ["text", "json"] if args.mode == "both" else [args.mode]
     for mode in modes:
@@ -179,6 +199,7 @@ def main() -> None:
             mode,
             args.home,
             args.offline,
+            args.store.expanduser().resolve() if args.store else None,
         )
         print(json.dumps(result))
 

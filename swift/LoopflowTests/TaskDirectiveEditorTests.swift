@@ -12,7 +12,7 @@ struct TaskDirectiveEditorTests {
           arguments: [DirectiveSource.Outcome.rejected, .unreadable])
     fileprivate func updatesCapturedTask(outcome: DirectiveSource.Outcome) async throws {
         let source = try DirectiveSource()
-        let model = PodiumModel(query: RegistryQuery { args, cwd in
+        let model = WorkModel(query: RegistryQuery { args, cwd in
             try await source.read(args, cwd: cwd)
         }, repoPath: "/src/loopflow")
         await model.refresh()
@@ -88,7 +88,7 @@ struct TaskDirectiveEditorTests {
     @Test("A polling response started before Save cannot restore the old directive")
     func oldReadCannotUndoSave() async throws {
         let source = try DirectiveSource()
-        let model = PodiumModel(query: RegistryQuery { args, cwd in
+        let model = WorkModel(query: RegistryQuery { args, cwd in
             try await source.read(args, cwd: cwd)
         }, repoPath: "/src/loopflow")
         await model.refresh()

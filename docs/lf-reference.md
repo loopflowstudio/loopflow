@@ -23,8 +23,8 @@ limits this launch and its children. Saved Flows retain provider selections;
 children check their destination's access before starting a provider.
 Account observations distinguish unavailable, expired and measured capacity.
 
-JSON readers emit one document; `monitor active --watch --json` emits NDJSON
-until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
+JSON readers emit one document; `monitor active --watch --json` and
+`monitor work --watch --json` emit NDJSON until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
 operation succeeded; 1 denotes an operational failure, 2 a syntax or lookup
 failure, and 130 interruption. A successful auto-merge request is not a merge.
 
@@ -328,6 +328,16 @@ Observe active conversations and missing process evidence
 | `--task` | task |
 | `--help / -h` | Print help |
 
+## lf monitor work
+
+Stream planning and activity for the selected Work, each part again only when it changes
+
+| Argument | What it does |
+|---|---|
+| `--json` | json |
+| `--watch` | Stream NDJSON until stdin closes Default: false. |
+| `--help / -h` | Print help |
+
 ## lf monitor usage
 
 Show direct provider-authored usage from recorded Session inputs
@@ -434,7 +444,7 @@ Read this conversation's native start, usage and completion receipts
 
 | Argument | What it does |
 |---|---|
-| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
+| `<id>` | Session ID or provider conversation ID |
 | `--json` | json Default: false. |
 | `--after` | Continue after an observed event sequence Default: 0. |
 | `--limit` | limit Default: 100. |
@@ -466,7 +476,7 @@ Connect to the live conversation, or resume its saved history
 
 | Argument | What it does |
 |---|---|
-| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
+| `<id>` | Session ID or provider conversation ID |
 | `--json` | json Default: false. |
 | `--replace` | Stop Loopflow-owned clients before resuming here Default: false. |
 | `--try` | Ask the provider to resume even when another client is active Default: false. |
@@ -498,7 +508,7 @@ Complete a review or interactive session
 
 | Argument | What it does |
 |---|---|
-| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
+| `<id>` | Session ID or provider conversation ID |
 | `--help / -h` | Print help |
 
 ## lf session rename
@@ -507,7 +517,7 @@ Rename a Session; a human name is never replaced by a suggestion
 
 | Argument | What it does |
 |---|---|
-| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
+| `<id>` | Session ID or provider conversation ID |
 | `<name>` | name |
 | `--suggest` | Propose an agent-generated name; keeps a human-assigned name Default: false. |
 | `--json` | json Default: false. |
@@ -519,7 +529,7 @@ Assign a Task to a Session that has none; the Task never changes after
 
 | Argument | What it does |
 |---|---|
-| `<id>` | Session ID, one of its Run IDs, or the provider's own conversation ID |
+| `<id>` | Session ID or provider conversation ID |
 | `--task` | The Task, by its issue identifier (e.g. INF-123) or stable Task ID |
 | `--dry-run` | Resolve the exact target without assigning the Session Default: false. |
 | `--json` | json Default: false. |
@@ -703,11 +713,12 @@ Refresh shared planning from Linear
 
 ## lf repo new-chapter
 
-Advance every Wave to the named Project plan
+Rotate selected Waves using exact destinations and KRs in a retained plan
 
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
+| `--plan <path>` | Required retained JSON plan with exact Wave and successor IDs |
 | `--dry-run` | dry run Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1032,6 +1043,38 @@ Manage Wave identity, placement and planning
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf wave new-chapter
+
+Rotate one Wave through the repository rotation operation.
+
+| Argument | What it does |
+|---|---|
+| `<wave> <name>` | Select the Wave and chapter name |
+| `--plan <path>` | Required retained JSON plan; consumes this Wave's exact entry |
+| `--dry-run` | Preview without provider writes |
+| `--json` | Emit the rotation result as JSON |
+
+## lf wave ensure
+
+Ensure the configured Project is active, or create one with a durable identity
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave bind-project
+
+Bind an existing Project UUID as this Wave's shared current selection
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `<project>` | project |
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave cron

@@ -434,7 +434,15 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        store.create_task(&task, &pr).await.unwrap();
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
+            wave.id(),
+            None,
+            project.plan.id.as_str(),
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
+        store.create_task(&task, &pr, None).await.unwrap();
         task
     }
 
@@ -746,13 +754,13 @@ mod tests {
             let previous = [
                 "LF_HOME",
                 "LF_RUN_DIR",
-                "LF_RUN_ID",
+                "LF_CAPTURE_KEY",
                 crate::lf::WORK_DECLARATION_ENV,
             ]
             .map(|name| (name, std::env::var_os(name)));
             std::env::set_var("LF_HOME", directory.path());
             std::env::set_var("LF_RUN_DIR", capture.artifact_dir());
-            std::env::set_var("LF_RUN_ID", capture.artifact_key().as_str());
+            std::env::set_var("LF_CAPTURE_KEY", capture.artifact_key().as_str());
             std::env::set_var(crate::lf::WORK_DECLARATION_ENV, format!("task:{selector}"));
             crate::session_record::write_provider_session(
                 &capture.artifact_dir(),
@@ -768,7 +776,6 @@ mod tests {
                 None,
                 repo.path(),
                 &capture.artifact_key(),
-                &capture.artifact_dir(),
                 &history,
             );
             assert!(resumed.unwrap_err().to_string().contains("was deleted"));
@@ -810,11 +817,9 @@ mod tests {
                 .await
                 .unwrap();
         let mut project = project(&wave, "desktop", "project-desktop");
+        project.plan.slug = "desktop-renamed".into();
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, directory.path().join("workspace")).await;
-        // Input ancestry names its Task by id, so Project renaming preserves history.
-        project.plan.slug = "desktop-renamed".into();
-        store.update_project(&project).await.unwrap();
         let session = |task_id: Option<TaskId>, caller: Option<String>| {
             let inherited = caller.is_some();
             crate::session::AgentSession {
@@ -1034,13 +1039,16 @@ mod tests {
             items: Vec::new(),
         };
         store
-            .put_pm_snapshot(PmSnapshotRow {
-                wave_id: wave.id().clone(),
-                provider: "linear".to_string(),
-                initiative: "initiative-1".to_string(),
-                synced_at: OffsetDateTime::now_utc().unix_timestamp(),
-                snapshot,
-            })
+            .put_pm_snapshot(
+                PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".to_string(),
+                    initiative: "initiative-1".to_string(),
+                    synced_at: OffsetDateTime::now_utc().unix_timestamp(),
+                    snapshot,
+                },
+                None,
+            )
             .await
             .unwrap();
 

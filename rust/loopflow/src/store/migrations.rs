@@ -59,6 +59,9 @@ pub(crate) fn apply_released_planning_fixture(conn: &rusqlite::Connection) {
     apply_set(conn, &MIGRATIONS[..count]).unwrap();
 }
 
+#[cfg(test)]
+pub(crate) use tests::{apply_before_current_draft, current_draft_sql};
+
 /// The exact branch-local history that reached one production ledger before
 /// main established `0.11.008_interactive_handoffs`. These ids were never
 /// released. They remain here only long enough to recognize and converge that
@@ -158,7 +161,7 @@ pub(crate) fn initialize_experimental_sqlite(
         if user_tables(conn)?.is_empty() {
             return Ok(false);
         }
-        validate_experimental_sqlite(conn, drafts)?;
+        validate_experimental_schema(conn, drafts)?;
         Ok(true)
     })? {
         return Ok(());
@@ -171,7 +174,7 @@ fn _initialize_experiment_in(
     drafts: &[crate::build_info::MigrationDraft],
 ) -> StoreResult<()> {
     if !user_tables(conn)?.is_empty() {
-        return validate_experimental_sqlite(conn, drafts);
+        return validate_experimental_schema(conn, drafts);
     }
     apply_set(conn, MIGRATIONS)?;
     for draft in drafts {
@@ -182,13 +185,24 @@ fn _initialize_experiment_in(
     _validate_development_schema(conn, drafts)
 }
 
-pub(crate) fn validate_experimental_sqlite(
+/// Validate an experiment's history and schema, as every open does.
+pub(crate) fn validate_experimental_schema(
     conn: &rusqlite::Connection,
     drafts: &[crate::build_info::MigrationDraft],
 ) -> StoreResult<()> {
     _read_snapshot(conn, |conn| {
         _validate_canonical_history_for_development(conn)?;
-        _validate_development_schema(conn, drafts)?;
+        _validate_development_schema(conn, drafts)
+    })
+}
+
+/// Diagnose an experiment in full: its schema and every stored foreign key.
+pub(crate) fn validate_experimental_sqlite(
+    conn: &rusqlite::Connection,
+    drafts: &[crate::build_info::MigrationDraft],
+) -> StoreResult<()> {
+    _read_snapshot(conn, |conn| {
+        validate_experimental_schema(conn, drafts)?;
         validate_foreign_keys(conn)
     })
 }
@@ -273,7 +287,8 @@ pub(crate) fn old_reader_recognizes(conn: &rusqlite::Connection) -> bool {
 /// Validate the schema this binary already understands without advancing it.
 /// Branch builds use this against the release-owned database: they can reuse
 /// compatible state, but an unpublished migration never becomes durable there.
-pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
+/// Every ordinary open of the release database runs this.
+pub(crate) fn validate_sqlite_schema(conn: &rusqlite::Connection) -> StoreResult<()> {
     _read_snapshot(conn, |conn| {
         validate_set(MIGRATIONS).map_err(StoreError::InvalidData)?;
         if !user_tables(conn)?
@@ -288,7 +303,14 @@ pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
         let applied = applied_versions(conn)?;
         pending_migrations(&applied, MIGRATIONS)?;
         validate_applied_checksums(conn, MIGRATIONS)?;
-        validate_schema(conn, &MIGRATIONS[..applied.len()])?;
+        validate_schema(conn, &MIGRATIONS[..applied.len()])
+    })
+}
+
+/// Diagnose the release database in full: its schema and every stored foreign key.
+pub(crate) fn validate_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
+    _read_snapshot(conn, |conn| {
+        validate_sqlite_schema(conn)?;
         validate_foreign_keys(conn)
     })
 }
@@ -508,7 +530,10 @@ fn backup_before_migration(
     )?;
     let mut destination = rusqlite::Connection::open(&temporary_path)?;
     let backup = rusqlite::backup::Backup::new(&source, &mut destination)?;
-    if let Err(error) = backup.run_to_completion(64, Duration::from_millis(10), None) {
+    eprintln!("Backing up {} before migration...", path.display());
+    // The migration transaction already excludes writers. Sleeping between
+    // tiny batches only prolongs that exclusion on large retained stores.
+    if let Err(error) = backup.run_to_completion(4096, Duration::ZERO, None) {
         drop(backup);
         drop(destination);
         drop(source);
@@ -597,6 +622,10 @@ fn hash_text(digest: &mut Sha256, value: &str) {
     digest.update(value.as_bytes());
 }
 
+/// Scan every stored row for a dangling reference. This reads the whole
+/// database, so opening a store never runs it: every connection enforces
+/// foreign keys and only a migration can violate them. Migrations check before
+/// they commit; `lf home doctor` and installation preflight diagnose in full.
 fn validate_foreign_keys(conn: &rusqlite::Connection) -> StoreResult<()> {
     let mut statement = conn.prepare("PRAGMA foreign_key_check")?;
     if statement.query([])?.next()?.is_some() {
@@ -1118,7 +1147,7 @@ pub fn latest_known_version() -> String {
 /// The next migration this binary knows that the store has not applied, or
 /// `None` when the store is exactly at this binary's frontier.
 ///
-/// Call only after [`validate_sqlite`] has confirmed the applied history is a
+/// Call only after [`validate_sqlite_schema`] has confirmed the applied history is a
 /// clean recognized prefix; then `pending_migrations` cannot error and this is a
 /// pure "is the store behind me?" question. An ordinary open of the shared store
 /// refuses when this is `Some`: the running binary's code may query columns that
@@ -1235,6 +1264,44 @@ mod tests {
 
     fn open() -> rusqlite::Connection {
         rusqlite::Connection::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn store_revisions_upgrade_starts_counting_without_touching_released_rows() {
+        let conn = open();
+        apply_before_current_draft(&conn, "store_revisions");
+        conn.execute_batch(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES('wave-released','proof','/repo',1);",
+        )
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("store_revisions"))
+            .unwrap();
+        let revision = |domain: &str| -> i64 {
+            conn.query_row(
+                "SELECT revision FROM store_revisions WHERE domain=?1",
+                [domain],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        // Rows written before the upgrade are not counted as changes.
+        assert_eq!(revision("planning"), 0);
+        conn.execute(
+            "UPDATE waves SET name='renamed' WHERE id='wave-released'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(revision("planning"), 1);
+        assert_eq!(revision("sessions"), 0);
+        let unfinished: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name IN
+                 ('execs_unfinished','session_events_exec','flow_events_exec')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unfinished, 3);
     }
 
     #[test]
@@ -1439,6 +1506,12 @@ mod tests {
             validate_experimental_sqlite(&conn, drafts).unwrap();
         }
         validate_experimental_sqlite(&valid, drafts).unwrap();
+
+        // Opening reads the schema only; the row scan belongs to diagnosis.
+        conn.execute_batch("INSERT INTO schema_child VALUES ('child', 'absent-parent');")
+            .unwrap();
+        initialize_experimental_sqlite(&conn, drafts).unwrap();
+        validate_experimental_sqlite(&conn, drafts).unwrap_err();
     }
 
     struct WaitingMigration {
@@ -1872,7 +1945,7 @@ mod tests {
         conn.execute_batch(&sql[body_start..body_end]).unwrap();
     }
 
-    fn apply_before_current_draft(conn: &rusqlite::Connection, name: &str) {
+    pub(crate) fn apply_before_current_draft(conn: &rusqlite::Connection, name: &str) {
         if _draft_is_canonical(name) {
             apply_before_draft(conn, name);
         } else {
@@ -1880,7 +1953,7 @@ mod tests {
         }
     }
 
-    fn current_draft_sql(name: &str) -> String {
+    pub(crate) fn current_draft_sql(name: &str) -> String {
         if !_draft_is_canonical(name) {
             return migration_sql_for_test(name);
         }

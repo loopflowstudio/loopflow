@@ -125,8 +125,8 @@ async fn graphql(
 }
 
 #[tokio::test]
-#[allow(clippy::await_holding_lock)] // isolates publication provenance in LF_RUN_ID
-async fn task_comments_read_and_publish_without_placement() {
+#[allow(clippy::await_holding_lock)] // isolates capture provenance
+async fn task_comments_read_and_publish_without_starting_work() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let directory = tempfile::tempdir().unwrap();
@@ -182,6 +182,16 @@ async fn task_comments_read_and_publish_without_placement() {
         })
         .await
         .unwrap();
+    for name in ["product", "other"] {
+        store
+            .create_wave(&crate::work::wave::Wave::new(
+                crate::id::WaveId::new(),
+                name.into(),
+                repo.display().to_string(),
+            ))
+            .await
+            .unwrap();
+    }
     let provider = Arc::new(Mutex::new(Provider {
         thread: Thread::Paged,
         queries: Vec::new(),
@@ -278,7 +288,19 @@ async fn task_comments_read_and_publish_without_placement() {
             let confirmed = task_comment_async(&repo, None, "FIX-7", None, false).await.unwrap();
             assert_eq!(confirmed.comments.len(), 2);
             assert_eq!(provider.lock().await.posted.len(), 2);
-            std::env::set_var(crate::durable::RUN_ID_ENV, crate::session_record::new_artifact_key());
+            let home = directory.path().join("home");
+            let _capture_home = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+            std::env::set_var("LF_HOME", &home);
+            let capture = crate::session_record::CaptureHandle::begin_at(
+                &home,
+                crate::session_record::SessionCaptureSpec {
+                    harness: "fixture".into(), model: None, surface: "headless".into(),
+                    cwd: repo.clone(), repo: Some(repo.clone()), worktree: Some(repo.clone()),
+                    skill: None, subjects: vec![],
+                    flow: crate::session_record::SessionFlowMembership::Independent, work: None,
+                },
+            ).unwrap();
+            std::env::set_var(crate::session_record::CAPTURE_KEY_ENV, capture.artifact_key());
             let progress = task_comment_async(&repo, None, "FIX-7", Some("Focused checks passed"), false).await.unwrap();
             let body = &progress.comments.last().unwrap().body;
             assert!(body.contains("<!-- loopflow-progress:"));
@@ -292,6 +314,6 @@ async fn task_comments_read_and_publish_without_placement() {
         .await;
     server.abort();
 
-    // Reading a thread registers no Work and prepares nothing.
-    assert!(store.list_waves(None).await.unwrap().is_empty());
+    // Reading a thread leaves the existing Wave inventory unchanged.
+    assert_eq!(store.list_waves(None).await.unwrap().len(), 2);
 }

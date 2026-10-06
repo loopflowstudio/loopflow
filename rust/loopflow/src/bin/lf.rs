@@ -13,7 +13,7 @@ use loopflow::lf::{
     Cli, Commands, FlowCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
 };
 
-use loopflow::ops::chapter::update_plan;
+use loopflow::ops::project::update_plan;
 use loopflow::ops::task_execution::TaskExecutionState;
 
 #[derive(Clone, Default)]
@@ -555,7 +555,7 @@ fn execute_target(
                         None => loopflow::lf::commands::run::run(Some(name), message, cli)?,
                     }
                     // Shared contributions leave checkpoint composition to the caller.
-                    if !shared && std::env::var_os(loopflow::durable::RUN_ID_ENV).is_none() {
+                    if !shared && !loopflow::journal::has_caller() {
                         let options = loopflow::ops::CommitOptions {
                             add: true,
                             message: Some(format!("lf commit: {name}")),
@@ -830,6 +830,52 @@ fn print_task_control(
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     match command {
+        WaveCommand::NewChapter {
+            wave,
+            name,
+            plan,
+            dry_run,
+            json,
+        } => {
+            let rotation =
+                loopflow::ops::chapter::new_chapter(repo, name, plan, Some(wave), *dry_run)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&rotation)?);
+            } else {
+                println!(
+                    "Chapter {}: {}",
+                    rotation.name, rotation.waves[0].successor_id
+                );
+            }
+            Ok(())
+        }
+        WaveCommand::Ensure { wave, json } => {
+            let result = tokio::runtime::Runtime::new()?
+                .block_on(loopflow::ops::project::ensure(repo, wave))?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!(
+                    "Wave {wave}: Project {} ({}) is active",
+                    result.name, result.id
+                );
+            }
+            Ok(())
+        }
+        WaveCommand::BindProject {
+            wave,
+            project,
+            json,
+        } => {
+            let result = tokio::runtime::Runtime::new()?
+                .block_on(loopflow::ops::project::bind_project(repo, wave, project))?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("Wave {wave}: bound Project {} ({})", result.name, result.id);
+            }
+            Ok(())
+        }
         WaveCommand::Cron { .. } => unreachable!("cron dispatches separately"),
         WaveCommand::List { .. } | WaveCommand::Status { .. } => {
             unreachable!("read commands dispatch separately")
@@ -1119,8 +1165,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand, cli: &Cli) -> anyhow::Re
         TaskCommand::Complete {
             issue,
             summary,
+            accept_unknown_exec,
             json,
-        } => match loopflow::ops::task::task_complete(repo, issue, summary.clone())? {
+        } => match loopflow::ops::task::task_complete(
+            repo,
+            issue,
+            summary.clone(),
+            accept_unknown_exec,
+        )? {
             Some(task) => print_task(&task, *json),
             None => {
                 let resolved = loopflow::ops::pm::pm_resolve_task(repo, issue)?;
@@ -1366,7 +1418,7 @@ fn run() -> anyhow::Result<()> {
         journal::observe_process(&args);
     }
 
-    // Screenshot capture owns no Home, repository, account, or Run state. Its
+    // Screenshot capture owns no Home, repository, account, or Session state. Its
     // hidden supervisor must also be able to clean up after its public parent
     // dies, so both forms dispatch before those unrelated boundaries.
     match &cli.command {
@@ -1615,7 +1667,9 @@ fn execute_command(
         Some(Commands::Home {
             cmd: loopflow::lf::HomeCommand::Desktop,
         }) => loopflow::lf::commands::desktop::run(),
-        Some(Commands::ProviderSession) => loopflow::lf::commands::runs::observe_provider_session(),
+        Some(Commands::ProviderSession) => {
+            loopflow::lf::commands::session_history::observe_provider_session()
+        }
         Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),
         Some(Commands::Account {
             cmd,
@@ -1730,7 +1784,7 @@ fn execute_command(
             tokio::runtime::Runtime::new()?
                 .block_on(loopflow::controller::task::run_worker(task_id.clone()))
         }),
-        // Local document access owns no Run lifecycle. Placement and the recorded
+        // Local document access owns no Session lifecycle. Placement and the recorded
         // Git base come from the Task registry inside these operations.
         Some(Commands::Task {
             cmd:

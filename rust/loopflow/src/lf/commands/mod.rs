@@ -18,10 +18,10 @@ pub mod placement;
 pub mod profile;
 pub mod replay;
 pub mod run;
-pub mod runs;
-mod runs_watch;
 pub mod screenshot;
 pub mod session;
+pub mod session_history;
+mod session_watch;
 pub mod ssh;
 pub mod tokens;
 pub mod top;
@@ -29,6 +29,7 @@ pub mod usage;
 pub mod util;
 pub mod waves;
 pub(crate) mod work_catalog;
+pub mod work_watch;
 
 /// One drill over the Wave → Project → Task Work hierarchy.
 #[derive(Debug, Clone, Copy, Default)]

@@ -67,6 +67,14 @@ pub enum MonitorCommand {
         #[arg(long)]
         task: Option<String>,
     },
+    /// Stream planning and activity for the selected Work, each part again only when it changes
+    Work {
+        #[arg(long, required = true)]
+        json: bool,
+        /// Stream NDJSON until stdin closes
+        #[arg(long)]
+        watch: bool,
+    },
     /// Show direct provider-authored usage from recorded Session inputs
     Usage {
         /// Emit Session usage evidence as JSON
@@ -148,8 +156,9 @@ fn parse_cursor(value: &str) -> Result<ExecCursor, String> {
 pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
     match command {
         MonitorCommand::Active { json, watch, task } => {
-            super::runs::list_active(*json, *watch, task.as_deref())
+            super::session_history::list_active(*json, *watch, task.as_deref())
         }
+        MonitorCommand::Work { watch, .. } => super::work_watch::run(*watch),
         MonitorCommand::Ps { json } => super::top::run_ps(*json),
         MonitorCommand::Top { json } => super::top::run_top(*json),
         MonitorCommand::Prune { dry_run, json } => super::top::run_prune(*json, *dry_run),
@@ -353,7 +362,13 @@ fn show(
             }
             Ok(())
         }
-        None => super::runs::inspect(input.unwrap_or(id), events, final_answer, context, json),
+        None => super::session_history::inspect(
+            input.unwrap_or(id),
+            events,
+            final_answer,
+            context,
+            json,
+        ),
     }
 }
 

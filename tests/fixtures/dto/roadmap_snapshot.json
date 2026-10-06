@@ -418,7 +418,8 @@
                 "authored_commits": false,
                 "recovery_required": false,
                 "reason": null
-              }
+              },
+              "unresolved_execution": true
             }
           },
           {
@@ -811,7 +812,8 @@
                 "authored_commits": true,
                 "recovery_required": false,
                 "reason": null
-              }
+              },
+              "unresolved_execution": true
             }
           },
           {
@@ -873,7 +875,8 @@
                 "authored_commits": null,
                 "recovery_required": null,
                 "reason": null
-              }
+              },
+              "unresolved_execution": false
             }
           },
           {
@@ -948,7 +951,8 @@
                 "authored_commits": false,
                 "recovery_required": false,
                 "reason": null
-              }
+              },
+              "unresolved_execution": false
             }
           }
         ],
@@ -975,6 +979,7 @@
             "name": "current",
             "flow": "feature",
             "status": "started",
+            "current": true,
             "metric_targets": [
               {
                 "metric_id": "task-loop-trust",
@@ -993,6 +998,13 @@
           }
         ],
         "truncated": false
+      },
+      "project_readiness": {
+        "state": "ready",
+        "project_id": "project-1",
+        "observed_at": null,
+        "pending_successor": null,
+        "activation": null
       }
     },
     {
@@ -1027,6 +1039,13 @@
       "projects": {
         "state": "unavailable",
         "reason": "Project planning unavailable"
+      },
+      "project_readiness": {
+        "state": "unconfigured",
+        "project_id": null,
+        "observed_at": null,
+        "pending_successor": null,
+        "activation": null
       }
     }
   ]

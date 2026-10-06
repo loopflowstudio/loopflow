@@ -524,20 +524,22 @@ fn task_snapshot_reads_its_current_parent_project() {
     repo.create_branch(branch);
     let task = register_task(home.path(), repo.path(), branch, &base);
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    let mut project = runtime
-        .block_on(task.store.get_project(&task.task.project_id))
-        .expect("read parent Project")
-        .expect("parent Project exists");
-    project.plan.slug = "current-project".to_string();
-    project.plan.pm_snapshot_synced_at += 1;
+    let mut planning = runtime
+        .block_on(task.store.pm_snapshot(&task.task.wave_id))
+        .unwrap()
+        .unwrap();
+    let project = &mut planning.snapshot.projects[0];
+    project.slug = "current-project".into();
+    project.revision = Some("2026-10-05T12:00:00Z".into());
+    let project_id = project.id.clone();
     runtime
-        .block_on(task.store.update_project(&project))
-        .expect("update parent Project");
+        .block_on(task.store.put_pm_snapshot(planning, None))
+        .unwrap();
 
     let snapshot = task_snapshot(&task.task).expect("snapshot Task");
 
     assert_eq!(snapshot.project, "current-project");
-    assert_eq!(snapshot.external_project_id, project.plan.id.as_str());
+    assert_eq!(snapshot.external_project_id, project_id);
     assert_eq!(
         snapshot.pm_snapshot_synced_at,
         task.task.plan.pm_snapshot_synced_at
@@ -957,7 +959,7 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
     snapshot.snapshot.items[0].url = None;
     snapshot.snapshot.items[0].revision = Some("2026-09-30T00:00:00Z".into());
     runtime
-        .block_on(task.store.put_pm_snapshot(snapshot))
+        .block_on(task.store.put_pm_snapshot(snapshot, None))
         .expect("remove cached Task URL");
 
     let result = create_or_update_pr(
@@ -1347,7 +1349,7 @@ fn task_resume_revokes_auto_merge_before_returning_to_human_review() {
         cwd: task.task.worktree.clone(),
         message: None,
         model: None,
-        current_attempt: None,
+        selected_capture: None,
         pending_session_id: None,
         ready_summary: None,
         worker_generation: 0,
@@ -1682,7 +1684,7 @@ fn task_complete_refuses_while_a_working_pr_is_unsettled() {
     repo.create_branch(branch);
     let task = register_task(home.path(), repo.path(), branch, &base);
 
-    let result = task_complete(repo.path(), "INF-123", "done".to_string());
+    let result = task_complete(repo.path(), "INF-123", "done".to_string(), &[]);
     let message = result
         .expect_err("an unpublished working PR must block completion")
         .to_string();

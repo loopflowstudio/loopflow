@@ -3,14 +3,14 @@ import SwiftUI
 
 /// Every retained owner, including headless work and conversations without turns.
 struct TaskWorkView: View {
-    let model: PodiumModel
+    let model: WorkModel
     let task: RoadmapTask
     let wave: WaveSnapshot
     @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            WorkspaceSectionHeading(title: "Work") {
+            WorkSectionHeading(title: "Work") {
                 Button("Refresh") { Task { await model.loadTaskWork(task: task, wave: wave) } }
                     .disabled(model.taskWork.inFlight.contains(task.id))
             }

@@ -1,12 +1,12 @@
 import Loopflow
 import SwiftUI
 
-/// Snapshot presentation; Podium owns the shared read for every Monitor pane.
+/// Snapshot presentation; Work owns the shared read for every Monitor pane.
 /// Monitor sits in the dark pane surface beside terminals, so it uses the
 /// terminal inks rather than the page palette.
 struct TaskMonitorView: View {
     let taskId: String
-    let model: PodiumModel
+    let model: WorkModel
 
     private enum Ink {
         static let text = Color(hex: 0xEDE7DF)

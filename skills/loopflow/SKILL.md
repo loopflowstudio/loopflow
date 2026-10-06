@@ -104,6 +104,7 @@ stable Home authority; the Home's SSH route may change without moving the Work.
 lf id                                      # this machine's HomeId
 lf wave place <wave-id> <home-id>          # only while no execution is live
 lf --wave <wave> wave/operate                    # one finite pass here
+lf session ensure -w <wave>                      # its ongoing conversation; operates on every return
 lf ssh <home-id> status <wave> --json           # inspect it on that Home
 lf ssh <home-id> --wave <wave> wave/operate       # one finite pass there
 ```

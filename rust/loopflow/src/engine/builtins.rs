@@ -326,7 +326,7 @@ mod tests {
         assert!(!LOOPFLOW_DOC.contains("--detach"));
 
         let wave = get_builtin_skill("wave/operate").expect("wave operate");
-        assert!(wave.contains("lf --task <issue-id> flow start"));
+        assert!(wave.contains("lf --task <issue> flow start"));
         assert!(wave.contains("lf task status"));
         assert!(wave.contains("Tasks progress independently"));
         assert!(wave.contains("S5 · Identity"));

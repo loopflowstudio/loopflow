@@ -229,6 +229,28 @@ struct PodiumModelTests {
         ])
     }
 
+    @Test("A checkout's repository identity follows its origin once that is resolved")
+    func repoIdentityFollowsResolvedOrigin() throws {
+        let fixture = try PodiumTestFixture.load()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("podium-identity-\(UUID().uuidString)", isDirectory: true)
+        let origin = root.appendingPathComponent("repo", isDirectory: true)
+        let worktree = root.appendingPathComponent("repo.wt", isDirectory: true)
+        try FileManager.default.createDirectory(at: origin, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-q"], at: origin)
+        try git(
+            ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"],
+            at: origin
+        )
+        try git(["worktree", "add", "-q", worktree.path], at: origin)
+
+        let model = PodiumModel(query: fixture.query, repoPath: origin.path)
+        #expect(model.repoIdentity(worktree.path) != model.repoIdentity(origin.path))
+        _ = WaveOrigin.resolve(worktree.path)
+        #expect(model.repoIdentity(worktree.path) == model.repoIdentity(origin.path))
+    }
+
     @Test("A development worktree becomes one main-repository choice")
     func developmentWorktreeBecomesMainRepositoryChoice() async throws {
         let fixture = try PodiumTestFixture.load()

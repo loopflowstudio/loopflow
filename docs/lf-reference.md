@@ -703,11 +703,12 @@ Refresh shared planning from Linear
 
 ## lf repo new-chapter
 
-Advance every Wave to the named Project plan
+Rotate selected Waves using exact destinations and KRs in a retained plan
 
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
+| `--plan <path>` | Required retained JSON plan with exact Wave and successor IDs |
 | `--dry-run` | dry run Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1033,6 +1034,17 @@ Manage Wave identity, placement and planning
 | Argument | What it does |
 |---|---|
 | `--help / -h` | Print help |
+
+## lf wave new-chapter
+
+Rotate one Wave through the repository rotation operation.
+
+| Argument | What it does |
+|---|---|
+| `<wave> <name>` | Select the Wave and chapter name |
+| `--plan <path>` | Required retained JSON plan; consumes this Wave's exact entry |
+| `--dry-run` | Preview without provider writes |
+| `--json` | Emit the rotation result as JSON |
 
 ## lf wave ensure
 

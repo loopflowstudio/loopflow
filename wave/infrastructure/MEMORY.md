@@ -284,11 +284,10 @@ expansion/move/narrowing response loss. These supersede the unrepaired-reteam
 finding; the registration and rotation proofs below establish later boundaries,
 not installed acceptance.
 
-Created-successor retry retains Task/PR/Flow identity but rejects
-`A — next` and `A — previous`. Recovery needs shared binding and exact-ID
-transitions; restoring name stripping would violate Jack Heart’s policy.
-Relationship serialization and membership fencing are implemented below;
-configuration-switch recovery remains unproved. Desktop activation
+The earlier created-successor retry preserved Task/PR/Flow identity but rejected
+`A — next` and `A — previous`. Exact-ID rotation below supersedes that failure;
+restoring name stripping would violate Jack Heart’s policy. Cross-process CLI
+recovery remains unproved. Desktop activation
 must preserve #1447's cached plans and independent Session reads, outside polling.
 #1446's ongoing procedures retain started-Task follow-through; reads never provision.
 
@@ -343,17 +342,15 @@ Ensure has six synthetic operation fixtures and one migration proof; post-bindin
 recovery is seeded, not a crash. Accepted facts precede activation. Evidence:
 `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:scratch/keep-every-wave-ready-for.md`.
 
-October 5 source review found two rotation gaps: name-only retries cannot identify
-settled destinations; current membership cannot identify the original transfer set
-after the binding switch. The revised plan retains exact destinations in caller
-input and selected issue IDs in transition evidence, without selection/execution
-authority. Later historical starts stay put; external moves remain conflicts.
-These counterexamples are source inspection, not executed proofs or new approvals.
-Rotation, Desktop and configured Intelligence acceptance remain open.
-Preflight must cover every destination and legacy conversion before any Wave
-mutates. Rotation checks destinations and applies adoption per Wave; Task-only
-preflight is insufficient. Release's lesson applies: helper proofs cannot
-establish public operation ordering.
+October 5 rotation retains exact-ID input, selected issue membership and settled
+history. Whole-input preflight includes accepted facts and legacy conversion;
+all pairs reserve before provider writes. Creation intent survives retry; unfinished KRs stay editable.
+Before switching, reclassify new work; afterward reconcile only saved selections,
+preserving later starts and external moves. Planning updates preserve names,
+summaries and unrelated text. Queued membership/conversion writers retain guards.
+Operation fixtures cover partial settlement and both sides of the switch;
+CLI crashes, Desktop and configured Intelligence acceptance remain open.
+Earlier counterexamples: `fc6df439424bd341ec3cd8182c19b13ed45cffd7:wave/infrastructure/MEMORY.md`.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 

@@ -441,6 +441,25 @@ pub struct LinearClient {
     base_url: String,
 }
 
+fn replace_project_plan(original: &str, content: &ProjectContent) -> String {
+    let mut retained = String::new();
+    let mut managed_section = false;
+    for line in original.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            managed_section = matches!(trimmed, "## KRs" | "## Metric targets");
+        }
+        if !managed_section && !trimmed.starts_with("flow:") {
+            retained.push_str(line);
+        }
+    }
+    if !retained.is_empty() && !retained.ends_with('\n') {
+        retained.push('\n');
+    }
+    retained.push_str(&render_project_content(content));
+    retained
+}
+
 impl LinearClient {
     pub fn new(token: String, team_id: Option<String>) -> Self {
         Self {
@@ -894,6 +913,35 @@ impl LinearClient {
                 }),
             )
             .await?;
+        Ok(())
+    }
+
+    /// Replace authored planning fields while retaining the Project's other text and name.
+    pub(crate) async fn apply_project_plan(
+        &self,
+        project_id: &str,
+        content: &ProjectContent,
+    ) -> PmResult<()> {
+        content.validate()?;
+        let node = self.project_node(project_id).await?;
+        let original = node.content.as_deref().unwrap_or("");
+        if crate::pm::parse_project_content(original)? == *content {
+            return Ok(());
+        }
+        let updated = replace_project_plan(original, content);
+        let response: Value = self
+            .graphql(
+                r#"mutation ApplyProjectPlan($id: String!, $content: String!) {
+                projectUpdate(id: $id, input: { content: $content }) { success }
+            }"#,
+                json!({"id":project_id,"content":updated}),
+            )
+            .await?;
+        if response["projectUpdate"]["success"] != true {
+            return Err(PmError::Message(
+                "Linear did not confirm Project plan update".into(),
+            ));
+        }
         Ok(())
     }
 

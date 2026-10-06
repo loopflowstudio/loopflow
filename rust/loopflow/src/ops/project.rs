@@ -180,6 +180,7 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
             successor_id: uuid::Uuid::new_v4().to_string(),
             predecessor_id: None,
             reset_name: None,
+            create_successor: None,
             created_at: time::OffsetDateTime::now_utc().unix_timestamp(),
             settled_at: None,
         };

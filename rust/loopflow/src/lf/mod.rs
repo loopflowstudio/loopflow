@@ -671,6 +671,17 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
+    /// Rotate this Wave using its exact destination in a retained chapter plan
+    NewChapter {
+        wave: String,
+        name: String,
+        #[arg(long)]
+        plan: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Ensure the configured Project is active, or create one with a durable identity
     Ensure {
         wave: String,
@@ -1327,6 +1338,8 @@ pub enum RepoCommand {
     NewChapter {
         name: String,
         #[arg(long)]
+        plan: PathBuf,
+        #[arg(long)]
         dry_run: bool,
         #[arg(long)]
         json: bool,
@@ -1862,10 +1875,18 @@ mod tests {
     }
 
     #[test]
-    fn chapter_and_task_commands_require_no_project_selector() {
-        let preview =
-            Cli::try_parse_from(["lf", "repo", "new-chapter", "two", "--dry-run", "--json"])
-                .unwrap();
+    fn chapter_commands_require_retained_plan_and_task_creation_needs_no_project_selector() {
+        let preview = Cli::try_parse_from([
+            "lf",
+            "repo",
+            "new-chapter",
+            "two",
+            "--plan",
+            "chapter.json",
+            "--dry-run",
+            "--json",
+        ])
+        .unwrap();
         assert!(matches!(
             preview.command,
             Some(Commands::Repo {

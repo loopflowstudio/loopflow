@@ -2933,7 +2933,7 @@ fn ensure_unique_project_slugs(projects: &[PmProject], wave: &str) -> OpsResult<
     Ok(())
 }
 
-/// List repository Projects and enforce singular Team + Initiative ownership.
+#[cfg(test)]
 pub(crate) async fn checked_projects(
     repo: &Path,
     ctx: &PmContext,
@@ -3032,18 +3032,6 @@ fn title_case(slug: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-pub(crate) async fn linear_project_name(
-    repo: &Path,
-    wave: &str,
-    canonical_name: &str,
-) -> OpsResult<String> {
-    Ok(format!(
-        "{} — {}",
-        canonical_wave_title_path_async(repo, wave).await?,
-        canonical_name.trim()
-    ))
 }
 
 pub fn canonical_wave_title_path(repo: &Path, wave: &str) -> OpsResult<String> {

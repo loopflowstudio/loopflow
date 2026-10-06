@@ -830,6 +830,25 @@ fn print_task_control(
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     match command {
+        WaveCommand::NewChapter {
+            wave,
+            name,
+            plan,
+            dry_run,
+            json,
+        } => {
+            let rotation =
+                loopflow::ops::chapter::new_chapter(repo, name, plan, Some(wave), *dry_run)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&rotation)?);
+            } else {
+                println!(
+                    "Chapter {}: {}",
+                    rotation.name, rotation.waves[0].successor_id
+                );
+            }
+            Ok(())
+        }
         WaveCommand::Ensure { wave, json } => {
             let result = tokio::runtime::Runtime::new()?
                 .block_on(loopflow::ops::project::ensure(repo, wave))?;

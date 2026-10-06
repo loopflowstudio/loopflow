@@ -6,17 +6,16 @@ lf task status INF-124 --json
 lf checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf --task INF-124 flow start
-lf repo new-chapter 2026-10 --dry-run
+lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run
 ```
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
 cadence, budget and metric instruments across plans. Its one In Progress Linear
 Project owns Tasks, KRs, targets and an optional default Flow. A Chapter is the shared
 name of those current Projects across the repository. The rotation below describes
-the current implementation. LOO-366 replaces status/name selection with an explicit
-shared Project binding and preserves unreviewed backlog. Binding setup, operation
-routing, reader selection, SQLite admission and ensure recovery exist; rotation
-recovery remains unfinished. [Cutover status](../architecture-reference.md#cutover-status) records
+the explicit shared Project binding. Rotation retains exact destinations and selected
+issue IDs for recovery, while unreviewed backlog stays in its original Project.
+[Cutover status](../architecture-reference.md#cutover-status) records
 other implementation and proof gaps.
 
 ```bash
@@ -41,31 +40,60 @@ it to the Wave's Initiative, activates it, then writes the shared binding. Retry
 reuses the reservation across uncertain responses and failed binding writes.
 Terminal, archived, paused or foreign Projects report their condition without
 replacement. Names, content and empty Flow remain intact. Ensure neither searches
-for candidates nor performs rotation; status and roadmap never call it. Rotation
-recovery and Desktop activation remain unfinished in this branch.
+for candidates nor performs rotation; status and roadmap never call it. Desktop activation remains unfinished in this branch.
 
 ## Rotate the plan, preserve the work
 
 ```bash
-lf repo new-chapter 2026-10
-lf refresh product
+lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run --json
+lf repo new-chapter 2026-10 --plan scratch/chapter.json --json
+lf wave new-chapter product 2026-10 --plan scratch/chapter.json --json
 ```
 
-A Planned Project expresses the next plan. Rotation reuses the explicitly named
-successor or creates one with the predecessor's Flow when present. Started unfinished Tasks
-move with identity, checkout, PR and captured execution intact. Unreviewed backlog
-stays in its existing Project until explicit disposition; completed Tasks stay
-historical. Missing local or provider evidence remains unresolved. Linear keeps the Projects
-and their Tasks.
+Retain one JSON input with `name` and `waves`. Each entry supplies `wave_id`,
+`successor_id`, `create`, `project_name` and `content`:
 
-Rotation still infers predecessors and successors from names and does not consume
-`project_transitions` or switch the shared binding. Created-successor retry can
-fail on the provider's preserved names; successful provider rotation alone does
-not advance configured selection. This is an unfinished cutover, not a supported
-recovery path for the new binding. The replacement must reserve exact endpoints,
-validate authored KRs before creation, transfer started work, switch the binding,
-and confirm predecessor completion. No Chapter row is required. See
-[Waves](../waves.md#the-planning-model) for the preservation contract.
+```json
+{
+  "name": "2026-10",
+  "waves": [{
+    "wave_id": "<registered-wave-id>",
+    "successor_id": "<new-or-existing-project-uuid>",
+    "create": true,
+    "project_name": "Autumn customer work",
+    "content": {
+      "flow": "",
+      "metric_targets": [],
+      "krs": [{"text": "Customers can resume unfinished work", "holds": false}]
+    }
+  }]
+}
+```
+
+Allocate a new UUID once when authoring a creation plan. Set `create` to false
+for an existing exact destination; absence never turns that instruction into
+creation. Every destination requires authored KRs before any provider write.
+Existing Projects keep their names, summaries and unrelated content; supplied
+KRs, targets and optional Flow replace only those planning fields.
+
+The repository operation validates all selected Waves, destinations, legacy
+conversions and Task evidence before reserving every pair and applying the first
+Wave. The Wave command consumes only its entry through the same operation.
+The shared binding identifies the predecessor. Names never select either endpoint.
+Started unfinished Tasks move with identity, checkout, PR and captured execution
+intact. Unreviewed backlog remains historical; unknown evidence blocks apply.
+
+Retry with the same file. SQLite retains exact endpoints, create/existing intent, and
+selected issue IDs; those records never select the current Project. Before the
+binding switch, retry permits corrected planning fields and reclassifies new work. After it, only retained
+selected issues are reconciled; new historical starts stay put and external moves
+remain conflicts. Predecessor completion follows the binding switch. Settled
+Waves can be retried alongside unfinished ones without new Projects, and an old
+plan cannot overwrite an intervening binding. No Chapter table is required.
+
+Task candidate admission follows Project creation separately. Retain those
+candidates alongside the input and use the existing Task creation operation;
+failure there does not undo the selected Projects or their KRs.
 
 ## Inspect planning before starting execution
 
@@ -158,7 +186,7 @@ Chapter rollover transfers started work and retains unreviewed backlog in its
 predecessor Project before completing that Project in Linear. It confirms provider
 completion before recording the Project. Closing it neither completes transferred
 Tasks nor changes historical KR results. Current Project readers follow the shared
-binding; rotation's old status/name inference still awaits replacement.
+binding, which rotation switches before confirming predecessor completion.
 
 The planning store can retain explicit archival acknowledgements. Integrating
 archival into the provider-backed chapter operation and preserving old acknowledgements

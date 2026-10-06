@@ -23,9 +23,20 @@ CREATE TABLE project_transitions (
     successor_id TEXT NOT NULL,
     predecessor_id TEXT,
     reset_name TEXT,
+    create_successor INTEGER CHECK(create_successor IN (0, 1)),
     created_at INTEGER NOT NULL,
     settled_at INTEGER,
     PRIMARY KEY (wave_id, successor_id)
 );
 CREATE UNIQUE INDEX project_transitions_pending
     ON project_transitions(wave_id) WHERE settled_at IS NULL;
+
+-- Freeze selected transfer membership independently of later provider membership.
+CREATE TABLE project_transition_items (
+    wave_id TEXT NOT NULL,
+    successor_id TEXT NOT NULL,
+    issue_id TEXT NOT NULL,
+    PRIMARY KEY (wave_id, successor_id, issue_id),
+    FOREIGN KEY (wave_id, successor_id)
+        REFERENCES project_transitions(wave_id, successor_id)
+);

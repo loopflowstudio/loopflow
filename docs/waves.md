@@ -108,8 +108,8 @@ track remaining implementation and acceptance.
 
 ```bash
 lf roadmap --json
-lf repo new-chapter 2026-10 --dry-run
-lf repo new-chapter 2026-10
+lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run
+lf repo new-chapter 2026-10 --plan scratch/chapter.json
 ```
 
 The shared Wave binding selects its current Project by UUID. Status and roadmap
@@ -121,30 +121,26 @@ Projects hold Tasks, KRs, metric targets and an optional default Flow. Projects
 created together share a chapter name, such as `2026-10`; there is no chapter table.
 Current navigation stays Wave → Task. Completed Projects retain their history.
 
-Create a Planned Project in Linear to prepare the next plan. Rotation reuses the
-Planned Project with the requested name in each Wave, or creates an empty one
-with the predecessor's `flow:` when present. It never copies checked KRs or metric
-targets.
-Every Wave participates, including Waves with no Tasks. A new Wave with no
-Projects has no default Flow, unless its explicitly Planned successor supplies one.
+Author and retain a [chapter plan](architecture/planning.md#rotate-the-plan-preserve-the-work)
+with exact Wave/destination IDs and nonempty KRs. Select `create: false` for an
+existing Project or allocate one UUID for creation. The repository operation
+rotates the listed Waves; `lf wave new-chapter` consumes one entry. Ordinary
+Project ensure needs neither a chapter nor KRs.
 
-The preview lists every successor and Task disposition. Started unfinished Tasks
+The preview lists each successor and Task disposition. Started unfinished Tasks
 keep identity, checkout, PR and captured execution when moved. Unreviewed backlog
 stays with the predecessor until explicit disposition, alongside completed Tasks.
 Missing checkout, provider or execution evidence remains unresolved.
 
-Retry the same command after interruption. Rotation reads fresh provider state,
-activates each successor, moves started Tasks, then completes its predecessor.
-During that sequence both Projects can be In Progress. A mix of the requested
-name and one shared predecessor name is recoverable; competing predecessor
-names are reported for resolution in Linear. Nothing wins because its name is
-newer. A Wave without a current Project requires an unambiguous predecessor;
-the command never selects an arbitrary historical plan.
+Retry with the same plan file after interruption. Rotation validates all destinations
+before provider writes and retains reservations and selected issue IDs. It activates
+the successor, moves selected work, switches the shared binding, then completes the
+predecessor. After the switch, new historical starts stay put. An external move of
+selected work remains a conflict. Earlier settled Waves remain settled during retry;
+Project names never choose an endpoint or overwrite a later binding.
 
-There is no transaction across Linear mutations or across Homes. A second Home
-observes the same statuses on `lf refresh <wave>` or its next normal
-planning refresh. Lost responses are reconciled by stable Project and issue IDs.
-Recheck external reassignments after previewing.
+The operation is recoverable within its owning Home, not atomic across provider
+mutations. Read-only planning and unrelated Wave ensure remain independent of it.
 
 Set the Project's default Flow in its content:
 

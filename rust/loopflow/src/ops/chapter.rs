@@ -1,23 +1,21 @@
-//! Repository chapter rotation converges on fresh Linear Project status.
-//! No local record owns the chapter or remembers a partially applied operation.
+//! Explicit Project rotation. Shared bindings select Projects; receipts retain recovery evidence.
 
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::engine::git::{is_clean, rev_parse};
+use crate::id::WaveId;
 use crate::ops::{OpsError, OpsResult};
 use crate::pm::{PmItem, PmProject, ProjectContent, ProjectStatus};
-use crate::store::Store;
+use crate::store::project_transitions::ProjectTransition;
+use crate::store::{PlanningLocks, Store};
+use crate::work::wave::project_binding::{read_project_binding, write_project_binding};
 use crate::work::wave::{Wave, WaveLocator};
 
-use super::pm::{
-    checked_projects, linear_project_name, lock_wave_planning, pm_store, project_is_foreign,
-    refresh_pm_snapshot_locked, resolve_context, PmContext,
-};
+use super::pm::{lock_wave_planning, pm_store, project_is_foreign, resolve_context, PmContext};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -35,7 +33,24 @@ pub struct ChapterTask {
     pub observed_at: i64,
 }
 
-/// A preview/result, never a persisted Chapter or recovery receipt.
+/// Retained command input. Names describe the plan; IDs select its destinations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChapterPlan {
+    pub name: String,
+    pub waves: Vec<WaveChapterPlan>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WaveChapterPlan {
+    pub wave_id: WaveId,
+    pub successor_id: String,
+    pub create: bool,
+    pub project_name: String,
+    pub content: ProjectContent,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChapterRotation {
     pub name: String,
@@ -51,243 +66,760 @@ pub struct WaveRotation {
     pub tasks: Vec<ChapterTask>,
 }
 
+struct PreparedRotation {
+    input: WaveChapterPlan,
+    wave: Wave,
+    ctx: PmContext,
+    acquisition: Arc<PlanningLocks>,
+    transition: ProjectTransition,
+    reserved: bool,
+    switched: bool,
+    conversions: Vec<String>,
+    result: WaveRotation,
+}
+
 fn error(value: impl std::fmt::Display) -> OpsError {
     OpsError::Message(value.to_string())
 }
 
-pub fn new_chapter(repo: &Path, name: &str, dry_run: bool) -> OpsResult<ChapterRotation> {
+pub fn new_chapter(
+    repo: &Path,
+    name: &str,
+    plan: &Path,
+    wave: Option<&str>,
+    dry_run: bool,
+) -> OpsResult<ChapterRotation> {
+    let plan: ChapterPlan =
+        serde_json::from_slice(&std::fs::read(plan).map_err(error)?).map_err(error)?;
+    if plan.name != name {
+        return Err(error("chapter name must match the retained plan"));
+    }
     tokio::runtime::Runtime::new()
         .map_err(error)?
-        .block_on(rotate(repo, name, dry_run))
+        .block_on(rotate(repo, &plan, wave, dry_run))
 }
 
-pub(crate) fn select_current(wave: &str, projects: &[PmProject]) -> OpsResult<PmProject> {
-    let current: Vec<_> = projects
-        .iter()
-        .filter(|project| project.status == ProjectStatus::Started)
-        .collect();
-    match current.as_slice() {
-        [project] => Ok((*project).clone()),
-        [] => Err(error(format!("Wave {wave} has no In Progress Project"))),
-        _ => Err(error(format!(
-            "Wave {wave} has competing In Progress Projects: {}",
-            current
-                .iter()
-                .map(|project| format!("{} ({})", project.name, project.id))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))),
-    }
-}
-
-// Stable across Homes, including a lost create response before initiative attachment.
-fn successor_id(initiative: &str, name: &str) -> String {
-    let digest = Sha256::digest(format!("loopflow-project\0{initiative}\0{name}"));
-    let mut bytes = [0; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    uuid::Uuid::from_bytes(bytes).to_string()
-}
-
-fn plan_rotation(
-    name: &str,
-    inventories: &[(String, String, Vec<PmProject>)],
+pub(crate) async fn rotate(
+    repo: &Path,
+    plan: &ChapterPlan,
+    only_wave: Option<&str>,
+    dry_run: bool,
 ) -> OpsResult<ChapterRotation> {
-    if name.trim().is_empty()
-        || name.trim() != name
-        || name.len() > 160
-        || name.contains(['\n', '\r'])
+    if plan.name.trim().is_empty()
+        || plan.name.trim() != plan.name
+        || plan.name.len() > 160
+        || plan.name.contains(['\n', '\r'])
     {
         return Err(error("chapter name must be 1–160 characters on one line"));
     }
-    let predecessor_names: BTreeSet<_> = inventories
-        .iter()
-        .flat_map(|(_, _, projects)| projects)
-        .filter(|project| project.status == ProjectStatus::Started && project.name != name)
-        .map(|project| project.name.as_str())
-        .collect();
-    if predecessor_names.len() > 1 {
-        return Err(error(format!(
-            "competing current chapter names: {}; resolve the Projects in Linear",
-            predecessor_names.into_iter().collect::<Vec<_>>().join(", ")
-        )));
-    }
-    let predecessor_name = predecessor_names.first().copied();
-    let mut waves = Vec::new();
-    for (wave, initiative, projects) in inventories {
-        let targets: Vec<_> = projects
-            .iter()
-            .filter(|project| project.name == name)
-            .collect();
-        let successor = match targets.as_slice() {
-            [] => None,
-            [project]
-                if matches!(
-                    project.status,
-                    ProjectStatus::Planned | ProjectStatus::Started
-                ) =>
-            {
-                Some((*project).clone())
-            }
-            [_] => {
-                return Err(error(format!(
-                    "Wave {wave}: target {name} exists but is neither Planned nor In Progress"
-                )))
-            }
-            _ => {
-                return Err(error(format!(
-                    "Wave {wave}: several Projects are named {name}; choose one in Linear"
-                )))
-            }
-        };
-        let current: Vec<_> = projects
-            .iter()
-            .filter(|project| project.status == ProjectStatus::Started && project.name != name)
-            .collect();
-        let predecessor = match current.as_slice() {
-            [project] => Some((*project).clone()),
-            [] if successor
-                .as_ref()
-                .is_some_and(|project| project.status == ProjectStatus::Started) =>
-            {
-                None
-            }
-            [] if projects.is_empty() || (projects.len() == 1 && successor.is_some()) => None,
-            [] => {
-                // Recover the inverse status-write order only with shared predecessor evidence.
-                let previous: Vec<_> = projects
-                    .iter()
-                    .filter(|project| {
-                        Some(project.name.as_str()) == predecessor_name
-                            && project.status == ProjectStatus::Completed
-                    })
-                    .collect();
-                match previous.as_slice() {
-                    [project] if successor.is_some() => Some((*project).clone()),
-                    _ => return Err(error(format!("Wave {wave} has no unambiguous current predecessor; set its Project status in Linear"))),
-                }
-            }
-            _ => {
-                return Err(error(format!(
-                    "Wave {wave} has competing In Progress predecessors"
-                )))
-            }
-        };
-        let id = successor
-            .as_ref()
-            .map(|project| project.id.clone())
-            .unwrap_or_else(|| successor_id(initiative, name));
-        waves.push(WaveRotation {
-            wave: wave.clone(),
-            successor_id: id,
-            predecessor,
-            successor,
-            tasks: Vec::new(),
-        });
-    }
-    Ok(ChapterRotation {
-        name: name.into(),
-        waves,
-    })
-}
-
-pub(crate) async fn rotate(repo: &Path, name: &str, dry_run: bool) -> OpsResult<ChapterRotation> {
     let store = pm_store().await?;
-    let names = super::pm::list_local_waves(repo)?;
-    if names.is_empty() {
-        return Err(error("repository has no Waves"));
-    }
-    let mut contexts = Vec::new();
-    let mut inventories = Vec::new();
-    let mut locks = Vec::new();
-    for wave_name in names {
-        let wave = if dry_run {
-            let locator = WaveLocator::discover(repo, &wave_name).map_err(error)?;
+    let home = store.sqlite.home_dir().map_err(error)?;
+    let selected_wave = match only_wave {
+        Some(name) => Some(
             store
-                .get_wave_at(&locator)
+                .get_wave_at(&WaveLocator::discover(repo, name).map_err(error)?)
                 .await
                 .map_err(error)?
-                .unwrap_or_else(|| {
-                    Wave::new(
-                        crate::id::WaveId::new(),
-                        wave_name.clone(),
-                        repo.display().to_string(),
-                    )
-                })
-        } else {
-            crate::work::wave::ensure_wave_row(&store, repo, &wave_name)
+                .ok_or_else(|| error("Wave is not registered"))?
+                .id()
+                .clone(),
+        ),
+        None => None,
+    };
+    let mut ids = BTreeSet::new();
+    let mut successors = BTreeSet::new();
+    let mut inputs = Vec::new();
+    for input in &plan.waves {
+        if selected_wave
+            .as_ref()
+            .is_some_and(|id| id != &input.wave_id)
+        {
+            continue;
+        }
+        if !ids.insert(input.wave_id.as_str().to_owned())
+            || !successors.insert(input.successor_id.clone())
+        {
+            return Err(error("chapter plan repeats a Wave or destination"));
+        }
+        let successor = uuid::Uuid::parse_str(&input.successor_id).map_err(error)?;
+        if input.create && successor.get_version() != Some(uuid::Version::Random) {
+            return Err(error(
+                "new Project destinations require a UUID v4 allocated with the plan",
+            ));
+        }
+        if input.content.krs.is_empty()
+            || input.content.krs.iter().any(|kr| kr.text.trim().is_empty())
+        {
+            return Err(error(
+                "each chapter destination requires nonempty authored KRs",
+            ));
+        }
+        input.content.validate().map_err(error)?;
+        if input.project_name.trim().is_empty() {
+            return Err(error("Project name is empty"));
+        }
+        inputs.push(input);
+    }
+    if inputs.is_empty() {
+        return Err(error("chapter plan has no selected Waves"));
+    }
+    inputs.sort_by(|a, b| a.wave_id.as_str().cmp(b.wave_id.as_str()));
+    let mut contexts = Vec::new();
+    for input in inputs {
+        let wave = store
+            .get_wave(&input.wave_id)
+            .await
+            .map_err(error)?
+            .ok_or_else(|| error("planned Wave is unavailable"))?;
+        let located = store
+            .get_wave_at(&WaveLocator::discover(repo, wave.slug()).map_err(error)?)
+            .await
+            .map_err(error)?;
+        if located.as_ref().map(Wave::id) != Some(wave.id()) {
+            return Err(error("planned Wave belongs to another repository"));
+        }
+        super::pm::require_planning_home(&store, &wave).await?;
+        super::metrics::validate_chapter_targets(&wave, &input.content.metric_targets)
+            .map_err(error)?;
+        let acquisition = lock_wave_planning(&wave).await?;
+        let ctx = resolve_context(repo, wave.slug()).await?;
+        contexts.push((input, wave, ctx, acquisition));
+    }
+    let mut roots = Vec::new();
+    for (_, wave, _, _) in &contexts {
+        roots.extend(
+            store
+                .list_tasks(Some(wave.id()))
                 .await
                 .map_err(error)?
+                .into_iter()
+                .map(|task| task.worktree)
+                .filter(|path| !path.as_os_str().is_empty()),
+        );
+    }
+    let checkouts = store.lock_checkout_roots(roots).await.map_err(error)?;
+    let mut prepared = Vec::new();
+    for (input, wave, ctx, acquisition) in contexts {
+        let acquisition = Arc::new(acquisition.with_checkouts(&checkouts));
+        let binding = read_project_binding(&home, wave.id()).map_err(error)?;
+        let existing = store
+            .project_transition(wave.id(), &input.successor_id)
+            .await
+            .map_err(error)?;
+        let pending = store
+            .pending_project_transition(wave.id())
+            .await
+            .map_err(error)?;
+        if pending
+            .as_ref()
+            .is_some_and(|t| t.successor_id != input.successor_id)
+        {
+            return Err(error(format!(
+                "Wave {} has another unfinished transition",
+                wave.slug()
+            )));
+        }
+        let reserved = existing.is_some();
+        let transition = existing.unwrap_or_else(|| ProjectTransition {
+            wave_id: wave.id().clone(),
+            successor_id: input.successor_id.clone(),
+            predecessor_id: binding.clone(),
+            reset_name: Some(plan.name.clone()),
+            create_successor: Some(input.create),
+            created_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+            settled_at: None,
+        });
+        if transition.create_successor != Some(input.create)
+            || transition.reset_name.as_deref() != Some(&plan.name)
+            || transition.predecessor_id.as_deref() == Some(&input.successor_id)
+        {
+            return Err(error("retained transition does not match this plan"));
+        }
+        let switched = binding.as_deref() == Some(&input.successor_id);
+        if !switched && binding != transition.predecessor_id
+            || transition.settled_at.is_some() && !switched
+        {
+            return Err(error(
+                "Project selection changed since this plan; preserve the intervening decision",
+            ));
+        }
+        let project_observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        let pending_conversion = store
+            .projects_pending_adoption(wave.id())
+            .await
+            .map_err(error)?;
+        let mut conversions = Vec::new();
+        let mut read = async |id: &str| -> OpsResult<Option<PmProject>> {
+            if pending_conversion.iter().any(|(pending, _)| pending == id) {
+                conversions.push(id.to_owned());
+                Ok(Some(
+                    ctx.client
+                        .adopt_project(id, &ctx.initiative, &ctx.team_id, false, false)
+                        .await
+                        .map_err(error)?,
+                ))
+            } else {
+                ctx.client.find_project(id).await.map_err(error)
+            }
         };
-        let ctx = resolve_context(repo, &wave_name).await?;
-        contexts.push((wave, ctx));
-    }
-    contexts.sort_by(|(left, _), (right, _)| left.id().as_str().cmp(right.id().as_str()));
-    if !dry_run {
-        for (wave, _) in &contexts {
-            locks.push(lock_wave_planning(wave).await?);
+        let predecessor = match &transition.predecessor_id {
+            Some(id) => {
+                let project = read(id)
+                    .await?
+                    .ok_or_else(|| error("predecessor is unavailable"))?;
+                require_owned(&ctx, &project, false)?;
+                if !matches!(
+                    project.status,
+                    ProjectStatus::Backlog
+                        | ProjectStatus::Planned
+                        | ProjectStatus::Started
+                        | ProjectStatus::Completed
+                ) {
+                    return Err(error("predecessor status changed"));
+                }
+                if !reserved && project.status == ProjectStatus::Completed {
+                    return Err(error("configured predecessor is terminal"));
+                }
+                Some(project)
+            }
+            None => None,
+        };
+        let successor = read(&input.successor_id).await?;
+        if let Some(project) = &successor {
+            require_owned(&ctx, project, input.create && reserved)?;
+            if !matches!(
+                project.status,
+                ProjectStatus::Backlog | ProjectStatus::Planned | ProjectStatus::Started
+            ) {
+                return Err(error("successor is no longer available for activation"));
+            }
+            if switched
+                && (project.status != ProjectStatus::Started
+                    || project.krs != input.content.krs
+                    || project.flow != input.content.flow
+                    || project.metric_targets != input.content.metric_targets)
+            {
+                return Err(error(
+                    "selected destination changed after the Project switch",
+                ));
+            }
+            if input.create && !reserved {
+                return Err(error(
+                    "creation destination already exists without this reservation",
+                ));
+            }
+        } else if !input.create || switched || transition.settled_at.is_some() {
+            return Err(error(
+                "selected destination is unavailable; it cannot be recreated",
+            ));
+        } else {
+            ctx.client
+                .require_initiative(&ctx.initiative)
+                .await
+                .map_err(error)?;
         }
-        let mut roots = Vec::new();
-        for (wave, _) in &contexts {
-            roots.extend(
-                store
-                    .list_tasks(Some(wave.id()))
-                    .await
-                    .map_err(error)?
-                    .into_iter()
-                    .map(|task| task.worktree)
-                    .filter(|path| !path.as_os_str().is_empty()),
-            );
+        let mut entry = PreparedRotation {
+            input: input.clone(),
+            wave,
+            ctx,
+            acquisition,
+            transition,
+            reserved,
+            switched,
+            conversions,
+            result: WaveRotation {
+                wave: String::new(),
+                successor_id: input.successor_id.clone(),
+                predecessor,
+                successor,
+                tasks: Vec::new(),
+            },
+        };
+        if let Some(project) = entry.result.predecessor.take() {
+            let project = accept_project(&store, &entry, project, project_observed_at).await?;
+            if !matches!(
+                project.status,
+                ProjectStatus::Backlog
+                    | ProjectStatus::Planned
+                    | ProjectStatus::Started
+                    | ProjectStatus::Completed
+            ) || (!entry.reserved && project.status == ProjectStatus::Completed)
+            {
+                return Err(error("accepted predecessor status prevents rotation"));
+            }
+            entry.result.predecessor = Some(project);
         }
-        let checkouts = store.lock_checkout_roots(roots).await.map_err(error)?;
-        for acquisition in &mut locks {
-            *acquisition = Arc::new(acquisition.with_checkouts(&checkouts));
+        if let Some(project) = entry.result.successor.take() {
+            let project = if project.initiative_ids.is_empty() {
+                project
+            } else {
+                accept_project(&store, &entry, project, project_observed_at).await?
+            };
+            if !matches!(
+                project.status,
+                ProjectStatus::Backlog | ProjectStatus::Planned | ProjectStatus::Started
+            ) || (entry.switched
+                && (project.status != ProjectStatus::Started
+                    || project.krs != entry.input.content.krs
+                    || project.flow != entry.input.content.flow
+                    || project.metric_targets != entry.input.content.metric_targets))
+            {
+                return Err(error("accepted successor facts prevent rotation"));
+            }
+            entry.result.successor = Some(project);
         }
-    }
-    for (wave, ctx) in &contexts {
-        let projects = checked_projects(repo, ctx, wave.slug()).await?;
-        inventories.push((wave.slug().to_string(), ctx.initiative.clone(), projects));
-    }
-    let mut plan = plan_rotation(name, &inventories)?;
-    // Evaluate every Wave before the first provider write, even if an earlier Wave is ready.
-    for (entry, (wave, ctx)) in plan.waves.iter_mut().zip(&contexts) {
-        entry.tasks = rotation_tasks(&store, wave, ctx, entry).await?;
+        entry.result.wave = entry.wave.slug().to_owned();
+        entry.result.tasks = rotation_tasks(&store, &entry).await?;
+        prepared.push(entry);
     }
     if dry_run {
-        return Ok(plan);
+        return Ok(ChapterRotation {
+            name: plan.name.clone(),
+            waves: prepared.into_iter().map(|entry| entry.result).collect(),
+        });
     }
-    for entry in &plan.waves {
+    for entry in &prepared {
         if let Some(task) = entry
+            .result
             .tasks
             .iter()
             .find(|task| task.disposition == TaskDisposition::Unresolved)
         {
             return Err(error(format!(
-                "{}: {}; no Project status changed",
+                "{}: {}; no provider writes performed",
                 task.task.identifier, task.reason
             )));
         }
     }
-    for ((entry, (wave, ctx)), acquisition) in plan.waves.iter_mut().zip(&contexts).zip(&locks) {
-        adopt_legacy_projects(repo, &store, wave.slug(), ctx, true).await?;
-        apply_rotation(repo, &store, wave, ctx, name, entry, acquisition)
-            .await
-            .map_err(|cause| error(format!("{cause}; retry `lf repo new-chapter {name}`")))?;
-        refresh_pm_snapshot_locked(repo, wave, ctx, &store, acquisition.clone()).await?;
-    }
-    for (wave, ctx) in &contexts {
-        let projects = checked_projects(repo, ctx, wave.slug()).await?;
-        let current = select_current(wave.slug(), &projects)?;
-        if current.name != name {
-            return Err(error(format!(
-                "Wave {} now selects {}; reconcile competing chapter changes in Linear",
-                wave.slug(),
-                current.name
-            )));
+    // Every pair is reserved before the first provider mutation.
+    for entry in &prepared {
+        if !entry.reserved {
+            store
+                .reserve_project_transition(entry.transition.clone(), entry.acquisition.clone())
+                .await
+                .map_err(error)?;
         }
     }
-    Ok(plan)
+    for entry in &mut prepared {
+        apply_rotation(&store, entry).await.map_err(|cause| {
+            error(format!(
+                "Wave {}: {cause}; retry with the same chapter plan",
+                entry.wave.slug()
+            ))
+        })?;
+    }
+    Ok(ChapterRotation {
+        name: plan.name.clone(),
+        waves: prepared.into_iter().map(|entry| entry.result).collect(),
+    })
+}
+
+fn require_owned(ctx: &PmContext, project: &PmProject, unattached: bool) -> OpsResult<()> {
+    if project.team_ids != [ctx.team_id.clone()]
+        || !(project.initiative_ids == [ctx.initiative.clone()]
+            || unattached && project.initiative_ids.is_empty())
+    {
+        return Err(error("Project ownership changed; reconcile it in Linear"));
+    }
+    Ok(())
+}
+
+async fn rotation_tasks(store: &Store, entry: &PreparedRotation) -> OpsResult<Vec<ChapterTask>> {
+    let selected = store
+        .project_transition_items(entry.wave.id(), &entry.input.successor_id)
+        .await
+        .map_err(error)?;
+    let mut items = Vec::new();
+    if !entry.switched {
+        if let Some(predecessor) = &entry.result.predecessor {
+            items = entry
+                .ctx
+                .client
+                .list_items(&predecessor.id)
+                .await
+                .map_err(error)?;
+            let projects = store
+                .list_projects(Some(entry.wave.id()))
+                .await
+                .map_err(error)?;
+            for task in store
+                .list_tasks(Some(entry.wave.id()))
+                .await
+                .map_err(error)?
+            {
+                if projects
+                    .iter()
+                    .any(|p| p.id == task.project_id && p.plan.id.as_str() == predecessor.id)
+                    && !items.iter().any(|item| item.id == task.plan.id.as_str())
+                {
+                    let (item, _) = entry
+                        .ctx
+                        .client
+                        .issue_ownership(task.plan.id.as_str())
+                        .await
+                        .map_err(error)?
+                        .ok_or_else(|| error("Task planning is unavailable"))?;
+                    items.push(item);
+                }
+            }
+        }
+    }
+    for id in &selected {
+        if !items.iter().any(|item| &item.id == id) {
+            items.push(
+                entry
+                    .ctx
+                    .client
+                    .issue_ownership(id)
+                    .await
+                    .map_err(error)?
+                    .ok_or_else(|| error("selected Task planning is unavailable"))?
+                    .0,
+            );
+        }
+    }
+    let mut decisions = Vec::new();
+    for item in items {
+        if item.team_id != entry.ctx.team_id
+            || (item.project_id.as_deref() != entry.transition.predecessor_id.as_deref()
+                && item.project_id.as_deref() != Some(&entry.input.successor_id))
+        {
+            return Err(error(format!(
+                "{} moved outside this transition",
+                item.identifier
+            )));
+        }
+        if entry.switched && item.project_id.as_deref() != Some(&entry.input.successor_id) {
+            return Err(error(format!(
+                "{} moved after the Project switch; preserve the external decision",
+                item.identifier
+            )));
+        }
+        let retained = selected.contains(&item.id);
+        let mut decision = disposition(store, item).await?;
+        if retained && decision.disposition != TaskDisposition::Unresolved {
+            decision.disposition = TaskDisposition::Move;
+            decision.reason = "selected by this transition; confirm its destination".into();
+        }
+        decisions.push(decision);
+    }
+    Ok(decisions)
+}
+
+async fn accept_project(
+    store: &Store,
+    entry: &PreparedRotation,
+    project: PmProject,
+    observed_at: i64,
+) -> OpsResult<PmProject> {
+    require_owned(&entry.ctx, &project, false)?;
+    let accepted = store
+        .put_pm_project(
+            entry.wave.id(),
+            entry.ctx.provider.as_str(),
+            &entry.ctx.initiative,
+            project,
+            observed_at,
+            Some(entry.acquisition.clone()),
+        )
+        .await
+        .map_err(error)?;
+    require_owned(&entry.ctx, &accepted, false)?;
+    Ok(accepted)
+}
+
+async fn apply_rotation(store: &Store, entry: &mut PreparedRotation) -> OpsResult<()> {
+    for id in &entry.conversions {
+        entry
+            .ctx
+            .client
+            .adopt_project(id, &entry.ctx.initiative, &entry.ctx.team_id, false, true)
+            .await
+            .map_err(error)?;
+        store
+            .finish_project_adoption(entry.wave.id(), id, entry.acquisition.clone())
+            .await
+            .map_err(error)?;
+    }
+    let id = entry.input.successor_id.clone();
+    let mut observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+    let mut successor = match entry.ctx.client.find_project(&id).await.map_err(error)? {
+        Some(project) => project,
+        None if entry.input.create && !entry.switched => {
+            let created = entry
+                .ctx
+                .client
+                .create_project(
+                    &entry.ctx.initiative,
+                    &entry.input.project_name,
+                    &entry.input.content,
+                    Some(&id),
+                )
+                .await
+                .map_err(error)?;
+            if created != id {
+                return Err(error("provider returned a different destination identity"));
+            }
+            observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+            entry
+                .ctx
+                .client
+                .project_ownership(&id)
+                .await
+                .map_err(error)?
+        }
+        None => return Err(error("selected destination disappeared")),
+    };
+    require_owned(&entry.ctx, &successor, entry.input.create)?;
+    if successor.initiative_ids.is_empty() {
+        entry
+            .ctx
+            .client
+            .attach_project(&entry.ctx.initiative, &id)
+            .await
+            .map_err(error)?;
+        observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        successor = entry
+            .ctx
+            .client
+            .project_ownership(&id)
+            .await
+            .map_err(error)?;
+    }
+    successor = accept_project(store, entry, successor, observed_at).await?;
+    if !matches!(
+        successor.status,
+        ProjectStatus::Backlog | ProjectStatus::Planned | ProjectStatus::Started
+    ) {
+        return Err(error("accepted successor status prevents plan changes"));
+    }
+    if !entry.switched
+        && (successor.krs != entry.input.content.krs
+            || successor.flow != entry.input.content.flow
+            || successor.metric_targets != entry.input.content.metric_targets)
+    {
+        entry
+            .ctx
+            .client
+            .apply_project_plan(&id, &entry.input.content)
+            .await
+            .map_err(error)?;
+        observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        successor = entry
+            .ctx
+            .client
+            .project_ownership(&id)
+            .await
+            .map_err(error)?;
+        successor = accept_project(store, entry, successor, observed_at).await?;
+    }
+    if successor.krs != entry.input.content.krs
+        || successor.flow != entry.input.content.flow
+        || successor.metric_targets != entry.input.content.metric_targets
+    {
+        return Err(error("destination content changed during rotation"));
+    }
+    if !matches!(
+        successor.status,
+        ProjectStatus::Backlog | ProjectStatus::Planned | ProjectStatus::Started
+    ) {
+        return Err(error("successor status changed during rotation"));
+    }
+    if successor.status != ProjectStatus::Started {
+        entry
+            .ctx
+            .client
+            .set_project_status(&id, ProjectStatus::Started)
+            .await
+            .map_err(error)?;
+        observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        successor = entry
+            .ctx
+            .client
+            .project_ownership(&id)
+            .await
+            .map_err(error)?;
+        successor = accept_project(store, entry, successor, observed_at).await?;
+        if successor.status != ProjectStatus::Started {
+            return Err(error("successor activation is not confirmed"));
+        }
+    }
+    entry.result.successor = Some(successor);
+    entry.result.tasks = rotation_tasks(store, entry).await?;
+    for decision in &entry.result.tasks {
+        if decision.disposition == TaskDisposition::Unresolved {
+            return Err(error(&decision.reason));
+        }
+        if decision.disposition != TaskDisposition::Move {
+            continue;
+        }
+        if !entry.switched {
+            store
+                .select_project_transition_item(
+                    entry.wave.id(),
+                    &id,
+                    &decision.task.id,
+                    entry.acquisition.clone(),
+                )
+                .await
+                .map_err(error)?;
+        }
+        let mut observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        let (mut item, mut project) = entry
+            .ctx
+            .client
+            .issue_ownership(&decision.task.id)
+            .await
+            .map_err(error)?
+            .ok_or_else(|| error("Task planning is unavailable"))?;
+        if item.team_id != entry.ctx.team_id {
+            return Err(error("Task Team changed during rotation"));
+        }
+        if item.project_id.as_deref() != Some(&id) {
+            if entry.switched
+                || item.project_id.as_deref() != entry.transition.predecessor_id.as_deref()
+            {
+                return Err(error("selected Task moved outside this transition"));
+            }
+            entry
+                .ctx
+                .client
+                .move_item_to_project(&item.id, &id)
+                .await
+                .map_err(error)?;
+            observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+            (item, project) = entry
+                .ctx
+                .client
+                .issue_ownership(&item.id)
+                .await
+                .map_err(error)?
+                .ok_or_else(|| error("Task transfer is unavailable"))?;
+            if item.project_id.as_deref() != Some(&id) || item.team_id != entry.ctx.team_id {
+                return Err(error("Task transfer is not confirmed"));
+            }
+        }
+        store
+            .put_pm_task(
+                entry.wave.repo(),
+                entry.ctx.provider.as_str(),
+                crate::store::PmTaskRecord {
+                    item,
+                    project,
+                    observed_at,
+                },
+                Some((entry.wave.id().clone(), entry.ctx.initiative.clone())),
+                Some(entry.acquisition.clone()),
+            )
+            .await
+            .map_err(error)?;
+    }
+    // Recheck provider facts before selection changes. Never sweep historical starts after it.
+    if !entry.switched
+        && rotation_tasks(store, entry).await?.iter().any(|task| {
+            task.task.project_id.as_deref() == entry.transition.predecessor_id.as_deref()
+                && task.disposition != TaskDisposition::Historical
+        })
+    {
+        return Err(error("predecessor still has unfinished selected work"));
+    }
+    let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+    let current = entry
+        .ctx
+        .client
+        .project_ownership(&id)
+        .await
+        .map_err(error)?;
+    let current = accept_project(store, entry, current, observed_at).await?;
+    if current.status != ProjectStatus::Started
+        || current.krs != entry.input.content.krs
+        || current.flow != entry.input.content.flow
+        || current.metric_targets != entry.input.content.metric_targets
+    {
+        return Err(error("successor changed before the Project switch"));
+    }
+    if let Some(previous) = &entry.transition.predecessor_id {
+        let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        let current = entry
+            .ctx
+            .client
+            .project_ownership(previous)
+            .await
+            .map_err(error)?;
+        let current = accept_project(store, entry, current, observed_at).await?;
+        if !matches!(
+            current.status,
+            ProjectStatus::Backlog
+                | ProjectStatus::Planned
+                | ProjectStatus::Started
+                | ProjectStatus::Completed
+        ) {
+            return Err(error(
+                "predecessor status changed before the Project switch",
+            ));
+        }
+    }
+    let home = store.sqlite.home_dir().map_err(error)?;
+    let expected = if entry.switched {
+        Some(id.as_str())
+    } else {
+        entry.transition.predecessor_id.as_deref()
+    };
+    write_project_binding(&home, entry.wave.id(), expected, &id, &entry.acquisition)
+        .map_err(error)?;
+    entry.switched = true;
+    if let Some(previous) = &entry.transition.predecessor_id {
+        let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        let project = entry
+            .ctx
+            .client
+            .project_ownership(previous)
+            .await
+            .map_err(error)?;
+        let mut project = accept_project(store, entry, project, observed_at).await?;
+        if !matches!(
+            project.status,
+            ProjectStatus::Backlog
+                | ProjectStatus::Planned
+                | ProjectStatus::Started
+                | ProjectStatus::Completed
+        ) {
+            return Err(error("predecessor status changed during rotation"));
+        }
+        if project.status != ProjectStatus::Completed {
+            entry
+                .ctx
+                .client
+                .set_project_status(previous, ProjectStatus::Completed)
+                .await
+                .map_err(error)?;
+            let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+            project = entry
+                .ctx
+                .client
+                .project_ownership(previous)
+                .await
+                .map_err(error)?;
+            project = accept_project(store, entry, project, observed_at).await?;
+            if project.status != ProjectStatus::Completed {
+                return Err(error("predecessor completion is not confirmed"));
+            }
+        }
+    }
+    if read_project_binding(&home, entry.wave.id())
+        .map_err(error)?
+        .as_deref()
+        != Some(&id)
+    {
+        return Err(error(
+            "Project binding changed before settlement; preserve the intervening decision",
+        ));
+    }
+    store
+        .settle_project_transition(entry.wave.id(), &id, entry.acquisition.clone())
+        .await
+        .map_err(error)?;
+    Ok(())
 }
 
 // The migration marker scopes old-content decoding to the exact pre-upgrade
@@ -303,6 +835,11 @@ pub(crate) async fn adopt_legacy_projects(
     let locator = WaveLocator::discover(repo, wave_name).map_err(error)?;
     let Some(wave) = store.get_wave_at(&locator).await.map_err(error)? else {
         return Ok(Vec::new());
+    };
+    let acquisition = if apply {
+        Some(lock_wave_planning(&wave).await?)
+    } else {
+        None
     };
     let mut pending = store
         .projects_pending_adoption(wave.id())
@@ -405,344 +942,19 @@ pub(crate) async fn adopt_legacy_projects(
                 )));
             }
             store
-                .finish_project_adoption(wave.id(), &project.id)
+                .finish_project_adoption(
+                    wave.id(),
+                    &project.id,
+                    acquisition
+                        .as_ref()
+                        .expect("apply owns the Wave lock")
+                        .clone(),
+                )
                 .await
                 .map_err(error)?;
         }
     }
     Ok(converted)
-}
-
-async fn rotation_tasks(
-    store: &Store,
-    wave: &Wave,
-    ctx: &PmContext,
-    entry: &WaveRotation,
-) -> OpsResult<Vec<ChapterTask>> {
-    let Some(predecessor) = &entry.predecessor else {
-        return Ok(Vec::new());
-    };
-    let mut items = ctx
-        .client
-        .list_items(&predecessor.id)
-        .await
-        .map_err(error)?;
-    let projects = store.list_projects(Some(wave.id())).await.map_err(error)?;
-    for task in store.list_tasks(Some(wave.id())).await.map_err(error)? {
-        if !projects.iter().any(|project| {
-            project.id == task.project_id && project.plan.id.as_str() == predecessor.id
-        }) || items.iter().any(|item| item.id == task.plan.id.as_str())
-        {
-            continue;
-        }
-        let (item, _) = ctx
-            .client
-            .issue_ownership(task.plan.id.as_str())
-            .await
-            .map_err(error)?
-            .ok_or_else(|| error("Task planning is unavailable during chapter rotation"))?;
-        if item.project_id.as_deref() != Some(predecessor.id.as_str())
-            && item.project_id.as_deref() != Some(entry.successor_id.as_str())
-        {
-            return Err(error(format!(
-                "{} moved outside this chapter transition",
-                item.identifier
-            )));
-        }
-        items.push(item);
-    }
-    let mut tasks = Vec::new();
-    for item in items {
-        tasks.push(disposition(store, item).await?);
-    }
-    Ok(tasks)
-}
-
-async fn apply_rotation(
-    repo: &Path,
-    store: &Store,
-    wave: &Wave,
-    ctx: &PmContext,
-    name: &str,
-    entry: &mut WaveRotation,
-    acquisition: &Arc<crate::store::PlanningLocks>,
-) -> OpsResult<()> {
-    let linear_name = linear_project_name(repo, wave.slug(), name).await?;
-    let mut project_observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    let mut successor = match ctx
-        .client
-        .find_project(&entry.successor_id)
-        .await
-        .map_err(error)?
-    {
-        Some(project) => project,
-        None if entry.successor.is_some() => {
-            return Err(error(
-                "the selected Planned Project disappeared; refresh its ownership",
-            ))
-        }
-        None => {
-            let flow = entry
-                .predecessor
-                .as_ref()
-                .map(|project| project.flow.as_str())
-                .unwrap_or("");
-            let content = ProjectContent {
-                flow: flow.to_string(),
-                metric_targets: Vec::new(),
-                krs: Vec::new(),
-            };
-            ctx.client
-                .create_project(
-                    &ctx.initiative,
-                    &linear_name,
-                    &content,
-                    Some(&entry.successor_id),
-                )
-                .await
-                .map_err(error)?;
-            project_observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-            ctx.client
-                .project_ownership(&entry.successor_id)
-                .await
-                .map_err(error)?
-        }
-    };
-    if (successor.name != linear_name && successor.name != name)
-        || successor.team_ids != vec![ctx.team_id.clone()]
-        || successor
-            .initiative_ids
-            .iter()
-            .any(|id| id != &ctx.initiative)
-    {
-        return Err(error(
-            "successor identity or ownership changed; reconcile it in Linear",
-        ));
-    }
-    if !successor.initiative_ids.contains(&ctx.initiative) {
-        ctx.client
-            .attach_project(&ctx.initiative, &successor.id)
-            .await
-            .map_err(error)?;
-        project_observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-        successor = ctx
-            .client
-            .project_ownership(&successor.id)
-            .await
-            .map_err(error)?;
-        if successor.initiative_ids != vec![ctx.initiative.clone()] {
-            return Err(error("successor attachment is not confirmed"));
-        }
-    }
-    if !matches!(
-        successor.status,
-        ProjectStatus::Planned | ProjectStatus::Started
-    ) {
-        return Err(error("successor is no longer Planned or In Progress"));
-    }
-    if successor.status != ProjectStatus::Started {
-        ctx.client
-            .set_project_status(&successor.id, ProjectStatus::Started)
-            .await
-            .map_err(error)?;
-        project_observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-        successor = ctx
-            .client
-            .project_ownership(&successor.id)
-            .await
-            .map_err(error)?;
-        if successor.status != ProjectStatus::Started {
-            return Err(error("successor activation is not confirmed"));
-        }
-    }
-    store
-        .put_pm_project(
-            wave.id(),
-            ctx.provider.as_str(),
-            &ctx.initiative,
-            successor.clone(),
-            project_observed_at,
-            Some(acquisition.clone()),
-        )
-        .await
-        .map_err(error)?;
-    // Reconcile a transfer that another Home or an interrupted caller already performed.
-    let items_observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    for item in ctx.client.list_items(&successor.id).await.map_err(error)? {
-        store
-            .put_pm_task(
-                wave.repo(),
-                ctx.provider.as_str(),
-                crate::store::PmTaskRecord {
-                    item,
-                    project: None,
-                    observed_at: items_observed_at,
-                },
-                Some((wave.id().clone(), ctx.initiative.clone())),
-                Some(acquisition.clone()),
-            )
-            .await
-            .map_err(error)?;
-    }
-    entry.successor = Some(successor);
-    let Some(predecessor) = entry.predecessor.as_ref() else {
-        return Ok(());
-    };
-    let fresh = ctx
-        .client
-        .project_ownership(&predecessor.id)
-        .await
-        .map_err(error)?;
-    if !matches!(
-        fresh.status,
-        ProjectStatus::Started | ProjectStatus::Completed
-    ) || fresh.team_ids != vec![ctx.team_id.clone()]
-        || fresh.initiative_ids != vec![ctx.initiative.clone()]
-    {
-        return Err(error(
-            "predecessor status or ownership changed; reconcile it in Linear",
-        ));
-    }
-    entry.tasks = rotation_tasks(store, wave, ctx, entry).await?;
-    for decision in &entry.tasks {
-        let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-        let (item, project) = ctx
-            .client
-            .issue_ownership(&decision.task.id)
-            .await
-            .map_err(error)?
-            .ok_or_else(|| error("Task planning is unavailable during chapter rotation"))?;
-        if item.project_id.as_deref() == Some(entry.successor_id.as_str()) {
-            store
-                .put_pm_task(
-                    wave.repo(),
-                    ctx.provider.as_str(),
-                    crate::store::PmTaskRecord {
-                        item,
-                        project,
-                        observed_at,
-                    },
-                    Some((wave.id().clone(), ctx.initiative.clone())),
-                    Some(acquisition.clone()),
-                )
-                .await
-                .map_err(error)?;
-            continue;
-        }
-        if item.project_id.as_deref() != Some(predecessor.id.as_str()) {
-            return Err(error(format!(
-                "{} moved outside this transition",
-                item.identifier
-            )));
-        }
-        let decision = disposition(store, item).await?;
-        match decision.disposition {
-            TaskDisposition::Move => {
-                ctx.client
-                    .move_item_to_project(&decision.task.id, &entry.successor_id)
-                    .await
-                    .map_err(error)?;
-                let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-                let (confirmed, project) = ctx
-                    .client
-                    .issue_ownership(&decision.task.id)
-                    .await
-                    .map_err(error)?
-                    .ok_or_else(|| error("Task planning is unavailable during chapter rotation"))?;
-                if confirmed.project_id.as_deref() != Some(entry.successor_id.as_str()) {
-                    return Err(error("Task transfer is not confirmed"));
-                }
-                store
-                    .put_pm_task(
-                        wave.repo(),
-                        ctx.provider.as_str(),
-                        crate::store::PmTaskRecord {
-                            item: confirmed,
-                            project,
-                            observed_at,
-                        },
-                        Some((wave.id().clone(), ctx.initiative.clone())),
-                        Some(acquisition.clone()),
-                    )
-                    .await
-                    .map_err(error)?;
-            }
-            TaskDisposition::Historical => {}
-            TaskDisposition::Unresolved => {
-                return Err(error(format!(
-                    "{}: {}",
-                    decision.task.identifier, decision.reason
-                )))
-            }
-        }
-    }
-    let remaining = rotation_tasks(store, wave, ctx, entry).await?;
-    if remaining.iter().any(|task| {
-        task.task.project_id.as_deref() == Some(predecessor.id.as_str())
-            && task.disposition != TaskDisposition::Historical
-    }) {
-        return Err(error(
-            "predecessor still has unfinished Tasks; refresh and retry",
-        ));
-    }
-    let current = checked_projects(repo, ctx, wave.slug()).await?;
-    if current.iter().any(|project| {
-        project.status == ProjectStatus::Started
-            && project.id != predecessor.id
-            && project.id != entry.successor_id
-    }) {
-        return Err(error(
-            "another In Progress Project appeared during rotation; reconcile it in Linear",
-        ));
-    }
-    let current_successor = current
-        .iter()
-        .find(|project| project.id == entry.successor_id)
-        .ok_or_else(|| error("successor is missing from the final Project inventory"))?;
-    if current_successor.status != ProjectStatus::Started || current_successor.name != name {
-        return Err(error(
-            "successor is no longer the intended In Progress Project; reconcile it in Linear",
-        ));
-    }
-    let current_predecessor = current
-        .iter()
-        .find(|project| project.id == predecessor.id)
-        .ok_or_else(|| error("predecessor is missing from the final Project inventory"))?;
-    match current_predecessor.status {
-        ProjectStatus::Started => {
-            ctx.client
-                .set_project_status(&predecessor.id, ProjectStatus::Completed)
-                .await
-                .map_err(error)?;
-        }
-        ProjectStatus::Completed => {}
-        _ => {
-            return Err(error(
-                "predecessor status changed during rotation; reconcile it in Linear",
-            ));
-        }
-    }
-    let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    let completed = ctx
-        .client
-        .project_ownership(&predecessor.id)
-        .await
-        .map_err(error)?;
-    if completed.status != ProjectStatus::Completed {
-        return Err(error("predecessor completion is not confirmed"));
-    }
-    store
-        .put_pm_project(
-            wave.id(),
-            ctx.provider.as_str(),
-            &ctx.initiative,
-            completed,
-            observed_at,
-            Some(acquisition.clone()),
-        )
-        .await
-        .map_err(error)?;
-    Ok(())
 }
 
 async fn disposition(store: &Store, item: PmItem) -> OpsResult<ChapterTask> {

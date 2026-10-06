@@ -5,16 +5,13 @@ Jack Heart concluded review before the October 5 implementation attempt. The
 status and evidence; earlier review notes remain at
 `6dc8536fedce0852bd4931682c7ffb0a871cf17d:scratch/questions.md`.
 
-- Preservation mechanics need no product decision. Registration and rotation
-  retain shared guards through commit; backlog stays historical. Completed
-  registration, reteam and checkout-admission detail remains in the design and
-  `986be7988:scratch/questions.md`. Shared binding setup exists. October 5 source inspection found missing exact
-  retry destinations and post-switch transfer membership; the design now specifies
-  retained exact-ID plan input and transition-owned selected issue IDs. This is an
-  implementation choice, not additional approval from Jack Heart; code and proofs
-  remain unfinished.
+- Preservation mechanics need no product decision. Exact-ID input, transition-owned
+  selected issue IDs, whole-input preflight/reservation and binding switching are
+  implemented. Retained creation intent prevents retry from recreating a missing existing
+  destination; it is an implementation choice, not additional approval from Jack Heart.
+  Operation fixtures and remaining CLI/crash acceptance are recorded in the design.
 - Chapter metadata representation and projection. Cross-Wave historical inspection
-  remains proposed; Wave-scoped chapter creation is requested.
+  remains proposed; Wave-scoped chapter creation is implemented.
 - Skill/Flow composition and the retained Task-candidate format between KR planning,
   chapter creation and separate Task admission.
 - Designated fixture Waves and provider write authority beyond Intelligence.

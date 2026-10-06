@@ -1,4 +1,4 @@
-//! `lf monitor workspace --watch` shows another process's commits. Each test
+//! `lf monitor work --watch` shows another process's commits. Each test
 //! drives the real binary against a seeded `LF_HOME` and writes from here.
 
 use std::collections::BTreeMap;
@@ -10,11 +10,10 @@ use std::time::{Duration, Instant};
 
 use loopflow::id::WaveId;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot};
-use loopflow::lf::commands::workspace_watch::{WorkspaceContent, WorkspaceFrame};
-use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
+use loopflow::planning::{LinearIssueId, TaskPlan};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::PmSnapshotRow;
-use loopflow::work::project::{Project, ProjectId};
 use loopflow::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
 
@@ -25,7 +24,7 @@ const INPUT: &str = "run_00000000000000000000000000000001";
 struct Watch {
     child: Child,
     stdin: Option<ChildStdin>,
-    frames: Receiver<WorkspaceFrame>,
+    frames: Receiver<WorkFrame>,
 }
 
 impl Drop for Watch {
@@ -121,24 +120,7 @@ impl Home {
         let worktree = repository(&self.path().join("checkout"));
         let head = git(&worktree, &["rev-parse", "HEAD"]);
         let now = time::OffsetDateTime::now_utc();
-        let project = Project {
-            id: ProjectId::new(),
-            plan: ProjectPlan {
-                flow: "feature".into(),
-                status: loopflow::pm::ProjectStatus::Started,
-                id: LinearProjectId::new(PROJECT).unwrap(),
-                slug: "reactive".into(),
-                name: "Reactive".into(),
-                prompt_context: String::new(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            wave_id: self.wave.id().clone(),
-            iteration: 0,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-        };
-        self.store.insert_project(&project).unwrap();
+        let project = self.store.project_by_project(PROJECT).unwrap().unwrap();
         let task = Task {
             id: TaskId::new(),
             plan: TaskPlan {
@@ -267,7 +249,7 @@ fn identifiers(roadmap: &RoadmapSnapshot) -> Vec<String> {
 impl Watch {
     /// Start the reader on a Home, which need not hold a store yet.
     fn open(home: &Path) -> Self {
-        let mut child = lf(home, &["monitor", "workspace", "--watch", "--json"])
+        let mut child = lf(home, &["monitor", "work", "--watch", "--json"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -277,7 +259,7 @@ impl Watch {
         std::thread::spawn(move || {
             for line in stdout.lines() {
                 let line = line.unwrap();
-                let frame: WorkspaceFrame = serde_json::from_str(&line)
+                let frame: WorkFrame = serde_json::from_str(&line)
                     .unwrap_or_else(|error| panic!("invalid frame: {error}: {line}"));
                 if send.send(frame).is_err() {
                     break;
@@ -297,7 +279,7 @@ impl Watch {
         stdin.flush().unwrap();
     }
 
-    fn next(&self, within: Duration) -> Option<WorkspaceFrame> {
+    fn next(&self, within: Duration) -> Option<WorkFrame> {
         self.frames.recv_timeout(within).ok()
     }
 
@@ -309,7 +291,7 @@ impl Watch {
                 .next(deadline.saturating_duration_since(Instant::now()))
                 .expect("no matching planning frame in time");
             assert_eq!(frame.unavailable, None);
-            if let WorkspaceContent::Planning(Some(part)) = frame.content {
+            if let WorkContent::Planning(Some(part)) = frame.content {
                 let tasks = identifiers(&part.roadmap);
                 if accept(&tasks) {
                     return tasks;
@@ -326,7 +308,7 @@ impl Watch {
             let frame = self
                 .next(deadline.saturating_duration_since(Instant::now()))
                 .unwrap_or_else(|| panic!("no planning frame showing {expected:?} in time"));
-            let WorkspaceContent::Planning(Some(part)) = frame.content else {
+            let WorkContent::Planning(Some(part)) = frame.content else {
                 continue;
             };
             let Evidence::Ok { items, .. } = &part.roadmap.waves[0].tasks else {
@@ -347,7 +329,7 @@ impl Watch {
             let frame = self
                 .next(deadline.saturating_duration_since(Instant::now()))
                 .expect("no matching Sessions frame in time");
-            if let WorkspaceContent::Sessions(Some(part)) = frame.content {
+            if let WorkContent::Sessions(Some(part)) = frame.content {
                 let record = part
                     .entries
                     .iter()
@@ -367,18 +349,18 @@ impl Watch {
             let frame = self
                 .next(deadline.saturating_duration_since(Instant::now()))
                 .expect("no heartbeat in time");
-            if let WorkspaceContent::Heartbeat(heartbeat) = frame.content {
+            if let WorkContent::Heartbeat(heartbeat) = frame.content {
                 return heartbeat.projections;
             }
         }
     }
 
     /// Every frame that arrives within `window`, heartbeats aside.
-    fn parts(&self, window: Duration) -> Vec<WorkspaceFrame> {
+    fn parts(&self, window: Duration) -> Vec<WorkFrame> {
         let deadline = Instant::now() + window;
         let mut parts = Vec::new();
         while let Some(frame) = self.next(deadline.saturating_duration_since(Instant::now())) {
-            if !matches!(frame.content, WorkspaceContent::Heartbeat(_)) {
+            if !matches!(frame.content, WorkContent::Heartbeat(_)) {
                 parts.push(frame);
             }
         }
@@ -427,7 +409,7 @@ fn a_task_committed_elsewhere_appears_once_and_bursts_converge() {
     let mut frames = 0;
     let mut last = None;
     for frame in watch.parts(Duration::from_secs(3)) {
-        if let WorkspaceContent::Planning(Some(part)) = frame.content {
+        if let WorkContent::Planning(Some(part)) = frame.content {
             frames += 1;
             last = Some(part.roadmap);
         }
@@ -482,7 +464,7 @@ fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
     assert!(watch
         .parts(Duration::from_millis(1500))
         .iter()
-        .all(|frame| !matches!(frame.content, WorkspaceContent::Planning(_))));
+        .all(|frame| !matches!(frame.content, WorkContent::Planning(_))));
     assert!(watch.heartbeat()["planning"] > after["planning"]);
 
     let writer = std::thread::spawn({
@@ -607,11 +589,11 @@ fn a_store_that_cannot_be_opened_is_unavailable_not_empty() {
     let watch = Watch::open(dir.path());
     let frame = loop {
         let frame = watch.next(Duration::from_secs(30)).expect("reader ended");
-        if matches!(frame.content, WorkspaceContent::Planning(_)) {
+        if matches!(frame.content, WorkContent::Planning(_)) {
             break frame;
         }
     };
-    assert!(matches!(frame.content, WorkspaceContent::Planning(None)));
+    assert!(matches!(frame.content, WorkContent::Planning(None)));
     assert!(frame.unavailable.is_some());
 }
 
@@ -627,7 +609,7 @@ fn a_steady_writer_is_shown_while_it_writes() {
         home.plan(count);
         std::thread::sleep(Duration::from_millis(50));
         while let Ok(frame) = watch.frames.try_recv() {
-            if let WorkspaceContent::Planning(Some(part)) = frame.content {
+            if let WorkContent::Planning(Some(part)) = frame.content {
                 latest = identifiers(&part.roadmap).len();
                 shown.get_or_insert((count, started.elapsed()));
             }
@@ -680,7 +662,7 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
             let frame = watch
                 .next(deadline.saturating_duration_since(Instant::now()))
                 .expect("no Sessions frame in time");
-            if let WorkspaceContent::Sessions(Some(part)) = frame.content {
+            if let WorkContent::Sessions(Some(part)) = frame.content {
                 if frame.answers == Some(id) {
                     return part;
                 }
@@ -706,8 +688,8 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
     home.raw().execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES('conversation','Conversation','human',1,0,?1)", [home.wave.repo()]).unwrap();
     for frame in watch.parts(Duration::from_secs(2)) {
         match frame.content {
-            WorkspaceContent::Sessions(Some(part)) => assert_eq!(part.repo, other),
-            WorkspaceContent::Wave(Some(part)) => assert_eq!(part.wave, home.wave.id().as_str()),
+            WorkContent::Sessions(Some(part)) => assert_eq!(part.repo, other),
+            WorkContent::Wave(Some(part)) => assert_eq!(part.wave, home.wave.id().as_str()),
             _ => {}
         }
     }
@@ -733,7 +715,7 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
     let idle: Vec<_> = watch
         .parts(Duration::from_secs(5))
         .into_iter()
-        .filter(|frame| !matches!(frame.content, WorkspaceContent::Activity(_)))
+        .filter(|frame| !matches!(frame.content, WorkContent::Activity(_)))
         .collect();
     assert!(idle.is_empty(), "{idle:?}");
     assert_eq!(home.execs(), execs);
@@ -752,8 +734,8 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
 #[test]
 fn a_checkout_changed_on_disk_is_shown() {
     let home = Home::at(tempfile::tempdir().unwrap());
-    let worktree = home.checkout();
     home.plan(1);
+    let worktree = home.checkout();
     let watch = home.watch();
     watch.checkout((false, false));
 
@@ -804,7 +786,7 @@ fn usage_rereads_only_wave_detail_and_not_for_every_row() {
 }
 
 #[test]
-fn selection_only_commit_reaches_two_open_workspace_readers() {
+fn selection_only_commit_reaches_two_open_work_readers() {
     let home = Home::new();
     let first = home.watch();
     let second = home.watch();
@@ -812,7 +794,7 @@ fn selection_only_commit_reaches_two_open_workspace_readers() {
         let deadline = Instant::now() + Duration::from_secs(20);
         while Instant::now() < deadline {
             if let Some(frame) = watch.next(Duration::from_millis(500)) {
-                if let WorkspaceContent::Planning(Some(planning)) = frame.content {
+                if let WorkContent::Planning(Some(planning)) = frame.content {
                     let wave = &planning.roadmap.waves[0];
                     if wave.project_readiness.state == expected {
                         assert!(

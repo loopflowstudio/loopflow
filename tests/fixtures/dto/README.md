@@ -31,7 +31,7 @@ reconstruct the condition from process flags.
 `activity_snapshot.json` pins `lf ps --json`: exact live Exec and provider
 processes carry OS-derived state, while a provider without exact ownership
 stays separate from the call tree. Rust and Swift both round-trip it; The
-Podium derives no process state of its own.
+Loopflow Desktop derives no process state of its own.
 
 `session_history_summary.json` and `wave_detail.json` pin the `SessionHistory`
 shape used by `lf usage --json` and Wave detail. Captured event sequences

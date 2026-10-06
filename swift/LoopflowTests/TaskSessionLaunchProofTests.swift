@@ -131,7 +131,7 @@ struct TaskSessionLaunchProofTests {
             }
         }
         let repo = directory.path
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         let origin = model.navigation
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)

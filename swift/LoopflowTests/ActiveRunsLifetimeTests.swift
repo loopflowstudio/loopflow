@@ -4,14 +4,14 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-@Suite("Podium active Session lifetime", .serialized)
+@Suite("Work active Session lifetime", .serialized)
 @MainActor
 struct ActiveSessionsLifetimeTests {
     @Test("Home replacement drains the old generation and rejects its late evidence")
     func replacement() async throws {
         let feed = ReplacingActiveSessionsFeed()
         let query = RegistryQuery(watchActiveSessions: { await feed.open() }) { _, _ in "[]" }
-        let model = PodiumModel(query: query)
+        let model = WorkModel(query: query)
         model.observeActiveSessions()
         try await waitForActiveSessions { model.activeSessions.value?.home == "/first" }
         await feed.replace()
@@ -33,7 +33,7 @@ struct ActiveSessionsLifetimeTests {
         let feed = ActiveSessionsTestFeed()
         let wire = #"{"discovery":"ready","home":"/fixture","observed_at":1,"task":null,"sessions":[],"gaps":[]}"#
         let query = RegistryQuery(watchActiveSessions: { try await feed.open(initial: wire) }) { _, _ in "[]" }
-        var model: PodiumModel? = PodiumModel(query: query)
+        var model: WorkModel? = WorkModel(query: query)
         weak var reference = model
         model?.observeActiveSessions()
         try await waitForActiveSessions { model?.activeSessions.value != nil }

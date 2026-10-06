@@ -163,7 +163,7 @@ private struct WavePlanView: View {
         }
     }
 
-    /// Later readings arrive from the window's workspace stream when a commit
+    /// Later readings arrive from the window's Work stream when a commit
     /// changes this Wave; nothing here reads on a clock.
     private func applyStreamed() {
         guard let streamed, streamed.wave == wave.id else { return }
@@ -235,18 +235,18 @@ private struct WavePlanView: View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             if let project = displayedPlan.currentProject { WaveProjectView(project: project) }
             if isAwaitingDetail {
-                WorkspaceSectionHeading("Tasks")
+                WorkSectionHeading("Tasks")
                 ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")
             } else if let workMap {
                 switch workMap.tasks {
                 case .unavailable(let reason):
-                    WorkspaceSectionHeading("Tasks")
+                    WorkSectionHeading("Tasks")
                     Text(reason).foregroundStyle(Color.statusWarning)
                 case .available(let inventory, let truncated):
                     let tasks = inventory.filter {
                         historyFilter.includes($0.task, condition: $0.condition, now: historyNow)
                     }
-                    WorkspaceSectionHeading(title: "Tasks", count: tasks.count) {
+                    WorkSectionHeading(title: "Tasks", count: tasks.count) {
                         TaskHistoryControls(filter: $historyFilter)
                             .onChange(of: historyFilter) { historyNow = Date() }
                     }
@@ -255,7 +255,7 @@ private struct WavePlanView: View {
                     ForEach(tasks) { task in WaveTaskWorkView(task: task, selection: $selection) }
                 }
             } else {
-                WorkspaceSectionHeading("Tasks")
+                WorkSectionHeading("Tasks")
                 Text("Task status unavailable.").foregroundStyle(palette.textSecondary)
             }
             ForEach(reading.snapshot?.unavailableTasks ?? [], id: \.taskId) { task in
@@ -326,7 +326,7 @@ struct WaveMetricPortfolioView: View {
     var body: some View {
         if !portfolio.metrics.isEmpty || !portfolio.contractIssues.isEmpty {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                WorkspaceSectionHeading(title: "Metrics", count: portfolio.metrics.count) {
+                WorkSectionHeading(title: "Metrics", count: portfolio.metrics.count) {
                     if presentation.requiresWorkCount > 0 {
                         Label(
                             countLabel(
@@ -358,7 +358,7 @@ struct WaveMetricPortfolioView: View {
                             WaveMetricTableRow(metric: metric, candidate: true, targetUnavailable: presentation.targetUnavailable(for: metric))
                         }
                     }
-                    .workspacePanel()
+                    .workPanel()
                     .accessibilityIdentifier(official.isEmpty ? "wave-metric-candidates" : "wave-metric-official")
                 }
 
@@ -448,7 +448,7 @@ private struct WaveMetricTableRow: View {
                         .foregroundStyle(palette.text)
                         .lineLimit(1)
                     if candidate {
-                        WorkspaceChip(text: "candidate", tone: .neutral)
+                        WorkChip(text: "candidate", tone: .neutral)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -466,7 +466,7 @@ private struct WaveMetricTableRow: View {
                     .font(Typography.code(12))
                     .foregroundStyle(palette.textSecondary)
                     .frame(width: MetricColumns.window, alignment: .leading)
-                WorkspaceChip(text: presentation.state, tone: metric.evidence.tone)
+                WorkChip(text: presentation.state, tone: metric.evidence.tone)
                     .frame(width: MetricColumns.state, alignment: .leading)
             }
             Text(detail(presentation))
@@ -613,7 +613,7 @@ private extension MetricEvidence {
         }
     }
 
-    var tone: WorkspaceTone {
+    var tone: WorkTone {
         switch self {
         case .met: return .done
         case .missed: return .blocked
@@ -879,8 +879,8 @@ struct WaveProjectView: View {
             ForEach(project.krs) { kr in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Circle()
-                        .fill(kr.holds ? WorkspaceTone.done.ink : Color.clear)
-                        .overlay(Circle().strokeBorder(kr.holds ? WorkspaceTone.done.ink : palette.borderStrong, lineWidth: 1.5))
+                        .fill(kr.holds ? WorkTone.done.ink : Color.clear)
+                        .overlay(Circle().strokeBorder(kr.holds ? WorkTone.done.ink : palette.borderStrong, lineWidth: 1.5))
                         .frame(width: 12, height: 12)
                         .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
                     Text(kr.text)

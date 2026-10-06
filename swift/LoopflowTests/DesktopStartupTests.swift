@@ -24,10 +24,10 @@ struct DesktopStartupTests {
             for attempt in 0..<samples {
                 let directory = FileManager.default.temporaryDirectory.appendingPathComponent("startup-\(UUID().uuidString)")
                 defer { try? FileManager.default.removeItem(at: directory) }
-                let saving = WorkspaceCache(directory: directory)
+                let saving = WorkCache(directory: directory)
                 if scenario != "uncached" {
                     // The previous launch: every read succeeded and was saved.
-                    let previous = PodiumModel(query: capture.query(latency: false, offline: false, reads: ReadCounts()),
+                    let previous = WorkModel(query: capture.query(latency: false, offline: false, reads: ReadCounts()),
                                                launchCandidates: [capture.repo], cache: saving)
                     await previous.refresh()
                     previous.confirmHome(capture.homeId)
@@ -35,17 +35,17 @@ struct DesktopStartupTests {
                 }
                 // `warm_reopen` is a second window in the process that saved; the
                 // other scenarios are a new process reading the file.
-                let cache = scenario == "warm_reopen" ? saving : WorkspaceCache(directory: directory)
+                let cache = scenario == "warm_reopen" ? saving : WorkCache(directory: directory)
 
                 let reads = ReadCounts()
                 let query = capture.query(latency: true, offline: scenario == "saved_offline", reads: reads)
                 let clock = ContinuousClock()
                 let start = clock.now
                 // The window's own constructor: an unsaved repository costs its `git` checks here.
-                let model = PodiumModel(query: query, launchCandidates: [capture.repo], cache: cache)
+                let model = WorkModel(query: query, launchCandidates: [capture.repo], cache: cache)
                 let initMs = milliseconds(clock.now - start)
                 let usableFrom = model.roadmap.value != nil && model.sessions.value != nil ? "saved" : "read"
-                let loop = Task { await model.keepWorkspaceCurrent() }
+                let loop = Task { await model.keepWorkCurrent() }
                 var usableMs: Double?
                 var settledMs: Double?
                 var readsUntilUsable: [String: Int]?
@@ -55,14 +55,14 @@ struct DesktopStartupTests {
                         usableMs = milliseconds(clock.now - start)
                         readsUntilUsable = reads.finished
                     }
-                    switch model.workspaceStatus {
+                    switch model.workStatus {
                     case .current, .failed: settledMs = milliseconds(clock.now - start)
                     case .loading, .updating: try await Task.sleep(for: .milliseconds(1))
                     }
                 }
                 loop.cancel()
                 await loop.value
-                let status: String = switch model.workspaceStatus {
+                let status: String = switch model.workStatus {
                 case .loading: "loading"
                 case .updating: "updating"
                 case .current: "current"

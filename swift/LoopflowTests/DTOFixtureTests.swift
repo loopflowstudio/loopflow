@@ -472,11 +472,11 @@ struct DTOFixtureTests {
         #expect(decoded == session)
     }
 
-    @Test("Workspace frames decode every part and keep the wire text a saved workspace needs")
+    @Test("Work frames decode every part and keep the wire text a saved workspace needs")
     func workspaceFramesDecode() throws {
-        let data = try loadFixtureData("workspace_frame.json")
+        let data = try loadFixtureData("work_frame.json")
         let lines = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
-        let frames = try lines.map { try WorkspaceFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
+        let frames = try lines.map { try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
 
         #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat"])
         #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6])
@@ -509,7 +509,7 @@ struct DTOFixtureTests {
         var missing = lines[0]
         missing.removeValue(forKey: "answers")
         #expect(throws: (any Error).self) {
-            try WorkspaceFrame.decode(line: JSONSerialization.data(withJSONObject: missing))
+            try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: missing))
         }
     }
 

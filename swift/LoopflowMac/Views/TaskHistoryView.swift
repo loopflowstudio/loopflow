@@ -7,12 +7,12 @@ import SwiftUI
 /// remain separate from recorded input completion and command exit. Each step also
 /// shows what its submitted input was made of, from `lf usage --context`.
 struct TaskHistoryView: View {
-    let model: PodiumModel
+    let model: WorkModel
     let task: RoadmapTask
     let wave: WaveSnapshot
     @Environment(\.palette) private var palette
 
-    private var reading: PodiumReading<[SessionHistory]> { model.sessionHistory[task.id] }
+    private var reading: WorkReading<[SessionHistory]> { model.sessionHistory[task.id] }
     private var history: [SessionHistory]? { reading.value }
     private var expanded: Bool { model.navigation.expandedHistory.contains(task.id) }
     private var inFlight: Bool { model.sessionHistory.inFlight.contains(task.id) }
@@ -20,7 +20,7 @@ struct TaskHistoryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            WorkspaceDisclosureHeading(
+            WorkDisclosureHeading(
                 title: "Session history",
                 count: expanded ? history?.count : nil,
                 expanded: expanded,

@@ -12,7 +12,7 @@ struct ProjectActivationTests {
         let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: path))
         let result = ActivationResult()
-        let model = PodiumModel(query: RegistryQuery { _, _ in
+        let model = WorkModel(query: RegistryQuery { _, _ in
             if await result.offline { throw RegistryQueryError("offline") }
             return "{}"
         })
@@ -33,7 +33,7 @@ struct ProjectActivationTests {
     @Test("leaving a Wave does not cancel its activation or replace another Wave's feedback")
     func lateResponse() async {
         let response = DelayedPreparation()
-        let model = PodiumModel(query: RegistryQuery { args, _ in
+        let model = WorkModel(query: RegistryQuery { args, _ in
             if args.contains("a") {
                 await response.wait()
                 throw RegistryQueryError("a failed")
@@ -60,7 +60,7 @@ struct ProjectActivationTests {
         let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: path))
         let response = DelayedPreparation()
-        let model = PodiumModel(query: RegistryQuery { _, _ in
+        let model = WorkModel(query: RegistryQuery { _, _ in
             await response.wait()
             throw RegistryQueryError("offline")
         })
@@ -120,7 +120,7 @@ struct ProjectActivationTests {
         for index in items.indices { items[index]["flow"] = "" }
         projects["items"] = items; waves[0]["projects"] = projects; data["waves"] = waves
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: data))
-        let model = PodiumModel(query: RegistryQuery { _, _ in "{}" })
+        let model = WorkModel(query: RegistryQuery { _, _ in "{}" })
         model.applyFixture(roadmap: .available(roadmap), waves: .available([]),
             processActivity: .loading, workActivity: .loading, repos: [])
         model.select(.wave(id: roadmap.waves[0].wave.id))

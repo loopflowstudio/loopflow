@@ -12,7 +12,7 @@ enum RepoFilter: Hashable {
 
 @MainActor
 private final class WindowModel {
-    private(set) lazy var model = PodiumModel.window(query: RegistryQueryLocal.shared)
+    private(set) lazy var model = WorkModel.window(query: RegistryQueryLocal.shared)
 }
 
 struct WavesView: View {
@@ -23,7 +23,7 @@ struct WavesView: View {
     /// Built when a window first renders: the app describes this view at every
     /// launch, and a model decodes the saved workspace.
     @State private var window = WindowModel()
-    private var model: PodiumModel { window.model }
+    private var model: WorkModel { window.model }
     @State private var showsTaskWorkspace = false
 
     /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
@@ -139,8 +139,8 @@ struct WavesView: View {
                 .frame(minWidth: 1100, minHeight: 700)
             }
         }
-        .task { await model.keepWorkspaceCurrent() }
-        .onChange(of: model.workspaceScope) { _, _ in model.syncWorkspaceScope() }
+        .task { await model.keepWorkCurrent() }
+        .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
         .onChange(of: selectedWave?.id, initial: true) { _, _ in
             model.detailWaveId = selectedWave.flatMap { $0.isRegistered ? $0.id : nil }
             if let wave = selectedWave, wave.isRegistered {

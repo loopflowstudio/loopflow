@@ -223,11 +223,11 @@ pub struct TaskConditionSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskReferenceSnapshot {
     pub issue_url: Option<String>,
-    pub workspace: Option<TaskWorkspaceSnapshot>,
+    pub workspace: Option<TaskWorktreeSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskWorkspaceSnapshot {
+pub struct TaskWorktreeSnapshot {
     pub home_id: Option<crate::durable::HomeId>,
     pub slug: String,
     /// Full branch name from the active PR, or the last recorded PR after the
@@ -1556,7 +1556,7 @@ fn task_reference(
         } else {
             task.worktree.clone()
         };
-        TaskWorkspaceSnapshot {
+        TaskWorktreeSnapshot {
             home_id,
             slug: task.workspace_slug.clone(),
             branch,

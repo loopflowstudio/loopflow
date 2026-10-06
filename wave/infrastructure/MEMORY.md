@@ -385,27 +385,29 @@ Operation fixtures cover partial settlement and both sides of the switch;
 CLI crashes, Desktop and configured Intelligence acceptance remain open.
 Earlier counterexamples: `fc6df439424bd341ec3cd8182c19b13ed45cffd7:wave/infrastructure/MEMORY.md`.
 
-October 6: Jack Heart authorized replacing the Home-local YAML selector and
-`ProjectPreparation` with SQLite selection and LOO-382's workspace stream.
-`e887a21c1` was integrated via supported sync at `66a3daa86`; its uncommitted
-changes remain outside this branch. Selection references the accepted Project on
-the Wave row. Explicit mutations import old YAML once, retaining original bytes;
-old file edits thereafter select nothing. Creation selection/settlement commit
-together. Readiness derives from accepted facts, original age, transition evidence
-and the actual activation Exec. An unfinished Exec proves no current liveness.
-Both Desktop surfaces share activation and streamed reads; absent Flow renders no
-template. Partial Project acceptance stays visible without inventing Task absence
-or full-refresh freshness. Watchers never activate. Compression removed Portfolio's
-post-reset refresh callback; committed workspace frames own updates. Live command
-feedback and persisted Exec uncertainty remain distinct: both surfaces derive
-“Preparing Project…” only from the existing per-Wave transport handle, preserving
-cached planning and unknown persisted outcomes after that handle ends. Current
-transport errors precede retained activation errors; retry clears transport feedback.
-Headless checks prove no installed Intelligence repair or mounted acceptance.
-Release child memory reinforces operation-entry recovery: internal fixtures cannot
-replace public CLI/crash proof. The design retains acceptance; source work grants
-no installation authority. Earlier Desktop evidence:
-`42e6c2706b1b35b2852e438ff94a49d060faccda:scratch/keep-every-wave-ready-for.md`.
+October 6: Jack Heart authorized SQLite selection and LOO-382's stream, deleting
+the YAML selector and `ProjectPreparation`. Dependency `e887a21c1` entered through
+`66a3daa86`; its dirty work stayed separate. Explicit mutations import YAML once,
+retaining bytes; later edits select nothing. Creation selection/settlement commit
+together. Accepted facts retain age and partial inventory. Readiness uses those
+facts, transitions and the actual activation Exec; unfinished is unknown. Both
+surfaces share activation; absent Flow hides its template. Watchers never activate.
+Committed frames replace refresh callbacks. Only the live per-Wave command shows
+“Preparing Project…”; cached plans survive it. Current transport errors precede
+retained errors; Retry clears transport feedback. Public CLI/crash, mounted and
+installed Intelligence acceptance remain unproved; source grants no installation
+authority. Release's operation-entry lesson still applies. Earlier detail:
+`c99baa3baa23d324b013a03ea02cdcbc8953c2aa:wave/infrastructure/MEMORY.md`.
+
+Jack Heart also selected Loopflow Desktop, `WorkModel`, `RepoView` and Work-named
+observation/navigation on October 6. The naming implementation preserves wire
+fields, cache files, selection/layout keys and identities. Durable Work still means
+Wave/Project/Task; Sessions and Execs remain associated records. Presentation joins
+are `TaskProjection`/`WaveProjection`, not new Task/Wave owners. `TaskWorktreeSnapshot`
+is Git placement; `WorkspaceIdentity`, `SessionWorkspace` and terminal workspaces
+remain broader directory/layout concepts. `WorkReadingStatus` avoids conflating
+loading with durable `WorkStatus`.
+
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 

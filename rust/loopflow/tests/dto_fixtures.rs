@@ -488,21 +488,18 @@ fn context_report_keeps_unknown_sources_distinct_from_zero() {
 }
 
 #[test]
-fn workspace_frames_keep_each_part_and_require_every_envelope_field() {
-    use loopflow::lf::commands::workspace_watch::{WorkspaceContent, WorkspaceFrame};
-    let json = include_str!("../../../tests/fixtures/dto/workspace_frame.json");
-    let frames: Vec<WorkspaceFrame> = serde_json::from_str(json).unwrap();
+fn work_frames_keep_each_part_and_require_every_envelope_field() {
+    use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
+    let json = include_str!("../../../tests/fixtures/dto/work_frame.json");
+    let frames: Vec<WorkFrame> = serde_json::from_str(json).unwrap();
     let source: serde_json::Value = serde_json::from_str(json).unwrap();
     assert_eq!(serde_json::to_value(&frames).unwrap(), source);
-    assert!(matches!(
-        frames[0].content,
-        WorkspaceContent::Planning(Some(_))
-    ));
+    assert!(matches!(frames[0].content, WorkContent::Planning(Some(_))));
     assert_eq!(frames[0].answers, None);
-    assert!(matches!(frames[2].content, WorkspaceContent::Task(None)));
+    assert!(matches!(frames[2].content, WorkContent::Task(None)));
     assert!(frames[2].unavailable.is_some());
     assert!(frames[4].revisions.is_none());
-    let WorkspaceContent::Heartbeat(heartbeat) = &frames[5].content else {
+    let WorkContent::Heartbeat(heartbeat) = &frames[5].content else {
         panic!("last fixture frame is a heartbeat");
     };
     assert_eq!(heartbeat.projections["planning"], 3);
@@ -510,7 +507,7 @@ fn workspace_frames_keep_each_part_and_require_every_envelope_field() {
         let mut missing = source[0].clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(
-            serde_json::from_value::<WorkspaceFrame>(missing).is_err(),
+            serde_json::from_value::<WorkFrame>(missing).is_err(),
             "{field} must be required"
         );
     }

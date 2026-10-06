@@ -49,7 +49,7 @@ ENDPOINTS = {
     ],
     "write-visible": [
         "Endpoint: another process's commit to a private Home's store, through the real "
-        "`lf monitor workspace --watch` reader, to native bitmap capture with text verification.",
+        "`lf monitor work --watch` reader, to native bitmap capture with text verification.",
         "**Not compositor paint time. Frame-hitch evidence is unavailable.**",
         "",
         "The interval starts when the writing process has exited. Rows are written with "

@@ -39,7 +39,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
         let cancel: @Sendable () async -> Void
     }
 
-    /// `name` labels failures ("Active Session", "Workspace").
+    /// `name` labels failures ("Active Session", "Work").
     static func start(
         name: String,
         process: Process,
@@ -283,17 +283,17 @@ enum LocalActiveSessionsObservation {
     }
 }
 
-enum LocalWorkspaceObservation {
+enum LocalWorkObservation {
     /// Every frame is kept: the reader already holds at most one per part.
     static func start(
         process: Process,
         configurationChanged: @escaping @Sendable () throws -> Bool
-    ) throws -> WorkspaceObservation {
-        let reader = try LocalLineObservation<WorkspaceFrame>.start(
-            name: "Workspace", process: process, frameLimit: 64 * 1024 * 1024,
+    ) throws -> WorkObservation {
+        let reader = try LocalLineObservation<WorkFrame>.start(
+            name: "Work", process: process, frameLimit: 64 * 1024 * 1024,
             buffering: .unbounded, configurationChanged: configurationChanged,
-            decode: WorkspaceFrame.decode(line:))
-        return WorkspaceObservation(frames: reader.frames, request: { request in
+            decode: WorkFrame.decode(line:))
+        return WorkObservation(frames: reader.frames, request: { request in
             reader.send(request.line)
         }, cancel: reader.cancel)
     }

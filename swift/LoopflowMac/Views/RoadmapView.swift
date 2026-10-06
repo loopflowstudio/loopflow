@@ -67,13 +67,13 @@ func roadmapTaskIsActionable(_ task: RoadmapTask) -> Bool {
     roadmapTaskAction(task) != nil
 }
 
-/// The Podium's shared Work surface: one machine-wide `lf roadmap --json`
+/// Loopflow Desktop's shared Work surface: one machine-wide `lf roadmap --json`
 /// read, rendered without re-querying each Wave or inventing another work model.
 struct RoadmapView: View {
     let onOpenWave: (WaveSnapshot) -> Void
 
     @Environment(\.palette) private var palette
-    private let model: PodiumModel
+    private let model: WorkModel
     @Binding private var selection: WorkReference?
     @State private var lens: WorkLens = .now
     @State private var controlError: String?
@@ -81,7 +81,7 @@ struct RoadmapView: View {
 
     /// Renders the window's model; that window keeps it current.
     init(
-        model: PodiumModel,
+        model: WorkModel,
         onOpenWave: @escaping (WaveSnapshot) -> Void
     ) {
         self.model = model
@@ -197,7 +197,7 @@ struct RoadmapView: View {
         }
         .font(Typography.caption(9).weight(.semibold))
         .foregroundStyle(palette.textSecondary)
-        .accessibilityIdentifier("podium-work-breadcrumb")
+        .accessibilityIdentifier("loopflow-work-breadcrumb")
     }
 
     private var breadcrumbSeparator: some View {
@@ -241,23 +241,23 @@ struct RoadmapView: View {
     @ViewBuilder
     private var content: some View {
         if snapshot == nil, queryError == nil {
-            ProgressView(WorkspaceStatus.loading.message ?? "")
+            ProgressView(WorkReadingStatus.loading.message ?? "")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityIdentifier("podium-work-loading")
+                .accessibilityIdentifier("loopflow-work-loading")
         } else if snapshot == nil {
             ContentUnavailableView(
                 "Work unavailable",
                 systemImage: "exclamationmark.triangle",
                 description: Text("Couldn't read the latest work. Refresh to try again.")
             )
-            .accessibilityIdentifier("podium-work-unavailable")
+            .accessibilityIdentifier("loopflow-work-unavailable")
         } else if visibleWaves.isEmpty {
             ContentUnavailableView(
                 repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
                 systemImage: "map",
                 description: Text("Waves without readable Projects remain in the Waves sidebar.")
             )
-            .accessibilityIdentifier("podium-work-empty")
+            .accessibilityIdentifier("loopflow-work-empty")
         } else {
             if selection != nil {
                 focusedContent
@@ -483,7 +483,7 @@ struct RoadmapView: View {
         }
     }
 
-    private func openWorktree(_ workspace: TaskWorkspaceSnapshot) {
+    private func openWorktree(_ workspace: TaskWorktreeSnapshot) {
         var components = URLComponents()
         components.scheme = "warp"
         components.host = "action"
@@ -506,7 +506,7 @@ private struct RoadmapWaveCard: View {
     let onRefresh: () async -> Void
     let onError: (String) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
-    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
 
@@ -570,7 +570,7 @@ private struct RoadmapWaveCard: View {
                     lineWidth: selection == .wave(id: roadmap.wave.id) ? 2 : 1
                 )
         }
-        .accessibilityIdentifier("podium-wave-\(roadmap.wave.id)")
+        .accessibilityIdentifier("loopflow-wave-\(roadmap.wave.id)")
     }
 }
 
@@ -580,7 +580,7 @@ struct RoadmapTaskRow: View {
     let activeControlId: String?
     let onSelect: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
-    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
 
@@ -634,7 +634,7 @@ struct RoadmapTaskRow: View {
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-        .accessibilityIdentifier("podium-task-\(task.id)")
+        .accessibilityIdentifier("loopflow-task-\(task.id)")
         .opacity(roadmapTaskIsActionable(task) ? 1 : 0.55)
     }
 }
@@ -686,7 +686,7 @@ struct TaskActionCluster: View {
     let isActing: Bool
     let controlsDisabled: Bool
     let onAction: (RoadmapTaskAction) -> Void
-    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
@@ -718,7 +718,7 @@ struct NowSectionView: View {
     let activeControlId: String?
     let onSelect: (NowRow) -> Void
     let onTaskAction: (NowRow, RoadmapTaskAction) -> Void
-    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
 
@@ -748,7 +748,7 @@ struct NowSectionView: View {
                 )
             }
         }
-        .accessibilityIdentifier("podium-now-\(section.group.rawValue)")
+        .accessibilityIdentifier("loopflow-now-\(section.group.rawValue)")
     }
 
     private func nowColor(_ group: TaskConditionState) -> Color {
@@ -767,7 +767,7 @@ private struct NowRowView: View {
     let activeControlId: String?
     let onSelect: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
-    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
 
@@ -819,7 +819,7 @@ private struct NowRowView: View {
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-        .accessibilityIdentifier("podium-task-\(task.id)")
+        .accessibilityIdentifier("loopflow-task-\(task.id)")
         .opacity(roadmapTaskIsActionable(task) ? 1 : 0.55)
     }
 }

@@ -123,7 +123,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
 /// Task Work and remains after execution finishes.
 public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
     public let issueUrl: URL?
-    public let workspace: TaskWorkspaceSnapshot?
+    public let workspace: TaskWorktreeSnapshot?
 
     enum CodingKeys: String, CodingKey {
         case workspace
@@ -131,7 +131,7 @@ public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-public struct TaskWorkspaceSnapshot: Decodable, Sendable, Hashable {
+public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
     public let homeId: String?
     public var identity: WorkspaceIdentity? { homeId.map { WorkspaceIdentity(homeId: $0, worktree: worktree) } }
     public let slug: String

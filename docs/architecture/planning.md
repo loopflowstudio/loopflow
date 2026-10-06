@@ -43,7 +43,7 @@ replacement. Names, content and empty Flow remain intact. Ensure neither searche
 for candidates nor performs rotation; status and roadmap never call it. Desktop
 ensures on explicit opening or retry while retaining cached planning and independent
 Session reads. Both primary and Portfolio surfaces render the same SQLite-derived
-`project_readiness` through `lf monitor workspace --watch --json`. Committed selection,
+`project_readiness` through `lf monitor work --watch --json`. Committed selection,
 accepted facts, transitions and exact activation Exec outcomes invalidate that reading.
 A pending transition or unfinished Exec is unresolved evidence, not proof of liveness.
 Watchers and status reads never provision or import.

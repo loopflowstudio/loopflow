@@ -66,7 +66,7 @@ a valid result only when every started Task already holds a disposition above.
   a decision. Follow the TaskWorkflow's outgoing edges when one is present;
   do not choose a new direction or arm an unapproved merge.
 - **Reviews stay in the Task conversation.** Surface the Session from
-  `lf session list --needs-me --json`. Discuss feedback and preserve agreed
+  `lf session list --waiting --json`. Discuss feedback and preserve agreed
   direction there; closing a Session supplies no navigation authority.
   Headless, required judgment is a waiting disposition.
 

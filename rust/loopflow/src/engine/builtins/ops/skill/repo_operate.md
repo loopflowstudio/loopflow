@@ -153,8 +153,8 @@ accepted direction; use `concept-review` when existing work needs rethinking.
 
 ## Sessions and reviews
 
-Use `lf session list --needs-me --json` to identify current review/reply
-obligations through `attention`. `task_ids` is the shared Task membership,
+Use `lf session list --waiting --json` to identify conversations waiting on
+a person through `attention`; a quiet working step can appear there. `task_ids` is the shared Task membership,
 including checkout association; `work` alone is not. An open or interrupted
 conversation does not by itself mean its Task is blocked.
 

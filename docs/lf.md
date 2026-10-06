@@ -272,8 +272,10 @@ lf task status LOO-358 --json
 lf session list --task LOO-358 --interactive all --history
 ```
 
-`lf session list` defaults to unfinished interactive conversations and current
-Flow reviews. `--needs-me` narrows that selection to immediate attention;
+`lf session list` defaults to unfinished interactive conversations.
+`--waiting` narrows that selection to conversations waiting on you: one that
+asked a question, handed its turn back, or went quiet for two minutes with no
+tool call outstanding. A long silent step can show up there;
 `--all` changes repository scope, `--interactive all` includes background work,
 and `--history` includes completed conversations and historical reviews.
 

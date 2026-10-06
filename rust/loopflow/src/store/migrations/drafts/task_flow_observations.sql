@@ -150,3 +150,18 @@ END;
 -- A Task's primary conversation is one of its own, named here. The Session
 -- keeps its Task membership and carries no scope mark.
 ALTER TABLE tasks ADD COLUMN primary_session_id TEXT REFERENCES agent_sessions(id) ON DELETE SET NULL;
+
+-- Waiting replaces the reply reading this index served.
+DROP INDEX session_turn_attention;
+
+-- What a Session's driver last read from its provider's own stream: one row
+-- per Session, replaced as the stream moves. A row from a driver that no
+-- longer holds the Session says nothing about it now.
+CREATE TABLE session_activity (
+    session_id TEXT PRIMARY KEY REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    driver_generation INTEGER NOT NULL,
+    observed_at INTEGER NOT NULL,
+    open_tools INTEGER NOT NULL,
+    pending_input INTEGER NOT NULL,
+    yielded INTEGER NOT NULL CHECK (yielded IN (0, 1))
+) STRICT;

@@ -107,7 +107,23 @@ pub struct SessionBind {
 #[serde(rename_all = "snake_case")]
 pub enum SessionKind {
     Conversation,
-    FlowReview,
+}
+
+/// Quiet time after which a conversation with no unresolved tool call waits
+/// on a person. A long silent provider step can read as Waiting.
+pub(crate) const WAITING_QUIET_SECONDS: i64 = 120;
+
+/// What a Session's driver last read from its provider's own stream. One row
+/// per Session, replaced by whichever driver currently owns that stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionActivity {
+    pub observed_at: i64,
+    /// Tool calls started and not yet answered.
+    pub open_tools: usize,
+    /// Questions the provider asked a person and has no answer to.
+    pub pending_input: usize,
+    /// The provider handed its last turn back successfully.
+    pub yielded: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,6 +170,8 @@ pub struct SessionFilter {
     pub task: Option<String>,
     pub search: Option<String>,
     pub interactive: Option<bool>,
+    /// Only conversations waiting on a person at this time, chosen before paging.
+    pub waiting: Option<i64>,
     pub history: bool,
     pub limit: usize,
     pub offset: usize,
@@ -169,6 +187,7 @@ impl Default for SessionFilter {
             task: None,
             search: None,
             interactive: Some(true),
+            waiting: None,
             history: false,
             limit: 100,
             offset: 0,
@@ -183,7 +202,8 @@ impl Default for SessionFilter {
 pub(crate) struct SessionSummary {
     pub primary_scope: Option<String>,
     pub driver_outcome: Option<String>,
-    pub latest_turn: Option<String>,
+    /// Waiting on a person, as of the read's clock.
+    pub waiting: bool,
     pub task_terminal: bool,
     pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,

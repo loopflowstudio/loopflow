@@ -371,12 +371,12 @@ mod tests {
             ..Default::default()
         };
         for expected in ["b-repo", "c-wave", "d-orphan"] {
-            let page = store.session_summaries(&filter).unwrap();
+            let page = store.session_summaries(&filter, 0).unwrap();
             assert_eq!(page.len(), 1);
             assert_eq!(page[0].id, expected);
             filter.after = Some(page[0].id.clone());
         }
-        assert!(store.session_summaries(&filter).unwrap().is_empty());
+        assert!(store.session_summaries(&filter, 0).unwrap().is_empty());
     }
 
     #[test]
@@ -464,12 +464,15 @@ mod tests {
         );
         assert!(store.session_task_ids("sibling").unwrap().is_empty());
         let summaries = store
-            .session_summaries(&SessionFilter {
-                task: Some("PROOF-1".into()),
-                interactive: None,
-                history: true,
-                ..Default::default()
-            })
+            .session_summaries(
+                &SessionFilter {
+                    task: Some("PROOF-1".into()),
+                    interactive: None,
+                    history: true,
+                    ..Default::default()
+                },
+                0,
+            )
             .unwrap();
         assert_eq!(summaries.len(), work.sessions.len());
         assert!(summaries

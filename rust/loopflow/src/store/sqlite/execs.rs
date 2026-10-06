@@ -672,15 +672,6 @@ impl SqliteStore {
         let _dispatch = self.lock_session_driver(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let closed_review: bool = tx.query_row(
-            "SELECT kind='flow_review' AND completed_at IS NOT NULL FROM agent_sessions WHERE id=?1",
-            [session], |row| row.get(0),
-        )?;
-        if closed_review {
-            return Err(StoreError::InvalidAuthority(
-                "review has been closed".into(),
-            ));
-        }
         let current = driver_in(&tx, session)?;
         if current.as_ref() != expected {
             return Err(StoreError::InvalidAuthority(
@@ -775,7 +766,7 @@ impl SqliteStore {
         tx.execute(
             &format!(
                 "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1
-             AND s.completed_at IS NULL AND s.kind='conversation' AND s.primary_scope IS NULL
+             AND s.completed_at IS NULL AND s.primary_scope IS NULL
              AND s.wave_id IS NULL AND {} IS NULL
              AND s.driver_exec_id=s.provider_exec_id
              AND NOT EXISTS({}) AND ?3 IN ('completed','interrupted')",

@@ -16,6 +16,7 @@ pub(super) struct History {
     requests: HashSet<String>,
     started: HashSet<String>,
     completed: HashSet<String>,
+    attention: super::attention::Attention,
 }
 
 impl History {
@@ -25,6 +26,18 @@ impl History {
             ..Self::default()
         }
     }
+    /// One server event of conversation `thread`, read for attention only.
+    pub(super) fn attend(&mut self, thread: &str, event: &Value) {
+        if let Some((store, session, driver)) = &self.owner {
+            self.attention.record(
+                store,
+                session,
+                driver,
+                super::attention::opencode(event, thread),
+            );
+        }
+    }
+
     pub(super) fn request(&mut self) -> String {
         let id = format!("msg_{}", uuid::Uuid::new_v4().simple());
         self.requests.insert(id.clone());

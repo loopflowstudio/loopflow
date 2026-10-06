@@ -100,6 +100,20 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<Agen
     .transpose()
 }
 
+/// Whether agent_sessions row `session` waits on a person at `now`: its
+/// current driver's reading shows an unanswered question, or no unresolved
+/// tool call and either an interactive turn handed back or a quiet stream.
+/// No reading, or one from a driver that has let go, is not Waiting.
+fn waiting_sql(session: &str, now: i64) -> String {
+    format!(
+        "EXISTS(SELECT 1 FROM session_activity act WHERE act.session_id={session}.id
+            AND {session}.completed_at IS NULL AND act.driver_generation={session}.driver_generation
+            AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
+                OR {now}-act.observed_at>={quiet}))))",
+        quiet = crate::session::WAITING_QUIET_SECONDS
+    )
+}
+
 fn inventory_query(
     filter: &crate::session::SessionFilter,
     select: &str,
@@ -119,6 +133,9 @@ fn inventory_query(
     }
     if !filter.history {
         sql.push_str(" AND s.completed_at IS NULL");
+    }
+    if let Some(now) = filter.waiting {
+        sql.push_str(&format!(" AND {}", waiting_sql("s", now)));
     }
     if let Some(repo) = &filter.repo {
         sql.push_str(&format!(
@@ -174,7 +191,8 @@ const SUMMARY_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,
 
 const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.artifact_key')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END";
 
-fn summary_query(page: &str, by_id: bool) -> String {
+fn summary_query(page: &str, by_id: bool, now: i64) -> String {
+    let waiting = waiting_sql("a", now);
     let order = if by_id { "s.id" } else { "s.title,s.id" };
     // A Flow is the driver Exec above the step that captured the current input.
     format!("WITH page AS MATERIALIZED ({page})
@@ -188,11 +206,7 @@ fn summary_query(page: &str, by_id: bool) -> String {
         a.primary_scope,
         (SELECT CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.outcome') END FROM session_events e INDEXED BY session_driver_exit
             WHERE e.session_id=s.id AND e.receipt_key='driver:'||(a.driver_generation-1)||':exit' AND e.kind='observed'),
-        (SELECT COALESCE(CASE WHEN json_valid(done.payload) THEN json_extract(done.payload,'$.status') END,'running') FROM session_events start
-            LEFT JOIN session_events done INDEXED BY session_turn_attention ON done.session_id=start.session_id
-                AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn AND done.kind='completed'
-            WHERE start.session_id=s.id AND start.captured_event=s.current_capture AND start.kind='started'
-            ORDER BY start.seq DESC LIMIT 1),
+        {waiting},
         COALESCE(t.work_state IN ('done','abandoned'),0)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -244,7 +258,7 @@ fn read_summary(
             task_ids: serde_json::from_str(&row.get::<_, String>(27)?)?,
             primary_scope: row.get(28)?,
             driver_outcome: row.get(29)?,
-            latest_turn: row.get(30)?,
+            waiting: row.get(30)?,
             task_terminal: row.get(31)?,
             captured: row.get(17)?,
             id: row.get(0)?,
@@ -367,13 +381,15 @@ impl SqliteStore {
             .ok_or_else(|| invalid(format!("Session {session} disappeared while being chosen")))
     }
 
+    /// Each row's Waiting is judged at `now`.
     pub(crate) fn session_summaries(
         &self,
         filter: &crate::session::SessionFilter,
+        now: i64,
     ) -> StoreResult<Vec<crate::session::SessionSummary>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (page, values) = inventory_query(filter, SUMMARY_SELECT)?;
-        let mut query = conn.prepare(&summary_query(&page, filter.after.is_some()))?;
+        let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
         let rows = query.query_map(rusqlite::params_from_iter(values), read_summary)?;
         rows.map(|row| row?).collect()
     }
@@ -381,10 +397,11 @@ impl SqliteStore {
     pub(crate) fn session_summary(
         &self,
         id: &str,
+        now: i64,
     ) -> StoreResult<Option<crate::session::SessionSummary>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1"), false),
+            &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1"), false, now),
             [id],
             read_summary,
         )
@@ -1393,7 +1410,10 @@ mod metadata_tests {
             repo: Some("/repo".into()),
             ..SessionFilter::default()
         };
-        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "retained");
+        assert_eq!(
+            store.session_summaries(&filter, 0).unwrap()[0].id,
+            "retained"
+        );
         store
             .conn
             .lock()
@@ -1403,7 +1423,7 @@ mod metadata_tests {
                 [],
             )
             .unwrap();
-        assert!(store.session_summaries(&filter).unwrap().is_empty());
+        assert!(store.session_summaries(&filter, 0).unwrap().is_empty());
     }
 
     #[test]
@@ -1493,7 +1513,9 @@ mod metadata_tests {
             .unwrap();
         }
         // Listing reads the Flow from Execs and survives unreadable detail.
-        let rows = store.session_summaries(&SessionFilter::default()).unwrap();
+        let rows = store
+            .session_summaries(&SessionFilter::default(), 0)
+            .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].flow_id.as_deref(), Some(driver.as_str()));
         let flow = rows[0].flow.as_ref().unwrap();
@@ -1525,7 +1547,7 @@ mod metadata_tests {
             )
             .unwrap();
         let flow = store
-            .session_summary("session")
+            .session_summary("session", 0)
             .unwrap()
             .unwrap()
             .flow
@@ -1551,7 +1573,7 @@ mod metadata_tests {
         };
         assert!(
             !store
-                .session_summary("imported")
+                .session_summary("imported", 0)
                 .unwrap()
                 .unwrap()
                 .independent
@@ -1563,7 +1585,7 @@ mod metadata_tests {
         }
         assert!(
             store
-                .session_summary("imported")
+                .session_summary("imported", 0)
                 .unwrap()
                 .unwrap()
                 .independent
@@ -1575,7 +1597,7 @@ mod metadata_tests {
             .is_err());
         assert!(
             store
-                .session_summary("imported")
+                .session_summary("imported", 0)
                 .unwrap()
                 .unwrap()
                 .independent
@@ -1618,7 +1640,7 @@ mod metadata_tests {
             limit: 2,
             ..SessionFilter::default()
         };
-        let rows = store.session_summaries(&filter).unwrap();
+        let rows = store.session_summaries(&filter, 0).unwrap();
         assert_eq!(
             rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
             ["a", "b"]
@@ -1627,21 +1649,24 @@ mod metadata_tests {
         assert!(!rows[1].independent);
         filter.search = Some("%".into());
         assert_eq!(
-            store.session_summaries(&filter).unwrap().len(),
+            store.session_summaries(&filter, 0).unwrap().len(),
             1,
             "Contains search is literal"
         );
         filter.search = Some("ALPHA".into());
-        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "a");
+        assert_eq!(store.session_summaries(&filter, 0).unwrap()[0].id, "a");
         filter.search = None;
         filter.interactive = Some(false);
-        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "headless");
+        assert_eq!(
+            store.session_summaries(&filter, 0).unwrap()[0].id,
+            "headless"
+        );
         filter.interactive = Some(true);
         filter.offset = 1;
         filter.limit = 1;
-        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "b");
+        assert_eq!(store.session_summaries(&filter, 0).unwrap()[0].id, "b");
         filter.after = Some(String::new());
-        let first = store.session_summaries(&filter).unwrap();
+        let first = store.session_summaries(&filter, 0).unwrap();
         assert_eq!(first[0].id, "a");
         store
             .conn
@@ -1653,14 +1678,14 @@ mod metadata_tests {
             )
             .unwrap();
         filter.after = Some(first[0].id.clone());
-        let second = store.session_summaries(&filter).unwrap();
+        let second = store.session_summaries(&filter, 0).unwrap();
         assert_eq!(second[0].id, "b");
         assert_eq!(second[0].title, "000 renamed");
         filter.after = Some(String::new());
         filter.limit = 2;
         assert_eq!(
             store
-                .session_summaries(&filter)
+                .session_summaries(&filter, 0)
                 .unwrap()
                 .iter()
                 .map(|row| row.id.as_str())

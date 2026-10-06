@@ -184,7 +184,8 @@ pub struct SessionPage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub primary_scope: Option<String>,
-    /// A current obligation, independent of process liveness.
+    /// Waiting on a person, read from its provider's stream; absent when it is
+    /// working or nothing current says.
     pub attention: Option<SessionAttention>,
     pub task_ids: Vec<crate::durable::TaskId>,
     pub id: String,
@@ -212,8 +213,7 @@ pub struct SessionRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionAttention {
-    Review,
-    Reply,
+    Waiting,
 }
 
 fn session_state(session: &crate::session::SessionSummary, has_clients: bool) -> SessionState {
@@ -223,25 +223,13 @@ fn session_state(session: &crate::session::SessionSummary, has_clients: bool) ->
         SessionState::Active
     } else if session.driver_outcome.as_deref() == Some("interrupted") {
         SessionState::Interrupted
-    } else if session.kind != crate::session::SessionKind::Conversation {
-        SessionState::Waiting
     } else {
         SessionState::Unknown
     }
 }
 
 fn session_attention(session: &crate::session::SessionSummary) -> Option<SessionAttention> {
-    if session.completed_at.is_some() {
-        return None;
-    }
-    if session.interactive
-        && session.latest_turn.as_deref() == Some("completed")
-        && session.driver_outcome.is_none()
-    {
-        Some(SessionAttention::Reply)
-    } else {
-        None
-    }
+    session.waiting.then_some(SessionAttention::Waiting)
 }
 
 /// Whether a Session's conversation is an occurrence of a Flow. Membership
@@ -352,7 +340,8 @@ pub(crate) async fn list(
         selection.offset = 0;
     }
     let mut sessions = Vec::new();
-    for session in store.session_summaries(&selection).await? {
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    for session in store.session_summaries(&selection, now).await? {
         sessions.push(summary_surface(&session));
     }
     workspace::associate(store, &mut sessions).await?;
@@ -396,38 +385,6 @@ pub(crate) async fn list(
     Ok(sessions)
 }
 
-/// Filter before applying the caller's page size, using the same attention
-/// metadata reading. Scan bounded metadata pages, never provider transcripts.
-pub(crate) async fn list_attention(
-    store: &SharedStore,
-    filter: &crate::session::SessionFilter,
-) -> Result<Vec<SessionRecord>> {
-    let mut page = filter.clone();
-    page.after = Some(filter.after.clone().unwrap_or_default());
-    page.offset = 0;
-    page.limit = 100;
-    let mut skip = filter.offset;
-    let mut matches = Vec::new();
-    loop {
-        let rows = list(store, &page).await?;
-        let exhausted = rows.len() < page.limit;
-        page.after = rows.last().map(|row| row.id.clone());
-        for row in rows.into_iter().filter(|row| row.attention.is_some()) {
-            if skip > 0 {
-                skip -= 1;
-                continue;
-            }
-            matches.push(row);
-            if filter.limit > 0 && matches.len() == filter.limit {
-                return Ok(matches);
-            }
-        }
-        if exhausted {
-            return Ok(matches);
-        }
-    }
-}
-
 /// Where a Session's step stands in its Flow: the last one a still-open driver
 /// launched, an earlier one, or part of a Flow whose driver has exited.
 fn flow_occurrence(
@@ -444,10 +401,7 @@ fn flow_occurrence(
 /// Passive listing reads record metadata and exact local client receipts only.
 /// Connect/complete still enter find_session and surface, with full validation.
 fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
-    let kind = match session.kind {
-        crate::session::SessionKind::Conversation => SessionKind::Conversation,
-        crate::session::SessionKind::FlowReview => SessionKind::Flow,
-    };
+    let kind = SessionKind::Conversation;
     let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
@@ -545,14 +499,10 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             crate::session::TitleSource::Generated => SessionTitleSource::Generated,
         },
         flow_membership,
-        detail: match (kind, &session.skill) {
-            (SessionKind::Conversation, _) => session
-                .model
-                .as_ref()
-                .map_or(provider.clone(), |model| format!("{provider}:{model}")),
-            (_, Some(skill)) => skill.clone(),
-            (_, None) => "Request for input".into(),
-        },
+        detail: session
+            .model
+            .as_ref()
+            .map_or(provider.clone(), |model| format!("{provider}:{model}")),
         provider: session.provider.clone(),
         cwd: session.cwd.display().to_string(),
         state,
@@ -574,9 +524,7 @@ async fn find_session(
     let Some(session) = session_by_id(store, session_id).await? else {
         return Ok(None);
     };
-    if session.completed_at.is_some()
-        && !(open_completed && session.kind == crate::session::SessionKind::Conversation)
-    {
+    if session.completed_at.is_some() && !open_completed {
         bail!("Session {} is already complete", session.id);
     }
     Ok(Some(session))
@@ -733,82 +681,64 @@ pub(crate) async fn open(
             .ok_or_else(|| session_not_found(session_id))?,
     };
     let session = &target;
-    match session.kind {
-        crate::session::SessionKind::Conversation => {
-            let admitted;
-            let session = if resume {
-                let id = session.id.clone();
-                let _launch = tokio::task::spawn_blocking(move || lock_session_exec(&id)).await??;
-                admitted = primary::admit_workspace(store, session.clone()).await?;
-                &admitted
-            } else {
-                session
-            };
-            let native = NativeSession::of(session)?;
-            let Some(provider_session) =
-                store.sqlite.input_provider_session(&session.artifact_key)?
-            else {
-                let surface = surface(store, session).await?;
-                if resume {
-                    open_waiting(store, &session.id).await?;
-                }
-                return Ok(surface);
-            };
-            if resume {
-                crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
-            }
-            if resume
-                && native.provider == "codex"
-                && connect_live_codex(store, session, &provider_session, mode == OpenMode::Replace)
-                    .await?
-            {
-                let session = store
-                    .sqlite
-                    .session(&session.id)?
-                    .ok_or_else(|| session_not_found(&session.id))?;
-                return surface(store, &session).await;
-            }
-            if resume && mode == OpenMode::Replace {
-                native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
-            }
-            if mode == OpenMode::Refuse && !native.clients()?.is_empty() {
-                require_session_action(
-                    SessionKind::Conversation,
-                    SessionState::Active,
-                    SessionActionKind::Open,
-                )?;
-            }
-            let mut result = surface(store, session).await?;
-            if resume {
-                crate::lf::commands::util::resume_session(
-                    native.provider,
-                    session.model.as_deref(),
-                    &session.cwd,
-                    &session.artifact_key,
-                    &provider_session,
-                )?;
-            } else {
-                match mode {
-                    OpenMode::Replace => result.open_argv.push("--replace".to_string()),
-                    OpenMode::Try => result.open_argv.push("--try".to_string()),
-                    OpenMode::Refuse => {}
-                }
-            }
-            Ok(result)
+    let admitted;
+    let session = if resume {
+        let id = session.id.clone();
+        let _launch = tokio::task::spawn_blocking(move || lock_session_exec(&id)).await??;
+        admitted = primary::admit_workspace(store, session.clone()).await?;
+        &admitted
+    } else {
+        session
+    };
+    let native = NativeSession::of(session)?;
+    let Some(provider_session) = store.sqlite.input_provider_session(&session.artifact_key)? else {
+        let surface = surface(store, session).await?;
+        if resume {
+            open_waiting(store, &session.id).await?;
         }
-        crate::session::SessionKind::FlowReview => {
-            if mode != OpenMode::Refuse {
-                bail!("--replace and --try apply only to interactive provider sessions");
-            }
-            let surface = surface(store, session).await?;
-            if resume {
-                open_waiting(store, &session.id).await?;
-            }
-            Ok(surface)
+        return Ok(surface);
+    };
+    if resume {
+        crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
+    }
+    if resume
+        && native.provider == "codex"
+        && connect_live_codex(store, session, &provider_session, mode == OpenMode::Replace).await?
+    {
+        let session = store
+            .sqlite
+            .session(&session.id)?
+            .ok_or_else(|| session_not_found(&session.id))?;
+        return surface(store, &session).await;
+    }
+    if resume && mode == OpenMode::Replace {
+        native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
+    }
+    if mode == OpenMode::Refuse && !native.clients()?.is_empty() {
+        require_session_action(
+            SessionKind::Conversation,
+            SessionState::Active,
+            SessionActionKind::Open,
+        )?;
+    }
+    let mut result = surface(store, session).await?;
+    if resume {
+        crate::lf::commands::util::resume_session(
+            native.provider,
+            session.model.as_deref(),
+            &session.cwd,
+            &session.artifact_key,
+            &provider_session,
+        )?;
+    } else {
+        match mode {
+            OpenMode::Replace => result.open_argv.push("--replace".to_string()),
+            OpenMode::Try => result.open_argv.push("--try".to_string()),
+            OpenMode::Refuse => {}
         }
     }
+    Ok(result)
 }
-
 /// Connect to one existing provider thread. Native UI traffic crosses the same
 /// driver fence as the headless writer; closing the current UI closes the runtime.
 #[cfg(unix)]
@@ -967,10 +897,7 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
 
 /// A Session as its row and its current input describe it.
 async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionRecord> {
-    let kind = match session.kind {
-        crate::session::SessionKind::Conversation => SessionKind::Conversation,
-        crate::session::SessionKind::FlowReview => SessionKind::Flow,
-    };
+    let kind = SessionKind::Conversation;
     let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
@@ -987,7 +914,10 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
     };
     let metadata = store
         .sqlite
-        .session_summary(&session.id)?
+        .session_summary(
+            &session.id,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata, !clients.is_empty());
     let actions = session_actions(kind, state);
@@ -1425,7 +1355,7 @@ mod tests {
         let mut summary = crate::session::SessionSummary {
             primary_scope: None,
             driver_outcome: None,
-            latest_turn: None,
+            waiting: false,
             task_terminal: false,
             task_ids: vec![task.clone()],
             captured: Some(1),

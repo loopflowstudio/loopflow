@@ -466,7 +466,7 @@ List Sessions
 | `--all` | Include waiting steps from every repository on this machine Default: false. |
 | `--interactive` | Select interactive (true), headless (false), or both (all) Default: true. |
 | `--history` | Include completed conversations and historical reviews Default: false. |
-| `--needs-me` | Only conversations waiting for review or a reply Default: false. |
+| `--waiting` | Only conversations waiting on you Default: false. |
 | `--limit` | Maximum conversations; 0 reads the complete matching inventory Default: 100. |
 | `--offset` | offset Default: 0. |
 | `--page` | Return a bounded stable-ID page with a continuation cursor Default: false. |

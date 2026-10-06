@@ -10,9 +10,13 @@ impl Store {
     pub(crate) async fn session_summaries(
         &self,
         filter: &crate::session::SessionFilter,
+        now: i64,
     ) -> StoreResult<Vec<crate::session::SessionSummary>> {
         let filter = filter.clone();
-        run_sqlite(&self.sqlite, move |store| store.session_summaries(&filter)).await
+        run_sqlite(&self.sqlite, move |store| {
+            store.session_summaries(&filter, now)
+        })
+        .await
     }
 
     pub async fn session(&self, id: &str) -> StoreResult<Option<AgentSession>> {

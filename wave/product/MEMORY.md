@@ -69,7 +69,7 @@ prose narrating a builtin Flow drifts when its YAML changes: `advance` and
 suites prove decisions, correction, routing and loop passes; a real provider
 step, a driver killed mid-turn, a populated-store migration and Desktop remain
 unproven. Workflow, loop, steer and Task-primary slices have headless tests
-only; Waiting, Desktop, defaults and docs are unbuilt.
+only, Waiting included; Desktop, defaults and docs are unbuilt.
 
 Saved pursue retains demo although
 current source does not: templates cannot establish a saved invocation's shape.
@@ -143,15 +143,18 @@ unproven. Prototype approval supplies no native acceptance or sustained-use KR.
 The accepted design and dated demo evidence are retained at
 [the branch checkpoint](https://github.com/loopflowstudio/loopflow/tree/25f183992969f59b42f9765d7594638cc91652dc/scratch).
 
-## Session working set (2026-10-03)
+## Session working set and Waiting (2026-10-03, revised 2026-10-06)
 
 Jack Heart requested unfinished interactive participation in ordinary API and
 Desktop Session navigation (LOO-372). Task association still includes all work.
-`--needs-me` narrows the selected mode; explicit headless/history filters retain
-full inspection. Filtered absence cannot release native surfaces or clear drafts
-and selection. Explicit completion remains separate from turn completion.
-Local headless regressions cover visibility, counts and refresh/completion races;
-they establish no sustained-use KR or configured provider acceptance.
+Filtered absence cannot release native surfaces or clear drafts and selection.
+Explicit completion remains separate from turn completion.
+
+`--waiting` replaced `--needs-me` on the LOO-353 branch, unreviewed by Jack.
+Lesson: Waiting can only come from a stream `lf` owns. A native `claude` or
+`opencode` terminal gives none, so those conversations never show Waiting;
+the earlier Reply reading had the same gap. Reading Claude's transcript is
+Jack's open choice. Tests replay recorded streams, no live provider.
 
 ## Current Tasks and completion history (2026-10-02)
 
@@ -211,8 +214,6 @@ store recovery coverage; full Rust and Desktop acceptance remains with gate.
 A successful provider turn is not reclassified from prose alone. This records
 Product’s shared Session contract, not a Task or Wave placement decision.
 
-Reconciliation with the October 1 Session attention change preserves `--needs-me`
-for current reviews, ready conversations and recorded interactive replies.
 Converted Ask history follows ordinary conversation rules; its former kind alone
 creates no attention obligation. Conversion itself never completes a Session.
 Later confirmed owning-driver exits can retire unassigned, non-primary

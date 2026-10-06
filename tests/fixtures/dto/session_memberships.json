@@ -52,7 +52,7 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": "review"
+    "attention": "waiting"
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -385,6 +385,6 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": "review"
+    "attention": "waiting"
   }
 ]

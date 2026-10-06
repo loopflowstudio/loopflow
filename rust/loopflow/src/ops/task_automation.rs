@@ -50,11 +50,6 @@ pub(crate) fn admission_blocker(
         if Some(session.id.as_str()) == repair_session {
             continue;
         }
-        if session.completed_at.is_none()
-            && session.kind != crate::session::SessionKind::Conversation
-        {
-            return Ok(Some(format!("Session {} awaits completion", session.id)));
-        }
         if let Some(input) = store.session(&session.id).map_err(error)? {
             if !input.interactive && !input.input_published {
                 return Ok(Some(format!("Session {} has a reserved input", session.id)));

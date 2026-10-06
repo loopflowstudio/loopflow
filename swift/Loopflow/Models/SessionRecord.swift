@@ -10,13 +10,11 @@ public enum SessionState: String, Codable, Sendable, Hashable {
 }
 
 public enum SessionAttention: String, Codable, Sendable, Hashable {
-    case review
-    case reply
+    case waiting
 
     public var label: String {
         switch self {
-        case .review: "Needs review"
-        case .reply: "Needs reply"
+        case .waiting: "Waiting"
         }
     }
 }

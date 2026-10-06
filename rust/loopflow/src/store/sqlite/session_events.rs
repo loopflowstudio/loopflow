@@ -94,6 +94,23 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Replace the Session's reading with its current driver's.
+    pub(crate) fn record_session_activity(
+        &self,
+        session: &str,
+        driver: &crate::exec::SessionDriver,
+        activity: &crate::session::SessionActivity,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT OR REPLACE INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded)
+             VALUES(?1,?2,?3,?4,?5,?6)",
+            params![session, driver.generation, activity.observed_at,
+                activity.open_tools as i64, activity.pending_input as i64, activity.yielded],
+        )?;
+        Ok(())
+    }
+
     /// Retain a provider observation even when its conversational driver has
     /// changed. Observation grants neither native write nor Flow authority.
     pub(crate) fn record_session_event(
@@ -875,7 +892,7 @@ mod tests {
     }
 
     #[test]
-    fn session_exit_retires_orphans_but_preserves_primary_and_review_obligations() {
+    fn session_exit_retires_orphans_but_preserves_primary_and_task_conversations() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::id::WaveId::new();
@@ -897,11 +914,10 @@ mod tests {
                 rusqlite::params![task.as_str(), project.as_str()],
             ).unwrap();
         }
-        for (id, kind, primary, retired) in [
-            ("orphan", "conversation", None, true),
-            ("primary", "conversation", Some("repository"), false),
-            ("task", "conversation", None, false),
-            ("review", "flow_review", None, false),
+        for (id, primary, retired) in [
+            ("orphan", None, true),
+            ("primary", Some("repository"), false),
+            ("task", None, false),
         ] {
             let session = store.test_session(id, &crate::session_record::new_artifact_key());
             let exec = crate::id::ExecId::new();
@@ -913,8 +929,8 @@ mod tests {
                 )
                 .unwrap();
                 conn.execute(
-                    "UPDATE agent_sessions SET kind=?2,primary_scope=?3 WHERE id=?1",
-                    rusqlite::params![id, kind, primary],
+                    "UPDATE agent_sessions SET primary_scope=?2 WHERE id=?1",
+                    rusqlite::params![id, primary],
                 )
                 .unwrap();
                 if id == "task" {
@@ -932,7 +948,7 @@ mod tests {
             let saved = store.session(id).unwrap().unwrap();
             assert_eq!(saved.completed_at.is_some(), retired);
             assert_eq!(saved.captured, session.captured);
-            let summary = store.session_summary(id).unwrap().unwrap();
+            let summary = store.session_summary(id, 0).unwrap().unwrap();
             assert_eq!(summary.driver_outcome.as_deref(), Some("interrupted"));
             let history = store.session_history(id, 0, 100).unwrap();
             assert!(history
@@ -944,7 +960,7 @@ mod tests {
                 .any(|event| event.kind == SessionEventKind::Completed));
         }
         assert!(!store
-            .session_summaries(&crate::session::SessionFilter::default())
+            .session_summaries(&crate::session::SessionFilter::default(), 0)
             .unwrap()
             .iter()
             .any(|session| session.id == "orphan"));
@@ -968,12 +984,11 @@ mod tests {
         }
         for _ in 0..2 {
             let rows = store
-                .session_summaries(&crate::session::SessionFilter::default())
+                .session_summaries(&crate::session::SessionFilter::default(), 0)
                 .unwrap();
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].id, session.id);
             assert!(rows[0].completed_at.is_none());
-            assert_eq!(rows[0].latest_turn.as_deref(), Some("completed"));
         }
     }
 
@@ -1023,15 +1038,6 @@ mod tests {
             .unwrap()
             .completed_at
             .is_none());
-        assert_eq!(
-            store
-                .session_summary(&session.id)
-                .unwrap()
-                .unwrap()
-                .latest_turn
-                .as_deref(),
-            Some("interrupted")
-        );
         let resumed = store
             .claim_session_driver(&session.id, Some(&original), &second, true)
             .unwrap();

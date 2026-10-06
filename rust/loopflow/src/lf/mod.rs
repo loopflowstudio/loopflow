@@ -552,9 +552,9 @@ pub enum SessionCommand {
         /// Include completed conversations and historical reviews
         #[arg(long)]
         history: bool,
-        /// Only conversations waiting for review or a reply
+        /// Only conversations waiting on you
         #[arg(long)]
-        needs_me: bool,
+        waiting: bool,
         /// Maximum conversations; 0 reads the complete matching inventory
         #[arg(long, default_value_t = 100)]
         limit: usize,

@@ -312,6 +312,10 @@ impl OpenCodeHarness {
                         }
                     };
 
+                    history
+                        .lock()
+                        .expect("OpenCode history lock poisoned")
+                        .attend(&reader_session_id, &raw);
                     let mapped = opencode_mapping::map_event(&raw, &mut state);
                     // SSE is a wake edge; native messages own request identity,
                     // completion and usage. Busy/idle cannot supply those facts.

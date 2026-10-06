@@ -152,13 +152,14 @@ are not built.
   `pr publish`; `lf pr reconcile` remains its owner.
 - **Leftovers.** Native history readers still parse `structured_output`, for
   conversations recorded before this pass;
-  `SessionFlowMembership::Step` remains for older manifests.
-  `SessionKind::FlowReview` and `SessionAttention::Review` go with the Waiting
-  slice. Task status still lists every Exec. `--needs-me` remains until
-  `--waiting` replaces it. Desktop does not draw step Execs.
+  `SessionFlowMembership::Step` remains for older manifests. The wire values
+  Session kind `flow` and state `waiting` are no longer produced; their
+  fixtures and Swift views go with the Desktop slice. Task status still lists
+  every Exec. Desktop does not draw step Execs.
 - **Failing before this pass, unchanged** (reproduced on `8535598ef`):
-  `session_cli_tests resume_selects_human_input_in_the_physical_worktree_and_records_opening`
-  and `status_tests previous_release_merge_request_migrates_into_readable_status_and_roadmap`.
+  `status_tests previous_release_merge_request_migrates_into_readable_status_and_roadmap`.
+  The Waiting pass repaired two `session_cli_tests` that still set up a
+  review row and called `session complete`.
 
 ## Slices — one looping Flow builds these in order
 
@@ -229,7 +230,15 @@ Flow history below means FlowExec rows joined to their Execs.
    opening/unknown; disconnection is unknown; new activity clears it;
    filtering happens before paging. Provider evidence:
    [harness-attention.md](harness-attention.md). Done when the injected-clock
-   and recorded-trace tests pass for Claude, Codex and OpenCode. *Not done.*
+   and recorded-trace tests pass for Claude, Codex and OpenCode. *Built, not
+   yet compressed or realigned:* `cargo test -p loopflow --lib -- harness::
+   store:: ops::human_session` 324 passed (8 in `harness::attention`),
+   `session_cli_tests` 11, `dto_fixtures` 18, `session_lifecycle_tests` 18,
+   Swift DTO/Session decoding 59 passed, all-target Clippy clean. The driver
+   that owns a provider's stream saves one reading per Session
+   (`session_activity`); one SQL rule judges Waiting for the row and for
+   `--waiting`. Demo items: a live provider asking a question; a native
+   Claude or OpenCode terminal, which `lf` cannot hear (see questions.md).
 6. **Desktop.** The Task page draws its TaskWorkflow with the current stage
    or running edge, and every Flow run of the Task gets the same
    graph/progress/output view from FlowExec. Waiting first, working Sessions
@@ -270,6 +279,7 @@ Clear inherited `LF_*`/`LOOPFLOW_*` before Rust tests. Gate owns the full run.
 | `cargo test -p loopflow --test land_tests lf_pr_land_returns` | A Flow stops at a landing its plain `pr land` step left watched. |
 | `cargo test -p loopflow --lib store::` | Released frontier converts through the one draft; the record is append-only; a step must be its driver's child. |
 | `cargo test -p loopflow --test dto_fixtures` | Wire shapes are unchanged. |
+| `cargo test -p loopflow --lib harness::attention` | Recorded Claude, Codex and OpenCode streams under an injected clock: questions, open tools, hand-back, 120 seconds of quiet, a released driver, choice before paging. |
 | `git grep -nE "__flow-step\|FlowStep::\|execute_flow_command"` | No executable path. |
 
 October 5, after compress: the commands above except `land_tests` passed

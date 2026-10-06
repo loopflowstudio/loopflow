@@ -146,54 +146,15 @@ The agent's readings of these points, since built, are at
 
 ## Choices the FlowExec pass made without Jack
 
-The agent's, October 5, while building FlowExec and oblivious steps. None is
-confirmed by Jack Heart.
-
-- **Shape.** `flow_execs(exec_id, flow, graph)` and
-  `flow_exec_steps(seq, flow_exec_id, exec_id, node, iterations)`. Triggers
-  refuse updates and refuse a step that is not its driver's child Exec. The
-  step label is read from the graph, not stored.
-- **Finding the child.** The driver polls for its newest child Exec every
-  10 ms and then appends the step row. A driver killed in that gap leaves the
-  step's Exec without a row. No Exec id is assigned by the parent.
-- **Operations go through the ordinary CLI.** The in-process interpreter and
-  its allowlist are deleted, so any `lf` command can be a `cmd:` step.
-  `cmd: pr open` now opens the browser page, as the command does; `commit` no
-  longer applies the managed-Task guard the interpreter added; `repo release
-  run` under a cron firing reads the receipt from the existing hidden
-  `--__cron-receipt`/`--__cron-lock-fd` globals, which stay. Old spellings in
-  a Flow file (`task sync`, `rebase`) are translated by the driver.
-- **Watched landing.** After an operation the driver stops the Flow when a
-  landing of its checkout, touched since the step began, still awaits its
-  merge. Exit status 75 is gone; Task status says "Flow stopped after …"
-  instead of naming the watched landing.
-- **The answer contract is message text only.** Provider structured-output
-  requests are deleted for every provider, and Claude steps all use the
-  ordinary headless path. The driver accepts the JSON value alone, in prose
-  or in a code fence. How reliably real providers comply is unproven.
-- **Correction command.** `lf -b session resume ID MESSAGE`, a new optional
-  argument on the existing command. It reruns the conversation's skill prompt
-  with the message under the provider's own history, as the old correction
-  did. Without `-b` a message is refused.
-- **A step looks its skill up by name.** A skill file edited mid-Flow applies
-  to later steps. Of a step's authored overrides only `agent` travels, as
-  `--model`, and only when the launch named none; `action_style` on a step is
-  dropped. The default XOR router is now the builtin skill `xor-route`, which
-  a repository can override.
-- **Steers.** Per-node acknowledgement is gone; slice 3 restores the saving
-  (below).
-- **`LF_FLOW_ID` stays,** set by the driver in the step's environment so the
-  S1–S5 skills can share a note. `lf` reads it nowhere.
-- **Started.** The driver marks its Task started when it writes the Flow row;
-  the trigger accepts a Flow run from the Task's checkout as evidence.
-- **Performed work.** The Exec filter counts every Flow step Exec in the
-  Task's checkout; before, only operation steps.
-- **Past Flows keep their launched graph.** The redraw from the Exec sequence
-  is deleted. Loop counts for deciders outside the latest step's own path read
-  zero; settled counts inside a finished XOR path are no longer shown.
-- **Session position.** A Session's node and iterations are read from its
-  step row. The draft drops `agent_sessions.node`/`iterations`; a saved Flow's
-  position survives in its `legacy_flow` observation.
+The agent's, October 5; none is confirmed by Jack Heart. The full list is at
+`4207263c5:scratch/questions.md` under this heading. The ones most likely to
+matter in review: the driver finds each step's Exec by polling, so a driver
+killed in that gap leaves a step unrecorded; operations run through the
+ordinary CLI, so any `lf` command can be a `cmd:` step and `cmd: pr open`
+opens the browser; the answer contract is message text only, with provider
+structured-output requests deleted; a step looks its skill up by name, so an
+edit mid-Flow applies to later steps; `LF_FLOW_ID` stays in a step's
+environment for the S1–S5 shared note; a past Flow keeps its launched graph.
 
 ## Choices the TaskWorkflow pass made without Jack
 
@@ -332,6 +293,40 @@ The agent's, October 6, building slice 4. None is confirmed by Jack Heart.
   the checkout, finished ones included, and ignores the primary.
 - **Outside the slice.** `docs/lf-reference.md` was regenerated and picked up
   earlier passes' flags (`commit --push`, `--accept-unknown-exec`).
+
+## Choices the Waiting pass made without Jack
+
+The agent's, October 6, building slice 5. None is confirmed by Jack Heart.
+
+- **Who knows.** Only a driver that owns a provider's stream: every headless
+  Run, and Codex through `lf`'s app-server connection. A conversation typed
+  into a native `claude` or `opencode` terminal has no stream `lf` reads, so
+  it never shows Waiting. The earlier Reply reading had the same blind spot.
+  Open for Jack: whether to read Claude's transcript file, which his
+  stream-json-only rule may exclude.
+- **One reading per Session.** `session_activity`, replaced in place by the
+  current driver: last heard, open tool calls, unanswered questions, handed
+  back. Unchanged readings are saved every 5 seconds, so quiet is measured
+  within that. It is the one mutable row here; an append-only log of stream
+  messages was the alternative.
+- **The rule is SQL,** used for both the row's `attention` and `--waiting`,
+  so the filter precedes paging. Waiting: an unanswered question; or no open
+  tool call and either an interactive turn handed back or 120 seconds of
+  quiet. A reading from a driver that has let go, or none, is not Waiting.
+- **Headless Runs** can be Waiting through a question or quiet, never
+  through a finished turn. `--waiting` still lists interactive conversations
+  unless `--interactive all` is given.
+- **A failed turn** is not a hand-back; it waits only after quiet.
+- **A killed driver** leaves its reading in force: the Session reads Waiting
+  after 120 seconds until another driver takes it.
+- **Codex approvals count as questions** when a person's client must answer
+  them. OpenCode permissions do not: its driver answers them.
+- **Wire.** `attention` is `"waiting"` or null. Session state `waiting` and
+  kind `flow` stay on the wire unproduced until Desktop drops their views.
+  Text `lf session list` and `lf monitor` print waiting from `attention`.
+- **A failed save of a reading is logged,** never a failed turn.
+- **Removed with reviews:** a closed review refusing a driver, review rows
+  blocking CI repair and landing repair, and the index the Reply reading used.
 
 ## Choices the earlier pass made without Jack
 

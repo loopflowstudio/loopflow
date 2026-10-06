@@ -431,9 +431,9 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                     "Matching provider process observed".into(),
                     "lf monitor active --json".to_string(),
                 ),
-                SessionState::Waiting => (
+                _ if session.attention.is_some() => (
                     "waiting",
-                    session.detail.clone(),
+                    "Its provider is waiting on a person".into(),
                     format!("lf session connect {}", session.id),
                 ),
                 _ => (

@@ -300,11 +300,10 @@ fn admit_ci_fix(
                 if Some(&session.id) != reservation.session.as_ref()
                     && session.cwd == landing.worktree
                     && session.completed_at.is_none()
-                    && (session.kind != crate::session::SessionKind::Conversation
-                        || store
-                            .sqlite
-                            .session_has_pending_turn(&session.id)
-                            .map_err(repair_error)?)
+                    && store
+                        .sqlite
+                        .session_has_pending_turn(&session.id)
+                        .map_err(repair_error)?
                 {
                     return Err(repair_error(format!(
                         "Session {} has unresolved work",

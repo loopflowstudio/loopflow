@@ -22,10 +22,13 @@ pub(super) struct History {
     started: HashSet<String>,
     replies: HashMap<String, SessionDriver>,
     attributed: HashSet<String>,
+    attention: super::attention::Attention,
 }
 
 impl History {
     pub(super) fn request(&mut self, rpc: &Value) {
+        // Saved with the provider's next message.
+        self.attention.apply(super::attention::codex(rpc, true));
         if rpc["method"] == "turn/start" && !rpc["id"].is_null() {
             self.sequence += 1;
             self.requests.insert(rpc["id"].to_string(), self.sequence);
@@ -45,6 +48,10 @@ impl History {
         rpc: &Value,
     ) -> StoreResult<()> {
         self.sequence += 1;
+        if let Some(driver) = driver {
+            self.attention
+                .record(store, session, driver, super::attention::codex(rpc, false));
+        }
         let request = if rpc.get("method").is_none() {
             self.requests.remove(&rpc["id"].to_string())
         } else {

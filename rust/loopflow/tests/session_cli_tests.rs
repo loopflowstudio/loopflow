@@ -493,6 +493,33 @@ fn prepare_conversation(
     (session.id, input, dir)
 }
 
+#[test]
+fn waiting_lists_only_conversations_waiting_on_a_person() {
+    let home = tempfile::tempdir().unwrap();
+    let cwd = home.path().join("work");
+    std::fs::create_dir(&cwd).unwrap();
+    let (working, _, _) = prepare_conversation(home.path(), &cwd, "codex", "Working");
+    let (asked, _, _) = prepare_conversation(home.path(), &cwd, "codex", "Asked");
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    for (id, pending) in [(&working, 0), (&asked, 1)] {
+        db.execute(
+            "INSERT INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded)
+             SELECT id,driver_generation,unixepoch(),1,?2,0 FROM agent_sessions WHERE id=?1",
+            rusqlite::params![id, pending],
+        )
+        .unwrap();
+    }
+    let list = |flag: &str| run(home.path(), &["session", "list", "--all", "--json", flag]);
+    let waiting = list("--waiting");
+    assert!(waiting.status.success(), "{waiting:?}");
+    let waiting: Vec<serde_json::Value> = serde_json::from_slice(&waiting.stdout).unwrap();
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0]["id"], asked.as_str());
+    assert_eq!(waiting[0]["attention"], "waiting");
+    assert!(listed(home.path(), &working)["attention"].is_null());
+    assert!(!list("--needs-me").status.success());
+}
+
 fn listed(home: &std::path::Path, id: &str) -> serde_json::Value {
     let output = run(home, &["session", "list", "--all", "--history", "--json"]);
     assert!(output.status.success(), "{output:?}");
@@ -580,14 +607,12 @@ fn session_names_survive_capture_replacement() {
 
     // Capture keys and history prefixes cannot select a conversation mutation.
     for selector in [first_run.as_str(), &first_run[..12]] {
-        for args in [
-            vec!["session", "rename", selector, "Wrong target"],
-            vec!["session", "complete", selector],
-        ] {
-            let rejected = run(home.path(), &args);
-            assert!(!rejected.status.success(), "{rejected:?}");
-            assert!(String::from_utf8_lossy(&rejected.stderr).contains("was not found"));
-        }
+        let rejected = run(
+            home.path(),
+            &["session", "rename", selector, "Wrong target"],
+        );
+        assert!(!rejected.status.success(), "{rejected:?}");
+        assert!(String::from_utf8_lossy(&rejected.stderr).contains("was not found"));
     }
     assert_eq!(listed(home.path(), id)["title"], "Which release target?");
     let suggested = rename(home.path(), &[id, "Release target", "--suggest"]);
@@ -778,7 +803,6 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
     let (b, input_b, _) = prepare_conversation(home.path(), &repo, "codex", "B");
     let (background, _, _) = prepare_conversation(home.path(), &repo, "codex", "Background");
     let (other, _, _) = prepare_conversation(home.path(), &sibling, "codex", "Other");
-    let (review, _, _) = prepare_conversation(home.path(), &repo, "codex", "Stale review");
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
         "UPDATE agent_sessions SET interactive=0,created_at=9999999999 WHERE id=?1",
@@ -788,11 +812,6 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
     db.execute(
         "UPDATE agent_sessions SET created_at=9999999999 WHERE id=?1",
         [&other],
-    )
-    .unwrap();
-    db.execute(
-        "UPDATE agent_sessions SET kind='flow_review',created_at=9999999999 WHERE id=?1",
-        [&review],
     )
     .unwrap();
     db.execute("UPDATE agent_sessions SET completed_at=2 WHERE id=?1", [&a])

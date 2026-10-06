@@ -819,9 +819,8 @@ compositor/input proof and both hours remain unresolved. Receipts remain in the 
 
 October 6 stacks attribute two ~17 MiB VM regions to CoreGraphics copying under
 AppKit capture; Ghostty targets stayed unchanged. Free-history collection failed,
-so lifetime/live-byte ownership remains unproved. The retained executable was
-hashed, not rebuilt. No repair or acceptance follows. The matched report owns
-receipts and the next realistic-workspace/equivalent-pixel investigation.
+so lifetime/live-byte ownership remains unproved. The matched report records the retained executable hash, evidence limits and
+next realistic-workspace/equivalent-pixel investigation; no acceptance follows.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

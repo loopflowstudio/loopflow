@@ -192,8 +192,8 @@ The agent's, October 5, building slice 1. None is confirmed by Jack Heart.
   deleted Flows; other skills still say `lf task run <issue> <chosen-flow>`,
   which a Task on a workflow refuses unless that Flow leaves its stage.
 - **Flow catalog.** `lf flow list` no longer lists `feature` or `code`, so a
-  Project default of `feature` has no Flow graph for Desktop to draw until
-  slice 6 draws the workflow.
+  Project default of `feature` has no Flow graph; Desktop draws the workflow
+  once the Task's first run records it.
 - **Test count.** The slice list said six tests; the build order at
   `26279a3d2:scratch/task-workflow.md` lists five behaviors, each covered.
   The list now says five.
@@ -284,9 +284,8 @@ The agent's, October 6, building slice 5. None is confirmed by Jack Heart.
   after 120 seconds until another driver takes it.
 - **Codex approvals count as questions** when a person's client must answer
   them. OpenCode permissions do not: its driver answers them.
-- **Wire.** `attention` is `"waiting"` or null. Session state `waiting` and
-  kind `flow` stay on the wire unproduced until Desktop drops their views.
-  Text `lf session list` and `lf monitor` print waiting from `attention`.
+- **Wire.** `attention` is `"waiting"` or null; the Desktop pass removed
+  Session state `waiting` and kind `flow`. Text `lf session list` and `lf monitor` print waiting from `attention`.
 - **A failed save of a reading is logged,** never a failed turn.
 - **Removed with reviews:** a closed review refusing a driver, review rows
   blocking CI repair and landing repair, and the index the Reply reading used.

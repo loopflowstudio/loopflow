@@ -233,7 +233,7 @@ Flow history below means FlowExec rows joined to their Execs.
    store call's `now` judges filter and row): `--lib harness::attention` 8
    passed. The driver that owns a provider's stream saves one reading per
    Session (`session_activity`); one SQL rule judges Waiting for the row and
-   for `--waiting`. Left for slice 8: `--needs-me` in four `website/docs/` pages. Demo items: a
+   for `--waiting`. Demo items: a
    live provider asking a question; a native Claude or OpenCode terminal,
    which `lf` cannot hear (see questions.md).
 6. **Desktop.** The Task page draws its TaskWorkflow with the current stage
@@ -241,11 +241,11 @@ Flow history below means FlowExec rows joined to their Execs.
    graph/progress/output view from FlowExec. Waiting first, working Sessions
    in a compact group, no completion controls; Start runs `lf -b task run` as
    an app-owned child. Done when `swift build --build-tests` and the headless
-   Desktop tests pass with shared DTO fixtures. **Built** at `e3ac73edb` and compressed (the workflow model
-   answers running and outgoing edges once), not yet realigned: `swift build --build-tests` clean; `swift test --filter
-   "DesktopHeadlessTests|DTOFixtureTests"` passed; `dto_fixtures` 19,
-   `session_lifecycle_tests` 18, lib `store::` 182 and all-target Clippy
-   pass. A full `swift test` has one failure, `ActiveSessionsLifetimeTests
+   Desktop tests pass with shared DTO fixtures. **Done** at `f0b4196c1` (built
+   `e3ac73edb`; compress made the workflow model answer running and outgoing
+   edges once), merged with main at `9771ff7d7`: `swift build --build-tests`
+   clean and `swift test --filter "DesktopHeadlessTests|DTOFixtureTests"` 27
+   passed. A full `swift test` has one failure, `ActiveSessionsLifetimeTests
    replacement`, which passes alone. Demo items: native rendering and
    interaction; Start against a real `lf`; a Task opening on its primary; a
    live run's progress moving.

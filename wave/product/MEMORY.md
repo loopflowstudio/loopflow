@@ -67,17 +67,20 @@ shared note key and command normalization all leaned on the Flow row. Skill
 prose narrating a builtin Flow drifts when its YAML changes: `advance` and
 `launch-plan` described human steps two passes after they were removed. Fake-provider
 suites prove decisions, correction, routing and loop passes; a real provider
-step, a driver killed mid-turn, a populated-store migration and Desktop remain
-unproven. Workflow, loop, steer and Task-primary slices have headless tests
-only, Waiting included; Desktop, defaults and docs are unbuilt.
+step, a driver killed mid-turn and a populated-store migration remain unproven.
+Workflow, loop, steer, Task-primary, Waiting and Desktop slices have headless
+tests only; defaults and docs are unbuilt.
 
-Saved pursue retains demo although
-current source does not: templates cannot establish a saved invocation's shape.
-Main `16fa97425` adds native-human-input recency for `lf resume`; reuse that ranking
-for initial Task selection, with unfinished Task membership and explicit-primary
-precedence. Resume also admits completed history. This supplies no configured
-workspace proof. Remote/performance/defaults/website scope stays LOO-353;
-LOO-366/367 retain separate policy scope.
+Desktop (October 6, unreviewed by Jack) draws the TaskWorkflow and every Flow
+run from FlowExec, lists Waiting first, and matches no conversation to a Flow
+step. Lessons: `lf` allows a second `lf task run` while an edge runs, so only
+Desktop's disabled Start keeps two drivers out of a checkout; a killed driver
+has no exit record and its run reads as running forever; nothing lists
+workflows, so an unstarted Task has no graph to preview.
+
+Main `16fa97425` adds native-human-input recency for `lf resume`; the Task
+primary reuses that ranking. Remote/performance/defaults/website scope stays
+LOO-353; LOO-366/367 retain separate policy scope.
 
 ## Session and operate pairs (2026-10-05)
 
@@ -493,12 +496,7 @@ blue means running and loop region and nothing else; only the running node
 animates. Research sources and Jack's decisions are preserved in
 [the branch's design history](https://github.com/loopflowstudio/loopflow/tree/be7a02db0/scratch).
 
-Historical follow-up split: LOO-299 (control room, bind, Flow views, ⌘K, dark
-mode) after LOO-298's data model; LOO-300 for performance. The September 30
-direction supersedes the control-room approach; this local reconciliation does
-not establish the current scope or status of those external Tasks.
-
-Jack separated those three follow-ups so LOO-291 can deliver S1–S5, the recorder,
+Jack separated follow-ups LOO-298/299/300 (detail at `9771ff7d7`) so LOO-291 can deliver S1–S5, the recorder,
 signposts and assign-on-change fixes. The accepted Run/Session tables and universal
 bind are future implementation, documented in [Infrastructure memory](../infrastructure/MEMORY.md#data-model-and-performance-decisions-2026-09-26).
 Chapter history becoming navigable is part of that approved model; the current

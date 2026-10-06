@@ -260,6 +260,7 @@ def main() -> None:
             assert authored.read_text() == "preserve authored work\n"
             issue["state"]["type"] = "completed"
             issue["updatedAt"] = _next_revision(issue["updatedAt"])
+            # Ownership refresh may advance its observation time, not Task history.
             db.execute(
                 "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?,?,'end',123)",
                 (
@@ -267,8 +268,18 @@ def main() -> None:
                     '{"name":"unplanned","nodes":[],"edges":[{"from":"start","to":"end","flow":null}]}',
                 ),
             )
+            db.execute(
+                "UPDATE tasks SET pm_snapshot_synced_at=1 WHERE id=?",
+                (fixture["task"],),
+            )
             db.commit()
-            before = db.execute("SELECT * FROM tasks").fetchall()
+            history_columns = ",".join(
+                row[1]
+                for row in db.execute("PRAGMA table_info(tasks)")
+                if row[1] != "pm_snapshot_synced_at"
+            )
+            history_query = f"SELECT {history_columns} FROM tasks"
+            before = db.execute(history_query).fetchall()
             for selector in ["INF-123", fixture["task"]]:
                 result = subprocess.run(
                     [fixture["lf"], "task", "delete", selector],
@@ -286,7 +297,8 @@ def main() -> None:
                 )
             assert server.state["deletes"] == 1 and issue["trashed"]
             assert issue["state"]["type"] == "completed"
-            assert db.execute("SELECT * FROM tasks").fetchall() == before
+            assert db.execute(history_query).fetchall() == before
+            assert db.execute("SELECT pm_snapshot_synced_at FROM tasks").fetchone()[0] > 1
             assert db.execute("SELECT * FROM task_prs").fetchall() == prs
             assert db.execute("SELECT issue_id FROM task_deletions").fetchall() == [
                 (fixture["issue"],)

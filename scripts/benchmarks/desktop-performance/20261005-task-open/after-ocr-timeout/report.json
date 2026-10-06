@@ -1,0 +1,515 @@
+{
+  "attempts": [
+    {
+      "attempt": 0,
+      "duration_ms": 45130.219167,
+      "event": "end",
+      "id": "snapshot-cold_workspace-0",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": null,
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 139.152959,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4553
+            ]
+          },
+          {
+            "at_ms": 7413.536334,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4553
+            ]
+          }
+        ]
+      },
+      "outcome": "timeout",
+      "population": "snapshot",
+      "reason": "Task identity not captured in 45 seconds",
+      "scenario": "cold_workspace",
+      "state": "first_interaction"
+    },
+    {
+      "attempt": 0,
+      "duration_ms": 45143.977084,
+      "event": "end",
+      "id": "snapshot-warm_task-0",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": null,
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 383.695334,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4553
+            ]
+          }
+        ]
+      },
+      "outcome": "timeout",
+      "population": "snapshot",
+      "reason": "Task identity not captured in 45 seconds",
+      "scenario": "warm_task",
+      "state": "first_interaction"
+    },
+    {
+      "attempt": 0,
+      "duration_ms": 45029.26425,
+      "event": "end",
+      "id": "snapshot-reopen_task-0",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": null,
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 8.12675,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4553
+            ]
+          }
+        ]
+      },
+      "outcome": "timeout",
+      "population": "snapshot",
+      "reason": "Task identity not captured in 45 seconds",
+      "scenario": "reopen_task",
+      "state": "first_interaction"
+    },
+    {
+      "attempt": 1,
+      "duration_ms": 45064.36225,
+      "event": "end",
+      "id": "snapshot-cold_workspace-1",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": null,
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 62.176583,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4567
+            ]
+          },
+          {
+            "at_ms": 6794.726833,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4567
+            ]
+          }
+        ]
+      },
+      "outcome": "timeout",
+      "population": "snapshot",
+      "reason": "Task identity not captured in 45 seconds",
+      "scenario": "cold_workspace",
+      "state": "warm"
+    },
+    {
+      "attempt": 1,
+      "duration_ms": 45134.968791,
+      "event": "end",
+      "id": "snapshot-warm_task-1",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": null,
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 364.35775,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4567
+            ]
+          }
+        ]
+      },
+      "outcome": "timeout",
+      "population": "snapshot",
+      "reason": "Task identity not captured in 45 seconds",
+      "scenario": "warm_task",
+      "state": "warm"
+    },
+    {
+      "attempt": 1,
+      "duration_ms": 45021.933875,
+      "event": "end",
+      "id": "snapshot-reopen_task-1",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": null,
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 12.239208,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4567
+            ]
+          }
+        ]
+      },
+      "outcome": "timeout",
+      "population": "snapshot",
+      "reason": "Task identity not captured in 45 seconds",
+      "scenario": "reopen_task",
+      "state": "warm"
+    },
+    {
+      "attempt": 2,
+      "duration_ms": 45096.924875,
+      "event": "end",
+      "id": "snapshot-cold_workspace-2",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": null,
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 68.925,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4590
+            ]
+          },
+          {
+            "at_ms": 10921.526667,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4590
+            ]
+          }
+        ]
+      },
+      "outcome": "timeout",
+      "population": "snapshot",
+      "reason": "Task identity not captured in 45 seconds",
+      "scenario": "cold_workspace",
+      "state": "warm"
+    },
+    {
+      "attempt": 2,
+      "duration_ms": 45123.407417,
+      "event": "end",
+      "id": "snapshot-warm_task-2",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": null,
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 379.425042,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4590
+            ]
+          }
+        ]
+      },
+      "outcome": "timeout",
+      "population": "snapshot",
+      "reason": "Task identity not captured in 45 seconds",
+      "scenario": "warm_task",
+      "state": "warm"
+    },
+    {
+      "attempt": 2,
+      "duration_ms": 45014.453667,
+      "event": "end",
+      "id": "snapshot-reopen_task-2",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": null,
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 8.841083,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4590
+            ]
+          }
+        ]
+      },
+      "outcome": "timeout",
+      "population": "snapshot",
+      "reason": "Task identity not captured in 45 seconds",
+      "scenario": "reopen_task",
+      "state": "warm"
+    },
+    {
+      "attempt": 3,
+      "duration_ms": 45068.444417,
+      "event": "end",
+      "id": "snapshot-cold_workspace-3",
+      "metric": "task_workspace_ready_ms",
+      "observation": {
+        "selected_session": null,
+        "session_usable_ms": null,
+        "transitions": [
+          {
+            "at_ms": 59.526834,
+            "key_window": -1,
+            "selection": "",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4611
+            ]
+          },
+          {
+            "at_ms": 7862.96225,
+            "key_window": -1,
+            "selection": "f9d86c53-f190-4f55-9983-8cff9cd4ecd8",
+            "task_link_sheet": false,
+            "window_numbers": [
+              4611
+            ]
+          }
+        ]
+      },
+      "outcome": "timeout",
+      "population": "snapshot",
+      "reason": "Task identity not captured in 45 seconds",
+      "scenario": "cold_workspace",
+      "state": "warm"
+    },
+    {
+      "attempt": 3,
+      "duration_ms": null,
+      "event": "begin",
+      "id": "snapshot-warm_task-3",
+      "metric": "task_workspace_ready_ms",
+      "outcome": "interrupted",
+      "population": "snapshot",
+      "scenario": "warm_task",
+      "state": "warm"
+    }
+  ],
+  "expected_attempts": 15,
+  "groups": [
+    {
+      "attempted": 1,
+      "failure_rate": 1.0,
+      "metric": "task_workspace_ready_ms",
+      "p50_ms": null,
+      "p95_ms": null,
+      "passed": 0,
+      "population": "snapshot",
+      "scenario": "cold_workspace",
+      "state": "first_interaction"
+    },
+    {
+      "attempted": 3,
+      "failure_rate": 1.0,
+      "metric": "task_workspace_ready_ms",
+      "p50_ms": null,
+      "p95_ms": null,
+      "passed": 0,
+      "population": "snapshot",
+      "scenario": "cold_workspace",
+      "state": "warm"
+    },
+    {
+      "attempted": 1,
+      "failure_rate": 1.0,
+      "metric": "task_workspace_ready_ms",
+      "p50_ms": null,
+      "p95_ms": null,
+      "passed": 0,
+      "population": "snapshot",
+      "scenario": "reopen_task",
+      "state": "first_interaction"
+    },
+    {
+      "attempted": 2,
+      "failure_rate": 1.0,
+      "metric": "task_workspace_ready_ms",
+      "p50_ms": null,
+      "p95_ms": null,
+      "passed": 0,
+      "population": "snapshot",
+      "scenario": "reopen_task",
+      "state": "warm"
+    },
+    {
+      "attempted": 1,
+      "failure_rate": 1.0,
+      "metric": "task_workspace_ready_ms",
+      "p50_ms": null,
+      "p95_ms": null,
+      "passed": 0,
+      "population": "snapshot",
+      "scenario": "warm_task",
+      "state": "first_interaction"
+    },
+    {
+      "attempted": 3,
+      "failure_rate": 1.0,
+      "metric": "task_workspace_ready_ms",
+      "p50_ms": null,
+      "p95_ms": null,
+      "passed": 0,
+      "population": "snapshot",
+      "scenario": "warm_task",
+      "state": "warm"
+    }
+  ],
+  "journal_errors": [],
+  "journey_errors": [],
+  "metadata": {
+    "binary_sha256": "4532649b30404ec916933837252e8fd3722ea52cfd1a14cece2e82b9a3a9b765",
+    "build_command": [
+      "swift",
+      "build",
+      "--package-path",
+      "swift",
+      "--build-tests",
+      "-Xswiftc",
+      "-gnone",
+      "--jobs",
+      "4"
+    ],
+    "build_mode": "SwiftPM debug -gnone",
+    "command": [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/libexec/swift/pm/swiftpm-testing-helper",
+      "--test-bundle-path",
+      "/Users/jack/src/loopflow.open-tasks-directly-and-optimize/swift/.build/debug/LoopflowSwiftPackageTests.xctest/Contents/MacOS/LoopflowSwiftPackageTests",
+      "--testing-library",
+      "swift-testing",
+      "--filter",
+      "DesktopPerformanceTests.measureSnapshotTaskOpening"
+    ],
+    "exit_code": -15,
+    "host": {
+      "arch": "arm64",
+      "name": "Jacks-MacBook-Pro-2.local",
+      "os": "macOS-26.0.1-arm64-arm-64bit-Mach-O"
+    },
+    "issue": "LOO-368",
+    "measurement_source": "6708cc84379276f30331df7f4bb15b9b89ee7d22acea1cccc1e9426ddfe634b8",
+    "outcome": "interrupted",
+    "population_source": "isolated SQLite online backup",
+    "repo": "/Users/jack/src/loopflow",
+    "resources_after": {
+      "free_bytes": 135316238336,
+      "load_average": [
+        44.05029296875,
+        40.12451171875,
+        49.84033203125
+      ]
+    },
+    "resources_before": {
+      "free_bytes": 140291325952,
+      "load_average": [
+        76.63818359375,
+        82.296875,
+        67.06884765625
+      ]
+    },
+    "schema": 1,
+    "snapshot": {
+      "captured_at": "2026-10-05T20:32:39.541715+00:00",
+      "counts": {
+        "access_profiles": 4,
+        "agent_sessions": 604,
+        "auth_browser_bindings": 7,
+        "blob_tokens": 1401,
+        "ci_incidents": 212,
+        "execs": 218637,
+        "flow_events": 901,
+        "flow_sessions": 104,
+        "homes": 1,
+        "metric_instruments": 0,
+        "metric_observations": 0,
+        "pm_issue_changes": 0,
+        "pm_items": 163,
+        "pm_projects": 35,
+        "pm_wave_projects": 35,
+        "pm_wave_sync": 21,
+        "pr_landings": 142,
+        "project_events": 30536,
+        "projects": 49,
+        "provider_account_limits": 12,
+        "provider_account_switches": 1,
+        "provider_accounts": 6,
+        "provider_routes": 12,
+        "provider_session_accounts": 3724,
+        "provider_tokens": 5,
+        "schema_migrations": 62,
+        "session_events": 521637,
+        "sqlite_sequence": 3,
+        "task_deletions": 1,
+        "task_events": 66836,
+        "task_issue_identities": 1,
+        "task_linear_ingested_comments": 611,
+        "task_linear_observations": 342,
+        "task_pr_repair_incidents": 3,
+        "task_prs": 449,
+        "tasks": 342,
+        "tool_responses": 0,
+        "waves": 53,
+        "work_placements": 441
+      },
+      "sha256": "2d4ec12d2103f3200d3675ec419f97a6b06b782c697f63f0ab9d80c583901725"
+    },
+    "source_after": "be55a7fe7b41e6e2af56eac01e41c0c86d27975dccbd7ebeeecf23b9c5dd354a",
+    "source_before": "20195620c5a56915a6a729c427879c2c1a8004e35eb4c90d74a244f26434058b",
+    "started_at": "2026-10-05T20:33:14.655621+00:00",
+    "test_binary_sha256": "1c78dc2843e82b09c4b39e449de777b7273eacc222d0e8a294351f1703590349"
+  },
+  "not_started": 4,
+  "plan": {
+    "endpoint": "native_capture_ocr",
+    "event": "plan",
+    "gaps": [
+      "A new Podium and native window measure cold workspace construction, not OS application launch.",
+      "Bitmap capture is not compositor presentation; OCR adds observer cost.",
+      "Copied providers cannot be connected. Session usability/provider startup are unmeasured."
+    ],
+    "poll_interval_ms": 5,
+    "population_version": "home-snapshot-v2",
+    "populations": {
+      "snapshot": 1
+    },
+    "samples": 5,
+    "scenarios": [
+      "cold_workspace",
+      "warm_task",
+      "reopen_task"
+    ]
+  },
+  "status": "incomplete"
+}

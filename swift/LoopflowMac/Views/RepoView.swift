@@ -63,7 +63,7 @@ struct RepoView: View {
         .accessibilityIdentifier("loopflow")
         .background {
             if let taskLinks {
-                WorkLinkReceiver(router: taskLinks) { url in
+                WorkLinkReceiver(router: taskLinks, contains: model.containsTaskDestination) { url in
                     Task { await model.openTaskLink(url) }
                 }.frame(width: 0, height: 0)
             }

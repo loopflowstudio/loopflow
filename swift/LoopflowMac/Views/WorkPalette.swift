@@ -152,7 +152,6 @@ struct TaskLinkView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Open Task").font(Typography.sectionTitle(26))
-            if model.taskLinkReading.isLoading { Text("Finding Task…") }
             if let error = model.taskLinkReading.errorMessage { Text(error) }
             if let result = model.taskLinkReading.value {
                 let matches = result.waves.flatMap { wave in wave.tasks.items.map { (wave, $0) } }

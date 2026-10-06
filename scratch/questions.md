@@ -21,6 +21,10 @@ interpretations are at `6f246fda4:scratch/questions.md`.
   design; the mechanism there (a public newer-than option the driver passes)
   is the agent's.
 
+- **Waiting (October 6).** On Waiting not seeing an interactive Claude or
+  OpenCode conversation: "seems like not the right product experience, but OK
+  to defer to land this." Not fixed in this PR; needs its own Task.
+
 ## Step invocation — decided by Jack Heart (October 5)
 
 At `45ca0d2ac` the driver passes each step a JSON `FlowStep` through the

@@ -133,18 +133,16 @@ Wave acceptance.
 ## Remaining coherent cut
 
 October 5 realignment: the previous iteration's cancellation/cold-detail/reteam
-repair request is implemented in `2cac145295a5d94a9517d8ee5298c255bc15cce0`,
-with the subsequent local compression retaining those paths. The recorded focused
-checks below cover that repair; the earlier “reteam remains unrepaired” feedback
-is superseded. Step 2 is the next implementation boundary, not another pass at
-identifier-only writes or async-scope locking.
+repair request is implemented in `2cac145295a5d94a9517d8ee5298c255bc15cce0`.
+Subsequent compression retains those paths and the recorded focused checks.
+The earlier reteam repair request is satisfied; step 2 remains next.
 
 The branch is not releasable: shared binding, exact-ID ensure, transition recovery,
 KR-first rotation, backlog preservation, Desktop activation and configured
-acceptance remain. The implementation order below owns their sequencing. Both
-`require_current_task_chapter` callers (worker claim and managed Flow admission)
-and `resolve_project_for_task` still select through Started status. Replace them
-with configured selection alongside rotation's provider-name comparisons. The
+acceptance remain. The implementation order below owns their sequencing. The October 5 source audit also finds a separate Started-count selector in
+`sqlite/children.rs::insert_initial_task`, shared by both registration APIs. Replace
+it alongside `require_current_task_chapter` (worker claim and managed Flow admission),
+`resolve_project_for_task` and rotation’s provider-name comparisons. The
 preservation findings below identify additional writers outside those callers.
 No further cached-name policy decision is needed.
 
@@ -287,7 +285,7 @@ Three source-derived counterexamples determine the remaining cut; none is an
 executed provider-rotation proof:
 
 - **First starts bypass chapter admission.** `sessions.rs::create_session` and
-  `bind_session` bypass the two SQL checks. Released
+  `bind_session` bypass the admission checks. Released
   `0.12.29.001_release.sql` triggers `task_first_conversation_insert` and
   `task_first_conversation_bind` set Started; `flows.rs::begin_flow_operation`
   also writes it. These writers do not share the Wave rotation lock. Binding
@@ -308,8 +306,10 @@ executed provider-rotation proof:
   rotation, then register locally against the predecessor after checkout locks
   were collected. Its earlier taskless conversations immediately become Task
   work. Unknown unregistered backlog would block rotation; this example relies
-  on provider Started. The unused generic `update_task` relocation writer is now deleted.
-  New-issue `pm_create_task_idempotent` already holds the Wave lock.
+  on provider Started. Both registration APIs insert the supplied Task plan; `insert_initial_task`
+  validates Project status/count without rereading accepted issue ownership.
+  Placement inheritance no longer reinserts the Task, but fixes neither stale
+  registration nor exclusion. New-issue `pm_create_task_idempotent` holds the Wave lock.
 
 October 5: the executed `input_replacement_retains_workspace_and_task_membership`
 regression exposed another writer. `replace_session_input` locked only the supplied
@@ -720,6 +720,9 @@ rotation remain. Keep this one delivery boundary.
   assertions use accepted ingestion; placement fixtures seed their own rows.
   Generic runtime `update_project` and its SQL are also deleted. Fixture setup
   remains local; behavioral updates use accepted observations.
+- Deleted: `create_task_work`'s duplicate Task lookup/insert and fallback identity.
+  Registration inserts the Task once; `inherit_task_placement` only inherits its
+  Project placement in the same transaction.
 - Deleted: `sessions::replace_input_in`'s generic `cwd` update. Input replacement
   retains the stored workspace; explicit primary workspace admission remains.
 - Rotation's automatic backlog expiration: preserve unreviewed Tasks until
@@ -821,20 +824,16 @@ multi-product platform are excluded.
 
 ## Review constraints
 
-Compression review, October 5: partial Project and Task ingestion now share
-`associate_project`, retaining accepted Initiative and repository validation in
-the ingestion transaction. Projection iterates accepted rows without an intermediate
-collection and selects retained/new identity with an explicit match. Ownership
-errors still roll back the entire observation. Full-refresh ordering and freshness
-remain separate. The subsequent acquisition/reteam cut below supplies those repairs.
+Prior compression rationale is retained at
+`f2b127d87bc0bb99654ba66118fb91a77099b73f:scratch/keep-every-wave-ready-for.md`
+under this heading. Shared `associate_project` rollback, independent entity ages,
+`run_planning_write` guard lifetime, stable-ID lock order and exact Team readbacks
+remain required; full-refresh freshness differs from partial acceptance.
 
-October 5 compression keeps one `run_planning_write` owner for the queued
-worker's acquisition lifetime, including invalidation. Reteam retains each
-Project's preflight Wave association and stores registered Waves with their held
-guards; repeated configuration searches and parallel lookup collections are
-removed. Review preserves stable-ID lock ordering, exact Team readbacks and
-independent entity ages. Prior check evidence is retained at
-`2cac145295a5d94a9517d8ee5298c255bc15cce0:scratch/keep-every-wave-ready-for.md`.
+October 5 compression retains one Task insertion and tests exact identity plus
+Project placement inheritance. Reteam reads cached identifiers only for issues
+already on the destination Team; moved issues use full readbacks. Production tests
+replace the archived cancellation experiment. These changes leave step 2 open.
 
 The remaining selection deletion targets require configured identity and exact-ID
 transitions. Reteam readbacks and cancellation-safe acceptance are implemented;
@@ -863,8 +862,8 @@ boundary with #1451's pending-version behavior; no release-tree gate ran here.
 
 ### Acquisition ownership through cancellation — October 5 implementation
 
-The retained `scratch/planning-cancellation.rs` experiment disproved an async-scope
-guard: canceling the waiter released exclusion while its SQLite worker later
+The experiment at `f2b127d87bc0bb99654ba66118fb91a77099b73f:scratch/planning-cancellation.rs`
+disproved an async-scope guard: canceling the waiter released exclusion while its SQLite worker later
 accepted old facts. Production acceptance now moves an `Arc<File>` guard into
 the queued worker, retaining ownership through commit. Snapshot refresh, detail,
 reteam and rotation use this lifetime; held-lock callers reuse it. No lock is
@@ -887,5 +886,7 @@ created-successor failure remains an explicit replacement target. Membership
 fencing, shared binding/ensure, KR-first rotation, Desktop and configured acceptance
 remain unfinished. No installed Home or designated Intelligence Project was mutated.
 
-Prior acquisition/reteam checks remain at `719226ef4:scratch/keep-every-wave-ready-for.md`.
-Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b store::sqlite::sessions::metadata_tests review_session_retains_feedback_and_history_across_replacement_and_corrupt_neighbors --test-threads=4` passed (9, including the previously failing membership regression); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed; rotation/start and configured acceptance remain unproved.
+Prior checks remain at `f2b127d87bc0bb99654ba66118fb91a77099b73f:scratch/keep-every-wave-ready-for.md`.
+Checks: `cargo test -p loopflow --lib --no-run --jobs 4` passed; `uv run --no-sync python scripts/test_network.py target/debug/deps/loopflow-fbbe45904a1f826b task_creation_records_placement_without_synthetic_direction task_registration_retains_earlier_checkout_conversations_without_binding repository_team_reteam --test-threads=4` passed (7); `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` and `git diff --check` passed; rotation/start and configured acceptance remain with implementation/gate.
+
+Realign check: `git diff --check` passed; source audit confirms registration’s separate status/count selector; prior focused checks reused, with no code changes or behavioral rerun.

@@ -320,17 +320,18 @@ KRs, Tasks and identity, with no competing creation or repository rotation.
 This explicit ID supplies bootstrap selection, not a candidate heuristic.
 The active-Project adoption test proves no Backlog activation or installed repair.
 
-Preservation requires complete Task-work membership, not Started/worker claims
-alone. Unbound checkout Sessions can lack Started; shared membership includes
-Flow associations and excludes primary scopes. Session binding and mechanical
-Flow starts bypass chapter admission. Registration can change membership after rotation collects locks, without any
-Session write; the unused generic checkout-relocation writer is deleted.
-Stabilize the Task/checkout population as well as taskless starts, binding from
-elsewhere and missing-path admission. Store tests preserve historical binding,
-transfer and registration bytes. Rotation exclusion, lock order, both start
-orderings and failed-reset re-entry remain unproved. Historical binding stays
-allowed; pending receipts cannot permanently deny starts. Release's operation-entry
-recovery lesson applies; publication/installation prove no readiness.
+Preservation includes unbound checkout Sessions and Flow associations, excluding
+primary scopes. Session binding and mechanical Flow starts bypass chapter admission;
+registration changes membership without a Session write. October 5 source audit
+finds a separate Started-count selector in `insert_initial_task`, which inserts
+caller-supplied planning without rereading accepted issue ownership. Removing the
+duplicate placement-time Task insertion preserves identity, not registration
+freshness or rotation exclusion. Shared selection must replace this check too.
+Store proofs retain historical binding, transfer and registration bytes; population
+fencing, missing-path admission, both start orderings and failed-reset re-entry
+remain unproved. Historical binding stays allowed; pending receipts cannot deny
+starts indefinitely. Release's operation-entry recovery lesson applies; published
+installation proves no Project readiness.
 
 ## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
 

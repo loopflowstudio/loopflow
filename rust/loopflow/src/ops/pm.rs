@@ -2215,15 +2215,14 @@ async fn apply_or_plan_repository_reteam(
                         project.team_ids.join(", ")
                     )));
                 }
-                let registered_identifier =
-                    store
+                if item.team_id == *team_id {
+                    already += 1;
+                    let registered_identifier = store
                         .task_issue_identifier(&item.id)
                         .await
                         .map_err(|error| {
                             OpsError::Message(format!("failed to read task registry: {error}"))
                         })?;
-                if item.team_id == *team_id {
-                    already += 1;
                     if registered_identifier.is_some_and(|identifier| identifier != item.identifier)
                     {
                         identifier_updates.push(ReteamIdentifierUpdate {

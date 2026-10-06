@@ -25,7 +25,7 @@ use crate::work::task::{
     TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
 };
 
-use super::durable::{create_task_work, inherit_project_placement};
+use super::durable::{inherit_project_placement, inherit_task_placement};
 use super::SqliteStore;
 
 impl SqliteStore {
@@ -980,7 +980,7 @@ fn insert_initial_task(
         TASK_INSERT,
         rusqlite::params_from_iter(parameters.iter().map(|value| value.as_ref())),
     )?;
-    create_task_work(conn, task)?;
+    inherit_task_placement(conn, task)?;
     insert_task_pr(conn, pr)?;
     seed_task_linear_observation(conn, task)
 }

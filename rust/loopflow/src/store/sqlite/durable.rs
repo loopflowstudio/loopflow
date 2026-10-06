@@ -669,32 +669,13 @@ pub(super) fn inherit_project_placement(
     )
 }
 
-pub(crate) fn create_task_work(tx: &Transaction<'_>, task: &Task) -> StoreResult<()> {
-    let project_id = task.project_id.as_str().to_string();
-    let task_id = tx
-        .query_row(
-            "SELECT id FROM tasks WHERE external_issue_id=?1",
-            [task.plan.id.as_str()],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .unwrap_or_else(|| TaskId::new().to_string());
-    tx.execute(
-        "INSERT OR IGNORE INTO tasks (
-            id, project_id, external_issue_id, issue_identifier, created_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![
-            task_id,
-            project_id,
-            task.plan.id.as_str(),
-            task.plan.identifier,
-            task.created_at.unix_timestamp(),
-        ],
-    )?;
-    let work = WorkRef::Task(TaskId::parse(&task_id).map_err(invalid_durable)?);
-    let parent = WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?);
-    inherit_placement(tx, &work, Some(&parent), task.created_at.unix_timestamp())?;
-    Ok(())
+pub(super) fn inherit_task_placement(tx: &Transaction<'_>, task: &Task) -> StoreResult<()> {
+    inherit_placement(
+        tx,
+        &WorkRef::Task(task.id.clone()),
+        Some(&WorkRef::Project(task.project_id.clone())),
+        task.created_at.unix_timestamp(),
+    )
 }
 
 pub(crate) fn work_for_child_in(conn: &Connection, target: &ChildRef) -> StoreResult<WorkRef> {

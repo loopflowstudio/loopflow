@@ -2679,6 +2679,12 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
+        let home = crate::durable::HomeId::new();
+        store.observe_home(&home, "ssh://fixture").await.unwrap();
+        store
+            .place_work(&WorkRef::Project(project.id.clone()), &home)
+            .await
+            .unwrap();
         let mut task = make_task(&wave, &project);
         task.worktree = directory.path().join("uncreated-child-worktree");
         let pr = make_task_pr(&task);
@@ -2687,6 +2693,12 @@ mod tests {
             .create_task_with_worktree(&task, &pr)
             .await
             .expect("generic Run identity is opaque provenance, not planning authority");
+        let placement = store
+            .placement(&WorkRef::Task(task.id.clone()))
+            .await
+            .unwrap();
+        assert_eq!(placement.home_id, home);
+        assert_eq!(store.get_task(&task.id).await.unwrap(), Some(task.clone()));
         let durable_child_rows = |path: &std::path::Path| {
             rusqlite::Connection::open(path)
                 .unwrap()

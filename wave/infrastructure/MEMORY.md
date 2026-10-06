@@ -104,8 +104,9 @@ outcome until exact exit evidence or a subsequent boot establishes death;
 Jack Heart's October 5 steer subsequently authorized explicit acceptance of
 this exact historical uncertainty for completion. Unknown outcomes and history
 must remain intact; acceptance grants no process control or checkout cleanup.
-The current branch adds a Task-history disposition for that completion decision;
-source verification, delivery and installed acceptance are separate obligations.
+The branch records exact Exec acceptance in Task history and rechecks eligibility
+at completion. Any process receipt or current owner disqualifies it. Admission
+and cleanup retain execution protection; installed completion remains unproved.
 
 Branch prevention now keys process receipts by Exec ID and removes them only
 after a successful terminal write. Interrupt cleanup follows the same rule;
@@ -120,11 +121,11 @@ Rust reached 1,903 passes before host security pressure interrupted four tests
 and left 333 unrun (17 skipped). Receipt regressions passed; CI owns unfinished
 verification. Installed behavior remains unproved.
 
-Release's October 5 recovery adds a separate download lesson: bounded retries
-cannot compensate for an overall deadline that kills healthy slow transfers.
-Its 76 MB transfer near 200 KiB/s exceeded five minutes and completed within
-fifteen. Keep deadline sizing separate from read retry policy; publication and
-installation still do not establish public smoke verification.
+Release's October 5 recovery shows retries cannot fix a deadline that kills
+healthy transfers: 76 MB near 200 KiB/s exceeded five minutes but finished within
+fifteen. Jack Heart also selected preserving the pending release version during
+recovery, superseding automatic patch successors; published tags, artifacts and
+migration bytes stay immutable. Details and acceptance limits belong in Release memory.
 
 PR #1435 CI at `6c760f285` exposed a release cleanup race: a terminal repair
 Exec receipt can precede closure of inherited checkout descriptors. A delayed

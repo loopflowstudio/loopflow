@@ -601,10 +601,11 @@ fn historical_unknown_exec(
     let Some(exec) = work.execs.iter().find(|exec| &exec.id == id) else {
         return Ok(false);
     };
+    // Any process receipt disqualifies acceptance, regardless of liveness.
+    // Without a receipt, completion or a previous boot already proves exit.
     if crate::journal::current_exec_id().as_ref() == Some(id)
         || exec.completed_at.is_some()
-        || crate::journal::exec_process_evidence(&store.sqlite, id)
-            != crate::journal::ProcessIdentityEvidence::Unknown
+        || crate::journal::began_before_boot(exec.started_at)
         || crate::journal::read_exec_process_receipts_at(&crate::store::lf_home_dir())
             .map_err(task_error)?
             .iter()

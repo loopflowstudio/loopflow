@@ -3972,7 +3972,7 @@ pub(crate) fn find_discardable_task_successor(repo: &Path) -> OpsResult<Option<S
     })
 }
 
-/// Complete planning-only work without allocating execution placement.
+/// Complete delivered work, without allocating placement for planning-only Tasks.
 pub fn task_complete(
     repo: &Path,
     issue: &str,
@@ -5912,13 +5912,7 @@ mod tests {
             .block_on(fixture.store.task_prs(&fixture.task.id))
             .unwrap()
             .remove(0);
-        assert!(std::process::Command::new("git")
-            .current_dir(repo.path())
-            .args(["checkout", "-b", &pr.branch])
-            .output()
-            .unwrap()
-            .status
-            .success());
+        repo.create_branch(&pr.branch);
         pr.base_commit = repo.head_sha();
         runtime
             .block_on(fixture.store.heal_task_pr_base(&pr))
@@ -5982,10 +5976,6 @@ mod tests {
             !gate().satisfied,
             "acceptance cannot settle an unpublished PR"
         );
-        let mut pr = runtime
-            .block_on(fixture.store.task_prs(&fixture.task.id))
-            .unwrap()
-            .remove(0);
         pr.abandoned_at = Some(time::OffsetDateTime::now_utc());
         runtime
             .block_on(fixture.store.settle_task_pr(&pr, None))

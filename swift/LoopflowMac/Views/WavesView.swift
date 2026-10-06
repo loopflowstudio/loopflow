@@ -318,6 +318,7 @@ struct WavesView: View {
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
                 streamed: model.waveDetail,
+                isProjectActivationPending: model.isProjectActivationPending(id: wave.id),
                 transportError: model.projectCommandErrors[wave.id],
                 onActivateProject: { model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave)) },
                 onClose: { selectedWaveId = nil },

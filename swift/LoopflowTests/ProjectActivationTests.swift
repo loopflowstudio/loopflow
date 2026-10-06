@@ -20,11 +20,13 @@ struct ProjectActivationTests {
             processActivity: .loading, workActivity: .loading, repos: [])
         await model.activateProject(id: "a", name: "a", repo: "/repo")?.value
         #expect(model.projectCommandErrors["a"] == "offline")
+        #expect(!model.isProjectActivationPending(id: "a"))
         #expect(model.projectCommandErrors["b"] == nil)
         #expect(model.roadmap.value == roadmap)
         await result.recover()
         await model.activateProject(id: "a", name: "a", repo: "/repo")?.value
         #expect(model.projectCommandErrors["a"] == nil)
+        #expect(!model.isProjectActivationPending(id: "a"))
         #expect(model.roadmap.value == roadmap)
     }
 
@@ -40,12 +42,72 @@ struct ProjectActivationTests {
         })
         let old = model.activateProject(id: "a", name: "a", repo: "/repo")
         await response.started()
+        #expect(model.isProjectActivationPending(id: "a"))
+        #expect(!model.isProjectActivationPending(id: "b"))
         model.select(nil)
         await model.activateProject(id: "b", name: "b", repo: "/repo")?.value
+        #expect(model.isProjectActivationPending(id: "a"))
+        #expect(!model.isProjectActivationPending(id: "b"))
         await response.finish()
         await old?.value
         #expect(model.projectCommandErrors["a"] == "a failed")
+        #expect(!model.isProjectActivationPending(id: "a"))
         #expect(model.projectCommandErrors["b"] == nil)
+    }
+
+    @Test("both surfaces show pending activation alongside retained planning")
+    func pendingPresentation() async throws {
+        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: path))
+        let response = DelayedPreparation()
+        let model = PodiumModel(query: RegistryQuery { _, _ in
+            await response.wait()
+            throw RegistryQueryError("offline")
+        })
+        model.applyFixture(roadmap: .available(roadmap), waves: .available([]),
+            processActivity: .loading, workActivity: .loading, repos: [])
+        let wave = roadmap.waves[0].wave
+        model.select(.wave(id: wave.id))
+        let command = model.activateProject(id: wave.id, name: wave.name, repo: wave.repo)
+        await response.started()
+        // Finish the suspended transport before assertions can throw.
+        let primary = WorkSurfaceView(model: model)
+        let portfolio = WaveDetailPane(
+            wave: WaveViewModel(api: Wave(id: wave.id, name: wave.name, repo: wave.repo, status: .ready),
+                plan: WavePlan(objective: "Retained objective")),
+            repoPath: wave.repo, streamed: nil,
+            isProjectActivationPending: model.isProjectActivationPending(id: wave.id),
+            transportError: nil, onActivateProject: {}, onClose: {}, onOpenTask: { _ in })
+        let primaryPending = try? primary.inspect().find(text: "Preparing Project…").string()
+        let retainedKRs = try? primary.inspect().find(text: "Current KRs").string()
+        let portfolioPending = try? portfolio.inspect().find(text: "Preparing Project…").string()
+        let retainedObjective = try? portfolio.inspect().find(text: "Retained objective").string()
+        await response.finish()
+        await command?.value
+        #expect(primaryPending == "Preparing Project…")
+        #expect(portfolioPending == "Preparing Project…")
+        #expect(retainedKRs == "Current KRs")
+        #expect(retainedObjective == "Retained objective")
+        #expect(try primary.inspect().find(text: "offline").string() == "offline")
+
+        let retry = model.activateProject(id: wave.id, name: wave.name, repo: wave.repo)
+        await response.started()
+        let retryPending = try? primary.inspect().find(text: "Preparing Project…").string()
+        let staleError = try? primary.inspect().find(text: "offline").string()
+        await response.finish()
+        await retry?.value
+        #expect(retryPending == "Preparing Project…")
+        #expect(staleError == nil)
+        #expect(model.roadmap.value == roadmap)
+    }
+
+    @Test("an unfinished persisted Exec without a live command remains unknown")
+    func unfinishedExec() throws {
+        let readiness = try JSONDecoder().decode(ProjectReadiness.self, from: Data(#"{"state":"unconfigured","activation":{"exec_id":"exec","completed_at":null,"outcome":null,"error":null}}"#.utf8))
+        let view = ProjectReadinessView(readiness: readiness, isPending: false, transportError: nil, retry: {})
+        #expect(try view.inspect().find(text: "Project activation has no recorded outcome yet.").string()
+            == "Project activation has no recorded outcome yet.")
+        #expect((try? view.inspect().find(text: "Preparing Project…")) == nil)
     }
 
     @Test("a Project without a default Flow renders no unavailable template")

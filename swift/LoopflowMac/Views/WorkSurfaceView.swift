@@ -136,6 +136,7 @@ struct WorkSurfaceView: View {
                 }
 
                 ProjectReadinessView(readiness: roadmap.projectReadiness,
+                                     isPending: model.isProjectActivationPending(id: roadmap.wave.id),
                                      transportError: model.projectCommandErrors[roadmap.wave.id]) {
                     model.activateProject(id: roadmap.wave.id, name: roadmap.wave.name, repo: roadmap.wave.repo)
                 }

@@ -518,6 +518,9 @@ See [TESTING.md](../TESTING.md) for the full commands and CLI prerequisite.
 
 Wave opening and Retry call `PodiumModel.activateProject` from both WorkSurface and
 Portfolio. The command outlives the opened view; it never refreshes a view directly.
+Both surfaces show “Preparing Project…” while that Wave's local command is pending,
+retaining cached planning. Retry appears after failure. An unfinished persisted
+Exec without a pending local command remains an unknown outcome.
 The workspace stream supplies `project_readiness`: selected Project, dated accepted
 facts, unresolved transition and the exact activation Exec's outcome. Empty default
 Flows render no template section. Command transport errors remain scoped to the Wave.

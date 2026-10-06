@@ -397,8 +397,9 @@ Both Desktop surfaces share activation and streamed reads; absent Flow renders n
 template. Partial Project acceptance stays visible without inventing Task absence
 or full-refresh freshness. Watchers never activate. Compression removed Portfolio's
 post-reset refresh callback; committed workspace frames own updates. Live command
-feedback and persisted Exec uncertainty remain distinct: the pending presentation
-is still missing. Headless checks prove no installed Intelligence repair or mounted
+feedback and persisted Exec uncertainty remain distinct: both surfaces derive
+“Preparing Project…” only from the existing per-Wave transport handle, preserving
+cached planning and unknown persisted outcomes after that handle ends. Headless checks prove no installed Intelligence repair or mounted
 acceptance. Release child memory reinforces operation-entry recovery: internal
 fixtures cannot replace public CLI/crash proof. Remaining acceptance lives in the
 design; source work grants no installation authority. Earlier Desktop evidence:

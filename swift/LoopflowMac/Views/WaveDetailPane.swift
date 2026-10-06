@@ -38,6 +38,7 @@ struct WaveDetailPane: View {
     let repoPath: String
     /// The window's streamed reading of this Wave, once one has arrived.
     let streamed: StreamedWaveDetail?
+    let isProjectActivationPending: Bool
     let transportError: String?
     let onActivateProject: () -> Void
     let onClose: () -> Void
@@ -64,6 +65,7 @@ struct WaveDetailPane: View {
                     repoPath: repoPath,
                     selection: $selection,
                     streamed: streamed,
+                    isProjectActivationPending: isProjectActivationPending,
                     transportError: transportError,
                     onActivateProject: onActivateProject,
                     onOpenTask: onOpenTask
@@ -114,6 +116,7 @@ private struct WavePlanView: View {
     let repoPath: String
     @Binding var selection: WaveWorkSelection?
     let streamed: StreamedWaveDetail?
+    let isProjectActivationPending: Bool
     let transportError: String?
     let onActivateProject: () -> Void
     let onOpenTask: (String) -> Void
@@ -133,12 +136,9 @@ private struct WavePlanView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 objective
-                if let readiness = reading.snapshot?.projectReadiness {
-                    ProjectReadinessView(readiness: readiness, transportError: transportError, retry: onActivateProject)
-                } else if let transportError {
-                    Text(transportError).foregroundStyle(Color.statusWarning)
-                    Button("Retry Project preparation", action: onActivateProject)
-                }
+                ProjectReadinessView(readiness: reading.snapshot?.projectReadiness,
+                                     isPending: isProjectActivationPending,
+                                     transportError: transportError, retry: onActivateProject)
                 projectAndTasks
                 if let portfolio = reading.snapshot?.metricPortfolio {
                     WaveMetricPortfolioView(

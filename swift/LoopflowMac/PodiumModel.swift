@@ -953,6 +953,10 @@ final class PodiumModel {
     private var projectCommands: [String: Task<Void, Never>] = [:]
     private(set) var projectCommandErrors: [String: String] = [:]
 
+    func isProjectActivationPending(id: String) -> Bool {
+        projectCommands[id] != nil
+    }
+
     @discardableResult
     func activateProject(id: String, name: String, repo: String) -> Task<Void, Never>? {
         guard !usesFixedFixture else { return nil }

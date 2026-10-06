@@ -4,13 +4,15 @@ import SwiftUI
 
 /// Both Wave surfaces render the Rust reading; none of these labels mutate readiness.
 struct ProjectReadinessView: View {
-    let readiness: ProjectReadiness
+    let readiness: ProjectReadiness?
+    let isPending: Bool
     let transportError: String?
     let retry: () -> Void
 
     private var message: String? {
-        if let error = readiness.activation?.error { return error }
         if let transportError { return transportError }
+        guard let readiness else { return nil }
+        if let error = readiness.activation?.error { return error }
         if let activation = readiness.activation {
             if activation.completedAt == nil { return "Project activation has no recorded outcome yet." }
             if activation.outcome != "succeeded" { return "Project activation \(activation.outcome ?? "outcome unknown")." }
@@ -26,11 +28,13 @@ struct ProjectReadinessView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            if let message {
+            if isPending {
+                ProgressView("Preparing Project…")
+            } else if let message {
                 Text(message).foregroundStyle(Color.statusWarning).textSelection(.enabled)
-                if readiness.state != .terminal { Button("Retry Project preparation", action: retry) }
+                if readiness?.state != .terminal { Button("Retry Project preparation", action: retry) }
             }
-            if let successor = readiness.pendingSuccessor {
+            if let successor = readiness?.pendingSuccessor {
                 Text("Project transition remains unresolved: \(successor)")
                     .font(Typography.caption()).textSelection(.enabled)
             }

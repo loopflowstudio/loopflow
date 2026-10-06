@@ -113,7 +113,7 @@ Local synthetic passes establish neither installed conversion nor configured rea
 October 6 reconciliation: reactive source is committed at `c2edcdba3`; dependency
 `e887a21c1` entered through `66a3daa86`. HEAD `9552df051` also includes telemetry
 repair #1462 (`102b8cfa0`); that integration supplies no new readiness proof.
-The existing uncommitted compression changes below retain their recorded checks.
+Compression is checkpointed at `45debbb7c`; its recorded checks remain applicable.
 
 
 Registration, exact-ID readers/admission, ensure, rotation, Portfolio activation
@@ -305,11 +305,11 @@ An unavailable sibling Wave or global reset does not prevent ordinary work here.
 
 On opening, show retained Project and Tasks while preparation runs. With no
 retained plan, show “Preparing Project…” while the local activation command is
-pending. This presentation remains unimplemented: `ProjectReadinessView` currently
-shows “No Project selected yet” or an unknown-outcome message, and the model's
-command handle is not exposed to either surface. An unfinished persisted Exec must
-still mean unknown; any pending indicator must derive from the live transport
-handle, without another persisted lifecycle. An outage
+pending. Both surfaces now derive this presentation from the model's existing
+per-Wave command handle, including Portfolio before its first workspace frame.
+Cached planning remains visible, Retry waits for completion, and current transport
+failures take precedence over cached activation errors. An unfinished persisted
+Exec without a local command still means unknown; no persisted lifecycle is added. An outage
 shows its cause and Retry, never an empty-project prompt. The configured ID
 selects the current Project even if another provider Project is In Progress.
 Other Projects do not block opening the configured one. Project
@@ -555,7 +555,9 @@ and rotation fixtures preserve identity and failure recovery; headless model tes
 retain planning through failure/navigation and suppress empty-Flow presentation.
 These are disposable source proofs, not configured or mounted acceptance.
 
-Remaining implementation: the pending-command presentation described under Outcome and demo.
+Pending-command presentation is implemented through the existing per-Wave transport
+handle. Headless checks cover retained planning in both surfaces, delay, failure/retry,
+navigation and unfinished persisted Exec uncertainty.
 Remaining proofs: actual configured Intelligence repair after publication/install;
 public CLI ensure with simulated provider, actual process crashes across rotation;
 mounted opening/reopening/retry in both surfaces; skill-driven chapter/admission
@@ -672,4 +674,4 @@ Earlier reactive implementation checks remain at `fd98f97352fdfc16145adf0efcc045
 
 Compression checks: network-isolated `cargo test -p loopflow --lib chapter` 32 passed, 1 failed on fixture setup; repaired `task_sweep_previews_old_chapters` 1 passed; headless `scripts/test_desktop.sh -Xswiftc -gnone --filter 'ProjectActivationTests|WaveDetailReadingTests|PodiumModelTests'` 38 passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, diff and context-budget checks passed. Gate retains configured/CLI/crash and mounted/skill acceptance, the output-handle leak and CI repair.
 
-Reconciliation check: `git diff --check` passed; prior focused results above reused because this pass changes prose only; CLI/crash and configured proof remain with gate, mounted judgment with demo/review.
+Pending presentation checks: `scripts/test_desktop.sh -Xswiftc -gnone --filter 'ProjectActivationTests|WaveDetailReadingTests|PodiumModelTests'` built Desktop and passed 40 headless tests with inherited LF authority removed; `uv run --no-sync python scripts/check_swift_multiplatform_boundaries.py`, diff and context-budget checks passed. The first build rejected a test-file edit during compilation; the stable-tree rerun passed. Logs: `/tmp/loo366-pending-tests-retry.log`. CLI/crash and configured proof remain with gate, mounted judgment with review. Source review corrected current transport-error precedence over retained activation failure; no new readiness owner was introduced.

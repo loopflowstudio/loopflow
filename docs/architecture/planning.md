@@ -14,9 +14,20 @@ cadence, budget and metric instruments across plans. Its one In Progress Linear
 Project owns Tasks, KRs, targets and an optional default Flow. A Chapter is the shared
 name of those current Projects across the repository. The rotation below describes
 the current implementation. LOO-366 replaces status/name selection with an explicit
-shared Project binding and preserves unreviewed backlog; that cutover remains
-unimplemented. [Cutover status](../architecture-reference.md#cutover-status) records
+shared Project binding and preserves unreviewed backlog. Binding setup exists;
+selection and recovery cutover remain unimplemented. [Cutover status](../architecture-reference.md#cutover-status) records
 other implementation and proof gaps.
+
+```bash
+lf wave bind-project product <project-uuid> --json
+```
+
+Validate one existing Project and record `pm.linear_project` in
+`<Home>/waves/<WaveId>/config.yaml`. Repeating the same binding preserves it;
+a different existing binding is left unchanged. Setup preserves provider status,
+content and identity, including a Backlog Project without a Flow. It does not
+activate the Project. The reader/admission and rotation cutover must finish before
+this binding becomes ordinary Project selection.
 
 ## Rotate the plan, preserve the work
 

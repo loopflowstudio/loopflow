@@ -671,6 +671,13 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
+    /// Bind an existing Project UUID as this Wave's shared current selection
+    BindProject {
+        wave: String,
+        project: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Local launchd jobs that run lf commands on a schedule
     Cron {
         #[command(subcommand)]

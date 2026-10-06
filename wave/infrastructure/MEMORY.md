@@ -344,13 +344,18 @@ backlog stays with its Project; unresolved abandonment keeps its separate settle
 Shared binding, transition recovery, CI repair acceptance and configured readiness
 remain open. Focused operation proofs pass; publication proves no readiness.
 
-## One migration draft per Task (LOO-344, branch evidence 2026-10-01)
+October 5 binding setup now preserves Home-local YAML bytes and exact Project
+identity through repeated calls. Acceptance returns the committed Project body:
+a delayed Backlog read cannot bind newer completed history. This local setup
+slice does not replace ordinary selectors or activate Intelligence; ensure,
+transition recovery and configured readiness remain unfinished.
 
-Jack Heart selected one editable draft per Task and one client on September 30.
-Released SQL stays immutable; custom Homes retain exact-schema validation.
-[MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md) owns mechanics;
-`4ef2486a2:wave/infrastructure/MEMORY.md` retains implementation evidence.
-Not shipped.
+## One migration draft per Task (LOO-344, 2026-10-01)
+
+Jack Heart selected one editable draft per Task and one client. Released SQL stays
+immutable; custom Homes retain exact-schema validation. Mechanics and branch
+evidence: [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md),
+`986be7988:wave/infrastructure/MEMORY.md`. Not shipped.
 
 ## One main Home (LOO-342, curated 2026-10-04)
 

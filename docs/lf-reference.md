@@ -1034,6 +1034,17 @@ Manage Wave identity, placement and planning
 |---|---|
 | `--help / -h` | Print help |
 
+## lf wave bind-project
+
+Bind an existing Project UUID as this Wave's shared current selection
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `<project>` | project |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
 ## lf wave cron
 
 Local launchd jobs that run lf commands on a schedule

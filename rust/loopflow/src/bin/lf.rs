@@ -830,6 +830,20 @@ fn print_task_control(
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     match command {
+        WaveCommand::BindProject {
+            wave,
+            project,
+            json,
+        } => {
+            let result = tokio::runtime::Runtime::new()?
+                .block_on(loopflow::ops::project::bind_project(repo, wave, project))?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("Wave {wave}: bound Project {} ({})", result.name, result.id);
+            }
+            Ok(())
+        }
         WaveCommand::Cron { .. } => unreachable!("cron dispatches separately"),
         WaveCommand::List { .. } | WaveCommand::Status { .. } => {
             unreachable!("read commands dispatch separately")

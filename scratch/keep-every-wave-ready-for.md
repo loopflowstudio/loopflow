@@ -56,9 +56,19 @@ must expose either the previous or next complete binding. The lock lives outside
 the replaced file, so atomic rename cannot create a second lock owner. Ordinary
 opening consumes the shared binding even when its checkout contains an older ID.
 
-Optional Flow and the cached-name cutover below are implemented locally. Shared
-binding, exact-ID ensure, rotation recovery and Desktop remain unfinished. No
-provider mutation or configured acceptance has occurred.
+Optional Flow, the cached-name cutover and shared binding setup are implemented
+locally. `lf wave bind-project <wave> <uuid> --json` validates exact ownership under
+the Wave lock and writes the stable-ID file atomically, preserving unrelated YAML
+bytes. Repeated binding is idempotent; replacing a different binding remains with
+rotation. The command preserves status, including Backlog without Flow. Accepted
+Project ingestion now returns its committed body; a delayed Backlog response cannot
+bind a newer completed Project. File reads create no directories. Leading-comment
+preservation requires editing the YAML file rather than only its document.
+
+Ordinary readers/admission and rotation still use the old selectors. This is a
+local bootstrap slice, not a completed selection cut or shippable readiness.
+Exact-ID ensure, transition recovery and Desktop remain unfinished; Intelligence
+has not been bound or activated on the installed Home.
 
 ## Intelligence repair — Jack Heart's October 5 steer
 
@@ -75,7 +85,7 @@ The exact ID supplies the explicit bootstrap selection required by the accepted
 configuration policy. The intended supported path is binding that ID through the
 shared configuration writer, then status-only activation through ensure and
 provider readback. Binding setup needs an explicit supported operation alongside
-ensure; its CLI spelling remains an implementation choice. It must validate the
+ensure; its implemented CLI spelling is `lf wave bind-project <wave> <uuid> --json`. It must validate the
 exact Project's ownership under the same Wave lock and preserve unrelated file
 bytes. Ordinary ensure must not infer this binding from candidate discovery.
 
@@ -83,8 +93,8 @@ Source inspection confirms `migration_adoption_accepts_a_started_project_without
 uses Started status and disables promotion. It proves neither Backlog activation
 nor the configured Intelligence repair. Existing migration adoption can promote
 only from retained migration evidence; it is not a general bootstrap API.
-The empty-Flow refusal is removed in source, but shared binding and ensure do not
-exist yet. No installed repair is established, and a branch binary must not write
+The empty-Flow refusal is removed and explicit binding exists in source; ensure
+and activation remain unimplemented. No installed repair is established, and a branch binary must not write
 the installed Home. Delivery must report the actual supported binding/activation
 commands once implemented and available in a published installation.
 
@@ -366,19 +376,11 @@ of this boundary through operation entry points, retaining actual failures.
 Release's recovery findings reinforce this requirement; its publication and
 installation evidence supplies no Project-readiness acceptance.
 
-Existing public-store regressions establish narrower preservation contracts:
-
-- `session_binding_retains_a_task_in_completed_project_history`: historical
-  binding succeeds, sets Started and retains Task/checkout identity.
-- `checkout_session_membership_survives_project_transfer_without_binding`:
-  transfer retains unbound Session bytes, checkout identity and membership.
-- `checkout_exclusion_preserves_registration_and_retry`: both registration APIs
-  retain earlier Session bytes/membership and unset Started after exclusion/retry.
-  It also covers the former standalone earlier-conversation registration case.
-
-These earlier store tests prove narrower contracts. The new rotation operation test
-adds exclusion and failed-reset retry; configured-ID selection and transitions
-remain unimplemented. Jack Heart's explicit-binding policy is unchanged.
+Historical binding, unbound checkout transfer and both registration APIs retain
+focused store proofs. Their exact names and boundaries remain at
+`986be7988:scratch/keep-every-wave-ready-for.md` under “Preservation boundary”.
+Rotation adds both start orderings and failed-reset retry. Configuration-switch
+and created-successor recovery remain unproved; explicit selection is unchanged.
 
 ## Outcome and demo
 
@@ -692,8 +694,8 @@ cases below own requirements; this list identifies each next cut:
    operation regressions cover newer accepted facts, stale-owner refusal, both
    start/rotation orderings and failed-reset retry. Final before/after-configuration-
    switch proofs and created-successor recovery depend on steps 3–5.
-3. Add the shared Wave-ID configuration reader/writer and explicit binding setup,
-   then replace every current-Project selector, including Task routing and
+3. Shared Wave-ID configuration and explicit binding setup exist locally. Replace
+   every current-Project selector, including Task routing and
    CLI/status/DTO consumers. Preserve the designated Intelligence Project.
 4. Add transition persistence and ensure, exercising concurrency and uncertain
    responses through operations with a stateful fake provider. Test this Task's
@@ -890,4 +892,4 @@ Reteam's retained compression and earlier check evidence remain at
 `3555375af:scratch/keep-every-wave-ready-for.md`; its full preflight, exact readbacks
 and cancellation-safe acceptance remain required.
 
-Checks: reconciliation `git diff --check` passed; prior results retained without rerun: `cargo test -p loopflow --lib --no-run --jobs 4`, `cargo fmt`, `cargo clippy --all-targets --jobs 4 -- -D warnings` passed; isolated `scripts/test_network.py <lib-test> <filter> --test-threads=1` passed 13 tests across `registration`, `missing_root_exclusion`, `cancelled_projection`, `rotation_excludes_checkout_starts`; gate retains full affected suites, CI repair and configured acceptance. Earlier checks remain at `7e7204ddad:scratch/keep-every-wave-ready-for.md`.
+Checks: `cargo test -p loopflow --lib project_binding --jobs 4` passed 5 tests; `cargo clippy --all-targets --jobs 4 -- -D warnings`, `cargo fmt` and `git diff --check` passed. Prior preservation checks remain at `986be7988:scratch/keep-every-wave-ready-for.md`; gate retains full affected suites, CI repair and configured acceptance.

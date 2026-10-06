@@ -3,6 +3,7 @@
 pub mod config;
 pub mod context;
 pub mod metrics;
+pub mod project_binding;
 pub mod relocate;
 
 use serde::Serialize;

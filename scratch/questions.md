@@ -5,18 +5,11 @@ Jack Heart concluded review before the October 5 implementation attempt. The
 status and evidence; earlier review notes remain at
 `6dc8536fedce0852bd4931682c7ffb0a871cf17d:scratch/questions.md`.
 
-- Preservation mechanics need no product decision. Acceptance retains shared
-  acquisition guards through SQLite commit; cold detail re-reads ownership under
-  its guard, and reteam uses full readbacks and authorized Team reconciliation.
-  The prior iteration’s reteam repair request is satisfied locally;
-  hierarchical checkout admission now excludes registration at an unregistered
-  missing ancestor, preserving sibling progress. Its Task-population scan is gone.
-  Registration now retains its Wave guard through commit, including cancellation.
-  Registration now returns transactional accepted facts to downstream consumers.
-  Rotation holds checkout exclusion through classification and queued writes;
-  unreviewed backlog remains in place. The rejected global guard remains in history.
-  Configuration-switch and created-successor recovery proofs depend on the later
-  binding/transition replacement; name selection cannot recover preserved names.
+- Preservation mechanics need no product decision. Registration and rotation
+  retain shared guards through commit; backlog stays historical. Completed
+  registration, reteam and checkout-admission detail remains in the design and
+  `986be7988:scratch/questions.md`. Shared binding setup exists; selection and
+  configuration-switch recovery still need the coherent transition replacement.
 - Chapter metadata representation and projection. Cross-Wave historical inspection
   remains proposed; Wave-scoped chapter creation is requested.
 - Skill/Flow composition and the retained Task-candidate format between KR planning,

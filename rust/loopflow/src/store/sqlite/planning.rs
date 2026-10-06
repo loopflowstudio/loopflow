@@ -17,7 +17,7 @@ impl SqliteStore {
         initiative: &str,
         project: &PmProject,
         observed_at: i64,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<PmProject> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let repo: String = conn.query_row(
             "SELECT repo FROM waves WHERE id=?1",
@@ -42,8 +42,14 @@ impl SqliteStore {
             &[],
             Some((wave, initiative)),
         )?;
+        let body: String = tx.query_row(
+            "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+            params![repo, provider, project.id],
+            |row| row.get(0),
+        )?;
+        let accepted = serde_json::from_str(&body)?;
         tx.commit()?;
-        Ok(())
+        Ok(accepted)
     }
 
     pub(crate) fn reconcile_pm_project_teams(

@@ -61,6 +61,16 @@ pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
 }
 
+impl SqliteStore {
+    pub(crate) fn home_dir(&self) -> StoreResult<PathBuf> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.path()
+            .and_then(|path| Path::new(path).parent())
+            .map(Path::to_path_buf)
+            .ok_or_else(|| StoreError::InvalidData("store has no owning Home path".into()))
+    }
+}
+
 /// Recorded checkout evidence remains usable without chapter metadata.
 #[derive(Debug, Clone)]
 pub(crate) struct TaskCheckout {

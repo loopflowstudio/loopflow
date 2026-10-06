@@ -356,7 +356,7 @@ impl Store {
         project: crate::pm::PmProject,
         observed_at: i64,
         acquisition: Option<Arc<PlanningLocks>>,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<crate::pm::PmProject> {
         let wave = wave.clone();
         let provider = provider.to_string();
         let initiative = initiative.to_string();

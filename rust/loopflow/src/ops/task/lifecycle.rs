@@ -9,6 +9,7 @@ use crate::engine::worktrees::main_repo_root;
 use crate::ops::pm::PmResolvedTask;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
+use crate::store::sqlite::OpenExecs;
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
 use crate::work::task::{PrPhase, Task, TaskPr};
 
@@ -572,8 +573,15 @@ fn historical_unknown_exec(
     Ok(true)
 }
 
-pub(super) fn completion_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
-    let mut work = store.sqlite.task_work(&task.id).map_err(task_error)?;
+pub(super) fn completion_work_blockers(
+    store: &SharedStore,
+    task: &Task,
+    open: &OpenExecs,
+) -> OpsResult<Vec<String>> {
+    let mut work = store
+        .sqlite
+        .task_open_work(&task.id, open)
+        .map_err(task_error)?;
     let mut accepted = HashSet::new();
     for id in store
         .sqlite
@@ -594,15 +602,20 @@ pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsR
     associated_execution_blockers(store, task)
 }
 
+fn open_work(store: &SharedStore, task: &Task) -> OpsResult<crate::task_work::TaskWork> {
+    let open = store.sqlite.open_execs().map_err(task_error)?;
+    store
+        .sqlite
+        .task_open_work(&task.id, &open)
+        .map_err(task_error)
+}
+
 /// Restoring a checkout preserves idle Flows; only unresolved execution waits.
 pub(super) fn associated_execution_blockers(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<Vec<String>> {
-    execution_blockers(
-        store,
-        &store.sqlite.task_work(&task.id).map_err(task_error)?,
-    )
+    execution_blockers(store, &open_work(store, task)?)
 }
 
 fn execution_blockers(

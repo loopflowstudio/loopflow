@@ -361,7 +361,8 @@ enum MockWaveFixture {
                     "authored_commits": true,
                     "recovery_required": false,
                     "reason": null
-                  }
+                  },
+                  "unresolved_execution": true
                 },
                 "actions": {
                   "recommended": "open_pr",
@@ -434,7 +435,8 @@ enum MockWaveFixture {
                     "authored_commits": null,
                     "recovery_required": null,
                     "reason": null
-                  }
+                  },
+                  "unresolved_execution": false
                 },
                 "actions": {
                   "recommended": null,

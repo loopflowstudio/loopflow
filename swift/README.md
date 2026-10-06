@@ -474,6 +474,21 @@ xcodebuild -quiet \
 
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
+```bash
+lf monitor workspace --watch --json    # what a window shows, as it changes
+```
+
+Each window keeps one such reader open through `RegistryQuery.watchWorkspace()`.
+Its frames carry planning, the repository's Sessions, the shown Task's work, the
+shown Wave's detail and activity. A part arrives again only when a commit
+changed what it shows, so a Task created by `lf`, a worker or another window
+appears without a refresh. A file written or a commit made in a Task checkout
+shows within a few seconds, and token totals within about ten. Nothing in the
+window reads on a timer. Each request
+the window sends carries an id and each frame names the newest one it answers;
+a frame read before a local write is ignored. If the reader ends, the last
+reading stays on screen marked unavailable until a new reader answers.
+
 Task Monitor's shared reader is `RegistryQuery.watchActiveSessions()`, backed by
 `lf monitor active --watch --json`. Its `sessions` rows retain stable AgentSession IDs, titles and current typed Work.
 Verified Exec/process and native-client receipts establish activity independently

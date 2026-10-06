@@ -11,7 +11,7 @@
 //! than one that says nothing at all.
 
 use std::io::IsTerminal;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,7 @@ use crate::lf::output::Colors;
 use crate::ops::task_execution::TaskExecutionState;
 use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot};
 use crate::session_record::SessionHistory;
+use crate::store::sqlite::OpenExecs;
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
 use crate::work::task::{
@@ -62,7 +63,7 @@ pub struct WaveSnapshot {
 
 /// `lf wave status <wave>`: current planning, Task conditions and Session history.
 /// Wire type; no defaults.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveDetailSnapshot {
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
@@ -175,6 +176,7 @@ pub enum TaskConditionState {
 pub use crate::ops::task_actions::{
     ci_failure_reason, derive_task_actions, TaskAction, TaskActionEvidence, TaskActionModel,
 };
+use crate::ops::task_flow::TaskFlowRecord;
 pub use crate::ops::task_flow::TaskFlowSnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +210,10 @@ pub struct TaskConditionSnapshot {
     /// Age of the durable Work evidence at that sample, if Work exists.
     pub evidence_age_secs: Option<i64>,
     pub local_progress: LocalProgressEvidence,
+    /// Started work a finished plan has not settled: the Task is still ready,
+    /// its Flow is not idle, or its checkout holds observed unsettled work.
+    /// Keeps a terminal Task in the working set.
+    pub unresolved_execution: bool,
 }
 
 /// Stable references for one Task, shared verbatim by `lf wave status` and
@@ -485,19 +491,7 @@ pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
         let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
             return no_registry(json, "[]");
         };
-        let waves = store
-            .list_waves(None)
-            .await
-            .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
-        let waves = scope_waves_to_repo(waves, all)?;
-        let mut snapshots = Vec::with_capacity(waves.len());
-        for wave in waves {
-            let snapshot = snapshot_wave(&store, &wave).await?;
-            if !current || current_wave(&snapshot) {
-                snapshots.push(snapshot);
-            }
-        }
-        snapshots.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
+        let snapshots = wave_snapshots(&store, all, current).await?;
         if json {
             println!("{}", serde_json::to_string(&snapshots)?);
         } else {
@@ -505,6 +499,28 @@ pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
         }
         Ok(())
     })
+}
+
+/// The rows of `lf wave list`, in its order.
+pub(crate) async fn wave_snapshots(
+    store: &SharedStore,
+    all: bool,
+    current: bool,
+) -> Result<Vec<WaveSnapshot>> {
+    let waves = store
+        .list_waves(None)
+        .await
+        .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
+    let waves = scope_waves_to_repo(waves, all)?;
+    let mut snapshots = Vec::with_capacity(waves.len());
+    for wave in waves {
+        let snapshot = snapshot_wave(store, &wave).await?;
+        if !current || current_wave(&snapshot) {
+            snapshots.push(snapshot);
+        }
+    }
+    snapshots.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
+    Ok(snapshots)
 }
 
 fn current_wave(wave: &WaveSnapshot) -> bool {
@@ -519,37 +535,42 @@ pub fn status(wave: Option<&str>, json: bool) -> Result<()> {
             return no_registry(json, "null");
         };
         let wave = resolve_status_wave(&store, wave).await?;
-        let repository_waves = store
-            .list_waves(Some(wave.repo()))
-            .await
-            .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
-        validate_pm_portfolio(&store, &repository_waves).await?;
-        let snapshot = snapshot_wave(&store, &wave).await?;
-        let task_snapshots = wave_tasks(&store, &wave, true, None).await?;
-        let metric_portfolio =
-            crate::ops::metrics::wave_metric_portfolio(&store, &wave, now()).await?;
-        let status = WaveDetailSnapshot {
-            history: Evidence::from_result(
-                crate::lf::commands::session_history::collect_recent_history(
-                    crate::lf::commands::WorkFilter {
-                        wave: Some(wave.slug()),
-                        project: None,
-                        task: None,
-                    },
-                ),
-            ),
-            wave: snapshot,
-            projects: project_planning(&store, &wave).await,
-            tasks: task_snapshots.tasks,
-            metric_portfolio,
-            unavailable_tasks: task_snapshots.unavailable_tasks,
-        };
+        let status = wave_detail(&store, &wave).await?;
         if json {
             println!("{}", serde_json::to_string(&status)?);
         } else {
             print_status(&status);
         }
         Ok(())
+    })
+}
+
+/// One Wave's `lf wave status` reading.
+pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<WaveDetailSnapshot> {
+    let repository_waves = store
+        .list_waves(Some(wave.repo()))
+        .await
+        .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
+    validate_pm_portfolio(store, &repository_waves).await?;
+    let snapshot = snapshot_wave(store, wave).await?;
+    let shared = SharedTaskReads::read(store).await?;
+    let task_snapshots = wave_tasks(store, wave, true, None, &shared).await?;
+    let metric_portfolio = crate::ops::metrics::wave_metric_portfolio(store, wave, now()).await?;
+    Ok(WaveDetailSnapshot {
+        history: Evidence::from_result(
+            crate::lf::commands::session_history::collect_recent_history(
+                crate::lf::commands::WorkFilter {
+                    wave: Some(wave.slug()),
+                    project: None,
+                    task: None,
+                },
+            ),
+        ),
+        wave: snapshot,
+        projects: project_planning(store, wave).await,
+        tasks: task_snapshots.tasks,
+        metric_portfolio,
+        unavailable_tasks: task_snapshots.unavailable_tasks,
     })
 }
 
@@ -617,61 +638,8 @@ pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) ->
             }
             Err(other) => return Err(anyhow!(other)),
         };
-        // A Wave filter narrows presentation, not repository ownership checks.
-        let ownership_waves = if waves.len() == 1 {
-            store
-                .list_waves(Some(waves[0].repo()))
-                .await
-                .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?
-        } else {
-            waves.clone()
-        };
-        validate_pm_portfolio(&store, &ownership_waves).await?;
-        let mut roadmaps = Vec::with_capacity(waves.len());
-        for wave in &waves {
-            let snapshot = snapshot_wave(&store, wave).await?;
-            if !include_history && !current_wave(&snapshot) {
-                continue;
-            }
-            let task_snapshots =
-                wave_tasks(&store, wave, false, task)
-                    .await
-                    .unwrap_or_else(|error| WaveTasks {
-                        tasks: Evidence::Unavailable {
-                            reason: error.to_string(),
-                        },
-                        unavailable_tasks: Vec::new(),
-                    });
-            if task.is_some()
-                && matches!(&task_snapshots.tasks, Evidence::Ok { items, .. } if items.is_empty())
-            {
-                continue;
-            }
-            roadmaps.push(WaveRoadmap {
-                wave: snapshot,
-                projects: project_planning(&store, wave).await,
-                tasks: match task_snapshots.tasks {
-                    Evidence::Ok { items, truncated } => Evidence::Ok {
-                        items: items.into_iter().map(roadmap_task).collect(),
-                        truncated,
-                    },
-                    Evidence::Unavailable { reason } => Evidence::Unavailable { reason },
-                },
-                unavailable_tasks: task_snapshots.unavailable_tasks,
-                metric_portfolio: crate::ops::metrics::wave_metric_portfolio(
-                    &store,
-                    wave,
-                    evaluation_time,
-                )
-                .await?,
-            });
-        }
-        roadmaps.sort_by(|a, b| a.wave.name.cmp(&b.wave.name));
-        let roadmap = RoadmapSnapshot {
-            generated_at: format_time(evaluation_time)
-                .expect("current timestamp formats as RFC 3339"),
-            waves: roadmaps,
-        };
+        let roadmap =
+            roadmap_snapshot(&store, waves, include_history, task, evaluation_time).await?;
         if json {
             println!("{}", serde_json::to_string(&roadmap)?);
         } else {
@@ -679,6 +647,130 @@ pub fn roadmap(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) ->
         }
         Ok(())
     })
+}
+
+/// `lf roadmap --all`: every current Wave in every repository.
+pub(crate) async fn roadmap_all(store: &SharedStore) -> Result<RoadmapSnapshot> {
+    let waves = store
+        .list_waves(None)
+        .await
+        .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
+    roadmap_snapshot(store, waves, false, None, now()).await
+}
+
+async fn roadmap_snapshot(
+    store: &SharedStore,
+    waves: Vec<Wave>,
+    include_history: bool,
+    task: Option<&str>,
+    evaluation_time: time::OffsetDateTime,
+) -> Result<RoadmapSnapshot> {
+    // A Wave filter narrows presentation, not repository ownership checks.
+    let ownership_waves = if waves.len() == 1 {
+        store
+            .list_waves(Some(waves[0].repo()))
+            .await
+            .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?
+    } else {
+        waves.clone()
+    };
+    validate_pm_portfolio(store, &ownership_waves).await?;
+    let shared = SharedTaskReads::read(store).await?;
+    let mut roadmaps = Vec::with_capacity(waves.len());
+    for wave in &waves {
+        let snapshot = snapshot_wave(store, wave).await?;
+        if !include_history && !current_wave(&snapshot) {
+            continue;
+        }
+        let task_snapshots = wave_tasks(store, wave, false, task, &shared)
+            .await
+            .unwrap_or_else(|error| WaveTasks {
+                tasks: Evidence::Unavailable {
+                    reason: error.to_string(),
+                },
+                unavailable_tasks: Vec::new(),
+            });
+        if task.is_some()
+            && matches!(&task_snapshots.tasks, Evidence::Ok { items, .. } if items.is_empty())
+        {
+            continue;
+        }
+        roadmaps.push(WaveRoadmap {
+            wave: snapshot,
+            projects: project_planning(store, wave).await,
+            tasks: match task_snapshots.tasks {
+                Evidence::Ok { items, truncated } => Evidence::Ok {
+                    items: items.into_iter().map(roadmap_task).collect(),
+                    truncated,
+                },
+                Evidence::Unavailable { reason } => Evidence::Unavailable { reason },
+            },
+            unavailable_tasks: task_snapshots.unavailable_tasks,
+            metric_portfolio: crate::ops::metrics::wave_metric_portfolio(
+                store,
+                wave,
+                evaluation_time,
+            )
+            .await?,
+        });
+    }
+    roadmaps.sort_by(|a, b| a.wave.name.cmp(&b.wave.name));
+    Ok(RoadmapSnapshot {
+        generated_at: format_time(evaluation_time).expect("current timestamp formats as RFC 3339"),
+        waves: roadmaps,
+    })
+}
+
+/// What a reading asks once and every Task's detail then shares, so the cost
+/// of a plan does not grow by a statement per Task.
+#[derive(Debug)]
+struct SharedTaskReads {
+    checkouts: Vec<crate::store::sqlite::TaskCheckout>,
+    local_home: crate::durable::HomeId,
+    open: OpenExecs,
+}
+
+impl SharedTaskReads {
+    async fn read(store: &SharedStore) -> Result<Self> {
+        let checkouts = store.task_checkouts().await?;
+        ask_checkouts_ahead(&checkouts);
+        Ok(Self {
+            checkouts,
+            local_home: store.local_home().await?.id,
+            open: store.sqlite.open_execs()?,
+        })
+    }
+}
+
+/// Git is asked about each existing checkout in turn by the Task details. A
+/// process that retains answers asks about several checkouts at once first,
+/// so the details find them waiting; any other process would only ask twice.
+fn ask_checkouts_ahead(checkouts: &[crate::store::sqlite::TaskCheckout]) {
+    const AT_ONCE: usize = 8;
+    if !crate::engine::git::retains_reads() {
+        return;
+    }
+    let existing = checkouts
+        .iter()
+        .map(|checkout| checkout.worktree.as_path())
+        .filter(|worktree| worktree.is_dir())
+        .collect::<Vec<_>>();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..AT_ONCE.min(existing.len()) {
+            scope.spawn(|| {
+                while let Some(worktree) =
+                    existing.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+                {
+                    // The answers are kept by Git's reader; failures are the details' to report.
+                    let _ = crate::engine::git::is_clean(worktree);
+                    let _ = crate::engine::git::rev_parse(worktree, "HEAD");
+                    let _ = crate::engine::git::worktree_root(worktree);
+                    let _ = crate::engine::worktrees::git_common_dir(worktree);
+                }
+            });
+        }
+    });
 }
 
 #[derive(Debug)]
@@ -693,6 +785,7 @@ async fn wave_tasks(
     wave: &Wave,
     probe_pr_empty: bool,
     identifier: Option<&str>,
+    shared: &SharedTaskReads,
 ) -> Result<WaveTasks> {
     let projects = store.list_projects(Some(wave.id())).await?;
     let mut tasks = store.list_tasks(Some(wave.id())).await?;
@@ -741,6 +834,7 @@ async fn wave_tasks(
         planning,
         probe_pr_empty,
         identifier.is_some(),
+        shared,
     )
     .await?;
     Ok(WaveTasks {
@@ -818,12 +912,21 @@ fn now() -> time::OffsetDateTime {
     time::OffsetDateTime::now_utc()
 }
 
+/// A Wave's main checkout. A repository that is gone answers for itself:
+/// Git is asked only about directories that exist.
+fn wave_main_repo(repo: &str) -> PathBuf {
+    let repo = Path::new(repo);
+    repo.is_dir()
+        .then(|| crate::engine::worktrees::main_repo_root(repo).ok())
+        .flatten()
+        .unwrap_or_else(|| repo.to_path_buf())
+}
+
 /// Build the registry snapshot for one wave, probing its discovery endpoint
 /// for liveness.
 pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot> {
     let repo = wave.repo().to_string();
-    let goal_repo = crate::engine::worktrees::main_repo_root(Path::new(&repo))
-        .unwrap_or_else(|_| Path::new(&repo).to_path_buf());
+    let goal_repo = wave_main_repo(&repo);
     let tasks = store
         .list_tasks(Some(wave.id()))
         .await
@@ -913,8 +1016,7 @@ async fn read_pm_planning(store: &SharedStore, wave: &Wave) -> Result<Option<PmS
 async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()> {
     let mut ownership = std::collections::HashMap::<_, PmPortfolioValidator>::new();
     for wave in waves {
-        let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
-            .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf());
+        let repo = wave_main_repo(wave.repo());
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
         let row = match store.pm_snapshot(wave.id()).await {
             Ok(Some(row)) => row,
@@ -942,9 +1044,8 @@ async fn snapshot_tasks(
     planning: PmSnapshot,
     probe_pr_empty: bool,
     include_retained: bool,
+    shared: &SharedTaskReads,
 ) -> Result<(Vec<TaskDetailSnapshot>, Vec<UnavailableTaskEvidence>)> {
-    let checkouts = store.task_checkouts().await?;
-    let local_home = store.local_home().await?;
     let mut details = Vec::new();
     let mut unavailable_tasks = Vec::new();
     for item in planning.items {
@@ -959,8 +1060,7 @@ async fn snapshot_tasks(
                 runtime_task,
                 recommended,
                 probe_pr_empty,
-                &checkouts,
-                &local_home.id,
+                shared,
             )
             .await?,
         );
@@ -1015,16 +1115,8 @@ async fn snapshot_tasks(
             .map_or("feature", |plan| plan.workflow.as_str())
             .to_string();
         details.push(
-            snapshot_task_detail(
-                store,
-                item,
-                Some(task),
-                recommended,
-                probe_pr_empty,
-                &checkouts,
-                &local_home.id,
-            )
-            .await?,
+            snapshot_task_detail(store, item, Some(task), recommended, probe_pr_empty, shared)
+                .await?,
         );
     }
     details.sort_by(|left, right| {
@@ -1069,8 +1161,7 @@ async fn snapshot_task_detail(
     task: Option<&Task>,
     recommended: String,
     probe_pr_empty: bool,
-    checkouts: &[crate::store::sqlite::TaskCheckout],
-    local_home: &crate::durable::HomeId,
+    shared: &SharedTaskReads,
 ) -> Result<TaskDetailSnapshot> {
     let prs = match task {
         Some(task) => store.task_prs(&task.id).await?,
@@ -1094,12 +1185,12 @@ async fn snapshot_task_detail(
                 flow_record,
             )
         }
-        None => (None, None, crate::ops::task_flow::TaskFlowRecord::None),
+        None => (None, None, TaskFlowRecord::None),
     };
     let home_id = task
-        .and_then(|task| checkouts.iter().find(|row| row.task_id == task.id))
+        .and_then(|task| shared.checkouts.iter().find(|row| row.task_id == task.id))
         .and_then(|row| row.home_id.clone());
-    let reference = task_reference(&item, task, active, &prs, home_id, local_home);
+    let reference = task_reference(&item, task, active, &prs, home_id, &shared.local_home);
     let worktree_blocker = match task {
         Some(task) => crate::ops::task::task_worktree_blocker(store, task).await?,
         None => None,
@@ -1153,7 +1244,7 @@ async fn snapshot_task_detail(
         task_local_progress(task, runtime.as_ref(), active, worktree_blocker.as_ref());
     let completion_refusal = match (task, runtime.as_ref()) {
         (Some(task), Some(runtime)) if !work_status_is_terminal(&runtime.status) => {
-            crate::ops::task::task_completion_gate(store, task)
+            crate::ops::task::task_completion_gate_among(store, task, &shared.open)
                 .await?
                 .refusal(&task.plan.identifier)
         }
@@ -1199,6 +1290,7 @@ async fn snapshot_task_detail(
         &next_move,
         local_progress,
         action_evidence.as_ref(),
+        &flow_record,
         observed_at,
     );
     let actions = action_evidence.as_ref().map_or_else(
@@ -1368,8 +1460,16 @@ fn derive_task_condition(
     next_move: &NextMove,
     local_progress: LocalProgressEvidence,
     action_evidence: Option<&TaskActionEvidence>,
+    flow: &TaskFlowRecord,
     observed_at: time::OffsetDateTime,
 ) -> TaskConditionSnapshot {
+    // A removed historical checkout does not reopen settled work.
+    let unresolved_execution = runtime.is_some_and(|runtime| {
+        runtime.status == WorkStatus::Ready
+            || matches!(flow, TaskFlowRecord::Pinned(flow) if flow.execution != TaskExecutionState::Idle)
+            || (local_progress.state == LocalProgressEvidenceState::Observed
+                && local_progress.unsettled == Some(true))
+    });
     let active_pr_phase = action_evidence
         .and_then(|e| e.latest_pr_phase)
         .filter(|phase| phase.is_active());
@@ -1438,6 +1538,7 @@ fn derive_task_condition(
             .expect("Task condition observation time formats as RFC 3339"),
         evidence_age_secs: runtime.and_then(|runtime| age_secs(&runtime.updated_at, observed_at)),
         local_progress,
+        unresolved_execution,
     }
 }
 
@@ -1454,7 +1555,8 @@ fn task_reference(
             .or_else(|| prs.iter().max_by_key(|pr| pr.sequence))
             .map(|pr| pr.branch.clone());
         let local = home_id.as_ref() == Some(local_home);
-        let worktree = if local {
+        // A removed checkout has no root to resolve.
+        let worktree = if local && task.worktree.is_dir() {
             crate::engine::git::worktree_root(&task.worktree)
                 .ok()
                 .and_then(|root| root.canonicalize().ok())
@@ -2188,7 +2290,7 @@ mod tests {
     use super::{
         derive_task_condition, metric_portfolio_text, next_move_for_task, truncate_start,
         LocalProgressEvidence, LocalProgressEvidenceState, NextMove, NextMoveOwner,
-        TaskConditionState, TaskRuntimeSnapshot,
+        TaskConditionState, TaskFlowRecord, TaskRuntimeSnapshot,
     };
     use crate::durable::WorkStatus;
     use crate::ops::task_actions::TaskActionEvidence;
@@ -2231,10 +2333,17 @@ mod tests {
             .await
             .unwrap();
         let stored = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
-        let (details, gaps) =
-            super::snapshot_tasks(&store, vec![], vec![], stored.snapshot, false, false)
-                .await
-                .unwrap();
+        let (details, gaps) = super::snapshot_tasks(
+            &store,
+            vec![],
+            vec![],
+            stored.snapshot,
+            false,
+            false,
+            &super::SharedTaskReads::read(&store).await.unwrap(),
+        )
+        .await
+        .unwrap();
         assert!(gaps.is_empty());
         assert_eq!(details.len(), planning.items.len());
         for detail in &details {
@@ -2370,7 +2479,10 @@ mod tests {
         };
         store.put_pm_snapshot(snapshot.clone()).await.unwrap();
         // Old applied abandonment receipts do not imply native deletion.
-        let before = super::wave_tasks(&store, &wave, false, None).await.unwrap();
+        let shared = super::SharedTaskReads::read(&store).await.unwrap();
+        let before = super::wave_tasks(&store, &wave, false, None, &shared)
+            .await
+            .unwrap();
         assert!(matches!(before.tasks, super::Evidence::Ok { items, .. } if items.len() == 2));
         store
             .confirm_task_deletion(wave.id(), "removed", "FIX-1")
@@ -2399,7 +2511,7 @@ mod tests {
                 .await
                 .unwrap(),
             );
-            let detail = super::wave_tasks(&reopened, &wave, false, None)
+            let detail = super::wave_tasks(&reopened, &wave, false, None, &shared)
                 .await
                 .unwrap();
             let super::Evidence::Ok { items, .. } = detail.tasks else {
@@ -2640,6 +2752,62 @@ mod tests {
     }
 
     #[test]
+    fn a_finished_task_stays_current_only_while_execution_is_unresolved() {
+        let unresolved = |status, flow: &TaskFlowRecord, state, unsettled| {
+            let runtime = TaskRuntimeSnapshot {
+                work_id: "task-1".to_string(),
+                status,
+                reason: "settled".to_string(),
+                updated_at: "2026-07-21T00:00:00Z".to_string(),
+                provider: "codex".to_string(),
+                started: true,
+            };
+            derive_task_condition(
+                Some(&runtime),
+                &NextMove {
+                    owner: NextMoveOwner::Task,
+                    reason: "settled".to_string(),
+                },
+                LocalProgressEvidence {
+                    state,
+                    unsettled: Some(unsettled),
+                    dirty: None,
+                    authored_commits: None,
+                    recovery_required: Some(unsettled),
+                    reason: None,
+                },
+                None,
+                flow,
+                OffsetDateTime::now_utc(),
+            )
+            .unresolved_execution
+        };
+        let review = TaskFlowRecord::Pinned(crate::ops::task_flow::PinnedTaskFlow {
+            invocation_id: "inv".into(),
+            graph: crate::engine::flow_graph::FlowGraph::new("feature", &[]),
+            current: None,
+            completed: Vec::new(),
+            returns: Vec::new(),
+            iterations: Vec::new(),
+            execution: TaskExecutionState::Human,
+            reason: "Review remains open".into(),
+            restart_required: false,
+        });
+        let none = TaskFlowRecord::None;
+        let missing = LocalProgressEvidenceState::Missing;
+        // A removed checkout alone does not reopen settled work.
+        assert!(!unresolved(WorkStatus::Done, &none, missing, true));
+        assert!(unresolved(WorkStatus::Ready, &none, missing, true));
+        assert!(unresolved(WorkStatus::Done, &review, missing, false));
+        assert!(unresolved(
+            WorkStatus::Done,
+            &none,
+            LocalProgressEvidenceState::Observed,
+            true
+        ));
+    }
+
+    #[test]
     fn task_condition_distinguishes_clear_work_from_external_waits() {
         let runtime = TaskRuntimeSnapshot {
             work_id: "task-1".to_string(),
@@ -2667,6 +2835,7 @@ mod tests {
             &next_move,
             evidence(),
             None,
+            &TaskFlowRecord::None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(advisory.state, TaskConditionState::Clear);
@@ -2679,6 +2848,7 @@ mod tests {
             },
             evidence(),
             None,
+            &TaskFlowRecord::None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(delegated.state, TaskConditionState::Waiting);
@@ -2692,6 +2862,7 @@ mod tests {
             },
             evidence(),
             None,
+            &TaskFlowRecord::None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(user_handoff.state, TaskConditionState::Waiting);
@@ -2740,6 +2911,7 @@ mod tests {
                     reason: None,
                 },
                 Some(&actions),
+                &TaskFlowRecord::None,
                 OffsetDateTime::now_utc(),
             );
             assert_eq!(condition.state, expected);
@@ -2765,6 +2937,7 @@ mod tests {
                             status: runtime.status.clone(),
                             ..actions
                         }),
+                        &TaskFlowRecord::None,
                         OffsetDateTime::now_utc(),
                     );
                     assert_eq!(terminal.state, TaskConditionState::Blocked);
@@ -2806,6 +2979,7 @@ mod tests {
             },
             local_progress,
             Some(&action_evidence),
+            &TaskFlowRecord::None,
             OffsetDateTime::now_utc(),
         );
 

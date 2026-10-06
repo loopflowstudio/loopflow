@@ -23,6 +23,18 @@ enum RegistryQueryLocal {
                 configurationChanged: { try ActiveSessionsLaunchConfiguration.current() != configuration }
             )
         }.value
+    }, watchWorkspace: {
+        try await Task.detached(priority: .userInitiated) {
+            let configuration = try ActiveSessionsLaunchConfiguration.current()
+            let process = LocalWaveAgentLauncher.queryProcess(
+                [configuration.helper, "monitor", "workspace", "--watch", "--json"]
+            )
+            process.environment = configuration.environment
+            return try LocalWorkspaceObservation.start(
+                process: process,
+                configurationChanged: { try ActiveSessionsLaunchConfiguration.current() != configuration }
+            )
+        }.value
     }, start: { args, cwd in
         try await Task.detached(priority: .userInitiated) {
             try LocalWaveAgentLauncher.startLf(args, cwd: cwd)

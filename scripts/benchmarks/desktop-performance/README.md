@@ -468,3 +468,51 @@ at 308.6 MiB and seventh at 313.5 MiB, while the first sampler reading was
 app growth; it neither diagnoses a leak nor removes the measured fourth-round
 52.7 MiB failure. A capable recorder/storage environment and production allocation
 profiling remain necessary before a matched pair and both full hour soaks.
+
+### Observer allocations (October 6)
+
+`observe_pixels.swift` isolates the two existing OCR passes against one retained
+bitmap without creating a window, workspace, terminal or provider. Compile with
+`xcrun swiftc scripts/benchmarks/desktop-performance/observe_pixels.swift -o OUTPUT`;
+invoke `OUTPUT IMAGE pooled|unpooled` inside a read-only sandbox permitting that
+exact image and executable, system frameworks, and only owned output writes.
+Keep network and other executable access denied. The retained policy and commands
+are `/tmp/loo304-observer-allocation-20261006/{observer.sb,runs.json}`.
+Each process performs at most 40 observations and stops unsuccessfully above
+512 MiB RSS. This is a fixed-pixel diagnostic, never a Desktop acceptance runner.
+
+Four serial processes used the identical 2800×1600 retained failure bitmap,
+identical executable and policy, with reversed pooling order. All 160 observations
+completed with the same recognized-text hash. Private pixels/text stay local;
+[raw measurements](20261006-observer/) contain only counts and hashes.
+
+| Mode, invocation order | Initial / first OCR / final / drained RSS (MiB) | Warm OCR median (39 samples) |
+| --- | --- | --- |
+| Unpooled, 1 | 12.1 / 111.6 / 134.7 / 117.6 | 191.3 ms |
+| Pooled, 2 | 12.0 / 98.2 / 127.4 / 110.3 | 191.5 ms |
+| Pooled, 3 | 12.0 / 96.4 / 127.2 / 127.2 | 189.2 ms |
+| Unpooled, 4 | 12.0 / 91.4 / 117.2 / 117.2 | 194.1 ms |
+
+No monotonic pooling benefit supports changing the observer or declaring a leak.
+The observer alone explains substantial startup allocation and latency. It cannot
+explain the soak's fourth-round increase: OCR had already run before that interval.
+A separate, intrusive `vmmap -summary` observation of the exact owned probe found
+9.2 MiB allocated in the default malloc zone versus 45.4 MiB resident/dirty there
+(36.2 MiB slack). Framework/shared mappings and non-malloc memory are separate;
+neither zone slack nor total mapped resident pages measure retained app objects.
+That probe is excluded from the four timing cohorts. Its raw output, preliminary
+probes and first policy's exit-134 failure remain in the same private directory.
+
+Journey journals now retain process RSS at event boundaries and per-capture RSS
+before capture, after bitmap creation and after both OCR passes, with separate
+bitmap/OCR durations. Failed captures preserve partial checkpoints. They retain
+the original action-to-capture and action-to-verification clocks and assertions;
+use identical instrumentation for both variants. These are process observations,
+not allocation ownership: other threads can allocate between checkpoints.
+
+The diagnostic and test build run headlessly. This contribution has no rendering
+environment; native launch versus retained workspace allocation still needs a
+contained rendered replay of the prepared all-row fixture with these checkpoints,
+then allocation stacks around the phase that grows. No production leak or repair
+is established. The failed 52.7 MiB result, twenty-sample acceptance cohorts,
+unavailable provider comments, and both 3600-second soaks remain outstanding.

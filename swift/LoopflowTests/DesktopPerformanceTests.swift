@@ -1,5 +1,6 @@
 #if os(macOS)
 import AppKit
+import Darwin
 import Foundation
 import SwiftUI
 import Testing
@@ -588,6 +589,7 @@ struct DesktopPerformanceTests {
         record["windows_before"] = NSApp.windows.filter(\.isVisible).count
         record["window_number"] = window.windowNumber
         record["focus_before"] = window.firstResponder.map { String(describing: type(of: $0)) } ?? "none"
+        window.captureObservations = []
         try journal.write(record)
         let start = DispatchTime.now().uptimeNanoseconds
         do {
@@ -607,12 +609,14 @@ struct DesktopPerformanceTests {
             record["event"] = soaking ? "soak_sample_end" : "end"
             record["duration_ms"] = milliseconds(start)
             record["observation"] = observation()
+            record["captures"] = window.captureObservations
             try journal.write(record)
             throw error
         }
         record["event"] = soaking ? "soak_sample_end" : "end"
         record["duration_ms"] = milliseconds(start)
         record["observation"] = observation()
+        record["captures"] = window.captureObservations
         record["windows_after"] = NSApp.windows.filter(\.isVisible).count
         record["focus_after"] = window.firstResponder.map { String(describing: type(of: $0)) } ?? "none"
         try journal.write(record)
@@ -876,6 +880,7 @@ private final class PerformanceWindow: NSWindow {
     var outlineText: [String] = []
     var contentText: [String] = []
     var observedAt: UInt64 = 0
+    var captureObservations: [[String: Any]] = []
     var allText: [String] { outlineText + contentText }
 
     func saveFailureCapture() throws {
@@ -884,6 +889,10 @@ private final class PerformanceWindow: NSWindow {
     }
 
     func capture(saveTo output: URL? = nil) throws {
+        let start = DispatchTime.now().uptimeNanoseconds
+        var observation: [String: Any] = ["start_uptime_ns": start,
+                                         "rss_before_bytes": performanceResidentBytes() as Any? ?? NSNull()]
+        defer { captureObservations.append(observation) }
         guard let host = attachedSheet?.contentView ?? contentView,
               let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
             throw PerformanceFailure("unavailable", "Native capture is unavailable")
@@ -893,6 +902,8 @@ private final class PerformanceWindow: NSWindow {
             throw PerformanceFailure("unavailable", "Native bitmap has no image")
         }
         observedAt = DispatchTime.now().uptimeNanoseconds
+        observation["bitmap_ms"] = Double(observedAt - start) / 1_000_000
+        observation["rss_after_bitmap_bytes"] = performanceResidentBytes() as Any? ?? NSNull()
         // Read the same pixels with both recognizers: fast preserves the serif
         // title's zeros; accurate resolves small monospaced Session IDs.
         var rows: [VNRecognizedTextObservation] = []
@@ -904,6 +915,8 @@ private final class PerformanceWindow: NSWindow {
             try VNImageRequestHandler(cgImage: image).perform([request])
             rows += request.results ?? []
         }
+        observation["ocr_ms"] = Double(DispatchTime.now().uptimeNanoseconds - observedAt) / 1_000_000
+        observation["rss_after_ocr_bytes"] = performanceResidentBytes() as Any? ?? NSNull()
         if let output, let png = bitmap.representation(using: .png, properties: [:]) {
             try png.write(to: output)
         }
@@ -911,6 +924,17 @@ private final class PerformanceWindow: NSWindow {
         outlineText = rows.filter { $0.boundingBox.midX < outlineWidth }.compactMap { $0.topCandidates(1).first?.string }
         contentText = rows.filter { $0.boundingBox.midX >= outlineWidth }.compactMap { $0.topCandidates(1).first?.string }
     }
+}
+
+private func performanceResidentBytes() -> UInt64? {
+    var info = mach_task_basic_info()
+    var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+    let result = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+            task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+        }
+    }
+    return result == KERN_SUCCESS ? info.resident_size : nil
 }
 
 private struct PerformanceFailure: Error, CustomStringConvertible {
@@ -928,6 +952,8 @@ private final class PerformanceJournal {
     }
     deinit { try? file.close() }
     func write(_ record: [String: Any]) throws {
+        var record = record
+        record["rss_bytes"] = performanceResidentBytes() as Any? ?? NSNull()
         var data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
         data.append(10)
         try file.write(contentsOf: data)
@@ -997,6 +1023,7 @@ extension DesktopPerformanceTests {
             defer { window.contentView = nil; window.close() }
             var model: PodiumModel?
             for scenario in scenarios {
+                window.captureObservations = []
                 let start = DispatchTime.now().uptimeNanoseconds
                 var record: [String: Any] = ["event": "begin", "id": "snapshot-\(scenario)-\(attempt)",
                     "metric": "task_workspace_ready_ms", "scenario": scenario,
@@ -1059,6 +1086,7 @@ extension DesktopPerformanceTests {
                     record["reason"] = String(describing: error)
                 }
                 record["event"] = "end"
+                record["captures"] = window.captureObservations
                 record["duration_ms"] = milliseconds(start)
                 record["observation"] = ["transitions": transitions, "selected_session": model?.navigation.selectedSessionId as Any? ?? NSNull(),
                                          "session_usable_ms": NSNull()]

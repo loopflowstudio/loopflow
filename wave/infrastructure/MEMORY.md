@@ -751,13 +751,10 @@ Performance (instrumentation implemented in LOO-291; LOO-300 continues): `os_sig
 intervals under `studio.loopflow`/`perf` for cold start, navigation, Wave/Task/
 Session paint, every `lf` read, Markdown parse and terminal key-to-draw;
 `scripts/benchmarks/desktop-performance/record_live.py` records local usage
-without telemetry. The retained [90-second idle recording](../../scripts/benchmarks/desktop-performance/20260926-demo-app/report.md)
-measured `session list` at p50 809 ms and `roadmap --all` at 3.49 s; `ps --json`
-was 274 ms, so not every read exceeded the proposed 300 ms budget. It recorded
-zero hitches but one 1.85 s potential hang and nearly flat RSS. The earlier
-installed build's six-second probe measured 51 ms/s hitches; these different
-windows/builds do not prove a causal improvement. Republishing identical readings
-was found in source and removed; remaining hang causes need profiling.
+without telemetry. The [September 26 recording](../../scripts/benchmarks/desktop-performance/20260926-demo-app/report.md)
+and `fe3f3ed46:wave/infrastructure/MEMORY.md` retain earlier timing/hang evidence.
+Different windows/builds never proved causal improvement. Identical-read publication
+was removed; remaining hang causes need profiling.
 
 LOO-300 owns Session streaming, projection caching and the density harness after
 the data-model work. The handoff records passes only for cold-start-to-outline
@@ -789,6 +786,14 @@ raw paths and failed outcomes. A smaller Hitches/Hangs probe still generated
 799 MB in thirty seconds; TMPDIR was ignored. Final bundle size hides raw storage
 cost. The benchmark guide retains observer/RSS distinctions and failures. No
 production allocation cause or performance acceptance follows from these probes.
+
+Independent fixed-image OCR diagnosis completed 160 observations: warm medians
+189–194 ms, substantial framework startup RSS, no consistent benefit from explicit
+autorelease draining. OCR was already warm before the failed soak; this does not
+explain its 52.7 MiB increase. Exact-process vmmap showed allocator slack, not an
+app leak. Journey journals now separate RSS around bitmap/OCR and action boundaries;
+matched rendered allocation replay remains necessary. No production repair or
+acceptance follows. The benchmark guide owns raw comparisons and remaining proof.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 
@@ -867,15 +872,11 @@ Wave learning stays with its identified owner, never miscellaneous .lf notes.
 
 ## Prompt reduction boundary (2026-09-24)
 
-The `task-viewer` branch removes the unused prompt-direction feature end to end
-and collapses unchecked gather/render wrappers to `PromptComponents` and `String`.
-The context-specific contract is in [Intelligence memory](../intelligence/MEMORY.md#prompt-assembly-reduction-branch-evidence-2026-09-24).
-Keep reductions tied to actual ownership: `WorkCatalog` preserves historical
-identity lookup, `TaskExecutionSnapshot` distinguishes current execution from
-durable Work disposition, and `PreparedLaunchPrompt` carries consumed evidence.
-None is interchangeable with the deleted wrappers. LOO-287 still owns the broader
-architecture pass and its real weekly observations; local deletion and passing
-checks do not complete that Task or establish its KR.
+The dated branch details remain at `fe3f3ed46:wave/infrastructure/MEMORY.md` under
+this heading and in [Intelligence memory](../intelligence/MEMORY.md#prompt-assembly-reduction-branch-evidence-2026-09-24).
+Keep historical identity (`WorkCatalog`), current execution (`TaskExecutionSnapshot`)
+and consumed launch evidence (`PreparedLaunchPrompt`) distinct. LOO-287's broader
+architecture/weekly proof remains open; wrapper deletion never established it.
 
 ## Installation and command scope (curated 2026-10-02)
 

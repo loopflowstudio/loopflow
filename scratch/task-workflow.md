@@ -25,69 +25,60 @@ This reverses two earlier lines, deliberately: September 30 and LOO-367
 ("there is no separate 'Task workflow' concept") and October 4 ("without a
 shared playhead"; "no runtime row"). TaskWorkflow executes nothing itself.
 
-## Proposed shape
+## Direction from Jack Heart — October 6 (after seeing it built)
 
-**Authored.** `.lf/workflows/<name>.yaml`. Stages are where a person takes
-part in the Task conversation; edges are `lf` flows. `start` and `end` are
-implicit.
+On the built record being append-only with derived position:
 
-```yaml
-# feature
-stages:
-  design: review-design      # skill the conversation uses at this stage
-  demo: demo
-edges:
-  - { from: start,  to: design, flow: task-design }
-  - { from: design, to: design, flow: task-design }   # revise the design
-  - { from: design, to: demo,   flow: pursue }
-  - { from: demo,   to: demo,   flow: pursue }        # another pass
-  - { from: demo,   to: end,    flow: ship }          # land
-```
+- "its not essential we make everything accessible per se. However, i do
+  think the data model and the basic data API should be well thought out and
+  mutable and we should be clear what we want that mutable API to be."
+- "a user will be using the Loopflow desktop app. They will have an open
+  primary task session, which should have as much access to the workflow as
+  possible. We likely want to give the user buttons to press; however it's
+  possible that we want to have all the interaction come directly from inside
+  the LLM session".
+- "the right place to start is looking at the sort of human-decide loops. The
+  demo, okay, send it back Okay this time it's good enough. Let's proceed
+  towards landing."
+- "there's no graph editing flow ... If you want to change the graph itself,
+  you need to start over from a new graph"; "the graph is fixed upfront when
+  it's loaded and never mutated".
+- "We want both the human and the LLM to have direct control over choosing
+  x-words [XORs] or choosing to go back in loops".
+- "this is kind of like the complete button is what we had before and this is
+  kind of a generalization of that but also hopefully less awkward ... it
+  doesn't need to end the LM session that you're in".
+- "a simple task CLI command for navigating through these workflows, which
+  are essentially live states in the LFDB And then we can also make buttons
+  in the Loopflow desktop UI that make the choice as well as show you where
+  you are".
+- On 0-PR Tasks still carrying a PR slot and not completing at `end`: "This
+  seems deferable".
 
-A 0-PR Task is a workflow with no landing edge (`research`: start, findings,
-end; the last edge may name no flow). Several PRs are a loop through a
-landing edge back to a stage. The workflow never counts PRs.
+## Proposed mutable model (agent's, for Jack's review)
 
-**Record.** One TaskWorkflow per Task that has one; a Task may have none and
-run only ad hoc flows. It holds the Task, the workflow name and graph as
-captured when it started, and a traversal log: edge, the FlowExec that ran
-it, who started it. Position is read from the log, not stored: on an edge
-while that FlowExec's driver runs; at the edge's `to` stage when it finished;
-back at `from` when it stopped or failed.
+- **Live state.** One row per Task: the workflow's graph, fixed when loaded,
+  and the Task's position, stored: at a stage, or on an edge with the Flow
+  run carrying it. A separate append-only history records each move: who made
+  it (a person, a conversation, an edge finishing), from, to, the Flow run,
+  and a note.
+- **Choose.** One command picks a way out of the current stage and, when that
+  edge has a Flow, runs it; the note travels to the Flow as Task direction.
+  This is today's `lf task run ISSUE <choice>`. The process running the edge
+  writes the position when it ends: forward on success; otherwise the Task
+  stays on the edge, shown as stopped.
+- **Set.** One command puts the Task at a named stage without running
+  anything: go back, skip ahead, or correct the record after work done by
+  hand or a landing that settled later. This does not exist yet.
+- **Start over.** Taking up a workflow by name replaces the graph and resets
+  position; history stays.
+- **Read.** Graph, position, the ways out and the history, for the
+  conversation, `task status` and Desktop's buttons alike.
 
-**Moving it.** One helper, already allowed to do extra work before entering
-ordinary `lf run`: `lf task run ISSUE [FLOW]`. With a TaskWorkflow it
-resolves the outgoing edge (the only one, or the one whose flow is named),
-appends the traversal, then runs the flow. Starting a Task runs the `start`
-edge. There is no approve, complete or advance command: a person's feedback
-in the conversation leads the conversation to run the next edge. A plain
-`lf run` in the worktree is tracked as a FlowExec and does not traverse.
-
-**Reading it.** `task status` and Desktop draw the workflow with the current
-stage or edge, and the running edge's FlowExec inside it. "At a stage" means
-the Task waits on a person. This replaces LOO-317's derived view.
-
-**Builtins.** `feature` (design, demo, land), `code` (demo, land), `research`
-(no PR). The Project's default names a workflow.
-
-## Open, for Jack — the pass follows the default
-
-1. **Position.** Default: read from the traversal log and moved only by
-   `lf task run`; never set directly.
-2. **Replace and take over.** Default: replace switches the Task to another
-   workflow, keeping the log; no take-over command is built. Jack has not
-   said which of these he means: switching workflow, another conversation
-   becoming the one that moves it, or restarting a running edge.
-3. **Reaching `end`.** Default: it does not complete the Task; `lf task
-   complete` stays separate (LOO-367).
-4. **Where.** Unresolved; Jack said both. "I think you own TaskWorkflow. We
-   cant do this design correctly without it" places it in LOO-353; asked
-   whether to keep this PR to the inner record and leave the outer one as the
-   next Task, he said "Yeah i think so." The FlowExec pass built none of it.
-5. **Names.** Default: builtin workflows keep `feature`, `code`, `research`;
-   the flows they run are `task-design`, `pursue`, `ship`. `lf feature` then
-   names the workflow's `start` edge through `lf task run`; a bare `lf run
-   feature` outside a Task is an error that says so.
+Open for Jack: whether choosing and running stay one command; whether a
+stopped edge returns the Task to its stage or holds it on the edge; whether
+an edge finishing in the background should reach the conversation by any
+means other than the conversation's own background tool or reading status.
 
 ## Built — October 5, unreviewed by Jack
 

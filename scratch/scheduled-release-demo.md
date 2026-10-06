@@ -19,8 +19,8 @@ preserve intent and evidence. PR #1419 records the affected checks and their
 simulated-service limits.
 
 Remaining acceptance: supported installed accounting, required telemetry and
-UI-host/public artifact/installer proof, and two adjacent original configured
-dues settled by two distinct automatic executions, including one artifact
+headless Desktop/public artifact/installer proof (UI-host retired by LOO-357),
+and two adjacent original configured dues settled by two distinct automatic executions, including one artifact
 publication without manual repair. Earlier telemetry failures remain evidence.
 Task completion is not requested or established by this review approval.
 

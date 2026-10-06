@@ -196,20 +196,24 @@ from the rejected commit; earlier preparation commits remain in history.
 Unknown or partial publication blocks replacement. Release history retains the
 rejected candidate and inspection on the same opportunity's attempt.
 A valid interrupted candidate resumes unchanged. Cached packaged binaries must
-still pass installation preflight in a fresh Home before reuse or publication.
+still pass candidate installation preflight before reuse or publication. That
+read-only helper resolves the OS account installation despite `LF_HOME`; it does
+not currently prove fresh-Home acceptance. Isolated candidate validation remains
+unfinished.
 
-Preparation runs the required `scripts/test.py --ui-host` gate before tagging.
+Required headless Desktop checks remain in gate and CI; the optional UI-host
+exercise is not a publication prerequisite.
 The publisher retains candidate hashes and gate evidence before external writes.
 Its `verify --tag <tag>` mode checks the public asset set and hashes, both versioned
 and latest DMGs, website release identity, crate version, and installed `lf`
-version in an isolated Home. Scheduled settlement uses `reconcile --tag <tag>`:
+version and selected bytes in a disposable Linux container. Scheduled settlement
+uses `reconcile --tag <tag>`:
 it repairs missing crate/versioned-DMG publication and stale website/latest-DMG
 stages from the exact source and verified public artifacts, then repeats read-back.
 Repair requires this tag to remain GitHub's latest release. Unavailable services
 and conflicting immutable bytes fail without overwriting them. A crash after
 publication does not require signing again or republishing GitHub assets just to
-obtain a receipt. A missing historical host-gate result must be executed against
-that exact source; published assets cannot substitute for the check.
+obtain a receipt. Public assets do not substitute for required verification.
 
 After integration, the publisher inspects the exact merged source before the
 controller builds or tags it. A migration arriving after preparation causes a

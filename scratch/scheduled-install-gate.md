@@ -6,9 +6,9 @@ Jack Heart's October 4 review approval is retained in scheduled-release-demo.md.
 
 ## Defect and implementation
 
-Public smoke calls the pinned installer with temporary HOME/LF_HOME, but machine
-installation uses getpwuid's account Home. It can mutate the release host.
-It also hashes the installed entry gate against the native executable.
+The former public smoke called the pinned installer with temporary HOME/LF_HOME,
+but installation uses getpwuid's account Home and could mutate the release host.
+It also hashed the installed entry gate against the native executable.
 The implementation moves installer execution into a disposable Ubuntu 24.04 container with copied
 public artifacts, no host mounts or forwarded credentials. It compares the selected
 CLI artifact and actual bytes against the exact public Linux package; exercise
@@ -17,7 +17,8 @@ version/help smoke separately. Docker failure remains a failed verification.
 No scheduler, settlement, receipt schema or installation routing change is needed.
 
 Delete — do not maintain: host installer invocation with fake HOME; entry-gate
-hash comparison. Preserve pinned public downloads, complete asset hashes, native
+hash comparison; singleton binary loops and their obsolete host-install fixture.
+These paths are removed. Preserve pinned public downloads, complete asset hashes, native
 smoke, exact product identity and failed-publication evidence.
 
 Counterexamples: installer selects wrong bytes; correct gate selects wrong version;
@@ -36,13 +37,24 @@ no manual repair) remain unproved. All 36 dated telemetry failures survive.
 No production release, installation, trigger or schedule change is authorized here.
 The candidate-preflight helper also uses LF_HOME while reading OS-account
 installation state; it is read-only, but cannot prove fresh-Home acceptance.
-That preparation path needs reconciliation independently of public smoke.
+That preparation path remains an implementation gap: isolate candidate preflight
+at the OS-account boundary and prove both preparation and cached-candidate reuse
+without reading the release host installation. Public installer smoke cannot
+substitute for this prepublication check.
+
+Release child memory (October 5) records v0.13.3 shipping #1441 and installed
+jobs repaired to use the machine gate at unchanged times. Installed history still
+had three unresolved opportunities with unknown timezone provenance, zero executions
+and no qualifying pair. Those are dated child observations, not a new status read.
+The child Wave remains unregistered; no ownership transfer is established.
 
 Simulated review found the machine selection wraps its artifact set under
 `selection`; the smoke reader follows that existing owner. The launcher remains
 a launcher, and neither its bytes nor its version alone establish selected content.
 No publication or review completion was performed.
 
-Check: `uv run pytest python/tests/test_release_publisher.py -q` — 37 passed;
-Ruff and diff checks pass; real Docker installer execution deferred to gate/CI
-(Docker daemon socket unavailable), not recorded as a successful public proof.
+Compression keeps archive extraction and native smoke explicit about their one
+`lf` binary. The publisher fixture no longer pretends to install on the host;
+selected-artifact and entry-gate behavior stays in the isolated smoke test.
+
+Check: `git diff --check` passed; prior `uv run pytest python/tests/test_release_publisher.py -q` — 37 passed (unchanged code); real Docker installer execution deferred to gate/CI (daemon unavailable), not public proof.

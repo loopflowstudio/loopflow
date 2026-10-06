@@ -55,10 +55,10 @@ exact publication evidence, and surface any unresolved blocker and next action
 without requiring Jack to rediscover the gap. Keep progress updates in the
 ongoing conversation while recovery is active.
 
-Release memory records v0.13.2 publication and installation with PR #1421 filtering,
-but no verified public receipt from manual recovery or two unattended settlements.
-Upstream #1441 removes the retired UI receipt prerequisite and repairs CLI smoke;
-source integration is not configured acceptance. Exact recovery evidence belongs
+Release memory records v0.13.3 publication and installation, including #1441's
+retired UI-receipt removal and CLI smoke repair. Manual public read-back matched
+assets, DMGs, website and crate identity; it establishes neither a scheduled
+verified receipt nor two unattended settlements. Exact recovery evidence belongs
 in [Release memory](release/MEMORY.md).
 
 ## Capture cutover (LOO-370, reconciled 2026-10-05)
@@ -182,19 +182,22 @@ reacquire after dropping the parent's shared handle. Parent death and elapsed
 wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
-`a60ac0281` fixes retry timing; `02d6b3c00` atomically covers materialized dues
-across same-Home segments. Original ownership/provenance survives; firing segments
-own telemetry/retry, and Home changes break continuation. Synthetic tests cover
-interruption, late writers and recovery without republishing. `95643bd50` adds
-calendar/closure overlap continuation and retains old physical receipts. Save
-physical failure before accounting; an accounting error must not erase lock loss.
-Repeated overlap adds no settlement. Local interruption proofs at `d60d254ef` show
-public reconciliation retains target/checkout locks after controller death;
-retry preserves the failed cron receipt, candidate, coverage and caller bytes
-without republishing. Cron exit cannot establish orphaned verifier lock release.
-Candidate-ref/workflow lost acknowledgements, verifier materialization and
-post-arm Task compensation have focused synthetic proofs. Gate, Jack Heart's
-review and configured settlements remain open.
+Same-Home coverage, overlap, retry timing and interruption proofs remain at
+`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`
+and its referenced commits `a60ac0281`, `02d6b3c00`, `95643bd50`, `d60d254ef`.
+They retain original ownership, physical failure, frozen coverage, candidate,
+caller bytes and child-held locks without republishing or double settlement.
+Synthetic proofs do not establish configured automatic settlements.
+
+October 5 source inspection found public installer smoke used fake HOME/LF_HOME
+although promotion resolves the OS account Home, then hashed the entry gate as
+if it were the executable. The follow-up isolates promotion in a disposable
+container and verifies selected CLI bytes; native macOS smoke stays separate.
+Candidate preflight uses the packaged Linux CLI in a fresh network-disabled
+container for preparation, cached reuse and publication; cached receipts cannot
+bypass it. Service or cleanup failure prevents success. Docker was unavailable
+locally: real container/public acceptance remains open, and simulated checks
+establish neither macOS installation nor automatic settlement.
 
 Release's September 28 incident proves entry points need operation-level recovery:
 an agent reported failure successfully, producing a misleading green cron receipt.
@@ -202,14 +205,20 @@ Jack's later steer records v0.12.24 publication/install and skill-to-Flow activa
 at unchanged 10:00. That supersedes the child's dated pending-activation evidence,
 without proving this accounting branch is installed or either qualifying outcome.
 Release-specific detail remains in [release memory](release/MEMORY.md).
+October 5 child evidence records repaired installed jobs using the machine gate
+at unchanged 09:00/10:00 schedules. Ownership remains Infrastructure; the child
+is not registered. History exposed three unresolved opportunities with unknown
+timezone provenance, zero executions and no qualifying pair. Schedule repair
+cannot backfill that evidence or count as an unattended settlement.
 
 All 36 telemetry failures, including the original 35, remain dated counterevidence
 from September 24. The missing `agent_turns` diagnosis is historical: integrated
 scorecard source consumes SessionHistory. The isolated doctor/scorecard Flow
 regression proves Recovery cannot replace natural Scheduled evidence. No installed
 pass or accepted Intelligence handoff is established; reproduce current failure
-before commissioning duplicate analytics repair. Required UI/public proof and
-actual automatic settlement observations remain outstanding. The working plan
+before commissioning duplicate analytics repair. Required headless Desktop/public proof and
+actual automatic settlement observations remain outstanding. LOO-357 retired
+the UI-host prerequisite; PR #1441 removed its scheduled validator requirement. The working plan
 owns remaining implementation; no production release, install, schedule change,
 Home transfer or review completion is authorized by local reconciliation.
 
@@ -253,49 +262,27 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Installed worker recovery (2026-10-02 PDT)
+## Installed worker recovery (2026-10-02 PDT; curated October 5)
 
-Jack Heart authorized recovery of blocked workers and publication/installation
-of the prepared patch. [PR #1415](https://github.com/loopflowstudio/loopflow/pull/1415)
-merged as bfc681ee8; [v0.12.32](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.32)
-published from 8c72e591e78a68227255fd86bfff6a939ded5e8b after release
-[workflow 37099938065](https://github.com/loopflowstudio/loopflow/actions/runs/37099938065).
-The published installer promoted CLI/app after preflight recognized the existing
-Home exactly, with all 33 executable references resolving and no migration.
-GitHub's API identified v0.12.32 while its public latest redirect still selected
-v0.12.31; the checksum-verified published installer with --version v0.12.32
-completed installation. No source build was promoted or runtime data hand-edited.
+Jack Heart authorized recovery and published installation of v0.12.32 after
+PR #1415 merged. Exact release/workflow identities, preserved-file checks and
+recovery observations remain at
+`8d8f68dc1e8cae33fd3b05a28a50b864d4d503ab:wave/infrastructure/MEMORY.md`
+under this heading. The published installer preserved the Home with no migration;
+LOO-367 resumed its saved Flow. LOO-285's focused CI-repair ownership checks and
+operator-triggered release established neither automatic settlements nor completion.
 
-Installed readback confirms LOO-367 resumed the same saved Flow, passed
-loop-decide and entered implementation iteration 1. Historical unowned Execs no
-longer block resumption; actual current process/Session/Flow ownership still does.
-LOO-285's integrated CI-repair child ownership fix passed focused tests and its
-saved Flow resumed beyond sync. Cross-segment continuation implementation and
-the two distinct automatic settlements remain, including retained telemetry
-failures; this operator-triggered release supplies none of that automatic proof.
-LOO-292 retains its demo review. LOO-370 owns retired Run-name cleanup.
+LOO-295 reconciled merged PR #1283 while preserving all eight unrelated files;
+its later October 4 acceptance above supersedes the then-open review obligation.
+LOO-292's later closure likewise supersedes its pending demo. The retained
+`invalid stored landing placement: home` defect interrupted reconciliation and
+release settlement; supported re-entry completed the same release without deleting
+records or worktrees. LOO-373 owns repair and exact evidence in Release memory.
 
-LOO-295's installed reconciliation attached existing merged
-[PR #1283](https://github.com/loopflowstudio/loopflow/pull/1283) to the original
-PR row, recording merge 5bcc40fdff810c39885a31b3fbfd6557f49fde93. The Task stayed
-open and all eight unrelated scratch/loc-explorer files were byte-identical.
-Its current-runtime review/repeat/final-demo acceptance remains unresolved.
-
-A separate retained-data defect remains: `invalid stored landing placement: home`
-from store/sqlite/pr_landings.rs::map_landing fails repository reconciliation,
-including after LOO-295's successful association, and degrades the CI watcher.
-It also interrupted release settlement after #1417 merged. Supported re-entry
-recognized that existing merge and completed the same v0.12.32; no manual
-record/ref/worktree deletion occurred. The old placement reader/migration needs
-repair with preserved ownership evidence. This is not an empty/healthy backlog.
-
-Jack questioned serial releases. The operator committed to collecting further
-recovery defects into one repair batch, with installed-state preflight, instead
-of starting another immediate release for each discovery; this is an operating
-adjustment, not a claim that Jack approved a new release policy.
-
-Checks: PR and merge-queue CI, candidate workflow and publisher passed; installed
-LOO-367 progression and LOO-295 association/file-preservation readback passed.
+Jack questioned serial releases. The operator committed to batching demonstrated
+recovery repairs with installed-state preflight; this was not Jack's approval of
+a new release policy. Source merges, installation and configured acceptance remain
+separate facts.
 
 ## Optional chapters and Task workflows (2026-10-02)
 

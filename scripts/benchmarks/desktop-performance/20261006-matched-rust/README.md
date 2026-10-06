@@ -492,3 +492,106 @@ hitch/hang endpoints were not measured here. Historical failed memory results,
 full matched Swift/observer attribution, cold startup and both full-hour soaks
 remain open. No high-volume trace ran; its capacity blocker remains. This bounded
 read repair is verified for publication only.
+
+## Pending-turn history repair — October 6
+
+Jack Heart requested the next measured read repair, a realistic Desktop replay and
+publication to PR #1460 without merge or Task completion. This contribution changes
+only the shared pending-turn query. Repository discovery was inspected but left
+unchanged: replacing Git would need separate proof for its layouts and configuration.
+[Measurements](pending-read-summary.json) retain distributions, counters, preservation
+and receipt hashes. Reproduction scripts and raw evidence are at
+`/tmp/loo304-pending-read-20261006/`.
+
+Bundled SQLite 3.53.2 selected the full Session-history index for started turns and
+rescanned retirement receipts for each turn. The query now selects the released
+`session_event_input` partial index and checks Session retirement once. Completion
+still matches the exact provider thread/turn; missing identity, unknown boot time,
+the inclusive boot boundary and explicit retirement retain their previous meaning.
+No migration, cache, membership change or process mutation was introduced.
+
+Read-only comparisons returned identical answers for all **604 Sessions**. With
+unknown boot time, VM steps fell **4,632,584 → 145,735**; with the current boot
+boundary, **3,554,064 → 58,480**, query CPU **192 → 2.3 ms** across all Sessions.
+These diagnostic totals cover more Sessions than a single roadmap read.
+
+### Alternating release reads
+
+Both normal release binaries finished building before measurement. The baseline
+is the retained candidate from the preceding repair, matching this contribution's
+starting `ef5ca8879147d46130850ea72a5fe5c665a09b77`. Identical isolated copies of the
+unchanged compatible snapshot, containment and instrumentation supplied **84/84**
+successful reads, no timeouts. Each cell is median / nearest-rank p95 with **20 warm
+successes**; first reads remain separate in the JSON.
+
+| Direct CLI measurement | Before | After |
+| --- | ---: | ---: |
+| Roadmap elapsed, ms | 586 / 611 | 570 / 1033 |
+| Roadmap child CPU, ms | 564 / 582 | 546 / 580 |
+| Session list elapsed, ms | 233 / 243 | 234 / 243 |
+| Git processes per roadmap | 67 / 67 | 67 / 67 |
+
+The median reduction is small, and **roadmap p95 worsened**. Candidate samples 12
+and 17 took 1978/1033 ms with 580/602 ms child CPU; their wall-time causes remain
+unknown. Paired median elapsed/CPU deltas were both approximately −11 ms. Roadmap
+load median was 17.2 on both sides, maximum 29.7; Session load median was 25.9.
+The earlier 602/812 ms cohort is not this comparison's baseline. The 300 ms
+roadmap budget remains unmet; no tail-latency improvement is claimed.
+
+Each side retained 42 starts/ends, 315 connections, 65,711 statements and 1,093,976
+returned rows. Sessions matched byte-for-byte; roadmap differed only in fresh
+timestamps and 525 verified corresponding evidence-age checks. All pre-existing
+rows, identities and storage types across 39 tables survived; each copy appended
+42 inspection Execs. Snapshot and authored config hashes stayed unchanged.
+Historical unknown Execs and the installed Home were not mutated.
+
+### Same-observer Desktop replay
+
+The normal snapshot runner then ran before/after **sequentially**, 21 samples per
+scenario, `--no-xctrace`, no soak. Both passed **84/84**, including all 21 native
+preservation rounds. Swift test-binary and measurement-source hashes were identical;
+CLI/source/config hashes stayed unchanged during each run. The baseline's early
+navigation overlapped the retained-row audit, limiting timing attribution. These
+runs connect the new CLI to the existing UX, not to a proved end-to-end speedup.
+
+| Desktop endpoint, 20 warm successes, median / p95 ms | Before | After |
+| --- | ---: | ---: |
+| Workspace construction, bitmap/OCR included | 1346 / 2123 | 1089 / 1391 |
+| Warm Task, bitmap/OCR included | 337 / 453 | 300 / 370 |
+| Task reopen, bitmap/OCR included | 301 / 432 | 292 / 396 |
+| Native reopen, endpoint/input | 868 / 914 | 894 / 976 |
+| Native readiness before capture | 613 / 644 | 648 / 698 |
+
+Native latency worsened. Every native round retained history/native identity,
+input replies, panes/layout, file draft/selection and one window; focus reached
+`GhosttyMetalView`. Process counts rose **407 → 415**, statements **204,437 →
+209,230**, returned rows **2,387,165 → 2,423,759**. Faster polling is not quietness.
+Each side retained 43 unavailable comment reads (42 copied Task, one owned Task);
+activity cancellations were 10/2. No unavailable data was synthesized.
+
+First/last attempt-end RSS was **239/315 MiB** before and **230/312 MiB** after.
+Those endpoints span the entire sequence and are not the four-round growth metric.
+Prior failed <32 MiB results remain. App interval CPU, main-thread stalls, hitches,
+hangs, compositor paint and one-frame glyph latency are unmeasured here. Workspace
+construction is not the original cold-start/first-frame endpoint. Both full-hour
+soaks, full Swift attribution and every original budget remain open. The measured
+~94 GiB/hour raw-trace requirement still exceeds available storage; no trace was
+started or deleted.
+
+A fresh candidate profile retained 418 main-thread samples: repository validation
+97, checkout execution-boundary discovery 51, Task-work reads 51 and pending-turn
+reads three. Trace2 still records 49 common-directory launches per roadmap. Next:
+reduce repeated discovery through the existing resolver without changing canonical
+aliases, missing/retired paths or authored configuration validation, and attribute
+the remaining Exec membership read with bundled SQLite before changing it. Sampling
+starts after launch; these counts are leads, not an end-to-end time decomposition.
+The immediate sampling attempt returned 255 without a trace; a separate attempt
+attached after 150 ms and succeeded. Both receipts are retained under `profile/`
+and `profile-delayed/`.
+
+Review retained exact retirement/boot semantics and rejected equating query work
+with UI latency. Focused tests passed seven Task-work/query cases plus the historical
+uncertainty regression; normal release build, formatting and all-target Clippy
+passed. The initial new fixtures failed on a missing required `cwd`, then were
+corrected; those logs remain. Publication is a verified bounded repair, not full
+Task acceptance.

@@ -789,17 +789,16 @@ unavailable comments and failed growth. Faster refreshes increased CLI counts;
 quietness is unproved. Bitmap/OCR is not compositor paint. Swift attribution and
 both hours remain open; ~94 GiB/hour traces exceed storage. No budget changed.
 
-Bundled SQLite 3.53.2 scanned full Exec history for UNION order; Python 3.50.4
-did not. Existing partial-index selection repaired that cost. Jack Heart's next
-bounded repair found Flow joins scanning unrelated Session events; Session-first
-selection preserved all 104 Flows' membership while reducing VM steps 163.7M→1.94M.
-Repository paths now resolve once per command, shared by validation/display;
-subsequent reads remain fresh. Matched release roadmap median/p95 fell
-1135/1922→602/812 ms, Git launches 137→67 (twenty warm each). All 84 reads passed;
-39 tables' retained rows and freshness evidence survived. Session timing stayed
-unchanged. Roadmap still misses 300 ms: distinct repository resolution and
-per-Task membership/pending-turn reads remain actionable. These CLI-only results
-supply no new rendered, memory or soak proof; source publication only is authorized.
+Bundled SQLite 3.53.2 needed indexed Exec/Flow selection; Python's plan differed.
+Earlier matched repairs and all preservation evidence remain in the report above.
+Jack Heart's next authorized repair selects started-turn history and checks Session
+retirement once: all 604 answers match; boot-aware VM steps 3.55M→58,480.
+Matched roadmap median/p95 was 586/611→570/1033 ms; tail improvement is unproved.
+Same-observer Desktop passed 84/84 each, but native p95 worsened 914→976 ms and
+CLI count rose 407→415. Baseline early navigation overlapped the preservation audit.
+Repository discovery and Task-work reads remain measured costs; aliases, config
+validation, freshness, history and authority are unchanged. Original latency,
+failed growth, compositor and both hour obligations remain. Publication only.
 
 The repaired rendered run remains 83/84: nineteen warm native successes, no
 native p95. Growth (+60.9/+53.5/+47.6 MiB) failed. Jack Heart requested reopening

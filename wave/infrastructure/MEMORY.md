@@ -55,11 +55,12 @@ exact publication evidence, and surface any unresolved blocker and next action
 without requiring Jack to rediscover the gap. Keep progress updates in the
 ongoing conversation while recovery is active.
 
-Release memory records v0.13.2 publication and installation with PR #1421 filtering,
-but no verified public receipt from manual recovery or two unattended settlements.
-Upstream #1441 removes the retired UI receipt prerequisite and repairs CLI smoke;
-source integration is not configured acceptance. Exact recovery evidence belongs
-in [Release memory](release/MEMORY.md).
+Release memory records v0.13.3 publication, installation and manual public
+artifact verification, including #1421 filtering and #1441's retired UI-receipt
+removal/CLI smoke repair. The October 5 schedule repair keeps 09:00/10:00 and
+routes loaded jobs through the installation gate. Neither manual recovery nor
+job readback proves two unattended settlements; LOO-285 remains open. Exact
+receipts and the pending child-owner cutover belong in [Release memory](release/MEMORY.md).
 
 ## Capture cutover (LOO-370, reconciled 2026-10-05)
 
@@ -772,10 +773,19 @@ failure evidence, not binding policy: current Session rows own attribution and
 write-once bind permits done/landed Tasks. Preserve current ownership through the
 one-machine conversion; discarded historical attribution needs no importer.
 
-Staging gotcha: `install.py local --skip cargo` bundled a stale `lf`, and the
-store gate keys on the registered installation path, not the bytes, so a demo
-app must route through the installed `lf` (`LoopflowDevControl.json` →
-`lf_path`) or be promoted.
+LOO-304's October 6 reconciliation retains Jack Heart's original performance
+budgets. The combined snapshot workspace now keeps production refresh running
+while reopening an owned Task-bound Session; copied records grant no execution
+authority. Its contained proofs establish preservation and isolation, not rendered
+latency or an hour soak. Compare identical snapshot, sandbox and instrumentation
+costs; denied checkout reads cannot count as speedups. Source recovery at
+`f4ac1ae3a` repaired history API drift; later merge `99a3fbd83` changes terminal
+input and Session recovery, so earlier passes are not a final-tree gate. Remaining
+measurements belong to the Task plan, not another startup coordinator.
+
+The stale-bundle staging incident remains at
+`99a3fbd83:wave/infrastructure/MEMORY.md` under this heading; it grants no branch
+promotion authority.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

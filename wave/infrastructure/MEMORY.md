@@ -810,18 +810,20 @@ unknown. The report retains exact evidence; observation repair proves no product
 latency improvement. Swift attribution, latency/growth, both hours and compositor
 proof remain open; publication only is authorized.
 
-October 6 recorder decomposition retained owned ten-second probes: Hitches alone
-projected 13.2 GiB/hour, Hangs 103.0; neither exports both required tables. The 2 GiB guard remains; no full hour ran. Actual TOCs put clocks under `info/summary`; the reader's synthetic
-`run-info` assumption lost coverage. Reports now decode real clocks and reject
-trace-enabled completion with missing tables or endpoint gaps. Starting recording
-after `soak_begin` still needs a readiness barrier. Faithful lower-volume recording,
-compositor/input proof and both hours remain unresolved. Receipts remain in the report; the installed Home was untouched.
+October 6 Hitches/Hangs probes projected 13.2/103.0 GiB/hour; neither exports
+both tables. The 2 GiB guard remains. Real TOC clocks use `info/summary`; reports
+reject missing tables/coverage. Readiness, capacity and both hours remain open.
 
-October 6: AppKit/CoreGraphics allocated two ~17 MiB regions; Ghostty targets
-stayed fixed. Free lifetimes remain unknown. Direct bitmap drawing lost terminal
-glyphs (4,642 pixels), failing both recognizers; original captures matched exactly.
-Candidate discarded. Hashes retained. Faithful capture, realistic attribution
-and all acceptance remain open.
+Capture stacks attribute two ~17 MiB regions to AppKit/CoreGraphics; Ghostty
+targets stayed fixed. Direct drawing lost 4,642 glyph pixels, failing both
+recognizers; discarded. Original captures matched.
+
+Jack Heart requested object-lifetime evidence. Four contained processes show
+bitmap wrappers die after the ordinary 5 ms suspension, or before return with
+pooling. Vision handlers/results do not accumulate; two requests remain. RSS
+grows similarly. The prior full-scope pool passed 20/20 but failed +53.0 MiB
+growth; no pool repair is supported. Weak references cannot prove internal storage lifetime or exclude product leaks.
+Source restored; all acceptance remains open. The matched report owns receipts.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

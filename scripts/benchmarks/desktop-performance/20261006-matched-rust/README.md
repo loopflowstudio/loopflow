@@ -858,3 +858,49 @@ No installed Home, historical Exec, release or publication operation occurred.
 
 Check: fresh Swift test build PASS; contained probe execution PASS; full-resolution
 pixel/OCR equivalence FAIL (candidate discarded); source restoration/diff PASS.
+
+### Capture object lifetime — October 6
+
+Jack Heart requested checking natural autorelease lifetime before proposing another
+pool repair. The retained `/tmp/loo304-capture-pool-20261006/experiment.swift` already
+enclosed the entire synchronous capture and both recognizers. Its original
+20/20 endpoints and **+53.0 MiB** four-round failure remain the workflow evidence;
+that rejected experiment was not repeated as a new optimization.
+
+A fresh build from `d686b1a88` plus temporary weak-reference instrumentation ran
+four contained cat-PTY processes in unpooled/pooled/pooled/unpooled order, eight
+full captures each. Weak references observed NSBitmapImageRep, Vision requests,
+handlers and recognition results immediately after return and after the ordinary
+5 ms suspension. All 32 captures retained the owned terminal marker.
+
+| Mode/order | Bitmap alive at return / after suspension | First→last post-suspension RSS |
+| --- | --- | --- |
+| Unpooled, 1 | 1 / 0 at every capture | 203.7→369.4 MiB |
+| Pooled, 2 | 0 / 0 at every capture | 209.4→376.9 MiB |
+| Pooled, 3 | 0 / 0 at every capture | 205.8→370.7 MiB |
+| Unpooled, 4 | 1 / 0 at every capture | 205.1→370.0 MiB |
+
+Handlers and recognition results were gone at every return. Two requests remained
+in each process, without increasing across captures. The explicit pool shortens
+bitmap lifetime until return; ordinary suspension already ends that lifetime.
+Persistent RSS growth therefore cannot be explained by accumulation of these
+tracked objects across the observed iterations. Internal CoreGraphics allocations,
+framework caches and allocator page retention are not measured by these weak
+references; their ownership/lifetimes remain unresolved.
+
+Both recognizers and the full 2800×1600 capture stayed unchanged. Every process
+produced the same set of two byte-identical PNG states, with identical recognized
+text for matching states; temporal sequences differed. This is lifetime diagnosis,
+not exact repeated-workflow equivalence or a latency/memory acceptance run. PNG
+serialization and instrumentation add costs. No diagnostic RSS is subtracted from
+the original failed growth, and no deadlines, warmup or capture workload changed
+in the ordinary runner. The original Swift source was restored byte-for-byte.
+
+Private source, scripts, 32 images and journals remain under
+`/tmp/loo304-object-lifetime-20261006/`; `capture-stacks-summary.json` records hashes
+and per-capture counts. Review rejected a pool patch despite its earlier release
+point: neither this comparison nor the prior full workflow demonstrates a retained
+memory benefit. Next useful evidence is internal capture-storage lifetime in the
+realistic workspace, independent of wrapper lifetime. All original acceptance
+obligations remain. About 13 GiB free still cannot support the measured full-hour
+trace, and recorder readiness/coverage remains unresolved; no full hour was run.

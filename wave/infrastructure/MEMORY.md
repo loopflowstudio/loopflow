@@ -55,10 +55,10 @@ exact publication evidence, and surface any unresolved blocker and next action
 without requiring Jack to rediscover the gap. Keep progress updates in the
 ongoing conversation while recovery is active.
 
-Release memory records v0.13.2 publication and installation with PR #1421 filtering,
-but no verified public receipt from manual recovery or two unattended settlements.
-Upstream #1441 removes the retired UI receipt prerequisite and repairs CLI smoke;
-source integration is not configured acceptance. Exact recovery evidence belongs
+Release memory records v0.13.3 publication and installation, including #1441's
+retired UI-receipt removal and CLI smoke repair. Manual public read-back matched
+assets, DMGs, website and crate identity; it establishes neither a scheduled
+verified receipt nor two unattended settlements. Exact recovery evidence belongs
 in [Release memory](release/MEMORY.md).
 
 ## Capture cutover (LOO-370, reconciled 2026-10-05)
@@ -182,19 +182,22 @@ reacquire after dropping the parent's shared handle. Parent death and elapsed
 wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
-`a60ac0281` fixes retry timing; `02d6b3c00` atomically covers materialized dues
-across same-Home segments. Original ownership/provenance survives; firing segments
-own telemetry/retry, and Home changes break continuation. Synthetic tests cover
-interruption, late writers and recovery without republishing. `95643bd50` adds
-calendar/closure overlap continuation and retains old physical receipts. Save
-physical failure before accounting; an accounting error must not erase lock loss.
-Repeated overlap adds no settlement. Local interruption proofs at `d60d254ef` show
-public reconciliation retains target/checkout locks after controller death;
-retry preserves the failed cron receipt, candidate, coverage and caller bytes
-without republishing. Cron exit cannot establish orphaned verifier lock release.
-Candidate-ref/workflow lost acknowledgements, verifier materialization and
-post-arm Task compensation have focused synthetic proofs. Gate, Jack Heart's
-review and configured settlements remain open.
+Same-Home coverage, overlap, retry timing and interruption proofs remain at
+`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`
+and its referenced commits `a60ac0281`, `02d6b3c00`, `95643bd50`, `d60d254ef`.
+They retain original ownership, physical failure, frozen coverage, candidate,
+caller bytes and child-held locks without republishing or double settlement.
+Synthetic proofs do not establish configured automatic settlements.
+
+October 5 source inspection found public installer smoke used fake HOME/LF_HOME
+although promotion resolves the OS account Home, then hashed the entry gate as
+if it were the executable. The follow-up isolates promotion in a disposable
+container and verifies selected CLI bytes; native macOS smoke stays separate.
+Candidate preflight uses the packaged Linux CLI in a fresh network-disabled
+container for preparation, cached reuse and publication; cached receipts cannot
+bypass it. Service or cleanup failure prevents success. Docker was unavailable
+locally: real container/public acceptance remains open, and simulated checks
+establish neither macOS installation nor automatic settlement.
 
 Release's September 28 incident proves entry points need operation-level recovery:
 an agent reported failure successfully, producing a misleading green cron receipt.
@@ -202,14 +205,20 @@ Jack's later steer records v0.12.24 publication/install and skill-to-Flow activa
 at unchanged 10:00. That supersedes the child's dated pending-activation evidence,
 without proving this accounting branch is installed or either qualifying outcome.
 Release-specific detail remains in [release memory](release/MEMORY.md).
+October 5 child evidence records repaired installed jobs using the machine gate
+at unchanged 09:00/10:00 schedules. Ownership remains Infrastructure; the child
+is not registered. History exposed three unresolved opportunities with unknown
+timezone provenance, zero executions and no qualifying pair. Schedule repair
+cannot backfill that evidence or count as an unattended settlement.
 
 All 36 telemetry failures, including the original 35, remain dated counterevidence
 from September 24. The missing `agent_turns` diagnosis is historical: integrated
 scorecard source consumes SessionHistory. The isolated doctor/scorecard Flow
 regression proves Recovery cannot replace natural Scheduled evidence. No installed
 pass or accepted Intelligence handoff is established; reproduce current failure
-before commissioning duplicate analytics repair. Required UI/public proof and
-actual automatic settlement observations remain outstanding. The working plan
+before commissioning duplicate analytics repair. Required headless Desktop/public proof and
+actual automatic settlement observations remain outstanding. LOO-357 retired
+the UI-host prerequisite; PR #1441 removed its scheduled validator requirement. The working plan
 owns remaining implementation; no production release, install, schedule change,
 Home transfer or review completion is authorized by local reconciliation.
 
@@ -253,24 +262,27 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Installed worker recovery (2026-10-02 PDT, curated 2026-10-05)
+## Installed worker recovery (2026-10-02 PDT; curated October 5)
 
-Jack Heart authorized recovering blocked workers and publishing the prepared
-patch: PR #1415 shipped in v0.12.32 through the published installer, with no
-migration and no hand-edited runtime data. Historical unowned Execs no longer
-block resumption; current process/Session/Flow ownership still does. LOO-295's
-merged PR #1283 was attached to its original PR row with unrelated scratch
-preserved. Receipts, workflow IDs and readback are in
-[the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#installed-worker-recovery-2026-10-02-pdt).
+Jack Heart authorized recovery and published installation of v0.12.32 after
+PR #1415 merged. Exact release/workflow identities, preserved-file checks and
+recovery observations remain at
+`8d8f68dc1e8cae33fd3b05a28a50b864d4d503ab:wave/infrastructure/MEMORY.md`
+under this heading. The published installer preserved the Home with no migration;
+LOO-367 resumed its saved Flow. LOO-285's focused CI-repair ownership checks and
+operator-triggered release established neither automatic settlements nor completion.
 
-Still open: `invalid stored landing placement: home` from
-store/sqlite/pr_landings.rs::map_landing fails repository reconciliation and
-degrades the CI watcher (LOO-373). Repair the old placement reader/migration
-with ownership evidence preserved; this is not an empty or healthy backlog.
+LOO-295 reconciled merged PR #1283 while preserving all eight unrelated files;
+its later October 4 acceptance above supersedes the then-open review obligation.
+LOO-292's later closure likewise supersedes its pending demo. The retained
+`invalid stored landing placement: home` defect interrupted reconciliation and
+release settlement; supported re-entry completed the same release without deleting
+records or worktrees. LOO-373 owns repair and exact evidence in Release memory.
 
-Jack questioned serial releases. The operator committed to batching further
-recovery defects into one repair with installed-state preflight; this is an
-operating adjustment, not a release policy Jack approved.
+Jack questioned serial releases. The operator committed to batching demonstrated
+recovery repairs with installed-state preflight; this was not Jack's approval of
+a new release policy. Source merges, installation and configured acceptance remain
+separate facts.
 
 ## Optional chapters and Task workflows (2026-10-02)
 
@@ -917,8 +929,8 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
 
 ## Gotchas
 
-- **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly** (filed). `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
-- **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures — two `bin/lf.rs` tests naming a deleted command had never run at all.
+- **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly**. `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
+- **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.
 - **Tests must survive draft migration materialization** (learned 2026-07-21).
@@ -928,7 +940,10 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
   at `migrations/drafts/` passes locally and fails the release tree at compile
   time.
 - **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in TESTING.md: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
-- **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between one command and the next, and `done` advanced 6→22 with no `--continue` from the losing session. Nothing was lost that time. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
+- **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between commands and `done` advanced 6→22 with no `--continue` from the losing session. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
+- **A sync target is not always the PR's upstream** (2026-10-06). `lf sync
+  origin/<own branch>` made that tip #1456's base; land refused its own commits
+  as foreign. Fixed in source; #1456 lands after a release installs the fix.
 - **Linear Project UUIDs survive renames; derived slugs do not.** Project content
   lives in Linear and the local SQLite snapshot, with no `projects/*.md` cache.
   Use stable IDs when reconciling current names with captured historical plans.

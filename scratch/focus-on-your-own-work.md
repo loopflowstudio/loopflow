@@ -210,6 +210,27 @@ Linear completion against an active Task.
 
 Every slice in this list is done. What is left is review and the demo items.
 
+13. **Repair three failing tests.** Found October 6 by rerunning whole suites
+    at `76f176fac`; each slice had run only its focused tests.
+    - `flow_tests the_research_workflow_ends_on_its_edge_that_runs_nothing`:
+      `lf task run INF-123 end` now answers "Task worktree has uncommitted
+      changes; publish or explicitly abandon them first". Slice 10a made
+      reaching `end` completion, so a Workflow with no landing edge cannot
+      end once its Flow has written anything. Agent's default, for Jack's
+      review: a Workflow with no edge that lands reaches `end` without PR or
+      clean-worktree refusals and keeps its checkout, so nothing is lost.
+    - `land_tests lf_pr_land_returns_before_later_checks_repair_and_observe_merge`
+      and `pr_tests repeated_status_of_merged_task_never_completes_work`:
+      find which slice broke each. Fix the code where the test states
+      behavior Jack still wants (a status read never moves a Workflow; a
+      landing returns before later checks). Change the test only where
+      slice 10a's rule (reaching `end` is completion) replaces what it
+      asserted, and record that in questions.md.
+    Done when `cargo test -p loopflow --no-fail-fast --test flow_tests --test
+    land_tests --test pr_tests --test task_flow_launch_tests --test
+    session_lifecycle_tests --test session_cli_tests --test dto_fixtures
+    --test cli_discovery` passes whole, with Clippy clean. *Not done.*
+
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task
 focus/input and process retention, same-byte symlink/read-only transitions,

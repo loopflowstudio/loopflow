@@ -33,7 +33,7 @@ impl SqliteStore {
         validate_project_membership(&conn, &repo, provider, project)?;
         let tx = conn.transaction()?;
         put_project(&tx, &repo, provider, observed_at, project)?;
-        associate_project(&tx, &repo, provider, &project.id, wave, initiative)?;
+        let accepted = associate_project(&tx, &repo, provider, &project.id, wave, initiative)?;
         project_accepted_planning(
             &tx,
             &repo,
@@ -42,12 +42,6 @@ impl SqliteStore {
             &[],
             Some((wave, initiative)),
         )?;
-        let body: String = tx.query_row(
-            "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
-            params![repo, provider, project.id],
-            |row| row.get(0),
-        )?;
-        let accepted = serde_json::from_str(&body)?;
         tx.commit()?;
         Ok(accepted)
     }
@@ -564,8 +558,8 @@ fn associate_project(
     project_id: &str,
     wave: &WaveId,
     initiative: &str,
-) -> StoreResult<()> {
-    require_accepted_initiative(tx, repo, provider, project_id, initiative)?;
+) -> StoreResult<PmProject> {
+    let accepted = require_accepted_initiative(tx, repo, provider, project_id, initiative)?;
     let wave_repo: String = tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
         row.get(0)
     })?;
@@ -580,7 +574,7 @@ fn associate_project(
          ON CONFLICT(wave_id,project_id) DO NOTHING",
         params![wave, project_id],
     )?;
-    Ok(())
+    Ok(accepted)
 }
 
 fn require_accepted_initiative(
@@ -589,7 +583,7 @@ fn require_accepted_initiative(
     provider: &str,
     project_id: &str,
     initiative: &str,
-) -> StoreResult<()> {
+) -> StoreResult<PmProject> {
     let body: String = conn.query_row(
         "SELECT body FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
         params![repo, provider, project_id],
@@ -601,7 +595,7 @@ fn require_accepted_initiative(
             "accepted Project {project_id} does not belong to Initiative {initiative}"
         )));
     }
-    Ok(())
+    Ok(accepted)
 }
 
 fn validate_project_membership(

@@ -161,11 +161,22 @@ separate. Detailed registration, rotation and admission evidence remains at
 `7e7204ddad0092beb1a633676f5d44af0853a9a8:scratch/keep-every-wave-ready-for.md`.
 These proofs establish neither configuration-switch recovery nor readiness.
 
-The branch is not releasable. Steps 3–7 still own shared binding, exact-ID ensure,
-transition recovery, KR-first rotation, Desktop and configured
-acceptance. Replace `sqlite/children.rs::insert_initial_task`'s Started-count selector
-alongside `require_current_task_chapter`, `resolve_project_for_task` and rotation's
-provider-name comparisons. No further cached-name policy decision is needed.
+The branch is not releasable. Binding setup exists; steps 3–7 still own selection,
+ensure, transition recovery, KR-first rotation, Desktop and configured acceptance.
+October 5 source inventory confirms three remaining selection boundaries:
+
+- `chapter::current_project`/`select_current` feed Task routing, PM edits and metrics;
+  rotation also infers predecessor/successor from names.
+- `sqlite/children.rs::insert_initial_task` and
+  `durable::require_current_task_chapter` independently require one Started Project.
+  Replace both under the existing planning/admission boundary.
+- `waves.rs::read_pm_planning` filters out all other Projects and their Tasks;
+  `print_projects` independently filters by Started. Configured selection must
+  retain unresolved predecessor work in status/roadmap, not merely substitute
+  the selected UUID in those filters. Update DTO consumers and fixtures together.
+
+No further cached-name or selection policy decision is needed. The migration draft
+contains only name-cutover evidence; transition persistence and ensure do not exist.
 
 ### Accepted planning must own durable projection — October 5
 
@@ -442,8 +453,7 @@ The following surviving capabilities constrain their replacements:
 
 ## Desktop integration after upstream #1447 — October 5
 
-Merge `c4373492c` integrated base `1f62e836d`, including #1447's
-cached-workspace rendering changes.
+Merge `c4373492c` integrated #1447's cached-workspace rendering changes.
 `PodiumModel` restores the saved workspace and retains last-good planning on read
 failure; its planning and Session refresh loops run independently. `WavesView`
 now creates its window model lazily. `WaveDetailPane` separately polls status
@@ -454,9 +464,11 @@ transport, outside model construction, cache restoration and both periodic read
 owners. Preserve the existing saved-plan presentation and independent Session
 refresh while ensure runs. Headless Desktop acceptance must include reopening
 from saved state with failed or delayed ensure, and switching Waves before that
-response returns. #1447's returning-launch measurements do not prove Project
-readiness or this activation path. This refines implementation step 6 without
-changing Jack Heart's accepted opening behavior.
+response returns. Merge `f6a6c8f3f` also integrated #1454 (`c41895363`): benchmarks
+now distinguish first launch at a fresh bundle path from reopening. It changes
+no activation code. Its ad-hoc-signed, warm-cache, loaded-host measurements prove
+neither the published installation path nor Project readiness. Keep first-frame
+timing separate from ensure completion; no new launch benchmark is required here.
 
 ## Chosen operation and authoritative state
 
@@ -498,25 +510,18 @@ in this API.
    reserved ID. Never overwrite a different ID written in the meantime. Read
    back configuration and provider outcome before settling the operation.
 
-The configured ID is the only current-Project selector. Other provider Projects
-may exist; their names and statuses cannot change that selection or block opening
-this Project. The API does not promise exactly one In Progress Project throughout
-Linear; it maintains one configured current Project for the Wave. Terminal,
-archived or inaccessible configured Projects report their condition; opening
-never silently reopens or replaces them.
+The configured ID alone selects the current Project; other Projects cannot block
+opening it. This does not promise one In Progress Project throughout Linear.
+Terminal, archived or inaccessible bindings report their condition without replacement.
 
-Existing Waves need their known Project UUIDs explicitly seeded in configuration
-as part of rollout, preserving existing work. That setup is separate from the
-runtime API; do not ship a heuristic matching layer as a migration convenience.
-Creation requires successful connection/access checks. A provider outage with
-no configured ID must not be interpreted as permission to create elsewhere.
+Rollout explicitly seeds known Project UUIDs, preserving existing work without
+heuristic matching. Creation requires successful connection/access checks;
+an outage never authorizes creation elsewhere.
 
-Ensure and observational readers resolve the same configured ID. During a reset,
-the predecessor remains selected until the explicit configuration switch; afterward
-the successor is selected and unfinished predecessor work remains visible. Opening
-does not move Tasks, complete Projects or switch the reset's config reference.
-Status reports pending recovery separately from current selection and marks
-stale/unavailable provider evidence truthfully.
+Readers share ensure's configured ID: predecessor before the reset switch,
+successor afterward, with unfinished predecessor work still visible. Opening never
+moves Tasks, completes Projects or switches a reset binding. Status separates
+pending recovery from selection and marks stale/unavailable evidence truthfully.
 
 Inspection of `ops/pm.rs::resolve_context` and `planning.rs` found configured
 Linear planning, not a local-only Project writer. Missing connection reports the
@@ -879,17 +884,19 @@ v0.13.3 verification and unresolved unattended settlements. Its operation-entry
 recovery lesson still applies to ensure and rotation: helper/store proofs do not
 establish recovery across the configuration switch.
 
-Checkout admission now lives in `store/sqlite/admission.rs`, shared by registration,
-Sessions, Flows and CI repair. Path modes accumulate directly in the ordered map;
-there is no intermediate path list. The registration retry test also covers the
-former standalone earlier-conversation case, preserving all assertions for both
-APIs. Review retained canonical path order, ancestor sharing and guard lifetime
-through commit. The new rotation lock group retains checkout exclusion through
-queued projection too; shared selection and readiness remain unfinished.
-Earlier checks and the failed Home-wide fence remain in the history above.
+Checkout admission shares canonical path order, ancestor sharing and guard lifetime
+through queued commits across registration, Sessions, Flows and CI repair. Earlier
+compression detail remains at `25542c7b1:scratch/keep-every-wave-ready-for.md`.
+
+Compression retains the accepted Project returned by Initiative validation through
+association and commit, removing a second SQL read/decode for binding. Projection
+does not mutate that accepted body. The binding error has one structure. Replacing
+the initial YAML template with `{}` failed two binding tests: nested mapping edits
+produced invalid YAML. The original template is retained. Review preserved ownership
+checks, authored bytes and stale-binding refusal. Shared selection remains unfinished.
 
 Reteam's retained compression and earlier check evidence remain at
 `3555375af:scratch/keep-every-wave-ready-for.md`; its full preflight, exact readbacks
 and cancellation-safe acceptance remain required.
 
-Checks: `cargo test -p loopflow --lib project_binding --jobs 4` passed 5 tests; `cargo clippy --all-targets --jobs 4 -- -D warnings`, `cargo fmt` and `git diff --check` passed. Prior preservation checks remain at `986be7988:scratch/keep-every-wave-ready-for.md`; gate retains full affected suites, CI repair and configured acceptance.
+Checks: prior `cargo test -p loopflow --lib project_binding --jobs 4` (5 passed), all-target Clippy and formatting reused; `git diff --check` passed; context budgets checked with `lf context --skill realign`; gate retains affected suites, CI repair and configured acceptance.

@@ -344,11 +344,13 @@ backlog stays with its Project; unresolved abandonment keeps its separate settle
 Shared binding, transition recovery, CI repair acceptance and configured readiness
 remain open. Focused operation proofs pass; publication proves no readiness.
 
-October 5 binding setup now preserves Home-local YAML bytes and exact Project
-identity through repeated calls. Acceptance returns the committed Project body:
-a delayed Backlog read cannot bind newer completed history. This local setup
-slice does not replace ordinary selectors or activate Intelligence; ensure,
-transition recovery and configured readiness remain unfinished.
+October 5 binding setup preserves Home-local YAML bytes and exact identity.
+Initiative validation returns the accepted Project through commit; delayed Backlog
+cannot bind newer completed history. Binding is not selection: Task admission still
+counts Started Projects, and roadmap filters away historical Tasks. Shared selection
+must preserve unresolved predecessor visibility. Ensure, transitions and configured
+Intelligence repair remain unfinished. Release's entry-point recovery lesson applies;
+helper proofs alone do not establish recovery across the configuration switch.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 
@@ -1053,14 +1055,12 @@ invented completion date. No fourth user-facing planning noun was selected.
 
 ## Earlier follow-ups (reselect through the accepted chapter)
 
-The [pre-curation backlog](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#earlier-follow-ups-reselect-through-the-accepted-chapter)
-retains historical reduction, Cadenza parity, host bootstrap, release feedback,
-upgrade preservation, instrumentation and replication suggestions. These are
-not current authorization or an instruction to revive retired Project/Run
-owners. Rebase-efficiency follow-ups were resolved by PR #818. Measure actual
-command drift, avoidable agent rebases and post-land repairs before tuning policy;
-the proposed synthetic workload harness remains unbuilt. Jack Heart's July 6
-“up/down 5ths” referent remains unresolved and deferred, not dropped.
+Historical suggestions remain at
+`d281370191844294ce0ad877752f2aa6a6402282:wave/infrastructure/MEMORY.md#earlier-follow-ups-reselect-through-the-accepted-chapter`;
+they authorize no current work or retired owners. PR #818 resolved rebase-efficiency
+follow-ups. Measure command drift, avoidable rebases and post-land repairs before
+tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
+“up/down 5ths” referent remains unresolved and deferred.
 
 ## Direct invocation and large inputs (curated 2026-10-05)
 

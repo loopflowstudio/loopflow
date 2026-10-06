@@ -11,13 +11,14 @@ use yaml_edit::YamlFile;
 use crate::id::WaveId;
 
 #[derive(Debug, thiserror::Error)]
-pub enum BindingError {
-    #[error("Project binding at {path}: {reason}")]
-    Invalid { path: PathBuf, reason: String },
+#[error("Project binding at {path}: {reason}")]
+pub struct BindingError {
+    path: PathBuf,
+    reason: String,
 }
 
 fn error(path: &Path, reason: impl ToString) -> BindingError {
-    BindingError::Invalid {
+    BindingError {
         path: path.into(),
         reason: reason.to_string(),
     }

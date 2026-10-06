@@ -394,6 +394,18 @@ impl SqliteStore {
     }
 }
 
+// Both durable projections require the same confirmed Initiative/Wave association.
+// A partial read supplies that association without advancing full-Wave freshness.
+const ACCEPTED_WAVE_PROJECTS: &str = "
+    SELECT p.id,p.body,p.observed_at,m.wave_id FROM pm_projects p
+    JOIN pm_wave_projects m ON m.project_id=p.id
+    LEFT JOIN pm_wave_sync sync ON sync.wave_id=m.wave_id AND sync.provider=p.provider
+    JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo
+    WHERE p.repo=?1 AND p.provider=?2 AND p.archived=0 AND p.membership_unresolved=0
+    AND json_array_length(p.body,'$.initiative_ids')=1
+    AND json_extract(p.body,'$.initiative_ids[0]')=
+        CASE WHEN m.wave_id=?4 THEN ?5 ELSE sync.initiative END";
+
 /// Inputs select IDs only; project their accepted rows inside the ingestion transaction.
 fn project_accepted_planning(
     tx: &Transaction<'_>,
@@ -407,19 +419,11 @@ fn project_accepted_planning(
     let project_ids = serde_json::to_string(&projects.iter().map(|p| &p.id).collect::<Vec<_>>())?;
     let item_ids = serde_json::to_string(&items.iter().map(|i| &i.id).collect::<Vec<_>>())?;
     let projects = {
-        let mut query = tx.prepare(
-            "WITH accepted AS (
-                SELECT * FROM pm_projects WHERE repo=?1 AND provider=?2
-                AND id IN (SELECT value FROM json_each(?3))
-                AND archived=0 AND membership_unresolved=0
-             )
-             SELECT p.body,p.observed_at,m.wave_id FROM accepted p
-             JOIN pm_wave_projects m ON m.project_id=p.id
-             LEFT JOIN pm_wave_sync sync ON sync.wave_id=m.wave_id AND sync.provider=p.provider
-             JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo
-             WHERE json_array_length(p.body,'$.initiative_ids')=1 AND
-             json_extract(p.body,'$.initiative_ids[0]')=CASE WHEN m.wave_id=?4 THEN ?5 ELSE sync.initiative END",
-        )?;
+        let mut query = tx.prepare(&format!(
+            "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
+             SELECT body,observed_at,wave_id FROM accepted
+             WHERE id IN (SELECT value FROM json_each(?3))"
+        ))?;
         let rows = query
             .query_map(
                 params![
@@ -478,7 +482,8 @@ fn project_accepted_planning(
     }
     // Copy accepted facts directly; execution fields and unobserved Tasks stay intact.
     tx.execute(
-        "UPDATE tasks AS target SET
+        &format!("WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
+         UPDATE tasks AS target SET
              issue_identifier=json_extract(i.body,'$.identifier'),
              issue_title=json_extract(i.body,'$.name'),
              issue_description=json_extract(i.body,'$.description'),
@@ -486,20 +491,12 @@ fn project_accepted_planning(
          FROM pm_items i
          JOIN projects p ON p.external_project_id=i.project_id
          JOIN projects current ON current.wave_id=p.wave_id
-         JOIN waves w ON w.id=current.wave_id
-         JOIN pm_projects observed ON observed.repo=i.repo AND observed.provider=i.provider AND observed.id=i.project_id
+         JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
          WHERE target.external_issue_id=i.id AND target.project_id=current.id
-         AND i.repo=?1 AND i.provider=?2 AND w.repo=i.repo AND i.needs_refresh=0
+         AND i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?3))
-         AND observed.archived=0 AND observed.membership_unresolved=0
-         AND EXISTS(SELECT 1 FROM pm_wave_projects membership
-             LEFT JOIN pm_wave_sync sync ON sync.wave_id=membership.wave_id AND sync.provider=i.provider
-             WHERE membership.project_id=i.project_id AND membership.wave_id=p.wave_id
-             AND json_array_length(observed.body,'$.initiative_ids')=1
-             AND json_extract(observed.body,'$.initiative_ids[0]')=
-                 CASE WHEN membership.wave_id=?4 THEN ?5 ELSE sync.initiative END)
          AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=current.wave_id AND d.issue_id=i.id)
-         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND i.provider='linear' AND c.removed=1)",
+         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND i.provider='linear' AND c.removed=1)"),
         params![repo, provider, item_ids, confirmed_wave, confirmed_initiative],
     )?;
     Ok(())

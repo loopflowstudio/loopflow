@@ -2,6 +2,7 @@
 
 pub mod active;
 pub(crate) mod activity;
+pub(crate) mod recovery;
 mod runtime;
 
 pub(crate) use runtime::finish_session_driver;
@@ -2167,13 +2168,18 @@ impl CaptureHandle {
                 ));
             }
         }
-        let replace_provider =
-            expected.is_none() || conversation_engine_exited(&store, &session.id)?;
+        let mut replace_provider = expected.is_none()
+            || store.session_provider_unstarted(&session.id)?
+            || conversation_engine_exited(&store, &session.id)?;
         let connection = store.session_connection(&session.id)?;
         if !replace_provider && connection.is_none() {
-            return Err(StoreError::InvalidAuthority(
-                "Conversation has no connection and no confirmed engine exit".into(),
-            ));
+            replace_provider =
+                recovery::prepare_after_restart(&store, &session.id, expected.as_ref())?;
+            if !replace_provider {
+                return Err(StoreError::InvalidAuthority(
+                    "Conversation has no connection and no confirmed engine exit; retry requires exact process evidence or an observed restart of the same host".into(),
+                ));
+            }
         }
         let driver = store.claim_session_driver(
             &session.id,
@@ -2181,6 +2187,9 @@ impl CaptureHandle {
             &exec_id,
             replace_provider,
         )?;
+        if replace_provider {
+            store.record_session_provider_launch(&session.id, &driver, false)?;
+        }
         capture.driver = Some((session.id, driver));
         drop(capture);
         let capture = Arc::downgrade(&self.0);
@@ -2199,10 +2208,19 @@ impl CaptureHandle {
 
     pub(crate) fn conversation_resume_token(&self) -> StoreResult<Option<String>> {
         let capture = self.0.lock().expect("Session capture mutex poisoned");
-        let Some((session, _)) = &capture.driver else {
+        let store = row_store(&capture.dir)?;
+        let Some(session) = store.session_for_artifact(&capture.manifest.artifact_key)? else {
             return Ok(None);
         };
-        row_store(&capture.dir)?.session_thread(session)
+        store.session_thread(&session.id)
+    }
+
+    pub(crate) fn begin_provider_spawn(&self) -> StoreResult<()> {
+        let capture = self.0.lock().expect("Session capture mutex poisoned");
+        if let Some((session, driver)) = &capture.driver {
+            row_store(&capture.dir)?.record_session_provider_launch(session, driver, true)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn record_provider_process(&self, pid: u32) -> StoreResult<()> {
@@ -3809,6 +3827,88 @@ mod tests {
                 exact: false,
             })
         );
+    }
+
+    #[test]
+    fn pre_spawn_failure_can_reclaim_conversation_without_inventing_engine_exit() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let capture = CaptureHandle::begin_at_with_request(
+            ledger.home(),
+            spec(ledger.home()),
+            AgentExecRequest::from_prepared(&AgentConfig::default(), &AgentCapabilities::default()),
+        )
+        .unwrap();
+        let store = super::row_store(&capture.artifact_dir()).unwrap();
+        let session = store
+            .session_for_artifact(&capture.artifact_key())
+            .unwrap()
+            .unwrap();
+        let command = vec!["lf".into(), "skill".into()];
+        crate::journal::with_runtime(ledger.home(), &command, || {
+            capture.claim_conversation_driver()?;
+            let (_, driver) = capture.session_driver().unwrap();
+            store.record_session_connection(
+                &session.id,
+                &driver,
+                "/missing.sock",
+                "saved-thread",
+            )?;
+            // The previous engine exited; the next admission replaces it.
+            store.record_session_provider_process(&session.id, &driver, std::process::id(), 1)?;
+            capture.finish("failed")?;
+            Ok(())
+        })
+        .unwrap();
+        for _ in 0..2 {
+            let manifest = super::read_manifest(&capture.artifact_dir()).unwrap();
+            let retry = CaptureHandle(std::sync::Arc::new(std::sync::Mutex::new(
+                super::SessionCapture::from_manifest(manifest, capture.artifact_dir()),
+            )));
+            crate::journal::with_runtime(ledger.home(), &command, || {
+                assert_eq!(
+                    retry.conversation_resume_token()?.as_deref(),
+                    Some("saved-thread")
+                );
+                retry.claim_conversation_driver()?;
+                assert!(store.session_provider_unstarted(&session.id)?);
+                assert!(!super::conversation_engine_exited(&store, &session.id)?);
+                retry.finish("failed")?;
+                Ok(())
+            })
+            .unwrap();
+        }
+        let expected = store.session_driver(&session.id).unwrap().unwrap();
+        crate::journal::with_runtime(ledger.home(), &command, || {
+            let exec = crate::journal::current_exec_id().unwrap();
+            let driver = store.claim_session_driver(&session.id, Some(&expected), &exec, true)?;
+            store.record_session_provider_launch(&session.id, &driver, false)?;
+            store.record_session_provider_launch(&session.id, &driver, true)?;
+            assert!(!store.session_provider_unstarted(&session.id)?);
+            assert!(!super::conversation_engine_exited(&store, &session.id)?);
+            assert!(store
+                .record_session_provider_launch(&session.id, &expected, false)
+                .is_err());
+            store.record_session_provider_process(
+                &session.id,
+                &driver,
+                std::process::id(),
+                crate::journal::process_started_at(std::process::id())?.unwrap(),
+            )?;
+            assert!(!super::conversation_engine_exited(&store, &session.id)?);
+            store.release_session_driver(&session.id, &driver)?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            store.session_thread(&session.id).unwrap().as_deref(),
+            Some("saved-thread")
+        );
+        assert!(store
+            .session_history(&session.id, 0, 100)
+            .unwrap()
+            .iter()
+            .all(|event| event.kind != crate::session::SessionEventKind::Completed));
     }
 
     #[test]

@@ -1,5 +1,5 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Task Flows Review</title><style>
+<title>Task Workflow Review</title><style>
 :root{--bg:#fbfaf7;--fg:#1f1d1a;--mute:#6b665e;--rule:#e2ded5;--code:#f3f1ea;--term:#22201d;--termfg:#ece7dc;--accent:#7a2e2e}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#181715;--fg:#e9e5dc;--mute:#9a9489;--rule:#33302b;--code:#211f1c;--term:#0f0e0d;--termfg:#e3ded2;--accent:#d49a8f}}
 :root[data-theme=dark]{--bg:#181715;--fg:#e9e5dc;--mute:#9a9489;--rule:#33302b;--code:#211f1c;--term:#0f0e0d;--termfg:#e3ded2;--accent:#d49a8f}
@@ -30,15 +30,102 @@ details{margin:14px 0}summary{cursor:pointer;color:var(--mute);font-size:14px}
  table,tbody,tr,td{display:block}thead{display:none}tr{border-bottom:1px solid var(--rule);padding:10px 0}td{border:0;padding:3px 0}
  td::before{content:attr(data-l);display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute)}}
 @media print{body{background:#fff}pre{white-space:pre-wrap}details>*{display:block}}
-</style></head><body><main>
-<h1>Flows as plain commands with a driver's record</h1>
-<p class="meta"><a href="https://github.com/loopflowstudio/loopflow/pull/1439">PR #1439</a> “Run Task Flows through ordinary commands and retain their execution history” · LOO-353 · base <code>8ea0bec9c</code> → published head <code>32f42bffe</code> · 238 files, +6,530 −23,511 · the local branch matches the published head.</p>
-<p>Jack Heart's model from October 5: one <code>lf</code> flow run is a process whose driver keeps an append-only record, <b>FlowExec</b>; its steps are plain commands that do not know they are part of a Flow. The outer path from start to end, <b>TaskWorkflow</b>, is designed in <code>scratch/task-workflow.md</code> and is not in this revision.</p>
-<nav><a href="#run">Run</a><a href="#step">A step</a><a href="#record">The record</a><a href="#stop">Stopping</a><a href="#choices">Choices to review</a><a href="#proof">Proof</a></nav>
-<table><thead><tr><th>When you…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody><tr><td data-l="When you…"><a href="#run">Run a Flow for a Task</a></td><td data-l="What happens">The command prints the Flow's output and returns when it ends, whether you name the Task with <code>lf task run ISSUE</code>, with <code>--task ISSUE</code>, or by standing in its worktree.</td><td data-l="Where the code controls this"><code>lf task run</code> places the Task and picks its default Flow, then becomes <code>lf --task ISSUE run FLOW</code>. Unchanged since the last review.</td></tr><tr><td data-l="When you…"><a href="#step">Watch a Flow while it runs</a></td><td data-l="What happens">Each step shows up as the command you would type yourself, such as <code>lf sync --plan</code>. <code>flow show</code> lists the steps so far and marks the one still running.</td><td data-l="Where the code controls this">The driver starts each step as an ordinary child process. The step is told nothing about the Flow; the driver alone knows which step it is.</td></tr><tr><td data-l="When you…"><a href="#record">Ask what a Flow did</a></td><td data-l="What happens">Every Flow run, started by hand or by <code>lf task run</code>, has the same record: its name, its graph as it was at launch, and one line per step started.</td><td data-l="Where the code controls this">Two tables, <code>flow_execs</code> and <code>flow_exec_steps</code>, written only by the driver and never updated. Whether anything is running or finished is read from the process rows.</td></tr><tr><td data-l="When you…"><a href="#stop">Kill a Flow's process</a></td><td data-l="What happens">The Flow reads Stopped. Nothing restarts it. The step it had started keeps running to its own end.</td><td data-l="Where the code controls this">A Flow's state is its driver process's state. There is no command that changes a running Flow.</td></tr></tbody></table>
 
-<h2 id="run">1 · Run a Flow for a Task</h2>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/32f42bffed1bf3915d67cebd1e4d87e68f620d7c/rust/loopflow/src/bin/lf.rs#L1451-L1486"><code>rust/loopflow/src/bin/lf.rs</code></a> · <code>task run dispatch</code> · 32f42bffe · lines 1451–1486</figcaption><pre><code>    // `lf task run` places the Task and fills its defaults; from here it is
+ul{max-width:74ch;padding-left:20px}li{margin:6px 0}</style></head><body><main>
+<h1>A Task's workflow, and the Flows that carry it</h1>
+<p class="meta"><a href="https://github.com/loopflowstudio/loopflow/pull/1439">PR #1439</a> “Run Task workflows from one ongoing conversation” · LOO-353 · base <code>1a0dd6330</code> → published head <code>ac91bf9e1</code> · 270 files changed, 11560 insertions(+), 25144 deletions(-) · the local branch matches the published head.</p>
+<p>Since the last review (<code>32f42bffe</code>, FlowExec and plain-command steps) one looping Flow built eight slices: TaskWorkflow, the loop syntax, two review repairs, a Task's primary conversation, Waiting, Desktop, defaults and editing, and docs. This page covers the command-line behavior, which was run by hand. Desktop is covered only by headless tests and is listed under proof.</p>
+<nav><a href="#move">Workflow</a><a href="#nopr">No PR</a><a href="#loops">Loops</a><a href="#steers">Steers</a><a href="#waiting">Waiting, primary</a><a href="#choices">Choices to review</a><a href="#proof">Proof</a></nav>
+<table><thead><tr><th>When you…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody><tr><td data-l="When you…"><a href="#move">Start a Task, or tell it to go on</a></td><td data-l="What happens"><code>lf task run ISSUE</code> takes the Task along the next edge of its workflow and runs that edge's Flow in the foreground. Status says which stage the Task waits at, or which edge is running. A Flow that is not a way out of the current stage is refused, with the ways out named.</td><td data-l="Where the code controls this">The workflow is a YAML graph of stages and edges. The Task's position is not stored: it is read from the list of edges it set out on and how each one's process ended.</td></tr><tr><td data-l="When you…"><a href="#nopr">Run a Task that ends without a PR</a></td><td data-l="What happens">A workflow whose last edge runs nothing ends by name: <code>lf task run ISSUE end</code>. No PR is opened and the Task is not completed for you.</td><td data-l="Where the code controls this">The same graph; an edge into <code>end</code> may name no Flow.</td></tr><tr><td data-l="When you…"><a href="#loops">Write a looping Flow</a></td><td data-l="What happens">A loop is one line, <code>- loop: implement</code>, placed after the work it repeats. The deciding step is <code>loop-or-next</code>.</td><td data-l="Where the code controls this">The Flow loader. <code>loop-decide</code> and <code>repeat: from:</code> are refused with a message naming <code>loop:</code>.</td></tr><tr><td data-l="When you…"><a href="#steers">Rerun a step in a loop</a></td><td data-l="What happens">A step that repeats is given only the Task direction that arrived since its last run, not every steer again.</td><td data-l="Where the code controls this">The Flow's driver remembers the newest steer each node has seen and passes an ordinary option, <code>--steers-after</code>, on the step's command.</td></tr><tr><td data-l="When you…"><a href="#waiting">Look for what needs you</a></td><td data-l="What happens"><code>lf session list --waiting</code> lists conversations waiting on a person. Each Task has one primary conversation, which <code>lf session ensure --task ISSUE</code> finds or starts.</td><td data-l="Where the code controls this">One saved reading per conversation and one rule over it; one column on the Task for its primary.</td></tr></tbody></table>
+
+<h2 id="move">1 · Moving a Task along its workflow</h2>
+<figure class="term"><figcaption>Captured October 6 · branch build 0.13.5+ac91bf9e1 · private Home, fixture Task; <code>task-design</code>, <code>pursue</code> and <code>ship</code> are provider-free stand-ins · agent run · output trimmed</figcaption><pre><code>$ lf -b task run INF-123                 # no Flow named: the Project&#x27;s default, feature
+…
+$ lf task status INF-123
+  Workflow feature: at design
+
+$ lf -b task run INF-123 ship
+Error: Task INF-123 is at design of workflow feature: ship does not leave design.
+Outgoing edges: task-design (to design), pursue (to demo). `lf task run INF-123 &lt;workflow&gt;`
+takes up another workflow; `lf run &lt;flow&gt;` in the Task worktree runs a Flow without moving the Task
+
+$ lf -b task run INF-123 pursue          # design → demo
+$ lf -b task run INF-123 pursue &amp;        # demo → demo, with a 40-second step
+$ lf task status INF-123
+  Workflow feature: running pursue (demo → demo)
+  latest Flow: Step Exec ccd33b96-… is running task wait INF-123 --timeout 40
+$ lf -b run proof                        # an ad hoc Flow in the worktree
+$ lf task status INF-123
+  Workflow feature: running pursue (demo → demo)      # unmoved
+
+… the edge finishes …
+  Workflow feature: at demo
+$ lf -b task run INF-123 ship
+  Workflow feature: at end</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/ac91bf9e10fbef086047839a2cf1048ebf82bf88/rust/loopflow/src/engine/builtins/task/workflow/feature.yaml"><code>rust/loopflow/src/engine/builtins/task/workflow/feature.yaml</code></a> · the builtin feature workflow · ac91bf9e1</figcaption><pre><code># Design, build and land. Design review and the demo happen in the Task
+# conversation; each edge is the Flow that carries the Task to the next stage.
+stages:
+  design: review-design
+  demo: demo
+edges:
+  - { from: start, to: design, flow: task-design }
+  - { from: design, to: design, flow: task-design }
+  - { from: design, to: demo, flow: pursue }
+  - { from: demo, to: demo, flow: pursue }
+  - { from: demo, to: end, flow: ship }</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/ac91bf9e10fbef086047839a2cf1048ebf82bf88/rust/loopflow/src/ops/task_workflow.rs#L22-L72"><code>rust/loopflow/src/ops/task_workflow.rs</code></a> · <code>WorkflowPosition and how it is read</code> · ac91bf9e1 · lines 22–72</figcaption><pre><code>#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = &quot;kind&quot;, rename_all = &quot;snake_case&quot;)]
+pub enum WorkflowPosition {
+    /// The Task waits on a person at this stage, or stands at `start` or `end`.
+    Stage { stage: String },
+    /// This edge is running. `exec_id` is its driver, which names its Flow.
+    Edge { edge: u32, exec_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowTraversal {
+    pub edge: u32,
+    pub exec_id: String,
+}
+
+/// The workflow graph, the Task&#x27;s position on it, and every edge set out on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskWorkflowSnapshot {
+    pub name: String,
+    pub stages: Vec&lt;WorkflowStage&gt;,
+    pub edges: Vec&lt;WorkflowEdge&gt;,
+    pub position: WorkflowPosition,
+    pub traversals: Vec&lt;WorkflowTraversal&gt;,
+}
+
+impl TaskWorkflowRecord {
+    /// `running` says whether an Exec with no recorded exit still has its process.
+    pub(crate) fn position(&amp;self, running: impl Fn(&amp;Exec) -&gt; bool) -&gt; WorkflowPosition {
+        let mut stage = START;
+        for (index, (edge, exec)) in self.traversals.iter().enumerate() {
+            let Some(authored) = self.workflow.edges.get(*edge as usize) else {
+                continue;
+            };
+            if exec.outcome.as_deref() == Some(&quot;succeeded&quot;) {
+                stage = &amp;authored.to;
+            } else if index + 1 == self.traversals.len()
+                &amp;&amp; exec.completed_at.is_none()
+                &amp;&amp; running(exec)
+            {
+                return WorkflowPosition::Edge {
+                    edge: *edge,
+                    exec_id: exec.id.to_string(),
+                };
+            }
+        }
+        WorkflowPosition::Stage {
+            stage: stage.to_string(),
+        }
+    }
+
+    /// The stage whose outgoing edges a new traversal chooses among: where the</code></pre></figure>
+<p>A Task is at an edge's <code>to</code> stage only when the process that ran the edge succeeded. A failed or stopped edge leaves it where it was. While the newest edge's process is alive, the Task is on that edge.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/ac91bf9e10fbef086047839a2cf1048ebf82bf88/rust/loopflow/src/bin/lf.rs#L1463-L1506"><code>rust/loopflow/src/bin/lf.rs</code></a> · <code>lf task run: place, resolve the edge, then become an ordinary run</code> · ac91bf9e1 · lines 1463–1506</figcaption><pre><code>    // `lf task run` places the Task and fills its defaults; from here it is
     // `lf --task ISSUE run FLOW`.
     if let Some(Commands::Task {
         cmd:
@@ -67,6 +154,14 @@ details{margin:14px 0}summary{cursor:pointer;color:var(--mute);font-size:14px}
                 directive: directive.clone(),
             },
         )?;
+        let Some(flow) = flow else {
+            // An edge that runs nothing: setting out on it is the whole move.
+            println!(
+                &quot;Task {} moved along a workflow edge that runs no Flow&quot;,
+                task.plan.identifier
+            );
+            return Ok(());
+        };
         cli.task = Some(task.plan.identifier);
         cli.command = Some(Commands::Run {
             name: flow,
@@ -74,217 +169,108 @@ details{margin:14px 0}summary{cursor:pointer;color:var(--mute);font-size:14px}
         });
     }
     if let Some(task) = cli.task.as_ref() {</code></pre></figure>
-<p>Unchanged from the last review. <code>task_flow_launch_tests</code> still runs the three launch forms and asserts identical refusals and records; it passes at this head.</p>
+<div class="note"><b>Fits the decisions.</b> Jack: “One where there there is a start and a land node and then in between are human sessions, and the edges are lf flows”; a Task helper may prepare, then “go into the lf run flow”. Nothing approves or completes a stage: the only move is running an edge. A plain <code>lf run</code> is tracked as a Flow run and does not move the Task.</div>
+<div class="note"><b>Differs from what Jack described.</b> He said the outer record is the mutable one, and that it could be replaced or taken over. What is built is two append-only tables (<code>task_workflows</code>, <code>task_workflow_traversals</code>) with position derived. “Replace” exists as taking up another workflow by name; there is no take-over command. This was the open question in <code>scratch/task-workflow.md</code> and ran on the agent's default.</div>
+<div class="note"><b>Unguarded.</b> A second <code>lf task run</code> while an edge is running is allowed and chooses among the edges leaving the running edge's starting stage. Desktop disables its buttons in that state; <code>lf</code> does not.</div>
 
-<h2 id="step">2 · A step is the command you would type</h2>
-<figure class="term"><figcaption>Captured October 5 · branch build 0.13.3+32f42bffe · private Home, fixture Task · agent run, read while the second step was waiting · rows trimmed</figcaption><pre><code>$ lf -b run stages &amp;                 # sync --plan, then a 40-second wait, then sync --plan
-$ lf flow list --sessions --for-task INF-123
-0e0f46b7-1f1d-45d4-b3a1-0d20f1fd71f5  Current  stages
-2927673f-bb44-4069-a6d2-6a41f785b9f2  Completed  proof
-
-$ lf flow show --sessions 0e0f46b7-1f1d-45d4-b3a1-0d20f1fd71f5
-0e0f46b7-1f1d-45d4-b3a1-0d20f1fd71f5  Current  stages
-  d495b06c-…  task sync --plan                iteration [[]]  succeeded
-  c435c0e8-…  task wait INF-123 --timeout 40  iteration [[]]  no recorded exit
-
+<h2 id="nopr">2 · A Task that ends without a PR</h2>
+<figure class="term"><figcaption>Captured October 6 · branch build 0.13.5+ac91bf9e1 · private Home, fixture Task; <code>task-design</code>, <code>pursue</code> and <code>ship</code> are provider-free stand-ins · agent run · <code>notes</code> is a fixture workflow shaped like builtin <code>research</code></figcaption><pre><code>$ lf -b task run INF-123 notes           # take up a workflow with no landing edge
+  Workflow notes: at findings
+$ lf -b task run INF-123
+Error: Task INF-123 is at findings of workflow notes: findings has more than one outgoing edge;
+name one as `lf task run INF-123 &lt;name&gt;`. Outgoing edges: proof (to findings), end (runs no Flow). …
+$ lf -b task run INF-123 end
+Task INF-123 moved along a workflow edge that runs no Flow
 $ lf task status INF-123
-  latest Flow: Step Exec c435c0e8-… is running task wait INF-123 --timeout 40
-  Exec: c435c0e8-…  [&quot;…/lf&quot;,&quot;task&quot;,&quot;wait&quot;,&quot;INF-123&quot;,&quot;--timeout&quot;,&quot;40&quot;]  unknown
-  Exec: 0e0f46b7-…  [&quot;…/lf&quot;,&quot;-b&quot;,&quot;run&quot;,&quot;stages&quot;]                       unknown
-  Exec: d495b06c-…  [&quot;…/lf&quot;,&quot;sync&quot;,&quot;--plan&quot;]                           succeeded
-  … other rows omitted …</code></pre></figure>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/32f42bffed1bf3915d67cebd1e4d87e68f620d7c/rust/loopflow/src/lf/commands/flow.rs#L531-L575"><code>rust/loopflow/src/lf/commands/flow.rs</code></a> · <code>Driver::run_skill — building and running a skill step</code> · 32f42bffe · lines 531–575</figcaption><pre><code>        let mut step_cli = self.launcher.exec_options();
-        step_cli.account.clear();
-        step_cli.only_account.clear();
+  Workflow notes: at end
+  PR 1: working  not opened on GitHub  launch-proof</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/ac91bf9e10fbef086047839a2cf1048ebf82bf88/rust/loopflow/src/engine/builtins/task/workflow/research.yaml"><code>rust/loopflow/src/engine/builtins/task/workflow/research.yaml</code></a> · the builtin no-PR workflow · ac91bf9e1</figcaption><pre><code># Investigate and report. The Task ends on accepted findings, with no PR.
+stages:
+  findings: research
+edges:
+  - { from: start, to: findings, flow: research }
+  - { from: findings, to: findings, flow: research }
+  - { from: findings, to: end }</code></pre></figure>
+<div class="note"><b>Jack's question, partly answered.</b> “I am pretty confident we want 0 PR tasks; not sure we need multi-PR tasks.” A workflow needs no landing edge, and several PRs would be a loop through one; the workflow never counts PRs. But the Task still carries a “PR 1: working” slot, as the last line shows, and reaching <code>end</code> does not complete it. Both belong to Task completion (LOO-367), which this PR leaves alone.</div>
+
+<h2 id="loops">3 · The loop syntax</h2>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/ac91bf9e10fbef086047839a2cf1048ebf82bf88/rust/loopflow/src/engine/builtins/task/flow/pursue.yaml"><code>rust/loopflow/src/engine/builtins/task/flow/pursue.yaml</code></a> · builtin pursue, after · ac91bf9e1</figcaption><pre><code>- implement
+- compress
+- flow: refresh
+- loop: implement
+- pr-publish</code></pre></figure>
+<p>Before, the same loop was a five-line step: <code>id: decide</code>, <code>name: loop-decide</code>, <code>repeat: from: implement</code>.</p>
+
+<h2 id="steers">4 · Steers on a repeated step</h2>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/ac91bf9e10fbef086047839a2cf1048ebf82bf88/rust/loopflow/src/lf/commands/flow.rs#L540-L558"><code>rust/loopflow/src/lf/commands/flow.rs</code></a> · <code>Driver::run_skill — what a node has already been given</code> · ac91bf9e1 · lines 540–558</figcaption><pre><code>        step_cli.only_account.clear();
         step_cli.isolate = false;
         step_cli.shared = false;
-        // The step looks its skill up by name. An agent the Flow names for
-        // this occurrence is the one option that travels, as `--model`.
-        if step_cli.model.is_none() {
-            let authored = crate::engine::flow::load_skill(name, self.cwd).ok();
-            if authored.and_then(|authored| authored.agent) != skill.skill.agent {
-                step_cli.model = skill.skill.agent.clone();
-            }
-        }
-        // The step is the command a person would type: `lf -b skill &lt;name&gt; [message]`.
-        let mut args = step_cli.step_args();
-        args.extend([&quot;skill&quot;.to_owned(), name.clone()]);
-        if !message.trim().is_empty() {
-            args.push(message);
-        }
-        // An invalid answer is corrected in the same conversation, twice at most.
-        for turn in 1.. {
-            let (exit, step) = self.spawn(name, &amp;args).await?;
-            if let StepExit::Stopped = exit {
-                return Ok(SkillOutcome::Waiting);
-            }
-            let Some(output) = &amp;output else {
-                return Ok(SkillOutcome::Completed);
-            };
-            let (conversation, answer) = self.answer(name, step.as_ref())?;
-            let error = match answer {
-                None =&gt; &quot;final output is absent&quot;.to_owned(),
-                Some(text) =&gt; match answer_value(&amp;text).and_then(|value| output.decode(&amp;value)) {
-                    Ok(outcome) =&gt; return Ok(outcome),
-                    Err(error) =&gt; error,
-                },
-            };
-            anyhow::ensure!(
-                turn &lt; 3,
-                &quot;structured output validation exhausted after {turn} successful turns: {error}&quot;
-            );
-            args = vec![
-                &quot;--batch&quot;.to_owned(),
-                &quot;session&quot;.to_owned(),
-                &quot;resume&quot;.to_owned(),
-                conversation,</code></pre></figure>
-<p>A deciding step's answer format is appended to its message (lines 529–531). If the answer does not parse, the driver runs <code>lf --batch session resume &lt;conversation&gt; &lt;correction&gt;</code>, twice at most.</p>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/32f42bffed1bf3915d67cebd1e4d87e68f620d7c/rust/loopflow/src/lf/commands/flow.rs#L366-L412"><code>rust/loopflow/src/lf/commands/flow.rs</code></a> · <code>Driver::spawn — start the child, then record which Exec it became</code> · 32f42bffe · lines 366–412</figcaption><pre><code>    /// Run `lf &lt;args&gt;` as a child and record its Exec as this Flow&#x27;s next step.
-    async fn spawn(
-        &amp;self,
-        label: &amp;str,
-        args: &amp;[String],
-    ) -&gt; Result&lt;(StepExit, Option&lt;crate::id::ExecId&gt;)&gt; {
-        // The absolute selected path becomes argv[0] in the child&#x27;s Exec record.
-        let mut command =
-            tokio::process::Command::new(crate::engine::process::resolve_pinned_lf_binary()?);
-        command.current_dir(self.cwd);
-        command.env(flow_run::FLOW_ID_ENV, self.exec.as_str());
-        if let Some((id, fd)) = self
-            .launcher
-            .cron_receipt
-            .as_ref()
-            .zip(self.launcher.cron_lock_fd)
-        {
-            command.args([&quot;--__cron-receipt&quot;, id, &quot;--__cron-lock-fd&quot;, &amp;fd.to_string()]);
-            // SAFETY: the cron launcher owns the descriptor throughout spawn;
-            // fcntl preserves that exact capability in the step child.
-            unsafe {
-                command.pre_exec(move || {
-                    if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
-            }
-        }
-        command.args(args);
-        let mark = self.store.sqlite.exec_mark()?;
-        let mut child = command.spawn().context(&quot;could not execute Flow step&quot;)?;
-        let mut step = None;
-        let status = loop {
-            tokio::select! {
-                status = child.wait() =&gt; break status,
-                // A read can fail while a newer child migrates; the exit retries it.
-                () = tokio::time::sleep(std::time::Duration::from_millis(10)), if step.is_none() =&gt; {
-                    step = self.record_step(mark).unwrap_or(None);
-                }
-            }
-        };
-        // The step ran whatever comes next, so its row is attempted first.
-        if step.is_none() {
-            step = self.record_step(mark).unwrap_or(None);
-        }
-        // A new installation can select a newer child. Never read its result</code></pre></figure>
-<div class="note"><b>Fits the decision.</b> Jack: “why does the skill lf exec even need to know what step position it is? just runt the right skill.” No payload, hidden argument or position variable remains. <code>LF_FLOW_ID</code> is still set in the step's environment so skills can share a note; <code>lf</code> reads it nowhere.</div>
-<div class="note"><b>How the driver learns its child's Exec.</b> It notes where the Exec table ends, starts the child, and polls every 10 ms for the first new Exec whose parent is itself. A driver killed in that gap leaves a step with no record line.</div>
+        // A node that runs again is spared the Task direction its earlier run
+        // was already given.
+        if let Some(task) = &amp;self.task {
+            let newest = self
+                .store
+                .task_steers(task)
+                .await?
+                .last()
+                .map_or(0, |steer| steer.id);
+            let (node, _) = self.location();
+            let seen = self
+                .steers
+                .lock()
+                .expect(&quot;Flow steers mutex poisoned&quot;)
+                .insert(node, newest);
+            step_cli.steers_after = seen.max(step_cli.steers_after);</code></pre></figure>
+<div class="note"><b>Jack's concern.</b> “This seems potentially bad as that was specifically added to address some runaway token counts.” The saving is back without telling a step about its Flow. The memory is per driver process, so the first run of each node in a new Flow still receives every steer.</div>
 
-<h2 id="record">3 · The record every Flow gets</h2>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/32f42bffed1bf3915d67cebd1e4d87e68f620d7c/rust/loopflow/src/store/migrations/drafts/task_flow_observations.sql#L76-L106"><code>rust/loopflow/src/store/migrations/drafts/task_flow_observations.sql</code></a> · <code>flow_execs, flow_exec_steps</code> · 32f42bffe · lines 76–106</figcaption><pre><code>-- One row per Flow run, written once by its driver: the Flow&#x27;s name and its
--- graph as compiled at launch. Running, finished and failed are the driver
--- Exec&#x27;s; nothing here is updated.
-CREATE TABLE flow_execs (
-    exec_id TEXT PRIMARY KEY REFERENCES execs(id),
-    flow TEXT NOT NULL,
-    graph TEXT NOT NULL CHECK (json_valid(graph))
-) STRICT;
+<h2 id="waiting">5 · Waiting and a Task's primary conversation</h2>
+<figure class="term"><figcaption>Captured October 6 · branch build 0.13.5+ac91bf9e1 · private Home, fixture Task; <code>task-design</code>, <code>pursue</code> and <code>ship</code> are provider-free stand-ins · agent run</figcaption><pre><code>$ lf session list --needs-me
+error: unexpected argument &#x27;--needs-me&#x27; found
+$ lf session list --waiting
+No Sessions.
 
--- One row per step the driver started, in launch order. The step&#x27;s result is
--- its own Exec&#x27;s exit.
-CREATE TABLE flow_exec_steps (
-    seq INTEGER PRIMARY KEY,
-    flow_exec_id TEXT NOT NULL REFERENCES flow_execs(exec_id),
-    exec_id TEXT NOT NULL UNIQUE REFERENCES execs(id),
-    node INTEGER NOT NULL,
-    iterations TEXT NOT NULL CHECK (json_valid(iterations))
-) STRICT;
-CREATE INDEX flow_exec_steps_flow ON flow_exec_steps(flow_exec_id, seq);
-
-CREATE TRIGGER flow_execs_are_append_only BEFORE UPDATE ON flow_execs BEGIN
-    SELECT RAISE(ABORT,&#x27;A Flow record is append-only&#x27;);
-END;
-CREATE TRIGGER flow_exec_steps_are_append_only BEFORE UPDATE ON flow_exec_steps BEGIN
-    SELECT RAISE(ABORT,&#x27;A Flow record is append-only&#x27;);
-END;
-CREATE TRIGGER validate_flow_exec_step BEFORE INSERT ON flow_exec_steps BEGIN
-    SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM execs step
-        WHERE step.id=NEW.exec_id AND step.parent_exec_id=NEW.flow_exec_id
-    ) THEN RAISE(ABORT,&#x27;A Flow step is an Exec its driver started&#x27;) END;
-END;</code></pre></figure>
-<figure class="term"><figcaption>The same private Home, after the runs above</figcaption><pre><code>sqlite&gt; select substr(exec_id,1,8), flow, length(graph) from flow_execs;
-2927673f|proof|334
-0e0f46b7|stages|682
-sqlite&gt; select substr(flow_exec_id,1,8), seq, substr(exec_id,1,8), node, iterations from flow_exec_steps;
-2927673f|1|131c89ce|0|[[]]
-0e0f46b7|2|d495b06c|0|[[]]
-0e0f46b7|3|c435c0e8|1|[[]]</code></pre></figure>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/32f42bffed1bf3915d67cebd1e4d87e68f620d7c/rust/loopflow/src/store/sqlite/flow_inventory.rs#L213-L242"><code>rust/loopflow/src/store/sqlite/flow_inventory.rs</code></a> · <code>the driver's two writes</code> · 32f42bffe · lines 213–242</figcaption><pre><code>    /// A driver&#x27;s one write about its Flow: the name and graph it launched with.
-    pub(crate) fn record_flow_exec(
-        &amp;self,
-        driver: &amp;ExecId,
-        flow: &amp;str,
-        graph: &amp;FlowGraph,
-    ) -&gt; StoreResult&lt;()&gt; {
-        let conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
-        conn.execute(
-            &quot;INSERT INTO flow_execs(exec_id,flow,graph) VALUES(?1,?2,?3)&quot;,
-            params![driver, flow, serde_json::to_string(graph)?],
-        )?;
-        Ok(())
-    }
-
-    /// A driver&#x27;s record of one step it started, as that step&#x27;s Exec.
-    pub(crate) fn record_flow_step(
-        &amp;self,
-        driver: &amp;ExecId,
-        step: &amp;ExecId,
-        key: u32,
-        iterations: &amp;[Vec&lt;u32&gt;],
-    ) -&gt; StoreResult&lt;()&gt; {
-        let conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
-        conn.execute(
-            &quot;INSERT INTO flow_exec_steps(flow_exec_id,exec_id,node,iterations) VALUES(?1,?2,?3,?4)&quot;,
-            params![driver, step, key, serde_json::to_string(iterations)?],
-        )?;
-        Ok(())
-    }</code></pre></figure>
-<div class="note"><b>Fits the decision.</b> “the flow driver should be responsible for maintaining the state”; “FlowExec works fine”. The record is keyed by the driver's Exec, holds no state of its own, and triggers refuse any update. No column on a Task points at a Flow.</div>
-<div class="note"><b>Regained since the last review.</b> A past Flow is drawn on the graph it launched with, not on today's YAML.</div>
-
-<h2 id="stop">4 · Killing a Flow's process</h2>
-<figure class="term"><figcaption>Captured October 5 in the same private Home · agent run</figcaption><pre><code>$ kill -TERM &lt;driver of a running `stages` Flow&gt;
-$ lf flow list --sessions --for-task INF-123
-0e0f46b7-1f1d-45d4-b3a1-0d20f1fd71f5  Stopped  stages
+$ lf flow list
 …
-$ ps | grep &quot;task wait&quot;              # the step it had started is still running
-…/lf task wait INF-123 --timeout 40</code></pre></figure>
-<div class="note"><b>Evidence limit.</b> This was an operation step. A driver killed during an agent step is untested; by design the running turn is left to its conversation.</div>
+pursue
+ship
+task-design
+code  (workflow)
+feature  (workflow)
+research  (workflow)
 
-<h2 id="choices">Choices the pass made that Jack has not reviewed</h2>
-<p>From <code>scratch/questions.md</code>, “Choices the FlowExec pass made without Jack”. The ones that change behavior beyond this model:</p>
+$ lf session ensure --help
+      --task &lt;TASK&gt;       The Task&#x27;s: the one chosen, else its only or most recently used conversation
+      --choose &lt;SESSION&gt;  Make this conversation of the Task its primary</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/ac91bf9e10fbef086047839a2cf1048ebf82bf88/rust/loopflow/src/store/sqlite/sessions.rs#L102-L114"><code>rust/loopflow/src/store/sqlite/sessions.rs</code></a> · <code>the one Waiting rule</code> · ac91bf9e1 · lines 102–114</figcaption><pre><code>/// Whether agent_sessions row `session` waits on a person at `now`: its
+/// current driver&#x27;s reading shows an unanswered question, or no unresolved
+/// tool call and either an interactive turn handed back or a quiet stream.
+/// No reading, or one from a driver that has let go, is not Waiting.
+fn waiting_sql(session: &amp;str, now: i64) -&gt; String {
+    format!(
+        &quot;EXISTS(SELECT 1 FROM session_activity act WHERE act.session_id={session}.id
+            AND {session}.completed_at IS NULL AND act.driver_generation={session}.driver_generation
+            AND (act.pending_input&gt;0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
+                OR {now}-act.observed_at&gt;={quiet}))))&quot;,
+        quiet = crate::session::WAITING_QUIET_SECONDS
+    )
+}</code></pre></figure>
+<div class="note"><b>Limit to know before relying on it.</b> Waiting is only known for a conversation whose stream <code>lf</code> owns: every headless Run, and Codex. A native <code>claude</code> or <code>opencode</code> terminal never shows Waiting. Reading Claude's transcript file would fix that and may be excluded by Jack's stream-json-only rule; it is an open question in <code>scratch/questions.md</code>.</div>
+
+<h2 id="choices">Choices the slices made that Jack has not reviewed</h2>
+<p>All are listed in <code>scratch/questions.md</code>, one section per slice. The ones that change what you would see:</p>
 <ul>
-<li><b>Structured output is gone for every provider.</b> A deciding step's answer contract is message text only; the driver accepts a JSON value alone, in prose or in a code fence. How reliably real providers comply is unproven.</li>
-<li><b>Any <code>lf</code> command can be a <code>cmd:</code> step.</b> The in-process operation interpreter and its allowlist are deleted. <code>cmd: pr open</code> now opens the browser page; <code>commit</code> in a Flow no longer applies the guard the interpreter added.</li>
-<li><b>Watched landings.</b> Exit status 75 is gone; after an operation the driver stops the Flow if a landing of its checkout still awaits its merge.</li>
-<li><b>Steers.</b> Every step receives all of its Task's steers; per-node acknowledgement, which spared a repeated node steers it had already seen, is gone.</li>
-<li><b>Step overrides.</b> A step looks its skill up by name, so a mid-Flow edit applies to later steps. Only <code>agent</code> travels, as <code>--model</code>; <code>action_style</code> on a step is dropped. The default XOR router is now a builtin skill, <code>xor-route</code>.</li>
-<li><b><code>lf session resume ID MESSAGE</code></b> is a new optional argument, refused without <code>-b</code>.</li>
+<li><b><code>feature</code> and <code>code</code> are workflows only.</b> <code>lf run feature</code> fails and names <code>lf task run</code>. A repository's own <code>.lf/flows/feature.yaml</code> still wins.</li>
+<li><b>Operators and a waiting Task.</b> The operate skills now say a Task at a stage waits on a person, and only a stopped or failed edge is rerun. Jack's earlier “a defined Flow with steps left proceeds without asking” has no mechanism now that resume is gone.</li>
+<li><b>Desktop.</b> A Flow run whose driver was killed draws as running forever. Start is one button per edge leaving the waiting stage. Edit opens the file in the system's default application, not the Task file pane.</li>
+<li><b>Session wire shape.</b> <code>attention</code> is <code>"waiting"</code> or null; Session <code>kind</code> and the <code>agent_sessions.kind</code> column are gone.</li>
+<li><b><code>lf wave update-plan --flow NAME</code></b> does not check that NAME loads.</li>
+<li><b>Still standing from the last review:</b> structured output is gone for every provider, and any <code>lf</code> command can be a <code>cmd:</code> step.</li>
 </ul>
 
 <h2 id="proof">Proof and limits</h2>
 <details open><summary>Checks</summary>
-<p><b>Run for this page, at <code>32f42bffe</code>, inherited <code>LF_*</code> cleared:</b> <code>task_flow_launch_tests</code> (1), <code>flow_tests</code> (24), <code>pr_tests</code> (31), <code>session_lifecycle_tests</code> (17), <code>dto_fixtures</code> (18) passed; Clippy on all targets and <code>cargo fmt --check</code> clean. The private-Home transcripts above.</p>
-<p><b>Reported by the pass, not rerun:</b> two gate failures it says predate it (Session resume selection; previous-release status migration). The real-Codex end-to-end script was ported but not executed.</p>
-<p><b>PR CI:</b> not rechecked for this head; on earlier heads only <code>scratch-clear</code> ran.</p>
-<p><b>Unverified:</b> a real provider step, including whether a provider returns a decision without structured output; a loop's iterations in a live run; a driver killed during an agent step; the migration on a populated store; Swift tests and Desktop.</p></details>
+<p><b>Run for this page at <code>ac91bf9e1</code>, inherited <code>LF_*</code> cleared:</b> <code>task_flow_launch_tests</code> 5, <code>flow_tests</code> 27, <code>pr_tests</code> 31, <code>session_lifecycle_tests</code> 18, <code>session_cli_tests</code> 11, <code>dto_fixtures</code> 19, <code>cli_discovery</code> 18; the library suite, 1,641 passed and 1 failed (<code>ops::chapter … legacy_project_adoption_preserves_plans_across_lost_responses</code>, which passes alone); Clippy on all targets and <code>cargo fmt --check</code> clean; <code>scripts/check_architecture.py</code> clean; 42 headless Desktop tests in 6 suites; <code>swift build --build-tests</code> and the Mac app build. The transcripts above.</p>
+<p><b>Reported by the slices, not rerun:</b> website checks (78 passed, 3 skipped); the recorded-trace Waiting tests for the three providers.</p>
+<p><b>PR CI:</b> one job ran and passed; 14 were skipped, as on every earlier head. The hosted suites have not run on this PR.</p>
+<p><b>Unverified:</b> any real provider step, including a deciding step answering without structured output and a live conversation reading the stage guidance; Desktop on screen; a driver killed during an agent step; the migration on a populated Home.</p></details>
 </main></body></html>

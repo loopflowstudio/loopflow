@@ -227,7 +227,7 @@ Flow history below means FlowExec rows joined to their Execs.
    without provider activity and zero unresolved tool calls. No event yet is
    opening/unknown; disconnection is unknown; new activity clears it;
    filtering happens before paging. Provider evidence:
-   [harness-attention.md](harness-attention.md). Done when the injected-clock
+   `ac91bf9e1:scratch/harness-attention.md`. Done when the injected-clock
    and recorded-trace tests pass for Claude, Codex and OpenCode. **Done** at
    `e3ab80c55` (built `92abbed56`; compress gave the read one clock, so the
    store call's `now` judges filter and row): `--lib harness::attention` 8

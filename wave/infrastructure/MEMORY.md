@@ -771,24 +771,27 @@ refresh. Copied SQLite alone cannot isolate retained checkout/process references
 or external effects. Release's installed filtering proof above supplies none of
 these performance measurements.
 
-LOO-304's CLI counters retain partial receipts without SQL or values; setup and
-scenario scopes stay separate. Its combined source harness now keeps snapshot refresh and an owned
-Task-bound native fixture in the same Podium/window, preserving draft/selection,
-panes, transcript and identity across reopening. The standalone mounted reopen
-window is deleted. Public bind and Rust membership supply Task ownership; the
-test transport merges observations from separate Homes without rewriting copied
-identities. Only the owned Session can connect. One inherited OS sandbox covers app, shells and CLI children, isolating writes,
-credentials, providers and scheduling. macOS
-rejected nested sandbox application, so the runner owns one boundary. Use kernel
-canonical paths for policy and pin Git to avoid xcrun's ambient cache writes.
+LOO-304's combined snapshot/owned-Task soak is implemented in `33c65d8ba`;
+the earlier separate-path feedback is superseded. One production Podium/window
+and refresh owner retain drafts, selection, panes, transcript and native identity
+through Task-based reopening. Public bind and Rust membership own the association.
+The test transport joins observations from separate Homes without rewriting copied
+identities; only the owned Session can connect. Setup/scenario counters stay
+separate and retain partial receipts without SQL or values.
 
-The headless integration proof uses a small synthetic snapshot and real CLI
-reads with WindowServer denied. It checks preservation, copied-client refusal
-and external file/execute/network denial. It does not establish realistic-density
-latency, rendered native readiness, real providers, compositor presentation or
-an hour-long soak. Additive fixture and sandbox overhead require a fresh matched
-baseline/candidate pair. Release's retired publisher UI receipt does not waive
-LOO-304's rendered proof; capable gate/CI still owns that execution.
+One inherited OS sandbox covers app, shells and CLI children. macOS rejected
+nested sandbox application; kernel-canonical paths and pinned Git avoid path/cache
+escapes. Three retained headless proofs cover membership, copied-client refusal,
+preservation and external read/write/execute/network denial on a small synthetic
+snapshot. They establish neither rendered performance nor real-provider readiness.
+Additive fixture/sandbox overhead requires a fresh matched baseline/candidate pair;
+rendered repetitions and the hour soak remain with capable gate/CI.
+
+LOO-376's `c41895363` receipts separate first-after-update and repeat launches.
+Heavy load, warm caches, ad-hoc signing and render-server-commit endpoints limit
+inference. Benchmark stripping changes no release policy. Neither these receipts
+nor Release's retired publisher UI prerequisite revises Jack Heart's budgets or
+establishes LOO-304 rendered acceptance.
 
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)

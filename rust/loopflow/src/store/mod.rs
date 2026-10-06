@@ -23,6 +23,7 @@ pub mod migrations;
 mod pr_landings;
 pub mod rows;
 mod sessions;
+mod spend;
 pub mod sqlite;
 mod token_crypto;
 

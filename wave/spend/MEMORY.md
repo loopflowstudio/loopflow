@@ -37,8 +37,17 @@ name is not evidence of read-only authority. No secret values were requested.
 Unresolved account identities remain explicit discovery gaps and do not block
 local inventory/report implementation. Missing integration is distinct from a
 provider-unsupported capability; only provider evidence establishes the latter.
-LOO-389's October 6 reconciliation found planning changes only, with billing,
-access and isolation acceptance still outstanding.
+LOO-389 now has a tested local inventory/invoice core and dated access observations
+under `lf auth`; provider billing, test rotation, isolation and live acceptance
+remain outstanding. Shared account links do not allocate charges, and corrected
+invoices retain their earlier evaluated attribution.
+
+October 6 public-provider research found that Runpod's current billing API returns
+time-bucketed spending with resource detail and reconciliation totals, without an
+invoice identity/finality contract. Usage-ledger evidence must remain distinct
+from settled invoices. Reader selection remains open; the discovered key's scope
+and account have not been verified. This is an evidence-model constraint, not an
+authorization to connect an account.
 
 Restricted reporting must not inherit the general SSH credential bundle.
 Environment scrubbing alone does not isolate host credential files. Prefer

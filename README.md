@@ -79,6 +79,10 @@ when read from cache. Malformed definitions report their parse error.
 Flows invoke builtin commands with `cmd:`, for example `- cmd: pr land`.
 See [Authoring](docs/authoring.md) for composition and review boundaries.
 
+Inspect dependency consumers, access requirements and billed evidence with
+[`lf auth`](rust/loopflow/src/spend/README.md). Imports use non-secret metadata and
+complete normalized invoice exports; live provider integration remains pending.
+
 ## Keep work moving
 
 Author a Wave in the repo and open its conversation:

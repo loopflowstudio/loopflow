@@ -1,0 +1,202 @@
+{
+  "provenance": "synthetic integration fixture",
+  "effective_from": "2026-09-01",
+  "dependencies": [
+    {
+      "id": "workers",
+      "name": "workers",
+      "consumers": [
+        {
+          "repo": "example/one",
+          "wave_id": null
+        }
+      ],
+      "accounts": [
+        "shared"
+      ],
+      "resources": [],
+      "sources": [],
+      "requirements": [
+        "laptop-key"
+      ],
+      "coverage": [
+        "account scope unverified"
+      ],
+      "recurring_estimate": null
+    },
+    {
+      "id": "tools",
+      "name": "tools",
+      "consumers": [
+        {
+          "repo": "example/one",
+          "wave_id": null
+        }
+      ],
+      "accounts": [
+        "shared"
+      ],
+      "resources": [],
+      "sources": [],
+      "requirements": [
+        "laptop-key"
+      ],
+      "coverage": [
+        "account scope unverified"
+      ],
+      "recurring_estimate": null
+    },
+    {
+      "id": "unknown",
+      "name": "unknown",
+      "consumers": [
+        {
+          "repo": "example/one",
+          "wave_id": null
+        }
+      ],
+      "accounts": [],
+      "resources": [],
+      "sources": [],
+      "requirements": [
+        "laptop-key"
+      ],
+      "coverage": [
+        "account scope unverified"
+      ],
+      "recurring_estimate": null
+    }
+  ],
+  "accounts": [
+    {
+      "id": "shared",
+      "provider": "fixture",
+      "native_id": "account-1",
+      "managed_account": null,
+      "evidence": "synthetic account"
+    }
+  ],
+  "resources": [
+    {
+      "id": "direct",
+      "account": "shared",
+      "native_id": "direct",
+      "project": null,
+      "tags": {},
+      "observed_at": 1790812800,
+      "deleted_at": null
+    },
+    {
+      "id": "allocated",
+      "account": "shared",
+      "native_id": "allocated",
+      "project": null,
+      "tags": {},
+      "observed_at": 1790812800,
+      "deleted_at": null
+    }
+  ],
+  "sources": [
+    {
+      "id": "fixture",
+      "accounts": [
+        "shared"
+      ],
+      "credential": "key",
+      "coverage": [],
+      "authority": "fixture/account-1"
+    }
+  ],
+  "credentials": [
+    {
+      "id": "key",
+      "reference": {
+        "project": "fixture",
+        "config": "test",
+        "name": "BILLING_KEY"
+      },
+      "provider_key_id": null,
+      "version": null,
+      "purpose": "billing read",
+      "declared_permissions": [
+        "read"
+      ],
+      "expires_at": null,
+      "rotation_evidence": null
+    }
+  ],
+  "environments": [
+    {
+      "id": "laptop",
+      "name": "test laptop",
+      "home_id": null
+    }
+  ],
+  "requirements": [
+    {
+      "id": "laptop-key",
+      "environment": "laptop",
+      "credential": "key",
+      "tool": null,
+      "purpose": "read billed evidence",
+      "permissions": [
+        "read"
+      ],
+      "revision": "1"
+    }
+  ],
+  "rules": [
+    {
+      "id": "direct-rule",
+      "revision": "1",
+      "account": "shared",
+      "resource": "direct",
+      "effective_from": "2026-09-01",
+      "effective_to": "2026-10-01",
+      "reason": "fixture ownership",
+      "assignments": [
+        {
+          "kind": "direct",
+          "consumer": {
+            "repo": "example/one",
+            "wave_id": null
+          },
+          "dependency": "workers",
+          "weight": 10000
+        }
+      ]
+    },
+    {
+      "id": "shared-rule",
+      "revision": "1",
+      "account": "shared",
+      "resource": "allocated",
+      "effective_from": "2026-09-01",
+      "effective_to": "2026-10-01",
+      "reason": "fixture ownership",
+      "assignments": [
+        {
+          "kind": "allocated",
+          "consumer": {
+            "repo": "example/one",
+            "wave_id": null
+          },
+          "dependency": "workers",
+          "weight": 5000
+        },
+        {
+          "kind": "allocated",
+          "consumer": {
+            "repo": "example/two",
+            "wave_id": null
+          },
+          "dependency": "workers",
+          "weight": 5000
+        }
+      ]
+    }
+  ],
+  "discovery_gaps": [
+    "fixture only; no live account verified"
+  ]
+}

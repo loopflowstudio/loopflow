@@ -32,6 +32,7 @@ mod pr_landings;
 mod revisions;
 mod session_events;
 pub(crate) mod sessions;
+mod spend;
 mod task_work;
 
 pub use revisions::StoreRevisions;

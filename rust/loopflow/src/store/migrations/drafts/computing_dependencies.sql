@@ -1,0 +1,18 @@
+CREATE TABLE spend_accounts (id TEXT PRIMARY KEY, provider TEXT NOT NULL, native_id TEXT, payload TEXT NOT NULL, UNIQUE(provider, native_id));
+CREATE TABLE spend_credentials (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+CREATE TABLE spend_environments (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+CREATE TABLE spend_resources (id TEXT PRIMARY KEY, account TEXT NOT NULL REFERENCES spend_accounts(id), native_id TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(account, native_id));
+CREATE TABLE spend_sources (id TEXT PRIMARY KEY, authority TEXT NOT NULL UNIQUE, credential TEXT REFERENCES spend_credentials(id), payload TEXT NOT NULL);
+CREATE TABLE spend_source_accounts (source TEXT NOT NULL REFERENCES spend_sources(id), account TEXT NOT NULL REFERENCES spend_accounts(id), PRIMARY KEY(source, account));
+CREATE TABLE spend_requirements (id TEXT PRIMARY KEY, environment TEXT NOT NULL REFERENCES spend_environments(id), credential TEXT REFERENCES spend_credentials(id), payload TEXT NOT NULL);
+CREATE TABLE spend_dependencies (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+CREATE TABLE spend_dependency_accounts (dependency TEXT NOT NULL REFERENCES spend_dependencies(id), account TEXT NOT NULL REFERENCES spend_accounts(id), PRIMARY KEY(dependency, account));
+CREATE TABLE spend_dependency_resources (dependency TEXT NOT NULL REFERENCES spend_dependencies(id), resource TEXT NOT NULL REFERENCES spend_resources(id), PRIMARY KEY(dependency, resource));
+CREATE TABLE spend_dependency_sources (dependency TEXT NOT NULL REFERENCES spend_dependencies(id), source TEXT NOT NULL REFERENCES spend_sources(id), PRIMARY KEY(dependency, source));
+CREATE TABLE spend_dependency_requirements (dependency TEXT NOT NULL REFERENCES spend_dependencies(id), requirement TEXT NOT NULL REFERENCES spend_requirements(id), PRIMARY KEY(dependency, requirement));
+CREATE TABLE spend_inventory_history (revision INTEGER PRIMARY KEY, effective_from TEXT NOT NULL, provenance TEXT NOT NULL, payload TEXT NOT NULL);
+CREATE TABLE spend_rules (id TEXT PRIMARY KEY, revision TEXT NOT NULL, account TEXT NOT NULL REFERENCES spend_accounts(id), resource TEXT REFERENCES spend_resources(id), payload TEXT NOT NULL);
+CREATE TABLE spend_rule_history (id TEXT NOT NULL, revision TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(id, revision));
+CREATE TABLE spend_invoices (source TEXT NOT NULL, account TEXT NOT NULL, document_id TEXT NOT NULL, current_revision TEXT NOT NULL, PRIMARY KEY(source, account, document_id), FOREIGN KEY(source, account) REFERENCES spend_source_accounts(source, account));
+CREATE TABLE spend_invoice_revisions (source TEXT NOT NULL, account TEXT NOT NULL, document_id TEXT NOT NULL, revision TEXT NOT NULL, period TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(source, account, document_id, revision), FOREIGN KEY(source, account, document_id) REFERENCES spend_invoices(source, account, document_id));
+CREATE TABLE spend_access_observations (id INTEGER PRIMARY KEY, environment TEXT NOT NULL REFERENCES spend_environments(id), requirement TEXT NOT NULL REFERENCES spend_requirements(id), observed_at INTEGER NOT NULL, payload TEXT NOT NULL);

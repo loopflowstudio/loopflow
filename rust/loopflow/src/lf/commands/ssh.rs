@@ -23,6 +23,7 @@
 //! forwarded `GH_TOKEN` over HTTPS, so the caller's SSH identity stays home.
 
 use clap::Parser;
+use secrecy::ExposeSecret;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -378,7 +379,13 @@ async fn resolve_credentials(
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     let mut secrets = Vec::with_capacity(secret_names.len());
     for name in secret_names {
-        secrets.push((name.clone(), resolve_doppler_secret(name)?));
+        secrets.push((
+            name.clone(),
+            crate::provider_auth::doppler::resolve_secret(name, None)
+                .await?
+                .expose_secret()
+                .to_owned(),
+        ));
     }
     let account_lease = lease::prepare_root_lease(selection).await?;
     let provider_authority = match account_lease {
@@ -406,36 +413,6 @@ fn resolve_gh_token() -> Option<String> {
     }
     let token = String::from_utf8(output.stdout).ok()?.trim().to_string();
     (!token.is_empty()).then_some(token)
-}
-
-/// Resolve one secret from Doppler on the local machine. The Doppler token never
-/// leaves this process; only the resolved value is forwarded.
-fn resolve_doppler_secret(name: &str) -> anyhow::Result<String> {
-    if !is_valid_env_name(name) {
-        return Err(anyhow!(
-            "invalid --secret name '{name}': expected an environment variable identifier"
-        ));
-    }
-    let output = Command::new("doppler")
-        .args(["secrets", "get", name, "--plain"])
-        .output()
-        .with_context(|| format!("failed to run doppler for secret '{name}'"))?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "doppler could not resolve secret '{name}' (is it set in the active config?)"
-        ));
-    }
-    // Strip only the trailing newline doppler appends; keep the value otherwise.
-    let value = String::from_utf8(output.stdout)
-        .with_context(|| format!("doppler returned non-UTF8 value for '{name}'"))?
-        .trim_end_matches(['\n', '\r'])
-        .to_string();
-    if value.is_empty() {
-        return Err(anyhow!(
-            "doppler returned an empty value for secret '{name}'"
-        ));
-    }
-    Ok(value)
 }
 
 /// PM/Linear access token from the local store credential store. Absent when no
@@ -468,16 +445,6 @@ async fn _resolve_stored_provider_token(provider: &str) -> Option<String> {
     Some(token.access_token)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-}
-
-/// A valid POSIX environment variable name: `[A-Za-z_][A-Za-z0-9_]*`.
-fn is_valid_env_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    match chars.next() {
-        Some(first) if first.is_ascii_alphabetic() || first == '_' => {}
-        _ => return false,
-    }
-    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
 /// Assemble the bash preamble piped to the remote over stdin. Every secret value
@@ -1106,15 +1073,5 @@ mod tests {
         // Nothing credential-shaped in the sanitized message.
         assert!(!err.contains("TOKEN"));
         assert!(!err.contains("password"));
-    }
-
-    #[test]
-    fn env_name_validation_rejects_injection() {
-        assert!(is_valid_env_name("STRIPE_KEY"));
-        assert!(is_valid_env_name("_x1"));
-        assert!(!is_valid_env_name("1BAD"));
-        assert!(!is_valid_env_name("A B"));
-        assert!(!is_valid_env_name("A=B; rm -rf ~"));
-        assert!(!is_valid_env_name(""));
     }
 }

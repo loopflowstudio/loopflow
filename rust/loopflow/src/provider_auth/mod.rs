@@ -10,6 +10,7 @@
 mod browser_handoff;
 pub(crate) mod codex;
 pub mod credential_socket;
+pub mod doppler;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;

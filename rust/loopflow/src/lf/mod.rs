@@ -338,6 +338,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SessionCommand,
     },
+    /// Inspect dependency access and costs
+    Auth {
+        #[command(subcommand)]
+        cmd: commands::spend::AuthCommand,
+    },
     /// Refresh account access and capacity, or manage logins and routing
     Account {
         #[command(subcommand)]

@@ -1625,6 +1625,7 @@ fn execute_command(
             loopflow::lf::commands::session_history::observe_provider_session()
         }
         Some(Commands::Session { cmd }) => loopflow::lf::commands::session::run(cmd),
+        Some(Commands::Auth { cmd }) => loopflow::lf::commands::spend::run(cmd),
         Some(Commands::Account {
             cmd,
             provider,

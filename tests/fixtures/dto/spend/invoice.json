@@ -1,0 +1,65 @@
+{
+  "source": "fixture",
+  "account": "shared",
+  "document_id": "invoice-1",
+  "period": "2026-09",
+  "currency": "USD",
+  "total": "170.00",
+  "fetched_at": 1790812800,
+  "generated_at": null,
+  "complete": true,
+  "charges": [
+    {
+      "resource": "direct",
+      "description": "fixture",
+      "kind": "usage",
+      "amount": "100.00",
+      "start": "2026-09-01",
+      "end": "2026-10-01",
+      "quantity": null,
+      "unit": null,
+      "model": null,
+      "provider_key_id": null,
+      "locator": "fixture/invoice-1"
+    },
+    {
+      "resource": "allocated",
+      "description": "fixture",
+      "kind": "usage",
+      "amount": "60.00",
+      "start": "2026-09-01",
+      "end": "2026-10-01",
+      "quantity": null,
+      "unit": null,
+      "model": null,
+      "provider_key_id": null,
+      "locator": "fixture/invoice-1"
+    },
+    {
+      "resource": null,
+      "description": "fixture",
+      "kind": "subscription",
+      "amount": "20.00",
+      "start": "2026-09-01",
+      "end": "2026-10-01",
+      "quantity": null,
+      "unit": null,
+      "model": null,
+      "provider_key_id": null,
+      "locator": "fixture/invoice-1"
+    },
+    {
+      "resource": "direct",
+      "description": "fixture",
+      "kind": "credit",
+      "amount": "-10.00",
+      "start": "2026-09-01",
+      "end": "2026-10-01",
+      "quantity": null,
+      "unit": null,
+      "model": null,
+      "provider_key_id": null,
+      "locator": "fixture/invoice-1"
+    }
+  ]
+}

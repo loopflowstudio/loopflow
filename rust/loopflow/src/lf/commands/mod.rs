@@ -22,6 +22,7 @@ pub mod screenshot;
 pub mod session;
 pub mod session_history;
 mod session_watch;
+pub mod spend;
 pub mod ssh;
 pub mod tokens;
 pub mod top;

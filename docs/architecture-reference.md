@@ -447,6 +447,29 @@ Rust function. [`lf` reference](lf.md) owns argument-level detail. DTOs emitted
 by `--json` are required-field projections; Rust/Swift fixture tests own their
 wire parity.
 
+## Dependency access and billed evidence
+
+`spend/` owns dependency metadata, exact invoice money and immutable attribution
+results in the shared Store. `store/spend.rs` exposes operations; SQLite relation
+tables enforce account, resource, source and credential links. One draft migration
+owns the feature's unreleased schema. `lf auth` imports non-secret inventory and
+complete normalized invoices, then reads dependency, access and spending views.
+It does not change `lf account` routing authority or Session usage attribution.
+
+An invoice's current revision points to an immutable normalized document and its
+evaluated rules. Dependency/account relationships do not assign charges. Missing
+periods and unknown dependency costs remain gaps. Decimal string amounts preserve
+source precision and currencies stay separate. Access observations bind the
+executing Home, requirement revision and credential version where known. The only
+implemented access probe reads a local report tool; provider verification,
+rotation, isolated provisioning and live billing acceptance remain open.
+
+The shared `provider_auth/doppler.rs` resolver replaces SSH's private function.
+It fetches one named secret, supports explicit project/config references, bounds
+runtime/output and returns a redacted secret value without provider error bodies.
+The reporting path never uses SSH's credential bundle. See the
+[dependency guide](../rust/loopflow/src/spend/README.md) for the implemented surface.
+
 ## Persistence map
 
 Loopflow deliberately uses several stores because no one store owns all truth.

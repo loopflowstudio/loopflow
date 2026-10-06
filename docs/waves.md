@@ -427,6 +427,8 @@ A Task's state is where it stands on its workflow: ready at `start`, active
 between, done at `end`. Reaching `end`, by an edge or by `task move`, completes
 the Task; no other command does. It is refused over uncommitted changes, an
 unsettled PR or unresolved execution, and retires a PR whose branch never moved.
+An edge that runs nothing lands nothing: it accepts uncommitted changes and
+keeps the checkout.
 `task move ISSUE end` also finishes planning-only Tasks without creating a
 checkout, recording the reason once in Linear. If completion reports pending PM
 writeback, repeat the command to reconcile Linear. Canceled and duplicate

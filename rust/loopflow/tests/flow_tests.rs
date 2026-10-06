@@ -2196,6 +2196,8 @@ fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
         String::from_utf8_lossy(&ended.stderr)
     );
     assert_eq!(position(), "end");
+    // Running the Flow left a file uncommitted; ending kept it.
+    assert!(checkout.join(".gitignore").exists());
 }
 
 #[test]

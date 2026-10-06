@@ -1566,32 +1566,28 @@ fn repeated_status_of_merged_task_never_completes_work() {
         .expect("read first Task events");
     let conn =
         rusqlite::Connection::open(home.path().join("loopflow.db")).expect("open test registry");
-    let first_state: (String, Option<i64>) = conn
-        .query_row(
-            "SELECT work_state, work_terminal_at FROM tasks WHERE id=?1",
+    let moves = || -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM task_workflow_moves WHERE task_id=?1",
             [task.task.id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
-        .expect("read Work state");
+        .expect("read Workflow moves")
+    };
+    let first_moves = moves();
     let second = task_status(repo.path(), Some("INF-123"))
         .expect("repeated merged-PR status")
         .execution
         .expect("execution");
-    let second_state: (String, Option<i64>) = conn
-        .query_row(
-            "SELECT work_state, work_terminal_at FROM tasks WHERE id=?1",
-            [task.task.id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .expect("reread Work state");
+    let second_moves = moves();
     let second_events = runtime
         .block_on(task.store.task_events_after(&task.task.id, 0))
         .expect("reread Task events");
 
     assert!(!second.status.is_terminal());
     assert_eq!(
-        second_state, first_state,
-        "status must not mutate Work state"
+        second_moves, first_moves,
+        "status must not move the Workflow"
     );
     assert_eq!(
         second_events, first_events,

@@ -115,8 +115,8 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
         rusqlite::params![project.as_str(),wave]).unwrap();
     connection
         .execute(
-            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,work_state,work_terminal_at,created_at)
-        VALUES(?1,?2,'issue-proof','PROOF-1','done',2,1)",
+            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at)
+        VALUES(?1,?2,'issue-proof','PROOF-1',1)",
             rusqlite::params![task.as_str(), project.as_str()],
         )
         .unwrap();

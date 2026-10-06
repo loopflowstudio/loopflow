@@ -3731,8 +3731,8 @@ pub fn task_end(
 
 /// Put the Task at `end` of its Workflow by `how`. Reaching `end` is
 /// completion: refused while delivery or execution is unsettled, it writes
-/// Linear and retires the checkout. Returns false when `how` no longer
-/// applied to where the Task stood.
+/// Linear and retires the checkout, unless the edge taken ran nothing.
+/// Returns false when `how` no longer applied to where the Task stood.
 async fn reach_end(
     store: &SharedStore,
     task: &mut Task,
@@ -3759,8 +3759,12 @@ async fn reach_end(
         return Err(task_error(conflict));
     }
     reconcile_task_pr_observation(store, task, crate::ops::pr::PrReadFreshness::Cached).await?;
-    if !is_clean(&task.worktree)
-        .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
+    // An edge that runs nothing lands nothing: the Task ends as it stands and
+    // keeps its checkout, so what is uncommitted there is not at risk.
+    let keeps_checkout = matches!(how, EndMove::Choose { .. });
+    if !keeps_checkout
+        && !is_clean(&task.worktree)
+            .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
     {
         return Err(task_error(
             "Task worktree has uncommitted changes; publish or explicitly abandon them first",
@@ -3817,6 +3821,13 @@ async fn reach_end(
         .map_err(|error| task_error(format!("failed to complete Task: {error}")))?
     {
         return Ok(false);
+    }
+    if keeps_checkout {
+        eprintln!(
+            "Task {} is complete; retained its checkout.",
+            task.plan.identifier
+        );
+        return Ok(true);
     }
     cleanup_completed_task(store, task).await?;
     Ok(true)

@@ -130,6 +130,13 @@ main-thread stalls are `record_live.py`'s. `20261004-launch-rendered/` compares
 a baseline and a candidate; `20261005-first-render/` alternates the two in
 rounds so both see the same host load.
 
+`--first-launch N` (three by default) opens N copies of the bundle, each at a
+new path and each once, with a saved workspace. The system charges a binary it
+has not run before, so this is the launch after an update; the other scenarios
+reopen one bundle and never pay it. `--strip` builds the bundle without local
+symbols. `20261005-first-launch/` is the receipt: about 390 ms more before
+`main`.
+
 `startup.py` measures when the model first holds outline content for an
 uncached launch, a launch with a saved workspace, a saved launch whose reads
 fail, and a second window in the process that saved. Twenty samples by default,

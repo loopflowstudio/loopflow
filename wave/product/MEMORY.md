@@ -1003,27 +1003,27 @@ text first; that latency has no owning Task (LOO-375 owns `wt list` only).
   shell-block semantics.
 - Jack Heart's October 5 report (LOO-381) added: colors lost in provider CLIs,
   a context header and indentation per block, a red background from the real
-  exit status, and one selection at a time. Jack's demo verdict: "looks good",
-  more space between blocks, and Warp's smaller dim directory header. The
-  branch draws that header in the overlay from a concealed prompt row; unseen.
-- Jack then asked for five polish items drawn from terminal research (Hacker
-  News-heavy, no Loopflow users); built, unseen. Block chrome never takes
-  selection or focus from the shell: a right-click keeps the selection under
-  it, any key reaching the shell ends a block selection, Command chords keep
-  it. Fill alphas are capped so the dimmest palette color keeps 3:1. Open:
-  Option-letter inserts the composed character where Ghostty sends Alt.
+  exit status, and one selection at a time. Jack asked for more space between
+  blocks and Warp's small dim directory header (drawn in the overlay from a
+  concealed prompt row), then rejected burgundy selection beside red: red
+  means failed only, selection is cream. He approved the demo overall and
+  asked that it land; no per-check report, "the bar on the right" unresolved.
+- Block chrome never takes selection or focus from the shell: a right-click
+  keeps the selection under it, any key reaching the shell ends a block
+  selection, Command chords keep it. Fills keep the dimmest palette color at
+  3:1. Open: Option-letter inserts the composed character.
 - **Desktop inherits its launcher's environment.** Opened from an agent shell it
   carried `NO_COLOR=1`, `PAGER=cat` and `TERM_PROGRAM`, and every pane lost
   color. The GUI drops those variables at launch, beside the execution markers.
   A prefix scrub also caught provider credentials `lf` reads; keep them by name.
-  Palette and Ghostty config were not the cause.
+  Not the palette or Ghostty config.
 - **The terminal owns block state.** A Swift-side `(id, text)` snapshot produced
   two competing highlights and stale copies; pointer-derived ids died on reflow.
   The `lf2` patch keeps exit status on the prompt row and one text-or-block
   selection in Ghostty's `Screen`; Swift holds only hover. Upstream also splits a
   block when its command line soft-wraps; the patch treats the wrapped row as a
   continuation. A new artifact version accompanies every patch change;
-  publication is a separately authorized action, and `lf2` is not yet published.
+  publication needs authorization. Jack authorized `lf2`; published 2026-10-05.
 - SwiftPM pins the published, checksum-verified patched artifact, not a local
   build path. `swift/GhosttyKitPatches/` plus `loopflow-dev.py ghostty-build`
   carry the patch and now run its Zig tests. Avoid synthetic multi-click

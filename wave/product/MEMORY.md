@@ -1006,6 +1006,12 @@ text first; that latency has no owning Task (LOO-375 owns `wt list` only).
   exit status, and one selection at a time. Jack's demo verdict: "looks good",
   more space between blocks, and Warp's smaller dim directory header. The
   branch draws that header in the overlay from a concealed prompt row; unseen.
+- Jack then asked for five polish items drawn from terminal research (Hacker
+  News-heavy, no Loopflow users); built, unseen. Block chrome never takes
+  selection or focus from the shell: a right-click keeps the selection under
+  it, any key reaching the shell ends a block selection, Command chords keep
+  it. Fill alphas are capped so the dimmest palette color keeps 3:1. Open:
+  Option-letter inserts the composed character where Ghostty sends Alt.
 - **Desktop inherits its launcher's environment.** Opened from an agent shell it
   carried `NO_COLOR=1`, `PAGER=cat` and `TERM_PROGRAM`, and every pane lost
   color. The GUI drops those variables at launch, beside the execution markers.
@@ -1021,7 +1027,7 @@ text first; that latency has no owning Task (LOO-375 owns `wt list` only).
 - SwiftPM pins the published, checksum-verified patched artifact, not a local
   build path. `swift/GhosttyKitPatches/` plus `loopflow-dev.py ghostty-build`
   carry the patch and now run its Zig tests. Avoid synthetic multi-click
-  workarounds; a standalone VT API is not an embedded-surface replacement.
+  workarounds.
 - Headless tests cover the launch environment, block layout and style, and the
   zsh hooks. The real-PTY click/drag/resize test needs a display and has not run
   for `lf2` (filter by `GhosttyTerminalInputTests`; display names do not
@@ -1035,7 +1041,7 @@ text first; that latency has no owning Task (LOO-375 owns `wt list` only).
 - Still deferred until the core interaction is accepted: separate command,
   output and last-command actions, multi-selection, bookmarks, sharing, exit-code
   or duration badges. Upstream API contribution may reduce patch maintenance
-  later (research reference: ghostty-org/ghostty#11747).
+  later (ghostty-org/ghostty#11747).
 
 ### Shared viewing boundary
 
@@ -1058,13 +1064,9 @@ App-quit survival and remote Home attachment remain separate scope decisions.
 Client provenance is absent today; keep ELSEWHERE generic until the shared API
 can name the recorded terminal/location.
 
-The 2026-09-22 reconciliation filed these remaining concrete gaps under Mac
-Surface UX: [LOO-280](https://linear.app/loopflow/issue/LOO-280) for build/resource
-parity, [LOO-281](https://linear.app/loopflow/issue/LOO-281) for real-shell blocks,
-geometry, long-output measurements, and visual proof,
-[LOO-282](https://linear.app/loopflow/issue/LOO-282) for client provenance, and
-[LOO-283](https://linear.app/loopflow/issue/LOO-283) for the bounded shared-viewing
-comparison.
+Filed 2026-09-22 under Mac Surface UX: LOO-280 build/resource parity; LOO-281
+real-shell blocks, geometry, long-output measurements and visual proof; LOO-282
+client provenance; LOO-283 the bounded shared-viewing comparison.
 
 ## Learnings
 

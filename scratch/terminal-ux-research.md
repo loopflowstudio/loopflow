@@ -105,8 +105,8 @@ own eye, not on this.
 - The recurring irritation is block chrome that takes over selection or focus.
   The branch's rule (pointer events always reach the terminal; a block is
   selected only on a click with no drag and no text selection; one selection at
-  a time) is aimed at exactly this, and the BoorishBears right-click case is
-  worth adding to the display test.
+  a time) is aimed at exactly this. The BoorishBears right-click case is now
+  handled and covered headlessly; the menu is modal, so not in the display test.
 - Warp's losses came from replacing the shell line and from AI crowding the
   terminal, not from blocks. Loopflow keeps the shell's own line editor and
   builds on OSC 133, which also keeps it close to where Ghostty upstream may go.

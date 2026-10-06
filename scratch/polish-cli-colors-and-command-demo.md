@@ -78,9 +78,10 @@ version during this demo; verify before building against it:
 | Navigation | Jump to previous/next block and between bookmarks; scroll to the start of the selected block |
 | Other | Notification when a long command finishes; failed blocks offer an AI explanation |
 
-Loopflow today: one-click block selection, whole-block copy, hover tint,
-failure tint from exit status, directory/branch header, hairline divider and
-left accent bar. Everything else in the table is absent. The design already
+Loopflow on the branch: one-click block selection, whole-block copy, hover
+tint, failure tint from exit status, a directory header, hairline divider,
+left accent bar, and Command-Up/Down between prompts. Everything else in the
+table is absent. The design already
 defers per-part copy, multi-selection, bookmarks, sharing and
 exit-code/duration badges until the core interaction is accepted.
 
@@ -142,7 +143,11 @@ terminals: [terminal-ux-research.md](terminal-ux-research.md).
 
 Jack looks at a Loopflow Dev built from the branch head: `ls`, `sdl`, a third
 command, then a bare Enter and a scroll. He confirms or corrects the header,
-the gap and the even red, and says what the right-side bar is. Proof for these
+the gap and the even red, and says what the right-side bar is. The same look
+covers the polish pass in the design's Further polish section: right-click on
+a selected block and on a text selection, a key and Escape with a block
+selected, Command-Up/Down, dim text on a selected failed block, and the
+line-editing keys beside standalone Ghostty. Proof for these
 is his eye on a real shell; the display suite
 (`LOOPFLOW_NATIVE_TESTS=1 swift test --filter GhosttyTerminalInputTests`) has still
 not run for `lf2`.

@@ -377,4 +377,11 @@ colorless with `NO_COLOR=1`.
 
 Check: after the polish pass and its compression, same filter against the local framework — 16 passed (adds fill contrast, right-click, embedded config parsed by Ghostty; the Command-chord rule is inline, covered only by the display suite). Pin restored.
 
-Check: realign by source inspection and `lf context --skill realign` — memory 15992/16000 tokens, scratch in budget; no code changed, no tests rerun (gate owns them).
+Realigned 2026-10-05 after the polish pass: the five items match this plan in
+source (right-click, key and paste/drop clearing, both keybinds, the three red
+alphas, the README). The context menu's Clear sends `clear` without ending a
+block selection first; the cleared screen drops it anyway. `main` has not
+moved; the `lf2` URL still returns 404. Product memory now carries the polish
+lessons.
+
+Check: realign by source inspection and `lf context --skill realign` — memory and scratch in budget; no code changed, no tests rerun (gate owns them).

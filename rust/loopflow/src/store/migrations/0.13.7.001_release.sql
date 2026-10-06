@@ -1,3 +1,4 @@
+-- draft: project_readiness
 -- Preserve the mixed historical name representation before using Linear names verbatim.
 -- Only these rows are eligible for one name/slug replacement. The original body
 -- includes provider revision; membership and archival evidence remain independent.

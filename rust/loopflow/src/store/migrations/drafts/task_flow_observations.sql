@@ -120,12 +120,11 @@ CREATE TRIGGER validate_task_started_update BEFORE UPDATE OF started_at ON tasks
     ) THEN RAISE(ABORT,'Started requires recorded Task work') END;
 END;
 
--- A Task's workflow: its name and graph as captured when the Task took it up.
+-- A Task's workflow: its named graph as captured when the Task took it up.
 -- The newest row is the Task's; replacing a workflow appends another.
 CREATE TABLE task_workflows (
     id INTEGER PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    workflow TEXT NOT NULL,
     graph TEXT NOT NULL CHECK (json_valid(graph)),
     started_at INTEGER NOT NULL
 ) STRICT;

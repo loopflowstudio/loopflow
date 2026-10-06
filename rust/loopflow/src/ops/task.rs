@@ -487,44 +487,40 @@ fn traverse_task_workflow(
     requested: Option<&str>,
     default: &str,
 ) -> OpsResult<Option<String>> {
-    let current = store.sqlite.task_workflow(&task.id).map_err(task_error)?;
-    let position = current
-        .as_ref()
-        .map(|record| record.position(|exec| store.sqlite.exec_may_run(exec)));
-    let departure = match (&current, &position) {
-        (Some(record), Some(position)) => Some(record.departure(position)),
-        _ => None,
-    };
+    let may_run = |exec: &crate::exec::Exec| store.sqlite.exec_may_run(exec);
+    let current = store
+        .sqlite
+        .task_workflow(&task.id)
+        .map_err(task_error)?
+        .map(|record| (record.departure(may_run), record));
     // A named Flow that leaves the current stage is that edge, whatever else
     // shares its name.
-    let names_edge = match (&current, &departure, requested) {
-        (Some(record), Some(stage), Some(name)) => record
-            .workflow
-            .outgoing(stage)
-            .any(|(_, edge)| edge.flow.as_deref() == Some(name)),
-        _ => false,
+    let names_edge = |name: &str| {
+        current.as_ref().is_some_and(|(stage, record)| {
+            record
+                .workflow
+                .outgoing(stage)
+                .any(|(_, edge)| edge.flow.as_deref() == Some(name))
+        })
     };
     let named = match requested {
-        Some(name) if !names_edge => load_task_workflow(&task.worktree, name)?,
+        Some(name) if !names_edge(name) => load_task_workflow(&task.worktree, name)?,
         _ => None,
     };
-    // `None` for a workflow the Task takes up with this traversal.
-    let (existing, workflow, stage, requested) = match (current, named) {
-        (Some(record), Some(named)) if record.workflow.name == named.name => (
-            Some(record.id),
-            record.workflow,
-            departure.expect("a workflow has a position"),
-            None,
-        ),
-        (_, Some(named)) => (None, named, START.to_string(), None),
-        (Some(record), None) => (
-            Some(record.id),
-            record.workflow,
-            departure.expect("a workflow has a position"),
-            requested,
-        ),
-        (None, None) => match load_task_workflow(&task.worktree, default)? {
-            Some(workflow) => (None, workflow, START.to_string(), requested),
+    // Naming a workflow names no edge of it.
+    let requested = requested.filter(|_| named.is_none());
+    // `existing` is `None` for a workflow the Task takes up with this traversal.
+    let (existing, workflow, stage) = match (current, named) {
+        (Some((stage, record)), named)
+            if named
+                .as_ref()
+                .is_none_or(|named| named.name == record.workflow.name) =>
+        {
+            (Some(record.id), record.workflow, stage)
+        }
+        (_, Some(named)) => (None, named, START.to_string()),
+        (_, None) => match load_task_workflow(&task.worktree, default)? {
+            Some(workflow) => (None, workflow, START.to_string()),
             None => {
                 let (flow, _) = load_task_flow(&task.worktree, requested.unwrap_or(default))?;
                 return Ok(Some(flow));

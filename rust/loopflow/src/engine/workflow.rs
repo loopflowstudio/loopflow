@@ -35,6 +35,7 @@ pub struct WorkflowStage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WorkflowEdge {
     pub from: String,
     pub to: String,
@@ -73,15 +74,7 @@ impl Workflow {
 struct AuthoredWorkflow {
     #[serde(default)]
     stages: serde_yaml_ng::Mapping,
-    edges: Vec<AuthoredEdge>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AuthoredEdge {
-    from: String,
-    to: String,
-    flow: Option<String>,
+    edges: Vec<WorkflowEdge>,
 }
 
 fn workflow_path(name: &str, repo: &Path) -> Option<PathBuf> {
@@ -91,44 +84,33 @@ fn workflow_path(name: &str, repo: &Path) -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
+/// The builtin workflow `name`, unless a repository Flow keeps that name.
+fn builtin_workflow(name: &str, repo: &Path) -> Option<&'static str> {
+    let (_, content) = BUILTIN_WORKFLOWS
+        .iter()
+        .find(|(builtin, _)| *builtin == name)?;
+    find_flow_source_path(name, repo)
+        .is_none()
+        .then_some(*content)
+}
+
+pub fn names_workflow(name: &str, repo: &Path) -> bool {
+    workflow_path(name, repo).is_some() || builtin_workflow(name, repo).is_some()
+}
+
 /// Load `name` when it names a workflow. A repository's own file wins; a
 /// repository Flow of the same name keeps the name from a builtin workflow.
 pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<Workflow>, LoadError> {
     let content = match workflow_path(name, repo) {
         Some(path) => fs::read_to_string(path)?,
-        None if find_flow_source_path(name, repo).is_some() => return Ok(None),
-        None => match BUILTIN_WORKFLOWS
-            .iter()
-            .find(|(builtin, _)| *builtin == name)
-        {
-            Some((_, content)) => content.to_string(),
+        None => match builtin_workflow(name, repo) {
+            Some(content) => content.to_string(),
             None => return Ok(None),
         },
     };
     parse_workflow(name, &content, repo)
         .map(Some)
         .map_err(|error| LoadError::InvalidFlow(format!("workflow {name}: {error}")))
-}
-
-pub fn workflow_names(repo: &Path) -> Vec<String> {
-    let mut names: BTreeSet<String> = BUILTIN_WORKFLOWS
-        .iter()
-        .map(|(name, _)| name.to_string())
-        .filter(|name| find_flow_source_path(name, repo).is_none())
-        .collect();
-    if let Ok(entries) = fs::read_dir(repo.join(".lf/workflows")) {
-        for path in entries.flatten().map(|entry| entry.path()) {
-            if path
-                .extension()
-                .is_some_and(|ext| ext == "yaml" || ext == "yml")
-            {
-                if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
-                    names.insert(stem.to_string());
-                }
-            }
-        }
-    }
-    names.into_iter().collect()
 }
 
 fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<Workflow, String> {
@@ -151,15 +133,7 @@ fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<Workflow, St
     let workflow = Workflow {
         name: name.to_string(),
         stages,
-        edges: authored
-            .edges
-            .into_iter()
-            .map(|edge| WorkflowEdge {
-                from: edge.from,
-                to: edge.to,
-                flow: edge.flow,
-            })
-            .collect(),
+        edges: authored.edges,
     };
     let known = |node: &str| workflow.stage(node).is_some();
     for edge in &workflow.edges {
@@ -218,7 +192,7 @@ fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<Workflow, St
 
 #[cfg(test)]
 mod tests {
-    use super::{load_workflow, workflow_names, END, START};
+    use super::{load_workflow, names_workflow, END, START};
 
     fn write(repo: &std::path::Path, path: &str, content: &str) {
         let path = repo.join(path);
@@ -248,7 +222,8 @@ mod tests {
         // A repository Flow keeps its name from the builtin workflow.
         write(repo.path(), ".lf/flows/feature.yaml", "- implement\n");
         assert!(load_workflow("feature", repo.path()).unwrap().is_none());
-        assert_eq!(workflow_names(repo.path()), ["code", "research"]);
+        assert!(!names_workflow("feature", repo.path()));
+        assert!(names_workflow("code", repo.path()));
     }
 
     #[test]

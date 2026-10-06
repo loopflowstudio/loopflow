@@ -181,10 +181,9 @@ impl SqliteStore {
     ) -> StoreResult<i64> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO task_workflows(task_id,workflow,graph,started_at) VALUES(?1,?2,?3,?4)",
+            "INSERT INTO task_workflows(task_id,graph,started_at) VALUES(?1,?2,?3)",
             rusqlite::params![
                 task.as_str(),
-                workflow.name,
                 serde_json::to_string(workflow)?,
                 crate::store::rows::now_unix()
             ],

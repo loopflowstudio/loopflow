@@ -71,11 +71,43 @@ impl TaskWorkflowRecord {
 
     /// The stage whose outgoing edges a new traversal chooses among: where the
     /// Task stands, or where its running edge left from.
-    pub(crate) fn departure(&self, position: &WorkflowPosition) -> String {
-        match position {
-            WorkflowPosition::Stage { stage } => stage.clone(),
-            WorkflowPosition::Edge { edge, .. } => self.workflow.edges[*edge as usize].from.clone(),
+    pub(crate) fn departure(&self, running: impl Fn(&Exec) -> bool) -> String {
+        match self.position(running) {
+            WorkflowPosition::Stage { stage } => stage,
+            WorkflowPosition::Edge { edge, .. } => self.workflow.edges[edge as usize].from.clone(),
         }
+    }
+
+    /// What the Task conversation needs: its stage's skill and the command
+    /// that sets out on each outgoing edge.
+    fn guidance(&self, position: &WorkflowPosition, issue: &str) -> String {
+        let workflow = &self.workflow;
+        let summary = summary(&workflow.name, &workflow.edges, position);
+        let WorkflowPosition::Stage { stage } = position else {
+            return format!("{summary}. A person takes part again when that Flow finishes.");
+        };
+        let mut lines = vec![match workflow.stage(stage) {
+            Some(authored) => format!(
+                "{summary}. The Task conversation works this stage with the {} skill.",
+                authored.skill
+            ),
+            None => format!("{summary}."),
+        }];
+        let edges: Vec<String> = workflow
+            .outgoing(stage)
+            .map(|(_, edge)| match &edge.flow {
+                Some(flow) => format!(
+                    "- `lf -b task run {issue} {flow}` moves the Task to {}",
+                    edge.to
+                ),
+                None => format!("- `lf task run {issue}` moves the Task to {}", edge.to),
+            })
+            .collect();
+        if !edges.is_empty() {
+            lines.push("The person's feedback in the conversation chooses the edge; background the command with your own tool:".into());
+            lines.extend(edges);
+        }
+        lines.join("\n")
     }
 
     pub(crate) fn snapshot(self, position: WorkflowPosition) -> TaskWorkflowSnapshot {
@@ -97,60 +129,32 @@ impl TaskWorkflowRecord {
 }
 
 impl TaskWorkflowSnapshot {
-    /// One line for text status and the Task conversation.
+    /// One line for text status.
     pub fn summary(&self) -> String {
-        match &self.position {
-            WorkflowPosition::Stage { stage } => format!("Workflow {}: at {stage}", self.name),
-            WorkflowPosition::Edge { edge, .. } => {
-                let edge = &self.edges[*edge as usize];
-                format!(
-                    "Workflow {}: running {} ({} → {})",
-                    self.name,
-                    edge.flow.as_deref().unwrap_or("no flow"),
-                    edge.from,
-                    edge.to
-                )
-            }
+        summary(&self.name, &self.edges, &self.position)
+    }
+}
+
+fn summary(name: &str, edges: &[WorkflowEdge], position: &WorkflowPosition) -> String {
+    match position {
+        WorkflowPosition::Stage { stage } => format!("Workflow {name}: at {stage}"),
+        WorkflowPosition::Edge { edge, .. } => {
+            let edge = &edges[*edge as usize];
+            format!(
+                "Workflow {name}: running {} ({} → {})",
+                edge.flow.as_deref().unwrap_or("no flow"),
+                edge.from,
+                edge.to
+            )
         }
     }
 }
 
-/// What the Task conversation needs at its current stage: the stage's skill
-/// and the commands that set out on each outgoing edge.
+/// Workflow guidance for a bound Task launch's context.
 pub(crate) fn guidance(store: &crate::store::sqlite::SqliteStore, task: &Task) -> Option<String> {
     let record = store.task_workflow(&task.id).ok()??;
     let position = record.position(|exec| store.exec_may_run(exec));
-    Some(record.guidance(position, &task.plan.identifier))
-}
-
-impl TaskWorkflowRecord {
-    fn guidance(self, position: WorkflowPosition, issue: &str) -> String {
-        let workflow = self.workflow.clone();
-        let summary = self.snapshot(position.clone()).summary();
-        let WorkflowPosition::Stage { stage } = &position else {
-            return format!("{summary}. A person takes part again when that Flow finishes.");
-        };
-        let mut lines = vec![match workflow.stage(stage) {
-            Some(authored) => format!(
-                "{summary}. The Task conversation works this stage with the {} skill.",
-                authored.skill
-            ),
-            None => format!("{summary}."),
-        }];
-        for (_, edge) in workflow.outgoing(stage) {
-            lines.push(match &edge.flow {
-                Some(flow) => format!(
-                    "- `lf -b task run {issue} {flow}` moves the Task to {}",
-                    edge.to
-                ),
-                None => format!("- `lf task run {issue}` moves the Task to {}", edge.to),
-            });
-        }
-        if lines.len() > 1 {
-            lines.insert(1, "The person's feedback in the conversation chooses the edge; background the command with your own tool:".into());
-        }
-        lines.join("\n")
-    }
+    Some(record.guidance(&position, &task.plan.identifier))
 }
 
 /// The outgoing edges of `stage`, as a caller would name them.
@@ -221,15 +225,15 @@ mod tests {
             panic!("a live driver is on its edge");
         };
         assert_eq!(edge, 2);
-        assert_eq!(running.departure(&running.position(live)), "design");
+        assert_eq!(running.departure(live), "design");
         // A driver that died without an exit record stopped: back at `from`.
         assert_eq!(running.position(|_| false), at("design"));
         // At a stage the conversation is told its skill and each way out;
         // on an edge, only that the Flow runs.
-        let guidance = landed.guidance(at("demo"), "INF-1");
+        let guidance = landed.guidance(&at("demo"), "INF-1");
         assert!(guidance.contains("with the demo skill"), "{guidance}");
         assert!(guidance.contains("`lf -b task run INF-1 ship` moves the Task to end"));
         let position = running.position(live);
-        assert!(!running.guidance(position, "INF-1").contains("task run"));
+        assert!(!running.guidance(&position, "INF-1").contains("task run"));
     }
 }

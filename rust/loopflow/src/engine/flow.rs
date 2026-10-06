@@ -8,6 +8,7 @@ use serde_yaml_ng::Value;
 
 use crate::engine::error::LoadError;
 use crate::engine::target::{resolve_definition, DefinitionKind, Target};
+use crate::engine::workflow::names_workflow;
 
 static RETIRED_INTERACTIVE_WARNING: AtomicBool = AtomicBool::new(false);
 
@@ -344,7 +345,7 @@ impl<'a> DefinitionLoader<'a> {
             match self.load_flow(name) {
                 Ok(flow) => return Ok(Target::Flow(flow)),
                 Err(LoadError::FlowNotFound(_)) if kind.is_none() => {}
-                Err(LoadError::FlowNotFound(_)) if self.names_workflow(name) => {
+                Err(LoadError::FlowNotFound(_)) if names_workflow(name, self.repo) => {
                     return Err(LoadError::TaskWorkflow(name.to_string()))
                 }
                 Err(error) => return Err(error),
@@ -353,7 +354,9 @@ impl<'a> DefinitionLoader<'a> {
         match load_skill(name, self.repo) {
             Ok(skill) => Ok(Target::Skill(skill)),
             // A name that is only a workflow is traversed, never run.
-            Err(LoadError::SkillNotFound(_)) if kind.is_none() && self.names_workflow(name) => {
+            Err(LoadError::SkillNotFound(_))
+                if kind.is_none() && names_workflow(name, self.repo) =>
+            {
                 Err(LoadError::TaskWorkflow(name.to_string()))
             }
             Err(LoadError::SkillNotFound(_)) if kind.is_none() => {
@@ -361,12 +364,6 @@ impl<'a> DefinitionLoader<'a> {
             }
             Err(error) => Err(error),
         }
-    }
-
-    fn names_workflow(&self, name: &str) -> bool {
-        crate::engine::workflow::workflow_names(self.repo)
-            .iter()
-            .any(|workflow| workflow == name)
     }
 
     fn load_flow(&mut self, name: &str) -> Result<Flow, LoadError> {

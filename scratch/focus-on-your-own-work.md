@@ -228,20 +228,17 @@ Flow history below means FlowExec rows joined to their Execs.
    opening/unknown; disconnection is unknown; new activity clears it;
    filtering happens before paging. Provider evidence:
    [harness-attention.md](harness-attention.md). Done when the injected-clock
-   and recorded-trace tests pass for Claude, Codex and OpenCode. *Built and
-   compressed, not yet realigned:* built at `92abbed56` (`--lib harness::
-   store:: ops::human_session` 324, `dto_fixtures` 18, Swift decoding 59).
-   Compress gave the read one clock (`--waiting` is a flag; the store call's
-   `now` judges filter and row): `--lib harness::attention
-   store::sqlite::sessions ops::human_session` 41 and `session_cli_tests` 11
-   passed, all-target Clippy clean. Delete with slice 6, since each crosses
-   the wire to Swift: the one-variant `session::SessionKind` and
-   `TaskSession.kind`, wire kind `flow`, state `waiting` and the `kind`
-   argument of `session_actions`. The driver
-   that owns a provider's stream saves one reading per Session
-   (`session_activity`); one SQL rule judges Waiting for the row and for
-   `--waiting`. Demo items: a live provider asking a question; a native
-   Claude or OpenCode terminal, which `lf` cannot hear (see questions.md).
+   and recorded-trace tests pass for Claude, Codex and OpenCode. **Done** at
+   `e3ab80c55` (built `92abbed56`; compress gave the read one clock, so the
+   store call's `now` judges filter and row): `--lib harness::attention` 8
+   passed. The driver that owns a provider's stream saves one reading per
+   Session (`session_activity`); one SQL rule judges Waiting for the row and
+   for `--waiting`. Left for slice 6, since each crosses the wire to Swift:
+   the one-variant `session::SessionKind` and `TaskSession.kind`, wire kind
+   `flow`, state `waiting` and the `kind` argument of `session_actions`. Left
+   for slice 8: `--needs-me` in four `website/docs/` pages. Demo items: a
+   live provider asking a question; a native Claude or OpenCode terminal,
+   which `lf` cannot hear (see questions.md).
 6. **Desktop.** The Task page draws its TaskWorkflow with the current stage
    or running edge, and every Flow run of the Task gets the same
    graph/progress/output view from FlowExec. Waiting first, working Sessions

@@ -170,8 +170,8 @@ pub struct SessionFilter {
     pub task: Option<String>,
     pub search: Option<String>,
     pub interactive: Option<bool>,
-    /// Only conversations waiting on a person at this time, chosen before paging.
-    pub waiting: Option<i64>,
+    /// Only conversations waiting on a person, chosen before paging.
+    pub waiting: bool,
     pub history: bool,
     pub limit: usize,
     pub offset: usize,
@@ -187,7 +187,7 @@ impl Default for SessionFilter {
             task: None,
             search: None,
             interactive: Some(true),
-            waiting: None,
+            waiting: false,
             history: false,
             limit: 100,
             offset: 0,

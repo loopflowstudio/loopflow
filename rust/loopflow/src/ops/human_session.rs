@@ -841,7 +841,7 @@ async fn connect_live_codex(
     connected
 }
 
-/// Open a conversation or a saved Flow's review: resume its native history, else
+/// Open a conversation: resume its native history, else
 /// launch its prepared input, else append another attempt to the Session.
 async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     let lock_id = id.to_string();
@@ -961,11 +961,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
             crate::session::TitleSource::Generated => SessionTitleSource::Generated,
         },
         flow_membership,
-        detail: match (kind, &session.skill) {
-            (SessionKind::Conversation, _) => launch_model(session),
-            (_, Some(skill)) => skill.clone(),
-            (_, None) => "Request for input".to_string(),
-        },
+        detail: launch_model(session),
         provider: session.provider.clone(),
         cwd: session.cwd.display().to_string(),
         state,

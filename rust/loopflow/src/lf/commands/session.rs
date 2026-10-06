@@ -89,7 +89,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
                 &store,
                 *json,
                 &crate::session::SessionFilter {
-                    waiting: waiting.then(|| time::OffsetDateTime::now_utc().unix_timestamp()),
+                    waiting: *waiting,
                     repo: if *all {
                         None
                     } else {

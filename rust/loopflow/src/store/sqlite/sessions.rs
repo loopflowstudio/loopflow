@@ -117,6 +117,7 @@ fn waiting_sql(session: &str, now: i64) -> String {
 fn inventory_query(
     filter: &crate::session::SessionFilter,
     select: &str,
+    now: i64,
 ) -> StoreResult<(String, Vec<rusqlite::types::Value>)> {
     use rusqlite::types::Value;
     let mut sql = format!("{select} WHERE 1");
@@ -134,7 +135,7 @@ fn inventory_query(
     if !filter.history {
         sql.push_str(" AND s.completed_at IS NULL");
     }
-    if let Some(now) = filter.waiting {
+    if filter.waiting {
         sql.push_str(&format!(" AND {}", waiting_sql("s", now)));
     }
     if let Some(repo) = &filter.repo {
@@ -388,7 +389,7 @@ impl SqliteStore {
         now: i64,
     ) -> StoreResult<Vec<crate::session::SessionSummary>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let (page, values) = inventory_query(filter, SUMMARY_SELECT)?;
+        let (page, values) = inventory_query(filter, SUMMARY_SELECT, now)?;
         let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
         let rows = query.query_map(rusqlite::params_from_iter(values), read_summary)?;
         rows.map(|row| row?).collect()
@@ -1009,13 +1010,14 @@ impl SqliteStore {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    /// Every open Session. A review is open while its invocation waits on it.
+    /// Every open Session.
     pub fn sessions(
         &self,
         filter: &crate::session::SessionFilter,
     ) -> StoreResult<Vec<AgentSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let (sql, values) = inventory_query(filter, SESSION_SELECT)?;
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let (sql, values) = inventory_query(filter, SESSION_SELECT, now)?;
         let mut query = conn.prepare(&sql)?;
         let rows = query.query_map(rusqlite::params_from_iter(values), read_session)?;
         rows.map(|row| row?).collect()

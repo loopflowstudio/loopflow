@@ -494,7 +494,7 @@ mod tests {
             .store
             .test_session("b", "run_0000000000000000000000000000000b");
         session.hear(claude(&json!({"type":"result","subtype":"success"})));
-        let page = |waiting| {
+        let page = |waiting: bool| {
             let filter = crate::session::SessionFilter {
                 waiting,
                 limit: 1,
@@ -504,8 +504,8 @@ mod tests {
             let rows = session.store.session_summaries(&filter, session.now);
             rows.unwrap().remove(0).id
         };
-        assert_eq!(page(None), "a");
-        assert_eq!(page(Some(session.now)), "conversation");
+        assert_eq!(page(false), "a");
+        assert_eq!(page(true), "conversation");
     }
 
     #[test]

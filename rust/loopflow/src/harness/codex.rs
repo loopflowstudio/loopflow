@@ -1587,6 +1587,9 @@ mod tests {
     #[test]
     fn saved_thread_rejection_retains_pre_spawn_retry_evidence() {
         let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _binary = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let store =
             crate::store::sqlite::SqliteStore::open_ephemeral(&ledger.home().join("loopflow.db"))
                 .unwrap();

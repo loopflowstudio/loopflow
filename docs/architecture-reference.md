@@ -216,6 +216,13 @@ interval. Old clients may display events but cannot start/steer turns or write
 Session state. Passive connection acquires no claim. Dispatch fences include
 queued native RPCs and approval replies, not only database claim updates.
 
+Headless admission records a provider-generation reservation in Session history.
+A launch records its spawn request under the exact driver fence before starting
+any provider process. An unconsumed reservation permits retry after pre-spawn
+failure; it is not engine-exit evidence. Once spawn is requested, a missing PID
+remains unknown. Saved native thread identity is loaded before account selection.
+Historical generations without this evidence retain their liveness protections.
+
 Native dispatch and driver claim, release, and exit share a Session-scoped OS
 lock beside the canonical database path. Driver validation releases the SQLite
 mutex before provider I/O; history and other Sessions keep using the database.
@@ -227,6 +234,13 @@ Connect transfers the driver while retaining the live conversation. Client
 replacement claims the driver before stopping the exact old clients; it leaves the engine and sibling
 conversations running. Flow retry can resume the recorded native conversation on
 a new engine after confirmed engine exit. Missing process evidence remains unknown.
+For a released driver without a process identity or connection, failed admission
+records the current machine and boot identity against that exact generation and
+its originating host. A later admission after a restart of the same machine may
+replace the engine while preserving its unknown outcome and native thread. The
+observation must precede the restart; wall-clock age, a failed Exec and a missing
+PID are insufficient. A changed driver invalidates the observation. This fallback
+does not restart the host, complete a turn, or settle a Flow.
 PID/start identity and native endpoint are operational evidence; conversation
 identity, causality and elapsed time grant no signal authority.
 

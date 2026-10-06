@@ -418,6 +418,10 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
             "LOOPFLOW_BUILD_PROVENANCE": "release",
             "LOOPFLOW_MIGRATION_AUTHORITY": "published",
             "RELEASE_TAG": tag,
+            # Survives cleanup of the generated preparation checkout on timeout.
+            "LF_RELEASE_NOTARIZATION_DIR": str(
+                output_dir.with_name(output_dir.name + ".notarization").resolve()
+            ),
         }
         _run(["python3", "-u", "scripts/release-loopflow.py"], env=env)
         stages.append(CANDIDATE_STAGES[2])

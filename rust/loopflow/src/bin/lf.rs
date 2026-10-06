@@ -13,7 +13,7 @@ use loopflow::lf::{
     Cli, Commands, FlowCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
 };
 
-use loopflow::ops::chapter::update_plan;
+use loopflow::ops::project::update_plan;
 use loopflow::ops::task_execution::TaskExecutionState;
 
 #[derive(Clone, Default)]

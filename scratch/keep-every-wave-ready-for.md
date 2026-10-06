@@ -69,8 +69,8 @@ Operation routing, metrics and Project editing now select the shared ID through
 `project::current_project`/`select_project`. Status/roadmap retain all Project/Task
 planning; Rust/Swift summaries carry required `current` selection rather than
 Desktop inferring it from Started status. Retained Task navigation uses the latest
-Wave even during a selection switch. SQLite admission and rotation still use the
-old selectors. Ensure, transitions and Desktop activation remain unfinished;
+Wave even during a selection switch. SQLite admission and rotation still use status/count and name selectors.
+Ensure, transitions and Desktop activation remain unfinished;
 Intelligence has not been bound or activated on the installed Home.
 
 ## Intelligence repair — Jack Heart's October 5 steer
@@ -171,18 +171,12 @@ The remaining selectors are `sqlite/children.rs::insert_initial_task`,
 `chapter::select_current`/name inference. Replace them with shared binding and
 exact transitions under the existing admission boundary.
 
-October 5 reader regression proves exact selection with two Started Projects,
-empty Flow, predecessor backlog in status/roadmap, unchanged observation ages
-across repeat reads, and refusal to fall back after an unknown configured ID.
-Swift DTO proof rejects a missing `current` field. The Desktop navigation fixture
-now models an explicit switch with both provider Projects still Started; its
-retained Task uses the latest Wave context independently of selection availability.
-Existing admission/rotation fixtures still need explicit bindings with the cut.
-The CLI regression failed on a malformed Project body: SQL filtered it before
-decoding, inventing an empty plan. Snapshot reads now decode before ownership
-filtering. All 13 status tests pass after that repair and materializing the existing
-finished draft in the historical-schema fixture. The duplicate filtered reader is
-deleted; exact-Task and whole-Wave inspection share the snapshot read.
+Reader/DTO evidence and the malformed-body failure remain at
+`ff458672407194236da0ad04705b23006d6db5bf:scratch/keep-every-wave-ready-for.md`.
+Exact selection retains predecessor backlog, names, empty Flow and observation
+ages; unknown configured IDs never fall back to Started Projects. Snapshot reads
+decode before membership filtering so malformed bodies remain errors. Desktop
+retains Task evidence with the latest Wave context. Configured acceptance remains unproved.
 
 ### Accepted planning must own durable projection — October 5
 
@@ -292,10 +286,8 @@ The two-Wave backlog proof also failed on `A — previous, B — previous`. Its 
 fixture now uses matching predecessor names to isolate preservation; differing-name
 rotation remains unproved and requires the planned selector replacement.
 
-The rejected global fence’s 31-test pass does not apply to this tree. The
-preservation reader and its operation proof are described below. Inspection Execs
-and unexecuted Flows do not count as started work. Shared admission, ensure, KR-first
-rotation, Desktop activation and installed Intelligence repair remain unfinished.
+The rejected global fence’s pass does not apply to this tree. Inspection Execs
+and unexecuted Flows do not establish started work.
 
 ### Preservation boundary — October 5
 
@@ -493,7 +485,7 @@ other configuration keys and authored bytes when updating this field.
 `lf wave ensure <wave> --json` is the explicit activation operation shared by
 Desktop and agents. It takes no candidate-selection argument. To use an existing
 Project, configure its exact ID. Reads never write configuration or provision
-Projects. 
+Projects.
 1. Acquire the per-Wave planning lock shared with plan editing and reset. Resolve
    the configured Project, repository/Team/Initiative and pending transition.
    Do not contact unrelated Waves or launch a Session.
@@ -701,9 +693,12 @@ cases below own requirements; this list identifies each next cut:
    operation regressions cover newer accepted facts, stale-owner refusal, both
    start/rotation orderings and failed-reset retry. Final before/after-configuration-
    switch proofs and created-successor recovery depend on steps 3–5.
-3. Shared binding, operation routing and Rust/Swift reader selection exist locally.
-   Replace the two SQLite admission selectors; migrate affected fixtures to explicit
-   bindings. Preserve the designated Intelligence Project.
+3. Shared binding, routing, Project editing and Rust/Swift reader selection exist.
+   Replace both SQLite admission selectors under the existing guard boundary:
+   registration rejects a second Started Project today; first-start admission
+   skips its status/count check once Started is set. Preserve that continuation
+   distinction and predecessor visibility while selecting by binding. Migrate
+   fixtures to explicit IDs; preserve the designated Intelligence Project.
 4. Add transition persistence and ensure, exercising concurrency and uncertain
    responses through operations with a stateful fake provider. Test this Task's
    single migration draft from the released frontier.
@@ -728,6 +723,9 @@ Apply the remaining cuts with their replacement consumers under the selected
 shared local configuration owner. Empty-Flow, names and reader selection are implemented
 locally; SQLite admission and rotation remain. Keep this one delivery boundary.
 
+- Deleted: `ops/chapter.rs::update_plan`; ordinary Project editing now lives in
+  `ops/project.rs` and shares one store across validation, selection and refresh.
+  Selection borrows the matching Project; summary rendering copies only its ID.
 - `ops/chapter.rs::select_current`: remaining rotation-only status selection awaits
   exact transitions. Ordinary selection moved to `ops/project.rs`; status Task
   filtering and Desktop status inference are deleted. `sync_projects` and
@@ -858,12 +856,6 @@ multi-product platform are excluded.
 
 ## Review constraints
 
-Prior compression rationale is retained at
-`f2b127d87bc0bb99654ba66118fb91a77099b73f:scratch/keep-every-wave-ready-for.md`
-under this heading. Shared `associate_project` rollback, independent entity ages,
-`run_planning_write` guard lifetime, stable-ID lock order and exact Team readbacks
-remain required; full-refresh freshness differs from partial acceptance.
-
 Shared acquisition, first-error collection, membership and migration-slice
 boundaries remain required. Prior compression detail survives at
 `a7789f1b88beb125110b36f511510701c463fd1d:scratch/keep-every-wave-ready-for.md`.
@@ -898,4 +890,9 @@ Reteam's retained compression and earlier check evidence remain at
 `3555375af:scratch/keep-every-wave-ready-for.md`; its full preflight, exact readbacks
 and cancellation-safe acceptance remain required.
 
-Checks: `cargo test -p loopflow --lib configured_project_selection` 1, `--test dto_fixtures` 18, `--test status_tests` 13 passed; headless Desktop DTO 22/Podium 20 passed; fmt/Clippy passed. Gate retains admission/rotation, CI repair and configured acceptance.
+Reconciliation October 5: inspected Release’s complete child goal/memory; its
+operation-entry recovery lesson remains applicable. No new product decision or
+acceptance evidence changes steps 3–7. Migration-marked adoption remains distinct
+from ordinary ensure; it does not supply configuration selection.
+
+Checks: `git diff --check` passed; retained prior `cargo nextest run -p loopflow --lib -E 'test(shared_portfolio_joins_persisted_evidence_without_changing_krs) | test(configured_project_selection) | test(shared_project_binding)' --no-fail-fast`: 5 passed. Fmt/all-target Clippy passed. Prior reader/DTO checks: `ff458672407194236da0ad04705b23006d6db5bf`; gate retains admission/rotation, CI repair and configured acceptance.

@@ -2,6 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::ops::{OpsError, OpsResult};
+use crate::pm::{PmProject, ProjectContent};
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
 
@@ -16,11 +17,11 @@ async fn project_store() -> OpsResult<SharedStore> {
 }
 
 /// Select by the shared binding, independently of names and other Project statuses.
-pub(crate) fn select_project(
+pub(crate) fn select_project<'a>(
     store: &crate::store::Store,
     wave: &crate::work::wave::Wave,
-    projects: &[crate::pm::PmProject],
-) -> OpsResult<crate::pm::PmProject> {
+    projects: &'a [PmProject],
+) -> OpsResult<&'a PmProject> {
     let home = store.sqlite.home_dir().map_err(project_error)?;
     let selected = crate::work::wave::project_binding::read_project_binding(&home, wave.id())
         .map_err(project_error)?
@@ -28,7 +29,6 @@ pub(crate) fn select_project(
     let project = projects
         .iter()
         .find(|project| project.id == selected)
-        .cloned()
         .ok_or_else(|| {
             project_error(format!(
                 "configured Project {selected} is unavailable; refresh the Wave"
@@ -54,7 +54,7 @@ pub(crate) async fn current_project(
         .await
         .map_err(project_error)?
         .ok_or_else(|| project_error("Project planning is unavailable; refresh the Wave"))?;
-    select_project(store, wave, &snapshot.snapshot.projects)
+    select_project(store, wave, &snapshot.snapshot.projects).cloned()
 }
 
 pub(crate) async fn resolve_project_for_task(
@@ -159,4 +159,33 @@ pub async fn bind_project(
     )
     .map_err(project_error)?;
     Ok(project)
+}
+
+pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) -> OpsResult<()> {
+    content.validate().map_err(project_error)?;
+    let wave = crate::work::wave::context::resolve_managed_wave_sync(Some(repo), wave)
+        .map_err(project_error)?;
+    tokio::runtime::Runtime::new()
+        .map_err(project_error)?
+        .block_on(async {
+            let store = super::pm::pm_store().await?;
+            let acquisition = super::chapter::rotation_lock(&wave).await?;
+            super::metrics::validate_chapter_targets(&wave, &content.metric_targets)
+                .map_err(project_error)?;
+            let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
+            let projects =
+                super::pm::checked_projects_with_store(repo, &ctx, wave.slug(), &store).await?;
+            let project = select_project(&store, &wave, &projects)?;
+            let provider = ctx
+                .client
+                .project_ownership(&project.id)
+                .await
+                .map_err(project_error)?;
+            ctx.client
+                .update_project(&provider.id, &provider.name, content)
+                .await
+                .map_err(project_error)?;
+            super::pm::refresh_pm_snapshot_locked(repo, &wave, &ctx, &store, acquisition).await?;
+            Ok(())
+        })
 }

@@ -2891,7 +2891,7 @@ pub(crate) async fn checked_projects(
     checked_projects_with_store(repo, ctx, wave, &store).await
 }
 
-async fn checked_projects_with_store(
+pub(super) async fn checked_projects_with_store(
     repo: &Path,
     ctx: &PmContext,
     wave: &str,

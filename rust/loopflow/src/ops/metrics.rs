@@ -499,7 +499,7 @@ mod tests {
         );
         store.create_wave(&wave).await.unwrap();
         let projects = [
-            project("project-api", "loopflow-api"),
+            project("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "loopflow-api"),
             project("project-surface", "mac-surface"),
         ];
         let unchanged_krs = projects
@@ -552,6 +552,14 @@ mod tests {
             },
         };
         store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+        crate::work::wave::project_binding::write_project_binding(
+            directory.path(),
+            wave.id(),
+            None,
+            &projects[0].id,
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
         let untargeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
             .unwrap();
@@ -586,14 +594,11 @@ mod tests {
         };
         snapshot.snapshot.projects[0].revision = Some("2026-09-30T00:00:02Z".into());
         store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
-        let ambiguous = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
+        let selected = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
             .await
             .unwrap();
-        assert_eq!(ambiguous.metrics, portfolio.metrics);
-        assert!(matches!(
-            ambiguous.contract_issues.as_slice(),
-            [MetricContractIssueDto::ChapterUnavailable { .. }]
-        ));
+        assert_eq!(selected.metrics, untargeted.metrics);
+        assert!(selected.contract_issues.is_empty());
         assert_eq!(store.pm_snapshot(wave.id()).await.unwrap(), Some(snapshot));
 
         let owned = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))

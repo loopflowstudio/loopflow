@@ -64,33 +64,6 @@ pub fn new_chapter(repo: &Path, name: &str, dry_run: bool) -> OpsResult<ChapterR
         .block_on(rotate(repo, name, dry_run))
 }
 
-pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) -> OpsResult<()> {
-    content.validate().map_err(error)?;
-    let wave =
-        crate::work::wave::context::resolve_managed_wave_sync(Some(repo), wave).map_err(error)?;
-    tokio::runtime::Runtime::new()
-        .map_err(error)?
-        .block_on(async {
-            let acquisition = rotation_lock(&wave).await?;
-            super::metrics::validate_chapter_targets(&wave, &content.metric_targets)
-                .map_err(error)?;
-            let ctx = resolve_context(repo, wave.slug()).await?;
-            let projects = checked_projects(repo, &ctx, wave.slug()).await?;
-            let project = super::project::select_project(&pm_store().await?, &wave, &projects)?;
-            let provider = ctx
-                .client
-                .project_ownership(&project.id)
-                .await
-                .map_err(error)?;
-            ctx.client
-                .update_project(&provider.id, &provider.name, content)
-                .await
-                .map_err(error)?;
-            refresh_pm_snapshot_locked(repo, &wave, &ctx, &pm_store().await?, acquisition).await?;
-            Ok(())
-        })
-}
-
 pub(crate) fn select_current(wave: &str, projects: &[PmProject]) -> OpsResult<PmProject> {
     let current: Vec<_> = projects
         .iter()

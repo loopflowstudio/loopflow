@@ -402,14 +402,16 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
             .pm_snapshot(wave.id())
             .await?
             .ok_or_else(|| anyhow!("Project planning has not been synced"))?;
-        let current = crate::ops::project::select_project(store, wave, &row.snapshot.projects)?;
+        let current = crate::ops::project::select_project(store, wave, &row.snapshot.projects)?
+            .id
+            .clone();
         let registered = store.list_projects(Some(wave.id())).await?;
         let projects = row
             .snapshot
             .projects
             .into_iter()
             .map(|project| ProjectSummary {
-                current: project.id == current.id,
+                current: project.id == current,
                 work_id: registered
                     .iter()
                     .find(|work| work.plan.id.as_str() == project.id)

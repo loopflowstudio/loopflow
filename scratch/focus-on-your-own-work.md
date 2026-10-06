@@ -271,7 +271,8 @@ Flow history below means FlowExec rows joined to their Execs.
    realigned:* `scripts/check_architecture.py` passes (SQLite 41/41),
    `cd website && uv run python dev.py test` 78 passed, 3 skipped; prompt
    goldens regenerated; `--lib engine::` 417, `documented_commands` 17 and
-   Python 349 passed. Demo items: the website's five building blocks as
+   Python 349 passed. Compress kept the workflow YAML in `docs/authoring.md`
+   only; both checks rerun and pass. Demo items: the website's five building blocks as
    rendered; the two flow diagrams, unchanged, still say "flow".
 
 Demo items carried from September 30, for Jack's review and not for the loop:

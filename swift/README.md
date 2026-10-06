@@ -263,7 +263,6 @@ Session completion controls are retired; historical completion timestamps and
 feedback remain inspectable.
 The shared Session projection supplies action labels, unavailable reasons and Work
 paths to both CLI and Mac; local terminal presence only determines which pane to show.
-Closing or detaching a review never resolves it.
 
 Flow steps run as ordinary `lf -b skill <name>` commands under their driver.
 The app lists, opens, and acts on the shared

@@ -175,31 +175,29 @@ environment for the S1–S5 shared note; a past Flow keeps its launched graph.
 
 ## Choices the TaskWorkflow pass made without Jack
 
-The agent's, October 5, building slice 1. None is confirmed by Jack Heart.
+The agent's, October 5, slice 1; none confirmed by Jack Heart. The list is at
+`77a376df0:scratch/questions.md` under this heading. Most likely to matter:
+`feature` and `code` are workflows only and `lf run feature` fails naming
+`lf task run`; a repository Flow file hides a same-named builtin workflow;
+naming a workflow replaces the Task's current one at `start`; edges accept
+what `lf run` accepts, and only an edge into `end` may run nothing.
 
-- **`feature` and `code` are workflows only.** The builtin Flows of those
-  names are deleted. `lf run feature` fails and names `lf task run <issue>
-  feature`; it is not rerouted through the Task entry, inside a Task or out.
-- **A repository Flow keeps its name.** `.lf/flows/feature.yaml` hides the
-  builtin workflow `feature`, so a repository that customized it runs it ad
-  hoc as before. `.lf/workflows/feature.yaml` wins over both.
-- **Which Tasks get a workflow.** One whose Project default names a workflow,
-  on its first `lf task run`; or one that names a workflow explicitly. A
-  Project whose default is a plain Flow leaves its Tasks ad hoc.
-- **Naming a workflow replaces.** `lf task run ISSUE WORKFLOW` on a Task with
-  another workflow starts the named one at `start`; the earlier rows stay. A
-  name that is both an outgoing edge's Flow and a workflow means the edge.
-- **Record and position:** replaced by the live-state pass below.
-- **Edges accept what `lf run` accepts,** a skill included: `research` runs
-  the `research` skill. Flowless edges are allowed only into `end`.
-- **`research` names a workflow and a skill.** `lf research` stays the skill.
-- **Guidance** is appended wherever a Task binding's context is rendered
-  (`resolve_work_binding`), headless launches included.
-- **Skill prose.** Only `advance` and `launch-plan` were corrected for the
-  deleted Flows; other skills still say `lf task run <issue> <chosen-flow>`,
-  which a Task on a workflow refuses unless that Flow leaves its stage.
-- **Reaching `end` removes nothing:** the Task stays ready and
-  `lf task complete` stays separate (draft default 3).
+## Choices the Task-run retry pass made without Jack
+
+The agent's, October 6, slice 9a. None is confirmed by Jack Heart.
+
+- **Every `lf task run` retries,** on a Workflow or ad hoc: it starts
+  `lf --task ISSUE run FLOW` as a child, three attempts at most, each from
+  the Flow's first step with no pause between.
+- **What is retried:** only an attempt that recorded a FlowExec and exited 1.
+  A launch refused before any Flow started is not.
+- **Exit 3** is new: `lf run` exits 3 when its Flow is blocked or stopped
+  short of its last step (an interrupted step, a watched landing). The Task
+  run returns that code and does not retry; nor after 130 or a signal.
+- **A stopped edge's guidance** names `lf flow list --for-task ISSUE`; the
+  position's Exec is now the Task run, which `lf flow show` does not read.
+- **Seen, not fixed:** `land_tests lf_pr_land_returns` fails ("detached
+  repair did not finish") with and without this slice, at `77a376df0`.
 
 ## Choices the Workflow live-state pass made without Jack
 

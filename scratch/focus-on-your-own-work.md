@@ -218,8 +218,11 @@ website as rendered.
     - Linear complete while the Task is ready: not offered as available.
       While active: a flag on the Task, shown as an error, work untouched,
       `end` refused until the flag is cleared. Clearing it, Jack: "Button on lf
-      desktop / some lf task api": one `lf task` command clears the flag and
-      Desktop's button runs it.
+      desktop / some lf task api", or alternatively "some sort of --force
+      option to allow moving a run forward even when theres the flag". Build
+      the second: `--force` on the command that reaches `end`, recorded in
+      the move's note; Desktop's button passes it. No separate clear command
+      (Jack, of `--force`: "i think i prefer that").
     - Agent's choices where Jack allowed either: a Task with no Workflow
       reads as not ready; creating a Task takes up its Project's workflow;
       existing Tasks get one by the draft migration only where their state

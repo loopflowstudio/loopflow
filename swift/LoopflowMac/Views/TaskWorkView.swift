@@ -1,9 +1,9 @@
 import Loopflow
 import SwiftUI
 
-/// A Task's workflow: the stages where a person takes part, joined by the
+/// A Task's workflow: the nodes where a person takes part, joined by the
 /// Flows that move between them. Rust owns the graph and the position; this
-/// draws them, chooses an edge through `lf task run` and sets a stage
+/// draws them, chooses an edge through `lf task run` and sets a node
 /// through `lf task move`.
 struct WorkflowView: View {
     let model: PodiumModel
@@ -21,8 +21,8 @@ struct WorkflowView: View {
             }
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 WorkflowGraphRow(
-                    stages: workflow.stages, edges: workflow.edges,
-                    current: { if case .stage(let stage) = workflow.position { stage } else { nil } }(),
+                    nodes: workflow.nodes, edges: workflow.edges,
+                    current: { if case .node(let node) = workflow.position { node } else { nil } }(),
                     running: workflow.onEdge.flatMap { $0.running ? $0.index : nil },
                     stopped: workflow.onEdge.flatMap { $0.running ? nil : $0.index })
                 Text(position)
@@ -40,16 +40,16 @@ struct WorkflowView: View {
                         .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.launchName) · to \(edge.to)")
                         .accessibilityIdentifier("task-workflow-run-\(index)")
                     }
-                    // Put the Task at a stage without running anything.
+                    // Put the Task at a node without running anything.
                     Menu("Move to") {
-                        ForEach(["start"] + workflow.stages.map(\.name) + ["end"], id: \.self) { stage in
-                            Button(stage) { Task { await model.moveTask(to: stage, task: task, wave: wave) } }
-                                .accessibilityIdentifier("task-workflow-move-\(stage)")
+                        ForEach(["start"] + workflow.nodes.map(\.name) + ["end"], id: \.self) { node in
+                            Button(node) { Task { await model.moveTask(to: node, task: task, wave: wave) } }
+                                .accessibilityIdentifier("task-workflow-move-\(node)")
                         }
                     }
                     .fixedSize()
                     .disabled(draft?.acting == true)
-                    .help("lf task move \(task.task.identifier) <stage>")
+                    .help("lf task move \(task.task.identifier) <node>")
                     .accessibilityIdentifier("task-workflow-move")
                     if draft?.acting == true { ProgressView().controlSize(.small) }
                 }
@@ -74,10 +74,10 @@ struct WorkflowView: View {
 
     private var position: String {
         switch workflow.position {
-        case .stage(let stage):
-            if stage == "end" { return "Ended" }
-            if let skill = workflow.stages.first(where: { $0.name == stage })?.skill {
-                return "Waiting on you at \(stage) · \(skill)"
+        case .node(let node):
+            if node == "end" { return "Ended" }
+            if let skill = workflow.nodes.first(where: { $0.name == node })?.skill {
+                return "Waiting on you at \(node) · \(skill)"
             }
             return "Not started"
         case .edge:
@@ -87,11 +87,11 @@ struct WorkflowView: View {
     }
 }
 
-/// A workflow's stages in authored order, each followed by the edges leaving it.
+/// A workflow's nodes in authored order, each followed by the edges leaving it.
 struct WorkflowGraphRow: View {
-    let stages: [Workflow.Stage]
+    let nodes: [Workflow.Node]
     let edges: [Workflow.Edge]
-    /// The stage a Task waits at, and the edge it is running, when a Task has taken the workflow up.
+    /// The node a Task waits at, and the edge it is running, when a Task has taken the workflow up.
     var current: String?
     var running: Int?
     var stopped: Int?
@@ -100,11 +100,11 @@ struct WorkflowGraphRow: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Spacing.sm) {
-                ForEach(["start"] + stages.map(\.name) + ["end"], id: \.self) { stage in
-                    WorkspaceChip(text: stage, tone: current == stage ? .human : .neutral)
-                        .accessibilityIdentifier("task-workflow-stage-\(stage)")
-                        .accessibilityValue(current == stage ? "Current" : "")
-                    ForEach(edges.leaving(stage), id: \.index) { index, edge in
+                ForEach(["start"] + nodes.map(\.name) + ["end"], id: \.self) { node in
+                    WorkspaceChip(text: node, tone: current == node ? .human : .neutral)
+                        .accessibilityIdentifier("task-workflow-node-\(node)")
+                        .accessibilityValue(current == node ? "Current" : "")
+                    ForEach(edges.leaving(node), id: \.index) { index, edge in
                         Text("→ \(edge.flow ?? "no Flow") → \(edge.to)")
                             .font(Typography.code(11))
                             .foregroundStyle(
@@ -172,7 +172,7 @@ struct TaskWorkView: View {
     }
 }
 
-/// One Flow run of the Task, opened to its launched graph, where it stands
+/// One Flow exec of the Task, opened to its launched graph, where it stands
 /// and each step it started. Every run reads the same way, whoever started it.
 struct FlowRunView: View {
     let model: PodiumModel

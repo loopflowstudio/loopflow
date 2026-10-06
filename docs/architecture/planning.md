@@ -11,7 +11,7 @@ lf repo new-chapter 2026-10 --dry-run
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
 cadence, budget and metric instruments across plans. Its one In Progress Linear
-Project owns Tasks, KRs, targets and the default Flow. A Chapter is the shared
+Project owns Tasks, KRs, targets and the workflow. A Chapter is the shared
 name of those current Projects across the repository. This page specifies the
 accepted model; [cutover status](../architecture-reference.md#cutover-status)
 records the remaining implementation and proof gaps.
@@ -36,7 +36,7 @@ unambiguous predecessor group. Unrelated competing current plans remain unresolv
 newest-looking names never win. Status mutations do not form a distributed
 transaction. Another Home observes the new plan through normal synchronization.
 There is no Chapter row, packet or local switch. See [Waves](../waves.md#the-planning-model)
-for adoption, default Flow and disposition details.
+for adoption, workflow and disposition details.
 
 ## Inspect planning before starting execution
 
@@ -124,23 +124,22 @@ step Execs, with no separate record or driver.
 Every Flow naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
 driver. Each `task run` starts a fresh Flow as a child `lf run`, and a fresh
-one again when that Flow exec fails; the Project's Flow
-supplies the default and naming a Flow selects another. Flows hold autonomous
+one again when that Flow exec fails. Flows hold autonomous
 steps only: launching one with a `human: true` step is rejected. Finishing
 retains history and chooses no successor; Flow completion alone does not
 complete Task Work.
 
 ## Move a Task through its workflow
 
-A [workflow](../authoring.md#workflows) is the outer shape of a Task: stages
+A [workflow](../authoring.md#workflows) is the outer shape of a Task: nodes
 where a person takes part in the Task conversation, and edges that each run
-one Flow. A Task takes one up on its first `lf task run` when its Project's
-default names one, or when a workflow is named. `task_workflows` holds one
+one Flow. A Task takes up its Project's on its first `lf task run`, or the one
+named; a Task that named its own keeps it. `task_workflows` holds one
 row per Task: the graph as it was then, never edited, and the Task's
 position. A later edit to the YAML applies to Tasks that take it up
 afterwards; taking one up again starts over at `start`.
 
-Position is stored: at a stage, or on an edge with the Exec carrying it.
+Position is stored: at a node, or on an edge with the Exec carrying it.
 Whether that Exec still runs is read from the Exec, never stored. The store
 has one read and four writes, and every write appends to
 `task_workflow_moves`:
@@ -148,13 +147,13 @@ has one read and four writes, and every write appends to
 | Call | Effect |
 | --- | --- |
 | take up | store the graph at `start` |
-| choose | from the edge's `from` stage, or from a stopped edge that left it: on the edge, carried by the choosing Exec; straight to `to` for an edge that runs nothing. Refused when the Task has moved since it was read |
+| choose | from the edge's `from` node, or from a stopped edge that left it: on the edge, carried by the choosing Exec; straight to `to` for an edge that runs nothing. Refused when the Task has moved since it was read |
 | arrive | the Exec that carried the edge, on success, puts the Task at `to` if it is still on that edge |
-| set | put the Task at a named stage |
+| set | put the Task at a named node |
 
 `lf task run ISSUE [NAME]` chooses, then runs the edge's Flow in the same
 process, which arrives when the Flow succeeds. A Flow that stops leaves the
-Task on its edge. `lf task move ISSUE STAGE` sets. An edge is not chosen
+Task on its edge. `lf task move ISSUE NODE` sets. An edge is not chosen
 while another runs. A move's author is its Exec's calling conversation, else
 a person; an arrival is the edge's own.
 

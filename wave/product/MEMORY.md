@@ -84,8 +84,8 @@ step. Lessons: `lf` allows a second `lf task run` while an edge runs, so only
 Desktop's disabled Start keeps two drivers out of a checkout; a killed driver
 has no exit record and its run reads as running forever. `lf flow list` now
 lists workflows, so an unstarted Task previews its default. `lf wave
-update-plan --flow` saves a name without loading it; Desktop shows that
-default invalid, Start disabled.
+update-plan --workflow` saves a name without loading it; Desktop shows it
+invalid, Start disabled.
 
 Main `16fa97425` adds native-human-input recency for `lf resume`; the Task
 primary reuses that ranking.

@@ -137,7 +137,7 @@ pub struct FlowCatalogEntry {
     /// A Flow's topology; `None` for a workflow or an unusable definition.
     pub graph: Option<FlowGraph>,
     pub template: Option<FlowTemplate>,
-    /// A workflow's stages and edges; `None` for a Flow or an unusable definition.
+    /// A workflow's nodes and edges; `None` for a Flow or an unusable definition.
     pub workflow: Option<WorkflowDefinition>,
     /// Why the definition is unusable; set exactly when it has no topology.
     pub unavailable: Option<String>,

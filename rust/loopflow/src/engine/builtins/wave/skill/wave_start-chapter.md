@@ -24,14 +24,14 @@ Name the beneficiary and what improves in their experience. Keep the objective
 on the Wave. Author proof-shaped KRs and metric targets with the full window
 and denominator where applicable. Multiple outcomes can belong to one plan;
 implementation steps belong in Tasks. Do not copy checked KRs or old targets.
-A newly created successor inherits only the predecessor's Flow; an existing
+A newly created successor inherits only the predecessor's workflow; an existing
 Planned successor keeps its authored content. Preserve that proposal unless
-accepted direction calls for a change. A missing default Flow requires resolution.
+accepted direction calls for a change. A missing workflow requires resolution.
 
 Produce a complete proposed Project content object:
 
 ```json
-{"metric_targets":[{"metric_id":"example-metric","target":{"kind":"at_least","value":0.95}}],"flow":"feature","krs":[{"text":"Observable proof","holds":false}]}
+{"metric_targets":[{"metric_id":"example-metric","target":{"kind":"at_least","value":0.95}}],"workflow":"feature","krs":[{"text":"Observable proof","holds":false}]}
 ```
 
 Use the actual selected Flow as a nonempty string, not an assumed `feature`.

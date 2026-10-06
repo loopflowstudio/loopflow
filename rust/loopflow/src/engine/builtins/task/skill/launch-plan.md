@@ -97,9 +97,9 @@ For an approved design, `--flow pursue` enters implement → compress → refres
 → loop-or-next. Refresh runs sync → realign. Iterate returns to implementation;
 Advance publishes and ends the pursuit. The `code` workflow starts with that
 pursuit; `feature` drafts the design first; both land an accepted PR through
-`ship`. Design review and the demo are workflow stages in the Task
+`ship`. Design review and the demo are workflow nodes in the Task
 conversation, never Flow steps. A Task on a workflow takes only an edge
-leaving its current stage: bare `lf task run <issue>` takes the only one or
+leaving its current node: bare `lf task run <issue>` takes the only one or
 names the choices, `lf task run <issue> <flow>` picks one, and naming a
 workflow takes it up from its start. `lf --task <issue> run <flow>` runs any
 Flow without moving the Task.

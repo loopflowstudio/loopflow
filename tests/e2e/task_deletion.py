@@ -194,7 +194,7 @@ def main() -> None:
         "updatedAt": "2026-09-30T00:00:00Z",
         "name": "Task PR Tests",
         "description": "",
-        "content": "flow: feature",
+        "content": "workflow: feature",
         "status": {"type": "started"},
         "initiatives": {"nodes": [{"id": "initiative-task-pr-tests"}]},
         "teams": {"nodes": [{"id": "team-task-pr-tests"}]},

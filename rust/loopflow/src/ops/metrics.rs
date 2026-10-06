@@ -387,7 +387,7 @@ mod tests {
             summary: String::new(),
 
             metric_targets: Vec::new(),
-            flow: "feature".into(),
+            workflow: "feature".into(),
             status: crate::pm::ProjectStatus::Started,
             krs: vec![PmKr {
                 text: "Proof holds for one week".to_string(),

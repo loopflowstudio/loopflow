@@ -199,41 +199,39 @@ The agent's, October 6, slice 9a. None is confirmed by Jack Heart.
 - **Seen, not fixed:** `land_tests lf_pr_land_returns` fails ("detached
   repair did not finish") with and without this slice, at `77a376df0`.
 
+## Choices the nodes and Project workflow pass made without Jack
+
+The agent's, October 6, slice 10. None is confirmed by Jack Heart.
+
+- **Linear content.** `lf` writes `workflow: NAME` and still reads a Project
+  written with `flow: NAME`; `workflow:` wins when both appear. No live
+  Project is rewritten by this PR: the next `lf update-plan` or rotation
+  rewrites the line. The reader for `flow:` can go once every live Project
+  has been rewritten.
+- **A Project that names a plain Flow.** Bare `lf task run ISSUE` is refused,
+  naming `lf wave update-plan --workflow`. Naming a Flow still runs it ad hoc;
+  naming a workflow takes it up. `--workflow` does not check that the name
+  loads.
+- **Stored.** The draft renames `projects.flow` to `workflow` and the `flow`
+  key in each stored Project; `task_workflows.stage` and the moves' columns
+  become `node`, `from_node`, `to_node`.
+- **Wire.** Project `flow` is `workflow` in status, roadmap and the plan
+  JSON `--plan` reads; `position` is `{"kind":"node","node":…}`; a
+  definition lists `nodes`. A Task's `flow.recommended` keeps its name.
+- **Left alone.** A Flow graph's `interactions.stages` (the earlier
+  human-step projection) and Desktop's "flow-stage" rows that draw it; the
+  product word "Run" for a headless conversation (LOO-386).
+- **Desktop.** The Wave page's section is **Workflow** and lists workflows
+  only; a Project naming a plain Flow reads "names no workflow here".
+
 ## Choices the Workflow live-state pass made without Jack
 
-The agent's, October 6, building slice 9. None is confirmed by Jack Heart.
-
-- **The set command is `lf task move ISSUE STAGE [--reason NOTE]`.** It
-  accepts `start`, `end` and any stage, from a stage or an edge. A Flow still
-  running on the edge is not stopped; its arrival is then ignored.
-- **A running edge refuses a second choice** (the contract's "only from the
-  edge's `from` stage or from that stage's stopped edge"). This reverses
-  slice 1's "no guard on a running edge". Taking up another workflow by name
-  is still allowed while an edge runs.
-- **Stopped is read, not stored:** on an edge whose Exec has exited or whose
-  process is known dead. A driver that succeeded but died before writing its
-  arrival reads as stopped; `lf task move` corrects it.
-- **A stopped landing holds the Task on its edge** (slice 1 returned it to
-  the stage). `ship` left watched reads "stopped on ship" until it is chosen
-  again or the Task is moved to `end`.
-- **Who.** A move's author is its Exec's calling conversation, else a
-  person; an arrival is the edge's. A headless Run that calls `lf task run`
-  counts as a conversation.
-- **Notes.** `--reason` on `lf task run` is both the Task steer it already
-  was and the move's note; on `lf task move` it is only the note.
-- **History spans definitions.** Each move names the definition it was made
-  on; taking up another keeps earlier moves in the same list.
-- **Wire.** `position.edge` gains `running`; `traversals` is replaced by
-  `history`; `outgoing` lists the edges that can be chosen now (empty while
-  one runs).
-- **Types.** Rust `Workflow` is the Task's; the authored one is
-  `WorkflowDefinition`. Tables keep the contract's names, `task_workflows`
-  and `task_workflow_moves`. Swift `TaskWorkflow` became `Workflow`.
-- **Desktop** offers the edges Rust lists and a **Move to** menu of every
-  stage; it shows no history.
-- **Not tested:** the running-edge refusal and the lost-race refusal through
-  the CLI (no long-running fixture Flow); a conversation as author, beyond
-  the fixture.
+The agent's, October 6, slice 9; none is confirmed by Jack Heart. The list is
+at `ec6b69233:scratch/questions.md` under this heading. Most likely to
+matter: `lf task move ISSUE NODE [--reason NOTE]` accepts any node from a
+node or an edge and stops nothing; a running edge refuses a second choice;
+stopped is read from the Exec, not stored; a stopped landing holds the Task
+on its edge; history spans definitions; Desktop shows no history.
 
 ## Choices the Loops, Review repairs and Task primary passes made without Jack
 

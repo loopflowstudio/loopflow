@@ -671,7 +671,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             .block_on(child.store.get_task(&parent.id))
             .unwrap()
             .unwrap();
-        // A Flow run from the checkout is this Task's work, never its upstream's.
+        // A Flow exec from the checkout is this Task's work, never its upstream's.
         let ran = run_lf(
             repo.path(),
             home.path(),
@@ -2173,7 +2173,7 @@ fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
             repo.path(),
             home.path(),
             &["task", "status", "INF-123", "--json"],
-        )["execution"]["work"]["workflow"]["position"]["stage"]
+        )["execution"]["work"]["workflow"]["position"]["node"]
             .clone()
     };
     let ran = run(&["-b", "--no-loopflow", "task", "run", "INF-123", "research"]);

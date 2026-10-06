@@ -1,4 +1,4 @@
-//! A Flow run is one driver Exec and the step Execs it starts. Its driver
+//! A Flow exec is one driver Exec and the step Execs it starts. Its driver
 //! writes a FlowExec: the Flow's name and graph as compiled at launch, then one
 //! row per step it starts. The record is append-only and only the driver writes
 //! it. Each step is an ordinary command that knows nothing of its Flow; whether
@@ -21,7 +21,7 @@ pub(crate) struct FlowExecStep {
     pub iterations: Vec<Vec<u32>>,
 }
 
-/// One Flow run as its driver recorded it.
+/// One Flow exec as its driver recorded it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FlowExec {
     pub driver: Exec,

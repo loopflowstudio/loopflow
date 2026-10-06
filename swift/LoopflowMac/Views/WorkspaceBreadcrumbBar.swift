@@ -264,7 +264,7 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
             return membershipHelp(session.flowMembership)
         }
         if node == nil { return "This Session predates recorded Flow step locations." }
-        if occurrence == .past { return "This Session belongs to an earlier Flow run. Its diagram is no longer available here." }
+        if occurrence == .past { return "This Session belongs to an earlier Flow exec. Its diagram is no longer available here." }
         return "This Session's Flow diagram is unavailable in the current Task reading."
     }
 
@@ -282,7 +282,7 @@ struct WorkspaceBreadcrumbBar<Trailing: View>: View {
         case .step(_, _, _, _, _, .earlier):
             "This conversation belonged to an earlier step of the Flow's current run."
         case .step(_, _, _, _, _, .past):
-            "This conversation belonged to a Flow run that has since finished or been followed by a newer one."
+            "This conversation belonged to a Flow exec that has since finished or been followed by a newer one."
         case .independent:
             "This conversation is not part of a Flow."
         case .unknown(let reason):

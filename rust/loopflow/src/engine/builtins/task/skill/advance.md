@@ -23,8 +23,8 @@ A stopped or failed Flow is history: inspect what it finished and the effects it
 recorded; historical review boundaries remain evidence. Launch fresh work with
 `lf task run <issue>` only when the current request identifies the
 next work—for example, implementation after an accepted design. On a
-workflow that is an edge leaving the Task's stage; name its Flow when the
-stage has more than one. A blocker needs
+workflow that is an edge leaving the Task's node; name its Flow when the
+node has more than one. A blocker needs
 its stated recovery first, completed work is not repeated, and a finished Flow
 alone is not a request to run it again.
 
@@ -43,7 +43,7 @@ takes up the `code` workflow, whose first edge is that Flow. Its PR review
 happens in the Task conversation, not as a Flow step. Do not repeat initial
 design work merely to launch implementation. For work that still
 needs design, take up the `feature` workflow, whose first edge drafts the
-design. A Task on a workflow takes only the edges leaving its current stage;
+design. A Task on a workflow takes only the edges leaving its current node;
 `lf task run <issue>` names them. Preserve any explicit User choice
 to perform implement → compress → refresh directly in this conversation.
 Ask only when intent or placement cannot be resolved from available evidence.

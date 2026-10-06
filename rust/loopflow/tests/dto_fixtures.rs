@@ -68,7 +68,7 @@ fn pm_show_preserves_repository_team_and_project_ownership() {
         ["initiative-infrastructure"]
     );
     assert_eq!(snapshot.projects[0].name, "Gmail");
-    assert_eq!(snapshot.projects[0].flow, "feature");
+    assert_eq!(snapshot.projects[0].workflow, "feature");
     assert_eq!(snapshot.projects[0].team_ids, ["team-loo"]);
     assert_eq!(snapshot.items[0].identifier, "LOO-2");
     assert_eq!(snapshot.items[0].state.as_deref(), Some("unstarted"));
@@ -113,7 +113,7 @@ fn wave_detail_preserves_flow_and_requires_home() {
     let loopflow::lf::commands::waves::Evidence::Ok { items, .. } = &snapshot.projects else {
         panic!("missing Projects")
     };
-    assert_eq!(items[0].flow, "task-design");
+    assert_eq!(items[0].workflow, "task-design");
     assert_eq!(items[0].status, loopflow::pm::ProjectStatus::Started);
 
     let encoded = serde_json::to_string(&snapshot).unwrap();
@@ -155,7 +155,7 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     };
     assert!(!items.is_empty());
     assert_eq!(
-        serde_json::to_value(&roadmap.waves[0].projects).unwrap()["items"][0]["flow"],
+        serde_json::to_value(&roadmap.waves[0].projects).unwrap()["items"][0]["workflow"],
         "feature"
     );
     assert_eq!(

@@ -18,7 +18,7 @@ struct DTOFixtureTests {
         #expect(work.flows[0].state == .current)
         #expect(!work.execs.isEmpty)
         let workflow = try #require(work.workflow)
-        #expect(workflow.stages.map(\.name) == ["design", "demo"])
+        #expect(workflow.nodes.map(\.name) == ["design", "demo"])
         #expect(workflow.edges.last?.flow == nil)
         #expect(workflow.edges.last?.launchName == "end")
         #expect(workflow.position == .edge(index: 1, execId: work.flows[0].id, running: true))
@@ -30,7 +30,7 @@ struct DTOFixtureTests {
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
     }
 
-    @Test("A Flow run keeps its launched graph and every step, and requires each field")
+    @Test("A Flow exec keeps its launched graph and every step, and requires each field")
     func flowDetailFixture() throws {
         let data = try loadFixtureData("flow_detail.json")
         let detail = try JSONDecoder().decode(FlowDetail.self, from: data)
@@ -66,7 +66,7 @@ struct DTOFixtureTests {
         let states = try JSONDecoder().decode([TaskStatus].self, from: loadFixtureData("task_status.json"))
         #expect(states[0].planning?.item.branchName == "dev/fix-1-existing")
         #expect(states[0].execution == nil)
-        #expect(states[0].planning?.project?.flow == "feature")
+        #expect(states[0].planning?.project?.workflow == "feature")
         #expect(states[0].planning?.project?.status == .started)
     }
 
@@ -173,7 +173,7 @@ struct DTOFixtureTests {
             return json
         }
         let plan = try await query.plan(wave: "infrastructure", objective: "Make releases boring.", cwd: "/fixture")
-        #expect(plan.currentProject?.flow == "task-design")
+        #expect(plan.currentProject?.workflow == "task-design")
         #expect(plan.currentProject?.krs.count == 1)
     }
 
@@ -238,7 +238,7 @@ struct DTOFixtureTests {
         // The Home runtime evidence carries the state and the one contextual action.
 
 
-        #expect(detail.currentProject?.flow == "task-design")
+        #expect(detail.currentProject?.workflow == "task-design")
         #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
         #expect(detail.unavailableTasks[0].status == .ready)
         #expect(detail.unavailableTasks[0].owner == .wave)
@@ -297,7 +297,7 @@ struct DTOFixtureTests {
         #expect(roadmap.waves.count == 2)
         let product = try #require(roadmap.waves.first)
         #expect(product.wave.name == "product")
-        #expect(product.currentProject?.flow == "feature")
+        #expect(product.currentProject?.workflow == "feature")
 
         #expect(product.metricPortfolio.metrics[0].identity.metricId == "task-loop-trust")
 

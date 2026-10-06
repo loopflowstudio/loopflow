@@ -198,13 +198,13 @@ public struct RegistryQuery: Sendable {
         try await run(["flow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Change the Wave's current chapter default, keeping its KRs and targets.
-    public func setDefaultFlow(_ name: String, wave: String, cwd: String?) async throws {
-        _ = try await run(["wave", "update-plan", "--wave", wave, "--flow", name], cwd)
+    /// Change the workflow of the Wave's current chapter, keeping its KRs and targets.
+    public func setWorkflow(_ name: String, wave: String, cwd: String?) async throws {
+        _ = try await run(["wave", "update-plan", "--wave", wave, "--workflow", name], cwd)
     }
 
     /// Run a fresh Flow for the Task headless, placing it when needed. Without
-    /// `flow`, Rust runs the Project default.
+    /// `flow`, Rust takes the Task's edge or its Project's workflow.
     public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {
         var args = ["-b", "task", "run", issue]
         if let flow { args.append(flow) }
@@ -215,12 +215,12 @@ public struct RegistryQuery: Sendable {
         }
     }
 
-    /// Put the Task at a stage of its Workflow without running anything.
-    public func moveTask(issue: String, stage: String, cwd: String?) async throws {
-        _ = try await run(["task", "move", issue, stage], cwd)
+    /// Put the Task at a node of its Workflow without running anything.
+    public func moveTask(issue: String, node: String, cwd: String?) async throws {
+        _ = try await run(["task", "move", issue, node], cwd)
     }
 
-    /// One Flow run from its driver's record, by driver Exec.
+    /// One Flow exec from its driver's record, by driver Exec.
     public func flowRun(id: String, cwd: String?) async throws -> FlowDetail {
         let stdout = try await run(["flow", "show", id, "--sessions", "--json"], cwd)
         return try Self.decode(FlowDetail.self, from: stdout)

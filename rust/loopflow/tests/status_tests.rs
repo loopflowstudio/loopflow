@@ -45,7 +45,7 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
     Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
-            flow: "feature".into(),
+            workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new(format!("linear-{slug}")).expect("Linear Project id"),
             slug: slug.to_string(),
@@ -80,7 +80,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             "name": project.plan.name,
             "summary": "Keep status truthful.",
             "metric_targets": [],
-            "flow": "feature", "status": "started",
+            "workflow": "feature", "status": "started",
             "krs": [{"text": "Current state and history stay distinct", "holds": false}],
             "initiative_ids": ["initiative-infrastructure"],
             "team_ids": ["team-infrastructure"]
@@ -207,7 +207,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     let stale = Project {
         id: ProjectId::parse(STALE_WORK_ID).expect("recorded Project Work id"),
         plan: ProjectPlan {
-            flow: "feature".into(),
+            workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id"),
             slug: "technical-architecture".to_string(),
@@ -279,7 +279,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     let current = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
-            flow: "feature".into(),
+            workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new("95159066-9098-4d0b-8903-01459dc7ec14")
                 .expect("current PM Project id"),
@@ -314,7 +314,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
                 "name": "Auditability",
                 "summary": "Every claim points to its receipt.",
                 "metric_targets": [],
-                "flow": "feature", "status": "started",
+                "workflow": "feature", "status": "started",
                 "krs": [{"text": "Every visible state carries its reason", "holds": false}],
                 "initiative_ids": ["initiative-product"],
                 "team_ids": ["team-product"]
@@ -445,7 +445,7 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
             "work_id": project.id.as_str(),
             "slug": project.plan.slug,
             "name": project.plan.name,
-            "flow": "feature",
+            "workflow": "feature",
             "status": "started",
             "metric_targets": [],
             "krs": [{"text": "Current state and history stay distinct", "holds": false}]
@@ -581,7 +581,7 @@ Count dispatched Task loops that settle without rescue.
             "name": "Loopflow API",
             "summary": "One product contract.",
             "metric_targets": [{"metric_id": "task-loop-trust", "target": {"kind": "at_least", "value": 1.0}}],
-            "flow": "feature", "status": "started",
+            "workflow": "feature", "status": "started",
             "krs": [{"text": "Task loops earn trust for one week", "holds": false}],
             "initiative_ids": ["initiative-product"],
             "team_ids": ["team-product"]
@@ -722,7 +722,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
             assert_eq!(projects[0]["id"], "95159066-9098-4d0b-8903-01459dc7ec14");
             assert_eq!(projects[0]["slug"], "auditability");
             assert_eq!(projects[0]["status"], "started");
-            assert_eq!(projects[0]["flow"], "feature");
+            assert_eq!(projects[0]["workflow"], "feature");
             assert_eq!(view["tasks"]["state"], "ok");
             assert_eq!(view["tasks"]["items"].as_array().unwrap().len(), 1);
             assert_eq!(view["tasks"]["items"][0]["task"]["identifier"], "PRD-52");

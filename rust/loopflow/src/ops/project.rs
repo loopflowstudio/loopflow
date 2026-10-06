@@ -53,7 +53,7 @@ pub(crate) fn project_plan(
         name: project.name.clone(),
         prompt_context: crate::ops::task::project_context(project),
         pm_snapshot_synced_at,
-        flow: project.flow.clone(),
+        workflow: project.workflow.clone(),
         status: project.status,
     })
 }

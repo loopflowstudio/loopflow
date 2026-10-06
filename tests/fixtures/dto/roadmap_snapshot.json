@@ -939,7 +939,7 @@
             "work_id": "proj-chapter-current",
             "slug": "loopflow-api",
             "name": "current",
-            "flow": "feature",
+            "workflow": "feature",
             "status": "started",
             "metric_targets": [
               {

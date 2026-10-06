@@ -73,7 +73,7 @@ BEFORE UPDATE OF task_id,wave_id ON agent_sessions BEGIN
         THEN RAISE(ABORT,'AgentSession Wave is permanent') END;
 END;
 
--- One row per Flow run, written once by its driver: the Flow's name and its
+-- One row per Flow exec, written once by its driver: the Flow's name and its
 -- graph as compiled at launch. Running, finished and failed are the driver
 -- Exec's; nothing here is updated.
 CREATE TABLE flow_execs (
@@ -121,14 +121,14 @@ CREATE TRIGGER validate_task_started_update BEFORE UPDATE OF started_at ON tasks
 END;
 
 -- A Task's workflow, one row per Task: the named graph as captured when the
--- Task took it up, never edited, and where the Task stands on it. `stage` is
--- where it waits; with `edge` set the Task is on that edge, which left `stage`,
--- carried by the Flow run `exec_id`. Whether that run still runs is its Exec's.
+-- Task took it up, never edited, and where the Task stands on it. `node` is
+-- where it waits; with `edge` set the Task is on that edge, which left `node`,
+-- carried by the Task run `exec_id`. Whether that run still runs is its Exec's.
 -- Taking up a workflow replaces the row.
 CREATE TABLE task_workflows (
     task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     graph TEXT NOT NULL CHECK (json_valid(graph)),
-    stage TEXT NOT NULL,
+    node TEXT NOT NULL,
     edge INTEGER,
     exec_id TEXT REFERENCES execs(id),
     updated_at INTEGER NOT NULL,
@@ -142,8 +142,8 @@ CREATE TABLE task_workflow_moves (
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
     workflow TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('took_up', 'chose', 'arrived', 'set')),
-    from_stage TEXT NOT NULL,
-    to_stage TEXT NOT NULL,
+    from_node TEXT NOT NULL,
+    to_node TEXT NOT NULL,
     edge INTEGER,
     exec_id TEXT NOT NULL REFERENCES execs(id),
     note TEXT,
@@ -176,3 +176,8 @@ CREATE TABLE session_activity (
     pending_input INTEGER NOT NULL,
     yielded INTEGER NOT NULL CHECK (yielded IN (0, 1))
 ) STRICT;
+
+-- A Project names a workflow: the column, and the key in each stored Project.
+ALTER TABLE projects RENAME COLUMN flow TO workflow;
+UPDATE pm_projects SET body = json_remove(json_set(body, '$.workflow', json_extract(body, '$.flow')), '$.flow')
+WHERE json_type(body, '$.flow') IS NOT NULL;

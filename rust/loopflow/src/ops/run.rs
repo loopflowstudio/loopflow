@@ -316,7 +316,7 @@ mod tests {
         Project {
             id: ProjectId::new(),
             plan: ProjectPlan {
-                flow: "feature".into(),
+                workflow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
                 id: LinearProjectId::new(planning_id).unwrap(),
                 slug: slug.to_string(),
@@ -956,7 +956,7 @@ mod tests {
                 summary: String::new(),
 
                 metric_targets: Vec::new(),
-                flow: "feature".into(),
+                workflow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
                 krs: vec![PmKr {
                     text: "One model everywhere".to_string(),

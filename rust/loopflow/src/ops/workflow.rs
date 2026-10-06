@@ -1,9 +1,9 @@
 //! A Task's Workflow: the workflow definition it took up, fixed from then
 //! on, and where the Task stands on it. Position is live state a person or a
-//! conversation moves: at a stage, or on an edge with the Task run carrying
-//! it. `lf task run` chooses a way out, starts the edge's Flow, again when a
+//! conversation moves: at a node, or on an edge with the Task run carrying
+//! it. `lf task run` chooses an edge, starts the edge's Flow, again when a
 //! Flow exec fails, and writes the arrival when one succeeds; `lf task move`
-//! sets a stage outright. Every
+//! sets a node outright. Every
 //! change is appended to the Task's history. Nothing here launches or
 //! controls a Flow.
 
@@ -18,7 +18,7 @@ pub struct Workflow {
     pub definition: WorkflowDefinition,
     pub position: WorkflowPosition,
     /// Edges `lf task run` can choose now, by their place among the edges:
-    /// those leaving the Task's stage, or the stage its stopped edge left.
+    /// those leaving the Task's node, or the node its stopped edge left.
     pub outgoing: Vec<u32>,
     /// Every move of this Task, across the definitions it has taken up.
     pub history: Vec<WorkflowMove>,
@@ -27,8 +27,8 @@ pub struct Workflow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkflowPosition {
-    /// The Task waits on a person at this stage, or stands at `start` or `end`.
-    Stage { stage: String },
+    /// The Task waits on a person at this node, or stands at `start` or `end`.
+    Node { node: String },
     /// The Task is on this edge. `exec_id` is the `lf task run` carrying it;
     /// each Flow exec it starts is that Exec's child. `running` is read from
     /// that Exec: an edge whose Task run has ended has stopped and holds the
@@ -46,7 +46,7 @@ pub enum WorkflowPosition {
 pub enum WorkflowMoveKind {
     /// The Task took up this definition at `start`.
     TookUp,
-    /// A way out of `from` was chosen; an edge with a Flow then carries the Task.
+    /// An edge leaving `from` was chosen; an edge with a Flow then carries the Task.
     Chose,
     /// The edge's Flow succeeded and its process put the Task at `to`.
     Arrived,
@@ -108,7 +108,7 @@ impl Workflow {
     ) -> Self {
         let outgoing = match &position {
             WorkflowPosition::Edge { running: true, .. } => Vec::new(),
-            WorkflowPosition::Stage { stage } => leaving(&definition, stage),
+            WorkflowPosition::Node { node } => leaving(&definition, node),
             WorkflowPosition::Edge { edge, .. } => {
                 leaving(&definition, &definition.edges[*edge as usize].from)
             }
@@ -121,24 +121,24 @@ impl Workflow {
         }
     }
 
-    /// Where the Task waits, or the stage its edge left.
-    pub(crate) fn stage(&self) -> &str {
+    /// Where the Task waits, or the node its edge left.
+    pub(crate) fn node(&self) -> &str {
         match &self.position {
-            WorkflowPosition::Stage { stage } => stage,
+            WorkflowPosition::Node { node } => node,
             WorkflowPosition::Edge { edge, .. } => &self.definition.edges[*edge as usize].from,
         }
     }
 
-    /// Whether the Task can be put at `stage`.
-    pub(crate) fn names_stage(&self, stage: &str) -> bool {
-        stage == START || stage == END || self.definition.stage(stage).is_some()
+    /// Whether the Task can be put at `node`.
+    pub(crate) fn names_node(&self, node: &str) -> bool {
+        node == START || node == END || self.definition.node(node).is_some()
     }
 
-    /// The edges leaving the Task's stage, as a caller would name them.
+    /// The edges leaving the Task's node, as a caller would name them.
     pub(crate) fn describe_outgoing(&self) -> String {
         let edges: Vec<String> = self
             .definition
-            .outgoing(self.stage())
+            .outgoing(self.node())
             .map(|(_, edge)| match &edge.flow {
                 Some(flow) => format!("{flow} (to {})", edge.to),
                 None => format!("{} (runs no Flow)", edge.to),
@@ -155,7 +155,7 @@ impl Workflow {
     pub fn summary(&self) -> String {
         let name = &self.definition.name;
         match &self.position {
-            WorkflowPosition::Stage { stage } => format!("Workflow {name}: at {stage}"),
+            WorkflowPosition::Node { node } => format!("Workflow {name}: at {node}"),
             WorkflowPosition::Edge { edge, running, .. } => {
                 let edge = &self.definition.edges[*edge as usize];
                 format!(
@@ -169,8 +169,8 @@ impl Workflow {
         }
     }
 
-    /// What the Task conversation needs: its stage's skill and the command
-    /// for each way on.
+    /// What the Task conversation needs: its node's skill and the command
+    /// for each edge.
     pub(crate) fn guidance(&self, issue: &str) -> String {
         let summary = self.summary();
         let mut lines = match &self.position {
@@ -178,12 +178,12 @@ impl Workflow {
                 return format!("{summary}. A person takes part again when that Flow finishes.");
             }
             WorkflowPosition::Edge { .. } => vec![format!(
-                "{summary}. Read `lf flow list --for-task {issue}` before choosing: run it again, take another way out of {}, or move the Task.",
-                self.stage()
+                "{summary}. Read `lf flow list --for-task {issue}` before choosing: run it again, take another edge leaving {}, or move the Task.",
+                self.node()
             )],
-            WorkflowPosition::Stage { stage } => vec![match self.definition.stage(stage) {
+            WorkflowPosition::Node { node } => vec![match self.definition.node(node) {
                 Some(authored) => format!(
-                    "{summary}. The Task conversation works this stage with the {} skill.",
+                    "{summary}. The Task conversation works this node with the {} skill.",
                     authored.skill
                 ),
                 None => format!("{summary}."),
@@ -205,14 +205,14 @@ impl Workflow {
             ));
         }
         lines.push(format!(
-            "`lf task move {issue} <stage>` puts the Task at a stage without running anything: to go back, skip ahead, or record work that finished elsewhere."
+            "`lf task move {issue} <node>` puts the Task at a node without running anything: to go back, skip ahead, or record work that finished elsewhere."
         ));
         lines.join("\n")
     }
 }
 
-fn leaving(definition: &WorkflowDefinition, stage: &str) -> Vec<u32> {
-    definition.outgoing(stage).map(|(index, _)| index).collect()
+fn leaving(definition: &WorkflowDefinition, node: &str) -> Vec<u32> {
+    definition.outgoing(node).map(|(index, _)| index).collect()
 }
 
 #[cfg(test)]
@@ -221,21 +221,21 @@ mod tests {
     use crate::engine::workflow::load_workflow;
 
     #[test]
-    fn a_stopped_edge_holds_the_task_and_guidance_names_every_way_on() {
+    fn a_stopped_edge_holds_the_task_and_guidance_names_every_edge() {
         let repo = tempfile::tempdir().unwrap();
         let definition = load_workflow("feature", repo.path()).unwrap().unwrap();
         let at = |position| Workflow::new(definition.clone(), position, Vec::new());
-        // At a stage the conversation is told its skill and each way out.
-        let waiting = at(WorkflowPosition::Stage {
-            stage: "demo".into(),
+        // At a node the conversation is told its skill and each edge.
+        let waiting = at(WorkflowPosition::Node {
+            node: "demo".into(),
         });
         assert_eq!(waiting.outgoing, [3, 4]);
         let guidance = waiting.guidance("INF-1");
         assert!(guidance.contains("with the demo skill"), "{guidance}");
         assert!(guidance.contains("`lf -b task run INF-1 ship` moves the Task to end"));
-        assert!(guidance.contains("`lf task move INF-1 <stage>`"));
+        assert!(guidance.contains("`lf task move INF-1 <node>`"));
 
-        // On a running edge there is no way out, only that the Flow runs.
+        // On a running edge there is nothing to choose, only that the Flow runs.
         let on_edge = |running| {
             at(WorkflowPosition::Edge {
                 edge: 2,
@@ -247,7 +247,7 @@ mod tests {
         assert!(running.outgoing.is_empty());
         assert!(!running.guidance("INF-1").contains("task run"));
 
-        // A stopped edge holds the Task; the ways out are those of the stage
+        // A stopped edge holds the Task; the edges it can take are those of the node
         // it left, the stopped edge among them.
         let stopped = on_edge(false);
         assert_eq!(stopped.outgoing, [1, 2]);

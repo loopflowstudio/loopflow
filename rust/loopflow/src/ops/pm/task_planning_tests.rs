@@ -88,7 +88,7 @@ fn planning_project(id: &str, current: &str) -> serde_json::Value {
         "prior-project" => "Previous chapter",
         _ => "Next chapter",
     };
-    json!({"id":id, "name":name, "description":"", "content":"flow: feature",
+    json!({"id":id, "name":name, "description":"", "content":"workflow: feature",
         "status":{"type":if completed { "completed" } else { "started" }},
         "updatedAt":if completed { "2026-09-30T12:00:01Z" } else { "2026-09-30T12:00:00Z" },
         "archivedAt":null,

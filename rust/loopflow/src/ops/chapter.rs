@@ -69,8 +69,8 @@ pub fn new_chapter(repo: &Path, name: &str, dry_run: bool) -> OpsResult<ChapterR
 #[derive(Debug)]
 pub enum PlanChange {
     Replace(ProjectContent),
-    /// Only the default Flow or workflow; KRs and targets stay as they are.
-    Flow(String),
+    /// Only the workflow; KRs and targets stay as they are.
+    Workflow(String),
 }
 
 pub fn update_plan(repo: &Path, wave: Option<&str>, change: PlanChange) -> OpsResult<()> {
@@ -93,15 +93,15 @@ async fn write_plan(repo: &Path, wave: &Wave, change: PlanChange) -> OpsResult<(
         .map_err(error)?;
     let content = match change {
         PlanChange::Replace(content) => content,
-        PlanChange::Flow(flow) => ProjectContent {
+        PlanChange::Workflow(workflow) => ProjectContent {
             metric_targets: provider.metric_targets.clone(),
-            flow,
+            workflow,
             krs: provider.krs.clone(),
         },
     };
     content.validate().map_err(error)?;
-    if content.flow.trim().is_empty() {
-        return Err(error("Project content requires a nonempty flow: line"));
+    if content.workflow.trim().is_empty() {
+        return Err(error("Project content requires a nonempty workflow: line"));
     }
     super::metrics::validate_chapter_targets(wave, &content.metric_targets).map_err(error)?;
     ctx.client
@@ -298,15 +298,15 @@ pub(crate) async fn rotate(repo: &Path, name: &str, dry_run: bool) -> OpsResult<
         return Ok(plan);
     }
     for entry in &plan.waves {
-        let flow = entry
+        let workflow = entry
             .successor
             .as_ref()
             .or(entry.predecessor.as_ref())
-            .map(|project| project.flow.as_str())
+            .map(|project| project.workflow.as_str())
             .unwrap_or("feature");
-        if flow.trim().is_empty() {
+        if workflow.trim().is_empty() {
             return Err(error(format!(
-                "Wave {}: set the Project's flow: line before rotating; no Project status changed",
+                "Wave {}: set the Project's workflow: line before rotating; no Project status changed",
                 entry.wave
             )));
         }
@@ -583,18 +583,18 @@ async fn apply_rotation(
             ))
         }
         None => {
-            let flow = entry
+            let workflow = entry
                 .predecessor
                 .as_ref()
-                .map(|project| project.flow.as_str())
+                .map(|project| project.workflow.as_str())
                 .unwrap_or("feature");
-            if flow.trim().is_empty() {
+            if workflow.trim().is_empty() {
                 return Err(error(
-                    "predecessor has no flow: line; set its default Flow before rotating",
+                    "predecessor has no workflow: line; set its workflow before rotating",
                 ));
             }
             let content = ProjectContent {
-                flow: flow.to_string(),
+                workflow: workflow.to_string(),
                 metric_targets: Vec::new(),
                 krs: Vec::new(),
             };

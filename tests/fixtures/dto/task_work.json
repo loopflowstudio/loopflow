@@ -65,7 +65,7 @@
   ],
   "workflow": {
     "name": "feature",
-    "stages": [
+    "nodes": [
       {
         "name": "design",
         "skill": "review-design"

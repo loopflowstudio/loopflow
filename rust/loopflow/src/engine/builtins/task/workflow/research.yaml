@@ -1,5 +1,5 @@
 # Investigate and report. The Task ends on accepted findings, with no PR.
-stages:
+nodes:
   findings: research
 edges:
   - { from: start, to: findings, flow: research }

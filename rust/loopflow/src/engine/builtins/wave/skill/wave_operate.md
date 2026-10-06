@@ -63,7 +63,7 @@ a valid result only when every started Task already holds a disposition above.
   report an unchanged failure instead of repeating it.
 - **A Flow ends where authored.** A finished Flow or published PR does not
   complete the Task. Name what remains and the PR or Task conversation awaiting
-  a decision. A Task on a workflow (`execution.work.workflow`) at a stage its
+  a decision. A Task on a workflow (`execution.work.workflow`) at a node its
   last edge reached waits on a person there; rerun an edge that stopped or
   failed with `lf task run <issue> <flow>`, and take no other edge for them;
   do not choose a new direction or arm an unapproved merge.
@@ -138,9 +138,9 @@ worktrees, placement and execution history.
 - Update the plan through `lf update-plan --wave <wave> --plan
   <plan.json>`; curate durable decisions in `wave/<wave>/MEMORY.md`. Change
   GOAL.md only within accepted direction. Supply the complete content object
-  with `metric_targets`, required nonempty `flow` and `krs`; for example
-  `{"metric_targets":[],"flow":"feature","krs":[]}`. This edits the Wave's
-  one In Progress Linear Project. Preserve authored Flow and other plan fields.
+  with `metric_targets`, required nonempty `workflow` and `krs`; for example
+  `{"metric_targets":[],"workflow":"feature","krs":[]}`. This edits the Wave's
+  one In Progress Linear Project. Preserve the authored workflow and other plan fields.
 - Use supported Task/Work operations for changes, not raw stores, unclaimed
   process signals or a competing worker on this Home. A missing Home stays an
   explicit blocker.

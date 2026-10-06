@@ -1,4 +1,4 @@
-//! A workflow definition: the stages where a person takes part in the Task
+//! A workflow definition: the nodes where a person takes part in the Task
 //! conversation, joined by edges that are operational Flows. `start` and `end`
 //! are implicit. A workflow executes nothing; `lf task run` traverses it by
 //! running an edge's Flow like any other.
@@ -28,9 +28,9 @@ const BUILTIN_WORKFLOWS: [(&str, &str); 3] = [
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorkflowStage {
+pub struct WorkflowNode {
     pub name: String,
-    /// The skill the Task conversation uses at this stage.
+    /// The skill the Task conversation uses at this node.
     pub skill: String,
 }
 
@@ -47,12 +47,12 @@ pub struct WorkflowEdge {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowDefinition {
     pub name: String,
-    pub stages: Vec<WorkflowStage>,
+    pub nodes: Vec<WorkflowNode>,
     pub edges: Vec<WorkflowEdge>,
 }
 
 impl WorkflowEdge {
-    /// What `lf task run ISSUE <name>` calls this edge: its Flow, or the stage
+    /// What `lf task run ISSUE <name>` calls this edge: its Flow, or the node
     /// it enters when it runs none.
     pub fn name(&self) -> &str {
         self.flow.as_deref().unwrap_or(&self.to)
@@ -72,8 +72,8 @@ impl WorkflowDefinition {
             .map(|(index, edge)| (index as u32, edge))
     }
 
-    pub fn stage(&self, name: &str) -> Option<&WorkflowStage> {
-        self.stages.iter().find(|stage| stage.name == name)
+    pub fn node(&self, name: &str) -> Option<&WorkflowNode> {
+        self.nodes.iter().find(|node| node.name == name)
     }
 }
 
@@ -81,7 +81,7 @@ impl WorkflowDefinition {
 #[serde(deny_unknown_fields)]
 struct AuthoredWorkflow {
     #[serde(default)]
-    stages: serde_yaml_ng::Mapping,
+    nodes: serde_yaml_ng::Mapping,
     edges: Vec<WorkflowEdge>,
 }
 
@@ -174,33 +174,33 @@ pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<WorkflowDefinitio
 fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<WorkflowDefinition, String> {
     let authored: AuthoredWorkflow =
         serde_yaml_ng::from_str(content).map_err(|error| error.to_string())?;
-    let mut stages = Vec::new();
-    for (stage, skill) in &authored.stages {
-        let (Some(stage), Some(skill)) = (stage.as_str(), skill.as_str()) else {
-            return Err("each stage is `name: skill`".into());
+    let mut nodes = Vec::new();
+    for (node, skill) in &authored.nodes {
+        let (Some(node), Some(skill)) = (node.as_str(), skill.as_str()) else {
+            return Err("each node is `name: skill`".into());
         };
-        if stage == START || stage == END {
-            return Err(format!("{stage} is implicit and cannot be a stage"));
+        if node == START || node == END {
+            return Err(format!("{node} is implicit and cannot be a node"));
         }
-        load_skill(skill, repo).map_err(|error| format!("stage {stage}: {error}"))?;
-        stages.push(WorkflowStage {
-            name: stage.to_string(),
+        load_skill(skill, repo).map_err(|error| format!("node {node}: {error}"))?;
+        nodes.push(WorkflowNode {
+            name: node.to_string(),
             skill: skill.to_string(),
         });
     }
     let workflow = WorkflowDefinition {
         name: name.to_string(),
-        stages,
+        nodes,
         edges: authored.edges,
     };
-    let known = |node: &str| workflow.stage(node).is_some();
+    let known = |node: &str| workflow.node(node).is_some();
     for edge in &workflow.edges {
         let label = format!("edge {} → {}", edge.from, edge.to);
         if edge.from != START && !known(&edge.from) {
-            return Err(format!("{label} leaves an unknown stage"));
+            return Err(format!("{label} leaves an unknown node"));
         }
         if edge.to != END && !known(&edge.to) {
-            return Err(format!("{label} enters an unknown stage"));
+            return Err(format!("{label} enters an unknown node"));
         }
         match &edge.flow {
             Some(flow) => {
@@ -238,12 +238,12 @@ fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<WorkflowDefi
             }
         }
     }
-    if let Some(stage) = workflow
-        .stages
+    if let Some(node) = workflow
+        .nodes
         .iter()
-        .find(|stage| !reached.contains(stage.name.as_str()))
+        .find(|node| !reached.contains(node.name.as_str()))
     {
-        return Err(format!("stage {} is unreachable from start", stage.name));
+        return Err(format!("node {} is unreachable from start", node.name));
     }
     Ok(workflow)
 }
@@ -260,11 +260,11 @@ mod tests {
     }
 
     #[test]
-    fn builtin_workflows_join_conversation_stages_with_operational_flows() {
+    fn builtin_workflows_join_conversation_nodes_with_operational_flows() {
         let repo = tempfile::tempdir().unwrap();
         let feature = load_workflow("feature", repo.path()).unwrap().unwrap();
-        let stages: Vec<_> = feature.stages.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(stages, ["design", "demo"]);
+        let nodes: Vec<_> = feature.nodes.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(nodes, ["design", "demo"]);
         let from_demo: Vec<_> = feature
             .outgoing("demo")
             .map(|(_, edge)| (edge.to.as_str(), edge.flow.as_deref()))
@@ -293,13 +293,13 @@ mod tests {
             load_workflow("proof", repo.path()).map(|workflow| workflow.unwrap())
         };
         let valid = load(
-            "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {from: review, to: end}\n",
+            "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {from: review, to: end}\n",
         )
         .unwrap();
         assert_eq!(valid.outgoing(START).count(), 1);
         for (content, expected) in [
             (
-                "stages:\n  review: demo\n  lost: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n",
+                "nodes:\n  review: demo\n  lost: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n",
                 "unreachable",
             ),
             (
@@ -307,19 +307,19 @@ mod tests {
                 "no-such-flow",
             ),
             (
-                "stages:\n  review: demo\nedges:\n  - {from: start, to: review}\n",
+                "nodes:\n  review: demo\nedges:\n  - {from: start, to: review}\n",
                 "names no flow",
             ),
             (
                 "edges:\n  - {from: start, to: missing, flow: pursue}\n",
-                "unknown stage",
+                "unknown node",
             ),
             (
-                "stages:\n  review: no-such-skill\nedges:\n  - {from: start, to: review, flow: pursue}\n",
+                "nodes:\n  review: no-such-skill\nedges:\n  - {from: start, to: review, flow: pursue}\n",
                 "no-such-skill",
             ),
             (
-                "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {from: start, to: end, flow: pursue}\n",
+                "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n  - {from: start, to: end, flow: pursue}\n",
                 "two outgoing edges",
             ),
         ] {
@@ -338,7 +338,7 @@ mod tests {
         };
         let builtin = entry("feature", CatalogKind::Workflow).unwrap();
         assert_eq!(builtin.source, None);
-        assert_eq!(builtin.workflow.unwrap().stages.len(), 2);
+        assert_eq!(builtin.workflow.unwrap().nodes.len(), 2);
         // Listing creates nothing; customizing writes the builtin once.
         assert!(!repo.path().join(".lf").exists());
         let path = customize("feature", repo.path()).unwrap();

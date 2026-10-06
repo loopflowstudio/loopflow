@@ -2246,7 +2246,7 @@ async fn apply_or_plan_repository_reteam(
                         &state.target_name,
                         &ProjectContent {
                             metric_targets: state.project.metric_targets.clone(),
-                            flow: state.project.flow.clone(),
+                            workflow: state.project.workflow.clone(),
                             krs: state.project.krs.clone(),
                         },
                     )
@@ -3237,7 +3237,7 @@ mod tests {
             "id": id,
             "name": name,
             "description": "",
-            "content": "flow: feature\n\n## Definition\n\nA measured bet.\n\n## KRs\n",
+            "content": "workflow: feature\n\n## Definition\n\nA measured bet.\n\n## KRs\n",
             "status": {"type":"started"},
             "initiatives": { "nodes": [{ "id": "initiative-123" }] },
             "teams": { "nodes": [{ "id": "team-123" }] }
@@ -3696,7 +3696,7 @@ mod tests {
             summary: String::new(),
 
             metric_targets: Vec::new(),
-            flow: "feature".into(),
+            workflow: "feature".into(),
             status: crate::pm::ProjectStatus::Started,
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],

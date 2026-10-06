@@ -101,7 +101,7 @@ class LinearHandler(BaseHTTPRequestHandler):
                                             "name": "Product — Reliability",
                                             "description": "",
                                             "content": (
-                                                "flow: feature\n\n## KRs\n\n- [ ] Fresh proof"
+                                                "workflow: feature\n\n## KRs\n\n- [ ] Fresh proof"
                                             ),
                                             "status": {"type": "started"},
                                             "initiatives": {"nodes": [{"id": "initiative-1"}]},

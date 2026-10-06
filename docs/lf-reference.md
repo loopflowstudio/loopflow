@@ -1174,13 +1174,13 @@ Rename or relocate an authored Wave and its provider mapping
 
 ## lf wave update-plan
 
-Replace the current chapter's KRs, targets, and Flow recommendation
+Replace the current chapter's KRs, targets and workflow
 
 | Argument | What it does |
 |---|---|
 | `--wave / -w` | wave |
 | `--plan` | The complete plan as JSON |
-| `--flow` | Change only the default Flow or workflow, keeping KRs and targets |
+| `--workflow` | Change only the workflow, keeping KRs and targets |
 | `--help / -h` | Print help |
 
 ## lf task
@@ -1251,11 +1251,22 @@ Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `<flow>` | Flow to run; the Project's default when omitted |
+| `<flow>` | The edge's Flow, or a workflow to take up; the Task's only edge or its Project's workflow when omitted |
 | `--name` | name |
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
 | `--reason` | Direction for this run, published to the Task |
+| `--help / -h` | Print help |
+
+## lf task move
+
+Put a Task at a node of its workflow without running anything
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `<node>` | `start`, `end` or one of the workflow's nodes |
+| `--reason` | Why, kept in the Task's workflow history |
 | `--help / -h` | Print help |
 
 ## lf task create

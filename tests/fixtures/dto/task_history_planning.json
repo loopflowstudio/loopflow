@@ -7,7 +7,7 @@
       "name": "Current",
       "summary": "",
       "metric_targets": [],
-      "flow": "feature",
+      "workflow": "feature",
       "status": "started",
       "krs": [],
       "initiative_ids": [

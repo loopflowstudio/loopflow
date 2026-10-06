@@ -571,7 +571,7 @@
         "work_id": null,
         "slug": "release-feedback",
         "name": "current",
-        "flow": "task-design",
+        "workflow": "task-design",
         "status": "started",
         "metric_targets": [
           {

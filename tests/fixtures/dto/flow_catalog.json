@@ -346,7 +346,7 @@
     "template": null,
     "workflow": {
       "name": "code",
-      "stages": [
+      "nodes": [
         {
           "name": "demo",
           "skill": "demo"

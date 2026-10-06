@@ -194,7 +194,7 @@ impl SqliteStore {
         Ok(Some((flow, entry)))
     }
 
-    /// A Flow run from a Task's checkout is work begun for that Task.
+    /// A Flow exec from a Task's checkout is work begun for that Task.
     pub(crate) fn mark_task_started(&self, task: &TaskId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(

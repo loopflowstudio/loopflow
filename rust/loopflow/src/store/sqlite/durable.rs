@@ -828,7 +828,7 @@ mod durable_store_tests {
         let project = Project {
             id: project_id.clone(),
             plan: ProjectPlan {
-                flow: "feature".into(),
+                workflow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
                 id: LinearProjectId::new("project-uuid").unwrap(),
                 slug: "probe".to_string(),

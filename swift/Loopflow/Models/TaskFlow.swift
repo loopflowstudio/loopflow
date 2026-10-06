@@ -142,7 +142,7 @@ public struct FlowStepExec: Decodable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// One Flow run as its driver recorded it: the graph captured at launch and
+/// One Flow exec as its driver recorded it: the graph captured at launch and
 /// every step it started. Any Flow reads the same way, ad hoc or a Task's edge.
 public struct FlowDetail: Decodable, Sendable, Hashable {
     public let entry: TaskFlowMember
@@ -246,7 +246,7 @@ public struct FlowCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
 /// An authored workflow before any Task has taken it up.
 public struct WorkflowDefinition: Decodable, Sendable, Hashable {
     public let name: String
-    public let stages: [Workflow.Stage]
+    public let nodes: [Workflow.Node]
     public let edges: [Workflow.Edge]
 }
 

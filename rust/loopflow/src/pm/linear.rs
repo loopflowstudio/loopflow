@@ -854,9 +854,9 @@ impl LinearClient {
         id: Option<&str>,
     ) -> PmResult<String> {
         content.validate()?;
-        if content.flow.trim().is_empty() {
+        if content.workflow.trim().is_empty() {
             return Err(PmError::Message(
-                "new Projects require a nonempty flow: line".into(),
+                "new Projects require a nonempty workflow: line".into(),
             ));
         }
         let team_id = self.require_team_id()?;
@@ -1250,8 +1250,7 @@ impl LinearClient {
         self.project_node(project_id).await?.into_pm_project()
     }
 
-    // Only migration-marked Projects reach this path. Ordinary parsing accepts
-    // flow: exclusively; no provider mutation occurs during read projection.
+    // Only migration-marked Projects reach this path. Ordinary parsing     // workflow: and the earlier flow: line; no provider mutation occurs during read projection.
     pub(crate) async fn adopt_project(
         &self,
         project_id: &str,
@@ -1275,8 +1274,11 @@ impl LinearClient {
         }
         let mut project = node.into_pm_project()?;
         crate::pm::validate_project_ownership("adoption", initiative, Some(team), &project)?;
-        if project.flow.trim().is_empty() && project.status == crate::pm::ProjectStatus::Started {
-            return Err(PmError::Message(format!("Project {project_id} has no recorded default Flow; set flow: in Linear before adoption")));
+        if project.workflow.trim().is_empty() && project.status == crate::pm::ProjectStatus::Started
+        {
+            return Err(PmError::Message(format!(
+                "Project {project_id} names no workflow; set workflow: in Linear before adoption"
+            )));
         }
         if apply && (converted != original || promote) {
             let mut input = json!({"content":converted});
@@ -2150,7 +2152,7 @@ struct ProjectNode {
 }
 
 fn convert_legacy_project_content(content: &str) -> PmResult<String> {
-    let current = parse_project_content(content)?.flow;
+    let current = parse_project_content(content)?.workflow;
     let mut section = false;
     let mut legacy: Option<String> = None;
     let mut converted = String::new();
@@ -2167,10 +2169,10 @@ fn convert_legacy_project_content(content: &str) -> PmResult<String> {
             if (!current.is_empty() && current != value)
                 || legacy.as_deref().is_some_and(|previous| previous != value)
             {
-                return Err(PmError::Message("Project has conflicting legacy and current default Flows; resolve its content in Linear".into()));
+                return Err(PmError::Message("Project has conflicting legacy and current workflows; resolve its content in Linear".into()));
             }
             if current.is_empty() && legacy.is_none() {
-                converted.push_str(&line.replacen("recommended:", "flow:", 1));
+                converted.push_str(&line.replacen("recommended:", "workflow:", 1));
             }
             legacy = Some(value.to_owned());
         } else {
@@ -2230,7 +2232,7 @@ impl ProjectNode {
             summary: self.description.unwrap_or_default(),
 
             metric_targets: content.metric_targets,
-            flow: content.flow,
+            workflow: content.workflow,
             // Older rotation archived its predecessor without changing status.
             // Retain that history without presenting it as a current plan.
             status: if self.archived_at.is_some()
@@ -2448,14 +2450,14 @@ mod tests {
         let before =
             "Retain prose.\n\n## Flows\nrecommended: custom\n\n## KRs\n- [ ] Original proof\n";
         let after = convert_legacy_project_content(before).unwrap();
-        assert_eq!(after, before.replace("recommended:", "flow:"));
-        assert_eq!(parse_project_content(&after).unwrap().flow, "custom");
+        assert_eq!(after, before.replace("recommended:", "workflow:"));
+        assert_eq!(parse_project_content(&after).unwrap().workflow, "custom");
         assert_eq!(convert_legacy_project_content(&after).unwrap(), after);
-        assert!(parse_project_content(before).unwrap().flow.is_empty());
-        assert!(
-            convert_legacy_project_content("flow: different\n\n## Flows\nrecommended: custom")
-                .is_err()
-        );
+        assert!(parse_project_content(before).unwrap().workflow.is_empty());
+        assert!(convert_legacy_project_content(
+            "workflow: different\n\n## Flows\nrecommended: custom"
+        )
+        .is_err());
         assert_eq!(
             convert_legacy_project_content("## Notes\nrecommended: prose").unwrap(),
             "## Notes\nrecommended: prose"
@@ -2831,7 +2833,7 @@ mod tests {
                 "Wave Chat",
                 &ProjectContent {
                     metric_targets: Vec::new(),
-                    flow: "feature".into(),
+                    workflow: "feature".into(),
                     krs: vec![PmKr {
                         text: "Replies stream".to_string(),
                         holds: false,
@@ -2874,7 +2876,7 @@ mod tests {
                 "Wave Chat",
                 &ProjectContent {
                     metric_targets: Vec::new(),
-                    flow: "task-design".to_string(),
+                    workflow: "task-design".to_string(),
                     krs: vec![PmKr {
                         text: "Replies survive every restart boundary".to_string(),
                         holds: false,
@@ -2894,7 +2896,7 @@ mod tests {
         assert!(update["variables"]["content"]
             .as_str()
             .expect("content")
-            .contains("flow: task-design"));
+            .contains("workflow: task-design"));
     }
 
     #[tokio::test]

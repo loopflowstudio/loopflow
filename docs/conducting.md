@@ -82,7 +82,7 @@ filters inventory; it cannot opt a new Session out of Task membership.
 Use Session identity to return to a conversation and its native history. A
 successful provider turn, the command's outcome and the Flow's progress can
 differ: the engine can finish after its driver dies, and a finished Flow
-leaves its Task at a workflow stage, waiting on you.
+leaves its Task at a workflow node, waiting on you.
 
 `lf mon show` and `lf replay` retain their historical selectors during the conversion.
 Their current fields and reader limitations are recorded in

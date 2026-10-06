@@ -825,10 +825,18 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         WaveCommand::Place { .. } | WaveCommand::Rename { .. } => {
             loopflow::lf::commands::placement::wave(repo, command)
         }
-        WaveCommand::UpdatePlan { wave, plan, flow } => {
+        WaveCommand::UpdatePlan {
+            wave,
+            plan,
+            workflow,
+        } => {
             let change = match plan {
                 Some(plan) => PlanChange::Replace(serde_json::from_slice(&std::fs::read(plan)?)?),
-                None => PlanChange::Flow(flow.clone().expect("clap requires --plan or --flow")),
+                None => PlanChange::Workflow(
+                    workflow
+                        .clone()
+                        .expect("clap requires --plan or --workflow"),
+                ),
             };
             update_plan(repo, wave.as_deref(), change)?;
             Ok(())
@@ -909,12 +917,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
         TaskCommand::Move {
             issue,
-            stage,
+            node,
             reason,
         } => {
             println!(
                 "{}",
-                loopflow::ops::task::workflow_set(issue, stage, reason.as_deref())?
+                loopflow::ops::task::workflow_set(issue, node, reason.as_deref())?
             );
             Ok(())
         }

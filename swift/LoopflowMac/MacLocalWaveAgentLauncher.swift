@@ -13,7 +13,7 @@ private struct DevelopmentControlConfig: Decodable {
 }
 
 enum LocalWaveAgentLauncher {
-    /// Run a filed Task's default Flow. `lf task run` owns Project lookup,
+    /// Run a filed Task on its workflow. `lf task run` owns Project lookup,
     /// worktree placement and Flow selection; the app does not reproduce them.
     static func runTask(repoPath: String, issue: String) throws {
         try startLf(taskRunArguments(issue: issue), cwd: WaveOrigin.resolve(repoPath))

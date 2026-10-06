@@ -10,9 +10,9 @@ public struct TaskWork: Codable, Sendable, Equatable {
 }
 
 /// A Task's Workflow: the definition it took up, where the Task stands on it,
-/// and how it got there. `start` and `end` are implicit stages.
+/// and how it got there. `start` and `end` are implicit nodes.
 public struct Workflow: Codable, Sendable, Equatable {
-    public struct Stage: Codable, Sendable, Hashable {
+    public struct Node: Codable, Sendable, Hashable {
         public let name: String
         public let skill: String
     }
@@ -23,7 +23,7 @@ public struct Workflow: Codable, Sendable, Equatable {
         public let flow: String?
 
         /// What `lf task run ISSUE <name>` takes to choose it: its Flow, or
-        /// the stage it enters when it runs none.
+        /// the node it enters when it runs none.
         public var launchName: String { flow ?? to }
     }
 
@@ -54,22 +54,22 @@ public struct Workflow: Codable, Sendable, Equatable {
         }
     }
 
-    /// At a stage the Task waits on a person. On an edge its Flow's driver
+    /// At a node the Task waits on a person. On an edge its Flow's driver
     /// Exec carries it; one that no longer runs has stopped and holds the Task.
     public enum Position: Codable, Sendable, Equatable {
-        case stage(String)
+        case node(String)
         case edge(index: Int, execId: String, running: Bool)
 
         enum CodingKeys: String, CodingKey {
-            case kind, stage, edge, running
+            case kind, node, edge, running
             case execId = "exec_id"
         }
 
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             switch try container.decode(String.self, forKey: .kind) {
-            case "stage":
-                self = .stage(try container.decode(String.self, forKey: .stage))
+            case "node":
+                self = .node(try container.decode(String.self, forKey: .node))
             case "edge":
                 self = .edge(
                     index: try container.decode(Int.self, forKey: .edge),
@@ -84,9 +84,9 @@ public struct Workflow: Codable, Sendable, Equatable {
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             switch self {
-            case .stage(let stage):
-                try container.encode("stage", forKey: .kind)
-                try container.encode(stage, forKey: .stage)
+            case .node(let node):
+                try container.encode("node", forKey: .kind)
+                try container.encode(node, forKey: .node)
             case .edge(let index, let execId, let running):
                 try container.encode("edge", forKey: .kind)
                 try container.encode(index, forKey: .edge)
@@ -97,7 +97,7 @@ public struct Workflow: Codable, Sendable, Equatable {
     }
 
     public let name: String
-    public let stages: [Stage]
+    public let nodes: [Node]
     public let edges: [Edge]
     public let position: Position
     /// Edges `lf task run` can choose now, by their place among `edges`.
@@ -117,9 +117,9 @@ public struct Workflow: Codable, Sendable, Equatable {
 }
 
 extension Array where Element == Workflow.Edge {
-    /// Edges leaving `stage`, each with its place among the workflow's edges.
-    public func leaving(_ stage: String) -> [(index: Int, edge: Workflow.Edge)] {
-        enumerated().filter { $0.element.from == stage }.map { ($0.offset, $0.element) }
+    /// Edges leaving `node`, each with its place among the workflow's edges.
+    public func leaving(_ node: String) -> [(index: Int, edge: Workflow.Edge)] {
+        enumerated().filter { $0.element.from == node }.map { ($0.offset, $0.element) }
     }
 }
 

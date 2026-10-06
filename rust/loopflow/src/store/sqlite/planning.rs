@@ -541,7 +541,7 @@ mod tests {
         let wave = WaveId::new();
         let snapshot = json!({"projects":[{
             "id":"project", "slug":"chapter", "name":"Chapter", "summary":"Proof",
-            "metric_targets":[], "flow":"feature", "status":"started", "krs":[],
+            "metric_targets":[], "workflow":"feature", "status":"started", "krs":[],
             "initiative_ids":["initiative"], "team_ids":["team"]
         }],"items":[{
             "id":"issue", "identifier":"FIX-1", "url":null, "name":"Retained title",

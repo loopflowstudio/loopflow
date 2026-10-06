@@ -77,7 +77,7 @@ Each pass reads dated evidence and replies in the invoking conversation. It
 gives every started Task one disposition: moving, acted on and verified,
 waiting on a named person or dependency, paused, or unknown. A started Task
 whose Flow stopped or failed is read and its remaining work run fresh; one at
-a workflow stage waits on you; unstarted backlog is
+a workflow node waits on you; unstarted backlog is
 listed and left for you to select. A no-action result is valid only when every
 started Task already has a disposition. Failed reads and stale provider data remain explicit
 gaps; they cannot justify closing work or treating a Task as idle.
@@ -105,16 +105,16 @@ lf repo new-chapter 2026-10
 ```
 
 A Wave's one In Progress Linear Project holds its current Tasks, KRs, metric
-targets and default Flow. Projects created together share a chapter name, such
+targets and workflow. Projects created together share a chapter name, such
 as `2026-10`. The chapter is that group of Projects; there is no chapter table,
 plan packet or local switch. Current navigation stays Wave → Task. Completed
 Projects retain previous plans and Tasks in Linear.
 
 Create a Planned Project in Linear to prepare the next plan. Rotation reuses the
 Planned Project with the requested name in each Wave, or creates an empty one
-with the predecessor's `flow:`. It never copies checked KRs or metric targets.
+with the predecessor's `workflow:`. It never copies checked KRs or metric targets.
 Every Wave participates, including Waves with no Tasks. A new Wave with no
-Projects starts with `flow: feature`, or uses its explicitly Planned successor.
+Projects starts with `workflow: feature`, or uses its explicitly Planned successor.
 
 The preview lists every successor and Task disposition. Started unfinished Tasks
 keep identity, checkout, PR and captured execution when moved. Proven untouched
@@ -135,30 +135,32 @@ observes the same statuses on `lf refresh <wave>` or its next normal
 planning refresh. Lost responses are reconciled by stable Project and issue IDs.
 Recheck external reassignments after previewing.
 
-Set the Project's Task default, a workflow or a Flow, in its content:
+Name the workflow the Project's Tasks take up in its content:
 
 ```markdown
-flow: feature
+workflow: feature
 
 ## KRs
 
 - [ ] A new contributor ships a change without an undocumented dependency.
 ```
 
-`lf task run <task>` uses that default unless an argument selects another.
-`lf update-plan --wave <wave> --flow NAME` rewrites only that line; it does not
-check that NAME loads, and `lf flow list` shows a default that names nothing
-as invalid. Existing
+A Task with no workflow takes that one up on its first `lf task run <task>`;
+naming another takes that up instead, and the Task keeps it.
+`lf update-plan --wave <wave> --workflow NAME` rewrites only that line; it does not
+check that NAME loads. `lf task run` refuses a name that is not a workflow
+until a Flow or workflow is named. A Project written with the earlier
+`flow:` line reads the same and is rewritten by the next plan update. Existing
 Projects observed before the status-model upgrade retain their identity and
-custom default Flow. The first explicit `lf refresh` or chapter rotation
-converts their old `recommended:` line to `flow:` and marks the recorded current
+custom workflow. The first explicit `lf refresh` or chapter rotation
+converts their old `recommended:` line to `workflow:` and marks the recorded current
 Project In Progress. Until then, planning reads project that same conversion
 without changing Linear. Deliberately Planned successors stay Planned; archived
 predecessors stay historical even if their old status says In Progress.
 
 If no receipt identifies the old current Project, adoption requires a single
 unambiguous candidate. Resolve competing plans in Linear; names and dates never
-break the tie. A missing default stays missing: set `flow:` before rotation.
+break the tie. A missing workflow stays missing: set `workflow:` before rotation.
 Unobserved backlog on another Home is unresolved, so a missing local Task row
 never establishes that work should be canceled.
 
@@ -222,7 +224,7 @@ observations into the local store.
 Set targets in the chapter plan, not the instrument contract:
 
 ```json
-{"metric_targets":[{"metric_id":"task-loop-trust","target":{"kind":"at_least","value":1}}],"flow":"feature","krs":[]}
+{"metric_targets":[{"metric_id":"task-loop-trust","target":{"kind":"at_least","value":1}}],"workflow":"feature","krs":[]}
 ```
 
 Apply this complete Wave plan with
@@ -331,19 +333,19 @@ See [Homes and processes](architecture/homes.md) and
 ```bash
 lf wave status infra --json
 lf update-plan --wave infra --plan plan.json
-lf update-plan --wave infra --flow research    # only the Task default
+lf update-plan --wave infra --workflow research    # only the workflow
 lf flow customize research                     # .lf/workflows/research.yaml, written from the builtin
 ```
 
 `plan.json` contains the complete current plan:
 
 ```json
-{"metric_targets":[],"flow":"task-design","krs":[{"text":"A new contributor ships a change using the architecture guide without an undocumented dependency.","holds":false}]}
+{"metric_targets":[],"workflow":"feature","krs":[{"text":"A new contributor ships a change using the architecture guide without an undocumented dependency.","holds":false}]}
 ```
 
 The Wave objective names who benefits and what improves. Chapter KRs prove observable outcomes
 across a stated window. Update the current plan explicitly; a new chapter copies only
-the default Flow, retaining any explicitly prepared successor plan.
+the workflow, retaining any explicitly prepared successor plan.
 
 ## Linear
 
@@ -384,12 +386,11 @@ lf task run INF-125 incident
 ```
 
 Task Work advances through one active remote branch and PR to `main`. Its
-Project's `flow:` supplies the default. When that names a workflow (`feature`,
-`code`, `research`, or a file in `.lf/workflows/`), the Task moves through its
-stages: each `lf task run` takes one edge leaving the current stage and runs
-that edge's Flow, and at a stage the Task waits on you in its conversation.
-See [workflows](authoring.md#workflows). When the default is a plain Flow,
-naming a Flow selects any other template.
+Project's `workflow:` (`feature`, `code`, `research`, or a file in
+`.lf/workflows/`) is the one it takes up. The Task moves through its
+nodes: each `lf task run` takes one edge leaving the current node and runs
+that edge's Flow, and at a node the Task waits on you in its conversation.
+See [workflows](authoring.md#workflows).
 Each launch starts a fresh Flow: one driver process holding the expanded graph
 and the step processes it starts. Every Flow remains history and none is privileged. A finished Flow
 leaves Task Work open until an explicit completion or delivery operation

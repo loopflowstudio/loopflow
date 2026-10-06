@@ -9,13 +9,13 @@ first, then the engineering words it borrows.
 |---|---|
 | **Skill** | One step: instructions for the AI, written as a text file in `.lf/skills/`. |
 | **Flow** | Steps in order, written as a file in `.lf/flows/`. |
-| **Workflow** | A Task's stages, where you take part in its conversation, joined by the flows that run between them. Written as a file in `.lf/workflows/`. |
+| **Workflow** | A Task's nodes, where you take part in its conversation, joined by the flows that run between them. Written as a file in `.lf/workflows/`. |
 | **Loopflow** | A flow that can go back and try again. Exactly: a flow with at least one backward edge. |
 | **Deciding step** | The step that chooses between moving on and going back. |
 | **Task** | One piece of work with a finish line. |
 | **Wave** | A goal Loopflow keeps working on. It has a written objective, a memory, and a schedule. |
 | **Chapter** | The shared name of every Wave's In Progress Linear Project; it has no separate stored object. |
-| **Project** | One Wave's Linear plan: status, Tasks, KRs, targets and Task default, a workflow or Flow. |
+| **Project** | One Wave's Linear plan: status, Tasks, KRs, targets and the workflow its Tasks take up. |
 | **KR** | Key result. A result you can check, stated before the work starts. |
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
 | **AgentSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |

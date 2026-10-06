@@ -1,5 +1,5 @@
 # Build and land. The demo happens in the Task conversation.
-stages:
+nodes:
   demo: demo
 edges:
   - { from: start, to: demo, flow: pursue }

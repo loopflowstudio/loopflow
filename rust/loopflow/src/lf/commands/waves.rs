@@ -390,7 +390,7 @@ pub struct ProjectSummary {
     pub work_id: Option<String>,
     pub slug: String,
     pub name: String,
-    pub flow: String,
+    pub workflow: String,
     pub status: crate::pm::ProjectStatus,
     pub metric_targets: Vec<crate::pm::ChapterMetricTarget>,
     pub krs: Vec<crate::pm::PmKr>,
@@ -415,7 +415,7 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
                 id: project.id,
                 slug: project.slug,
                 name: project.name,
-                flow: project.flow,
+                workflow: project.workflow,
                 status: project.status,
                 metric_targets: project.metric_targets,
                 krs: project.krs,
@@ -436,8 +436,8 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
                 .filter(|project| project.status == crate::pm::ProjectStatus::Started)
             {
                 println!(
-                    "  project   {} ({}) · flow {}",
-                    project.name, project.id, project.flow
+                    "  project   {} ({}) · workflow {}",
+                    project.name, project.id, project.workflow
                 );
                 for kr in &project.krs {
                     println!("  [{}] {}", if kr.holds { "x" } else { " " }, kr.text);
@@ -1012,7 +1012,7 @@ async fn snapshot_tasks(
             assignee: None,
         };
         let recommended = current_plan
-            .map_or("feature", |plan| plan.flow.as_str())
+            .map_or("feature", |plan| plan.workflow.as_str())
             .to_string();
         details.push(
             snapshot_task_detail(
@@ -1059,7 +1059,7 @@ fn recommended_flow(projects: &[crate::pm::PmProject], project_id: Option<&str>)
     projects
         .iter()
         .find(|project| Some(project.id.as_str()) == project_id)
-        .map_or("feature", |project| project.flow.as_str())
+        .map_or("feature", |project| project.workflow.as_str())
         .to_string()
 }
 
@@ -2297,7 +2297,7 @@ mod tests {
                     synced_at: 2,
                     snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                     "id":format!("{repository}-{name}"), "slug":name, "name":name,
-                    "summary":"", "metric_targets":[], "flow":"feature", "status":"started",
+                    "summary":"", "metric_targets":[], "workflow":"feature", "status":"started",
                     "krs":[{"text":"Retained planning is readable", "holds":false}],
                     "initiative_ids":["initiative"], "team_ids":["team"]
                 }], "items":[]}))
@@ -2363,7 +2363,7 @@ mod tests {
             synced_at: 1,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"current", "slug":"current", "name":"Current chapter", "summary":"",
-                "metric_targets":[], "flow":"feature", "status":"started", "krs":[],
+                "metric_targets":[], "workflow":"feature", "status":"started", "krs":[],
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":items}))
             .unwrap(),
@@ -2448,7 +2448,7 @@ mod tests {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative".into(), synced_at: 2,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"first", "slug":"first", "name":"First chapter", "summary":"",
-                "metric_targets":[], "flow":"feature", "status":"started", "krs":[{"text":"Edited proof", "holds":false}],
+                "metric_targets":[], "workflow":"feature", "status":"started", "krs":[{"text":"Edited proof", "holds":false}],
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]})).unwrap(),
         }).await.unwrap();

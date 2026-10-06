@@ -6,7 +6,7 @@ Open a new chapter from user direction. A chapter is the shared name of every
 Wave's one In Progress Linear Project. Planned Projects hold future plans;
 Completed Projects retain past plans and Tasks. Existing Project identities
 survive. The Wave owns its objective, memory and instruments; Project content
-owns metric targets, KRs and the required `flow:` default. There is no separate
+owns metric targets, KRs and the required `workflow:`. There is no separate
 Chapter record or local planning directory.
 
 Started unfinished Tasks move with identity, Started timestamp, worktree, PR
@@ -70,9 +70,9 @@ no provider writer is available. Never use `wave update-plan` to write a future
 plan into the predecessor.
 
 Without a prepared successor, rotation creates an empty plan carrying only the
-predecessor's Flow; a Wave with no Projects starts with `feature`. An existing
-Planned successor retains its authored Flow, KRs and targets. Missing default
-Flow or competing current Projects require explicit resolution in Linear.
+predecessor's workflow; a Wave with no Projects starts with `feature`. An existing
+Planned successor retains its authored workflow, KRs and targets. A missing
+workflow or competing current Projects require explicit resolution in Linear.
 Refresh the repository preview after preparation, then apply the accepted name:
 
 ```bash
@@ -99,7 +99,7 @@ lf update-plan --wave <wave> --plan <plan.json>
 The file replaces the complete current Project content:
 
 ```json
-{"metric_targets":[],"flow":"feature","krs":[{"text":"Observable proof","holds":false}]}
+{"metric_targets":[],"workflow":"feature","krs":[{"text":"Observable proof","holds":false}]}
 ```
 
 `flow` must be a nonempty string. Each metric target names `metric_id` and a

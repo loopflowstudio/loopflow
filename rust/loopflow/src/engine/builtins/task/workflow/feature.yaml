@@ -1,6 +1,6 @@
 # Design, build and land. Design review and the demo happen in the Task
-# conversation; each edge is the Flow that carries the Task to the next stage.
-stages:
+# conversation; each edge is the Flow that carries the Task to the next node.
+nodes:
   design: review-design
   demo: demo
 edges:

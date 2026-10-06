@@ -22,13 +22,13 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
     public let workId: String?
     public let slug: String
     public let name: String
-    public let flow: String
+    public let workflow: String
     public let status: ProjectStatus
     public let metricTargets: [ChapterMetricTarget]
     public let krs: [PlanningKeyResult]
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, flow, status, krs
+        case id, slug, name, workflow, status, krs
         case workId = "work_id"
         case metricTargets = "metric_targets"
     }

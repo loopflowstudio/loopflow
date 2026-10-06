@@ -189,19 +189,25 @@ website as rendered.
     arrives once with three Flow execs under one Task run). Not renamed
     yet: surfaces still say "Flow run"; slice 10's renaming owns it. Demo
     item: a real provider failure retried.
-10. **Nodes and edges; Projects have workflows.** Jack, October 6: "it is ok for
-    now to require that each edge is a unique step (flow/skill)": an edge is
-    named by what it runs, edges leaving one node run different things, and
-    edges get no names of their own (slice 9's were removed when it was
-    compressed). First, wherever slice 9
-    left "stage" or "way out", rename to node and edge (Jack, quoted under
-    "Name" in [task-workflow.md](task-workflow.md)), definitions' `stages:`
-    key included. Then: Jack, October 6, quoted under "Projects" in
-    [task-workflow.md](task-workflow.md). Rename the Project's default Flow to
-    its workflow across the plan field, `lf wave update-plan`, status, wire
-    shapes, Desktop's Wave page and docs; a Task's own workflow wins. Done
-    when a Task with none takes its Project's, a Task naming one keeps it, and
-    no surface says "default Flow". *Not done.*
+10. **Nodes and edges; Projects have workflows.** — **built, not yet
+    compressed or realigned.** Jack, October 6: "it is ok for now to require
+    that each edge is a unique step (flow/skill)"; "lets use Edge and node
+    instead of Stage and Way OUt"; "Then projects have workflows instead of
+    default" (both under "Name" and "Projects" in
+    [task-workflow.md](task-workflow.md)). Built: node and edge in
+    definitions (`nodes:`), types, store columns, wire, status text, skills,
+    Desktop and docs, with no alias; "Flow exec" for one FlowExec record;
+    the Project's `workflow` across the plan line, `lf wave update-plan
+    --workflow`, status, wire, Desktop's Wave page and docs. A Task with no
+    Workflow takes up its Project's; one that named its own keeps it.
+    Done-when check, October 6: `cargo test -p loopflow --test
+    task_flow_launch_tests` 8 passed (Project's workflow taken up; a named
+    one kept; a Project naming a plain Flow refused); `--lib store::
+    pm:: ops::chapter` and `--test dto_fixtures` pass; Swift
+    `DesktopHeadlessTests|DTOFixtureTests|PodiumModelTests` 48 passed.
+    Choices: [questions.md](questions.md). Demo items: the Wave page's
+    Workflow section on screen; a live Project's `flow:` line read and
+    rewritten.
 
 10a. **A Task's state comes from its Workflow.** Jack, October 6: "no
     separate Task is ready state; that is derived from where it is in the

@@ -236,7 +236,7 @@ struct FlowCatalogInspector: View {
             if let graph = entry?.graph, let template = entry?.template {
                 FlowTemplateView(graph: graph, template: template, navigation: navigation)
             } else if let workflow = entry?.workflow {
-                WorkflowGraphRow(stages: workflow.stages, edges: workflow.edges)
+                WorkflowGraphRow(nodes: workflow.nodes, edges: workflow.edges)
             } else { Text(entry?.unavailable ?? "Refresh the Flow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)

@@ -7,9 +7,9 @@ This is the governing document of the loopflow codebase. Contributors and agents
 **Wave planning:**
 - Wave = durable objective, responsibility, memory, cadence, budget, chat, and metric instruments
 - Chapter = shared name of every Wave's In Progress Linear Project; no Chapter table
-- Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the default Flow
+- Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the workflow its Tasks take up
 - A Task's work is every Session, Flow and Exec in its checkout, plus explicit binds; no Flow is selected over another
-- Workflow = a Task's stages (a person, in its conversation) joined by edges (Flows), with its stored position; `lf task run` chooses an edge, `lf task move` sets a stage
+- Workflow = a Task's nodes (a person, in its conversation) joined by edges (Flows), with its stored position; `lf task run` chooses an edge, `lf task move` sets a node
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
@@ -200,29 +200,29 @@ The instinct on a bug is often a new check. Invert it: can the system adapt inst
 A Wave's objective, memory, cadence, budget and instruments survive planning
 boundaries. A Chapter is the shared name of each Wave's one In Progress Linear
 Project. Linear Project status owns current/planned/completed history; there is
-no Chapter table or plan packet. Project owns Tasks, KRs, targets and its `flow:`
-default, not another objective, memory or operator.
+no Chapter table or plan packet. Project owns Tasks, KRs, targets and its
+`workflow:`, not another objective, memory or operator.
 
 A Task's work includes every Session, Flow and Exec associated with
 its checkout, plus explicit binds. Rust owns this shared association for status,
 Desktop navigation, recovery and completion. Membership grants no process or
 Flow authority and never rewrites historical usage. Every Flow naming the Task
 is equally its work; a stopped Flow is history its caller inspects, never a
-position to resume. The Project's `flow:` supplies the default for a fresh
-launch and may name a Flow or a workflow; explicit selection is allowed.
+position to resume. A Task with no Workflow takes up its Project's `workflow:`
+on its first `lf task run`; one that named its own keeps it.
 A Workflow is the Task's outer shape: the workflow definition it took up,
-whose stages are where a person takes part in the Task conversation and whose
+whose nodes are where a person takes part in the Task conversation and whose
 edges each run one Flow, plus the Task's stored position on it. The graph is
 fixed when taken up. `lf task run` chooses an edge, starts its Flow as a child
 `lf run`, again when a Flow exec fails, and writes the arrival when one
 succeeds; a stopped Flow leaves the Task on its edge;
-`lf task move` sets a stage. Each move is appended to the Task's history. It
-executes nothing, and no command approves or completes a stage.
+`lf task move` sets a node. Each move is appended to the Task's history. It
+executes nothing, and no command approves or completes a node.
 Taskless execution uses the same driver. A Flow is one driver Exec and the step
 Execs it starts; its id is the driver Exec id. The driver holds the cursor and
 return counts in memory and writes FlowExec, append-only: the Flow's name and
 compiled graph at launch, then each step's Exec, node and iteration counts.
-Every Flow run gets one; none is primary for a Task. A step is the plain command
+Every Flow exec gets one; none is primary for a Task. A step is the plain command
 (`lf -b skill <name> [message]` or the operation's own) and neither reads nor
 writes it. Running, finished and results are read from Execs, never stored
 twice. Template composition expands the graph; loop passes are node/iteration

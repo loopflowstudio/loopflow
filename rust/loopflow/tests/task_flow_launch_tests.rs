@@ -137,16 +137,14 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             serde_json::json!(["sync", "--plan"])
         );
         assert!(recorded.iter().all(|(_, steps)| *steps == recorded[0].1));
-        // With no Flow named, the entry runs the Project's.
+        // The Project names a repository Flow, which is not a workflow: a
+        // run that names nothing is refused and starts no Flow.
         let output = run(&["-b", "task", "run", "INF-123"]);
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let recorded = support::recorded_flows(home.path());
-        assert_eq!(recorded.len(), 4);
-        assert_eq!(recorded[3].1[0]["flow"], "feature");
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("which is not a workflow"), "{error}");
+        assert!(error.contains("lf wave update-plan --workflow"), "{error}");
+        assert_eq!(support::recorded_flows(home.path()).len(), 3);
         let status = run(&["task", "status", "INF-123", "--json"]);
         assert!(
             status.status.success(),
@@ -159,15 +157,14 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
                 .as_array()
                 .unwrap()
                 .len(),
-            4
+            3
         );
         assert!(status["execution"]["work"]["flows"]
             .as_array()
             .unwrap()
             .iter()
             .all(|flow| flow["state"] == "completed"));
-        // The Project's default names a repository Flow, so the Task took up
-        // no workflow and ran every Flow ad hoc.
+        // The Task took up no workflow and ran every named Flow ad hoc.
         assert!(status["execution"]["work"]["workflow"].is_null());
         let task = runtime
             .block_on(registered.store.get_task(&registered.task.id))
@@ -198,7 +195,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
                 "{removed:?}"
             );
         }
-        assert_eq!(support::recorded_flows(home.path()).len(), 4);
+        assert_eq!(support::recorded_flows(home.path()).len(), 3);
     }
 }
 
@@ -234,17 +231,22 @@ impl WorkflowTask {
             // Another round succeeds; accepting fails until `late` exists.
             (
                 ".lf/workflows/gated.yaml",
-                "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: review, flow: proof}\n  - {from: review, to: end, flow: gate}\n",
+                "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: review, flow: proof}\n  - {from: review, to: end, flow: gate}\n",
+            ),
+            // The Project's workflow, `feature`, as this repository defines it.
+            (
+                ".lf/workflows/feature.yaml",
+                "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: end}\n",
             ),
             // No PR: the last edge runs nothing.
             (
                 ".lf/workflows/findings.yaml",
-                "stages:\n  findings: research\nedges:\n  - {from: start, to: findings, flow: proof}\n  - {from: findings, to: end}\n",
+                "nodes:\n  findings: research\nedges:\n  - {from: start, to: findings, flow: proof}\n  - {from: findings, to: end}\n",
             ),
-            // Several PRs: the landing edge returns to its stage.
+            // Several PRs: the landing edge returns to its node.
             (
                 ".lf/workflows/rounds.yaml",
-                "stages:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: review, flow: land-proof}\n  - {from: review, to: end, flow: broken}\n",
+                "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: review, flow: land-proof}\n  - {from: review, to: end, flow: broken}\n",
             ),
         ] {
             let path = repo.path().join(path);
@@ -285,8 +287,8 @@ impl WorkflowTask {
     }
 }
 
-fn at(stage: &str) -> serde_json::Value {
-    serde_json::json!({"kind": "stage", "stage": stage})
+fn at(node: &str) -> serde_json::Value {
+    serde_json::json!({"kind": "node", "node": node})
 }
 
 /// Each move's kind and the edge it names, oldest first.
@@ -310,15 +312,34 @@ fn refusal(output: std::process::Output) -> String {
 }
 
 #[test]
+fn a_task_takes_up_its_projects_workflow_and_keeps_one_it_named() {
+    // Nothing named, no Workflow yet: the Project's.
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123"]);
+    let workflow = task.workflow();
+    assert_eq!(workflow["name"], "feature");
+    assert_eq!(workflow["position"], at("review"));
+    drop(task);
+
+    // A Task that named its own keeps it when later runs name nothing.
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
+    task.ok(&["-b", "task", "run", "INF-123"]);
+    let workflow = task.workflow();
+    assert_eq!(workflow["name"], "findings");
+    assert_eq!(workflow["position"], at("end"));
+}
+
+#[test]
 fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
     let task = WorkflowTask::new();
     task.ok(&["-b", "task", "run", "INF-123", "findings"]);
     let workflow = task.workflow();
     assert_eq!(workflow["name"], "findings");
-    assert_eq!(workflow["stages"][0]["skill"], "research");
+    assert_eq!(workflow["nodes"][0]["skill"], "research");
     assert_eq!(workflow["position"], at("findings"));
     assert_eq!(workflow["outgoing"], serde_json::json!([1]));
-    // The edge's Flow is an ordinary Flow run; its driver chose the edge and,
+    // The edge's Flow is an ordinary Flow exec; its driver chose the edge and,
     // having succeeded, wrote the arrival.
     let flows = support::recorded_flows(task.home.path());
     assert_eq!(flows.len(), 1);
@@ -348,7 +369,7 @@ fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
 }
 
 #[test]
-fn a_landing_edge_that_returns_to_its_stage_can_be_taken_again() {
+fn a_landing_edge_that_returns_to_its_node_can_be_taken_again() {
     let task = WorkflowTask::new();
     task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
     for _ in 0..2 {
@@ -406,7 +427,7 @@ fn a_landing_that_settles_later_is_recorded_by_moving_the_task() {
     assert_eq!(set["note"], "merged by hand");
     assert_eq!(set["actor"], "person");
     assert_eq!(set["session_id"], serde_json::Value::Null);
-    // One Flow exec reached the stage; the failing edge was attempted three times.
+    // One Flow exec reached the node; the failing edge was attempted three times.
     assert_eq!(support::recorded_flows(task.home.path()).len(), 4);
     // Taking up another workflow starts over and keeps the history.
     let before = workflow["history"].as_array().unwrap().len();
@@ -460,7 +481,7 @@ fn a_stopped_edge_is_chosen_again_and_the_task_can_go_back() {
         ["took_up", "chose", "arrived", "chose", "chose", "arrived", "set", "chose", "arrived"]
     );
     let error = refusal(task.run(&["task", "move", "INF-123", "nowhere"]));
-    assert!(error.contains("Stages: start, review, end"), "{error}");
+    assert!(error.contains("Nodes: start, review, end"), "{error}");
 }
 
 #[test]

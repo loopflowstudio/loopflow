@@ -37,7 +37,7 @@
         ],
         "metric_targets": [],
         "revision": "2026-09-29T11:00:00Z",
-        "flow": "feature",
+        "workflow": "feature",
         "status": "started"
       },
       "observed_at": 1790683200
@@ -85,7 +85,7 @@
         ],
         "metric_targets": [],
         "revision": "2026-09-29T11:00:00Z",
-        "flow": "feature",
+        "workflow": "feature",
         "status": "started"
       },
       "observed_at": 1790683200
@@ -140,7 +140,7 @@
         ],
         "metric_targets": [],
         "revision": "2026-09-29T11:00:00Z",
-        "flow": "feature",
+        "workflow": "feature",
         "status": "started"
       },
       "observed_at": 1790683200
@@ -188,7 +188,7 @@
         ],
         "metric_targets": [],
         "revision": "2026-09-29T11:00:00Z",
-        "flow": "feature",
+        "workflow": "feature",
         "status": "started"
       },
       "observed_at": 1790683200
@@ -236,7 +236,7 @@
         ],
         "metric_targets": [],
         "revision": "2026-09-29T11:00:00Z",
-        "flow": "feature",
+        "workflow": "feature",
         "status": "started"
       },
       "observed_at": 1790683200

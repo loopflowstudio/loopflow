@@ -1718,25 +1718,25 @@ const PROJECT_INSERT: &str = "INSERT INTO projects (
     id, wave_id, external_project_id, project_slug, project_name,
     project_prompt_context, pm_snapshot_synced_at,
     abandon_requested_at, abandon_reason,
-    created_at, updated_at, iteration, flow, status
+    created_at, updated_at, iteration, workflow, status
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
 )";
 const PROJECT_COLUMNS: &str = "SELECT
     id, external_project_id, project_slug, project_name, project_prompt_context,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at, iteration, flow, status
+    created_at, updated_at, iteration, workflow, status
     FROM projects";
 pub(super) const PROJECT_SELECT: &str = "SELECT
     id, external_project_id, project_slug, project_name, project_prompt_context,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at, iteration, flow, status
+    created_at, updated_at, iteration, workflow, status
     FROM projects WHERE id=?1";
 const PROJECT_FACT_UPDATE: &str = "UPDATE projects SET
     wave_id=?2, external_project_id=?3, project_slug=?4, project_name=?5,
     project_prompt_context=?6, pm_snapshot_synced_at=?7,
     abandon_requested_at=?8, abandon_reason=?9,
-    created_at=?10, updated_at=?11, flow=?12, status=?13
+    created_at=?10, updated_at=?11, workflow=?12, status=?13
     WHERE id=?1";
 fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
     vec![
@@ -1762,7 +1762,7 @@ fn project_params(project: &Project) -> Vec<Box<dyn ToSql>> {
         Box::new(project.created_at.unix_timestamp()),
         Box::new(project.updated_at.unix_timestamp()),
         Box::new(project.iteration),
-        Box::new(project.plan.flow.clone()),
+        Box::new(project.plan.workflow.clone()),
         Box::new(project.plan.status.as_str().to_string()),
     ]
 }
@@ -1792,7 +1792,7 @@ pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proje
             name: row.get(3)?,
             prompt_context: row.get(4)?,
             pm_snapshot_synced_at: row.get(6)?,
-            flow: row.get(12)?,
+            workflow: row.get(12)?,
             status: serde_json::from_value(serde_json::Value::String(row.get(13)?))
                 .map_err(|error| invalid_column(13, error))?,
         },

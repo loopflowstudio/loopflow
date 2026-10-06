@@ -152,7 +152,7 @@ struct PodiumModelTests {
         var historical = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("wave_detail.json"))) as? [String: Any])
         historical["projects"] = ["state": "ok", "truncated": false, "items": [[
             "id": "old-plan", "work_id": NSNull(), "slug": "old", "name": "Previous",
-            "flow": "feature", "status": "completed", "metric_targets": [], "krs": []
+            "workflow": "feature", "status": "completed", "metric_targets": [], "krs": []
         ]]]
         let reply = try JSONSerialization.data(withJSONObject: historical)
         await deferred.release(try #require(String(data: reply, encoding: .utf8)))

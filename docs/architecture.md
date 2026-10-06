@@ -187,7 +187,7 @@ ledger.
 Repository
   `-- Wave                    enduring objective, memory and cadence
         `-- Linear Project    status + shared chapter name + Flow + KRs
-              `-- Task        identity, worktree, PR and every Flow run for it
+              `-- Task        identity, worktree, PR and every Flow exec for it
 
 Exec                          one actual lf process; immutable causal parent
 AgentSession                  one conversation; nullable current driver Exec
@@ -205,7 +205,7 @@ Flow                          one driver Exec; cursor in its memory, graph in Fl
 | Running Flow | One driver process and the steps it starts, including taskless execution | The driver Exec and its child step Execs in `execs` |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and Linear Initiative membership |
 | Chapter | Shared name of each Wave's In Progress Project | Linear Project statuses; no Chapter row or packet |
-| Project | A Wave's plan, KRs, targets and default Flow | Linear Project and its synchronized `projects` row |
+| Project | A Wave's plan, KRs, targets and workflow | Linear Project and its synchronized `projects` row |
 | Task | A concrete change, investigation or document | `tasks`, Linear Issue, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Home | A machine's store, credentials and exact process authority | Home identity and observed route |

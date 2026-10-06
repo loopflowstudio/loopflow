@@ -36,12 +36,12 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    launch competing implementation when existing code has no supported handoff.
 
 2. **Choose the Flow.** A Task on a workflow reports it as
-   `execution.work.workflow` in status: stages where a person takes part,
+   `execution.work.workflow` in status: nodes where a person takes part,
    joined by edges that each run one Flow. On an edge, its Flow is running:
-   leave it. At a stage its last edge reached, the Task waits on a person in
-   its conversation; say which stage and which edges leave it. At a stage
+   leave it. At a node its last edge reached, the Task waits on a person in
+   its conversation; say which node and which edges leave it. At a node
    because the last edge stopped or failed, that edge is the remaining work.
-   Only an edge leaving the current stage moves the Task:
+   Only an edge leaving the current node moves the Task:
    `lf task run <issue>` takes the only one or names them,
    `lf task run <issue> <flow>` picks one, `lf task run <issue> end` takes an
    edge that runs nothing. `lf --task <issue> run <flow>` runs a Flow without
@@ -49,9 +49,9 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    Leave a Flow with a live driver running. A stopped
    Flow is history: read what it finished and which effects it recorded before
    choosing what to launch. Read the owning Wave's status and current Project's
-   `flow:` default, then inspect the actual
+   `workflow:`, then inspect the actual
    installed catalog with `lf list` and `lf help <flow>`. Honor an explicit Flow
-   choice; otherwise use the Project default unless the design and execution
+   choice; otherwise use the Project's workflow unless the design and execution
    evidence call for another entry point. For example, an accepted design with
    implementation remaining can use `pursue`; unresolved design starts with
    `task-design` and its review in the Task conversation. Flows run autonomous

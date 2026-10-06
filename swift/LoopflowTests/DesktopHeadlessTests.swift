@@ -38,7 +38,7 @@ struct DesktopHeadlessTests {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
         }
 
-        // Any Flow run opens to its launched graph, where it stands and every step it started.
+        // Any Flow exec opens to its launched graph, where it stands and every step it started.
         let flow = try #require(work.flows.first)
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "flow-run-status-\(flow.id)")
@@ -55,7 +55,7 @@ struct DesktopHeadlessTests {
         #expect(detail.progress.current == 1)
     }
 
-    @Test("A Wave's default draws its workflow, is set through lf, and keeps an invalid file visible")
+    @Test("A Project's workflow is drawn, is set through lf, and keeps an invalid file visible")
     func waveDefault() async throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
@@ -72,31 +72,31 @@ struct DesktopHeadlessTests {
             return "{}"
         })
         await model.loadFlowCatalog()
-        func view(_ name: String) -> WaveDefaultFlowView { WaveDefaultFlowView(model: model, wave: wave, name: name) }
+        func view(_ name: String) -> WaveWorkflowView { WaveWorkflowView(model: model, wave: wave, name: name) }
 
         // A builtin workflow is drawn before any Task has run it, and editing it is an explicit Customize.
         let builtin = view("code")
-        _ = try builtin.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-stage-demo")
-        #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-default-source").text().string() == "builtin workflow")
-        #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-default-edit").button().labelView().text().string() == "Customize")
+        _ = try builtin.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
+        #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-source").text().string() == "builtin workflow")
+        #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-edit").button().labelView().text().string() == "Customize")
         let entry = try #require(model.flowCatalog.value?.named("code"))
         #expect(await model.definitionSource(entry, wave: wave)?.path == "/repo/.lf/workflows/code.yaml")
 
         // An invalid repository file stays listed with its reason and can still be opened.
         let invalid = view("proof")
-        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-default-invalid").text().string().contains("unreachable"))
-        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-default-source").text().string() == ".lf/workflows/proof.yaml")
-        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-default-edit").button().labelView().text().string() == "Edit")
+        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-invalid").text().string().contains("unreachable"))
+        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-source").text().string() == ".lf/workflows/proof.yaml")
+        #expect(try invalid.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-edit").button().labelView().text().string() == "Edit")
 
-        // Setting the default changes only the Flow line; a refusal is shown on the Wave.
-        await model.setDefaultFlow("code", wave: wave)
-        #expect(await calls.calls.contains(["wave", "update-plan", "--wave", wave.name, "--flow", "code"]))
-        #expect(model.defaultFlowErrors[wave.id] == nil)
-        await model.setDefaultFlow("broken", wave: wave)
-        #expect(try view("code").inspect().find(viewWithAccessibilityIdentifier: "wave-default-error").text().string() == "broken does not load")
+        // Setting the workflow changes only that line; a refusal is shown on the Wave.
+        await model.setWorkflow("code", wave: wave)
+        #expect(await calls.calls.contains(["wave", "update-plan", "--wave", wave.name, "--workflow", "code"]))
+        #expect(model.workflowErrors[wave.id] == nil)
+        await model.setWorkflow("broken", wave: wave)
+        #expect(try view("code").inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-error").text().string() == "broken does not load")
     }
 
-    @Test("A Task's Workflow shows its running edge, offers a stopped edge again, and moves by choice or by stage")
+    @Test("A Task's Workflow shows its running edge, offers a stopped edge again, and moves by choice or by node")
     func taskWorkflow() async throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
@@ -138,7 +138,7 @@ struct DesktopHeadlessTests {
         #expect(try !stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run-1").button().isDisabled())
 
         // At `demo` the only edge runs nothing and is chosen as `end`.
-        let waiting = try view(position: ["kind": "stage", "stage": "demo"], outgoing: [2])
+        let waiting = try view(position: ["kind": "node", "node": "demo"], outgoing: [2])
         #expect(try position(waiting) == "Waiting on you at demo · demo")
         let accept = try waiting.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run-2").button()
         #expect(try accept.labelView().text().string() == "Finish")

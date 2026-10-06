@@ -692,16 +692,16 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Replace the current chapter's KRs, targets, and Flow recommendation
+    /// Replace the current chapter's KRs, targets and workflow
     UpdatePlan {
         #[arg(short = 'w', long)]
         wave: Option<String>,
         /// The complete plan as JSON
-        #[arg(long, required_unless_present = "flow")]
+        #[arg(long, required_unless_present = "workflow")]
         plan: Option<std::path::PathBuf>,
-        /// Change only the default Flow or workflow, keeping KRs and targets
+        /// Change only the workflow, keeping KRs and targets
         #[arg(long, conflicts_with = "plan")]
-        flow: Option<String>,
+        workflow: Option<String>,
     },
 }
 
@@ -763,7 +763,8 @@ pub enum TaskCommand {
     /// Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
     Run {
         issue: String,
-        /// Flow to run; the Project's default when omitted
+        /// The edge's Flow, or a workflow to take up; the Task's only edge or its
+        /// Project's workflow when omitted
         flow: Option<String>,
         #[arg(long)]
         name: Option<String>,
@@ -776,11 +777,11 @@ pub enum TaskCommand {
         #[arg(long)]
         reason: Option<String>,
     },
-    /// Put a Task at a stage of its workflow without running anything
+    /// Put a Task at a node of its workflow without running anything
     Move {
         issue: String,
-        /// `start`, `end` or one of the workflow's stages
-        stage: String,
+        /// `start`, `end` or one of the workflow's nodes
+        node: String,
         /// Why, kept in the Task's workflow history
         #[arg(long)]
         reason: Option<String>,

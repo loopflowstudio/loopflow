@@ -25,7 +25,7 @@ fn project(id: &str, name: &str, status: ProjectStatus) -> PmProject {
         name: name.into(),
         slug: name.into(),
         summary: String::new(),
-        flow: "feature".into(),
+        workflow: "feature".into(),
         status,
         metric_targets: Vec::new(),
         krs: Vec::new(),
@@ -388,7 +388,7 @@ fn provider_fixture() -> Provider {
         let id = format!("{wave}-old");
         let name = format!("{title} — previous");
         provider.projects.insert(id.clone(), json!({"id":id,"name":name,"description":"", "archivedAt":null,
-            "content":"flow: feature\n\n## KRs\n- [ ] Retain proof", "status":{"type":"started"},
+            "content":"workflow: feature\n\n## KRs\n- [ ] Retain proof", "status":{"type":"started"},
             "teams":{"nodes":[{"id":"team-1"}]},"initiatives":{"nodes":[{"id":format!("initiative-{wave}")} ]}}));
         for (suffix, state) in [
             ("started", "started"),
@@ -516,7 +516,7 @@ async fn local_started_task(
     )
     .await;
     assert!(!context.store.task_started(&task.id).await.unwrap());
-    // A Flow run from the checkout is the Task's first recorded work.
+    // A Flow exec from the checkout is the Task's first recorded work.
     context.store.sqlite.test_flow(
         "captured",
         &repo.to_string_lossy(),
@@ -691,7 +691,7 @@ async fn rotation_preserves_conflicting_statuses_observed_in_the_final_inventory
 }
 
 #[tokio::test]
-async fn changing_the_default_flow_keeps_the_chapters_krs() {
+async fn changing_the_workflow_keeps_the_chapters_krs() {
     let directory = tempfile::tempdir().unwrap();
     let repo = fixture_repo(directory.path());
     let provider = Arc::new(Mutex::new(provider_fixture()));
@@ -700,22 +700,22 @@ async fn changing_the_default_flow_keeps_the_chapters_krs() {
     let wave = ensure_wave_row(&home.store, &repo, "a").await.unwrap();
     PM_TEST_CONTEXT
         .scope(home, async {
-            write_plan(&repo, &wave, PlanChange::Flow("research".into()))
+            write_plan(&repo, &wave, PlanChange::Workflow("research".into()))
                 .await
                 .unwrap();
-            let empty = write_plan(&repo, &wave, PlanChange::Flow(" ".into())).await;
-            assert!(empty.unwrap_err().to_string().contains("nonempty flow"));
+            let empty = write_plan(&repo, &wave, PlanChange::Workflow(" ".into())).await;
+            assert!(empty.unwrap_err().to_string().contains("nonempty workflow"));
         })
         .await;
     let state = provider.lock().await;
     let content = state.projects["a-old"]["content"].as_str().unwrap();
     let plan = crate::pm::parse_project_content(content).unwrap();
-    assert_eq!(plan.flow, "research");
+    assert_eq!(plan.workflow, "research");
     assert_eq!(plan.krs[0].text, "Retain proof");
     assert!(state.projects["b-old"]["content"]
         .as_str()
         .unwrap()
-        .contains("flow: feature"));
+        .contains("workflow: feature"));
     server.abort();
 }
 
@@ -765,7 +765,7 @@ async fn explicit_sync_renames_legacy_projects_without_rewriting_authored_conten
     old["status"]["type"] = json!("planned");
     let mut expected = old.clone();
     expected["name"] = json!("A — previous");
-    expected["content"] = json!(original.replace("recommended:", "flow:"));
+    expected["content"] = json!(original.replace("recommended:", "workflow:"));
     expected["status"]["type"] = json!("started");
     let provider = Arc::new(Mutex::new(state));
     let (url, server) = serve_fixture(provider.clone()).await;
@@ -807,7 +807,7 @@ async fn explicit_sync_renames_legacy_projects_without_rewriting_authored_conten
         .iter()
         .find(|project| project.id == "a-old")
         .unwrap();
-    assert_eq!(synced.flow, "custom");
+    assert_eq!(synced.workflow, "custom");
     assert_eq!(synced.krs.len(), 1);
     assert_eq!(synced.krs[0].text, "Keep this KR");
     let retained = store.get_task(&task.id).await.unwrap().unwrap();
@@ -939,7 +939,7 @@ async fn every_provider_mutation_recovers_on_the_same_or_a_second_home() {
     }
     // An authored successor keeps its identity, Flow and KR content.
     *provider.lock().await = provider_fixture();
-    let content = "flow: custom\n\n## KRs\n- [ ] Authored next proof";
+    let content = "workflow: custom\n\n## KRs\n- [ ] Authored next proof";
     provider.lock().await.projects.insert(
         "authored-next".into(),
         json!({
@@ -1256,7 +1256,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                             let ctx = super::resolve_context(&repo, "a").await.unwrap();
                             let plans = super::checked_projects(&repo, &ctx, "a").await.unwrap();
                             let current = super::select_current("a", &plans).unwrap();
-                            assert_eq!((&*current.id, &*current.flow), ("a-old", "custom"));
+                            assert_eq!((&*current.id, &*current.workflow), ("a-old", "custom"));
                             assert_eq!(
                                 plans.iter().find(|p| p.id == "a-next").unwrap().status,
                                 ProjectStatus::Planned
@@ -1318,7 +1318,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                             assert_eq!(state.issues.len(), 6);
                             assert_eq!(
                                 state.projects["a-old"]["content"],
-                                original.replace("recommended:", "flow:")
+                                original.replace("recommended:", "workflow:")
                             );
                             assert_eq!(state.projects["a-old"]["status"]["type"], "started");
                             assert_eq!(state.projects["a-next"]["status"]["type"], "planned");
@@ -1423,7 +1423,7 @@ async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
                 .await
                 .unwrap();
             assert_eq!(projects[0].status, ProjectStatus::Started);
-            assert_eq!(projects[0].flow, "custom");
+            assert_eq!(projects[0].workflow, "custom");
             {
                 let mut state = provider.lock().await;
                 let mut future = state.projects["a-old"].clone();

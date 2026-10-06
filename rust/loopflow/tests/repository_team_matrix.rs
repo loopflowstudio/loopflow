@@ -57,7 +57,7 @@ fn snapshot(
             "name": project_name,
             "summary": "Fixture project",
             "metric_targets": [],
-            "flow": "feature", "status": "started",
+            "workflow": "feature", "status": "started",
             "krs": [{ "text": "Ownership is deterministic", "holds": true }],
             "initiative_ids": [initiative],
             "team_ids": ["team-loo"]

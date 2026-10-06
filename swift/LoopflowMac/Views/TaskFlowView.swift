@@ -310,7 +310,7 @@ struct TaskFlowView: View {
         } else if let graph = previewEntry?.graph {
             participation(graph, latest: nil)
         } else if let workflow = previewEntry?.workflow {
-            WorkflowGraphRow(stages: workflow.stages, edges: workflow.edges)
+            WorkflowGraphRow(nodes: workflow.nodes, edges: workflow.edges)
                 .accessibilityIdentifier("task-flow-workflow-preview")
         } else if let reason = previewEntry?.unavailable {
             Text("\(previewName) cannot be previewed: \(reason)")

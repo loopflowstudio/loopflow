@@ -1932,7 +1932,9 @@ mod tests {
         conn.execute_batch(r#"
             INSERT INTO execs(id,trace_id,started_at,outcome) VALUES('old-exec','trace',1,'interrupted');
             INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1);
-            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','linear-p',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at,flow) VALUES('p','w','linear-p',1,'custom');
+            INSERT INTO pm_projects(repo,provider,id,observed_at,body)
+            VALUES('/repo','linear','linear-p',1,'{"id":"linear-p","flow":"custom"}');
             INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,worktree,
               automation_enabled,automation_exec_id,automation_retry_key,automation_retries,
               automation_checked_at,automation_detail)
@@ -1986,7 +1988,17 @@ mod tests {
             [], |row| row.get(0),
         ).unwrap();
         assert_eq!(control, 0);
-        // No saved Flow becomes a Flow run: the driver-written record starts empty.
+        // A Project's stored name for its Tasks' workflow keeps its value.
+        let workflow: (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT p.workflow,json_extract(m.body,'$.workflow'),json_extract(m.body,'$.flow')
+                 FROM projects p JOIN pm_projects m ON m.id=p.external_project_id",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(workflow, ("custom".into(), "custom".into(), None));
+        // No saved Flow becomes a Flow exec: the driver-written record starts empty.
         let flows: i64 = conn
             .query_row(
                 "SELECT (SELECT count(*) FROM flow_execs)+(SELECT count(*) FROM flow_exec_steps)",
@@ -4875,17 +4887,12 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let snapshot: crate::pm::PmSnapshot = serde_json::from_str(&payload).unwrap();
-        assert_eq!(snapshot.projects[0].id, "old");
-        assert_eq!(snapshot.projects[0].flow, "custom");
-        assert_eq!(
-            snapshot.projects[0].status,
-            crate::pm::ProjectStatus::Started
-        );
-        assert_eq!(
-            snapshot.projects[1].status,
-            crate::pm::ProjectStatus::Planned
-        );
+        // This release's shape; the Project key is renamed by a later one.
+        let snapshot: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(snapshot["projects"][0]["id"], "old");
+        assert_eq!(snapshot["projects"][0]["flow"], "custom");
+        assert_eq!(snapshot["projects"][0]["status"], "started");
+        assert_eq!(snapshot["projects"][1]["status"], "planned");
         assert!(!user_tables(&conn)
             .unwrap()
             .iter()

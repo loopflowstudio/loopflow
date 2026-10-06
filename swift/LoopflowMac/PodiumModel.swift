@@ -283,7 +283,7 @@ final class PodiumModel {
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
     private(set) var taskWork = TaskReadings<TaskWork>()
-    /// Flow runs keyed by driver Exec, read when their row is opened.
+    /// Flow execs keyed by driver Exec, read when their row is opened.
     private(set) var flowRuns = TaskReadings<FlowDetail>()
     /// Conversation history, read only on disclosure.
     private(set) var sessionHistory = TaskReadings<[SessionHistory]>()
@@ -875,7 +875,7 @@ final class PodiumModel {
         }
     }
 
-    /// The shown Task's work and its opened, unfinished Flow runs follow the
+    /// The shown Task's work and its opened, unfinished Flow execs follow the
     /// planning cadence, so progress moves without a view owning a loop.
     func refreshShownTaskWork() async {
         guard !usesFixedFixture, let selection, selection.kind == .task,
@@ -933,17 +933,17 @@ final class PodiumModel {
         flowCatalogReadings[key] = reading(from: result, lastGood: previous)
     }
 
-    /// Why a Wave's last default or source change was refused, by Wave.
-    private(set) var defaultFlowErrors: [String: String] = [:]
+    /// Why a Wave's last workflow or source change was refused, by Wave.
+    private(set) var workflowErrors: [String: String] = [:]
 
-    /// Make `name` the default for the Wave's current chapter, then reread planning.
-    func setDefaultFlow(_ name: String, wave: WaveSnapshot) async {
+    /// Make `name` the workflow of the Wave's current chapter, then reread planning.
+    func setWorkflow(_ name: String, wave: WaveSnapshot) async {
         do {
-            try await query.setDefaultFlow(name, wave: wave.name, cwd: WaveOrigin.resolve(wave.repo))
-            defaultFlowErrors[wave.id] = nil
+            try await query.setWorkflow(name, wave: wave.name, cwd: WaveOrigin.resolve(wave.repo))
+            workflowErrors[wave.id] = nil
             await refresh()
         } catch {
-            defaultFlowErrors[wave.id] = error.localizedDescription
+            workflowErrors[wave.id] = error.localizedDescription
         }
     }
 
@@ -952,11 +952,11 @@ final class PodiumModel {
     func definitionSource(_ entry: FlowCatalogEntry, wave: WaveSnapshot) async -> URL? {
         do {
             let path = try await query.customizeDefinition(entry.name, cwd: repoPath)
-            defaultFlowErrors[wave.id] = nil
+            workflowErrors[wave.id] = nil
             await loadFlowCatalog(force: true)
             return URL(fileURLWithPath: path)
         } catch {
-            defaultFlowErrors[wave.id] = error.localizedDescription
+            workflowErrors[wave.id] = error.localizedDescription
             return nil
         }
     }
@@ -983,16 +983,16 @@ final class PodiumModel {
         }
     }
 
-    /// Put the Task at a stage of its Workflow, then refresh the shared
+    /// Put the Task at a node of its Workflow, then refresh the shared
     /// reading. A refusal is kept on that Task's draft.
-    func moveTask(to stage: String, task: RoadmapTask, wave: WaveSnapshot) async {
+    func moveTask(to node: String, task: RoadmapTask, wave: WaveSnapshot) async {
         let owner = navigation
         let taskId = task.id
         guard owner.flowDrafts[taskId]?.acting != true else { return }
         owner.flowDrafts[taskId, default: TaskFlowDraft()].acting = true
         owner.flowDrafts[taskId]?.error = nil
         do {
-            try await query.moveTask(issue: task.task.identifier, stage: stage, cwd: WaveOrigin.resolve(wave.repo))
+            try await query.moveTask(issue: task.task.identifier, node: node, cwd: WaveOrigin.resolve(wave.repo))
             owner.flowDrafts[taskId] = nil
             await loadTaskWork(task: task, wave: wave)
         } catch {

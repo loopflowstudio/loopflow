@@ -79,7 +79,7 @@ homepage:
     diagram_alt: >-
       The default workflow, step by step: kickoff, review plan, implement,
       compress, review, decide, review demo, decide, done. Review plan and
-      review demo are stages where a person takes part; the steps between
+      review demo are nodes where a person takes part; the steps between
       them are flows. Each decide step can return to implement.
     paragraphs:
       - >-
@@ -123,7 +123,7 @@ homepage:
       - label: "A workflow"
         filename: ".lf/workflows/feature.yaml"
         content: |
-          stages:
+          nodes:
             design: review-design
             demo: demo
           edges:

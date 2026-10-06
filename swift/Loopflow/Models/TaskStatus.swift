@@ -64,14 +64,14 @@ public struct PlanningProject: Decodable, Sendable {
     public let name: String
     public let summary: String
     public let metricTargets: [ChapterMetricTarget]
-    public let flow: String
+    public let workflow: String
     public let status: ProjectStatus
     public let krs: [PlanningKeyResult]
     public let initiativeIds: [String]
     public let teamIds: [String]
 
     enum CodingKeys: String, CodingKey {
-        case id, revision, slug, name, summary, flow, status, krs
+        case id, revision, slug, name, summary, workflow, status, krs
         case metricTargets = "metric_targets"
         case initiativeIds = "initiative_ids"
         case teamIds = "team_ids"

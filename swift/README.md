@@ -142,21 +142,21 @@ below the outline. Sessions without a Task association are also available under
 **Debug → Sessions → Orphan Sessions** in the repository menu, or `lf session list --orphan`.
 There is no creation opt-out from checkout association. **Task details** opens the description, comments and Run history.
 
-A Task on a workflow draws it: stages, the edges between them, and the current
-stage or running edge. At a stage the page reads **Waiting on you** and offers
+A Task on a workflow draws it: nodes, the edges between them, and the current
+node or running edge. At a node the page reads **Waiting on you** and offers
 one button per edge leaving it; each runs `lf -b task run` as a child of the
 app. No edge is offered while one runs. An edge whose Flow stopped holds the
 Task, reads **Stopped on**, and is offered again with the others leaving its
-stage. **Move to** puts the Task at any stage through `lf task move`. An unstarted Task previews its
-Project's default workflow. A default that names nothing reads invalid, with
+node. **Move to** puts the Task at any node through `lf task move`. An unstarted Task previews its
+Project's workflow. One that names no workflow reads invalid, with
 Start disabled.
-Each Flow run of the Task is a row that opens to its graph, steps and output
+Each Flow exec of the Task is a row that opens to its graph, steps and output
 (`lf flow show ID --sessions --json`); **Detailed Flow** exposes the captured
 branches and repeats. A run whose driver exited early reads **Stopped**. A run
 whose driver was killed has no exit record and keeps reading as running.
 Sessions list **Waiting** first and working ones in a compact group.
-The Wave page's **Task default** sets the Project's default from the catalogue
-(`lf flow list`); **Customize** or **Edit** opens the workflow or Flow source in
+The Wave page's **Workflow** sets the Project's workflow from the catalogue
+(`lf flow list`); **Customize** or **Edit** opens its source in
 your editor, writing a builtin to `.lf/` first.
 **Session history** under the Flow reads nothing until expanded; it then lists that
 Task's complete recorded input history (`lf usage --days 0 --task ID --json`) with each recorded

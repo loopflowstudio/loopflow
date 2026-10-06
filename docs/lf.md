@@ -34,7 +34,7 @@ lf --wave exports : "Review the goal" # add context in the current directory
 lf -b task run EXP-12       # place the Task, run its default
 lf -b task run EXP-12 pursue # take the workflow edge that runs pursue
 lf task run EXP-12 end       # take an edge that runs nothing
-lf task move EXP-12 demo     # put the Task at a stage, running nothing
+lf task move EXP-12 demo     # put the Task at a node, running nothing
 lf --task EXP-12 run incident # run a Flow without moving the Task
 lf task run EXP-12 --reason "take the smaller approach"
 ```
@@ -47,20 +47,20 @@ Flow ends. A Flow that fails is started again from its first step, three
 times at most; one that is blocked, interrupted or waiting on a landing is
 not. Background it yourself when you will not wait. It never continues
 an earlier Flow. `--reason` publishes direction to the Task first. Every
-Flow run for a Task is equally its work.
+Flow exec for a Task is equally its work.
 
-When the Project's default names a workflow, the Task moves through stages.
-Each `task run` takes one edge leaving the current stage: the only one, or the
-one whose Flow you name. At a stage the Task waits on you in its conversation;
-no command approves a stage. A Flow that does not leave the stage is refused
+A Task takes up its Project's workflow and moves through its nodes.
+Each `task run` takes one edge leaving the current node: the only one, or the
+one whose Flow you name. At a node the Task waits on you in its conversation;
+no command approves a node. A Flow that does not leave the node is refused
 with the edges that do. A Flow that stops, or fails every attempt, leaves the Task on its edge until
-you choose again or `lf task move EXP-12 <stage>` puts it at a stage outright. `lf task run EXP-12 code` takes up another workflow from
+you choose again or `lf task move EXP-12 <node>` puts it at a node outright. `lf task run EXP-12 code` takes up another workflow from
 its start. See [workflows](authoring.md#workflows).
 
 ```bash
 lf flow list                   # Flows and workflows, with source and validity
 lf flow customize feature      # write the builtin to .lf/ and print its path
-lf update-plan --wave exports --flow code   # change only the Task default
+lf update-plan --wave exports --workflow code   # change only the Project's workflow
 ```
 
 A Flow whose driver died leaves its Execs as history. No command resumes it. To change direction or recover:
@@ -148,7 +148,7 @@ inspection and replay; they do not select these Session actions.
 Each conversation is its scope's operator and carries the matching operate
 procedure. It leaves running Flows alone, reads a stopped or failed Flow before
 running its remaining work fresh, and names what waits on you, including a Task
-at a workflow stage. Unstarted backlog stays unstarted. A conversation acts
+at a workflow node. Unstarted backlog stays unstarted. A conversation acts
 only during a turn: between turns, running Flows and any installed background
 checks continue on their own.
 An open conversation keeps the instructions it launched with; `replace` it
@@ -303,7 +303,7 @@ and `--history` includes completed conversations and historical reviews.
 
 Task status lists Sessions, Flows and Execs from the checkout and explicit binds,
 including headless and completed work. A Task on a workflow also shows its
-stages, edges, position and the edges it has taken. No Flow is privileged; the execution
+nodes, edges, position and the edges it has taken. No Flow is privileged; the execution
 line observes the most recently launched one. Live or unresolved work preserves
 the checkout. A stopped Flow is history and blocks nothing.
 

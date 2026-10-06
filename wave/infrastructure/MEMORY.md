@@ -407,11 +407,10 @@ entry is not evidence of shipment or configured Desktop acceptance.
 
 ## Synced planning integration (LOO-334, 2026-09-30)
 
-Main's landed current-state cutover supersedes the earlier intermediate-schema
-bridge below. Planning now migrates from released Session ownership; it does not
-restore the historical importer or old execution drafts. Managed validation uses
-the single FlowSession driver, after native recovery and completed-Task cleanup.
-Task adoption retains branch/worktree/PR identity without inferring Flow progress.
+Main supersedes the intermediate-schema bridge. Migrate from released Session
+ownership; retain one FlowSession driver and adopted Task branch/worktree/PR
+identity without inferring progression. Historical detail remains at
+`47c23c396:wave/infrastructure/MEMORY.md` under this heading.
 
 ## Planning and launch preservation (curated 2026-10-02)
 
@@ -806,15 +805,23 @@ repair. Cached unavailable-client state suppressed connect after exit; selection
 now revalidates through connect, preserving fresh refusal and explicit takeover.
 Realistic repaired runs still failed at 5/21 and 20/21, the latter after connect.
 
-A 21/21 predicate replay did not reproduce the failure. Repeated main-actor OCR while connect was pending
-obstructed observation. Native samples now await independent readiness before
-capture/OCR, retaining the same five-second deadline and input/preservation proof.
-Focused 21/21 and full 84/84 passed. This repairs observation, not proven production latency. The
-historical failed predicate remains unknown; focused success cannot erase it.
-[The report](../../scripts/benchmarks/desktop-performance/20261006-matched-rust/README.md#native-reopen-diagnosis--october-6)
-retains all failures and limits. Publication only is authorized; matched Swift
-attribution, latency/growth, both full hours and compositor proof remain open.
-No trace or installed-Home operation occurred.
+The observer repair waits for independent native readiness before main-actor
+capture/OCR, retaining the five-second deadline and preservation checks. Focused
+21/21 and full 84/84 passed; the historical failed predicate remains unknown.
+The [report](../../scripts/benchmarks/desktop-performance/20261006-matched-rust/README.md#native-reopen-diagnosis--october-6)
+retains failures and limits. This is observation repair, not production latency
+proof. Matched Swift attribution, latency/growth, both hours and compositor proof
+remain open; publication only is authorized.
+
+October 6 recorder decomposition retained owned ten-second probes: Hitches alone
+projected 13.2 GiB/hour, Hangs 103.0; neither exports both required tables. Those
+short-probe rates are estimates. The 2 GiB guard remains; no full hour or cleanup
+occurred. Actual TOCs put clocks under `info/summary`; the reader's synthetic
+`run-info` assumption lost coverage. Reports now decode real clocks and reject
+trace-enabled completion with missing tables or endpoint gaps. Starting recording
+after `soak_begin` still needs a readiness barrier. Faithful lower-volume recording,
+compositor/input proof and both hours remain unresolved. Exact receipts and
+capacity requirements belong in the same report; no installed Home was touched.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 
@@ -893,11 +900,9 @@ Wave learning stays with its identified owner, never miscellaneous .lf notes.
 
 ## Prompt reduction boundary (2026-09-24)
 
-The dated branch details remain at `fe3f3ed46:wave/infrastructure/MEMORY.md` under
-this heading and in [Intelligence memory](../intelligence/MEMORY.md#prompt-assembly-reduction-branch-evidence-2026-09-24).
-Keep historical identity (`WorkCatalog`), current execution (`TaskExecutionSnapshot`)
-and consumed launch evidence (`PreparedLaunchPrompt`) distinct. LOO-287's broader
-architecture/weekly proof remains open; wrapper deletion never established it.
+Keep historical `WorkCatalog`, current `TaskExecutionSnapshot` and consumed
+`PreparedLaunchPrompt` distinct. LOO-287's broader proof remains open. Dated
+evidence: `fe3f3ed46:wave/infrastructure/MEMORY.md` and Intelligence memory.
 
 ## Installation and command scope (curated 2026-10-02)
 

@@ -595,3 +595,70 @@ uncertainty regression; normal release build, formatting and all-target Clippy
 passed. The initial new fixtures failed on a missing required `cwd`, then were
 corrected; those logs remain. Publication is a verified bounded repair, not full
 Task acceptance.
+
+
+## Recorder capacity and coverage — October 6
+
+Jack Heart requested resolving storage before the original matched hour pair.
+Two sequential ten-second probes attached only to owned `/bin/sleep` children,
+using the existing guarded recorder and Xcode 26.0 (17C52)'s Blank template.
+Private commands, exact observed raw paths, exit receipts and exported TOCs remain
+at `/tmp/loo304-recorder-capacity-20261006/`; neither probe is Desktop acceptance.
+
+| Instrument | Last observed raw bytes | Actual trace interval | Linear GiB per requested hour |
+| --- | ---: | ---: | ---: |
+| Hitches | 39,434,424 | 10.436 s | 13.2 |
+| Hangs | 307,205,320 | 10.672 s | 103.0 |
+
+These are last descriptor observations, not guaranteed final sizes or steady-state
+rates. Different process activity and tracing overhead limit extrapolation.
+Hitches exports frame-lifetime/render tables but no potential-hangs table; Hangs
+exports potential-hangs/runloop events but no hitches table. Dropping either loses
+required evidence. The earlier combined 30-second probe's ~94 GiB/hour remains;
+this decomposition identifies Hangs as the larger cost in these probes, not a
+faithful replacement configuration. The local template already disables waiting-
+thread/kernel-stack/context-switch sampling and priority-inversion detection.
+The CLI exposes instrument selection and a tail window, but no raw collection
+filter or lossless streaming option was found in its supported command interface.
+A tail window would discard coverage. Only the root volume is mounted.
+
+Initial free space was 11.9 GiB; no files were reclaimed or historical traces
+changed. A faithful method must fit the unchanged 2 GiB consumption allowance
+(less than 0.57 MiB/s averaged over an hour, including output overhead), retain
+both tables, actual trace clocks, CPU/RSS and window/focus evidence, and establish
+compositor/input endpoints. Present probes do not establish the last endpoints.
+At observed rates, an uncompressed full trace needs roughly 94–103 GiB for one
+hour, plus 6 GiB reserve and export/workspace headroom; retaining both raw hours
+would require roughly 188–206 GiB before that headroom. These are provisioning
+estimates, not a proved minimum or permission to raise the guard. A capable
+recorder needs verified lossless lower-volume collection/storage, not shortened
+sampling or an unverified external output path (TMPDIR previously did not relocate
+raw capture). Neither full-hour run was launched.
+
+Inspection found an independent coverage defect. Real Xcode exports put clocks
+under `run/info/summary`; the reader expected `run/info/run-info`, matching only
+its synthetic fixture. The reader and regression now use the real structure;
+both retained probe TOCs decode their exact dated intervals. Reports expose
+full-soak opening/closing gaps. Trace-enabled runs require a successful recording,
+both hitch/hang tables and coverage of the entire journal interval before they
+can report complete or supply a matched comparison. Missing resources remain
+unmeasured. RSS-only diagnostics retain their distinct mode and establish no
+trace acceptance. No historical report was overwritten.
+
+The current harness starts recording after `soak_begin`; a startup barrier tied
+to actual Instruments readiness is still needed, followed by coverage through
+`soak_end`. This report repair detects that gap; it does not close it. The original
+baseline remains `501073137` plus documented common prerequisites, compared with
+the current candidate under identical observer/build profiles. No newer convenient
+baseline, source sync, production optimization, observer subtraction or budget
+revision was introduced. The previous worsened roadmap/native p95 and failed
+memory results remain. Release/installation, live Home, historical unknown Execs,
+copied identities and the immutable realistic fixture were untouched.
+
+Review found that completeness was computed before resource evidence loaded;
+it now runs after coverage evaluation. Regression cases retain missing tables,
+missing resources, unsuccessful recording and gaps at either end. Release's
+immediate goal and current schedule/publication/installation memory were inspected;
+older incidents were not reread and provide no Desktop performance proof.
+Check: focused recorder/runner pytest PASS 60; Ruff/diff PASS; two bounded actual
+record/export probes PASS; full-hour acceptance remains unavailable.

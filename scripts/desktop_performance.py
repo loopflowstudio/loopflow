@@ -280,6 +280,11 @@ def _has_complete_observations(summary: dict) -> bool:
         and summary["not_started"] == 0
         and summary["soak"]["status"] != "incomplete"
         and metadata.get("recorder_exit_code", 0) == 0
+        and (
+            not metadata.get("xctrace", False)
+            or summary["soak"]["status"] == "not_requested"
+            or (summary["soak"].get("trace_coverage") or {}).get("status") == "complete"
+        )
         and metadata.get("repository_configs_unchanged", True)
         and not summary["journey_errors"]
         and not summary["journal_errors"]
@@ -347,6 +352,31 @@ def _comparison(current: dict, baseline: dict) -> dict:
     }
 
 
+def _soak_trace_coverage(soak: dict) -> dict:
+    result = {"status": "unmeasured", "start_gap_seconds": None, "end_gap_seconds": None}
+    resources = soak.get("resources") or {}
+    bounds = resources.get("trace_bounds")
+    start = (soak.get("begin") or {}).get("time")
+    end = (soak.get("end") or {}).get("time")
+    if not bounds or start is None or end is None or end <= start:
+        return result
+    start_gap = max(0, bounds[0] - start)
+    end_gap = max(0, end - bounds[1])
+    hitches = resources.get("hitches") or {}
+    complete = (
+        start_gap == 0
+        and end_gap == 0
+        and resources.get("run", {}).get("xctrace") == "recorded"
+        and hitches.get("recorded") is True
+        and hitches.get("hangs") is not None
+    )
+    return {
+        "status": "complete" if complete else "incomplete",
+        "start_gap_seconds": start_gap,
+        "end_gap_seconds": end_gap,
+    }
+
+
 def _report(output: Path, baseline: Path | None) -> dict:
     metadata = json.loads((output / "run.json").read_text())
     events, errors = _read_events(output / "attempts.jsonl")
@@ -355,11 +385,6 @@ def _report(output: Path, baseline: Path | None) -> dict:
     if metadata.get("soak_seconds", 0):
         summary["soak"] = _soak(events, {"soak_seconds": metadata["soak_seconds"]})
     summary.update(metadata=metadata, journal_errors=errors)
-    # Observed failures remain comparable, but cannot complete the journey.
-    complete = _has_complete_observations(summary) and all(
-        attempt["outcome"] == "passed" for attempt in summary["attempts"]
-    )
-    summary["status"] = "complete" if complete else "incomplete"
     summary["cli_volume"] = _cli_volume(output / "cli-volume")
     summary["fixture_setup_cli_volume"] = _cli_volume(output / "fixture-setup-cli-volume")
     recording = output / "soak-resources" / "report.json"
@@ -371,6 +396,12 @@ def _report(output: Path, baseline: Path | None) -> dict:
         after = soak["rounds"][3].get("rss_bytes")
         if before is not None and after is not None:
             soak["memory_after_four_rounds_mib"] = (after - before) / (1024 * 1024)
+    soak["trace_coverage"] = _soak_trace_coverage(soak)
+    # Observed failures remain comparable, but cannot complete the journey.
+    complete = _has_complete_observations(summary) and all(
+        attempt["outcome"] == "passed" for attempt in summary["attempts"]
+    )
+    summary["status"] = "complete" if complete else "incomplete"
     if baseline:
         summary["comparison"] = _comparison(
             summary, json.loads((baseline / "report.json").read_text())
@@ -447,6 +478,9 @@ def _markdown(summary: dict, *, scoped: bool) -> str:
             f"Soak: {soak['status']}; requested {soak['requested_seconds']} s; "
             f"{len(soak['rounds'])} preserved rounds.",
             f"RSS growth after four rounds: {soak['memory_after_four_rounds_mib']} MiB.",
+            f"Full-soak trace coverage: {soak['trace_coverage']['status']}; "
+            f"opening gap {soak['trace_coverage']['start_gap_seconds']} s; "
+            f"closing gap {soak['trace_coverage']['end_gap_seconds']} s.",
             "CPU, RSS, signposts and trace availability: soak-resources/report.json. "
             "Missing recording is unmeasured. "
             "Idle-only trace coverage is reported separately; partial coverage is not acceptance.",

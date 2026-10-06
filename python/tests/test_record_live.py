@@ -226,8 +226,8 @@ def test_idle_hitches_use_trace_clock_and_clip_phase_boundaries(tmp_path: Path) 
     start = datetime.fromtimestamp(origin, timezone.utc)
     end = datetime.fromtimestamp(origin + 4, timezone.utc)
     (tmp_path / "trace-toc.xml").write_text(
-        f'<trace-toc><run number="1"><info><run-info><start-date>{start.isoformat()}</start-date>'
-        f"<end-date>{end.isoformat()}</end-date></run-info></info></run></trace-toc>"
+        f'<trace-toc><run number="1"><info><summary><start-date>{start.isoformat()}</start-date>'
+        f"<end-date>{end.isoformat()}</end-date></summary></info></run></trace-toc>"
     )
     rows = [
         {"start_ms": 1000, "duration_ms": 100},

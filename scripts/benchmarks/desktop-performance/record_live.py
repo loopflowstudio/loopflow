@@ -378,6 +378,27 @@ def _trace_rows(output: Path, table: str, recorded: bool) -> list[dict] | None:
     return rows
 
 
+def _trace_bounds(output: Path) -> tuple[float, float] | None:
+    toc = output / "trace-toc.xml"
+    if not toc.exists():
+        return None
+    try:
+        root = ElementTree.fromstring(toc.read_text())
+        info = root.find(".//run[@number='1']/info/summary")
+        if info is None:
+            return None
+        start_date, end_date = info.findtext("start-date"), info.findtext("end-date")
+        if not start_date or not end_date:
+            return None
+        start = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+        if start.tzinfo is None or end.tzinfo is None or end <= start:
+            return None
+        return start.timestamp(), end.timestamp()
+    except (ElementTree.ParseError, ValueError):
+        return None
+
+
 def _idle(output: Path, frames: list[dict] | None, hangs: list[dict] | None) -> dict:
     phases = output / "phases.jsonl"
     result = {
@@ -404,24 +425,10 @@ def _idle(output: Path, frames: list[dict] | None, hangs: list[dict] | None) -> 
     if not intervals:
         return result
     result["requested_seconds"] = sum(end - start for start, end in intervals)
-    toc = output / "trace-toc.xml"
-    if not toc.exists():
+    bounds = _trace_bounds(output)
+    if bounds is None:
         return result
-    try:
-        root = ElementTree.fromstring(toc.read_text())
-        info = root.find(".//run[@number='1']/info/run-info")
-        if info is None:
-            return result
-        start_date, end_date = info.findtext("start-date"), info.findtext("end-date")
-        if not start_date or not end_date:
-            return result
-        start = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-        end = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-        if start.tzinfo is None or end.tzinfo is None:
-            return result
-        origin, finish = start.timestamp(), end.timestamp()
-    except (ElementTree.ParseError, ValueError):
-        return result
+    origin, finish = bounds
     covered = [
         (max(a, origin), min(b, finish)) for a, b in intervals if min(b, finish) > max(a, origin)
     ]
@@ -522,6 +529,7 @@ def summarize(output: Path) -> dict:
         "cpu": cpu,
         "hitches": hitch_summary,
         "idle": _idle(output, frames, hangs),
+        "trace_bounds": _trace_bounds(output) if recorded else None,
     }
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     (output / "report.md").write_text(_markdown(report), encoding="utf-8")

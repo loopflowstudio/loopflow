@@ -631,3 +631,38 @@ def test_failed_recorder_cannot_complete_preserved_soak(tmp_path: Path) -> None:
     assert result["status"] == "incomplete"
     assert len(result["soak"]["rounds"]) == 4
     assert result["soak"]["resources"] is None
+
+
+@pytest.mark.parametrize("gap", ["none", "start", "end", "table", "failed", "missing"])
+def test_trace_soak_requires_both_tables_across_entire_interval(tmp_path: Path, gap: str) -> None:
+    events = _soak_events()
+    events[-6]["time"] = 1000
+    events[-1]["time"] = 4600
+    _report(tmp_path, events)
+    metadata_path = tmp_path / "run.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata.update(xctrace=True, recorder_exit_code=0)
+    metadata_path.write_text(json.dumps(metadata))
+    resources = tmp_path / "soak-resources"
+    resources.mkdir()
+    if gap != "missing":
+        (resources / "report.json").write_text(
+            json.dumps(
+                {
+                    "run": {"xctrace": "failed" if gap == "failed" else "recorded"},
+                    "trace_bounds": [
+                        1001 if gap == "start" else 999,
+                        4599 if gap == "end" else 4601,
+                    ],
+                    "hitches": {"recorded": True, "hangs": None if gap == "table" else 0},
+                }
+            )
+        )
+    result = performance._report(tmp_path, None)
+    assert result["status"] == ("complete" if gap == "none" else "incomplete")
+    coverage = result["soak"]["trace_coverage"]
+    if gap == "start":
+        assert coverage["start_gap_seconds"] == 1
+    if gap == "end":
+        assert coverage["end_gap_seconds"] == 1
+    assert len(result["soak"]["rounds"]) == 4

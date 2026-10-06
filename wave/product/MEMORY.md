@@ -595,13 +595,10 @@ ID in the breadcrumb links to Linear. Use Description; collapse real Comments
 with their count below it. Dated updates belong in comments, current scope and
 blockers in Description. Omit ELSEWHERE, Local work evidence and preview jargon.
 
-Show the pinned Flow and both Feature return edges, with demo between deciders
-and final Advance leading to queue → land. Blue loops/running, yellow pending
-humans, green completed steps (including humans), red blocked, neutral stopped.
-Each edge counts its own returns; labels use the ordered tuple, including nesting.
-Boundary identity remains separate from that display count. Flow name opens
-search/typeahead; Start/Resume follow shared legality. Stop & restart requires
-confirmation. Pause is deferred; no worker at a saved step means Stopped.
+The September 25 pinned-Flow, Resume and Stop & restart presentation is retired
+by October 4's correction. Its details remain at
+`9d72242ce:wave/product/MEMORY.md` under this heading. Retain exact graph
+occurrences and independent return counts, including nested loops.
 
 New session sits beside the Task title, independently prepares its checkout and
 opens a conversation without starting its Flow. One open Session enters directly;
@@ -630,20 +627,13 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
 
 ### Identity, retention, and counterexamples
 
-- `SessionRecord.run_id` is required for Interactive, Ask, and FlowStep. Prepare
-  a resolvable Run before publishing a human boundary; launch consumes it and native
-  resume retains it. Ask's caller Run is separate. Boundary IDs still target actions.
-  Preparation proves identity, never liveness. Legacy unbound boundaries require
-  explicit JSON open; listing stays read-only and reports that recovery instead
-  of silently dropping them. Release the preparation lock before waiting on a
-  resumed provider, or another metadata open waits for the conversation to end.
-- `lf runs --active [--task …]` joins exact capture intervals and existing native
-  client receipts to one verified process observation, then resolves typed Work.
-  A new marker requirement hid live clients from older launchers; native discovery
-  must continue using their existing receipts independently. One Exec can host
-  successive Runs. Deduplicate by Run; old live Runs survive history age/count caps.
-  Waiting clients remain active; dead clients disappear; read/ownership gaps stay
-  explicit. Cwd, unresolved Sessions, and unterminated metadata prove none of this.
+The retired prepared-Run/review and `lf runs --active` contracts remain at
+`9d72242ce:wave/product/MEMORY.md` under this heading. Preserve the independent
+lessons: preparation proves identity, never liveness; release launch locks before
+waiting on a provider; discover native clients from existing receipts, without
+requiring a new marker. Deduplicate exact captures, retain live history past age
+caps, and keep missing ownership evidence explicit.
+
 - Native interactive history can follow an originally headless Run. Retained
   client namespaces preserve Session discovery after exit; explicit resolution
   removes it. Preserve launch provenance and resolve declared issue/slug subjects

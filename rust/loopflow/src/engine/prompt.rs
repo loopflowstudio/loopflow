@@ -2103,13 +2103,11 @@ mod tests {
             let scope = name.split_once('/').map(|(scope, _)| scope);
             let orchestrates = scope.is_some();
             assert_eq!(prompt.contains("lf task run"), orchestrates, "{name}");
-            for procedure in ["lf wave place"] {
-                assert_eq!(
-                    prompt.contains(procedure),
-                    scope == Some("repo"),
-                    "{name}: {procedure}"
-                );
-            }
+            assert_eq!(
+                prompt.contains("lf wave place"),
+                scope == Some("repo"),
+                "{name}: lf wave place"
+            );
             if scope.is_none() {
                 assert!(!prompt.contains("doppler run"), "{name}");
             }

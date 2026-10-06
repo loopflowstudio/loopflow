@@ -560,9 +560,11 @@ fn historical_unknown_exec(
     {
         if store
             .sqlite
-            .flow_exec_ids(&flow.summary.id)
+            .flow_exec(&flow.summary.id)
             .map_err(task_error)?
-            .contains(id)
+            .is_some_and(|(flow, _)| {
+                &flow.driver.id == id || flow.steps.iter().any(|step| &step.exec.id == id)
+            })
         {
             return Ok(false);
         }
@@ -584,7 +586,7 @@ pub(super) fn completion_work_blockers(store: &SharedStore, task: &Task) -> OpsR
         }
     }
     work.execs.retain(|exec| !accepted.contains(&exec.id));
-    execution_blockers(store, &work, ExecutionCheck::RetainWork)
+    execution_blockers(store, &work)
 }
 
 /// A Flow whose driver died is history; only live or unresolved execution waits.

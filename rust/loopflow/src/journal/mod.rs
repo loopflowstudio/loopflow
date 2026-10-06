@@ -937,6 +937,18 @@ fn current_context() -> Option<ExecContext> {
     EXEC_CONTEXT.with(|cell| cell.borrow().clone())
 }
 
+/// Caller provenance captured at process entry, before the environment is consumed.
+pub fn agent_caller() -> Option<AgentCaller> {
+    current_context().and_then(|context| context.agent_caller)
+}
+
+/// A nested command leaves checkpoint composition to its caller.
+pub fn has_caller() -> bool {
+    current_context().is_some_and(|context| {
+        context.agent_caller.is_some() || context.parent_process_id.is_some()
+    })
+}
+
 pub(crate) fn current_exec_id() -> Option<ExecId> {
     current_context().map(|context| context.process_id)
 }
@@ -1240,7 +1252,7 @@ fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
 mod tests {
     use super::{
         emit, events_path, read_events, traces_root, LfEvent, LfEventFields, LfEventType, LfNode,
-        TestLedgerGuard,
+        ProcessIdentityEvidence, TestLedgerGuard,
     };
     use crate::engine::git::is_clean;
     use crate::id::{ExecId, TraceId};

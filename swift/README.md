@@ -151,7 +151,7 @@ definition, current occurrence, and each loop's iteration. **Start** always
 launches a fresh Flow, including beside an earlier one, and is disabled with
 Rust's reason when it cannot be used. A launched Flow without a live worker
 reads **Stopped**; there is no Pause until Loopflow can hold a Flow at a boundary.
-**Recent runs** under the Flow reads nothing until expanded; it then lists that
+**Session history** under the Flow reads nothing until expanded; it then lists that
 Task's complete recorded input history (`lf usage --days 0 --task ID --json`) with each recorded
 outcome. Session rows show the provider recorded on their Run and a ready summary
 only when the Session recorded one.

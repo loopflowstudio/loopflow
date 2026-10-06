@@ -2545,26 +2545,6 @@ mod tests {
         validate_foreign_keys(&conn).unwrap();
     }
 
-    fn apply_current_work_schema(conn: &rusqlite::Connection) {
-        if columns(conn, "tasks").contains(&"work_state".to_string()) {
-            return;
-        }
-        let foreign_keys: bool = conn
-            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
-            .unwrap();
-        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        for draft in [
-            "opaque_steer_run_provenance",
-            "stable_work_state",
-            "obsolete_sql_lifecycle",
-        ] {
-            conn.execute_batch(&current_draft_sql(draft)).unwrap();
-        }
-        if foreign_keys {
-            conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        }
-    }
-
     #[test]
     fn stable_work_draft_keeps_definitions_and_clears_execution_state() {
         let conn = open();
@@ -4008,19 +3988,23 @@ mod tests {
             conn.execute_batch(&migration_sql_for_test(COMPLETED_TASK_WORK_REPAIR_NAME))
                 .unwrap();
         }
-        apply_current_work_schema(&conn);
+        if !_draft_is_canonical("task_flow_observations") {
+            conn.execute_batch(&current_draft_sql("task_flow_observations"))
+                .unwrap();
+        }
 
         let task: (String, String, String, String) = conn
             .query_row(
-                "SELECT id, issue_identifier, workspace_slug, work_state
-                 FROM tasks WHERE external_issue_id='issue-1'",
+                "SELECT t.id, t.issue_identifier, t.workspace_slug, w.node
+                 FROM tasks t JOIN task_workflows w ON w.task_id=t.id
+                 WHERE t.external_issue_id='issue-1'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
         assert_eq!(task.1, "INF-123");
         assert_eq!(task.2, "inf-123");
-        assert_eq!(task.3, "done");
+        assert_eq!(task.3, "end");
         let pr: (
             i64,
             String,

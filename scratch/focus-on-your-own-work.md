@@ -240,8 +240,11 @@ runs nothing ends a Task over uncommitted changes and keeps its checkout) —
     accessor (`Workflow.onEdge`) and a demo script's `session complete`
     branch removed; `swift build` passed.
 
-Every slice in this list is done. October 6: decisions and unreviewed
-choices moved to Product memory; `lf context --skill realign` fits.
+Every slice in this list is done; decisions and unreviewed choices are in
+Product memory.
+
+Gate, October 6, `uv run python scripts/test.py`: all pass except four
+`test_checkout_refresh` tests, deferred to CI; detail in Product memory.
 
 Demo items carried from September 30, for Jack's review and not for the loop:
 real provider continuation, owning-Home remote association, cross-Task

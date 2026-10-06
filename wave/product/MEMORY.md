@@ -44,8 +44,8 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
 
 Jack Heart approved landing on October 6 after three Desktop looks at a fixture
 Task in a private Home: "good enough. approved", then "lets get this landed."
-The approval covers the Task view as shown. No real provider, populated store
-or live Home was shown (LOO-391). The design, every unreviewed choice and the
+The approval covers the Task view as shown: no real provider, populated store
+or live Home (LOO-391). The design, every unreviewed choice and the
 demo notes are at `e67cdc62f:scratch/` (`focus-on-your-own-work.md`,
 `questions.md`, `task-workflow.md`, `demo-task-workflow.md`).
 
@@ -166,14 +166,14 @@ flow -b) apis."
 **Evidence limits.** Headless tests and a fake provider only. Unshown: a real
 provider step (the JSON contract with no schema request), a
 driver killed mid-turn, the migration on a populated store, Desktop Start
-against a real `lf`, a cron-fired Flow. September 30's workspace proof items
+against real `lf`, a cron-fired Flow. September 30's workspace proof items
 (provider continuation, remote owning-Home association, cross-Task focus,
 symlink transitions, twenty layout actions against p95 <100 ms) are also
-unshown and have no Task of their own. October 6 at `f360cdcc3`: 56
-integration suites, Clippy and 75 headless Desktop tests pass. Eleven
-`ops::chapter` tests fail only in the full parallel library run and pass
-alone (25 of 25); accepted for gate, cause unknown.
-One `status_tests` release-migration test failed before the branch (`8535598ef`).
+unshown and have no Task of their own. Gate, October 6 (`scripts/test.py`):
+Rust 2265 (one stale migration test repaired), Clippy, Desktop and website
+pass with `LF_*` cleared. Four `test_checkout_refresh` tests fail on Jack's
+host: branch `lf wt prune` refuses a Home lacking the draft; CI owns them.
+Eleven `ops::chapter` tests fail only in `cargo test --lib`.
 
 ## Session and operate pairs (2026-10-05)
 

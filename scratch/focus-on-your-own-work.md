@@ -189,8 +189,8 @@ website as rendered.
     arrives once with three Flow execs under one Task run). Not renamed
     yet: surfaces still say "Flow run"; slice 10's renaming owns it. Demo
     item: a real provider failure retried.
-10. **Nodes and edges; Projects have workflows.** — **built and compressed, not
-    yet realigned.** Jack, October 6: "it is ok for now to require
+10. **Nodes and edges; Projects have workflows.** — **done**, `5b71ff345`,
+    compressed `4cd645c78`. Jack, October 6: "it is ok for now to require
     that each edge is a unique step (flow/skill)"; "lets use Edge and node
     instead of Stage and Way OUt"; "Then projects have workflows instead of
     default" (both under "Name" and "Projects" in
@@ -200,7 +200,7 @@ website as rendered.
     the Project's `workflow` across the plan line, `lf wave update-plan
     --workflow`, status, wire, Desktop's Wave page and docs. A Task with no
     Workflow takes up its Project's; one that named its own keeps it.
-    Done-when check, October 6: `cargo test -p loopflow --test
+    Check, October 6, rerun at `65f8ec42b`: `cargo test -p loopflow --test
     task_flow_launch_tests` 8 passed (Project's workflow taken up; a named
     one kept; a Project naming a plain Flow refused); `--lib store::
     pm:: ops::chapter` and `--test dto_fixtures` pass; Swift

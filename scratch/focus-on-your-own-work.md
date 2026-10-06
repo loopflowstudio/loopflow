@@ -303,3 +303,5 @@ proof` prints and blocks; `lf monitor` and `lf flow show ID --sessions` show a
 looping Flow's driver, step and iteration; a real provider step; Desktop.
 
 October 6 sync onto main `5c0ca983a`: `cargo test -p loopflow --test session_lifecycle_tests` — 17 passed, 1 installation-only ignored; Session identity, caller provenance and historical-Exec acceptance reconciled with FlowExec.
+
+October 6 sync onto `c787c7530`: Task association tests 3 passed; Swift `TaskHistoryFilterTests|RegistryQueryTests` 23 passed. Reconciled workspace observation with FlowExec and Workflow; migration revision coverage, format and Clippy passed.

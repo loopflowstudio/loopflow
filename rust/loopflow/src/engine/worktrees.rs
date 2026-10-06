@@ -381,6 +381,10 @@ const REMOTE_LIMIT: Duration = Duration::from_secs(10);
 /// per-worktree and per-branch commands on this many threads.
 const GIT_WORKERS: usize = 16;
 
+/// Branches asked of GitHub in one request. One request for 53 branches took
+/// 1.1 s; four of this size, side by side, took 0.65 s.
+const GITHUB_BRANCHES_PER_REQUEST: usize = 16;
+
 /// Why a remote gave no usable answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RemoteFailure {
@@ -729,21 +733,57 @@ struct GithubBranches {
     existing: HashSet<String>,
 }
 
-/// Read every branch's PR state and existence in one GitHub call.
+/// Read every branch's PR state and existence from GitHub.
 ///
-/// A failure means GitHub was unavailable, so callers must not infer that a
-/// stale branch has no open PR.
+/// GitHub's answer time grows with the branches in one query, so the branches
+/// are asked `GITHUB_BRANCHES_PER_REQUEST` at a time, side by side. A failure
+/// means GitHub was unavailable, so callers must not infer that a stale branch
+/// has no open PR.
 fn github_branches(
     repo: &Path,
     (owner, name): (String, String),
+    mut heads: HashMap<String, String>,
     branches: &[String],
 ) -> Result<GithubBranches, RemoteFailure> {
-    let mut heads = branch_heads(repo);
     let branch_heads = branches
         .iter()
         .filter_map(|branch| heads.remove(branch).map(|head| (branch.clone(), head)))
         .collect::<Vec<_>>();
+    let requests: Vec<&[(String, String)]> =
+        branch_heads.chunks(GITHUB_BRANCHES_PER_REQUEST).collect();
+    whole_github_answer(concurrently(&requests, |branch_heads| {
+        github_request(repo, &owner, &name, branch_heads)
+    }))
+}
 
+/// One answer from every request's, or the failure that leaves it unknown.
+///
+/// A partial answer would report the unanswered branches as deleted and
+/// without PRs. A request stopped at its limit has used the whole limit.
+fn whole_github_answer(
+    answers: Vec<Result<GithubBranches, RemoteFailure>>,
+) -> Result<GithubBranches, RemoteFailure> {
+    if answers.contains(&Err(RemoteFailure::TimedOut)) {
+        return Err(RemoteFailure::TimedOut);
+    }
+    let mut whole = GithubBranches {
+        pull_requests: HashMap::new(),
+        existing: HashSet::new(),
+    };
+    for answer in answers {
+        let answer = answer?;
+        whole.pull_requests.extend(answer.pull_requests);
+        whole.existing.extend(answer.existing);
+    }
+    Ok(whole)
+}
+
+fn github_request(
+    repo: &Path,
+    owner: &str,
+    name: &str,
+    branch_heads: &[(String, String)],
+) -> Result<GithubBranches, RemoteFailure> {
     // Build aliased GraphQL query: two fields per branch. Branch names are
     // reusable, so current-head identity decides whether historical PR state
     // applies to this worktree.
@@ -768,8 +808,8 @@ fn github_branches(
         REMOTE_LIMIT,
     )?;
 
-    parse_pull_request_states(&stdout, &branch_heads)
-        .zip(parse_existing_branches(&stdout, &branch_heads))
+    parse_pull_request_states(&stdout, branch_heads)
+        .zip(parse_existing_branches(&stdout, branch_heads))
         .map(|(pull_requests, existing)| GithubBranches {
             pull_requests,
             existing,
@@ -960,7 +1000,14 @@ fn remote_facts(
             outcome: RemoteOutcome::NotAsked,
         };
     }
-    let Some(nwo) = github_repo_nwo(repo) else {
+    let (nwo, heads) = thread::scope(|scope| {
+        let heads = scope.spawn(|| branch_heads(repo));
+        (
+            github_repo_nwo(repo),
+            heads.join().expect("listing worker panicked"),
+        )
+    });
+    let Some(nwo) = nwo else {
         // A non-GitHub remote has no GitHub PR state: known, and empty.
         let listed = list_remote_branches(repo);
         return RemoteFacts {
@@ -971,7 +1018,7 @@ fn remote_facts(
             branches: listed.unwrap_or_default(),
         };
     };
-    match github_branches(repo, nwo, &branches) {
+    match github_branches(repo, nwo, heads, &branches) {
         Ok(mut github) => {
             // The listing compares against the default branch's remote head,
             // so a set naming no worktree branch still means "all gone".
@@ -1034,8 +1081,16 @@ fn apply_network_enrichment(
 /// `pull_request` unknown; it never fails or stalls the local listing.
 pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
     let started = Instant::now();
-    let default_branch = get_default_branch(repo)?;
-    let items = list_porcelain(repo)?;
+    // The remote cannot be asked before both are read, so they are read together.
+    let (default_branch, items) = thread::scope(|scope| {
+        let default_branch = scope.spawn(|| get_default_branch(repo));
+        let items = list_porcelain(repo);
+        (
+            default_branch.join().expect("listing worker panicked"),
+            items,
+        )
+    });
+    let (default_branch, items) = (default_branch?, items?);
     let ((remote, remote_time), mut worktrees, local_git) = thread::scope(|scope| {
         let remote = scope.spawn(|| {
             let asked = Instant::now();
@@ -1856,9 +1911,10 @@ mod tests {
         abandoned_prune_reason, apply_network_enrichment, diff_shortstats, ensure_agent_worktree,
         list_worktrees, move_default_agent_to_worktree, parse_existing_branches,
         parse_pull_request_states, plan_placement, prune_abandoned_prompt_logs,
-        prune_branch_worktree, remote_stdout, wave_agent_segment, worktree_path,
-        worktree_prune_reason, PlacementError, PlacementStrategy, PullRequestState,
-        TargetedPruneOutcome, WorktreePruneReason, WorktreeSegment, WorktreeState,
+        prune_branch_worktree, remote_stdout, wave_agent_segment, whole_github_answer,
+        worktree_path, worktree_prune_reason, GithubBranches, PlacementError, PlacementStrategy,
+        PullRequestState, RemoteFailure, TargetedPruneOutcome, WorktreePruneReason,
+        WorktreeSegment, WorktreeState,
     };
     use std::collections::{HashMap, HashSet};
     use std::fs;
@@ -2047,13 +2103,46 @@ mod tests {
     }
 
     #[test]
+    fn a_github_request_without_an_answer_leaves_every_branch_unknown() {
+        let answered = |branch: &str| {
+            Ok(GithubBranches {
+                pull_requests: HashMap::from([(branch.to_string(), PullRequestState::Open)]),
+                existing: HashSet::from([branch.to_string()]),
+            })
+        };
+
+        assert_eq!(
+            whole_github_answer(vec![answered("first"), answered("second")]),
+            Ok(GithubBranches {
+                pull_requests: HashMap::from([
+                    ("first".to_string(), PullRequestState::Open),
+                    ("second".to_string(), PullRequestState::Open),
+                ]),
+                existing: HashSet::from(["first".to_string(), "second".to_string()]),
+            })
+        );
+        assert_eq!(
+            whole_github_answer(vec![answered("first"), Err(RemoteFailure::Unavailable)]),
+            Err(RemoteFailure::Unavailable)
+        );
+        assert_eq!(
+            whole_github_answer(vec![
+                Err(RemoteFailure::Unavailable),
+                answered("second"),
+                Err(RemoteFailure::TimedOut),
+            ]),
+            Err(RemoteFailure::TimedOut)
+        );
+    }
+
+    #[test]
     fn unanswered_remote_stops_at_its_limit() {
         let started = std::time::Instant::now();
         let answer = remote_stdout(
             Command::new("sh").args(["-c", "sleep 30; echo late"]),
             Duration::from_millis(200),
         );
-        assert_eq!(answer, Err(super::RemoteFailure::TimedOut));
+        assert_eq!(answer, Err(RemoteFailure::TimedOut));
         assert!(started.elapsed() < Duration::from_secs(10));
         assert_eq!(
             remote_stdout(Command::new("echo").arg("answer"), Duration::from_secs(10)),
@@ -2061,7 +2150,7 @@ mod tests {
         );
         assert_eq!(
             remote_stdout(&mut Command::new("false"), Duration::from_secs(10)),
-            Err(super::RemoteFailure::Unavailable)
+            Err(RemoteFailure::Unavailable)
         );
     }
 

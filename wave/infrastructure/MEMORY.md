@@ -224,49 +224,24 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Installed worker recovery (2026-10-02 PDT)
+## Installed worker recovery (2026-10-02 PDT, curated 2026-10-05)
 
-Jack Heart authorized recovery of blocked workers and publication/installation
-of the prepared patch. [PR #1415](https://github.com/loopflowstudio/loopflow/pull/1415)
-merged as bfc681ee8; [v0.12.32](https://github.com/loopflowstudio/loopflow/releases/tag/v0.12.32)
-published from 8c72e591e78a68227255fd86bfff6a939ded5e8b after release
-[workflow 37099938065](https://github.com/loopflowstudio/loopflow/actions/runs/37099938065).
-The published installer promoted CLI/app after preflight recognized the existing
-Home exactly, with all 33 executable references resolving and no migration.
-GitHub's API identified v0.12.32 while its public latest redirect still selected
-v0.12.31; the checksum-verified published installer with --version v0.12.32
-completed installation. No source build was promoted or runtime data hand-edited.
+Jack Heart authorized recovering blocked workers and publishing the prepared
+patch: PR #1415 shipped in v0.12.32 through the published installer, with no
+migration and no hand-edited runtime data. Historical unowned Execs no longer
+block resumption; current process/Session/Flow ownership still does. LOO-295's
+merged PR #1283 was attached to its original PR row with unrelated scratch
+preserved. Receipts, workflow IDs and readback are in
+[the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#installed-worker-recovery-2026-10-02-pdt).
 
-Installed readback confirms LOO-367 resumed the same saved Flow, passed
-loop-decide and entered implementation iteration 1. Historical unowned Execs no
-longer block resumption; actual current process/Session/Flow ownership still does.
-LOO-285's integrated CI-repair child ownership fix passed focused tests and its
-saved Flow resumed beyond sync. Cross-segment continuation implementation and
-the two distinct automatic settlements remain, including retained telemetry
-failures; this operator-triggered release supplies none of that automatic proof.
-LOO-292 retains its demo review. LOO-370 owns retired Run-name cleanup.
+Still open: `invalid stored landing placement: home` from
+store/sqlite/pr_landings.rs::map_landing fails repository reconciliation and
+degrades the CI watcher (LOO-373). Repair the old placement reader/migration
+with ownership evidence preserved; this is not an empty or healthy backlog.
 
-LOO-295's installed reconciliation attached existing merged
-[PR #1283](https://github.com/loopflowstudio/loopflow/pull/1283) to the original
-PR row, recording merge 5bcc40fdff810c39885a31b3fbfd6557f49fde93. The Task stayed
-open and all eight unrelated scratch/loc-explorer files were byte-identical.
-Its current-runtime review/repeat/final-demo acceptance remains unresolved.
-
-A separate retained-data defect remains: `invalid stored landing placement: home`
-from store/sqlite/pr_landings.rs::map_landing fails repository reconciliation,
-including after LOO-295's successful association, and degrades the CI watcher.
-It also interrupted release settlement after #1417 merged. Supported re-entry
-recognized that existing merge and completed the same v0.12.32; no manual
-record/ref/worktree deletion occurred. The old placement reader/migration needs
-repair with preserved ownership evidence. This is not an empty/healthy backlog.
-
-Jack questioned serial releases. The operator committed to collecting further
-recovery defects into one repair batch, with installed-state preflight, instead
-of starting another immediate release for each discovery; this is an operating
-adjustment, not a claim that Jack approved a new release policy.
-
-Checks: PR and merge-queue CI, candidate workflow and publisher passed; installed
-LOO-367 progression and LOO-295 association/file-preservation readback passed.
+Jack questioned serial releases. The operator committed to batching further
+recovery defects into one repair with installed-state preflight; this is an
+operating adjustment, not a release policy Jack approved.
 
 ## Optional chapters and Task workflows (2026-10-02)
 
@@ -316,38 +291,26 @@ configured checks are in [the pre-curation memory](https://github.com/loopflowst
 ### Legacy retirement completed (2026-10-04)
 
 Jack Heart explicitly authorized clearing all legacy stores and their process
-owners. Fresh `lsof` identified 15 owners of the four retained installed stores.
-Current `lf monitor prune` had no registered orphan targets; the old `ask cancel`
-command failed reading the current installation manifest (`work_dispositions`
-missing). Exact executable/start-time checks and process ancestry bounded the
-shutdown to those owners, their matching legacy wrappers and descendants.
-All 37 processes exited after SIGTERM; no SIGKILL was required. The current
-Session and main-Home processes were outside that set.
-
-The four stores moved intact to `~/.lf-retired/20261004T161815Z/installed/`.
-The unused root database and two demo databases moved with the remaining legacy
-root to `remaining-home/` in the same archive. Its `retirement.json` records
-process identities, signals and source/destination paths. The seven earlier
-snapshots remain at `~/.lf-retired/20261002T191224Z/worktrees/`. Archives preserve
-history and consume disk space; retirement does not mean erasure.
-
-Verification: all 37 recorded process identities exited, legacy handles reached
-zero, `~/.lf-dev` no longer exists, and installed `lf home id` still returns
-`home_39860354aaca640c2ccb50bf6ca609d8`; prune inspection reports zero errors.
-LOO-342 was already marked done in the October 4 status read. This retirement
-supersedes the pending-store findings above and closes the remaining acceptance
-gap after the October 2 installed routing checks.
+owners. All 37 identified processes exited after SIGTERM, none needing SIGKILL.
+The four installed stores, the unused root database and two demo databases are
+intact under `~/.lf-retired/20261004T161815Z/` (`retirement.json` records
+identities, signals and paths); seven earlier snapshots remain at
+`~/.lf-retired/20261002T191224Z/worktrees/`. `~/.lf-dev` no longer exists and the main Home
+identity is unchanged. [Method and verification](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#legacy-retirement-completed-2026-10-04).
 
 ## Worktree listing and fenced dispatch (LOO-375, 2026-10-05)
 
 Jack Heart reported `lf wt list` at 44 s, 17 s after a deadlocked writer was
-killed. PR 1 shipped in v0.13.3; PR 2 is branch evidence. Numbers and method:
+killed. PR 1 shipped in v0.13.3 and PR 2 in v0.13.4. Numbers and method:
 [report](../../scripts/benchmarks/wt-list/README.md).
 
 - **Process count, not Git work, was the listing cost** (PR 1): about 370 serial
   Git processes became about 70 through batched ref reads, concurrent `status`,
-  one GitHub call and per-commit-pair answers in `.git/lf-commit-facts`. One
-  GitHub round trip (1–1.8 s) is the remaining online floor.
+  one GitHub call and per-commit-pair answers in `.git/lf-commit-facts`.
+- **GitHub's answer time grows with the branches in one query** (PR 3, branch
+  evidence). Installed 0.13.4 read 1.80 s median over three samples, 1.62 s of
+  it the remote. Asking 16 branches per request side by side: 1.45 s → 1.03 s
+  median on a fresh Home. One unanswered request leaves every branch unknown.
 - **Every store open scanned the whole database** (PR 2). The first installed
   sample read 8.09 s: 4.91 s before listing, 1.90 s in receipts. Opening ran
   `PRAGMA foreign_key_check`, and one command opens the store five times, so
@@ -365,7 +328,7 @@ killed. PR 1 shipped in v0.13.3; PR 2 is branch evidence. Numbers and method:
   the store in `<Home>/perf/wt-list.jsonl`, read with `lf wt timing`.
 - **Jack Heart's delivery contract:** land after autonomous checks and honest
   benchmarks; installed timing is post-merge validation, so the Task stays
-  open. One installed sample is not a p95; ≤1 s warm p95 online is unmet.
+  open. Seven installed samples are not a p95; ≤1 s warm p95 online is unmet.
 - **Install preflight/promote read the OS account's Home whatever `LF_HOME`
   says.** Tests running them are container-only installation proofs.
 - **A closed Session with a confirmed-dead provider no longer blocks Task
@@ -942,26 +905,16 @@ published machine artifacts only; `lf task sync` (which replaced `lf rebase` in
 #1367) owns checkout updates. The schedule is opt-in login plus weekly, Monday
 09:00 local, with positional daily/hourly/5min. The separate daemon is retired.
 
-Observed October 4 with published 0.13.0:
-
-- **Natural login catch-up.** v0.13.0 published at 00:20 PDT while the laptop
-  was asleep, then off after a 1% battery shutdown. `com.loopflow.refresh` ran
-  at the 12:04 login and promoted 0.12.32 → 0.13.0 with exact-store preflight
-  and no migration (refresh.log, switch-49b58550 receipt).
-- **Real calendar firing.** The 5min cadence fired at 20:10 and 20:15 through
-  launchd itself (runs 1 → 3); weekly was then restored byte-identical and
-  idempotent. No Monday 09:00 firing or sleep-coalesced wake run has been
-  observed; neither is Loopflow code. Read refresh.log after October 5 09:00.
-- **Complete artifacts.** Receipt CLI/app/helper hashes, the entry gate, the
-  notarized signature and /Applications 0.13.0 all match. Repeat `lf install`
-  changes no receipt, Task, PR, Flow or Wave identity.
-- **Fresh published path.** Ubuntu 24.04 container without Git: public installer,
-  repeat without download, and missing-entry repair retain the Home identity.
-- **Checkout updates.** Sandbox with the installed binary: stale main with an
-  unpublished commit plus staged/modified/untracked bytes catches up, repeats
-  as a no-op, picks up advanced upstream, bases a sibling on it, and a sibling
-  sync refreshes canonical main first. Clean main fast-forwards. The real main
-  checkout was already current; its incident path was not replayed there.
+Observed October 4 with published 0.13.0
+([evidence](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#installation-and-checkout-closure-loo-292-2026-10-04)):
+the login schedule caught up 0.12.32 → 0.13.0 after a shutdown with exact-store
+preflight and no migration; the 5min cadence fired twice through launchd and
+weekly was restored byte-identical; receipt, signature and /Applications hashes
+match and a repeat install changes no identity; an Ubuntu 24.04 container
+without Git installed and repaired a missing entry; sandboxed
+`lf task sync` caught up a stale main while preserving unpublished, staged,
+modified and untracked bytes. No Monday 09:00 firing or sleep-coalesced wake
+has been observed; neither is Loopflow code.
 
 Unresolved, not blocking: the currency probe (`--version` plus a 30 s preflight)
 returned not-current once at load ~14, starting a redundant download; preflight

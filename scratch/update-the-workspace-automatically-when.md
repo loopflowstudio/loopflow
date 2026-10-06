@@ -1,9 +1,9 @@
 # Update the workspace automatically when Loopflow data changes (LOO-382)
 
-Status: **stream built; the planning read is being rebuilt to be simple and
-fast, 2026-10-05.** Jack Heart requested the Task and made the decisions below
-in design review. After reading the PR walkthrough he set the direction in the
-next section. Open choices are in [questions.md](questions.md).
+Status: **stream and the five planning-read slices built, 2026-10-05; not
+shipped, window not re-measured.** Jack Heart requested the Task and made the
+decisions below in design review. After reading the PR walkthrough he set the
+direction in the next section. Open choices are in [questions.md](questions.md).
 
 ## Simple, fast planning read (direction 2026-10-05)
 
@@ -436,7 +436,7 @@ files, diffs, usage).
 | Situation | Behavior |
 | --- | --- |
 | No store yet | Frames with empty bodies; the watch waits for the file to appear. |
-| Store exists and cannot be opened | Every store part is unavailable with the reason, retried each second. Found on a Home copy at another schema, which read as an empty workspace. |
+| Store exists and cannot be opened | Every store part is unavailable with the reason, retried after 1 s doubling to 60 s (slice 4). Found on a Home copy at another schema, which read as an empty workspace. |
 | Projection fails | Part frame carries the existing `Unavailable` evidence; Desktop keeps last good rows, marked. |
 | Stream ends or stalls past the heartbeat | Last good reading shown as unavailable; restart with backoff; no silent freeze. |
 | Missed event, checkpoint, sleep | 1 s revision re-read or `refresh` converges. |
@@ -564,6 +564,8 @@ costs seconds. This plan earns no KR by itself.
 
 ## Check results
 
+- 2026-10-05 realign: plan, questions and memory only; no code changed, no
+  check rerun.
 - 2026-10-05 compress: `cargo test -p loopflow --lib -- lf::commands::waves
   engine::worktrees` 35/35; clippy `--all-targets -D warnings` clean.
 - 2026-10-05 slices 2–5: `cargo test -p loopflow --test workspace_watch`

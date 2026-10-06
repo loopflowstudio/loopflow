@@ -25,11 +25,15 @@ and a miss ships with numbers and a follow-up Task.
   `:events.jsonl:` with transcript lines; exempting the key silenced about
   1,270 displayed rows a day. Exempt the types readers skip. Usage still
   moves nothing, so token totals lag: nobody chose that either.
-- An unreadable store must not read as empty.
+- An unreadable store must not read empty.
 - On the branch, unshipped: one `lf monitor workspace --watch` per window
   replaces the 2–30 s loops; the Task-files comparison keeps its 10 s read.
   Reader on a copy of Jack's store (release, 5 samples): commit to frame
   0.3 s for a Task, 0.13 s for a Session. The window was not re-measured.
+- Jack (2026-10-05): which Waves and Tasks are current must be simple and
+  fast, and he wants derived state in the database. None is stored: sampling
+  put 83% of the read in one per-Task statement, and reading it in bulk met
+  300 ms. Sample first.
 - The outline lists started Tasks only (2026-09-25), so a Task created with
   no Run never reaches the left pane. LOO-382 asks that it does. Unresolved.
 
@@ -768,8 +772,7 @@ needs rotation. Preserve the chapter-bearing Home before proposing a new chapter
 
 ### Earlier runtime findings (July–August evidence)
 
-Retired 2026-10-05: resident-era retry, containment-liveness and Home-server
-notes live at [commit 2e1074903](https://github.com/loopflowstudio/loopflow/blob/2e1074903/wave/product/MEMORY.md).
+Retired 2026-10-05; resident-era notes live at [commit 2e1074903](https://github.com/loopflowstudio/loopflow/blob/2e1074903/wave/product/MEMORY.md).
 Still applicable: a missing Flow settles as one blocker instead of retrying,
 and a live containment is not proof of an advancing provider turn.
 
@@ -1087,9 +1090,6 @@ to close during this reconciliation.
   `--test dto_fixtures` to run that integration file. Headless runs set
   `LF_RUN_ID`; Rust tests asserting generated journal ids / branch-derived ingest
   must clear it or full `cargo test -p loopflow` fails only under agent runs.
-- **Historical migrations demonstrated the shared-store blast radius.** Product
-  and Intelligence collided on `061`; editing an already-applied migration left
-  existing databases without a required column. Preserve released migrations and
-  test upgrades from the released frontier. The incident detail and June's
-  superseded remote-client recipes are in the
-  [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md). AGENTS.md owns the current one-draft-per-Task rule.
+- **Preserve released migrations** and test upgrades from the released
+  frontier; two Waves once collided on `061`. See
+  [pre-chapter memory](../../.lf/chapters/20260923T000959Z-502f011b/sources/wave/product/MEMORY.md).

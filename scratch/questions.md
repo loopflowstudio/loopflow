@@ -111,13 +111,13 @@ Added 2026-10-05 after Jack Heart read the PR walkthrough.
     types, read in bulk, store no derived state and add no change log. Jack
     said "i think we want it in the db" about derived state; that is not
     built. He also said not to over-index on a keyed Swift store.
-24. **Built: a failing part backs off**, 1 s doubling to 60 s. The cap is a
-    guess. A commit or a request still reads the part at once, so a part
-    that fails while agents commit is read as often as a healthy one.
     Jack added: "this db's only purpose really is to serve this UX." Read as:
     display-shaped rows are the store's primary tables, not a cache beside
     them. The store also holds execution authority (Flow position, claims,
     landing locks); how those relate to display rows is not worked out.
+24. **Built: a failing part backs off**, 1 s doubling to 60 s. The cap is a
+    guess. A commit or a request still reads the part at once, so a part
+    that fails while agents commit is read as often as a healthy one.
 
 Added 2026-10-05 building the planning-read slices. Nobody has confirmed these.
 

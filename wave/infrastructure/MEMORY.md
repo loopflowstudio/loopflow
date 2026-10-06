@@ -189,15 +189,19 @@ They retain original ownership, physical failure, frozen coverage, candidate,
 caller bytes and child-held locks without republishing or double settlement.
 Synthetic proofs do not establish configured automatic settlements.
 
-October 5 source inspection found public installer smoke used fake HOME/LF_HOME
-although promotion resolves the OS account Home, then hashed the entry gate as
-if it were the executable. The follow-up isolates promotion in a disposable
-container and verifies selected CLI bytes; native macOS smoke stays separate.
-Candidate preflight uses the packaged Linux CLI in a fresh network-disabled
-container for preparation, cached reuse and publication; cached receipts cannot
-bypass it. Service or cleanup failure prevents success. Docker was unavailable
-locally: real container/public acceptance remains open, and simulated checks
-establish neither macOS installation nor automatic settlement.
+PR #1457 merged installer isolation: candidate preflight and public installer
+smoke use disposable Linux containers, checking selected CLI bytes instead of
+the entry gate. Native macOS smoke stays separate. Prior simulated checks prove
+neither container/public acceptance nor automatic settlement.
+
+October 6 scheduled receipt cron_a4b8b11b2a534bf99d183e677f2a6871 failed after
+recovery cron_5d930c31c7ae4a118f6b93774496991c passed continuity but the scorecard
+emitted retired product/task-loop-trust. Accepted chapter commit 42451654e removed
+that contract; remove its hardcoded producer output, preserving strict metric
+validation and lifecycle rows. Installed CLI with the repaired checkout reports
+35 rows; twelve focused tests pass. Original failed receipts and repair ownership
+remain unchanged. Jack Heart authorized publication; the operator owns subsequent
+release recovery after LOO-382. This manual proof supplies no automatic settlement.
 
 Release's September 28 incident proves entry points need operation-level recovery:
 an agent reported failure successfully, producing a misleading green cron receipt.

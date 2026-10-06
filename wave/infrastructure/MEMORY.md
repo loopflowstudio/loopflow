@@ -830,8 +830,8 @@ checkout identity and membership; changed inputs reject comparison.
 
 The bounded sample attributes 559/743 main-thread observations to completion-gate
 Exec reads. An outer-index hint preserved 342 Tasks but showed no benefit and
-was rejected. Further full-query/page attribution remains useful; fresh launch
-checks are distinct obligations. Exact receipts and policy-compilation failures
+was rejected. Full-query/page attribution remains open; fresh launch
+checks are distinct obligations. Receipts and policy-compilation failures
 live in the matched report. No new rendered/memory/Swift/compositor/hour proof;
 6.6 GiB remains below trace admission. Jack Heart authorized publication only.
 

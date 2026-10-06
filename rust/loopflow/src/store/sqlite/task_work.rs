@@ -86,11 +86,14 @@ fn exec_ids(selector: &str, unfinished: bool) -> String {
     } else {
         ""
     };
-    format!("SELECT ae.id FROM execs ae {index} JOIN ({}) tw ON ({unfinished}{})
-        UNION SELECT se.exec_id FROM session_events se WHERE se.session_id IN ({}) AND se.exec_id IS NOT NULL
-        UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN ({}) AND a.driver_exec_id IS NOT NULL
+    // History and current drivers share exactly the same Session membership.
+    // Materialize it once within this query, never across store reads.
+    format!("WITH members AS MATERIALIZED ({})
+        SELECT ae.id FROM execs ae {index} JOIN ({}) tw ON ({unfinished}{})
+        UNION SELECT se.exec_id FROM session_events se WHERE se.session_id IN (SELECT id FROM members) AND se.exec_id IS NOT NULL
+        UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN (SELECT id FROM members) AND a.driver_exec_id IS NOT NULL
         UNION SELECT fe.exec_id FROM flow_events fe WHERE fe.flow_id IN ({}) AND fe.exec_id IS NOT NULL",
-        tasks(selector), checkout("ae.cwd"), session_ids(selector), session_ids(selector), flow_ids(selector))
+        session_ids(selector), tasks(selector), checkout("ae.cwd"), flow_ids(selector))
 }
 
 impl SqliteStore {

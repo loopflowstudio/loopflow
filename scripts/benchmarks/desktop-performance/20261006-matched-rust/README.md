@@ -904,3 +904,93 @@ memory benefit. Next useful evidence is internal capture-storage lifetime in the
 realistic workspace, independent of wrapper lifetime. All original acceptance
 obligations remain. About 13 GiB free still cannot support the measured full-hour
 trace, and recorder readiness/coverage remains unresolved; no full hour was run.
+
+## Repeated Task Session membership — October 6
+
+Jack Heart requested continuing measured CLI/native latency work from `6842816c3`,
+with publication to PR #1460 and no merge or Task completion. Checkpoint `b1a75d2ff`
+preserves the preceding uncommitted lifetime diagnosis. Exact distributions,
+preservation and receipt hashes are in [task-membership-summary.json](task-membership-summary.json);
+private scripts and original outputs remain at `/tmp/loo304-next-read-20261006/`.
+
+Fresh native sampling produced no usable stacks: the first launch used a
+noncanonical CLI path and was refused before execution; corrected launches exited
+successfully but sampling either failed attachment or returned an empty call graph.
+These are failed profiling attempts, not new attribution. Only disposable database
+copies created for these attempts were removed, with source/copy hashes and their
+added inspection Execs retained. Existing snapshots, traces and historical records
+were untouched.
+
+Bundled SQLite **3.53.2** isolated repeated Task Session selection in `exec_ids`:
+Session history and current driver arms independently evaluated the same membership
+expression. One query-local materialized CTE now supplies both arms. The expression,
+checkout boundaries, explicit scopes, bindings, Flow associations, unfinished filter
+and ordering are unchanged. There is no cache across queries, schema change,
+Git/config shortcut or authority relaxation.
+
+The original and candidate ID selections matched for **all 342 Tasks** (598 selected
+IDs across Tasks, before the outer unfinished filter). VM steps fell
+**30,854,354 → 17,549,229**. Three paired bundled-engine runs measured CPU seconds
+1.186/0.725, 0.967/0.579 and 0.945/0.577. This isolates repeated SQL work, not the
+whole Task reader or rendered latency. Existing membership/alias/scope/history
+regressions passed, as did exact historical-uncertainty execution protection.
+
+The retained baseline binary contains Rust through `4151c79a6`; inspection found
+no later Rust changes through `b1a75d2ff`. The candidate is a normal release build
+with only this SQL change. Builds and checks finished before alternating reads on
+fresh copies of the same immutable snapshot and current authored configuration.
+
+| Direct reads, twenty warm successes each | Baseline median / p95 | Candidate median / p95 |
+| --- | ---: | ---: |
+| Roadmap wall time, ms | 994 / 2123 | 939 / 1346 |
+| Roadmap child CPU, ms | 805 / 883 | 786 / 907 |
+| Session-list wall time, ms | 488 / 1480 | 460 / 1854 |
+| Session-list child CPU, ms | 405 / 472 | 410 / 456 |
+
+All **84 reads** passed. Git counts remained 36 per roadmap and three per Session
+list. Roadmap load medians matched at 36.7 (maximum 42.5); Session load medians
+matched at 64.3 (maximum 68.0). High, variable contention limits timing attribution;
+Session p95 and roadmap CPU p95 worsened. Neither path meets 300 ms. All retained
+rows/types/identities across **39 tables** matched, including unknown historical
+Execs; each copy added only 42 inspection Execs. Responses differed only in fresh
+timestamps and 525 verified age comparisons. Snapshot and config hashes match.
+
+The unchanged mounted observer first passed baseline **20/20** endpoints and five
+preserved rounds over 150 seconds. The first candidate failed its first warm
+native endpoint: **16 successes, one timeout, three unstarted**. Focus/surface/history
+were ready at roughly 1.64 seconds, then a 3.42-second OCR call consumed the remaining
+five-second deadline; the failed endpoint ended at 5.64 seconds. This establishes
+the observed deadline sequence, not why OCR stalled or a product allocation defect.
+Its incomplete recorder (38 samples, 113/112 CLI starts/ends), failed journal and
+unavailable comparison remain retained. No timeout or observer change followed.
+
+After observed host load fell to about 14, one explicitly separate candidate
+confirmation passed **20/20** endpoints and five preserved rounds. It uses the same
+Swift binary, measurement-source hash, sandbox, fixture and observer as the baseline
+and failed candidate. Baseline/confirmation source/CLI/config stability passed.
+Unequal load and the retained intervening failure preclude a general speedup claim.
+
+- Fourth-round RSS growth **failed both: +42.6 / +44.5 MiB**. The failed candidate
+  never reached round four; its missing value is not zero.
+- Native warm median: 1161 / 1091 ms. Warm Task: 366 / 404 ms; Task reopen:
+  385 / 400 ms. Four warm observations provide **no p95**.
+- App CPU median/p95/max: 0.9/16.0/92.3% / 0.9/20.0/68.8%, 150 samples each,
+  excluding children. CLI starts/ends: 254/254 / 252/252. SQLite statements:
+  119,036 / 118,536; emitted rows: 1,434,815 / 1,428,872.
+- Both complete runs preserved native identity/history/input, drafts, selection,
+  layout and focus with one visible window. Eleven unavailable reads per run remain
+  explicit. Bitmap/OCR is not compositor paint; hitch/hang and full-interval trace
+  coverage remain unmeasured in this diagnostic mode.
+
+Review retained the query-local reduction and rejected interpreting it as Desktop
+acceptance. Existing-checkout Git resolution and remaining Task-work costs still
+need attribution; empty native samples cannot select the next repair. Original
+latency/read budgets, failed <32 MiB growth, independent Swift attribution,
+compositor/input, recorder readiness/capacity and both full hours remain open.
+About 10 GiB available storage does not support the retained full-trace rates.
+Release's immediate goal/current schedule and publication/installation memory were
+read; older incidents were not reread and provide no Desktop acceptance.
+Checks: release build, fmt, all-target Clippy PASS; Task-work 7 and historical
+uncertainty 1 PASS; direct reads 84/84 and 39-table preservation PASS; mounted
+baseline/confirmation 20/20 each PASS preservation / FAIL memory, first candidate
+FAIL native deadline. Publication only.

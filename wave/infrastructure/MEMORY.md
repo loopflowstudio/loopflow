@@ -378,16 +378,11 @@ killed. PR 1 shipped in v0.13.3; PR 2 is branch evidence. Numbers and method:
 
 ## Environment variables (LOO-341, branch evidence 2026-10-01)
 
-Jack Heart requested an audit of every `LF_*` variable against the policy it
-implements. The inventory is [Environment](../../docs/architecture/environment.md).
-`LF_HOME` is the only Home selector and its database is always
-`$LF_HOME/loopflow.db`; `LF_DB_PATH` and the `LF_CONTROL_*` trio are removed, with
-the other names nothing read. One list of Exec-context names drives both the
-session shell's `unset` and the tmux client's environment, because a tmux server
-copies its first client's environment into every later session. Fixtures open
-their store at the Home's fixed path. Not reviewed by Jack; branch evidence only.
-LOO-370 removes those presence-based runtime decisions. Its accepted scope excludes
-conversion; source gate and delivery remain unfinished.
+Jack Heart requested the LF_* policy audit. Current inventory belongs in
+[Environment](../../docs/architecture/environment.md); exact branch mechanics and
+unreviewed proof limits remain at `b1a75d2ff:wave/infrastructure/MEMORY.md` under
+this heading. LOO-370 removes presence-based runtime decisions; its accepted
+scope excludes conversion. Source gate/delivery remain unproved here.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 
@@ -405,12 +400,10 @@ during completion, recovery and cleanup. General membership cannot settle or
 signal them. Current mechanics live in the architecture reference; this branch
 entry is not evidence of shipment or configured Desktop acceptance.
 
-## Synced planning integration (LOO-334, 2026-09-30)
+## Synced planning integration (LOO-334)
 
-Main supersedes the intermediate-schema bridge. Migrate from released Session
-ownership; retain one FlowSession driver and adopted Task branch/worktree/PR
-identity without inferring progression. Historical detail remains at
-`47c23c396:wave/infrastructure/MEMORY.md` under this heading.
+Superseded bridge evidence: `47c23c396:wave/infrastructure/MEMORY.md`.
+Current Session/Flow ownership and Task identity preservation govern.
 
 ## Planning and launch preservation (curated 2026-10-02)
 
@@ -810,20 +803,26 @@ unknown. The report retains exact evidence; observation repair proves no product
 latency improvement. Swift attribution, latency/growth, both hours and compositor
 proof remain open; publication only is authorized.
 
-October 6 Hitches/Hangs probes projected 13.2/103.0 GiB/hour; neither exports
-both tables. The 2 GiB guard remains. Real TOC clocks use `info/summary`; reports
-reject missing tables/coverage. Readiness, capacity and both hours remain open.
+October 6 bounded capture work retains its receipts in the matched report.
+Hitches/Hangs project 13.2/103.0 GiB/hour; neither supplies both tables. The 2 GiB
+guard remains; corrected TOC clocks use `info/summary`. Readiness, coverage and
+both hours remain open. AppKit/CoreGraphics stacks identify two ~17 MiB mapped
+regions, not live/resident ownership; Ghostty targets stayed fixed. Direct draw
+lost 4,642 glyph pixels and was rejected. Four contained lifetime probes show
+bitmap wrappers released after ordinary suspension (before return with pooling),
+without handler/result accumulation or RSS benefit. The earlier pool passed
+20/20 but failed +53.0 MiB growth. No pool repair or leak exclusion is supported.
 
-Capture stacks attribute two ~17 MiB regions to AppKit/CoreGraphics; Ghostty
-targets stayed fixed. Direct drawing lost 4,642 glyph pixels, failing both
-recognizers; discarded. Original captures matched.
-
-Jack Heart requested object-lifetime evidence. Four contained processes show
-bitmap wrappers die after the ordinary 5 ms suspension, or before return with
-pooling. Vision handlers/results do not accumulate; two requests remain. RSS
-grows similarly. The prior full-scope pool passed 20/20 but failed +53.0 MiB
-growth; no pool repair is supported. Weak references cannot prove internal storage lifetime or exclude product leaks.
-Source restored; all acceptance remains open. The matched report owns receipts.
+Jack Heart's next bounded read repair shares Session membership within one SQL
+query. All 342 Task candidate-ID sets match; bundled VM steps 30.9M→17.5M.
+Alternating reads passed 84/84 with 39-table preservation; roadmap median/p95
+994/2123→939/1346 ms under high variable load, Git counts unchanged. Session p95
+worsened. Mounted baseline/confirmation passed 20/20 each but memory failed
++42.6/+44.5 MiB. The first candidate timeout remains: readiness 1.64 s plus
+3.42 s OCR exhausted the unchanged deadline. Lower-load confirmation is not
+causal latency proof. Query-local materialization grants no persistent freshness
+or authority. The report owns exact evidence; every original latency/growth,
+Swift, compositor/input and hour obligation remains. Publication only.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 
@@ -902,9 +901,9 @@ Wave learning stays with its identified owner, never miscellaneous .lf notes.
 
 ## Prompt reduction boundary (2026-09-24)
 
-Keep historical `WorkCatalog`, current `TaskExecutionSnapshot` and consumed
-`PreparedLaunchPrompt` distinct. LOO-287's broader proof remains open. Dated
-evidence: `fe3f3ed46:wave/infrastructure/MEMORY.md` and Intelligence memory.
+Keep catalog, execution snapshot and consumed launch prompt distinct. LOO-287's
+proof remains open; evidence: `fe3f3ed46:wave/infrastructure/MEMORY.md` and
+Intelligence memory.
 
 ## Installation and command scope (curated 2026-10-02)
 

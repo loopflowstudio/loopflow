@@ -51,6 +51,7 @@ The Task Workflow transition removes saved Flow resume, automatic recovery, and 
 - After a successful migration, Loopflow keeps the two newest fingerprinted backups. Hand-named and unfingerprinted backups are preserved.
 - If a process dies with buffered streaming increments, those increments remain available only in the capture file.
 - Draft-bearing development builds embed their expected schema instead of replaying migrations on every database open. Published releases did not incur that replay cost.
+- Release recovery now retries GitHub artifact downloads that fail on macOS with `read: operation timed out`, using the existing bounded read retry policy. Publisher writes are unchanged; this repair does not establish release publication or installed acceptance.
 
 ## Small changes
 

@@ -1,7 +1,8 @@
-# Assumptions — LOO-394
+# Assumptions — LOO-411 and later remote-work slices
 
 2026-10-07. Written from research and a conversation with Jack Heart that
-settled the holder and the credential rules. Jack authorized only the rename slice and publication; later slices remain intent.
+settled the holder and the credential rules. Jack authorized the rename and then
+LOO-411's machine record through publication and review; later slices remain intent.
 
 - Jack Heart's original mini command and error from 2026-10-06 were never
   captured. The design assumes `lf ssh mini --task <ISSUE> <skill>`, which fails
@@ -13,8 +14,6 @@ settled the holder and the credential rules. Jack authorized only the rename sli
   rotation for Claude rests on user reports and loopflow's own comments;
   `setup-token` scope and revocation are partly unverified. No command was run
   against real credentials.
-- GitHub's handling of a custom ref namespace (accepted, hidden in the UI, no
-  Actions, not in default clones) is general knowledge, not verified here.
 - The Keychain behaviour in `store/token_crypto.rs` over ssh is read from code,
   not observed.
 - "Do not restore that service" (product Wave memory) is read as ruling out a

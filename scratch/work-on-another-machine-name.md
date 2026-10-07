@@ -1,8 +1,19 @@
 # Work on another machine
 
-Status: LOO-411 builds step 2, the machine record, stacked on LOO-394 / PR #1484.
+Status: LOO-411 implements step 2, the machine record, stacked on LOO-394 / PR #1484.
 Jack Heart authorized implementation and publication on 2026-10-07, then stopping
 for review. The rename is inherited; later remote-work slices remain intent.
+
+## Remaining for LOO-411 (reconciled 2026-10-07)
+
+- Affected gate checks and an isolated real-SSH connection proof remain. Existing
+  public-command fixtures simulate SSH; they establish command behavior, not a
+  configured transport or installed migration. Installation proof belongs to
+  disposable OS-account/container verification.
+- Publication remains, followed by Jack Heart's review. No landing or later
+  remote-work implementation is authorized for this slice.
+- No product decision is needed for the machine record. Later slices retain
+  the unresolved Codex holder and shell-pane choices below.
 
 Do not lift code, tests, help text or config from herdr or cmux (Jack Heart,
 2026-10-07). Their behaviour is described here from docs and reading; write
@@ -19,10 +30,10 @@ Mac app or a phone.
 Infrastructure Wave (execution continuity). The design belongs to LOO-394; this copy drives LOO-411, the second step, stacked on the first so it does not wait for it to land (Jack Heart, 2026-10-07). LOO-393 and LOO-395 are
 merged into it.
 
-## The demo
+## Full remote-work demo — later slices
 
 ```sh
-lf machine add mini          # ssh works, lf found or installed, identity recorded, accounts connected
+lf machine add mini          # SSH and lf already work; identity and connection recorded
 lf machine status            # reachable / needs sign-in / error; never prompts
 lf ssh mini --task LOO-123 implement   # mini has never seen LOO-123; prints Session and reconnect command
 # close the laptop, wait, open it
@@ -123,7 +134,9 @@ PR 1 changes the Home names below to machine. The remote-work limitations remain
 ## PR 1: inherited rename
 
 LOO-394 / PR #1484 owns the Home-to-machine rename and its verification.
-The parent is integrated through `8d2988da54edd7eac8262e299e27bf93afc3a089`.
+The parent tip `76b4b28e67302c6e8d6d2a9d7616810574207e3f` is integrated by
+`bf22b0bcfffb986a56793b4762de2df0a95b360f`; it includes the cache/install-scope
+decisions below. This local ancestry does not establish hosted delivery.
 Jack Heart's later decisions discard old Desktop caches and name installation
 scope `installation`. Opaque identities, scheduled-job keys, Desktop selection
 keys, install paths and historical payloads retain their bytes. Parent evidence
@@ -292,7 +305,7 @@ silently merged. Phone use is LOO-396.
 
 ## Open choices
 
-No decision is needed for PR 1. Later plans must resolve the retained draft's
+No decision is needed for LOO-411. Later plans must resolve the retained draft's
 Codex contradiction: the relay design exempts its existing engine socket, while
 the deletion inventory lists it for replacement. Shell-pane restoration also
 remains undecided. Neither changes the accepted per-Session holder or authorizes
@@ -304,8 +317,8 @@ Decided by Jack Heart, 2026-10-07: "Fine to break things up into multiple
 PRs." Each one deletes what it replaces. Follow-ups are intent only; each gets
 its own plan when started.
 
-1. Rename Home to machine. No behaviour change. PR #1484, under review; this
-   branch is stacked on it.
+1. Rename Home to machine. PR #1484's updated tip is integrated here, including
+   the accepted cache discard and installation scope. This branch is stacked on it.
 2. `This slice` (LOO-411). Machine record: `lf machine add`, `list`, `status`, `rename`, `remove`;
    ssh aliases; identity fetched at add; repository path. Deletes `lf machine
    observe`, the hard-coded repository path and the `user@host` rule.
@@ -331,7 +344,13 @@ Jack Heart, 2026-10-07: a redesign cleans up in the same diff. Where several
 building blocks exist for one job and none quite works, delete them and keep
 the code minimal; do not add another beside them.
 
-Earlier attempts found in source. Each later slice removes what it replaces;
+Removed in this slice: `MachineCommand::Observe`, `Store::observe_machine`,
+`SqliteStore::observe_machine`, `MachineRoute`/`MachineHost` and their parser
+tests, `DEFAULT_REPO`, and the raw-host SSH fallback. Compression also removes
+`run_with_env`, `ssh_connection_args`, the second SSH runtime, and per-machine
+queries during listing. One row reader serves local, by-ID and list reads.
+
+Remaining targets belong to later slices. Each removes what it replaces;
 Codex's disposition remains unresolved as noted above:
 - Three ways to start something detached, none of which is a reattachable
   Session: `start_tmux_session` with the hidden `serve-conversation` command;
@@ -343,7 +362,6 @@ Codex's disposition remains unresolved as noted above:
 - The lease broker's detached-form string check
   (`reject_detached_account_forwarding`) and the ambient fallback that exports
   the laptop's raw provider tokens over ssh.
-- `lf machine observe` (renamed in PR 1); the hard-coded `~/src/loopflow`; the `user@host` rule.
 - Random Task id minting for new Tasks.
 - Rename slice removes `capture_home_command`, its unused capture subprocess and
   error type, plus the cache migration's duplicate JSON serialization. Installer
@@ -367,7 +385,9 @@ Codex's disposition remains unresolved as noted above:
 
 - Machine-local paths, liveness and execution authority never travel. A received
   record is never a worker claim.
-- One schema migration, written against the last released schema.
+- One migration draft for LOO-411, dependent on the inherited rename draft.
+  Preservation fixtures start from released SQL and apply both finished drafts;
+  no intermediate draft schema is a supported upgrade frontier.
 - Wire types get no defaults; fixtures updated in Rust and Swift.
 
 ## Full remote-work acceptance — later slices
@@ -400,7 +420,7 @@ Codex's disposition remains unresolved as noted above:
 
 Parent rename evidence remains at
 `06e88761d:scratch/work-on-another-machine-name.md`. PR #1484 owns its gate,
-installation proof and changing cache/install-scope decisions. This slice does
+installation proof and accepted cache/install-scope decisions. This slice does
 not claim installed migration or later remote-work acceptance.
 
 LOO-411 implementation choices (2026-10-07): extend the existing Machine row
@@ -412,10 +432,10 @@ An omitted repository uses the local checkout's home-relative path; outside a
 checkout, `--repo` is required. Absolute remote paths and `~/` paths are accepted.
 Remote installation/version replacement remains explicit: unsupported peers get
 an actionable upgrade error, never an unattended replacement of running work.
-Delete: `observe` and its writer, raw-host SSH fallback, DEFAULT_REPO, and the
-custom SSH user/host/port parser. Preserve exact machine checks and credential
-transport via stdin. Prove label lifecycle, nonprompting probe failures, quoting,
-version reporting and preservation from released SQL in disposable stores.
+The deletion inventory above is complete for this slice. Exact machine checks
+and credential transport via stdin remain. Focused fixtures cover label lifecycle,
+nonprompting probe failures, quoting, version reporting and preservation from
+released SQL in disposable stores.
 
 Review finding: removal must release the active destination as well as the label,
 so a replacement machine can be added there without deleting the old identity.
@@ -425,4 +445,8 @@ when the identity command fails. Machine commands and the regenerated command re
 publication remains. Real SSH/accounts and installed migration
 are not proved by the simulated transport fixtures.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; focused nextest selection passed 63 tests (two reported open output handles), merged `machine_commands`/`cli_discovery`/`documented_commands` passed 24 without leaks; `scripts/test_desktop.sh -Xswiftc -gnone --filter DTOFixtureTests` passed 22. Full affected gate and isolated installation remain with gate/CI; configured SSH and installed migration are unproved.
+Earlier migration, command-discovery and Swift fixture results, including the
+two open-output-handle observations, remain at
+`e7cd8050ee3882a71a2374c693d0ef6543b2219c:scratch/work-on-another-machine-name.md`.
+
+Checks: realign `git diff --check` passes and `lf context --wave infrastructure --skill realign --json` fits both budgets; reused unchanged-code passes for `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `cargo nextest run -p loopflow --lib --test machine_commands -E 'test(store::durable::tests::) | test(lf::commands::ssh::tests::) | test(lf::commands::machine::tests::) | binary(machine_commands)' --no-fail-fast` (21 tests, inherited LF_/LOOPFLOW_ authority cleared, LF_BIN pinned to this checkout); affected gate and isolated installation remain with gate/CI, configured SSH and installed migration unproved.

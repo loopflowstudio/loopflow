@@ -143,7 +143,10 @@ mod tests {
             .session_history("conversation", 0, 0)
             .unwrap()
             .iter()
-            .all(|event| event.kind == SessionEventKind::Captured));
+            .all(|event| matches!(
+                event.kind,
+                SessionEventKind::Captured | SessionEventKind::Observed
+            )));
         history
             .record(&json!({"type":"user","uuid":"request","session_id":"thread"}).to_string())
             .unwrap();
@@ -153,7 +156,12 @@ mod tests {
             .session_history("conversation", 0, 0)
             .unwrap()
             .into_iter()
-            .filter(|event| event.kind != SessionEventKind::Captured)
+            .filter(|event| {
+                !matches!(
+                    event.kind,
+                    SessionEventKind::Captured | SessionEventKind::Observed
+                )
+            })
             .collect();
         assert_eq!(events.len(), 3);
         assert!(events

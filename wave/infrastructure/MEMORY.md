@@ -14,6 +14,24 @@ proved. Retained binaries use the shared `install` shorthand. Exact-frontier
 fixtures seed released SQL without drafts. Local checks prove neither installed
 migration nor remote continuity. Schedule ownership and activation stay intact.
 
+## Terminal conversation recovery (LOO-409, 2026-10-07)
+
+Jack Heart authorized autonomous repair through landing. Installed v0.13.9
+revision `6448e3c9e7` recorded reservation and spawn-request receipts for LOO-386's
+first input `ca3b3cf9be254e118f314fef934cd2e9`; the later two admission errors
+were retries. Its TUI returned successfully without native history. The terminal
+path discarded its temporary client receipt without retaining a provider process.
+This contradicts the proposed initial-generation mismatch.
+
+Record native provider identity at spawn and observed exit at wait; failed spawn
+is positive non-start evidence, not an engine exit. Commit reservation with the
+driver claim. Native fallback must use the same ownership checks as first launch;
+remote clients cannot stand in for their surviving engine. Fast terminal exit
+must preserve successfully published native history between opener probes.
+LOO-408 owns completion, LOO-324 native/account discovery, LOO-400 terminology.
+CLI/PTY proofs pass; installed reconnect still fails. No migration. The legacy
+Session lacks exact process evidence; driver success proves no provider exit.
+
 ## Storage footprint (LOO-390, 2026-10-06)
 
 Jack Heart authorized autonomous investigation, cleanup and delivery. Findings,
@@ -491,31 +509,14 @@ local Git is the larger phase, with no measured hard lower bound. Numbers and me
 - **Process count, not Git work, was the listing cost** (PR 1): about 370 serial
   Git processes became about 70 through batched ref reads, concurrent `status`,
   one GitHub call and per-commit-pair answers in `.git/lf-commit-facts`.
-- **GitHub's answer time grows with the branches in one query** (PR 3, branch
-  evidence). Installed 0.13.4 read 1.80 s median over three samples, 1.62 s of
-  it the remote. Asking 16 branches per request side by side: 1.45 s → 1.03 s
-  median on a fresh Home. One unanswered request leaves every branch unknown.
-- **A lock around a cache serialized every Git read** (branch evidence,
-  2026-10-06). #1452's retained-read mutex was held while `git` ran even in
-  commands that retain nothing; installed 0.13.6 read 1.24 s local Git against
-  0.13.4's 0.39 s. Released before the spawn: 1.27 s → 0.31 s local, 1.45 s →
-  1.17 s listing median at load 19–37. GitHub (about 1.0 s) is the measured
-  remainder, not a proven floor.
-- **Every store open scanned the whole database** (PR 2). The first installed
-  sample read 8.09 s: 4.91 s before listing, 1.90 s in receipts. Opening ran
-  `PRAGMA foreign_key_check`, and one command opens the store five times, so
-  `lf home id` took 2.6–4.0 s on the 1.1 GB main Home. Opening now validates
-  ledger and schema only; migrations, doctor and install preflight keep the
-  scan. On a clone of that store: 1.40 s → 0.04 s. An empty Home hides any cost
-  that grows with the store; profile with `--store`.
-- **Never hold the Session fence while waiting on the runtime.** A fenced write
-  held the store mutex and SQLite's write lock inside `block_on` while the
-  reader waited for that mutex on a runtime worker. The write is now timed on
-  its own thread (`harness/dispatch.rs`). OpenCode's fenced HTTP post still
-  holds the fence up to 10 s: bounded, not a cycle.
-- **An Exec waits once for a contended store** (15 s), then runs warned and
-  unrecorded; the start receipt still precedes the command. Timing lives beside
-  the store in `<Home>/perf/wt-list.jsonl`, read with `lf wt timing`.
+- Historical GitHub batching and retained-read mutex measurements remain at
+  `6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`
+  under this heading; these branch observations establish no latency floor.
+- Store opens validate ledger/schema, leaving full integrity scans to migration,
+  doctor and install. Keep the Session fence outside runtime waits; OpenCode's
+  fenced post remains bounded at 10 s. Exec observation waits 15 s, then warns
+  and runs unrecorded. Exact measurements and counterexamples remain in the
+  same `6448e3c9e7` archive above; current timings live under `<Home>/perf/`.
 - **Jack Heart's delivery contract:** land after autonomous checks and honest
   benchmarks; installed timing is post-merge validation, so the Task stays
   open. Installed 0.13.6: 1.47 s text, 1.39 s JSON median over 20 pairs; ≤1 s

@@ -437,3 +437,5 @@ so a replacement machine can be added there without deleting the old identity.
 The route's uniqueness index covers the local identity and named connections;
 unnamed history remains intact. An unsupported peer still contributes its version
 when the identity command fails. Required checks are running; publication remains.
+
+Parent sync proof (2026-10-07): `cargo test -p loopflow --test machine_commands add_alias_rename_connect_and_remove_preserve_identity -- --exact` — passed (1 test); broader checks remain with gate/CI.

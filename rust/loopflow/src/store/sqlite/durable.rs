@@ -113,17 +113,12 @@ impl SqliteStore {
 
     pub fn machines(&self) -> StoreResult<Vec<Machine>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut stmt =
-            conn.prepare("SELECT id FROM machines WHERE label IS NOT NULL ORDER BY label")?;
-        let ids = stmt
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        ids.iter()
-            .map(|id| {
-                map_machine_by_id(&conn, &MachineId::parse(id).map_err(invalid_durable)?)?
-                    .ok_or(StoreError::NotFound)
-            })
-            .collect()
+        let mut stmt = conn.prepare(
+            "SELECT id, route, created_at, observed_at, label, repo
+             FROM machines WHERE label IS NOT NULL ORDER BY label",
+        )?;
+        let rows = stmt.query_map([], |row| Ok(map_machine_row(row)))?;
+        rows.map(|row| row?).collect()
     }
 
     pub fn rename_machine(&self, label: &str, name: &str) -> StoreResult<()> {
@@ -470,60 +465,29 @@ fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {
     conn.query_row(
         "SELECT id, route, created_at, observed_at, label, repo FROM machines WHERE route='local'",
         [],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, Option<String>>(5)?,
-            ))
-        },
-    )
-    .map_err(StoreError::from)
-    .and_then(|(id, route, created_at, observed_at, label, repo)| {
-        Ok(Machine {
-            label,
-            repo,
-            id: MachineId::parse(&id).map_err(invalid_durable)?,
-            route,
-            created_at: OffsetDateTime::from_unix_timestamp(created_at).map_err(invalid_durable)?,
-            observed_at: OffsetDateTime::from_unix_timestamp(observed_at)
-                .map_err(invalid_durable)?,
-        })
-    })
+        |row| Ok(map_machine_row(row)),
+    )?
 }
 
 fn map_machine_by_id(conn: &Connection, machine_id: &MachineId) -> StoreResult<Option<Machine>> {
     conn.query_row(
         "SELECT id, route, created_at, observed_at, label, repo FROM machines WHERE id=?1",
         [machine_id.as_str()],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, Option<String>>(5)?,
-            ))
-        },
+        |row| Ok(map_machine_row(row)),
     )
-    .optional()
-    .map_err(StoreError::from)?
-    .map(|(id, route, created_at, observed_at, label, repo)| {
-        Ok(Machine {
-            label,
-            repo,
-            id: MachineId::parse(&id).map_err(invalid_durable)?,
-            route,
-            created_at: OffsetDateTime::from_unix_timestamp(created_at).map_err(invalid_durable)?,
-            observed_at: OffsetDateTime::from_unix_timestamp(observed_at)
-                .map_err(invalid_durable)?,
-        })
-    })
+    .optional()?
     .transpose()
+}
+
+fn map_machine_row(row: &rusqlite::Row<'_>) -> StoreResult<Machine> {
+    Ok(Machine {
+        id: MachineId::parse(&row.get::<_, String>(0)?).map_err(invalid_durable)?,
+        route: row.get(1)?,
+        created_at: OffsetDateTime::from_unix_timestamp(row.get(2)?).map_err(invalid_durable)?,
+        observed_at: OffsetDateTime::from_unix_timestamp(row.get(3)?).map_err(invalid_durable)?,
+        label: row.get(4)?,
+        repo: row.get(5)?,
+    })
 }
 
 fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Placement> {

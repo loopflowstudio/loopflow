@@ -114,7 +114,7 @@ impl std::fmt::Debug for Credentials {
     }
 }
 
-/// Run `lf` on `host` in `$HOME/<repo>` with the local credential bundle
+/// Run `lf` on an added machine in its repository with the local credential bundle
 /// forwarded. Propagates the remote exit code.
 ///
 /// `secret_names` are resolved locally via Doppler and forwarded as env vars —
@@ -133,12 +133,36 @@ pub fn run(
     lf_args: &[String],
 ) -> anyhow::Result<()> {
     reject_nested_ssh(lf_args)?;
-    let target = resolve_target(target)?;
+    let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
+    let target = runtime.block_on(resolve_target(target))?;
     let cmd = std::iter::once("lf".to_string())
         .chain(lf_args.iter().cloned())
         .collect::<Vec<_>>();
-    let machine_id = target.id.as_str();
-    run_with_env(
+    if lease::account_lease_active() {
+        return Err(anyhow!(
+            "an inherited account lease cannot be re-forwarded over SSH; put `lf machine ssh` on the outer account-selected invocation"
+        ));
+    }
+    let mut credentials = runtime.block_on(resolve_credentials(secret_names, selection))?;
+    if let ProviderAuthority::Lease(prepared) = &credentials.provider_authority {
+        println!("Account lease: {}", format_account_plan(&prepared.lease));
+    }
+    let account_lease = credentials.take_account_lease();
+    reject_detached_account_forwarding(account_lease.is_some(), &cmd)?;
+    let broker = account_lease.map(AccountLeaseBroker::start).transpose()?;
+    let remote_handle = broker.as_ref().map(AccountLeaseBroker::remote_handle);
+    let user_name = crate::engine::config::participant_name()?.unwrap_or_default();
+    let declaration = std::env::var(crate::lf::WORK_DECLARATION_ENV).ok();
+    let mut extra_env = vec![
+        (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
+        (crate::engine::config::USER_NAME_ENV, user_name.as_str()),
+    ];
+    if let Some(value) = declaration.as_deref() {
+        extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));
+    }
+    let preamble = build_preamble(
+        &credentials,
+        remote_handle.as_ref(),
         &target.route,
         repo.unwrap_or(
             target
@@ -146,12 +170,22 @@ pub fn run(
                 .as_deref()
                 .expect("added machines have a repository"),
         ),
-        secret_names,
-        forward_agent,
-        selection,
         &cmd,
-        &[(EXPECTED_MACHINE_ID_ENV, machine_id)],
-    )
+        &extra_env,
+    );
+    let outcome = run_ssh(&target.route, forward_agent, broker.as_ref(), &preamble)?;
+    // Release the broker before reporting the remote command's result.
+    drop(broker);
+    match outcome {
+        SshOutcome::Success => Ok(()),
+        SshOutcome::CommandFailure(code) => Err(crate::exec::CommandExit(
+            u8::try_from(code).expect("SSH command exit status fits a byte"),
+        )
+        .into()),
+        SshOutcome::ConnectionFailure => {
+            unreachable!("run_ssh returns transport failures as errors")
+        }
+    }
 }
 
 fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
@@ -179,74 +213,21 @@ fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn resolve_target(target: &str) -> anyhow::Result<crate::durable::Machine> {
-    let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    runtime.block_on(async {
-        let store = crate::store::open_existing_store().await
-            .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
-        let machine = super::machine::find_machine(&store, target).await?;
-        let probe = super::machine::probe(&machine.route).await?;
-        super::machine::report_version(&machine.route, &probe.version);
-        let reached = probe.id?;
-        if reached != machine.id {
-            return Err(anyhow!("remote machine identity changed: expected {}, reached {reached}; remove and add the connection again", machine.id));
-        }
-        Ok(machine)
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_with_env(
-    dest: &str,
-    repo: &str,
-    secret_names: &[String],
-    forward_agent: bool,
-    selection: &AccountSelection,
-    cmd: &[String],
-    extra_env: &[(&str, &str)],
-) -> anyhow::Result<()> {
-    if lease::account_lease_active() {
+async fn resolve_target(target: &str) -> anyhow::Result<crate::durable::Machine> {
+    let store = crate::store::open_existing_store()
+        .await
+        .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
+    let machine = super::machine::find_machine(&store, target).await?;
+    let probe = super::machine::probe(&machine.route).await?;
+    super::machine::report_version(&machine.route, &probe.version);
+    let reached = probe.id?;
+    if reached != machine.id {
         return Err(anyhow!(
-            "an inherited account lease cannot be re-forwarded over SSH; put `lf machine ssh` on the outer account-selected invocation"
+            "remote machine identity changed: expected {}, reached {reached}; remove and add the connection again",
+            machine.id
         ));
     }
-    let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    let mut credentials = runtime.block_on(resolve_credentials(secret_names, selection))?;
-    if let ProviderAuthority::Lease(prepared) = &credentials.provider_authority {
-        println!("Account lease: {}", format_account_plan(&prepared.lease));
-    }
-    let account_lease = credentials.take_account_lease();
-    reject_detached_account_forwarding(account_lease.is_some(), cmd)?;
-    let broker = account_lease.map(AccountLeaseBroker::start).transpose()?;
-    let remote_handle = broker.as_ref().map(AccountLeaseBroker::remote_handle);
-    let user_name = crate::engine::config::participant_name()?.unwrap_or_default();
-    let declaration = std::env::var(crate::lf::WORK_DECLARATION_ENV).ok();
-    let mut extra_env = extra_env.to_vec();
-    if let Some(value) = declaration.as_deref() {
-        extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));
-    }
-    extra_env.push((crate::engine::config::USER_NAME_ENV, &user_name));
-    let preamble = build_preamble(
-        &credentials,
-        remote_handle.as_ref(),
-        dest,
-        repo,
-        cmd,
-        &extra_env,
-    );
-    let outcome = run_ssh(dest, forward_agent, broker.as_ref(), &preamble)?;
-    // Release the broker before reporting the remote command's result.
-    drop(broker);
-    match outcome {
-        SshOutcome::Success => Ok(()),
-        SshOutcome::CommandFailure(code) => Err(crate::exec::CommandExit(
-            u8::try_from(code).expect("SSH command exit status fits a byte"),
-        )
-        .into()),
-        SshOutcome::ConnectionFailure => {
-            unreachable!("run_ssh returns transport failures as errors")
-        }
-    }
+    Ok(machine)
 }
 
 fn format_account_plan(lease: &lease::AccountLease) -> String {
@@ -607,23 +588,7 @@ enum SshOutcome {
     CommandFailure(i32),
 }
 
-/// Build the `ssh` argument vector with noninteractive bounds. Pure so the
-/// bounds are unit-testable without a live host.
-///
-/// `BatchMode=yes` is the primary hang killer: it refuses every interactive
-/// prompt (password, passphrase, unknown host key) rather than blocking on the
-/// tty forever. The timeouts bound the connect handshake and a stalled session.
 fn ssh_args(dest: &str, forward_agent: bool, broker: Option<&AccountLeaseBroker>) -> Vec<String> {
-    let mut args = ssh_connection_args(dest, forward_agent, broker);
-    args.push("bash -s".to_string());
-    args
-}
-
-fn ssh_connection_args(
-    dest: &str,
-    forward_agent: bool,
-    broker: Option<&AccountLeaseBroker>,
-) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     if forward_agent {
         args.push("-A".to_string());
@@ -643,6 +608,7 @@ fn ssh_connection_args(
         args.push("ExitOnForwardFailure=yes".to_string());
     }
     args.extend(crate::engine::machine_route::bounded_ssh_args(dest));
+    args.push("bash -s".to_string());
     args
 }
 

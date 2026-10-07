@@ -62,6 +62,11 @@ same panes.
 - Restarting the Claude process on attach is acceptable; interrupting a turn
   "is not ideal but maybe not completely unsolvable. The important thing is
   just that it survives the laptop closing."
+- Rotating credentials reach a machine by minting a fresh login on the laptop
+  for that machine and forwarding it. "Yeah I'm confident in this direction."
+  Loopflow logs in to its own private directory on the laptop, the person
+  approves once in the browser, and the credential file is copied to the
+  machine. No terminal on the machine; the laptop's own login is untouched.
 - A launch that asks for an account the machine lacks starts adding that
   account to the machine: "if we know about account A on this machine, then we
   should start the process for adding A to the remote machine if it's not
@@ -173,12 +178,34 @@ on the issue, and it needs a conflict-resolution command.
 
 ### 3. Credentials resident on the machine
 
-| Credential | Mechanism | Approvals | Evidence |
-|---|---|---|---|
-| GitHub | Copy the `gh` token into the machine's `gh` config, file storage | 0 | No refresh token; nothing rotates |
-| Codex | Device-code login on the machine, approved in the laptop's browser | 1 code | OpenAI docs: do not share `auth.json` across machines; a copy lasts about 8 days |
-| Claude | `claude setup-token` minted on the laptop, or `claude auth login` on the machine with a pasted code | 1 | Refresh is single-use; see open choice 2 |
-| Linear | A second grant minted on the laptop | 1 | Each refresh issues a new refresh token; 30-minute grace |
+One rule for every credential that rotates (decided above): mint a fresh login
+on the laptop for that machine and forward it.
+
+| Credential | Mechanism | Approvals |
+|---|---|---|
+| GitHub | Copy the `gh` token into the machine's `gh` config, file storage. Nothing rotates. | 0 |
+| Claude | Fresh login into a private directory on the laptop; copy the credential file to the machine's account directory | 1 |
+| Codex | The same, with its own private directory | 1 |
+| Linear | A second grant minted on the laptop; store its tokens on the machine | 1 |
+
+`lf account connect` already performs the first half: it runs the provider
+login in a staging directory apart from the laptop's own login, with the
+browser callback arriving on the laptop, and verifies the account. The new part
+is installing the result on the machine instead of locally: write the file
+atomically with owner-only permissions, verify identity there, register the
+account.
+
+Why this is safe where copying the existing login is not: each machine gets
+its own refresh chain. Copying the laptop's login would put two machines on
+one chain, and whichever refreshed first would sign the other out.
+
+Fallbacks only if a full login cannot be forwarded for some provider: tunnel
+the login's callback from the machine, relay a pasted code from the laptop's
+prompt, or for Claude a `claude setup-token` (one year, inference-only, may
+fail identity and usage checks).
+
+Rests on one unverified fact, first on the list to test: a second login for
+the same account does not sign out the first.
 
 Conditions from the herdr floor: send only to an added machine with strict
 host-key checking; name the accounts at add time; never on a command line or in
@@ -254,29 +281,9 @@ silently merged. Phone use is LOO-396.
 
 ## Open choices
 
-1. Claude on a machine. Jack Heart asked on 2026-10-07 whether a normal login
-   can be had without typing into the machine's terminal. Three ways, in order
-   of preference:
-   - Mint a fresh login on the laptop and forward it. `lf account connect`
-     already runs a provider login in a private staging directory, apart from
-     the laptop's own login, with the browser callback arriving on the laptop.
-     Do that once per machine and move the resulting credential file into the
-     machine's account directory. One browser approval, no tunnel, no terminal
-     on the machine, full scope, its own refresh chain. The same move works for
-     Codex and matches the second grant already planned for Linear.
-   - Run the login on the machine and tunnel its callback. Claude's callback
-     port is not fixed, so `lf` would read it from the authorization address
-     and add a forward for it. No paste; more moving parts.
-   - Run the login on the machine and relay the pasted code from the laptop's
-     own prompt. One paste, at the laptop.
-   `claude setup-token` remains the fallback only if a full login cannot be
-   forwarded: it is inference-only and may fail loopflow's identity and usage
-   checks.
-   All of these rest on one unverified fact: a second login for the same
-   account does not sign out the first.
-2. Tasks that already exist on two machines with different random ids: backfill
+1. Tasks that already exist on two machines with different random ids: backfill
    rule, or leave per-machine?
-3. Shape: one PR, or a keystone (parts 1 and 2) with parts 3 to 6 as follow-ups?
+2. Shape: one PR, or a keystone (parts 1 and 2) with parts 3 to 6 as follow-ups?
 
 ## Delete — do not maintain
 
@@ -326,8 +333,9 @@ headless launch replace them, so they go in the same change:
   one Session, work continues, reattach shows its output.
 - No secret value in argv, logs, records or artifacts.
 - Deferred to hand verification on Jack's mini (needs real accounts):
-  1. Claude `setup-token` in a fresh config directory: interactive use, identity
-     check, usage polling.
+  1. A second Claude login and a second Codex login for the same account, made
+     in a private directory: the laptop's own login still works after both
+     have refreshed.
   2. Two Linear grants refreshed a day apart stay independent.
   3. The mini over ssh after a reboot with nobody logged in.
   4. Codex device code over ssh; laptop still signed in after eight days.

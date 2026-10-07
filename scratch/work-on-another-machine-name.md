@@ -195,9 +195,40 @@ silently merged. Phone use is LOO-396.
      with a per-Session socket and no shared state. Is that inside or outside
      "do not restore that service"? LOO-283 already lists tmux vs a transparent
      terminal relay as open.
-   - C. No holder. Attach means resume; keep the Codex engine alive on hangup,
-     which needs no terminal relay. An in-flight interactive Claude turn is
-     lost and shown as interrupted.
+   - C. No terminal holder. The work runs headless under a detached `lf`, which
+     already drives Claude over pipes and Codex through its engine and records
+     every event. Nothing relays a terminal. Returning has two verbs: watch
+     (read the recorded output as it arrives) and take over (open the native
+     client on the conversation). Taking over a Codex conversation joins the
+     live engine. Taking over a Claude conversation mid-turn interrupts that
+     turn, or waits for it to end.
+
+   Jack Heart, 2026-10-07, on this choice: "I'm okay with a resident process
+   with a listener per session." "I'm okay with attaching and restarting the
+   Claude process"; interrupting a turn "is not ideal but maybe not completely
+   unsolvable. The important thing is just that it survives the laptop
+   closing."
+
+   Proposal from that: C first. It meets the stated requirement with no new
+   process, listener or terminal code, and it matches the direction of sending
+   a message to a persistent conversation (`lf -b session resume ID MESSAGE`
+   exists) over holding a terminal open. B2 remains available later for one
+   case C does not cover: a person typing in a native Claude client on the
+   machine when the connection drops mid-turn.
+
+   What B2 costs, for the record: `lf` must own a terminal device (it owns none
+   today); drain it when no client is attached; carry window size from client
+   to program; and on reattach restore the modes the program set at start
+   (alternate screen, mouse reporting, bracketed paste, keyboard protocol),
+   which means tracking them. Replaying raw captured output is not safe as-is:
+   it contains queries a fresh terminal would answer, typing garbage into the
+   program. Clients of different sizes or terminal types need a rule. Holders
+   outlive `lf` upgrades, so the attach protocol needs a version check.
+
+   "Per Session" means per agent conversation, not per Task or Wave. A Task can
+   have several. Each agent step of a Flow is its own conversation, one live at
+   a time. Under C the detached `lf` is the process that already exists for a
+   headless run and exits when the turn ends.
 2. Must Workflow position follow the person between machines? If yes, the Git
    ref residue is required.
 3. Claude on a machine: `setup-token` is inference-only (may fail loopflow's

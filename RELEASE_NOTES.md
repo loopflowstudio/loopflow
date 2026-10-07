@@ -2,7 +2,7 @@
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.13.9 keeps Task design and review in one conversation, with a visible Workflow showing where the work stands and what can run next. It also reduces the database cost of new session history and restores concurrent Git reads in `lf wt list`. Together, these changes make ongoing work easier to follow and reduce the local overhead of keeping it moving.
+v0.13.9 keeps Task design and review in one conversation, with a visible Workflow showing where the work stands and what can run next. It also reduces the database cost of new session history and restores concurrent Git reads in `lf wt list`. Settled Tasks leave the Desktop sidebar once execution is resolved and no open Sessions remain, keeping ongoing work easier to find.
 
 ## Keep the conversation as the Task moves forward
 
@@ -12,6 +12,7 @@ Task design and review previously depended on separate review Sessions and saved
 - Tasks take up their Project's Workflow unless one is explicitly selected. `lf task run` runs an edge; `lf task move` changes position without executing work. Reaching `end` completes the Task.
 - Ordinary Flow execution replaces Task workers and resumable FlowSession state. Each driver records its launched graph and command steps in append-only FlowExec history; a Task run makes up to three attempts when its Flow fails.
 - Launching an existing Task resolves its Flow in that Task's checkout, keeping execution tied to the work being run.
+- Locally completed or abandoned Tasks leave the sidebar once execution is settled and no open Sessions remain, even when planning status is still open. Open Tasks remain in the Wave plan, and Tasks with open Sessions remain reachable.
 
 ## Keep session history with less database overhead
 

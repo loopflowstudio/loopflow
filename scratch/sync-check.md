@@ -1,1 +1,0 @@
-`cd swift && swift test --filter 'TaskHistoryFilterTests.locallySettledWorkLeavesTheSidebarBeforePlanningCatchesUp|TaskHistoryFilterTests.unresolvedFlowAndRetainedSessionSurviveHiddenHistory|startedWorkingSet'` — PASS, 3 tests after merge `be242ef88`; no rendered acceptance claimed.

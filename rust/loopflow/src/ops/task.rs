@@ -4928,6 +4928,10 @@ pub fn task_edit(
     )
 }
 
+pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm::PmUpdateResult> {
+    super::pm::pm_refile(repo, issue, wave)
+}
+
 pub fn task_comment(
     repo: &Path,
     issue: &str,

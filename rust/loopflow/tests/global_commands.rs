@@ -168,7 +168,7 @@ fn installation_uses_candidate_authority_from_any_checkout() {
             home.path(),
             cwd,
             &[
-                "machine",
+                "installation",
                 "install",
                 "promote",
                 "--cli-target",
@@ -198,7 +198,7 @@ fn installation_reaches_candidate_verdict_with_an_unreadable_task_registry() {
         home.path(),
         repo.path(),
         &[
-            "machine",
+            "installation",
             "install",
             "promote",
             "--cli-target",

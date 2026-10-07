@@ -1201,6 +1201,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             println!("{}: updated task {}", result.wave, result.id);
             Ok(())
         }
+        TaskCommand::Refile { issue, wave } => {
+            let result = loopflow::ops::task::task_refile(repo, issue, wave)?;
+            println!("{}: filed task {}", result.wave, result.id);
+            Ok(())
+        }
         TaskCommand::Comment {
             issue,
             message,
@@ -1330,39 +1335,16 @@ fn run() -> anyhow::Result<()> {
             cmd: loopflow::lf::MachineCommand::Doctor {
                 planning: false,
                 ..
-            }
-        })
+            } | loopflow::lf::MachineCommand::Screenshot { .. }
+        }) | Some(Commands::ScreenshotSupervisor { .. })
     );
-    if !bypasses_installation_startup_gate
-        && !matches!(
-            &cli.command,
-            Some(
-                Commands::Machine {
-                    cmd: loopflow::lf::MachineCommand::Screenshot { .. }
-                } | Commands::ScreenshotSupervisor { .. }
-            )
-        )
-    {
+    if !bypasses_installation_startup_gate {
         loopflow::installation::dispatch_default_cli()?;
     }
     ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
         .expect("failed to set Ctrl+C handler");
 
-    if matches!(
-        &cli.command,
-        Some(
-            Commands::Installation {
-                cmd: loopflow::lf::InstallationCommand::Install { .. }
-            } | Commands::Machine {
-                cmd: loopflow::lf::MachineCommand::Doctor {
-                    planning: false,
-                    ..
-                }
-            } | Commands::Machine {
-                cmd: loopflow::lf::MachineCommand::Screenshot { .. }
-            } | Commands::ScreenshotSupervisor { .. }
-        )
-    ) {
+    if bypasses_installation_startup_gate {
         journal::observe_process(&args);
     }
 

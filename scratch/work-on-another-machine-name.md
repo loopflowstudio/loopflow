@@ -52,6 +52,16 @@ same panes.
 - Task store: Linear is "an easy default but not required"; explore the store
   explicitly. Requirement from Jack's earlier move away from Tasks-in-Git: one
   official copy, and a new Task visible everywhere without merging anything.
+- Holder for interactive conversations: a transparent relay. "ok, relay it is."
+  tmux is out ("made the terminal experience worse"); no holder at all is
+  "probably also not desirable"; a multiplexer of our own is out because
+  Loopflow will not compete on multiplexing. Jack expects to sit on a live
+  Ghostty, on Superlogical's Rex, or on herdr over time.
+- A resident process with a listener per Session is acceptable. Per Session
+  means per agent conversation, not per Task or Wave.
+- Restarting the Claude process on attach is acceptable; interrupting a turn
+  "is not ideal but maybe not completely unsolvable. The important thing is
+  just that it survives the laptop closing."
 - Home may become "machine". Not decided.
 - 2026-10-04/05, product Wave memory: no automatic restart or retry of a turn
   or Flow; the caller owns recovery; `-b` prints and blocks and the caller
@@ -128,7 +138,7 @@ on the issue, and it needs a conflict-resolution command.
 |---|---|---|---|
 | GitHub | Copy the `gh` token into the machine's `gh` config, file storage | 0 | No refresh token; nothing rotates |
 | Codex | Device-code login on the machine, approved in the laptop's browser | 1 code | OpenAI docs: do not share `auth.json` across machines; a copy lasts about 8 days |
-| Claude | `claude setup-token` minted on the laptop, or `claude auth login` on the machine with a pasted code | 1 | Refresh is single-use; see open choice 3 |
+| Claude | `claude setup-token` minted on the laptop, or `claude auth login` on the machine with a pasted code | 1 | Refresh is single-use; see open choice 2 |
 | Linear | A second grant minted on the laptop | 1 | Each refresh issues a new refresh token; 30-minute grace |
 
 Conditions from the herdr floor: send only to an added machine with strict
@@ -154,7 +164,30 @@ inside the launch lock as a unique key on the Session. A retry returns the same
 Session: launch if still prepared, attach if live, report unknown if spawn was
 requested without evidence. Never a second agent.
 
-Interactive conversations are open choice 1.
+Interactive conversations are held by a transparent relay (decided above).
+A detached `lf` per Session owns the terminal device and passes bytes through
+unchanged to whichever client is attached. Loopflow's Ghostty surface, or the
+person's own terminal over ssh, does all emulation.
+
+- `lf` allocates the terminal device and spawns the provider on it. It owns
+  none today.
+- It drains output with no client attached and writes it to the Session's
+  capture.
+- Window size travels from the attached client. One client sets the size.
+- Reattach restores the modes the program set at start (alternate screen,
+  mouse reporting, bracketed paste, keyboard protocol), then asks the program
+  to repaint. Raw replay of captured output is not used: it contains queries a
+  fresh terminal would answer.
+- One Unix socket per Session, owned by the user, in the Session's runtime
+  directory. No shared state between holders.
+- The attach protocol carries a version; a holder outlives an `lf` upgrade.
+- Kept small enough to delete. Where `lf` already runs inside herdr or Rex,
+  that host holds the terminal and the relay is not started. No pluggable
+  holder interface: one implementation, reshaped when a second host is real.
+- Not needed for headless work, or for Codex, whose engine socket already
+  reattaches.
+- Known limits, accepted: a client on a different kind of terminal gets a
+  degraded view; no feature reads the screen.
 
 `session attach` over ssh: a second ssh call with a terminal and an argv-only
 remote command, no secrets. Wire the existing unreachable remote branch of
@@ -166,8 +199,8 @@ Hangup on a viewer never signals the agent. Stop is an explicit command, which
 ### 5. Mac app (was LOO-395)
 
 Persist pane layout and which Session is in which pane, per Task. On launch,
-each pane reconnects. What a pane reconnects to follows open choice 1. Shell
-panes: reopen in the same directory unless choice 1 lands on a holder.
+each pane attaches to its Session's relay. Shell panes can use the same relay
+(it holds any command) or reopen in the same directory; decide in review.
 
 ### 6. Seeing across machines
 
@@ -177,66 +210,20 @@ silently merged. Phone use is LOO-396.
 
 ## Open choices
 
-1. Holder for interactive conversations: our own multiplexer, or a transparent
-   relay.
-
-   Decided by Jack Heart, 2026-10-07:
-   - tmux is out. It "made the terminal experience worse."
-   - No holder at all is "probably also not desirable."
-   - A resident process with a listener per Session is acceptable. Per Session
-     means per agent conversation, not per Task or Wave.
-   - Restarting the Claude process on attach is acceptable; interrupting a turn
-     "is not ideal but maybe not completely unsolvable. The important thing is
-     just that it survives the laptop closing."
-   - Loopflow will not compete on multiplexing. Jack expects to sit on top of a
-     live Ghostty, on Superlogical's Rex ("the multiplexer for all work", macOS
-     beta on 2026-10-07, with a CLI and server API), or on herdr, and can
-     imagine versions of Loopflow built on herdr.
-
-   The two remaining options:
-   - Own multiplexer (herdr's way). The holder parses the program's output into
-     a screen model and sends rows to a client that redraws them. Gives exact
-     screen on reattach, clients of different sizes, and screen-based features.
-     Costs a terminal emulator's worth of upkeep: every keyboard protocol,
-     graphics, link and shell-integration feature must be parsed, stored and
-     re-emitted, and each new agent interface can break it. herdr is about 280k
-     lines with a team on it and still re-fixes key and mouse handling every
-     release. This is the thing Jack says Loopflow will not compete on.
-   - Transparent relay. A detached `lf` per Session owns the terminal device
-     and passes bytes through unchanged; Loopflow's Ghostty surface still does
-     all emulation. Its surface does not grow with terminal features, because
-     it does not interpret them. Costs: `lf` must own a terminal device (it
-     owns none today), drain it when nobody is attached, carry window size, and
-     on reattach restore the modes the program set at start (alternate screen,
-     mouse, bracketed paste, keyboard protocol). Raw replay of captured output
-     is not safe as-is because it contains queries a fresh terminal would
-     answer. One client sets the size. A client on a different terminal type
-     gets a degraded view.
-
-   Proposal: the relay, kept small enough to delete. It is the option whose
-   upkeep does not track the terminal ecosystem, and the one easiest to drop
-   when a multiplexer Loopflow can sit on exists. Where Loopflow already runs
-   inside herdr or Rex, that host is the holder and the relay is not started.
-   Headless work needs neither (part 4). Codex needs neither (its engine socket
-   already reattaches). LOO-283 lists tmux versus a transparent relay as open.
-
-   Do not build a pluggable holder interface now. One implementation, the
-   relay; add the second by reshaping it when a real second host exists.
-
-2. Must Workflow position follow the person between machines? If yes, the Git
+1. Must Workflow position follow the person between machines? If yes, the Git
    ref residue is required.
-3. Claude on a machine: `setup-token` is inference-only (may fail loopflow's
+2. Claude on a machine: `setup-token` is inference-only (may fail loopflow's
    identity check and usage polling, has no file form, interactive use
    unverified) versus a normal login with a pasted code (own refresh chain, full
    scope).
-4. A launch asks for account A and the machine has only B: run as B, or stop and
+3. A launch asks for account A and the machine has only B: run as B, or stop and
    offer to connect A?
-5. Home to machine: only what people read and type, or code and schema too? A
+4. Home to machine: only what people read and type, or code and schema too? A
    Home is per data directory and OS user; "machine" already names the install
    scope in code; the `home_` id prefix is persisted.
-6. Tasks that already exist on two machines with different random ids: backfill
+5. Tasks that already exist on two machines with different random ids: backfill
    rule, or leave per-machine?
-7. Shape: one PR, or a keystone (parts 1 and 2) with parts 3 to 6 as follow-ups?
+6. Shape: one PR, or a keystone (parts 1 and 2) with parts 3 to 6 as follow-ups?
 
 ## Delete — do not maintain
 
@@ -244,8 +231,8 @@ Jack Heart, 2026-10-07: a redesign cleans up in the same diff. Where several
 building blocks exist for one job and none quite works, delete them and keep
 the code minimal; do not add another beside them.
 
-Earlier attempts at this job found in source. Whatever open choice 1 selects,
-the ones it replaces go in the same change:
+Earlier attempts at this job found in source. The relay and the detached
+headless launch replace them, so they go in the same change:
 - Three ways to start something detached, none of which is a reattachable
   Session: `start_tmux_session` with the hidden `serve-conversation` command;
   `start_lf_session_inheriting` (setsid, used for landing repair); the Codex

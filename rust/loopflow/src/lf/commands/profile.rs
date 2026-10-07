@@ -117,7 +117,7 @@ async fn show_routes(
                 Err(error) => return Err(error.into()),
             };
         let ambient = accounts.is_none();
-        let local_limits = match store {
+        let limits = match store {
             Some(store) => {
                 store
                     .provider_account_limits(Some(provider.as_str()))
@@ -127,11 +127,10 @@ async fn show_routes(
         };
         let mut candidates = Vec::new();
         for account in accounts.unwrap_or_default() {
-            let limits = &local_limits;
             let demotion = crate::provider_account::active_account_strain(
                 provider.as_str(),
                 &account.account_id,
-                limits,
+                &limits,
                 now_unix(),
             )
             .map(|strain| format!("{} {}% used", strain.window, strain.used_percent));

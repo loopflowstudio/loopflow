@@ -25,7 +25,7 @@ file-backed login. Linear mints a new OAuth grant in memory and installs the tok
 and refresh grant in the target SQLite store after comparing provider user IDs.
 Neither provider account directories nor browser profiles are copied wholesale.
 
-`lf ssh --account codex=person@ mini implement` connects that account when missing
+`lf --machine mini --account codex=person@ implement` connects that account when missing
 and restricts the remote invocation to the same login. Remote launches use isolated
 account homes so native activation cannot require an unlocked Mac Keychain.
 Unselected read commands do not mint logins. Missing logins require a foreground
@@ -51,12 +51,17 @@ without an unlocked Keychain. Existing encrypted tokens must remain decryptable.
 - Lent-account routing, remote catalog merging and injected Codex token login.
 - The hidden account-lease probe and the obsolete bearer-forwarding PM reader.
 - Keychain key writes (which passed key bytes in argv) and truncate-in-place key files.
+- Remaining lease-only selection wrappers, forwarding diagnostics and replay arguments.
+- The `lf ssh` command, through LOO-411's global `--machine` selector cutover.
 
 Preserve managed account selection, local/shared account behavior, native identity,
 provider-owned refresh, historical captures, current machine records and routes.
 
 ## Remaining work
 
+- Integrate LOO-411's global `--machine` selector before publication, per Jack
+  Heart's comment `e332b3bb-603b-4dc4-bee4-1e5b704d5721`. The current base still
+  exposes `lf ssh`; its removal belongs to the parent.
 - Publish the stacked PR and stop for Jack Heart's review. No landing.
 - Gate/CI owns the full affected suite. The focused source checks cover account
   routing, native receipt/registration, byte preservation, command discovery and
@@ -72,4 +77,10 @@ lent routes and injected Codex-token login are deleted. Receiving uses `receive`
 to preserve the established `lf install` shorthand. Release child memory was read
 for preservation and operation-entry lessons; no release work or schedule changed.
 
-Checks: final `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` passed; post-sync CLI lifecycle test passed (1); pre-sync focused nextest (87) and documented-command tests (3) passed. The earlier 24-test run reported one retained-output-handle leak; the later run did not. Gate/CI owns broader verification; real-provider and installed acceptance remain unproved.
+Compression reuses the verified fresh-login identity and parses the remote CLI
+once. Account selection no longer wraps each resolved provider/account pair;
+the replay API no longer accepts a Session ID used only by the deleted broker.
+Literal account/home flags after `--` remain prompt text. Provider selection's
+ambiguity and duplicate checks are retained on the surviving local path.
+
+Checks: `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` passed; `uv run python scripts/test_network.py cargo nextest run -p loopflow --lib -E 'test(provider_account::) | test(lf::commands::account::account_first_tests::) | test(lf::commands::machine_credentials::) | test(lf::commands::ssh::)' --no-fail-fast` passed 69 tests (one retained-output-handle leak in `exhausted_venues_name_every_attempt_and_both_repairs`); gate/CI owns broader checks and parent integration needs its focused proof. Real-provider and installed acceptance remain unproved.

@@ -22,7 +22,7 @@ OpenCode Zen, GitHub, and Linear each use one effective credential instead of a
 routable subscription catalog.
 
 `lf account` refreshes managed identity and capacity, then reports next actions.
-Use `lf account --cached` for offline inspection with no provider or broker
+Use `lf account --cached` for offline inspection with no provider
 contact and no state writes. Unknown capacity stays unknown. JSON retains dated
 observations and reset times; expired observations do not prove current capacity.
 `lf account PROVIDER` limits the report to one provider.

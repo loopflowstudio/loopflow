@@ -34,8 +34,7 @@ sign-in, unknown or changed host keys, unreachable hosts, or missing `lf`, with 
 command to resolve each. Host-key repairs require verifying the fingerprint.
 Connections share a private OpenSSH control socket and expire after 60 idle
 seconds. Personal SSH control sockets are never reused or closed. Explicit
-agent forwarding uses a separate connection; account-forwarding routes are
-removed after each command. Add and status
+agent forwarding uses a separate connection. Add and status
 transfer no credentials. SSH requires an added connection and checks its identity
 before dispatch. `lf machine connect mini <provider> [email]` installs a separate
 login through SSH stdin; account-selected launches connect missing logins in the

@@ -1,6 +1,7 @@
 //! Run a command on an added machine using credentials resident there.
 //! Login transfers are separate foreground commands; this script contains no secrets.
 
+use crate::lf::{Cli, Commands, MachineCommand};
 use crate::provider_account::selection::AccountSelection;
 use anyhow::{anyhow, Context};
 use clap::Parser;
@@ -16,11 +17,11 @@ pub fn run(
     selection: &AccountSelection,
     lf_args: &[String],
 ) -> anyhow::Result<()> {
-    reject_nested_ssh(lf_args)?;
+    let cli = parse_remote_command(lf_args)?;
     let runtime = tokio::runtime::Runtime::new()?;
     let target = runtime.block_on(resolve_target(target, forward_agent))?;
     let selection = runtime.block_on(super::machine_credentials::prepare_launch(
-        &target, selection, lf_args,
+        &target, selection, &cli,
     ))?;
     let user_name = crate::engine::config::participant_name()?.unwrap_or_default();
     let selection = selection.env_value()?;
@@ -38,7 +39,7 @@ pub fn run(
         extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));
     }
     let cmd = std::iter::once("lf".to_string())
-        .chain(resident_args(lf_args)?)
+        .chain(resident_args(lf_args, &cli))
         .collect::<Vec<_>>();
     let preamble = build_preamble(
         &target.route,
@@ -54,15 +55,17 @@ pub fn run(
     run_ssh(&target.route, forward_agent, &preamble)
 }
 
-fn resident_args(args: &[String]) -> anyhow::Result<Vec<String>> {
-    let argv = std::iter::once("lf".into())
-        .chain(args.iter().cloned())
-        .collect();
-    let cli = crate::lf::Cli::try_parse_from(crate::lf::navigation::normalize_args(argv)?)?;
+fn resident_args(args: &[String], cli: &Cli) -> Vec<String> {
     let mut remaining = cli.account.len() + cli.only_account.len();
+    let mut shared = cli.shared;
     let mut result = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
+        if arg == "--" {
+            result.push(arg.clone());
+            result.extend(iter.cloned());
+            break;
+        }
         if remaining > 0 && matches!(arg.as_str(), "--account" | "--only-account") {
             iter.next();
             remaining -= 1;
@@ -70,16 +73,17 @@ fn resident_args(args: &[String]) -> anyhow::Result<Vec<String>> {
             && (arg.starts_with("--account=") || arg.starts_with("--only-account="))
         {
             remaining -= 1;
-        } else if cli.shared && arg == "--shared" {
+        } else if shared && arg == "--shared" {
             result.push("--isolate".into());
+            shared = false;
         } else {
             result.push(arg.clone());
         }
     }
-    Ok(result)
+    result
 }
 
-fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
+fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {
     if lf_args.first().is_some_and(|arg| arg == "lf") {
         return Err(anyhow!(
             "the remote `lf` is implicit; use `lf machine ssh <target> <args...>` without `-- lf`"
@@ -88,20 +92,18 @@ fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
     let args = std::iter::once("lf".to_string())
         .chain(lf_args.iter().cloned())
         .collect::<Vec<_>>();
+    let cli = Cli::try_parse_from(crate::lf::navigation::normalize_args(args)?)?;
     if matches!(
-        crate::lf::Cli::try_parse_from(crate::lf::navigation::normalize_args(args)?),
-        Ok(crate::lf::Cli {
-            command: Some(crate::lf::Commands::Machine {
-                cmd: crate::lf::MachineCommand::Ssh { .. }
-            }),
-            ..
+        cli.command,
+        Some(Commands::Machine {
+            cmd: MachineCommand::Ssh { .. }
         })
     ) {
         return Err(anyhow!(
             "nested `lf machine ssh` is not supported; connect directly from the origin machine"
         ));
     }
-    Ok(())
+    Ok(cli)
 }
 
 pub(super) async fn resolve_target(
@@ -217,7 +219,7 @@ fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()
 
 #[cfg(test)]
 mod tests {
-    use super::{build_preamble, command_result, reject_nested_ssh, resident_args, sh_quote};
+    use super::{build_preamble, command_result, parse_remote_command, resident_args, sh_quote};
 
     #[test]
     fn quotes_shell_data_without_forwarding_credentials() {
@@ -235,14 +237,38 @@ mod tests {
 
     #[test]
     fn nested_ssh_is_rejected_before_transport() {
-        assert!(reject_nested_ssh(&["ssh".into(), "other".into(), "list".into()]).is_err());
+        assert!(parse_remote_command(&["ssh".into(), "other".into(), "list".into()]).is_err());
     }
     #[test]
     fn remote_preferences_cannot_relax_the_resident_account_restriction() {
         let args = ["--account", "person@", "--shared", "skill", "implement"].map(str::to_string);
         assert_eq!(
-            resident_args(&args).unwrap(),
+            resident_args(&args, &parse_remote_command(&args).unwrap()),
             ["--isolate", "skill", "implement"]
+        );
+    }
+    #[test]
+    fn remote_prompt_preserves_literal_account_and_home_flags() {
+        let args = [
+            "--only-account=codex=person@",
+            "--shared",
+            "skill",
+            "implement",
+            "--",
+            "--shared",
+            "--account=other@",
+        ]
+        .map(str::to_string);
+        assert_eq!(
+            resident_args(&args, &parse_remote_command(&args).unwrap()),
+            [
+                "--isolate",
+                "skill",
+                "implement",
+                "--",
+                "--shared",
+                "--account=other@"
+            ]
         );
     }
     #[test]

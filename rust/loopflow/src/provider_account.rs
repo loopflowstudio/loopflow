@@ -118,8 +118,8 @@ pub enum ProviderAccountError {
     Filesystem(String),
     #[error("invalid account selection: {0}")]
     AccountSelection(String),
-    #[error("cannot forward {provider} account '{account_id}': {reason}")]
-    ForwardingCredential {
+    #[error("cannot authenticate {provider} account '{account_id}': {reason}")]
+    CredentialUnavailable {
         provider: Provider,
         account_id: ProviderAccountId,
         reason: String,
@@ -214,14 +214,11 @@ impl std::fmt::Debug for ProviderAccountRoute {
             RouteHome::Isolated => "account_home",
             RouteHome::Shared { .. } => "native_home",
         };
-        let login = match self.login {
-            AccountLogin::Stored { .. } | AccountLogin::Replayed { .. } => "profile",
-        };
         f.debug_struct("ProviderAccountRoute")
             .field("provider", &self.provider)
             .field("account_id", &self.account_id)
             .field("home", &home)
-            .field("login", &login)
+            .field("login", &"profile")
             .field("resume_requested_session", &self.resume_requested_session)
             .finish()
     }
@@ -332,7 +329,7 @@ impl ProviderAccountRoute {
                 let home = self.credential_home(profile);
                 crate::provider_auth::prepare_provider_account_access_token(self.provider, &home)
                     .await
-                    .map_err(|error| ProviderAccountError::ForwardingCredential {
+                    .map_err(|error| ProviderAccountError::CredentialUnavailable {
                         provider: self.provider,
                         account_id: self.account_id.clone(),
                         reason: error.to_string(),
@@ -1026,47 +1023,44 @@ async fn ordered_selected_candidates(
     };
     let mut candidates = Vec::new();
     let mut local_route = Vec::new();
-    {
-        if let Some(store) = &local_store {
-            local_route = provider_route_account_ids(store, repo_id, provider)
-                .await?
-                .unwrap_or_default();
-            let limits = store
-                .provider_account_limits(Some(provider.as_str()))
-                .await?;
-            for account in catalog
-                .iter()
-                .filter(|account| account.provider == provider.as_str())
-            {
-                let identity = if verify_identity {
-                    identity::check_current_identity(account, &catalog)
-                        .await
-                        .map_err(|error| error.to_string())
-                } else {
-                    identity::check_account_identity(account, &catalog)
-                };
-                let identity_matches = match identity {
-                    Ok(()) => true,
-                    Err(reason) => {
-                        tracing::warn!("skipping managed account: {reason}");
-                        false
-                    }
-                };
-                let Some(home) = account.home.clone() else {
-                    continue;
-                };
-                candidates.push(AccountCandidate {
-                    credential_available: account.credential_state == CredentialState::Connected
-                        && identity_matches,
-                    account: account.clone(),
-                    limits: limits.clone(),
-                    store: Arc::clone(store),
-                    home,
-                });
-            }
+    if let Some(store) = &local_store {
+        local_route = provider_route_account_ids(store, repo_id, provider)
+            .await?
+            .unwrap_or_default();
+        let limits = store
+            .provider_account_limits(Some(provider.as_str()))
+            .await?;
+        for account in catalog
+            .iter()
+            .filter(|account| account.provider == provider.as_str())
+        {
+            let identity = if verify_identity {
+                identity::check_current_identity(account, &catalog)
+                    .await
+                    .map_err(|error| error.to_string())
+            } else {
+                identity::check_account_identity(account, &catalog)
+            };
+            let identity_matches = match identity {
+                Ok(()) => true,
+                Err(reason) => {
+                    tracing::warn!("skipping managed account: {reason}");
+                    false
+                }
+            };
+            let Some(home) = account.home.clone() else {
+                continue;
+            };
+            candidates.push(AccountCandidate {
+                credential_available: account.credential_state == CredentialState::Connected
+                    && identity_matches,
+                account: account.clone(),
+                limits: limits.clone(),
+                store: Arc::clone(store),
+                home,
+            });
         }
     }
-    let local_count = candidates.len();
     catalog.retain(|account| account.home.is_some());
     let selection = selection::AccountSelection::from_env()?;
     let selected = selection.resolved_accounts(&catalog)?;
@@ -1095,7 +1089,7 @@ async fn ordered_selected_candidates(
     let mut order = explicitly_preferred.clone();
     if !selection.is_restricted() {
         for account_id in &local_route {
-            if let Some(index) = candidates[..local_count]
+            if let Some(index) = candidates
                 .iter()
                 .position(|candidate| candidate.account.account_id == *account_id)
             {
@@ -1103,7 +1097,7 @@ async fn ordered_selected_candidates(
             }
         }
 
-        for index in 0..local_count {
+        for index in 0..candidates.len() {
             push_candidate(&mut order, index);
         }
     }
@@ -1345,13 +1339,11 @@ pub(crate) fn resolve_provider_account_exact_blocking(
 
 /// Resolve one recorded account without consulting current planning routes.
 ///
-/// Otherwise the account's deterministic credential Machine on the Session's Machine is
-/// the authority. This path deliberately does not apply current repository
+/// The account catalog on the recorded Machine is the authority. This path deliberately does not apply current repository
 /// routing or account-health policy: replay names the account it requires.
 /// Both providers read the owning account catalog to check credential identity.
 pub(crate) fn resolve_recorded_provider_account_blocking(
     provider: Provider,
-    _provider_session_id: Option<String>,
     account_id: ProviderAccountId,
     lf_home: PathBuf,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
@@ -1707,12 +1699,6 @@ mod tests {
                 .and_then(|value| value.as_deref()),
             Some(temp.path().join("codex-reserve").to_str().unwrap())
         );
-        // Provider launch carries no account-selection env; descendants inherit
-        // the lease handle, not a re-derivable selection.
-        assert_eq!(
-            environment.get("LF_ACCOUNT_LEASE").map(Option::is_some),
-            None
-        );
         assert_eq!(environment.get("CLAUDE_CODE_OAUTH_TOKEN"), Some(&None));
 
         let mut async_command = tokio::process::Command::new("codex");
@@ -1902,9 +1888,8 @@ mod account_first_tests {
     async fn codex_routing_skips_mismatched_identity_and_readiness_rechecks_it() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", "LF_ACCOUNT_LEASE"]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var("LF_ACCOUNT_LEASE");
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
             temp.path().join("loopflow.db"),
         ))
@@ -1961,7 +1946,6 @@ mod account_first_tests {
         assert!(error.contains("replacement@example.com") && error.contains("second@example.com"));
         let error = resolve_recorded_provider_account_blocking(
             Provider::Codex,
-            None,
             second.account_id.clone(),
             temp.path().to_path_buf(),
         )
@@ -1984,9 +1968,8 @@ mod account_first_tests {
     async fn claude_routing_refreshes_changed_identity_and_rechecks_readiness() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", "LF_ACCOUNT_LEASE"]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var("LF_ACCOUNT_LEASE");
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
             temp.path().join("loopflow.db"),
         ))
@@ -2108,14 +2091,13 @@ mod account_first_tests {
             permissions.set_mode(0o755);
             fs::set_permissions(&claude, permissions).unwrap();
         }
-        let _restore = EnvRestore::capture(&["LF_HOME", "PATH", "LF_ACCOUNT_LEASE"]);
+        let _restore = EnvRestore::capture(&["LF_HOME", "PATH"]);
         std::env::set_var("LF_HOME", temp.path());
         let path = std::env::var_os("PATH").unwrap_or_default();
         std::env::set_var(
             "PATH",
             std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
         );
-        std::env::remove_var("LF_ACCOUNT_LEASE");
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(
                 temp.path().join("loopflow.db"),
@@ -2156,9 +2138,8 @@ mod account_first_tests {
     async fn blocking_pin_honors_exact_account_without_changing_dynamic_selection() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", "LF_ACCOUNT_LEASE"]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var("LF_ACCOUNT_LEASE");
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(
                 temp.path().join("loopflow.db"),
@@ -2201,9 +2182,8 @@ mod account_first_tests {
     fn recorded_account_requires_its_owning_identity_catalog() {
         let _lock = crate::journal::test_env_lock();
         let home = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", "LF_ACCOUNT_LEASE"]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", home.path());
-        std::env::remove_var("LF_ACCOUNT_LEASE");
         let registry = home.path().join("loopflow.db");
         fs::create_dir(&registry).unwrap();
 
@@ -2218,7 +2198,6 @@ mod account_first_tests {
 
         let route = resolve_recorded_provider_account_blocking(
             Provider::Claude,
-            None,
             account_id.clone(),
             home.path().to_path_buf(),
         )
@@ -2243,7 +2222,6 @@ mod account_first_tests {
         });
         let route = resolve_recorded_provider_account_blocking(
             Provider::Claude,
-            None,
             account_id.clone(),
             home.path().to_path_buf(),
         )
@@ -2257,9 +2235,8 @@ mod account_first_tests {
     async fn hard_limit_moves_the_route_to_the_next_account() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", "LF_ACCOUNT_LEASE"]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var("LF_ACCOUNT_LEASE");
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(
                 temp.path().join("loopflow.db"),
@@ -2437,9 +2414,8 @@ mod account_first_tests {
     async fn missing_routes_are_unmanaged_and_unusable_routes_fail() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", "LF_ACCOUNT_LEASE"]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var("LF_ACCOUNT_LEASE");
 
         assert!(resolve_provider_account(Provider::Claude, None)
             .await
@@ -2486,9 +2462,8 @@ mod account_first_tests {
     async fn accounts_form_an_implicit_route_when_no_route_is_configured() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", "LF_ACCOUNT_LEASE"]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var("LF_ACCOUNT_LEASE");
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(
                 temp.path().join("loopflow.db"),
@@ -2519,12 +2494,11 @@ mod account_first_tests {
         assert_eq!(route.account_id(), &healthy.account_id);
     }
 
-    const SHARED_ENV: [&str; 6] = [
+    const SHARED_ENV: [&str; 5] = [
         "LF_HOME",
         "CODEX_HOME",
         "CLAUDE_CONFIG_DIR",
         "LF_TEST_CLAUDE_PROFILE_URL",
-        "LF_ACCOUNT_LEASE",
         activation::ACCOUNT_ISOLATION_ENV,
     ];
 
@@ -2538,7 +2512,6 @@ mod account_first_tests {
     /// stored account holds.
     async fn shared_home(provider: Provider, temp: &Path, active: &str) -> (SharedStore, PathBuf) {
         std::env::set_var("LF_HOME", temp);
-        std::env::remove_var("LF_ACCOUNT_LEASE");
         std::env::remove_var(activation::ACCOUNT_ISOLATION_ENV);
         let native = temp.join("native");
         fs::create_dir_all(&native).unwrap();

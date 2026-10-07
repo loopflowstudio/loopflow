@@ -157,12 +157,7 @@ impl AccountSelection {
         &self,
         catalog: &[ProviderAccount],
     ) -> Result<Vec<(Provider, ProviderAccountId)>, ProviderAccountError> {
-        resolve_selectors(catalog, self.selectors()).map(|resolved| {
-            resolved
-                .into_iter()
-                .map(|resolved| (resolved.provider, resolved.account_id))
-                .collect()
-        })
+        resolve_selectors(catalog, self.selectors())
     }
 }
 
@@ -178,25 +173,15 @@ impl Drop for AccountSelectionGuard {
     }
 }
 
-fn supported_providers() -> [Provider; 2] {
-    [Provider::Claude, Provider::Codex]
-}
-
-#[derive(Debug, Clone)]
-struct ResolvedSelector {
-    provider: Provider,
-    account_id: ProviderAccountId,
-}
-
 fn resolve_selectors(
     catalog: &[ProviderAccount],
     selectors: &[ProviderAccountSelector],
-) -> Result<Vec<ResolvedSelector>, ProviderAccountError> {
+) -> Result<Vec<(Provider, ProviderAccountId)>, ProviderAccountError> {
     let mut resolved = Vec::new();
     let mut seen = HashSet::new();
     for selector in selectors {
         let mut selector_matches = Vec::new();
-        for provider in supported_providers() {
+        for provider in [Provider::Claude, Provider::Codex] {
             if selector
                 .provider
                 .is_some_and(|selected| selected != provider)
@@ -208,10 +193,9 @@ fn resolve_selectors(
                 .filter(|account| account.provider == provider.as_str())
                 .collect::<Vec<_>>();
             match match_account(&accounts, &selector.account) {
-                AccountMatch::One(account) => selector_matches.push(ResolvedSelector {
-                    provider,
-                    account_id: account.account_id.clone(),
-                }),
+                AccountMatch::One(account) => {
+                    selector_matches.push((provider, account.account_id.clone()))
+                }
                 AccountMatch::Ambiguous(matches) => {
                     return Err(ProviderAccountError::Runtime(format!(
                         "'{}' matches several accounts: {}",
@@ -240,15 +224,79 @@ fn resolve_selectors(
                 selector.account
             )));
         }
-        for matched in selector_matches {
-            if !seen.insert((matched.provider, matched.account_id.clone())) {
+        for (provider, account_id) in selector_matches {
+            if !seen.insert((provider, account_id.clone())) {
                 return Err(ProviderAccountError::Runtime(format!(
-                    "account selector duplicates {}/{}",
-                    matched.provider, selector.account
+                    "account selector duplicates {provider}/{}",
+                    selector.account
                 )));
             }
-            resolved.push(matched);
+            resolved.push((provider, account_id));
         }
     }
     Ok(resolved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AccountSelection;
+    use crate::profile::EmailAddress;
+    use crate::provider_account::{new_account, parse_account_id};
+    use crate::provider_auth::Provider;
+    use crate::store::ProviderAccount;
+
+    fn account(provider: Provider, name: &str) -> ProviderAccount {
+        new_account(
+            provider,
+            parse_account_id(name).unwrap(),
+            format!("/accounts/{provider}/{name}").into(),
+            Some(EmailAddress::parse(&format!("{name}@example.com")).unwrap()),
+        )
+    }
+
+    #[test]
+    fn account_selectors_resolve_across_providers_or_within_one_provider() {
+        let catalog = [
+            account(Provider::Claude, "work"),
+            account(Provider::Codex, "work"),
+        ];
+        for (selector, providers) in [
+            ("work@", vec![Provider::Claude, Provider::Codex]),
+            ("codex=work@", vec![Provider::Codex]),
+        ] {
+            let selection = AccountSelection::from_flags(&[], &[selector.into()]).unwrap();
+            assert!(selection.is_restricted());
+            assert_eq!(
+                selection.resolved_accounts(&catalog).unwrap(),
+                providers
+                    .into_iter()
+                    .map(|provider| (provider, parse_account_id("work").unwrap()))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn ambiguous_duplicate_and_missing_logins_fail_before_launch() {
+        let catalog = [
+            account(Provider::Codex, "work-one"),
+            account(Provider::Codex, "work-two"),
+        ];
+        for (selectors, diagnostic) in [
+            (vec!["codex=work"], "matches several accounts"),
+            (vec!["codex=work-one@", "codex=work-one@"], "duplicates"),
+            (vec!["claude=work-one@"], "no managed claude account"),
+        ] {
+            let selectors = selectors
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            let selection = AccountSelection::from_flags(&selectors, &[]).unwrap();
+            assert!(selection
+                .resolved_accounts(&catalog)
+                .unwrap_err()
+                .to_string()
+                .contains(diagnostic));
+        }
+    }
 }

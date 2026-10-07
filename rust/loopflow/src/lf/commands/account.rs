@@ -632,7 +632,10 @@ pub(super) async fn fresh_machine_login(
     provider: Provider,
     account: &ProviderAccount,
     chrome_profile: Option<&str>,
-) -> Result<tempfile::TempDir> {
+) -> Result<(
+    tempfile::TempDir,
+    crate::provider_account::identity::AccountIdentity,
+)> {
     let (profiles, _) = browser_profiles(store, provider, Some(account), chrome_profile).await?;
     let profile = profiles
         .first()
@@ -651,7 +654,7 @@ pub(super) async fn fresh_machine_login(
     {
         bail!("fresh login belongs to a different provider identity; credential discarded");
     }
-    Ok(login_home)
+    Ok((login_home, identity))
 }
 
 pub(super) async fn fresh_linear_login(
@@ -1611,7 +1614,6 @@ mod account_first_tests {
         TEST_OPENED_CHROME_PROFILES,
     };
     use crate::profile::{AccessProfile, EmailAddress, ProfileId};
-    const ACCOUNT_LEASE_ENV: &str = "LF_ACCOUNT_LEASE";
     use crate::provider_account::{account_home_path, parse_account_id};
     use crate::provider_auth::Provider;
     use crate::store::{CredentialState, ProviderAccount, RoutingState, StorageConfig};
@@ -1621,7 +1623,6 @@ mod account_first_tests {
         "HOME",
         "LF_HOME",
         "PATH",
-        ACCOUNT_LEASE_ENV,
         "LF_TEST_CODEX_AUTH_JSON",
         "LF_TEST_CODEX_EMAIL",
         "LF_TEST_CODEX_RELEASE",
@@ -1722,7 +1723,6 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
         );
         std::env::set_var("HOME", temp);
         std::env::set_var("LF_HOME", temp);
-        std::env::remove_var(ACCOUNT_LEASE_ENV);
         std::env::set_var("LF_TEST_CODEX_AUTH_JSON", auth_json);
         std::env::set_var("LF_TEST_CODEX_EMAIL", reported_login);
         std::env::set_var("LF_TEST_CODEX_COUNT", temp.join("codex-count"));
@@ -1770,9 +1770,8 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
 
     async fn verify_replaced_claude_credential(accepted: bool) {
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", ACCOUNT_LEASE_ENV]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var(ACCOUNT_LEASE_ENV);
         let home = temp.path().join("claude");
         fs::create_dir(&home).unwrap();
         let path = home.join(".credentials.json");
@@ -1930,9 +1929,11 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
             )
             .await
             .unwrap();
-        let staging = super::fresh_machine_login(&store, Provider::Codex, &original, None)
-            .await
-            .unwrap();
+        let (staging, identity) =
+            super::fresh_machine_login(&store, Provider::Codex, &original, None)
+                .await
+                .unwrap();
+        assert_eq!(identity.email, "operator@example.com");
         assert_ne!(staging.path(), home);
         assert!(staging.path().join("auth.json").is_file());
         assert_eq!(

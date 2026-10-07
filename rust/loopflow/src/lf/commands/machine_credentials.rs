@@ -6,7 +6,6 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, bail, Context, Result};
-use clap::Parser;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
@@ -68,11 +67,8 @@ pub(super) async fn connect(
                 "Connecting {provider} {login} on {}",
                 machine.label.as_deref().unwrap_or(&machine.route)
             );
-            let staging =
+            let (staging, identity) =
                 super::account::fresh_machine_login(&store, provider, &account, chrome_profile)
-                    .await?;
-            let (identity, _) =
-                super::account::verify_managed_identity(&store, provider, &account, staging.path())
                     .await?;
             let credential = fs::read_to_string(staging.path().join(credential_file(provider)?))?;
             match provider {
@@ -559,17 +555,12 @@ async fn linear_login(token: &str) -> Result<String> {
 
 pub(super) async fn prepare_launch(
     machine: &Machine,
-    selection: &AccountSelection,
-    args: &[String],
+    origin_selection: &AccountSelection,
+    cli: &Cli,
 ) -> Result<AccountSelection> {
-    let argv = std::iter::once("lf".into())
-        .chain(args.iter().cloned())
-        .collect();
-    let cli = Cli::try_parse_from(crate::lf::navigation::normalize_args(argv)?)?;
     let remote_selection = AccountSelection::from_flags(&cli.account, &cli.only_account)?;
-    let origin_selection = selection;
     let selection = if remote_selection.is_default() {
-        selection
+        origin_selection
     } else {
         &remote_selection
     };
@@ -646,6 +637,7 @@ mod tests {
 
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
+    use clap::Parser;
     use serde_json::json;
 
     use super::{install, install_managed, installed, write_private, Credential};
@@ -827,17 +819,16 @@ echo '{"id":2,"result":{"account":{"email":"person@example.com","planType":"plus
             &[],
         )
         .unwrap();
-        let prepared =
-            super::prepare_launch(&machine, &selected, &["skill".into(), "implement".into()])
-                .await
-                .unwrap();
+        let cli = crate::lf::Cli::try_parse_from(["lf", "skill", "implement"]).unwrap();
+        let prepared = super::prepare_launch(&machine, &selected, &cli)
+            .await
+            .unwrap();
         assert!(prepared.is_restricted());
         assert_eq!(prepared.resolved_accounts(&[account]).unwrap().len(), 1);
         executable(&root.path().join("bin/ssh"), "#!/bin/sh\necho false\n");
-        let error =
-            super::prepare_launch(&machine, &selected, &["skill".into(), "implement".into()])
-                .await
-                .unwrap_err();
+        let error = super::prepare_launch(&machine, &selected, &cli)
+            .await
+            .unwrap_err();
         assert!(error.to_string().contains("foreground terminal"));
         assert_eq!(store.list_provider_accounts(None).await.unwrap().len(), 1);
     }

@@ -87,9 +87,10 @@ final class WorkCache: @unchecked Sendable {
             if envelope.version == 1 {
                 snapshot.roadmap = snapshot.roadmap.map(Self.renameMachineFields)
                 snapshot.waves = snapshot.waves.map(Self.renameMachineFields)
-                for repo in snapshot.repositories.keys {
-                    let pages = snapshot.repositories[repo]?.sessionPages?.map(Self.renameMachineFields)
-                    snapshot.repositories[repo]?.sessionPages = pages
+                snapshot.repositories = snapshot.repositories.mapValues { entry in
+                    var entry = entry
+                    entry.sessionPages = entry.sessionPages?.map(Self.renameMachineFields)
+                    return entry
                 }
             }
             return snapshot
@@ -111,10 +112,7 @@ final class WorkCache: @unchecked Sendable {
             }
             return result
         }
-        guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)),
-              let data = try? JSONSerialization.data(withJSONObject: renamed(object)),
-              let migrated = String(data: data, encoding: .utf8) else { return text }
-        return migrated
+        return rewrite(text, renamed) ?? text
     }
 
     func saveRoadmap(_ text: String) {

@@ -95,15 +95,13 @@ fn is_current(directory: &Path, tag: &str, applications: Option<&Path>) -> bool 
     }) {
         return false;
     }
-    let published = inspect(
-        &directory.join("lf"),
-        &["machine", "install", "preflight", "--json"],
-    )
-    .filter(|output| output.status.success())
-    .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
-    .is_some_and(|preview| {
-        preview["candidate"]["authority"] == "published" && preview["verdict"]["kind"] == "promote"
-    });
+    let published = inspect(&directory.join("lf"), &["install", "preflight", "--json"])
+        .filter(|output| output.status.success())
+        .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
+        .is_some_and(|preview| {
+            preview["candidate"]["authority"] == "published"
+                && preview["verdict"]["kind"] == "promote"
+        });
     published && applications.is_none_or(|root| has_release_app(root, version))
 }
 
@@ -294,7 +292,7 @@ mod tests {
 
     fn binary(path: &Path, name: &str, authority: &str) {
         fs::write(path, format!(
-            "#!/bin/sh\nif [ \"$1\" = --version ]; then echo '{name} 9.9.9'; else echo '{{\"candidate\":{{\"authority\":\"{authority}\"}},\"verdict\":{{\"kind\":\"promote\"}}}}'; fi\n"
+            "#!/bin/sh\ncase \"$*\" in\n  --version) echo '{name} 9.9.9' ;;\n  'install preflight --json') echo '{{\"candidate\":{{\"authority\":\"{authority}\"}},\"verdict\":{{\"kind\":\"promote\"}}}}' ;;\n  *) exit 2 ;;\nesac\n"
         )).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }

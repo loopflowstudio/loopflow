@@ -23,8 +23,8 @@ struct WorkCacheTests {
         #expect(try Data(contentsOf: url) == bytes)
     }
 
-    @Test("A returning launch shows the saved workspace and selection before any read finishes")
-    func returningLaunchRestores() async throws {
+    @Test("A returning launch restores current and released caches before any read finishes", arguments: [1, WorkCache.version])
+    func returningLaunchRestores(version: Int) async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
         let cache = WorkCache(directory: directory)
@@ -37,13 +37,15 @@ struct WorkCacheTests {
         cache.flush()
 
         let cacheURL = directory.appendingPathComponent("workspace.json")
-        let current = try String(contentsOf: cacheURL, encoding: .utf8)
-        let released = current.replacingOccurrences(of: "machine_id", with: "home_id")
-            .replacingOccurrences(of: #"\"machine\":"#, with: #"\"home\":"#)
-        var envelope = try #require(JSONSerialization.jsonObject(with: Data(released.utf8)) as? [String: Any])
-        envelope["version"] = 1
-        let releasedBytes = try JSONSerialization.data(withJSONObject: envelope)
-        try releasedBytes.write(to: cacheURL)
+        if version == 1 {
+            let current = try String(contentsOf: cacheURL, encoding: .utf8)
+            let released = current.replacingOccurrences(of: "machine_id", with: "home_id")
+                .replacingOccurrences(of: #"\"machine\":"#, with: #"\"home\":"#)
+            var envelope = try #require(JSONSerialization.jsonObject(with: Data(released.utf8)) as? [String: Any])
+            envelope["version"] = version
+            try JSONSerialization.data(withJSONObject: envelope).write(to: cacheURL)
+        }
+        let savedBytes = try Data(contentsOf: cacheURL)
 
         let offline = RegistryQuery { _, _ in throw RegistryQueryError("offline") }
         let returning = WorkModel(query: offline, repoPath: Self.repo, cache: WorkCache(directory: directory))
@@ -54,7 +56,7 @@ struct WorkCacheTests {
         #expect(returning.sessions.value?.map(\.id) == first.sessions.value?.map(\.id))
         #expect(returning.selection == .task(id: "issue-now"))
         #expect(returning.task(id: "issue-now") != nil)
-        #expect(try Data(contentsOf: cacheURL) == releasedBytes)
+        #expect(try Data(contentsOf: cacheURL) == savedBytes)
     }
 
     @Test("Saved text never claims a live process or a legal mutation")

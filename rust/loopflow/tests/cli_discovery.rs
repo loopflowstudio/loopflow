@@ -72,6 +72,18 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
         vec![vec!["sync", "--help"], vec!["help", "sync"]],
         vec![vec!["help", "pr", "land"], vec!["pr", "land", "--help"]],
         vec![
+            vec!["machine", "install", "preflight", "--help"],
+            vec!["install", "preflight", "--help"],
+        ],
+        vec![
+            vec!["machine", "install", "recover-switch", "--help"],
+            vec!["install", "recover-switch", "--help"],
+        ],
+        vec![
+            vec!["machine", "install", "advance-switch", "--help"],
+            vec!["install", "advance-switch", "--help"],
+        ],
+        vec![
             vec!["help", "account", "route"],
             vec!["account", "route", "--help"],
         ],

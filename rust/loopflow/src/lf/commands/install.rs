@@ -780,9 +780,14 @@ mod compatibility_tests {
     fn an_exact_store_is_validated_in_place() {
         let directory = tempfile::tempdir().unwrap();
         let store = directory.path().join("loopflow.db");
-        crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
+        // An exact installation has the canonical frontier, without local drafts.
+        let connection = rusqlite::Connection::open(&store).unwrap();
+        crate::store::migrations::apply_sqlite(&connection).unwrap();
         let compatibility = super::read_store_evidence(&store);
-        assert!(matches!(compatibility, Compatibility::Exact { .. }));
+        assert!(
+            matches!(compatibility, Compatibility::Exact { .. }),
+            "{compatibility:?}"
+        );
 
         let executable = super::_read_executable_compatibility(&store, &compatibility);
 
@@ -1258,7 +1263,7 @@ fn read_binary_preflight(binary: &Path) -> Result<BinaryPreflight> {
     let mut command = Command::new(binary);
     isolate_candidate_command(&mut command);
     let output = command
-        .args(["machine", "install", "preflight", "--json"])
+        .args(["install", "preflight", "--json"])
         .output()
         .with_context(|| format!("run binary {} preflight", binary.display()))?;
     serde_json::from_slice(&output.stdout).with_context(|| {
@@ -1286,7 +1291,7 @@ fn read_binary_preview(binary: &Path) -> Result<PromotionPreview> {
     let mut command = Command::new(binary);
     isolate_candidate_command(&mut command);
     let output = command
-        .args(["machine", "install", "preflight", "--json"])
+        .args(["install", "preflight", "--json"])
         .output()
         .with_context(|| format!("run binary {} preflight", binary.display()))?;
     serde_json::from_slice(&output.stdout).with_context(|| {
@@ -1957,14 +1962,10 @@ fn delegate_switch_recovery(receipt: &crate::installation::SwitchReceipt) -> Res
     if current == recovery.path {
         return recover_switch(&receipt.id);
     }
+    // The pinned owner can predate the machine rename; resolve the operation
+    // without coupling recovery to its command group.
     let status = Command::new(&recovery.path)
-        .args([
-            "machine",
-            "install",
-            "recover-switch",
-            "--switch",
-            &receipt.id,
-        ])
+        .args(["install", "recover-switch", "--switch", &receipt.id])
         .status()
         .with_context(|| {
             format!(
@@ -2056,13 +2057,7 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
 fn run_switch_candidate(receipt: &crate::installation::SwitchReceipt) -> Result<()> {
     receipt.candidate.verify()?;
     let status = Command::new(&receipt.candidate.path)
-        .args([
-            "machine",
-            "install",
-            "advance-switch",
-            "--switch",
-            &receipt.id,
-        ])
+        .args(["install", "advance-switch", "--switch", &receipt.id])
         .env(crate::installation::INSTALL_SWITCH_ENV, receipt.id.as_str())
         .status()
         .with_context(|| {

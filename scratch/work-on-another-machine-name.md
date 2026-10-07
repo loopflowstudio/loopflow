@@ -72,6 +72,4 @@ lent routes and injected Codex-token login are deleted. Receiving uses `receive`
 to preserve the established `lf install` shorthand. Release child memory was read
 for preservation and operation-entry lessons; no release work or schedule changed.
 
-Pre-sync checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, focused `cargo nextest run` (87 tests), and `cargo test -p loopflow --test documented_commands` (3 tests) passed. The earlier 24-test run reported one retained-output-handle leak; the later 87-test run passed without it. Publication remains; real-provider and installed acceptance remain unproved.
-
-Sync check: `cargo test -p loopflow --test machine_commands add_alias_rename_connect_and_remove_preserve_identity -- --exact` passed (1 test); broader verification remains Gate/CI-owned.
+Checks: final `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` passed; post-sync CLI lifecycle test passed (1); pre-sync focused nextest (87) and documented-command tests (3) passed. The earlier 24-test run reported one retained-output-handle leak; the later run did not. Gate/CI owns broader verification; real-provider and installed acceptance remain unproved.

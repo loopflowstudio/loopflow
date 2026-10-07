@@ -111,7 +111,7 @@ struct WorkActivityView: View {
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                     Text("\((entry.work.kind == .project ? "CHAPTER" : entry.work.kind.rawValue.uppercased())) · \(entry.subject)")
-                        .font(Typography.caption(8).weight(.bold))
+                        .font(Typography.strong(8))
                         .tracking(0.6)
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)

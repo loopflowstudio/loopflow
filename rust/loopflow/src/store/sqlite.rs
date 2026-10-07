@@ -137,6 +137,7 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
         path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
+    crate::performance::observe_sqlite(&conn);
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
     let mut statement = conn.prepare(&format!(
         "SELECT t.worktree FROM tasks t WHERE {}",
@@ -450,6 +451,7 @@ impl SqliteStore {
             })?;
         }
         let conn = Connection::open(path)?;
+        crate::performance::observe_sqlite(&conn);
         configure_write_connection(&conn, path)?;
         super::migrations::initialize_experimental_sqlite(
             &conn,
@@ -511,6 +513,7 @@ impl SqliteStore {
         }
 
         let mut conn = Connection::open(path)?;
+        crate::performance::observe_sqlite(&conn);
         // Install the handler before journal-mode negotiation: that pragma can
         // itself meet another process opening the same WAL database.
         configure_write_connection(&conn, path)?;
@@ -568,6 +571,7 @@ impl SqliteStore {
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
+        crate::performance::observe_sqlite(&conn);
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
         validate_exec_schema(&conn)?;
         // An older ledger without the current process owner is not a writable
@@ -585,6 +589,7 @@ impl SqliteStore {
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
+        crate::performance::observe_sqlite(&conn);
         conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),

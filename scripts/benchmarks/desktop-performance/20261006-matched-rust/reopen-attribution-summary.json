@@ -1,0 +1,1483 @@
+{
+ "scope": "Attribution of the mounted Reopen Task delay and four-round RSS growth reported in gate-read-summary.json. Same host, fixtures and CLI binaries as that pair; Swift at this change.",
+ "raw_receipts": "/tmp/loo304-reopen-20261006",
+ "prior_receipts": "/tmp/loo304-gate-read-20261006",
+ "cohorts": {
+  "before-1": {
+   "load_averages": [
+    "11.25",
+    "11.47",
+    "10.56"
+   ],
+   "scenarios": {
+    "cold_workspace": {
+     "duration_ms": {
+      "n": 20,
+      "median": 956.1,
+      "p95": 998.6
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 781.8,
+      "p95": 815.5
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 458.7,
+      "p95": 468.9
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 22.9,
+      "p95": 30.3
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 781.8,
+       "p95": 815.5
+      }
+     }
+    },
+    "native_session_reopen": {
+     "duration_ms": {
+      "n": 20,
+      "median": 858.4,
+      "p95": 912.1
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 616.2,
+      "p95": 634.2
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 232.2,
+      "p95": 242.6
+     }
+    },
+    "reopen_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 240.9,
+      "p95": 255.3
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 54.2,
+      "p95": 60.2
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 185.9,
+      "p95": 196.8
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 47.9,
+      "p95": 53.2
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 54.2,
+       "p95": 60.2
+      }
+     }
+    },
+    "warm_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 287.4,
+      "p95": 297.5
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 109.5,
+      "p95": 118.1
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 177.6,
+      "p95": 188.9
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 36.0,
+      "p95": 41.6
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 109.5,
+       "p95": 118.1
+      }
+     }
+    }
+   },
+   "endpoints": {
+    "attempted": 84,
+    "passed": 84
+   },
+   "cli_sha256": "d884a2bc6a8033545310154b066cf0b4a3a60f89859ea2e3148303fe358b2b76",
+   "cli_unchanged": true,
+   "test_binary_sha256": "e448861f45ba98c3c1c88ad14ae05201a1a7f95787174c6b422cdd7796c26ca3",
+   "measurement_source": "31a19620f0d0709efd1a9061f8ac8dd96b4854082515e2cbe1ed289581e3d122",
+   "sources_unchanged": true,
+   "repository_inputs_unchanged": false,
+   "soak_seconds": 0,
+   "attempts_sha256": "6464ed86d81f5d1af0aef338de1f91df043bac3dad06a88f7b9eb1fa2feb9969"
+  },
+  "after-1": {
+   "load_averages": [
+    "8.47",
+    "10.43",
+    "10.25"
+   ],
+   "scenarios": {
+    "cold_workspace": {
+     "duration_ms": {
+      "n": 20,
+      "median": 664.9,
+      "p95": 1720.6
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 472.7,
+      "p95": 1227.8
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 319.9,
+      "p95": 508.2
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 19.6,
+      "p95": 31.2
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 472.7,
+       "p95": 1227.8
+      }
+     }
+    },
+    "native_session_reopen": {
+     "duration_ms": {
+      "n": 20,
+      "median": 531.8,
+      "p95": 668.3
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 281.2,
+      "p95": 373.3
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 236.7,
+      "p95": 306.0
+     }
+    },
+    "reopen_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 326.8,
+      "p95": 402.1
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 88.6,
+      "p95": 122.4
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 225.5,
+      "p95": 276.8
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 11.8,
+      "p95": 54.7
+     },
+     "planning_published_at_first_step": {
+      "observations": 10,
+      "bitmap_ready_ms": {
+       "n": 10,
+       "median": 110.4,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 10,
+      "bitmap_ready_ms": {
+       "n": 10,
+       "median": 58.7,
+       "p95": null
+      }
+     }
+    },
+    "warm_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 288.7,
+      "p95": 390.6
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 112.4,
+      "p95": 159.9
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 179.6,
+      "p95": 230.7
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 38.9,
+      "p95": 56.0
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 112.4,
+       "p95": 159.9
+      }
+     }
+    }
+   },
+   "endpoints": {
+    "attempted": 84,
+    "passed": 84
+   },
+   "cli_sha256": "4a71b8862c655cb4d743a963f1357ca8e20365f52769360cc82fd51c10156220",
+   "cli_unchanged": true,
+   "test_binary_sha256": "e448861f45ba98c3c1c88ad14ae05201a1a7f95787174c6b422cdd7796c26ca3",
+   "measurement_source": "31a19620f0d0709efd1a9061f8ac8dd96b4854082515e2cbe1ed289581e3d122",
+   "sources_unchanged": true,
+   "repository_inputs_unchanged": true,
+   "soak_seconds": 0,
+   "attempts_sha256": "ba7965101670a8b4db2695ef40368436f6467833457e765ff504b19b2c520ecc"
+  },
+  "after-2": {
+   "load_averages": [
+    "16.38",
+    "12.76",
+    "11.16"
+   ],
+   "scenarios": {
+    "cold_workspace": {
+     "duration_ms": {
+      "n": 20,
+      "median": 628.4,
+      "p95": 659.5
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 452.5,
+      "p95": 481.0
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 317.3,
+      "p95": 330.4
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 18.1,
+      "p95": 23.2
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 452.5,
+       "p95": 481.0
+      }
+     }
+    },
+    "native_session_reopen": {
+     "duration_ms": {
+      "n": 20,
+      "median": 523.2,
+      "p95": 550.5
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 275.6,
+      "p95": 287.8
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 236.5,
+      "p95": 258.4
+     }
+    },
+    "reopen_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 256.3,
+      "p95": 350.3
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 55.1,
+      "p95": 111.3
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 201.5,
+      "p95": 245.0
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 47.8,
+      "p95": 49.3
+     },
+     "planning_published_at_first_step": {
+      "observations": 9,
+      "bitmap_ready_ms": {
+       "n": 9,
+       "median": 108.9,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 11,
+      "bitmap_ready_ms": {
+       "n": 11,
+       "median": 53.4,
+       "p95": null
+      }
+     }
+    },
+    "warm_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 288.7,
+      "p95": 339.7
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 108.3,
+      "p95": 136.2
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 178.9,
+      "p95": 203.5
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 37.3,
+      "p95": 41.9
+     },
+     "planning_published_at_first_step": {
+      "observations": 1,
+      "bitmap_ready_ms": {
+       "n": 1,
+       "median": 142.6,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 19,
+      "bitmap_ready_ms": {
+       "n": 19,
+       "median": 108.2,
+       "p95": null
+      }
+     }
+    }
+   },
+   "endpoints": {
+    "attempted": 84,
+    "passed": 84
+   },
+   "cli_sha256": "4a71b8862c655cb4d743a963f1357ca8e20365f52769360cc82fd51c10156220",
+   "cli_unchanged": true,
+   "test_binary_sha256": "e448861f45ba98c3c1c88ad14ae05201a1a7f95787174c6b422cdd7796c26ca3",
+   "measurement_source": "31a19620f0d0709efd1a9061f8ac8dd96b4854082515e2cbe1ed289581e3d122",
+   "sources_unchanged": true,
+   "repository_inputs_unchanged": true,
+   "soak_seconds": 0,
+   "attempts_sha256": "2610618cfb4856428384bf0b691a8235f41d2910a706c407cb6fba3272350b1f"
+  },
+  "before-2": {
+   "load_averages": [
+    "10.38",
+    "11.68",
+    "10.88"
+   ],
+   "scenarios": {
+    "cold_workspace": {
+     "duration_ms": {
+      "n": 20,
+      "median": 944.2,
+      "p95": 961.2
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 765.1,
+      "p95": 782.2
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 457.7,
+      "p95": 464.3
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 21.6,
+      "p95": 26.6
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 765.1,
+       "p95": 782.2
+      }
+     }
+    },
+    "native_session_reopen": {
+     "duration_ms": {
+      "n": 20,
+      "median": 878.0,
+      "p95": 1006.2
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 622.9,
+      "p95": 710.9
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 244.4,
+      "p95": 301.9
+     }
+    },
+    "reopen_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 243.2,
+      "p95": 247.8
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 53.0,
+      "p95": 55.1
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 189.5,
+      "p95": 195.0
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 47.2,
+      "p95": 50.1
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 53.0,
+       "p95": 55.1
+      }
+     }
+    },
+    "warm_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 281.4,
+      "p95": 289.0
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 104.5,
+      "p95": 108.1
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 174.6,
+      "p95": 182.7
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 34.9,
+      "p95": 39.0
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 104.5,
+       "p95": 108.1
+      }
+     }
+    }
+   },
+   "endpoints": {
+    "attempted": 84,
+    "passed": 84
+   },
+   "cli_sha256": "d884a2bc6a8033545310154b066cf0b4a3a60f89859ea2e3148303fe358b2b76",
+   "cli_unchanged": true,
+   "test_binary_sha256": "e448861f45ba98c3c1c88ad14ae05201a1a7f95787174c6b422cdd7796c26ca3",
+   "measurement_source": "31a19620f0d0709efd1a9061f8ac8dd96b4854082515e2cbe1ed289581e3d122",
+   "sources_unchanged": true,
+   "repository_inputs_unchanged": true,
+   "soak_seconds": 0,
+   "attempts_sha256": "074b81a56f70ffd3878767b10e182168fcca0a8eeba340ca18bc2c1e1a9c7f92"
+  },
+  "fix-after-1": {
+   "load_averages": [
+    "5.44",
+    "9.01",
+    "9.91"
+   ],
+   "scenarios": {
+    "cold_workspace": {
+     "duration_ms": {
+      "n": 20,
+      "median": 635.5,
+      "p95": 867.8
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 454.7,
+      "p95": 652.5
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 314.9,
+      "p95": 410.4
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 18.4,
+      "p95": 24.5
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 454.7,
+       "p95": 652.5
+      }
+     }
+    },
+    "native_session_reopen": {
+     "duration_ms": {
+      "n": 20,
+      "median": 511.7,
+      "p95": 533.4
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 266.9,
+      "p95": 280.9
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 235.8,
+      "p95": 249.6
+     }
+    },
+    "reopen_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 342.0,
+      "p95": 411.7
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 105.4,
+      "p95": 110.2
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 234.0,
+      "p95": 314.8
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 47.2,
+      "p95": 96.2
+     },
+     "planning_published_at_first_step": {
+      "observations": 14,
+      "bitmap_ready_ms": {
+       "n": 14,
+       "median": 107.2,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 6,
+      "bitmap_ready_ms": {
+       "n": 6,
+       "median": 53.9,
+       "p95": null
+      }
+     }
+    },
+    "warm_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 285.1,
+      "p95": 339.0
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 105.3,
+      "p95": 121.4
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 180.1,
+      "p95": 217.5
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 35.7,
+      "p95": 40.1
+     },
+     "planning_published_at_first_step": {
+      "observations": 1,
+      "bitmap_ready_ms": {
+       "n": 1,
+       "median": 145.4,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 19,
+      "bitmap_ready_ms": {
+       "n": 19,
+       "median": 104.8,
+       "p95": null
+      }
+     }
+    }
+   },
+   "endpoints": {
+    "attempted": 84,
+    "passed": 84
+   },
+   "cli_sha256": "4a71b8862c655cb4d743a963f1357ca8e20365f52769360cc82fd51c10156220",
+   "cli_unchanged": true,
+   "test_binary_sha256": "fe7646f24f36682765831405b81248d81c496ae9388c43d7e0c7c77631598750",
+   "measurement_source": "31a19620f0d0709efd1a9061f8ac8dd96b4854082515e2cbe1ed289581e3d122",
+   "sources_unchanged": true,
+   "repository_inputs_unchanged": false,
+   "soak_seconds": 0,
+   "attempts_sha256": "e640328526e78813e28171573ad36e4339945b24945731b385ad26f398cc993e"
+  },
+  "fix-before-1": {
+   "load_averages": [
+    "6.13",
+    "8.46",
+    "9.63"
+   ],
+   "scenarios": {
+    "cold_workspace": {
+     "duration_ms": {
+      "n": 20,
+      "median": 932.5,
+      "p95": 970.6
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 749.0,
+      "p95": 796.8
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 455.8,
+      "p95": 465.9
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 22.9,
+      "p95": 27.5
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 749.0,
+       "p95": 796.8
+      }
+     }
+    },
+    "native_session_reopen": {
+     "duration_ms": {
+      "n": 20,
+      "median": 854.1,
+      "p95": 887.1
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 609.2,
+      "p95": 620.8
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 239.3,
+      "p95": 247.6
+     }
+    },
+    "reopen_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 238.2,
+      "p95": 247.6
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 52.4,
+      "p95": 57.5
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 186.1,
+      "p95": 190.9
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 47.7,
+      "p95": 52.9
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 52.4,
+       "p95": 57.5
+      }
+     }
+    },
+    "warm_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 281.6,
+      "p95": 289.3
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 104.4,
+      "p95": 110.7
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 175.7,
+      "p95": 181.6
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 36.6,
+      "p95": 40.7
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 104.4,
+       "p95": 110.7
+      }
+     }
+    }
+   },
+   "endpoints": {
+    "attempted": 84,
+    "passed": 84
+   },
+   "cli_sha256": "d884a2bc6a8033545310154b066cf0b4a3a60f89859ea2e3148303fe358b2b76",
+   "cli_unchanged": true,
+   "test_binary_sha256": "fe7646f24f36682765831405b81248d81c496ae9388c43d7e0c7c77631598750",
+   "measurement_source": "31a19620f0d0709efd1a9061f8ac8dd96b4854082515e2cbe1ed289581e3d122",
+   "sources_unchanged": true,
+   "repository_inputs_unchanged": false,
+   "soak_seconds": 0,
+   "attempts_sha256": "4aff8ec8881eb85fa93785ab0026f50087a6b8df96c5f1e038326bf583b00811"
+  },
+  "final-before": {
+   "load_averages": [
+    "6.29",
+    "7.43",
+    "8.22"
+   ],
+   "scenarios": {
+    "cold_workspace": {
+     "duration_ms": {
+      "n": 20,
+      "median": 895.3,
+      "p95": 921.0
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 723.5,
+      "p95": 747.9
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 437.0,
+      "p95": 450.5
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 17.5,
+      "p95": 22.9
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 723.5,
+       "p95": 747.9
+      }
+     }
+    },
+    "native_session_reopen": {
+     "duration_ms": {
+      "n": 20,
+      "median": 825.7,
+      "p95": 975.7
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 584.5,
+      "p95": 615.2
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 232.8,
+      "p95": 323.6
+     }
+    },
+    "reopen_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 229.2,
+      "p95": 241.2
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 50.1,
+      "p95": 52.2
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 178.4,
+      "p95": 191.5
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 45.1,
+      "p95": 47.6
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 50.1,
+       "p95": 52.2
+      }
+     }
+    },
+    "warm_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 268.0,
+      "p95": 273.9
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 97.3,
+      "p95": 104.4
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 170.0,
+      "p95": 174.4
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 32.1,
+      "p95": 37.0
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 97.3,
+       "p95": 104.4
+      }
+     }
+    }
+   },
+   "endpoints": {
+    "attempted": 84,
+    "passed": 84
+   },
+   "memory_mib": {
+    "soak_begin": 236.1,
+    "after_round": [
+     278.0,
+     282.9,
+     284.6,
+     282.9,
+     287.3,
+     289.2,
+     289.3,
+     298.6,
+     298.3,
+     298.3,
+     298.3,
+     298.8,
+     298.6,
+     298.3,
+     298.4,
+     298.5,
+     298.5,
+     298.5,
+     298.5,
+     297.5,
+     298.8
+    ],
+    "four_round_growth": 46.8,
+    "growth_round_1_to_last": 15.9,
+    "first_native_open": {
+     "before_capture": 248.2,
+     "after_bitmap": 299.2,
+     "after_ocr": 319.9,
+     "after_round_0": 278.0
+    }
+   },
+   "recorder_rss_mib": {
+    "first": 237.9,
+    "last": 286.9,
+    "median_last_20_before_final": 286.8,
+    "samples": 150
+   },
+   "cli_sha256": "d884a2bc6a8033545310154b066cf0b4a3a60f89859ea2e3148303fe358b2b76",
+   "cli_unchanged": true,
+   "test_binary_sha256": "17a54cae273083f35f327153e874562a8133fedc762be9907c98a79b1d255c23",
+   "measurement_source": "31a19620f0d0709efd1a9061f8ac8dd96b4854082515e2cbe1ed289581e3d122",
+   "sources_unchanged": true,
+   "repository_inputs_unchanged": false,
+   "soak_seconds": 150,
+   "attempts_sha256": "a01e62a0bb74e599f6393f8ea5683f77e830315e6cfb3ce3ea9e2cacdec9308f"
+  },
+  "final-after": {
+   "load_averages": [
+    "5.73",
+    "6.64",
+    "7.66"
+   ],
+   "scenarios": {
+    "cold_workspace": {
+     "duration_ms": {
+      "n": 20,
+      "median": 598.8,
+      "p95": 720.0
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 423.4,
+      "p95": 549.2
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 309.3,
+      "p95": 324.2
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 15.8,
+      "p95": 25.1
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 423.4,
+       "p95": 549.2
+      }
+     }
+    },
+    "native_session_reopen": {
+     "duration_ms": {
+      "n": 20,
+      "median": 518.6,
+      "p95": 594.9
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 269.9,
+      "p95": 287.3
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 234.8,
+      "p95": 309.0
+     }
+    },
+    "reopen_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 330.7,
+      "p95": 351.1
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 101.6,
+      "p95": 110.8
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 225.2,
+      "p95": 246.2
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 47.0,
+      "p95": 53.8
+     },
+     "planning_published_at_first_step": {
+      "observations": 12,
+      "bitmap_ready_ms": {
+       "n": 12,
+       "median": 104.4,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 8,
+      "bitmap_ready_ms": {
+       "n": 8,
+       "median": 53.3,
+       "p95": null
+      }
+     }
+    },
+    "warm_task": {
+     "duration_ms": {
+      "n": 20,
+      "median": 272.1,
+      "p95": 283.6
+     },
+     "bitmap_ready_ms": {
+      "n": 20,
+      "median": 98.5,
+      "p95": 106.2
+     },
+     "ocr_ms": {
+      "n": 20,
+      "median": 173.8,
+      "p95": 180.9
+     },
+     "first_step_wake_ms": {
+      "n": 20,
+      "median": 31.6,
+      "p95": 37.0
+     },
+     "planning_published_at_first_step": {
+      "observations": 0,
+      "bitmap_ready_ms": {
+       "n": 0,
+       "median": null,
+       "p95": null
+      }
+     },
+     "planning_unpublished_at_first_step": {
+      "observations": 20,
+      "bitmap_ready_ms": {
+       "n": 20,
+       "median": 98.5,
+       "p95": 106.2
+      }
+     }
+    }
+   },
+   "endpoints": {
+    "attempted": 84,
+    "passed": 84
+   },
+   "memory_mib": {
+    "soak_begin": 249.8,
+    "after_round": [
+     295.9,
+     300.4,
+     293.7,
+     293.9,
+     293.8,
+     293.9,
+     298.4,
+     298.4,
+     297.6,
+     298.5,
+     298.5,
+     298.6,
+     298.5,
+     298.5,
+     298.5,
+     298.8,
+     298.8,
+     298.8,
+     298.9,
+     298.8,
+     298.7
+    ],
+    "four_round_growth": 44.1,
+    "growth_round_1_to_last": -1.7,
+    "first_native_open": {
+     "before_capture": 260.1,
+     "after_bitmap": 310.9,
+     "after_ocr": 342.8,
+     "after_round_0": 295.9
+    }
+   },
+   "recorder_rss_mib": {
+    "first": 251.4,
+    "last": 314.5,
+    "median_last_20_before_final": 293.2,
+    "samples": 150
+   },
+   "cli_sha256": "4a71b8862c655cb4d743a963f1357ca8e20365f52769360cc82fd51c10156220",
+   "cli_unchanged": true,
+   "test_binary_sha256": "17a54cae273083f35f327153e874562a8133fedc762be9907c98a79b1d255c23",
+   "measurement_source": "31a19620f0d0709efd1a9061f8ac8dd96b4854082515e2cbe1ed289581e3d122",
+   "sources_unchanged": true,
+   "repository_inputs_unchanged": false,
+   "soak_seconds": 150,
+   "attempts_sha256": "2890dcc24a4542db4dc1e4179f86c4f03fb3e69f3ae07516c9ea05befbe60d5c"
+  }
+ },
+ "settled_diagnostic": {
+  "settled-fix-1": {
+   "reopen_settled": {
+    "first_step_wake_ms": {
+     "n": 11,
+     "median": 9.8,
+     "p95": null
+    },
+    "bitmap_ready_ms": {
+     "n": 11,
+     "median": 27.0,
+     "p95": null
+    },
+    "layout_or_display_over_1ms": 0
+   },
+   "reopen_settled_again": {
+    "first_step_wake_ms": {
+     "n": 11,
+     "median": 9.5,
+     "p95": null
+    },
+    "bitmap_ready_ms": {
+     "n": 11,
+     "median": 27.2,
+     "p95": null
+    },
+    "layout_or_display_over_1ms": 0
+   }
+  },
+  "settled-nofix-1": {
+   "reopen_settled": {
+    "first_step_wake_ms": {
+     "n": 11,
+     "median": 15.7,
+     "p95": null
+    },
+    "bitmap_ready_ms": {
+     "n": 11,
+     "median": 28.7,
+     "p95": null
+    },
+    "layout_or_display_over_1ms": 0
+   },
+   "reopen_settled_again": {
+    "first_step_wake_ms": {
+     "n": 11,
+     "median": 10.8,
+     "p95": null
+    },
+    "bitmap_ready_ms": {
+     "n": 11,
+     "median": 23.2,
+     "p95": null
+    },
+    "layout_or_display_over_1ms": 0
+   }
+  },
+  "settled-fix-2": {
+   "reopen_settled": {
+    "first_step_wake_ms": {
+     "n": 11,
+     "median": 9.1,
+     "p95": null
+    },
+    "bitmap_ready_ms": {
+     "n": 11,
+     "median": 28.2,
+     "p95": null
+    },
+    "layout_or_display_over_1ms": 0
+   },
+   "reopen_settled_again": {
+    "first_step_wake_ms": {
+     "n": 11,
+     "median": 9.5,
+     "p95": null
+    },
+    "bitmap_ready_ms": {
+     "n": 11,
+     "median": 26.3,
+     "p95": null
+    },
+    "layout_or_display_over_1ms": 0
+   }
+  },
+  "settled-nofix-2": {
+   "reopen_settled": {
+    "first_step_wake_ms": {
+     "n": 11,
+     "median": 13.0,
+     "p95": null
+    },
+    "bitmap_ready_ms": {
+     "n": 11,
+     "median": 23.5,
+     "p95": null
+    },
+    "layout_or_display_over_1ms": 0
+   },
+   "reopen_settled_again": {
+    "first_step_wake_ms": {
+     "n": 11,
+     "median": 12.6,
+     "p95": null
+    },
+    "bitmap_ready_ms": {
+     "n": 11,
+     "median": 25.5,
+     "p95": null
+    },
+    "layout_or_display_over_1ms": 0
+   }
+  }
+ },
+ "cohort_notes": {
+  "before-1/after-1/after-2/before-2": "HEAD 13883fa15 Swift plus observer step timing; alternating order.",
+  "fix-after-1/fix-before-1": "Adds the unchanged-write repair, uncommitted.",
+  "final-before/final-after": "Commit ba93d258d, 150-second soak.",
+  "settled_diagnostic": "Uncommitted diagnostic scenario (diagnostic-harness.patch): reopen after 2.5 s and again after 0.3 s of drained main actor, after-lf, 11 samples, repair applied (fix) or reverted (nofix), alternating.",
+  "repository_inputs_unchanged": "False where another Task committed to the shared repository mid-run. Those cohorts agree with the unchanged ones and are kept, not scored as comparisons."
+ },
+ "prior_pair": {
+  "source": "/tmp/loo304-gate-read-20261006/desktop-{before,after}/attempts.jsonl, decomposed without rerunning",
+  "reopen_task_warm": {
+   "before": {
+    "duration_ms": "197.9/239.9",
+    "bitmap_ready_ms": "28.1/64.9",
+    "ocr_ms": "169.7/180.1"
+   },
+   "after": {
+    "duration_ms": "233.7/332.0",
+    "bitmap_ready_ms": "52.8/108.2",
+    "ocr_ms": "180.3/226.9"
+   }
+  },
+  "memory_mib": {
+   "before": {
+    "soak_begin": 275.8,
+    "first_native_open_before_capture": 289.4,
+    "after_bitmap": 339.0,
+    "after_ocr": 367.9,
+    "after_round_0": 320.2,
+    "after_round_1": 329.8,
+    "after_round_3": 329.2,
+    "after_round_20": 326.1
+   },
+   "after": {
+    "soak_begin": 279.5,
+    "first_native_open_before_capture": 293.2,
+    "after_bitmap": 342.9,
+    "after_ocr": 376.2,
+    "after_round_0": 328.3,
+    "after_round_1": 334.5,
+    "after_round_3": 330.7,
+    "after_round_20": 333.0
+   }
+  },
+  "recorder_rss_mib": {
+   "before": {
+    "first": 286.9,
+    "last": 334.5,
+    "preceding_samples": "324.8-325.5"
+   },
+   "after": {
+    "first": 287.0,
+    "last": 383.6,
+    "preceding_samples": "325.2-330.6"
+   },
+   "explanation": "Growth is last sample minus first. Both last samples fell inside a native capture; after caught its bitmap/OCR peak."
+  }
+ },
+ "receipt_hashes": {
+  "summarize.py": "d35f359ac89e2e82c517d5eb9b2056ac59eccd2aa460794e8f7fad78954597e6",
+  "product-fix.patch": "bdddf730c0fc6b38255d224120c7ab054bca9d107a27e533736c39e268ac2f3d",
+  "diagnostic-harness.patch": "93263e4f249c6e414e7e5badb9027fe149300eea7fe618d1ed4c6a4a419ff147",
+  "settled-fix-1/attempts.jsonl": "def8c4c34207c4eb0d71c1737ea5d04f75ebb0fc15266b8904edab26e6fad4bf",
+  "settled-nofix-1/attempts.jsonl": "73d3c01aac6cdb6ef58c937fdc0b966139d1cb49da13e466f59dd6f797d96f89",
+  "settled-fix-2/attempts.jsonl": "74f94e10dbf2ecef5e76efa3979883b8740ea55d5094e0ab10a386d085d44cdc",
+  "settled-nofix-2/attempts.jsonl": "0dba430ca3727d1de66aa18bf6dbc49fb8c09f88cb76ca2e3ddd1138bfa5ceae"
+ }
+}

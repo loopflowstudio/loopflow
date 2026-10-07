@@ -97,9 +97,11 @@ final class WorkModel {
     func openTaskLink(_ url: URL, expectedTaskID: String? = nil) async {
         destinationGeneration &+= 1
         let generation = destinationGeneration
-        taskLinkURL = url
+        // Observation invalidates on every write, changed or not. Reopening
+        // what is already open must not redraw the window.
+        if taskLinkURL != url { taskLinkURL = url }
         taskLinkExpectedID = expectedTaskID
-        showsTaskLink = false
+        if showsTaskLink { showsTaskLink = false }
         do {
             let link = try TaskLink(url: url)
             // Already observed planning opens directly, like the outline and palette.
@@ -136,8 +138,8 @@ final class WorkModel {
 
     func dismissTaskLink() {
         destinationGeneration &+= 1
-        showsTaskLink = false
-        linkedSession = nil
+        if showsTaskLink { showsTaskLink = false }
+        if linkedSession != nil { linkedSession = nil }
     }
 
     func chooseLinkedTask(wave: WaveRoadmap, task: RoadmapTask) async {
@@ -206,7 +208,9 @@ final class WorkModel {
 
     func openTaskDestination(wave: WaveRoadmap, task: RoadmapTask) {
         setRepoPath(wave.wave.repo)
-        navigation.selectedTaskEvidence = (wave, task)
+        if navigation.selectedTaskEvidence.map({ $0.wave != wave || $0.task != task }) ?? true {
+            navigation.selectedTaskEvidence = (wave, task)
+        }
         // Reopening a Task must not clear its focused Session or retrigger entry.
         let isSelected = selection?.kind == .task
             && (selection?.id == task.id || selection?.id == task.runtime?.workId)
@@ -216,9 +220,8 @@ final class WorkModel {
 
     func remember(_ destination: WorkDestination) {
         guard let row = paletteRows.first(where: { $0.id == destination }) else { return }
-        navigation.recentDestinations.removeAll { $0.id == destination }
-        navigation.recentDestinations.insert(row, at: 0)
-        navigation.recentDestinations = Array(navigation.recentDestinations.prefix(20))
+        let recent = Array(([row] + navigation.recentDestinations.filter { $0.id != destination }).prefix(20))
+        if navigation.recentDestinations != recent { navigation.recentDestinations = recent }
     }
 
     func openPaletteTask(_ id: String) async {
@@ -359,6 +362,7 @@ final class WorkModel {
     private var savedSessionRepos: Set<String> = []
     private var usesFixedFixture = false
     private var sessionsGeneration = 0
+    @ObservationIgnored private var sessionsRefresh: (repo: String, generation: Int, task: Task<Void, Never>)?
     private var roadmapGeneration = 0
     /// The Wave whose detail a view is showing, if any.
     var detailWaveId: String?
@@ -378,7 +382,6 @@ final class WorkModel {
     @ObservationIgnored private var scopeFloor = 0
     @ObservationIgnored private var taskFloor = 0
     @ObservationIgnored private var planningWaiters: [(id: Int, resume: CheckedContinuation<Void, Never>)] = []
-    private var processActivityRefreshInFlight = false
     private var workActivityGeneration = 0
 
     /// A launch repository taken from the saved workspace without running
@@ -567,7 +570,6 @@ final class WorkModel {
         guard query.streamsWork else {
             // This transport has no reader: one reading, shown until asked again.
             await refresh()
-            await refreshProcessActivity()
             return
         }
         var delay = Duration.seconds(1)
@@ -826,18 +828,6 @@ final class WorkModel {
         await refreshWorkActivity()
     }
 
-    func refreshProcessActivity() async {
-        guard workObservation == nil else { return }
-        guard !usesFixedFixture, !isRefreshing, !processActivityRefreshInFlight else { return }
-        processActivityRefreshInFlight = true
-        defer { processActivityRefreshInFlight = false }
-
-        let previous = processActivity.value
-        if previous == nil { processActivity = .loading }
-        let next = reading(from: await readProcessActivity(), lastGood: previous)
-        if processActivity != next { processActivity = next }
-    }
-
     func refreshPortfolio(
         initialRepoPath: String?,
         persistedRepos: [PortfolioRepo] = []
@@ -898,7 +888,7 @@ final class WorkModel {
         }
         // Navigation is already scoped to this repository. A partial planning
         // read cannot invalidate its saved selection merely because we return.
-        repoPath = path
+        if repoPath != path { repoPath = path }
     }
 
 
@@ -1007,13 +997,26 @@ final class WorkModel {
             syncWorkScope()
             return
         }
-        sessionsGeneration &+= 1
-        let generation = sessionsGeneration
-        let repoPath = repoPath
         guard let repoPath else {
             sessions = .available([])
             return
         }
+        // The periodic reader and full refresh share one enumeration. Joining
+        // also lets callers wait for all pages instead of invalidating each other.
+        if let refresh = sessionsRefresh,
+           refresh.repo == repoPath, refresh.generation == sessionsGeneration {
+            await refresh.task.value
+            return
+        }
+        sessionsGeneration &+= 1
+        let generation = sessionsGeneration
+        let task = Task { await readSessions(repoPath: repoPath, generation: generation) }
+        sessionsRefresh = (repoPath, generation, task)
+        await task.value
+        if sessionsRefresh?.generation == generation { sessionsRefresh = nil }
+    }
+
+    private func readSessions(repoPath: String, generation: Int) async {
         let initialIDs = Set((sessions.value ?? []).map(\.id))
         var records: [SessionRecord] = []
         var after: String?
@@ -1047,7 +1050,8 @@ final class WorkModel {
             guard sessionsGeneration == generation, self.repoPath == repoPath,
                   !Task.isCancelled else { return }
             LaunchJournal.home.refreshed("sessions", ms: started.elapsedMs, ok: false)
-            sessions = .unavailable(lastGood: sessions.value, reason: error.localizedDescription)
+            let next = WorkReading.unavailable(lastGood: sessions.value, reason: error.localizedDescription)
+            if sessions != next { sessions = next }
         }
     }
 
@@ -1342,7 +1346,6 @@ final class WorkModel {
     func applyFixture(
         roadmap: WorkReading<RoadmapSnapshot>,
         waves: WorkReading<[Wave]>,
-        processActivity: WorkReading<ActivitySnapshot>,
         workActivity: WorkReading<WorkActivitySnapshot>,
         repos: [PortfolioRepo],
         fixed: Bool = false
@@ -1350,7 +1353,6 @@ final class WorkModel {
         self.roadmap = roadmap
         if fixed && AppTestMode.current() != .sessionFixtures { self.sessions = .available([]) }
         self.waves = waves
-        self.processActivity = processActivity
         self.workActivity = workActivity
         self.repos = repos
         authoredWavesByRepo = [:]
@@ -1466,16 +1468,6 @@ final class WorkModel {
             await Self.resolveRepoOrigins(waves.map(\.repo))
             if let text = wire.texts.last { cache?.saveWaves(text) }
             return .success(waves)
-        } catch {
-            return .failure(error)
-        }
-    }
-
-    private func readProcessActivity() async -> Result<ActivitySnapshot, Error> {
-        do {
-            let snapshot = try await query.processActivity()
-            await Self.resolveRepoOrigins(snapshot.nodes.compactMap(\.repo))
-            return .success(snapshot)
         } catch {
             return .failure(error)
         }

@@ -1,0 +1,863 @@
+{
+  "source_head": "142918e72a498fc4746a3eb367e7d727ae7b4b1c",
+  "kind": "contained allocation diagnosis, not acceptance",
+  "commands": [
+    "uv run python /tmp/loo304-capture-stacks-probe.py",
+    "uv run python /tmp/loo304-capture-events-probe.py"
+  ],
+  "limits": [
+    "Standalone cat PTY, not the realistic workspace.",
+    "Intrusive stack logging changes allocation and timing costs.",
+    "The diagnostic deliberately retains its first bitmap.",
+    "Requested no-compaction history returned only ALLOC and VM_ALLOC; free lifetime is unproved.",
+    "Virtual region sizes are not resident or live-object bytes.",
+    "Retained executable was hashed, not rebuilt; checkout HEAD is not authenticated binary build provenance."
+  ],
+  "phases": [
+    {
+      "phase": "blank",
+      "pid": 90891,
+      "rss_bytes": 93192192
+    },
+    {
+      "phase": "blank_captured",
+      "pid": 90891,
+      "rss_bytes": 169771008
+    },
+    {
+      "phase": "terminal_rendered",
+      "pid": 90891,
+      "rss_bytes": 159072256
+    },
+    {
+      "phase": "terminal_bitmap",
+      "pid": 90891,
+      "rss_bytes": 240271360
+    },
+    {
+      "phase": "terminal_ocr",
+      "pid": 90891,
+      "rss_bytes": 308183040
+    },
+    {
+      "phase": "terminal_recaptured",
+      "pid": 90891,
+      "rss_bytes": 386613248
+    }
+  ],
+  "capture_vm_regions": [
+    {
+      "size_bytes": 17924096,
+      "stack": [
+        "(com.apple.AppKit) -[NSView cacheDisplayInRect:toBitmapImageRep:includeSubviews:]",
+        "(com.apple.AppKit) -[NSBitmapImageRep _captureDrawing:]",
+        "(com.apple.AppKit) +[NSGraphicsContext graphicsContextWithBitmapImageRep:]",
+        "(com.apple.AppKit) -[NSBitmapGraphicsContext _initWithBitmapImageRep:]",
+        "(com.apple.AppKit) -[NSBitmapImageRep bitmapData]",
+        "(com.apple.AppKit) -[NSBitmapImageRep getBitmapDataPlanes:]",
+        "(com.apple.AppKit) -[NSBitmapImageRep _performBlockUsingBackingMutableData:]",
+        "(com.apple.AppKit) __57-[NSBitmapImageRep _performBlockUsingBackingMutableData:]_block_invoke",
+        "(com.apple.AppKit) -[NSBitmapImageRep _withoutChangingBackingPerformBlockUsingBackingMutableData:]",
+        "(com.apple.AppKit) __79-[NSBitmapImageRep _withoutChangingBackingPerformBlockUsingBackingMutableData:]_block_invoke",
+        "(com.apple.AppKit) NSNewBitmapBackingStore",
+        "(com.apple.CoreGraphics) CGBitmapAllocateData",
+        "(libsystem_kernel.dylib) mmap"
+      ]
+    },
+    {
+      "size_bytes": 18038784,
+      "stack": [
+        "(com.apple.AppKit) -[NSView cacheDisplayInRect:toBitmapImageRep:includeSubviews:]",
+        "(com.apple.AppKit) -[NSBitmapImageRep _captureDrawing:]",
+        "(com.apple.AppKit) __62-[NSView cacheDisplayInRect:toBitmapImageRep:includeSubviews:]_block_invoke",
+        "(com.apple.AppKit) -[NSView displayRectIgnoringOpacity:inContext:]",
+        "(com.apple.AppKit) NSPerformVisuallyAtomicChange",
+        "(com.apple.AppKit) __47-[NSView displayRectIgnoringOpacity:inContext:]_block_invoke",
+        "(com.apple.AppKit) -[NSView _recursive:displayRectIgnoringOpacity:inContext:stopAtLayerBackedViews:]",
+        "(com.apple.AppKit) -[NSView _renderLayerInContext:]",
+        "(com.apple.QuartzCore) -[CALayer renderInContext:]",
+        "(com.apple.QuartzCore) -[CALayer _renderForegroundInContext:]",
+        "(com.apple.CoreGraphics) CGContextDrawImage",
+        "(com.apple.CoreGraphics) CGContextDrawImageWithOptions",
+        "(com.apple.CoreGraphics) ripc_DrawImage",
+        "(com.apple.CoreGraphics) ripc_AcquireRIPImageData",
+        "(com.apple.CoreGraphics) CGSImageDataLock",
+        "(com.apple.CoreGraphics) img_data_lock",
+        "(com.apple.CoreGraphics) CGAccessSessionCreate",
+        "(com.apple.CoreGraphics) CGDataProviderRetainData",
+        "(com.apple.CoreGraphics) provider_for_destination_retain_data",
+        "(com.apple.CoreGraphics) CGDataProviderRetainData",
+        "(com.apple.CoreGraphics) imageProvider_retain_data",
+        "(com.apple.QuartzCore) copy_image_block_set(void*, CGImageProvider*, CGRect, CGSize, __CFDictionary const*)",
+        "(libsystem_malloc.dylib) _malloc",
+        "(libsystem_malloc.dylib) _malloc_zone_malloc_instrumented_or_legacy",
+        "(com.apple.MallocStackLogging) stack_logging_lite_malloc",
+        "(libsystem_malloc.dylib) _xzm_malloc_large_huge",
+        "(libsystem_malloc.dylib) xzm_segment_group_alloc_chunk",
+        "(libsystem_malloc.dylib) _xzm_segment_group_alloc_segment",
+        "(libsystem_malloc.dylib) _xzm_range_group_alloc_anywhere_segment",
+        "(libsystem_kernel.dylib) mach_vm_map"
+      ]
+    },
+    {
+      "size_bytes": 17956864,
+      "stack": [
+        "(com.apple.AppKit) -[NSView cacheDisplayInRect:toBitmapImageRep:includeSubviews:]",
+        "(com.apple.AppKit) -[NSBitmapImageRep _captureDrawing:]",
+        "(com.apple.AppKit) __62-[NSView cacheDisplayInRect:toBitmapImageRep:includeSubviews:]_block_invoke",
+        "(com.apple.AppKit) -[NSView displayRectIgnoringOpacity:inContext:]",
+        "(com.apple.AppKit) NSPerformVisuallyAtomicChange",
+        "(com.apple.AppKit) __47-[NSView displayRectIgnoringOpacity:inContext:]_block_invoke",
+        "(com.apple.AppKit) -[NSView _recursive:displayRectIgnoringOpacity:inContext:stopAtLayerBackedViews:]",
+        "(com.apple.AppKit) -[NSView _renderLayerInContext:]",
+        "(com.apple.QuartzCore) -[CALayer renderInContext:]",
+        "(com.apple.QuartzCore) -[CALayer _renderForegroundInContext:]",
+        "(com.apple.CoreGraphics) CGContextDrawImage",
+        "(com.apple.CoreGraphics) CGContextDrawImageWithOptions",
+        "(com.apple.CoreGraphics) ripc_DrawImage",
+        "(com.apple.CoreGraphics) ripc_AcquireRIPImageData",
+        "(com.apple.CoreGraphics) CGSImageDataLock",
+        "(com.apple.CoreGraphics) img_data_lock",
+        "(com.apple.CoreGraphics) create_image_data_handle",
+        "(libsystem_malloc.dylib) _malloc_zone_calloc",
+        "(libsystem_malloc.dylib) _malloc_zone_calloc_instrumented_or_legacy",
+        "(libsystem_malloc.dylib) _xzm_malloc_large_huge",
+        "(libsystem_malloc.dylib) xzm_segment_group_alloc_chunk",
+        "(libsystem_malloc.dylib) _xzm_segment_group_alloc_segment",
+        "(libsystem_malloc.dylib) _xzm_range_group_alloc_anywhere_segment",
+        "(libsystem_kernel.dylib) mach_vm_map"
+      ]
+    }
+  ],
+  "event_types": {
+    "ALLOC": 55961,
+    "VM_ALLOC": 208
+  },
+  "receipts": [
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/blank.stacks",
+      "bytes": 40092374,
+      "sha256": "3c039545cfbb112605070973eea6b00af09c8f96b04fac11ce630b42d8a99803"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/blank_captured.stacks",
+      "bytes": 63907182,
+      "sha256": "9ef48377671dd7343162a485382a27832b7190c740947509e9932ccd1f00e8b9"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/native-fixture.json",
+      "bytes": 1681,
+      "sha256": "f2395e85316929c1aa5294f226801c7fe52eb4068a5576bd02c3d5016e23a47c"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/native.log",
+      "bytes": 417,
+      "sha256": "f01234a45c3b99e6293c938620805f51034aeaaff0c64a1772a3e92caf7331c6"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/phases.jsonl",
+      "bytes": 811,
+      "sha256": "7045ddc4792abaf3954d70500fea4fd5bfa7b1457e97602cfe5972a6decb00c9"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/terminal_bitmap.stacks",
+      "bytes": 68104641,
+      "sha256": "311f1e11401169bc6a0e3668e944b49dfed8fc4fc1fcb6f9a6529f59eb99e068"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/terminal_ocr.stacks",
+      "bytes": 68948330,
+      "sha256": "4e736602d205cf360309445ac0858ff360f8bfccd911b6228e120df027bd60f6"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/terminal_recaptured.stacks",
+      "bytes": 69037499,
+      "sha256": "8c5a25af1f732bfa1f95b04b7758a2b23c0c0c597281bd879f1b249f7840efbf"
+    },
+    {
+      "path": "/tmp/loo304-capture-stacks-20261006/terminal_rendered.stacks",
+      "bytes": 68483318,
+      "sha256": "b6e4a36fabf30ec7fd3d5c81ef9ce209ef2f37c3603fd0f015f761865a080ec3"
+    },
+    {
+      "path": "/tmp/loo304-capture-events-20261006/native-fixture.json",
+      "bytes": 1682,
+      "sha256": "23ef828a97a3c506305d6c911371c055470303b44ba936b5101ad39686134865"
+    },
+    {
+      "path": "/tmp/loo304-capture-events-20261006/native.log",
+      "bytes": 417,
+      "sha256": "a21dffcfc84505e3ce5355e8ce600e126ffaf907de4227d3fae27b6795b508e0"
+    },
+    {
+      "path": "/tmp/loo304-capture-events-20261006/phases.jsonl",
+      "bytes": 811,
+      "sha256": "651200ce31953029ad1a42bbce4f592cd7c6e48e183601cbee8c591ee730a9c5"
+    },
+    {
+      "path": "/tmp/loo304-capture-events-20261006/terminal_bitmap.stacks",
+      "bytes": 288630548,
+      "sha256": "32c4e3fb41c9b49d93c226864bcbd8bb45e516e1b962d6606cf69846f9959e8c"
+    },
+    {
+      "path": "/private/tmp/loo304-capture-stacks-probe.py",
+      "bytes": 1584,
+      "sha256": "acd916388663405d5ebfd94efc993b45c294afe3e6bb6aa1a7614218899e5897"
+    },
+    {
+      "path": "/private/tmp/loo304-capture-events-probe.py",
+      "bytes": 1638,
+      "sha256": "8b4b74c595fd09ce1bbd83ff3d444001f328e326991204b25e15b7c435f67764"
+    },
+    {
+      "path": "/Users/jack/src/loopflow.make-the-current-desktop-workspace/swift/.build/arm64-apple-macosx/debug/LoopflowSwiftPackageTests.xctest/Contents/MacOS/LoopflowSwiftPackageTests",
+      "bytes": 56538840,
+      "sha256": "38afba05e92aba57d1c3bd85b02210e584cf54a1b3515504b66c4ad70416a378"
+    }
+  ],
+  "direct_capture_comparison": {
+    "source_head": "923339b7047085ce2538884994fd951acc4a45a6",
+    "date": "2026-10-06",
+    "candidate": "NSView.displayIgnoringOpacity(_:in:) into a full-resolution NSBitmapImageRep context",
+    "outcome": "rejected: terminal glyphs absent; both recognizers returned no text",
+    "protocol": "Existing contained terminalMemoryPhases setup, owned cat PTY and input, then cache-before/direct/cache-after without intervening input; original observers unchanged.",
+    "pixels": {
+      "images": {
+        "cache-before": {
+          "size": [
+            2800,
+            1600
+          ],
+          "rgba_sha256": "aed8ba630242764e0fe1e6371bf45c32783f5af16cfc3fcbf2e5d90ac50c90a7"
+        },
+        "direct": {
+          "size": [
+            2800,
+            1600
+          ],
+          "rgba_sha256": "98bd1a768bc92e200ccb0f5498121657711d366bca931f06ae39be213b7fae07"
+        },
+        "cache-after": {
+          "size": [
+            2800,
+            1600
+          ],
+          "rgba_sha256": "aed8ba630242764e0fe1e6371bf45c32783f5af16cfc3fcbf2e5d90ac50c90a7"
+        }
+      },
+      "comparisons": {
+        "cache-before/direct": {
+          "different_pixels": 4642,
+          "total_pixels": 4480000,
+          "max_channel_delta": 201
+        },
+        "cache-before/cache-after": {
+          "different_pixels": 0,
+          "total_pixels": 4480000,
+          "max_channel_delta": 0
+        },
+        "direct/cache-after": {
+          "different_pixels": 4642,
+          "total_pixels": 4480000,
+          "max_channel_delta": 201
+        }
+      }
+    },
+    "events": [
+      {
+        "event": "allocation_phase",
+        "phase": "blank",
+        "pid": 87789,
+        "rss_bytes": 87588864,
+        "uptime_ns": 177899890115125
+      },
+      {
+        "event": "allocation_phase",
+        "phase": "blank_captured",
+        "pid": 87789,
+        "rss_bytes": 148324352,
+        "uptime_ns": 177903312140958
+      },
+      {
+        "event": "allocation_phase",
+        "phase": "terminal_rendered",
+        "pid": 87789,
+        "rss_bytes": 136937472,
+        "uptime_ns": 177906611934083
+      },
+      {
+        "event": "capture",
+        "height": 1600,
+        "method": "cache-before",
+        "ms": 39.32925,
+        "rss_bytes": 217300992,
+        "uptime_ns": 177909759688250,
+        "width": 2800
+      },
+      {
+        "event": "recognition",
+        "level": "fast",
+        "method": "cache-before",
+        "rss_bytes": 238174208,
+        "text": [
+          "owned-terminal-memory",
+          "owned-tepminal-memopy"
+        ],
+        "uptime_ns": 177909862644000
+      },
+      {
+        "event": "recognition",
+        "level": "accurate",
+        "method": "cache-before",
+        "rss_bytes": 252542976,
+        "text": [
+          "vne\u2022-Terminal-memo",
+          "Vned-Terminal -memo"
+        ],
+        "uptime_ns": 177909988964166
+      },
+      {
+        "event": "capture",
+        "height": 1600,
+        "method": "direct",
+        "ms": 40.773125,
+        "rss_bytes": 279478272,
+        "uptime_ns": 177910029953916,
+        "width": 2800
+      },
+      {
+        "event": "recognition",
+        "level": "fast",
+        "method": "direct",
+        "rss_bytes": 297795584,
+        "text": [],
+        "uptime_ns": 177910126295791
+      },
+      {
+        "event": "recognition",
+        "level": "accurate",
+        "method": "direct",
+        "rss_bytes": 316899328,
+        "text": [],
+        "uptime_ns": 177910153348125
+      },
+      {
+        "event": "capture",
+        "height": 1600,
+        "method": "cache-after",
+        "ms": 37.108958,
+        "rss_bytes": 352796672,
+        "uptime_ns": 177910190719416,
+        "width": 2800
+      },
+      {
+        "event": "recognition",
+        "level": "fast",
+        "method": "cache-after",
+        "rss_bytes": 352845824,
+        "text": [
+          "owned-terminal-memory",
+          "owned-tepminal-memopy"
+        ],
+        "uptime_ns": 177910289687416
+      },
+      {
+        "event": "recognition",
+        "level": "accurate",
+        "method": "cache-after",
+        "rss_bytes": 355352576,
+        "text": [
+          "vne\u2022-Terminal-memo",
+          "Vned-Terminal -memo"
+        ],
+        "uptime_ns": 177910413014666
+      }
+    ],
+    "limits": [
+      "One bounded standalone probe, not realistic workspace or matched acceptance.",
+      "Sequential RSS includes earlier captures and OCR; no memory saving or product attribution established.",
+      "Test harness exit 0 records execution only; explicit pixel/OCR comparison fails equivalence.",
+      "No candidate adopted, no full workload launched. Original source restored byte-for-byte."
+    ],
+    "receipts": [
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/original.swift",
+        "bytes": 82474,
+        "sha256": "70ea8b24df849f1472e4bff403f720366c1e7789a4ce4cc0c26ab67bbac946a1"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/probe.swift",
+        "bytes": 84650,
+        "sha256": "e6d9f87ee69bc3f4eaf47a86cba9cbf27a94af97910962cb0e40c2e0b15cb703"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/probe.patch",
+        "bytes": 2961,
+        "sha256": "341518ec041b64ada721c0c7c22f89457be4e793409eaa00d1b3f7df32fa7b49"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/insert.py",
+        "bytes": 2419,
+        "sha256": "54d3a0f761273e78fd473407bae78e82005637d15a4b62046ac319643a4887d1"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/run.py",
+        "bytes": 1114,
+        "sha256": "053eb44c8048608bb33c95f1165144f58cb479067c96b164c5bd1458b6379203"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/pixels.py",
+        "bytes": 920,
+        "sha256": "6a393d83aba8eca6e599ba9c64b76ffeceb35fa04f2b5142bc9f03649bc8bb1c"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/build.log",
+        "bytes": 163194,
+        "sha256": "dbc7faf6f7e88910ffcfd21d6f6c71dcb8927daa5e2044766903330e830feebd"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/command.json",
+        "bytes": 1621,
+        "sha256": "b190fa641cda635b0e8806e46107e0115815d327b07ab017091fe856db744dbf"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/native.log",
+        "bytes": 417,
+        "sha256": "42d6c52b8b0485fdfdf2ca5100cfd7e13f2d924c98cf50e6af8af51b8d36b0c6"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/phases.jsonl",
+        "bytes": 1678,
+        "sha256": "e0785f70d9048ad989aa45eb6159465533df5474a32d74b2134c5e6280ff607f"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/pixels.json",
+        "bytes": 933,
+        "sha256": "7e7b4453f23e666f6649d6b3b4ba924ecf9a859488f2436f8c26b44b59405c11"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/cache-before.png",
+        "bytes": 97146,
+        "sha256": "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/direct.png",
+        "bytes": 85241,
+        "sha256": "f0636e6ff1ef89282a40e437aaa5b2de801cf86d512d6d8f3f5ee85262761752"
+      },
+      {
+        "path": "/tmp/loo304-capture-compare-20261006/cache-after.png",
+        "bytes": 97146,
+        "sha256": "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9"
+      },
+      {
+        "path": "/Users/jack/src/loopflow.make-the-current-desktop-workspace/swift/.build/arm64-apple-macosx/debug/LoopflowSwiftPackageTests.xctest/Contents/MacOS/LoopflowSwiftPackageTests",
+        "bytes": 62749864,
+        "sha256": "d820151db5fb73b85afcfdcef2452471888c43843e4de0d371019f9cd3796942"
+      }
+    ]
+  },
+  "object_lifetime": {
+    "source_head": "d686b1a88f324b64976156e51603aefea2422ab0",
+    "kind": "weak-object lifetime diagnosis, not acceptance",
+    "artifacts": {
+      "/tmp/loo304-object-lifetime-20261006/run.py": "8590ee4d4c0a50dadae1a7779726a9bfd8749c21404200d9e18f1dfa64f935b8",
+      "/tmp/loo304-object-lifetime-20261006/summarize.py": "7f30ce9b1184c4f4f63c758bb34a39c6b7692b282bb7eb2ae79a1ebfa194ce72",
+      "/tmp/loo304-object-lifetime-20261006/original.swift": "70ea8b24df849f1472e4bff403f720366c1e7789a4ce4cc0c26ab67bbac946a1",
+      "/tmp/loo304-object-lifetime-20261006/experiment.swift": "50d39b01a7705ab42ffd669ff4fdc6b13f8e7f4c9cea8f5c167395e067ef518f",
+      "/tmp/loo304-object-lifetime-20261006/instrument.py": "25b78d747fe830186936826ce721bf1eafc96c2d97386d1d7639f06f86552ffc",
+      "/tmp/loo304-object-lifetime-20261006/build.log": "2eedd1008c563a9e3ecef3c04454ddb76d25bc4a5207279392d853162a966f80",
+      "/tmp/loo304-object-lifetime-20261006/0/phases.jsonl": "35a18f1c374a7bb0f0b91a15ac67956b818e7da0fa2761e2ec8bd5205734fa3c",
+      "/tmp/loo304-object-lifetime-20261006/0/native.log": "747f76b912749de65fdb9e43c59061b0899b48b6af82ea09119e46ba24b7acc3",
+      "/tmp/loo304-object-lifetime-20261006/1/phases.jsonl": "0f641cabc4ecdda58c795a397cc695d5b4983c3b34043148c5fc61305ac16fc1",
+      "/tmp/loo304-object-lifetime-20261006/1/native.log": "b7804ee192b0c672026982782ab9e636437289846364288b798e6e642c600c11",
+      "/tmp/loo304-object-lifetime-20261006/3/phases.jsonl": "698b238abba0dcf392a0405d6c966a3c31f541641bc303790a0faa212fd4879e",
+      "/tmp/loo304-object-lifetime-20261006/3/native.log": "bed8fd5b9a28fb2ea4405c8821c15e50785a53e75e58888ea6a1a56750eb9b7f",
+      "/tmp/loo304-object-lifetime-20261006/2/phases.jsonl": "5bd84227c61a2f5938d2dd4117ac648205b2b7fba4c18fb7e76bf9cb6f1e46be",
+      "/tmp/loo304-object-lifetime-20261006/2/native.log": "c6c47eff7996952ccca7e250653abe9ac8d2cde04c8a92ff6f630e317fc78249",
+      "/tmp/loo304-object-lifetime-20261006/2/fixture-setup-cli-volume/lf-62965-6786d4c0-25ea-417b-9845-498347389514.jsonl": "689110327e70275fcc023f7078b0c62efa14158ae2a8216044c64d20548a3fa9",
+      "/tmp/loo304-object-lifetime-20261006/2/fixture-setup-cli-volume/lf-63259-c03c1ec0-07e7-4602-a678-ae65d1eb58ed.jsonl": "cebc4edc069d7bb3111053b62ee77cca5910b09b7b0e986f711bbfa08d152fc1",
+      "/tmp/loo304-object-lifetime-20261006/2/fixture-setup-cli-volume/lf-63359-3829448a-b4fa-4a08-9aba-7ce93c41881e.jsonl": "db1c08073a193c12d6ae4704b20df141de90286c35239eb004c08005389f170b",
+      "/tmp/loo304-object-lifetime-20261006/2/native-home/checkout/.lf/journal/traces/475606bb-99af-426d-aae8-213d17a654f0/events.jsonl": "5333b9cafc0f537b4412058f80566f6fde4753fc51890f25a1b8e73e00367944",
+      "/tmp/loo304-object-lifetime-20261006/2/native-home/checkout/.lf/journal/traces/2b2ff802-a4ae-4f96-80ec-ae15c710bb5c/events.jsonl": "9a9d865b7f54d23ad8728f3e498a7fb0121205f0503a48374533e7cf468a1340",
+      "/tmp/loo304-object-lifetime-20261006/2/native-home/checkout/.lf/journal/traces/0cc7cd3f-c7f4-40a9-b73b-48c13c92919c/events.jsonl": "a6433d438d01f90ba2ea3a75dc2cadbe070ce9657e18d7dc03d23969a5ba9737",
+      "/tmp/loo304-object-lifetime-20261006/2/native-home/codex/sessions/2026/10/05/rollout-time-41aa3683-102c-46de-8e23-01d69ea4d6da.jsonl": "aee0b88960ad49dcf6d884d362bdb15c107d14511d4201f85af5651b9ad4928b",
+      "/tmp/loo304-object-lifetime-20261006/3/fixture-setup-cli-volume/lf-70917-5e8a2596-f9f8-476e-825e-bb124936e7bd.jsonl": "86545981039c5957bd848dd3e8da38e6909de24d0f37d0d49fe7f5dbdec7d506",
+      "/tmp/loo304-object-lifetime-20261006/3/fixture-setup-cli-volume/lf-71385-b5fc1462-fc3f-452b-9403-1e89bc9b3e61.jsonl": "c202db54496ec67fea8d7a8e5fc2de50ea5b78db0ac09f33438f249ac3bab465",
+      "/tmp/loo304-object-lifetime-20261006/3/fixture-setup-cli-volume/lf-71987-aa865308-9720-4af9-87c6-c30035e0db8f.jsonl": "c28eb75f7c378df374394821a74fc2e9fec1d30d733ce0465bacd2370a2ffa1d",
+      "/tmp/loo304-object-lifetime-20261006/3/native-home/checkout/.lf/journal/traces/7cd90ec4-4ff2-41a5-8535-67f71babc522/events.jsonl": "184e55e015883f42392ffdda26fb93ca4ed09fa6fb2a767ce879e977b242ca53",
+      "/tmp/loo304-object-lifetime-20261006/3/native-home/checkout/.lf/journal/traces/720761fd-7d97-40ac-a490-27d71d8f110f/events.jsonl": "5669ce9ef07b54cc7b5fe942b30933b7837047ffa55e3a08346cd334b7258587",
+      "/tmp/loo304-object-lifetime-20261006/3/native-home/checkout/.lf/journal/traces/61103433-09b9-4218-a496-5671e5a4ba1d/events.jsonl": "cd72f00d2d677067119fcd8be79bb6720072c640c6326564d5ac8a72b98ef338",
+      "/tmp/loo304-object-lifetime-20261006/3/native-home/codex/sessions/2026/10/05/rollout-time-d8a3966f-ff73-4658-841e-f30472b90798.jsonl": "0b4b7a1d670e3ffca21f083fd8e04fbca277246652aecc070573f7c6a6cfe51e",
+      "/tmp/loo304-object-lifetime-20261006/1/fixture-setup-cli-volume/lf-60083-3c3d7b22-5f49-47bf-a4ab-91fde2ccbdd3.jsonl": "575526c6ff205387da17af79a98884af0e14ec3f3edac8f2f3e438f8dd6fd2a9",
+      "/tmp/loo304-object-lifetime-20261006/1/fixture-setup-cli-volume/lf-60390-daadfd0c-130c-4940-8351-3171d2462c0f.jsonl": "c21bfd06c1315aa62df08a09c138623874f2b7456b39513ad3fc0d80192eed69",
+      "/tmp/loo304-object-lifetime-20261006/1/fixture-setup-cli-volume/lf-60313-ca031459-979e-4885-a92a-82b1205878c9.jsonl": "48d7c868ebb4c31768f2583a13daef0a65ea18d3c81ad5e70b0be04b46688e91",
+      "/tmp/loo304-object-lifetime-20261006/1/native-home/checkout/.lf/journal/traces/b8e9f555-fd95-448a-84a1-4bfe42108136/events.jsonl": "6add949e0b86c8e55732e0285482350bafc16a988c7950060595c30d272a6f44",
+      "/tmp/loo304-object-lifetime-20261006/1/native-home/checkout/.lf/journal/traces/147c2e94-20fc-49e6-840e-b9606aad0a62/events.jsonl": "6eb859f399a8f7948e6cd6bca3086cb5ed55eb8a3b8563b56faaf54614af6790",
+      "/tmp/loo304-object-lifetime-20261006/1/native-home/checkout/.lf/journal/traces/76ae2a83-5197-4ace-b173-1f7e59c1f0af/events.jsonl": "411059ba4c47363ba88a07f55c7b93f9e59fbe5462a8e3cc5a841cb8f6fa0eb4",
+      "/tmp/loo304-object-lifetime-20261006/1/native-home/codex/sessions/2026/10/05/rollout-time-89b7d834-15a3-4d10-ac2e-61ff5f97d1d9.jsonl": "340ffa47cfad5f1a7d612e7c5c99e65f6bd1f184e828eec6dff0a4b369d14f0b",
+      "/tmp/loo304-object-lifetime-20261006/0/fixture-setup-cli-volume/lf-56089-7fc24b02-f13c-4588-8b3e-7b0d0e944740.jsonl": "d279fdececd1ad83eaa9ff4613d1b30612a151dea432a44b6c513c0ee3dd67b5",
+      "/tmp/loo304-object-lifetime-20261006/0/fixture-setup-cli-volume/lf-56016-97026da6-8c7b-4e52-8400-622acbe821e1.jsonl": "293162935f822dd96e01b87d8cb1d44ca9bb0160226f3d927f3278e48e62f148",
+      "/tmp/loo304-object-lifetime-20261006/0/fixture-setup-cli-volume/lf-56116-df6fbbc4-ba06-4335-9494-4ab1f7359158.jsonl": "3d92b2e3bea77e545e3f02c2feffbb8df70d88feb2f85ffbcb8823505ffa442a",
+      "/tmp/loo304-object-lifetime-20261006/0/native-home/checkout/.lf/journal/traces/61ad47fc-74dd-488e-9de7-78e1cf619bc9/events.jsonl": "f2e5b29c7accc60fe6ae646d32599db6b58d052a6a0642bfb7fb451a4d7e0511",
+      "/tmp/loo304-object-lifetime-20261006/0/native-home/checkout/.lf/journal/traces/bf290545-c1f7-48ce-8a18-84ad7b67f3a8/events.jsonl": "8ef50d112ebb34c760999a4b1fb1c4fc07b4679bdcbb5b6726ba785768851a7d",
+      "/tmp/loo304-object-lifetime-20261006/0/native-home/checkout/.lf/journal/traces/d6abd04f-a4ee-4419-ae1c-405b79c271d3/events.jsonl": "4bbca4910c4d05bea05461d84e208ef135b47d958bf6ae0e595b29cdd7b81506",
+      "/tmp/loo304-object-lifetime-20261006/0/native-home/codex/sessions/2026/10/05/rollout-time-b4666589-5d3d-4995-a45b-677ae4806e1b.jsonl": "a531f56668b39ff3fc45b17e11bab59ea6fb7008569b5f69d512e3b071c85f4a"
+    },
+    "limits": [
+      "Standalone cat PTY with PNG serialization and weak-reference instrumentation; not workspace acceptance.",
+      "Weak references cover the bitmap wrapper, Vision requests, handlers and results, not internal CoreGraphics storage or allocator pages.",
+      "Two pixel states occurred in every process; identical state hashes do not establish identical temporal sequences.",
+      "Eight captures per process provide no p95, four-round workspace result or hour soak."
+    ],
+    "runs": [
+      {
+        "index": 0,
+        "pooled": false,
+        "captures": 8,
+        "returned_alive": [
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          }
+        ],
+        "after_yield_alive": [
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          }
+        ],
+        "after_yield_rss_bytes": [
+          213565440,
+          238993408,
+          275283968,
+          293273600,
+          312147968,
+          348962816,
+          369426432,
+          387383296
+        ],
+        "png_sha256": [
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900"
+        ],
+        "dimensions": [
+          2800,
+          1600
+        ]
+      },
+      {
+        "index": 1,
+        "pooled": true,
+        "captures": 8,
+        "returned_alive": [
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          }
+        ],
+        "after_yield_alive": [
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          }
+        ],
+        "after_yield_rss_bytes": [
+          219529216,
+          244908032,
+          284704768,
+          302759936,
+          339640320,
+          358432768,
+          376406016,
+          395198464
+        ],
+        "png_sha256": [
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9"
+        ],
+        "dimensions": [
+          2800,
+          1600
+        ]
+      },
+      {
+        "index": 2,
+        "pooled": true,
+        "captures": 8,
+        "returned_alive": [
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          }
+        ],
+        "after_yield_alive": [
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          }
+        ],
+        "after_yield_rss_bytes": [
+          215793664,
+          235094016,
+          275480576,
+          295190528,
+          334053376,
+          352911360,
+          370130944,
+          388710400
+        ],
+        "png_sha256": [
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900"
+        ],
+        "dimensions": [
+          2800,
+          1600
+        ]
+      },
+      {
+        "index": 3,
+        "pooled": false,
+        "captures": 8,
+        "returned_alive": [
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          },
+          {
+            "bitmap": 1,
+            "request": 2
+          }
+        ],
+        "after_yield_alive": [
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          },
+          {
+            "request": 2
+          }
+        ],
+        "after_yield_rss_bytes": [
+          215023616,
+          239288320,
+          275251200,
+          293421056,
+          333004800,
+          352829440,
+          369983488,
+          387940352
+        ],
+        "png_sha256": [
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "fb0f9d9708de148b91406fc9c25090f218b58bf2cbe3f6c4824960071eb41df9",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900",
+          "0a305a0d484c9528863b5a4fe90e462490bbfd719c01f0673eec0969a83c2900"
+        ],
+        "dimensions": [
+          2800,
+          1600
+        ]
+      }
+    ],
+    "previous_full_scope": {
+      "source": "/tmp/loo304-capture-pool-20261006/experiment.swift",
+      "source_sha256": "0e1731b2058caafe8148de774bd1105b1e1588d0c5122ae1bdfc1370c8cb131a",
+      "endpoints": "20/20",
+      "round_four_growth_mib": 52.96875,
+      "disposition": "rejected before this investigation"
+    }
+  }
+}

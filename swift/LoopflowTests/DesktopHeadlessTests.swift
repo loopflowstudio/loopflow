@@ -354,7 +354,7 @@ struct DesktopHeadlessTests {
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
 
         model.applyFixture(roadmap: .unavailable(lastGood: nil, reason: "offline"),
-                           waves: .available([]), processActivity: .loading,
+                           waves: .available([]),
                            workActivity: .loading, repos: [])
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-unavailable")
         #expect(throws: (any Error).self) {
@@ -366,13 +366,13 @@ struct DesktopHeadlessTests {
         wire["waves"] = []
         let empty = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
         model.applyFixture(roadmap: .available(empty), waves: .available([]),
-                           processActivity: .loading, workActivity: .loading, repos: [])
+                           workActivity: .loading, repos: [])
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-empty")
 
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: data)
         let wave = try #require(roadmap.waves.first).wave
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.toWave()]),
-                           processActivity: .loading, workActivity: .loading, repos: [])
+                           workActivity: .loading, repos: [])
         model.navigation.presentation = .full
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         try navigator.inspect()

@@ -18,11 +18,11 @@ struct TaskProjection: Identifiable {
     var started: Bool { task.runtime?.started == true }
 
     /// The started working set. A Task with open Sessions stays reachable even
-    /// when its start predates recorded evidence.
+    /// when its start predates recorded evidence. Locally done or abandoned
+    /// Work has left it even while planning has not caught up.
     var inWorkingSet: Bool {
         if !sessions.isEmpty { return true }
-        guard started else { return false }
-        return !task.task.isTerminal || task.condition.unresolvedExecution
+        return started && task.condition.unresolvedExecution
     }
 }
 
@@ -47,34 +47,36 @@ struct WorkProjection {
     init(roadmaps: [WaveRoadmap], sessions: [SessionRecord]) {
         var matched = Set<String>()
         let visibleTaskIds = Set(roadmaps.flatMap { $0.tasks.items.compactMap { $0.runtime?.workId } })
-        // One pass over the Sessions, so a plan of many Tasks costs no more.
-        var byTask: [String: [SessionRecord]] = [:]
-        for session in sessions where session.primaryScope == nil {
-            var ids = Set(session.taskIds)
-            if let id = session.workspace?.taskId { ids.insert(id) }
-            for id in ids { byTask[id, default: []].append(session) }
-        }
-        func attached(to taskId: String?) -> [SessionRecord] {
-            guard let taskId, let records = byTask[taskId] else { return [] }
-            matched.formUnion(records.map(\.id))
-            return records
+        var taskSessions: [String: [SessionRecord]] = [:]
+        var waveSessions: [String: [SessionRecord]] = [:]
+        // Index the shared memberships once. A Session may belong to more than
+        // one Task; workspace and explicit membership must not duplicate a row.
+        for session in sessions {
+            var taskIds = Set(session.taskIds)
+            if let taskId = session.workspace?.taskId { taskIds.insert(taskId) }
+            let visibleMemberships = taskIds.intersection(visibleTaskIds)
+            if session.primaryScope == nil {
+                for taskId in visibleMemberships {
+                    taskSessions[taskId, default: []].append(session)
+                }
+            }
+            if visibleMemberships.isEmpty {
+                let waveId = session.work?.kind == .wave ? session.work?.id
+                    : (session.work?.kind == .project ? session.waveId : nil)
+                if let waveId { waveSessions[waveId, default: []].append(session) }
+            }
         }
         waves = roadmaps.map { wave in
             let repo = wave.wave.repo
+            let records = waveSessions[wave.wave.id] ?? []
+            matched.formUnion(records.map(\.id))
             return WaveProjection(
                 id: WorkNodeKey(repo: repo, work: .wave(id: wave.wave.id)),
                 roadmap: wave,
-                sessions: {
-                    let records = sessions.filter {
-                        !($0.workspace?.taskId.map(visibleTaskIds.contains) ?? false) && !$0.taskIds.contains(where: visibleTaskIds.contains)
-                            && ($0.work == .wave(id: wave.wave.id)
-                                || ($0.work?.kind == .project && $0.waveId == wave.wave.id))
-                    }
-                    matched.formUnion(records.map(\.id))
-                    return records
-                }(),
+                sessions: records,
                 tasks: wave.tasks.items.sorted { $0.task.rank < $1.task.rank }.map { task in
-                    let records = attached(to: task.runtime?.workId)
+                    let records = task.runtime.flatMap { taskSessions[$0.workId] } ?? []
+                    matched.formUnion(records.map(\.id))
                     return TaskProjection(
                         id: WorkNodeKey(repo: repo, work: .task(id: task.id)),
                         task: task, sessions: records

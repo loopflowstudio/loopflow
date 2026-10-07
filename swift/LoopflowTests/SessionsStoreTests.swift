@@ -31,7 +31,7 @@ struct SessionsStoreTests {
             query: RegistryQuery { args, _ in
                 #expect(args.first == "session")
                 #expect(args.dropFirst().first == "connect")
-                return session(id: args[2], state: "active")
+                return session(id: args[2], state: "waiting")
             }
         )
         store.reconcile(try records([
@@ -43,6 +43,20 @@ struct SessionsStoreTests {
 
         #expect(item(store, "first")?.state == .pending)
         #expect(item(store, "second")?.surface?.openArgv.suffix(3) == ["session", "connect", "second"])
+    }
+
+    @Test("A Session opened elsewhere during selection is not prepared locally")
+    func selectionHonorsFreshClientOwnership() async throws {
+        let store = SessionsStore(
+            repoPath: "/tmp/repo",
+            query: RegistryQuery { _, _ in session(id: "native", state: "active") }
+        )
+        store.reconcile(try records([session(id: "native", state: "waiting")]))
+
+        await store.select("native")
+
+        #expect(item(store, "native")?.surface == nil)
+        #expect(item(store, "native")?.error?.contains("active in another terminal") == true)
     }
 
     @Test("Selecting an active Session leaves its other terminal running until Move here")
@@ -65,6 +79,29 @@ struct SessionsStoreTests {
         await store.moveHere("native")
 
         #expect(item(store, "native")?.surface != nil)
+    }
+
+    @Test("Explicit reopen revalidates a cached observation failure", arguments: ["available", "refused", "unavailable"])
+    func reopenRevalidatesCachedFailure(result: String) async throws {
+        let reason = "Session client observation unavailable"
+        let record = session(id: "native", state: "closed")
+        let blocked = record.replacingOccurrences(of: "\"unavailable_reason\":null", with: "\"unavailable_reason\":\"\(reason)\"")
+        let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
+            if result == "refused" { throw RegistryQueryError(reason) }
+            return result == "unavailable" ? blocked : record
+        })
+        store.reconcile(try records([blocked]))
+        #expect(item(store, "native")?.record.action(.open)?.unavailableReason == reason)
+
+        await store.select("native")
+
+        if result == "available" {
+            #expect(item(store, "native")?.state == .prepared)
+            #expect(item(store, "native")?.surface?.openArgv == ["lf", "session", "connect", "native"])
+        } else {
+            #expect(item(store, "native")?.surface == nil)
+            #expect(item(store, "native")?.error?.contains(reason) == true)
+        }
     }
 
     @Test("Polling preserves the prepared interactive launch command", arguments: [false, true])

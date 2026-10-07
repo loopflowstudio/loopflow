@@ -65,6 +65,7 @@ shells unset them and tmux never receives them.
 | `LF_INSTALL_DIR`, `LF_INSTALL_CLI_ONLY`, `LF_APPLICATIONS_DIR` | `release/install.sh`, `lf install` | Installer destinations. |
 | `LF_PROVIDER_TOKEN_KEY_PATH` | `store::token_crypto` | Location of the token encryption key. |
 | `LF_NPX_BIN` | Skill discovery | Substitute `npx`. |
+| `LF_PERF_OUTPUT` | `performance` | Existing directory for opt-in CLI process/SQLite volume receipts; no SQL or data values. |
 | `LF_TRACE` | `ops::trace` | Emit operation traces instead of executing. |
 | `LOOPFLOW_DEV_WAVE_REPO` | Metrics, Desktop portfolio discovery | Repository a development app opens. |
 | `LOOPFLOW_BUILD_*`, `LOOPFLOW_MIGRATION_AUTHORITY`, `LOOPFLOW_RELEASE_TAG` | `build.rs`, release scripts | Build provenance, compiled in. |

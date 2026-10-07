@@ -211,8 +211,10 @@ final class SessionsStore: ObservableObject {
 
     private func recover(_ id: String, replacing: Bool = false) async {
         guard let index = _index(id),
-              let action = sessions[index].record.action(replacing ? .moveHere : .open),
-              action.unavailableReason == nil else { return }
+              let action = sessions[index].record.action(replacing ? .moveHere : .open) else { return }
+        // A cached observation failure can outlive the client that caused it.
+        // An explicit open revalidates through connect; it never replaces a client.
+        if replacing, action.unavailableReason != nil { return }
         switch sessions[index].state {
         case .pending, .failed:
             sessions[index].state = .opening
@@ -230,7 +232,11 @@ final class SessionsStore: ObservableObject {
             guard let latest = _index(id) else { return }
             if case .opening = sessions[latest].state {
                 sessions[latest].record = surface
-                sessions[latest].state = .prepared
+                if let reason = surface.action(replacing ? .moveHere : .open)?.unavailableReason {
+                    sessions[latest].state = .failed(reason)
+                } else {
+                    sessions[latest].state = .prepared
+                }
             }
         } catch {
             guard let latest = _index(id) else { return }

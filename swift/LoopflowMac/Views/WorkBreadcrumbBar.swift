@@ -35,6 +35,7 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
         .frame(height: TaskFileChrome.headerHeight)
         .background(palette.surfaceMuted)
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("work-toolbar")
     }
 

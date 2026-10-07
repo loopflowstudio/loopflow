@@ -15,6 +15,7 @@ pub mod task_work;
 #[allow(dead_code)]
 pub(crate) mod migration_drafts;
 pub mod ops;
+pub mod performance;
 pub mod planning;
 pub mod pm;
 pub mod pr_landing;

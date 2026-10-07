@@ -1885,7 +1885,7 @@ pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), Gi
 mod tests {
     use super::{
         abandoned_prune_reason, apply_network_enrichment, diff_shortstats, ensure_agent_worktree,
-        list_worktrees, move_default_agent_to_worktree, parse_existing_branches,
+        git_common_dir, list_worktrees, move_default_agent_to_worktree, parse_existing_branches,
         parse_pull_request_states, plan_placement, prune_abandoned_prompt_logs,
         prune_branch_worktree, remote_stdout, wave_agent_segment, whole_github_answer,
         worktree_path, worktree_prune_reason, GithubBranches, PlacementError, PlacementStrategy,
@@ -1931,6 +1931,39 @@ mod tests {
             "git {}: {}",
             args.join(" "),
             String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn common_directory_preserves_git_layouts_and_missing_checkouts() {
+        let repo = init_repo();
+        git(repo.path(), &["commit", "--allow-empty", "-m", "initial"]);
+        let common = repo.path().join(".git").canonicalize().unwrap();
+        let nested = repo.path().join("nested directory");
+        fs::create_dir(&nested).unwrap();
+        assert_eq!(git_common_dir(&nested).unwrap(), common);
+
+        let other = tempfile::tempdir().unwrap();
+        let checkout = other.path().join("linked checkout");
+        git(
+            repo.path(),
+            &["worktree", "add", "--detach", checkout.to_str().unwrap()],
+        );
+        let alias = other.path().join("alias");
+        std::os::unix::fs::symlink(&checkout, &alias).unwrap();
+        assert_eq!(git_common_dir(&checkout).unwrap(), common);
+        assert_eq!(git_common_dir(&alias).unwrap(), common);
+        fs::remove_dir_all(&checkout).unwrap();
+        assert!(git_common_dir(&checkout).is_err());
+        assert!(git_common_dir(&alias).is_err());
+        assert!(git_common_dir(other.path()).is_err());
+
+        // Absence was not cached: a new repository at the same path is fresh.
+        fs::create_dir(&checkout).unwrap();
+        git(&checkout, &["init", "-b", "main"]);
+        assert_eq!(
+            git_common_dir(&alias).unwrap(),
+            checkout.join(".git").canonicalize().unwrap()
         );
     }
 

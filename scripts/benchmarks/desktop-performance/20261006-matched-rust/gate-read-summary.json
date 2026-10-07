@@ -1,0 +1,725 @@
+{
+  "scope": "HEAD d688c47fe Rust (before) versus this change (after): Session-event Exec index, four concurrent Task details, embedded draft schema. Same host, corrected read-only Git policy, alternating order.",
+  "raw_receipts": "/tmp/loo304-gate-read-20261006",
+  "fixture": {
+    "provenance": "The prepared fixture d9dc08b5\u2026 and retained snapshot no longer exist. Both fixtures are APFS clones of the surviving /tmp/loo304-release-20261006/index-diagnostic.db (the prepared fixture plus one diagnostic index). Not byte-identical to earlier cohorts; never compared with them.",
+    "survivor_sha256": "e36e563dbed76e62dc678ef27a3fe17750612f5d9c2c31b119d3708432b91f8d",
+    "sha256": {
+      "before": "02577e9adc0f5f36f462549433f60a824c6c9eeea004f852ac5502c8a7090808",
+      "after": "e36e563dbed76e62dc678ef27a3fe17750612f5d9c2c31b119d3708432b91f8d"
+    },
+    "tables_matching_prepared_manifest": {
+      "before": true,
+      "after": true
+    },
+    "tables": 39,
+    "schema": "before: 122 objects, equal to a fresh Home from the before binary; after: 123, adding session_exec_membership, equal to a fresh Home from the after binary"
+  },
+  "binaries": {
+    "before": "d884a2bc6a8033545310154b066cf0b4a3a60f89859ea2e3148303fe358b2b76",
+    "after": "4a71b8862c655cb4d743a963f1357ca8e20365f52769360cc82fd51c10156220",
+    "index_only": "31255855910fb81624432ec5980dfc5144828947c2289eb3ae344e3450f67a61",
+    "concurrent_8_workers_without_embedded_schema": "c1b11537176b19fcdb229f2ad534908ae3e59fecdbfd069ce1d0c90703348c03",
+    "all_changes_8_workers": "617fb057166ecced37d1c5d8f8cf423ad13a4511d68be5e2a9a172ed75522e26"
+  },
+  "cohorts": {
+    "final_4_workers": {
+      "inputs_unchanged": true,
+      "reads": {
+        "before/roadmap": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 2676.0,
+          "ms": {
+            "n": 20,
+            "median": 971.5,
+            "p95": 1008.1
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 1008.0,
+            "p95": 1048.7
+          },
+          "git_children": 1890,
+          "git_succeeded": 1869,
+          "git_failed": 21,
+          "load_median": 6.38
+        },
+        "before/sessions": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 270.2,
+          "ms": {
+            "n": 20,
+            "median": 258.6,
+            "p95": 263.9
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 254.3,
+            "p95": 259.7
+          },
+          "git_children": 63,
+          "git_succeeded": 63,
+          "git_failed": 0,
+          "load_median": 6.31
+        },
+        "after/roadmap": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 1060.2,
+          "ms": {
+            "n": 20,
+            "median": 412.2,
+            "p95": 428.2
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 1067.0,
+            "p95": 1117.3
+          },
+          "git_children": 1890,
+          "git_succeeded": 1869,
+          "git_failed": 21,
+          "load_median": 6.32
+        },
+        "after/sessions": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 118.2,
+          "ms": {
+            "n": 20,
+            "median": 98.0,
+            "p95": 99.7
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 94.0,
+            "p95": 96.4
+          },
+          "git_children": 63,
+          "git_succeeded": 63,
+          "git_failed": 0,
+          "load_median": 6.31
+        }
+      }
+    },
+    "all_changes_8_workers": {
+      "inputs_unchanged": true,
+      "reads": {
+        "before/roadmap": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 2670.2,
+          "ms": {
+            "n": 20,
+            "median": 983.5,
+            "p95": 1015.0
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 1023.2,
+            "p95": 1046.9
+          },
+          "git_children": 1890,
+          "git_succeeded": 1869,
+          "git_failed": 21,
+          "load_median": 5.59
+        },
+        "before/sessions": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 271.6,
+          "ms": {
+            "n": 20,
+            "median": 254.5,
+            "p95": 257.5
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 250.3,
+            "p95": 252.9
+          },
+          "git_children": 63,
+          "git_succeeded": 63,
+          "git_failed": 0,
+          "load_median": 5.36
+        },
+        "after/roadmap": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 553.7,
+          "ms": {
+            "n": 20,
+            "median": 380.9,
+            "p95": 392.4
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 1394.7,
+            "p95": 1424.5
+          },
+          "git_children": 1890,
+          "git_succeeded": 1869,
+          "git_failed": 21,
+          "load_median": 5.59
+        },
+        "after/sessions": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 119.5,
+          "ms": {
+            "n": 20,
+            "median": 96.2,
+            "p95": 100.7
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 92.5,
+            "p95": 96.6
+          },
+          "git_children": 63,
+          "git_succeeded": 63,
+          "git_failed": 0,
+          "load_median": 5.36
+        }
+      }
+    },
+    "index_only": {
+      "inputs_unchanged": true,
+      "reads": {
+        "before/roadmap": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 2862.7,
+          "ms": {
+            "n": 20,
+            "median": 1100.9,
+            "p95": 1191.0
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 1155.6,
+            "p95": 1204.6
+          },
+          "git_children": 1890,
+          "git_succeeded": 1869,
+          "git_failed": 21,
+          "load_median": 9.52
+        },
+        "before/sessions": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 282.0,
+          "ms": {
+            "n": 20,
+            "median": 271.4,
+            "p95": 308.8
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 265.4,
+            "p95": 269.6
+          },
+          "git_children": 63,
+          "git_succeeded": 63,
+          "git_failed": 0,
+          "load_median": 8.68
+        },
+        "after/roadmap": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 1216.4,
+          "ms": {
+            "n": 20,
+            "median": 1001.9,
+            "p95": 1067.6
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 1047.7,
+            "p95": 1128.5
+          },
+          "git_children": 1890,
+          "git_succeeded": 1869,
+          "git_failed": 21,
+          "load_median": 9.56
+        },
+        "after/sessions": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 285.8,
+          "ms": {
+            "n": 20,
+            "median": 269.6,
+            "p95": 280.3
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 265.1,
+            "p95": 268.8
+          },
+          "git_children": 63,
+          "git_succeeded": 63,
+          "git_failed": 0,
+          "load_median": 8.68
+        }
+      }
+    },
+    "rejected_inputs_changed_8_workers_without_embedded_schema": {
+      "inputs_unchanged": false,
+      "reads": {
+        "before/roadmap": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 2864.1,
+          "ms": {
+            "n": 20,
+            "median": 1072.0,
+            "p95": 1144.7
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 1110.9,
+            "p95": 1162.8
+          },
+          "git_children": 1890,
+          "git_succeeded": 1869,
+          "git_failed": 21,
+          "load_median": 9.4
+        },
+        "before/sessions": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 305.5,
+          "ms": {
+            "n": 20,
+            "median": 295.3,
+            "p95": 512.2
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 270.8,
+            "p95": 278.9
+          },
+          "git_children": 63,
+          "git_succeeded": 63,
+          "git_failed": 0,
+          "load_median": 8.28
+        },
+        "after/roadmap": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 1313.3,
+          "ms": {
+            "n": 20,
+            "median": 569.6,
+            "p95": 636.1
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 1559.7,
+            "p95": 1613.6
+          },
+          "git_children": 1890,
+          "git_succeeded": 1869,
+          "git_failed": 21,
+          "load_median": 9.4
+        },
+        "after/sessions": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 300.5,
+          "ms": {
+            "n": 20,
+            "median": 296.4,
+            "p95": 506.6
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 271.5,
+            "p95": 277.5
+          },
+          "git_children": 63,
+          "git_succeeded": 63,
+          "git_failed": 0,
+          "load_median": 8.28
+        }
+      }
+    },
+    "rejected_inputs_changed_all_changes_8_workers": {
+      "inputs_unchanged": false,
+      "reads": {
+        "before/roadmap": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 2608.4,
+          "ms": {
+            "n": 20,
+            "median": 921.9,
+            "p95": 1002.1
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 958.6,
+            "p95": 1046.4
+          },
+          "git_children": 1890,
+          "git_succeeded": 1869,
+          "git_failed": 21,
+          "load_median": 6.37
+        },
+        "before/sessions": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 314.4,
+          "ms": {
+            "n": 20,
+            "median": 259.3,
+            "p95": 269.6
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 255.1,
+            "p95": 265.6
+          },
+          "git_children": 63,
+          "git_succeeded": 63,
+          "git_failed": 0,
+          "load_median": 7.39
+        },
+        "after/roadmap": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 1153.8,
+          "ms": {
+            "n": 20,
+            "median": 366.6,
+            "p95": 389.5
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 1396.9,
+            "p95": 1448.2
+          },
+          "git_children": 1890,
+          "git_succeeded": 1869,
+          "git_failed": 21,
+          "load_median": 6.41
+        },
+        "after/sessions": {
+          "reads": 21,
+          "nonzero_exits": 0,
+          "first_ms": 136.4,
+          "ms": {
+            "n": 20,
+            "median": 98.7,
+            "p95": 101.8
+          },
+          "child_cpu_ms": {
+            "n": 20,
+            "median": 94.4,
+            "p95": 97.8
+          },
+          "git_children": 63,
+          "git_succeeded": 63,
+          "git_failed": 0,
+          "load_median": 7.39
+        }
+      }
+    }
+  },
+  "preservation": {
+    "before": {
+      "tables": 39,
+      "retained_rows_identical": true,
+      "added_rows": {
+        "execs": 42
+      }
+    },
+    "after": {
+      "tables": 39,
+      "retained_rows_identical": true,
+      "added_rows": {
+        "execs": 42
+      }
+    }
+  },
+  "counters": {
+    "before": {
+      "starts": 42,
+      "ends": 42,
+      "connections": 525,
+      "statements": 94628,
+      "rows": 1194440
+    },
+    "after": {
+      "starts": 42,
+      "ends": 42,
+      "connections": 525,
+      "statements": 94628,
+      "rows": 1195175
+    }
+  },
+  "responses": {
+    "pairs": 42,
+    "identical_except_fresh_timestamps_and_verified_ages": true,
+    "age_checks": 1554
+  },
+  "fixed_overhead_ms": {
+    "lf home id, draft-bearing build, empty Home": 194,
+    "same with embedded draft schema": 35,
+    "lf --version": 12,
+    "sandbox-exec alone": 50,
+    "limit": "Medians of 8\u201310 runs. An installed release has no drafts and never paid the replay."
+  },
+  "worker_bound": {
+    "8": {
+      "wall_ms": 368,
+      "child_cpu_ms": 1357
+    },
+    "4": {
+      "wall_ms": 399,
+      "child_cpu_ms": 1075
+    },
+    "n": 11,
+    "limit": "Alternating warm roadmap reads on the after fixture."
+  },
+  "bundled_sqlite_probe": {
+    "tasks": 342,
+    "identical_rows": 57,
+    "vm_steps": {
+      "session_events_history": 17559770,
+      "session_exec_membership": 15378735
+    }
+  },
+  "profile_correction": "The earlier 559/743 sample followed a fresh clone: cold page reads. Warm, 550 of 629 main-thread samples waited on serial Git children.",
+  "desktop": {
+    "before": {
+      "attempts": 84,
+      "expected": 84,
+      "status": "incomplete",
+      "groups": [
+        {
+          "scenario": "cold_workspace",
+          "state": "first_interaction",
+          "passed": 1,
+          "p50_ms": 1125.860958,
+          "p95_ms": null
+        },
+        {
+          "scenario": "cold_workspace",
+          "state": "warm",
+          "passed": 20,
+          "p50_ms": 870.178625,
+          "p95_ms": 895.5415
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "first_interaction",
+          "passed": 1,
+          "p50_ms": 844.960166,
+          "p95_ms": null
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "warm",
+          "passed": 20,
+          "p50_ms": 793.622104,
+          "p95_ms": 927.085875
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "first_interaction",
+          "passed": 1,
+          "p50_ms": 194.922834,
+          "p95_ms": null
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "warm",
+          "passed": 20,
+          "p50_ms": 197.89547950000002,
+          "p95_ms": 239.690917
+        },
+        {
+          "scenario": "warm_task",
+          "state": "first_interaction",
+          "passed": 1,
+          "p50_ms": 270.501125,
+          "p95_ms": null
+        },
+        {
+          "scenario": "warm_task",
+          "state": "warm",
+          "passed": 20,
+          "p50_ms": 260.14945850000004,
+          "p95_ms": 267.588958
+        }
+      ],
+      "read_failures": 63,
+      "memory_after_four_rounds_mib": 53.40625,
+      "preserved_rounds": 21,
+      "rounds": 21,
+      "recorder": {
+        "cpu": {
+          "max_percent": 70.6,
+          "p50_percent": 0.3,
+          "p95_percent": 23.2,
+          "samples": 150
+        },
+        "memory": {
+          "end_mib": 334.5,
+          "growth_mib": 47.7,
+          "max_mib": 345.2,
+          "samples": 150,
+          "start_mib": 286.9
+        },
+        "hitches": {
+          "count": null,
+          "hangs": null,
+          "hitch_ms_per_second": null,
+          "recorded": false,
+          "worst_hang_ms": null,
+          "worst_ms": null
+        }
+      },
+      "cli_volume": {
+        "observed_totals": {
+          "connections": 3392,
+          "rows": 3306557,
+          "statements": 306911
+        },
+        "processes": 547,
+        "complete": true
+      },
+      "cli_sha256": "d884a2bc6a8033545310154b066cf0b4a3a60f89859ea2e3148303fe358b2b76",
+      "cli_unchanged": true,
+      "sources_unchanged": true,
+      "repository_configs_unchanged": true,
+      "test_binary_sha256": "e03f319b1602b6384c2926c395a19886b8879c0d9ae5a9092afd30e217db67d2",
+      "measurement_source": "e382c44c4499bc0b2c154decef758790aca9197b3b002197f67f77185832d483",
+      "snapshot_sha256": "02577e9adc0f5f36f462549433f60a824c6c9eeea004f852ac5502c8a7090808",
+      "xctrace": false
+    },
+    "after": {
+      "attempts": 84,
+      "expected": 84,
+      "status": "incomplete",
+      "groups": [
+        {
+          "scenario": "cold_workspace",
+          "state": "first_interaction",
+          "passed": 1,
+          "p50_ms": 884.353833,
+          "p95_ms": null
+        },
+        {
+          "scenario": "cold_workspace",
+          "state": "warm",
+          "passed": 20,
+          "p50_ms": 597.131271,
+          "p95_ms": 673.366416
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "first_interaction",
+          "passed": 1,
+          "p50_ms": 520.109583,
+          "p95_ms": null
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "warm",
+          "passed": 20,
+          "p50_ms": 530.7279585,
+          "p95_ms": 642.95125
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "first_interaction",
+          "passed": 1,
+          "p50_ms": 332.39075,
+          "p95_ms": null
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "warm",
+          "passed": 20,
+          "p50_ms": 233.710833,
+          "p95_ms": 331.692959
+        },
+        {
+          "scenario": "warm_task",
+          "state": "first_interaction",
+          "passed": 1,
+          "p50_ms": 271.323584,
+          "p95_ms": null
+        },
+        {
+          "scenario": "warm_task",
+          "state": "warm",
+          "passed": 20,
+          "p50_ms": 266.30454199999997,
+          "p95_ms": 275.671167
+        }
+      ],
+      "read_failures": 56,
+      "memory_after_four_rounds_mib": 51.109375,
+      "preserved_rounds": 21,
+      "rounds": 21,
+      "recorder": {
+        "cpu": {
+          "max_percent": 81.3,
+          "p50_percent": 0.25,
+          "p95_percent": 13.4,
+          "samples": 150
+        },
+        "memory": {
+          "end_mib": 383.6,
+          "growth_mib": 96.6,
+          "max_mib": 385.2,
+          "samples": 150,
+          "start_mib": 287.0
+        },
+        "hitches": {
+          "count": null,
+          "hangs": null,
+          "hitch_ms_per_second": null,
+          "recorded": false,
+          "worst_hang_ms": null,
+          "worst_ms": null
+        }
+      },
+      "cli_volume": {
+        "observed_totals": {
+          "connections": 3477,
+          "rows": 3374438,
+          "statements": 313576
+        },
+        "processes": 564,
+        "complete": true
+      },
+      "cli_sha256": "4a71b8862c655cb4d743a963f1357ca8e20365f52769360cc82fd51c10156220",
+      "cli_unchanged": true,
+      "sources_unchanged": true,
+      "repository_configs_unchanged": true,
+      "test_binary_sha256": "e03f319b1602b6384c2926c395a19886b8879c0d9ae5a9092afd30e217db67d2",
+      "measurement_source": "e382c44c4499bc0b2c154decef758790aca9197b3b002197f67f77185832d483",
+      "snapshot_sha256": "e36e563dbed76e62dc678ef27a3fe17750612f5d9c2c31b119d3708432b91f8d",
+      "xctrace": false
+    },
+    "limit": "One sequential pair, no xctrace. The runner refuses its own comparison because fixture files differ; table equality is verified separately. Bitmap/OCR, not compositor paint."
+  },
+  "receipt_hashes": {
+    "/tmp/loo304-gate-read-20261006/measure.py": "a57ffc51f14b0b03fb43f037e42f91398c11d2345052dae3ee91a3f3fbd16187",
+    "/tmp/loo304-gate-read-20261006/verify.py": "e6c7d35f08098203297512f930fe69eb7e5d7ef48cec94d5cfb428e91331bc16",
+    "/tmp/loo304-gate-read-20261006/verify-responses.py": "dd4ae6fcdb16daa66a032a86c39a86dca26a01dad8b22cbd2b672c77478273fc",
+    "/tmp/loo304-gate-read-20261006/verify_tables.py": "c29ddaf93271ba608bccc48c1202b9c1b38e6e278e4144ad18be361aa899f898",
+    "/tmp/loo304-gate-read-20261006/matched/reads.jsonl": "2096ad7e5a250c44ab99afa87949f956620a8973873c1ce114818f739ed94e11",
+    "/tmp/loo304-gate-read-20261006/matched/summary.json": "94e2c6ecc4786ba8c50c9fed6e8816fd090d5228671dfcadf02f0721b6d6552c",
+    "/tmp/loo304-gate-read-20261006/desktop-before/attempts.jsonl": "d73eb1d2faad2084bd7d295f9c80eee1662981a15371e6a9b7f10473807ed8b0",
+    "/tmp/loo304-gate-read-20261006/desktop-after/attempts.jsonl": "08fe0f76f1e7ca0db23b9ab0d7b6679db3ab396840bcb9f86dd403f91214fa61",
+    "/tmp/loo304-gate-read-20261006/history_vs_forced.txt": "53e0ff2e5d41f95671ad5029c0a95b3b1dd0ba16e3011562e8aa97c54d84cb9c"
+  }
+}

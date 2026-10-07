@@ -4,6 +4,15 @@ Renamed from `concerto` in the 2026-07-08 wave/project/task restructure. The wav
 scope widened past the Mac app: product now owns the shared API and every surface
 (CLI, Mac, iOS, agent turns, workers). Older “Concerto” notes mean the Mac surface.
 
+## Live Home reconciliation (2026-10-05)
+
+Jack Heart requested cleanup first (LOO-380). Desktop/CLI 0.13.3 shared one
+Home; supported operations reconciled completion/cancel writebacks and stopped
+Flows. Full receipts and recency caveat: `7c3072d64:wave/product/MEMORY.md`.
+Unresolved then, not rechecked: LOO-367's handoff, Intelligence's backlog
+Project (LOO-366), test Waves, LOO-343's dead claim; no rendered proof.
+This branch preserves the sidebar fix; parent #1439 has landed.
+
 ## Reactive workspace (2026-10-05)
 
 Jack Heart requested that the open workspace show committed changes without a
@@ -812,17 +821,10 @@ caps, and keep missing ownership evidence explicit.
 
 ## Work and continuity (reconciled 2026-09-23)
 
-- **Work is stable identity, not a process.** Wave, Project, and Task are the
-  three Work kinds. A Run records Home-local launch provenance and can be prepared before launch; attribution
-  does not grant Work mutation or process-control authority. Provider attempts and observed
-  Turns remain execution evidence, and the provider owns Session continuity.
-- **Domain structure carries continuity.** A Wave owns `GOAL.md`, `MEMORY.md`,
-  cadence, Chat, and metric instruments. One internal chapter Project owns KRs,
-  metric targets, and Tasks; the Wave retains the objective. A Task owns its directive, worktree, and serial PR chain. Project and
-  Task do not copy parent context or inherit recent Wave conversation.
-- **Steer is the one durable authored input.** Chat is its interactive Wave
-  presentation, not a second mailbox or history truth. Radio, agent channels,
-  machine bylines, and the database message bus are deleted.
+- Work identity and domain ownership follow AGENTS.md. The September 23
+  prepared-Run and internal-Project account is archived at
+  `0e9b9b705:wave/product/MEMORY.md`; launch attribution grants no control.
+- Steers remain durable authored inputs; retired Chat/mailbox details share that archive.
 - **Another Work perspective is an ordinary Run; interactive work is a
   Session.** Launch `lf --as <work> : <question>` when another agent perspective
   is useful. Ask was removed by Jack Heart’s 2026-10-01 decision. Failed work

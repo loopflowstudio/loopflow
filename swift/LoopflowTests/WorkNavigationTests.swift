@@ -622,13 +622,10 @@ struct WorkNavigationTests {
             case "roadmap": return planning
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session": return #"{"entries":[],"next":null}"#
-            case "ps": return #"{"schema_version":1,"observed_at":1,"nodes":[],"provider_processes":[]}"#
             default: return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
             }
         }, repoPath: "/src/loopflow")
         await model.refresh()
-        await model.refreshProcessActivity()
-        #expect(model.processActivity.errorMessage == nil)
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No active Tasks in this repository.") }
         if hasUnplannedWork {

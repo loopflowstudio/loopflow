@@ -932,7 +932,7 @@ Internal command; invoked by the owning operation.
 
 ## lf machine
 
-Inspect this Machine and observe routes to other Machines
+Name and connect to machines
 
 | Argument | What it does |
 |---|---|
@@ -970,14 +970,14 @@ Diagnose installation, storage, Exec integrity and scheduled receipts
 
 ## lf machine ssh
 
-Run lf on a Machine or SSH host carrying your local credentials
+Run lf on an added machine carrying your local credentials
 
 | Argument | What it does |
 |---|---|
 | `--account` | Prefer this origin account when the remote lf chooses a provider |
 | `--only-account` | Restrict remote provider launches to these origin accounts |
-| `<target>` | MachineId (preferred), SSH alias, or user@host |
-| `--repo` | Repository path on the remote, relative to $HOME |
+| `<target>` | Saved machine label (or its stable MachineId) |
+| `--repo` | Override the saved repository path on the remote |
 | `--secret` | Doppler secret to resolve locally and forward as an env var (repeatable). The Doppler token itself is never forwarded |
 | `--forward-agent` | Forward the ssh-agent (`ssh -A`). Off by default: git pushes use the forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk Default: false. |
 | `<lf_args>` | Arguments for the remote lf. The target is the boundary: every argument after it belongs to the remote invocation |
@@ -1001,15 +1001,55 @@ Print this machine's stable local Machine identity
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf machine observe
+## lf machine add
 
-Record the current route for a known Machine identity
+Discover a remote machine and save its SSH destination
 
 | Argument | What it does |
 |---|---|
-| `<machine_id>` | machine id |
-| `<route>` | route |
+| `<target>` | target |
+| `--label` | label |
+| `--repo` | Remote repository path; defaults to this checkout's home-relative path |
 | `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf machine list
+
+List saved machines without connecting
+
+| Argument | What it does |
+|---|---|
+| `<label>` | label |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf machine status
+
+Check reachability and version without prompting
+
+| Argument | What it does |
+|---|---|
+| `<label>` | label |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf machine rename
+
+Change a saved machine's label
+
+| Argument | What it does |
+|---|---|
+| `<label>` | label |
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf machine remove
+
+Forget a connection without touching remote work
+
+| Argument | What it does |
+|---|---|
+| `<label>` | label |
 | `--help / -h` | Print help |
 
 ## lf discord

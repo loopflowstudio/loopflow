@@ -120,30 +120,15 @@ PR 1 changes the Home names below to machine. The remote-work limitations remain
 - Mac app: a pane runs `lf session connect <id>`; the app owns the terminal;
   quitting ends the clients. Pane layout is in memory only.
 
-## PR 1: rename — implemented, verification and publication remain
+## PR 1: inherited rename
 
-Rename slice: commands, help, errors, docs, builtin skills, Rust/Swift types and
-DTO fixtures use machine. One migration renames the identity table and placement
-columns without rewriting IDs, routes, timestamps or historical payloads.
-
-- `LF_HOME`, provider homes and account homes retain their filesystem meanings.
-- Opaque `home_…` IDs stay unchanged, including scheduled-job references.
-- Saved cron JSON accepts its released `home_id` key and writes `machine_id`.
-  The installed `LoopflowHomeId` plist key and Desktop selection's `homeId` key
-  remain stable; changing them would drop existing schedules or selections.
-  Desktop upgrades version-1 cached DTO keys on read, preserving the source file.
-- The retired landing discriminator and JSON retain their historical spelling
-  and fence. Released SQL and historical benchmark captures are immutable.
-- Installation code is `installation.rs`; its existing promotion lock stays at
-  the same path. Installation command ownership is LOO-401's separate work.
-- A machine is one OS user and data directory, documented in the glossary.
-
-PR 1 acceptance: CLI/help/docs and Rust/Swift DTOs agree on machine; the released
-schema reaches the single draft with IDs, routes, timestamps and foreign keys
-intact; cron ownership, saved Desktop selections and retained installer recovery
-survive the rename. Existing focused checks cover these source boundaries.
-The affected gate and isolated installer proof remain with gate/CI. Publication
-does not establish installed migration or any remote-work acceptance below.
+LOO-394 / PR #1484 owns the Home-to-machine rename and its verification.
+The parent is integrated through `8d2988da54edd7eac8262e299e27bf93afc3a089`.
+Jack Heart's later decisions discard old Desktop caches and name installation
+scope `installation`. Opaque identities, scheduled-job keys, Desktop selection
+keys, install paths and historical payloads retain their bytes. Parent evidence
+remains at `06e88761d:scratch/work-on-another-machine-name.md`; this Task adds
+only the machine-record slice and claims no installed migration.
 
 ## Machine record and later design
 
@@ -247,7 +232,7 @@ connecting A to that machine with the mechanism in the table, then runs. An
 account the machine already has is kept, never overwritten. A different account
 on the machine is left alone and is not used in A's place.
 
-Today's lease stays for foreground commands on machines not yet connected.
+The existing lease stays for foreground commands on added machines until resident credentials replace it.
 
 ### 4. Work that outlives its launcher
 
@@ -436,6 +421,8 @@ Review finding: removal must release the active destination as well as the label
 so a replacement machine can be added there without deleting the old identity.
 The route's uniqueness index covers the local identity and named connections;
 unnamed history remains intact. An unsupported peer still contributes its version
-when the identity command fails. Required checks are running; publication remains.
+when the identity command fails. Machine commands and the regenerated command reference are implemented;
+publication remains. Real SSH/accounts and installed migration
+are not proved by the simulated transport fixtures.
 
-Parent sync proof (2026-10-07): `cargo test -p loopflow --test machine_commands add_alias_rename_connect_and_remove_preserve_identity -- --exact` — passed (1 test); broader checks remain with gate/CI.
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; focused nextest selection passed 63 tests (two reported open output handles), merged `machine_commands`/`cli_discovery`/`documented_commands` passed 24 without leaks; `scripts/test_desktop.sh -Xswiftc -gnone --filter DTOFixtureTests` passed 22. Full affected gate and isolated installation remain with gate/CI; configured SSH and installed migration are unproved.

@@ -1476,6 +1476,7 @@ pub enum MachineCommand {
     },
     /// List saved machines without connecting
     List {
+        label: Option<String>,
         #[arg(long)]
         json: bool,
     },

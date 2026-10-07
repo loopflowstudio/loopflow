@@ -65,8 +65,11 @@ async fn run_async(cmd: &MachineCommand) -> anyhow::Result<()> {
             let machine = store.add_machine(&probe.id?, route, &label, &repo).await?;
             print_machine(&machine, *json)?;
         }
-        MachineCommand::List { json } => {
-            let machines = store.machines().await?;
+        MachineCommand::List { label, json } => {
+            let machines = match label {
+                Some(label) => vec![find_machine(&store, label).await?],
+                None => store.machines().await?,
+            };
             if *json {
                 println!("{}", serde_json::to_string(&machines)?);
             } else {

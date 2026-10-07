@@ -111,6 +111,10 @@ fn add_alias_rename_connect_and_remove_preserve_identity() {
     assert_eq!(added["label"], "mini");
     assert_eq!(added["route"], "mini");
     assert_eq!(added["repo"], "project's checkout");
+    assert_eq!(
+        fixture.json(&["machine", "list", "mini", "--json"])[0]["id"],
+        added["id"]
+    );
     let repeated = fixture.json(&[
         "machine",
         "add",

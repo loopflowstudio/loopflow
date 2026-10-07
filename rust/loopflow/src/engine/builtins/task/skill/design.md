@@ -48,11 +48,10 @@ Classify the shape:
   the target architecture, integration/deletion path, forbidden near-misses,
   and acceptance conditions intact while `This slice` moves.
 
-Look for earlier attempts at the same job before choosing a mechanism: partial
-implementations, unreachable branches, hidden commands, unused tables, and
-retired names in docs or memory. A redesign usually has predecessors. When
-several building blocks exist and none quite works, plan to remove them; never
-add another beside them.
+A redesign deletes what it replaces. Before choosing an approach, find earlier
+attempts: partial implementations, unreachable branches, hidden commands, and
+unused tables. List the predecessors this change replaces under **Delete — do
+not maintain**, so the implementation removes them in the same diff.
 
 Sequence the deepest cuts first: remove obsolete concepts, authorities, and
 paths before building on what remains. Mark concrete files/symbols and their

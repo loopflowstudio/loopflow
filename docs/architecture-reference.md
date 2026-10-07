@@ -781,10 +781,6 @@ Task row ----> managed worktree ----> commits
    observes merge, and explicit arm or land resumes it.
 6. Landing with `-c` completes the Task; bare landing keeps it open. Serial PR
    rotation and separately stacked dependent Tasks retain their own identities.
-   Resuming a stopped Flow consumes its completed, operation-bound merged landing
-   before requiring an active PR or restoring a checkout. It uses the Flow's
-   driver lock and versioned checkpoint, preserving any following review. A final
-   landing finishes the Flow without creating a successor PR or completing the Task.
 
 GitHub remains merge truth. SQLite stores the observed PR/head/check/disposition
 needed to resume safely; it cannot declare an unmerged PR merged.

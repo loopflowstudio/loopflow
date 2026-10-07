@@ -3849,19 +3849,15 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
     match pr.phase() {
         PrPhase::Merged => "Merged".to_string(),
         PrPhase::Abandoned => "Abandoned".to_string(),
-        _ => {
-            let completes = pr.after_merge() == AfterMerge::CompleteTask;
-            if completes {
-                "Open · completes task on merge".to_string()
-            } else if let Some(request) = pr.merge_request() {
+        _ => match pr.merge_request() {
+            Some(request) if request.after_merge == AfterMerge::ContinueTask => {
                 match request.mode {
                     PrMergeMode::User => "Open · user merge requested".to_string(),
                     PrMergeMode::Auto => "Open · auto-merge requested".to_string(),
                 }
-            } else {
-                "Open · published".to_string()
             }
-        }
+            _ => "Open · completes task on merge".to_string(),
+        },
     }
 }
 
@@ -4061,11 +4057,7 @@ pub(crate) async fn task_completion_gate(
     }
 
     // Every active PR must be settled (merged or explicitly abandoned).
-    if let Some(pr) = store
-        .active_task_pr(&task.id)
-        .await
-        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-    {
+    if let Some(pr) = prs.iter().find(|pr| pr.is_active()) {
         let which = pr
             .github()
             .map(|github| format!("#{}", github.number))
@@ -4082,7 +4074,7 @@ pub(crate) async fn task_completion_gate(
             // row exactly as it found it.
             // A PR never published whose branch never moved holds nothing:
             // reaching `end` retires it, with or without earlier merges.
-            PrPhase::Working => match unpublished_work(&task.worktree, &pr)? {
+            PrPhase::Working => match unpublished_work(&task.worktree, pr)? {
                 CommittedFollowUp::ProvenEmpty => {
                     gate.discardable_successor = Some(pr.clone());
                 }

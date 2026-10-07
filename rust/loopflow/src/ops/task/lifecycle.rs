@@ -386,7 +386,7 @@ async fn require_known_prs(repo: &Path, prs: &[TaskPr], issue: &str) -> OpsResul
             .output()?;
         if !output.status.success() {
             return Err(task_error(format!(
-                "linked PR {url} is untracked and unreadable; cancellation was not attempted"
+                "linked PR {url} is untracked and unreadable; retained checkout and PR"
             )));
         }
         #[derive(serde::Deserialize)]
@@ -395,7 +395,7 @@ async fn require_known_prs(repo: &Path, prs: &[TaskPr], issue: &str) -> OpsResul
         }
         let pr: PullRequest = serde_json::from_slice(&output.stdout).map_err(task_error)?;
         if !matches!(pr.state.as_str(), "CLOSED" | "MERGED") {
-            return Err(task_error(format!("linked PR {url} is untracked and {}; close it explicitly before canceling this Task", pr.state)));
+            return Err(task_error(format!("linked PR {url} is untracked and {}; close it explicitly before removing this Task's checkout", pr.state)));
         }
     }
     Ok(())

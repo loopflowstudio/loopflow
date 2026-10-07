@@ -174,7 +174,7 @@ struct TaskFlowTests {
         #expect(latest.iterations == [[3], [0], [2]])
     }
 
-    @Test("A Flow exec's length and the two return ports")
+    @Test("A Flow process's length and the two return ports")
     @MainActor
     func durationAndPorts() {
         #expect(FlowRunView.duration(0) == "0s")
@@ -189,7 +189,7 @@ struct TaskFlowTests {
         #expect(FlowLoopGeometry.below(1) > FlowLoopGeometry.below(0))
     }
 
-    @Test("The Task workspace opens on the ensured Session, with the Workflow in its header and the Flow exec log as a pane")
+    @Test("The Task workspace opens on the ensured Session, with the Workflow in its header and the Flow process log as a pane")
     @MainActor
     func taskWorkspace() async throws {
         _ = NSApplication.shared
@@ -200,7 +200,7 @@ struct TaskFlowTests {
         let repo = "/src/loopflow"
         let roadmap = try object("roadmap_snapshot.json")
         let waves = try #require(roadmap["waves"] as? [[String: Any]]).map { try #require($0["wave"]) }
-        // The Task waits at `demo` after three Flow execs: one finished, one stopped, one running.
+        // The Task waits at `demo` after three Flow processes: one finished, one stopped, one running.
         var work = try object("task_work.json")
         var workflow = try #require(work["workflow"] as? [String: Any])
         workflow["position"] = ["kind": "node", "node": "demo"]
@@ -210,13 +210,13 @@ struct TaskFlowTests {
         let running = try #require((work["flows"] as? [[String: Any]])?.first)
         let runId = try #require(running["id"] as? String)
         let started = try #require((run["steps"] as? [[String: Any]])?.first?["started_at"] as? Int)
-        func exec(_ id: String, _ name: String, _ state: String, seconds: Int) -> [String: Any] {
+        func process(_ id: String, _ name: String, _ state: String, seconds: Int) -> [String: Any] {
             running.merging(["id": id, "name": name, "state": state, "updated_at": started - 7_200,
                              "ended_at": started - 7_200 + seconds]) { $1 }
         }
         work["flows"] = [
-            exec("22222222-2222-4222-8222-222222222222", "task-design", "completed", seconds: 725),
-            exec("44444444-4444-4444-8444-444444444444", "pursue", "stopped", seconds: 42),
+            process("22222222-2222-4222-8222-222222222222", "task-design", "completed", seconds: 725),
+            process("44444444-4444-4444-8444-444444444444", "pursue", "stopped", seconds: 42),
             running,
         ]
 
@@ -288,13 +288,13 @@ struct TaskFlowTests {
             "task-flow-runs", "task-work", "task-flow-start",
         ]))
 
-        // One menu adds the Flow exec log as a pane beside the Session.
+        // One menu adds the Flow process log as a pane beside the Session.
         try find("work-add-flow-log").button().tap()
         try await settle()
         #expect(panes.focusedPane.content == .flowLog(taskId: task.id))
         #expect(panes.layout.allPanes.count == 2)
-        // A line per exec; its id, graph and steps only when opened.
-        let log = FlowExecLog(model: model, taskId: task.id)
+        // A line per process; its id, graph and steps only when opened.
+        let log = FlowProcessLog(model: model, taskId: task.id)
         let stopped = "44444444-4444-4444-8444-444444444444"
         #expect(try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(stopped)")
             .find(text: "42s").string() == "42s")

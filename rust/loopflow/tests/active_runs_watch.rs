@@ -91,7 +91,7 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
         "schema_version": 1, "artifact_key": id, "caller_artifact_key": null,
         "created_at": "2020-01-01T00:00:00Z", "harness": "cat", "model": null,
         "surface": "tui", "cwd": home.path(), "repo": null, "worktree": null,
-        "skill": null, "subjects": [], "exec": null, "context": null,
+        "skill": null, "subjects": [], "process": null, "context": null,
         "runtime_path": null, "runtime_digest": null, "host": "fixture", "boot_id": null,
     });
     fs::write(

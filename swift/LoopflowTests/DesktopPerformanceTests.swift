@@ -84,7 +84,7 @@ struct DesktopPerformanceTests {
         child["LF_HOME"] = home
         let reader = child
         let query = RegistryQuery(watchWork: {
-            let process = Process()
+            let process = Foundation.Process()
             process.executableURL = URL(fileURLWithPath: lf)
             process.arguments = ["monitor", "work", "--watch", "--json"]
             process.environment = reader
@@ -132,7 +132,7 @@ struct DesktopPerformanceTests {
                            "gaps": ["Compositor presentation and frame hitches are not measured.",
                                     "A Task created without a Run is not in the outline; task_created ends at its Wave's Task list.",
                                     "The interval starts when the writing process has exited, after its commit.",
-                                    "Rows are written with sqlite3, not lf: no Exec, sync or provider is involved.",
+                                    "Rows are written with sqlite3, not lf: no lf process, sync or provider is involved.",
                                     "Each write waits for the reader to be idle; overlapping writes are not sampled.",
                                     "Forced bitmap capture and OCR are intrusive observer costs."]])
         let navigator = try view.inspect().find(WorkNavigator.self).actualView()
@@ -553,7 +553,7 @@ struct DesktopPerformanceTests {
             model.syncWorkScope()
             try await sample("flow_log_active", population, attempt, journal, window, action: {
                 // This Task already has a retained Session choice; the Flow
-                // exec log opens alongside it.
+                // process log opens alongside it.
                 multiplexer.show(.flowLog(taskId: "perf-task-0"))
             }, ready: {
                 hasRendered(window, "task-work-perf-flow-0")
@@ -963,7 +963,7 @@ struct DesktopPerformanceTests {
         if let index = Int(id.replacingOccurrences(of: "session-row-perf-session-", with: "")) {
             return window.outlineText.contains { $0.contains(String(format: "Conversation %03d", index)) }
         }
-        // A Flow exec's row shows its Flow's name.
+        // A Flow process's row shows its Flow's name.
         if id == "task-work-perf-flow-0" { return window.contentText.contains { $0.contains("benchflow") } }
         if id == "task-flow-runs-empty" {
             return window.contentText.joined(separator: " ").contains("No Flow has run")
@@ -1191,7 +1191,7 @@ private final class PerformanceReader {
         send("sessions", request.id,
              #"{"repo":"\#(repo)","includes_headless":\#(scope.headless),"entries":\#(sessions)}"#)
         guard let task = scope.task else { return }
-        // Only the first Task has a Flow exec.
+        // Only the first Task has a Flow process.
         let flows = task == "PERF-0" ? #"""
             [{"id":"perf-flow-0","name":"benchflow","state":"completed","task_id":null,"wave_id":null,
               "updated_at":1790270400,"repo":"/src/loopflow","ended_at":1790270460}]
@@ -1210,7 +1210,7 @@ private final class PerformanceReader {
             }
         }
         send("task", request.id, #"""
-            {"task":"\#(task)","work":{"sessions":[],"flows":\#(flows),"execs":[],"workflow":null},"flow_runs":\#(runs)}
+            {"task":"\#(task)","work":{"sessions":[],"flows":\#(flows),"processes":[],"workflow":null},"flow_runs":\#(runs)}
             """#)
     }
 
@@ -1317,7 +1317,7 @@ private struct PerformanceStore {
     let database: String
 
     func write(_ sql: String) throws {
-        let process = Process()
+        let process = Foundation.Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
         process.arguments = ["-bail", "-cmd", ".timeout 5000", database, sql]
         let errors = Pipe()
@@ -1577,7 +1577,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     guard ["roadmap", "activity"].contains(args.first ?? "") || ["wave list", "wave status", "session list", "session history", "machine id", "task status", "task files", "task diff", "flow list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
-    let process = Process()
+    let process = Foundation.Process()
     process.executableURL = URL(fileURLWithPath: binary)
     process.arguments = args
     process.currentDirectoryURL = URL(fileURLWithPath: cwd)

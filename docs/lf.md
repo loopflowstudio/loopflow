@@ -75,7 +75,7 @@ Flow ends. A Flow that fails is started again from its first step, three
 times at most; one that is blocked, interrupted or waiting on a landing is
 not. Background it yourself when you will not wait. It never continues
 an earlier Flow. `--reason` publishes direction to the Task first. Every
-Flow exec for a Task is equally its work.
+Flow process for a Task is equally its work.
 
 A Task takes up its Project's workflow and moves through its nodes.
 Each `task run` takes one edge leaving the current node: the only one, or the
@@ -91,12 +91,12 @@ lf flow customize feature      # write the builtin to .lf/ and print its path
 lf update-plan --wave exports --workflow code   # change only the Project's workflow
 ```
 
-A Flow whose driver died leaves its Execs as history. No command resumes it. To change direction or recover:
+A Flow whose driver died leaves its Processes as history. No command resumes it. To change direction or recover:
 
 ```bash
 lf task interrupt EXP-12             # end the active provider turn
 lf task status EXP-12                # the latest Flow and all Task work
-lf flow show ID --sessions --json    # one Flow's steps, by its driver Exec ID
+lf flow show ID --sessions --json    # one Flow's steps, by its Flow process ID
 lf -b task run EXP-12       # run fresh work
 ```
 
@@ -137,7 +137,7 @@ with the original creation options to reuse it without filing a duplicate.
 ```bash
 lf ps                              # one live process snapshot
 lf top                             # refresh on a terminal
-lf mon list --json                 # bounded Exec history with a next cursor
+lf mon list --json                 # bounded Process history with a next cursor
 lf mon active --watch --json        # NDJSON until stdin closes
 lf mon show SESSION --final         # provider conclusion
 lf usage --days 30                  # measured consumption and missing evidence
@@ -188,7 +188,10 @@ An open conversation keeps the instructions it launched with; `replace` it
 after an upgrade.
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
-Its overview explains each item's state and next action. A mechanical Exec has
+A process has a durable `lfid` and an optional Unix `pid`. Inspect by LFID; PIDs
+can be reused. `parent_process_lfid` names the recorded parent, and historical
+rows without PID evidence keep `pid: null`.
+Its overview explains each item's state and next action. A mechanical Process has
 no provider conclusion. JSON reads emit one document; the active watch emits
 newline-delimited snapshots. Progress and errors go to stderr.
 
@@ -202,7 +205,7 @@ lf pr publish                         # push a ready PR
 lf submit                          # prepare for a reviewer's merge click
 lf arm                             # prepare and request auto-merge; return
 lf land                            # record delivery and return
-lf --task EXP-12 land -c            # also request completion after merge
+lf --task EXP-12 land               # complete after verified merge
 lf sync --plan                     # preview integration with main or stack parent
 lf wt create csv-export
 lf check                   # inspect release eligibility
@@ -210,23 +213,30 @@ lf check                   # inspect release eligibility
 
 Choose one delivery operation for the desired endpoint. Submit, arm, and land
 own preparation and integration; publish does not sync. PR operations work
-on ordinary branches without creating a Task. Bare `land` keeps a Task open. Arm and land return after recording delivery;
+on ordinary branches without creating a Task. Verified merge normally completes its Task. Arm and land return after recording delivery;
 `lf pr reconcile` checks it once and settles verified merges. In a Task checkout,
 it also recovers an existing PR whose GitHub identity is missing from the Task,
-without publishing, rotating the branch, or completing the Task. Multiple PRs
+without publishing or rotating the branch. Multiple PRs
 for the recorded branch remain unresolved. `lf ci watch`
 starts a ci-fix when a recorded landing fails its required checks.
 
 ```bash
-lf task move EXP-12 end --accept-unknown-exec EXEC_ID --reason 'Accepted historical uncertainty; delivery verified'
+lf task follow-up EXP-12 --outcome 'Installed latency meets the budget' --evidence 'Warm p95 below 1s over 20 samples' --check-at 2026-10-09T17:00:00Z
+lf land
+lf task follow-up EXP-12 --clear 'Published v0.14: 20 samples, p95 0.8s'
 ```
 
-Explicit acceptance records the named Exec's unknown outcome in Task history
-without changing that outcome. Repeat the flag for multiple Execs. Completion
-still requires settled PRs and protects current Session/Flow owners and observed
-processes. Acceptance applies only to completion; the checkout remains retained
-while execution is unresolved. A refused completion may retain the acceptance
-for retry. Ordinary completion never infers acceptance.
+Record accepted remaining work before delivery. Its outcome, evidence condition
+and next check stay visible in Task status and Desktop. An overdue check calls
+for evidence or a scope decision; time and green CI never establish production
+success. `--next <slug>` keeps genuinely unfinished PR work open. Older keep-open
+requests without a stated outcome surface for an explicit scope decision.
+
+`lf task move EXP-12 end` records an explicit completion. Old Session turns,
+reserved inputs and unknown process exits cannot veto it. Execution history and
+live process controls remain intact; uncertain or occupied checkouts are retained.
+Cancellation follows the same separation. Open PRs and additional committed work
+still need delivery or explicit abandonment.
 
 ## Check authorized deliveries in the background
 
@@ -334,7 +344,7 @@ from a provider stream `lf` drives: a conversation in a native `claude` or
 `--all` changes repository scope, `--interactive all` includes background work,
 and `--history` includes completed conversations and historical reviews.
 
-Task status lists Sessions, Flows and Execs from the checkout and explicit binds,
+Task status lists Sessions, Flows and Processes from the checkout and explicit binds,
 including headless and completed work. A Task on a workflow also shows its
 nodes, edges, position and the edges it has taken. No Flow is privileged; the execution
 line observes the most recently launched one. Live or unresolved work preserves

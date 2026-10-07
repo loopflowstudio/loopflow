@@ -121,8 +121,8 @@ public struct LatestTaskFlow: Decodable, Sendable, Hashable {
 }
 
 /// One launched step and how its process ended.
-public struct FlowStepExec: Decodable, Sendable, Hashable, Identifiable {
-    public let execId: String
+public struct FlowStepProcess: Decodable, Sendable, Hashable, Identifiable {
+    public let processLfid: String
     public let label: String
     public let key: UInt32
     public let iterations: [[UInt32]]
@@ -131,18 +131,18 @@ public struct FlowStepExec: Decodable, Sendable, Hashable, Identifiable {
     public let outcome: String?
     public let exitCode: Int32?
 
-    public var id: String { execId }
+    public var id: String { processLfid }
 
     enum CodingKeys: String, CodingKey {
         case label, key, iterations, outcome
-        case execId = "exec_id"
+        case processLfid = "process_lfid"
         case startedAt = "started_at"
         case completedAt = "completed_at"
         case exitCode = "exit_code"
     }
 }
 
-/// One Flow exec as its driver recorded it: the graph captured at launch and
+/// One Flow process as its driver recorded it: the graph captured at launch and
 /// every step it started. Any Flow reads the same way, ad hoc or a Task's edge.
 public struct FlowDetail: Decodable, Sendable, Hashable {
     public let entry: TaskFlowMember
@@ -152,7 +152,7 @@ public struct FlowDetail: Decodable, Sendable, Hashable {
     public let returns: [FlowReturn]
     public let iterations: [[UInt32]]
     public let cwd: String?
-    public let steps: [FlowStepExec]
+    public let steps: [FlowStepProcess]
 
     /// The run in the shape the diagram draws. `current` records no driver
     /// exit, which is not proof of a live process.

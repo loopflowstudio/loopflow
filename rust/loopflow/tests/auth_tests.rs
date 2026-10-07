@@ -99,7 +99,7 @@ fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() 
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let (commands, completed): (i64, i64) = db
         .query_row(
-            "SELECT count(*),sum(outcome='succeeded' AND completed_at IS NOT NULL) FROM execs",
+            "SELECT count(*),sum(outcome='succeeded' AND completed_at IS NOT NULL) FROM processes",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -107,7 +107,7 @@ fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() 
     assert_eq!(
         (commands, completed),
         (5, 5),
-        "each actual auth process remains an Exec"
+        "each actual auth process remains a process"
     );
     let fixture = loopflow_test_support::TestRepo::new();
     let repository = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -122,7 +122,7 @@ fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() 
     );
     let failed: i64 = db
         .query_row(
-            "SELECT count(*) FROM execs WHERE outcome='failed' AND completed_at IS NOT NULL",
+            "SELECT count(*) FROM processes WHERE outcome='failed' AND completed_at IS NOT NULL",
             [],
             |row| row.get(0),
         )
@@ -675,7 +675,7 @@ esac
 }
 
 #[test]
-fn cached_auth_records_its_exec_without_creating_account_state() {
+fn cached_auth_records_its_process_without_creating_account_state() {
     let temp = tempfile::tempdir().unwrap();
     let lf_home = temp.path().join("absent");
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -700,7 +700,7 @@ fn cached_auth_records_its_exec_without_creating_account_state() {
     let database = rusqlite::Connection::open(lf_home.join("loopflow.db")).unwrap();
     let counts: (i64, i64, i64, i64) = database
         .query_row(
-            "SELECT (SELECT count(*) FROM execs WHERE outcome='succeeded'),
+            "SELECT (SELECT count(*) FROM processes WHERE outcome='succeeded'),
                     (SELECT count(*) FROM provider_accounts),
                     (SELECT count(*) FROM provider_routes),
                     (SELECT count(*) FROM agent_sessions)",

@@ -133,7 +133,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
                 .iter()
                 .all(|(outcome, _)| outcome.as_deref() == Some("succeeded")));
         }
-        // However the Task was named, the Flow left the same Execs.
+        // However the Task was named, the Flow left the same Processes.
         let recorded = support::recorded_flows(home.path());
         assert_eq!(recorded[0].1.len(), 1);
         assert_eq!(
@@ -381,7 +381,7 @@ fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
     assert_eq!(workflow["nodes"][0]["skill"], "research");
     assert_eq!(workflow["position"], at("findings"));
     assert_eq!(workflow["outgoing"], serde_json::json!([1]));
-    // The edge's Flow is an ordinary Flow exec; its driver chose the edge and,
+    // The edge's Flow is an ordinary Flow process; its driver chose the edge and,
     // having succeeded, wrote the arrival.
     let flows = support::recorded_flows(task.home.path());
     assert_eq!(flows.len(), 1);
@@ -395,7 +395,7 @@ fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
         ]
     );
     let history = workflow["history"].as_array().unwrap();
-    assert_eq!(history[1]["exec_id"], history[2]["exec_id"]);
+    assert_eq!(history[1]["process_lfid"], history[2]["process_lfid"]);
     assert_eq!(history[1]["actor"], "person");
     assert_eq!(history[2]["actor"], "edge");
     task.ok(&["task", "run", "INF-123"]);
@@ -472,7 +472,7 @@ fn a_landing_that_settles_later_is_recorded_by_moving_the_task() {
     assert_eq!(set["note"], "merged by hand");
     assert_eq!(set["actor"], "person");
     assert_eq!(set["session_id"], serde_json::Value::Null);
-    // One Flow exec reached the node; the failing edge was attempted three times.
+    // One Flow process reached the node; the failing edge was attempted three times.
     assert_eq!(support::recorded_flows(task.home.path()).len(), 4);
     // The Task is done; nothing runs until it is put back on its workflow.
     assert_eq!(task.state(), "done");
@@ -552,13 +552,13 @@ fn a_plain_flow_run_in_the_worktree_does_not_move_the_task() {
     assert!(error.contains("lf task run <issue> rounds"), "{error}");
 }
 
-/// The Flow execs started beneath `task_run`, by outcome, oldest first.
+/// The Flow processes started beneath `task_run`, by outcome, oldest first.
 fn attempts(home: &Path, task_run: &str) -> Vec<String> {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     let mut rows = db
         .prepare(
-            "SELECT d.outcome FROM flow_execs f JOIN execs d ON d.id=f.exec_id
-             WHERE d.parent_exec_id=?1 ORDER BY d.rowid",
+            "SELECT d.outcome FROM flow_processes f JOIN processes d ON d.lfid=f.process_lfid
+             WHERE d.parent_process_lfid=?1 ORDER BY d.rowid",
         )
         .unwrap();
     let outcomes = rows
@@ -575,7 +575,7 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
     task.ok(&["-b", "task", "run", "INF-123", "gated"]);
     let carrier = |workflow: &serde_json::Value| {
         let chose = workflow["history"].as_array().unwrap().last().unwrap();
-        chose["exec_id"].as_str().unwrap().to_string()
+        chose["process_lfid"].as_str().unwrap().to_string()
     };
     // Every attempt fails: the Task run gives up and the edge holds the Task.
     let output = task.run(&["-b", "task", "run", "INF-123", "gate"]);
@@ -584,7 +584,10 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
     let stopped = task.workflow();
     assert_eq!(stopped["position"]["edge"], 2);
     assert_eq!(stopped["position"]["running"], false);
-    assert_eq!(stopped["position"]["exec_id"], carrier(&stopped).as_str());
+    assert_eq!(
+        stopped["position"]["process_lfid"],
+        carrier(&stopped).as_str()
+    );
     assert_eq!(
         attempts(task.home.path(), &carrier(&stopped)),
         ["failed", "failed", "failed"]
@@ -620,14 +623,14 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
     );
     let workflow = task.workflow();
     assert_eq!(workflow["position"], at("accepted"));
-    // One Task run: chosen once, arrived once, three Flow execs beneath it.
+    // One Task run: chosen once, arrived once, three Flow processes beneath it.
     let kinds: Vec<_> = moves(&workflow).into_iter().map(|(kind, _)| kind).collect();
     assert_eq!(
         kinds,
         ["took_up", "chose", "arrived", "chose", "chose", "arrived"]
     );
     let arrived = workflow["history"].as_array().unwrap().last().unwrap();
-    let task_run = arrived["exec_id"].as_str().unwrap();
+    let task_run = arrived["process_lfid"].as_str().unwrap();
     assert_eq!(
         attempts(task.home.path(), task_run),
         ["failed", "failed", "succeeded"]
@@ -744,4 +747,96 @@ fn linear_completing_a_task_that_never_started_withdraws_it() {
     assert!(error.contains("terminal"), "{error}");
     assert!(support::recorded_flows(task.home.path()).is_empty());
     assert_eq!(task.state(), "not_ready");
+}
+
+#[test]
+fn completion_preserves_retained_session_input_and_unknown_process_history() {
+    let task = WorkflowTask::new();
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let exec = uuid::Uuid::new_v4().to_string();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    db.execute("INSERT INTO processes(lfid,trace_id,cwd,started_at,command) VALUES(?1,?1,?2,?3,'historical inspection')",
+        rusqlite::params![exec, task.repo.path().canonicalize().unwrap().to_str().unwrap(), now]).unwrap();
+    db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,interactive,task_id,wave_id,cwd)
+        VALUES('retained-input','retained input','generated',?1,0,0,?2,?3,?4)",
+        rusqlite::params![now, task.registered.task.id.as_str(), task.registered.task.wave_id.as_str(), task.repo.path().to_str().unwrap()]).unwrap();
+    db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('retained-input','captured',?1,1,'{}')", [uuid::Uuid::new_v4().simple().to_string()]).unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET current_capture=?1 WHERE id='retained-input'",
+        [db.last_insert_rowid()],
+    )
+    .unwrap();
+    let sessions: String = db.query_row("SELECT json_object('published',input_published,'completed',completed_at,'cwd',cwd) FROM agent_sessions WHERE id='retained-input'", [], |row| row.get(0)).unwrap();
+    for _ in 0..2 {
+        task.ok(&["task", "move", "INF-123", "end"]);
+        assert_eq!(task.state(), "done");
+        assert!(task.repo.path().exists());
+    }
+    let after: String = db.query_row("SELECT json_object('published',input_published,'completed',completed_at,'cwd',cwd) FROM agent_sessions WHERE id='retained-input'", [], |row| row.get(0)).unwrap();
+    assert_eq!(sessions, after);
+    let unfinished: bool = db
+        .query_row(
+            "SELECT completed_at IS NULL AND outcome IS NULL FROM processes WHERE lfid=?1",
+            [&exec],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(unfinished);
+    let count: i64 = db
+        .query_row(
+            "SELECT count(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='completed'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn remaining_work_is_visible_until_an_explicit_evidence_decision() {
+    let task = WorkflowTask::new();
+    let followup = [
+        "task",
+        "follow-up",
+        "INF-123",
+        "--outcome",
+        "Installed latency meets budget",
+        "--evidence",
+        "20 warm samples below 1s p95",
+        "--check-at",
+        "2000-01-01T00:00:00Z",
+    ];
+    task.ok(&followup);
+    task.ok(&followup);
+    let error = refusal(task.run(&["task", "move", "INF-123", "end"]));
+    assert!(error.contains("Installed latency meets budget"), "{error}");
+    assert!(error.contains("20 warm samples below 1s p95"), "{error}");
+    assert!(error.contains("overdue"), "{error}");
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let count = || {
+        db.query_row(
+            "SELECT count(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='follow_up'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(count(), 1);
+    task.ok(&[
+        "task",
+        "follow-up",
+        "INF-123",
+        "--clear",
+        "Installed measurements meet the budget",
+    ]);
+    task.ok(&[
+        "task",
+        "follow-up",
+        "INF-123",
+        "--clear",
+        "Installed measurements meet the budget",
+    ]);
+    assert_eq!(count(), 2);
+    task.ok(&["task", "move", "INF-123", "end"]);
+    assert_eq!(task.state(), "done");
 }

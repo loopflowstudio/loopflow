@@ -56,7 +56,7 @@ struct PortfolioRepoStateTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         func git(_ args: [String], at dir: URL) throws {
-            let process = Process()
+            let process = Foundation.Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["git", "-C", dir.path] + args
             process.standardOutput = Pipe()
@@ -94,7 +94,7 @@ struct PortfolioRepoStateTests {
           "retired_at":null,
           "superseded_by_wave_id":null,
           "retirement_reason":null,
-          "home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}
+          "machine":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}
         }]
         """
         let query = RegistryQuery { args, _ in
@@ -122,7 +122,7 @@ struct PortfolioRepoStateTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         func git(_ args: [String], at dir: URL) throws {
-            let process = Process()
+            let process = Foundation.Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["git", "-C", dir.path] + args
             process.standardOutput = Pipe()

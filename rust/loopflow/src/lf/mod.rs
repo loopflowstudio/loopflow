@@ -224,7 +224,7 @@ impl Cli {
         args
     }
 
-    pub(crate) fn exec_options(&self) -> Self {
+    pub(crate) fn process_options(&self) -> Self {
         Self {
             cron_receipt: self.cron_receipt.clone(),
             cron_lock_fd: self.cron_lock_fd,
@@ -767,6 +767,20 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Record accepted work remaining after merge, or resolve it with evidence
+    FollowUp {
+        issue: String,
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        outcome: Option<String>,
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        evidence: Option<String>,
+        /// Next observation or decision, as an RFC 3339 timestamp
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        check_at: Option<String>,
+        /// Evidence that the remaining work is satisfied or no longer needed
+        #[arg(long)]
+        clear: Option<String>,
+    },
     /// Enable or hold CI repair for a Task without interrupting running work
     Automate {
         issue: String,
@@ -820,9 +834,6 @@ pub enum TaskCommand {
         /// Reach `end` although Linear already calls the active Task complete
         #[arg(long)]
         force: bool,
-        /// Accept one historical Exec's unknown outcome when reaching `end`; retain its checkout
-        #[arg(long, value_name = "EXEC_ID")]
-        accept_unknown_exec: Vec<crate::id::ExecId>,
     },
     /// File a Task in the current chapter
     Create {
@@ -978,7 +989,8 @@ impl TaskCommand {
             | Self::Refile { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
-            | Self::Wait { issue, .. } => Some(issue),
+            | Self::Wait { issue, .. }
+            | Self::FollowUp { issue, .. } => Some(issue),
         }
     }
 }
@@ -1107,6 +1119,7 @@ pub enum PrCommand {
         strict: bool,
         #[arg(short = 'p', long = "create-pr")]
         create_pr: bool,
+        /// Complete after verified merge (the default unless --next is supplied)
         #[arg(short = 'c', long)]
         complete: bool,
         #[arg(long = "next")]
@@ -1126,6 +1139,7 @@ pub enum PrCommand {
         strict: bool,
         #[arg(long)]
         local: bool,
+        /// Complete after verified merge (the default unless --next is supplied)
         #[arg(short = 'c', long)]
         complete: bool,
         #[arg(long = "next")]
@@ -1145,6 +1159,7 @@ pub enum PrCommand {
         strict: bool,
         #[arg(long)]
         local: bool,
+        /// Complete after verified merge (the default unless --next is supplied)
         #[arg(short = 'c', long)]
         complete: bool,
         #[arg(long = "next")]
@@ -1403,7 +1418,7 @@ pub enum MachineCommand {
         #[command(flatten)]
         screenshot: ScreenshotArgs,
     },
-    /// Diagnose installation, storage, Exec integrity and scheduled receipts
+    /// Diagnose installation, storage, Process integrity and scheduled receipts
     Doctor {
         /// Diagnose repository planning without changing it
         #[arg(long)]
@@ -2370,14 +2385,11 @@ mod tests {
             "--reason",
             "Delivered",
             "--force",
-            "--accept-unknown-exec",
-            "00000000-0000-0000-0000-000000000001",
         ])
         .unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason, force: true, accept_unknown_exec } })
-                if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")
-                    && accept_unknown_exec.iter().map(|id| id.as_str()).collect::<Vec<_>>() == ["00000000-0000-0000-0000-000000000001"]));
+            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason, force: true } })
+                if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")));
         assert!(Cli::try_parse_from([
             "lf",
             "task",

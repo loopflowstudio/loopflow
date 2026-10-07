@@ -11,8 +11,7 @@ Keep unrelated active contributions out of this change.
 Run `lf land` with the caller's requested disposition:
 
 ```bash
-lf land                 # hand off this PR; keep the Task open
-lf land -c              # complete the Task after merge
+lf land                 # complete the Task after verified merge
 lf land --next <slug>   # continue its serial PR chain
 ```
 

@@ -46,9 +46,9 @@ memory; its current Linear Project owns Tasks, KRs, targets and workflow.
 Task owns the checkout and serial PRs. Every conversation and Flow attributed
 to it is equally its work; none is privileged.
 
-Exec records an actual lf command process. AgentSession keeps a continuable
-conversation, whether interactive or headless. A Flow is one driver Exec and
-the step Execs it starts. Provider turns and retries remain history
+Process records an actual lf command process. AgentSession keeps a continuable
+conversation, whether interactive or headless. A Flow is one lf process and
+the step processes it starts. Provider turns and retries remain history
 inside the conversation; they do not create another generic execution object.
 
 A child command records its causal parent and, when issued by an agent, its
@@ -123,7 +123,7 @@ Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
 tmux name. Project operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.
 
-Work survives its provider process. A Flow whose driver died leaves its Execs
+Work survives its provider process. A Flow whose driver died leaves its Processes
 as history; nothing resumes it. Inspect
 `lf task status ISSUE` and `lf flow show ID --sessions --json`, then launch
 fresh work with `lf task run INF-123`. The Task keeps its durable

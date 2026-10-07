@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
 
-use super::{local_capture_dir, lock_session_exec, publish_prepared_input};
+use super::{local_capture_dir, lock_session_process, publish_prepared_input};
 use crate::provider_account::activation::native_home;
 use crate::provider_auth::Provider;
 use crate::session::{AgentSession, TitleSource};
@@ -200,7 +200,7 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<AgentS
         return Ok(None);
     }
     let lock_id = format!("provider-conversation:{id}");
-    let _admission = tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
+    let _admission = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     if let Some(session) = recorded(store, id).await? {
         return Ok(Some(session));
     }

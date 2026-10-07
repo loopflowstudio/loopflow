@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use crate::exec::SessionDriver;
+use crate::process::SessionDriver;
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
 
@@ -40,16 +40,16 @@ impl History {
             {
                 return Ok(());
             }
-            let exec = driver
-                .exec_id
+            let process = driver
+                .process_lfid
                 .as_ref()
-                .context("Claude request has no driving Exec")?;
+                .context("Claude request has no driving Process")?;
             store.record_session_turn_origin(
                 session,
                 thread,
                 turn,
                 driver.provider_generation,
-                exec,
+                process,
             )?;
             self.pending.push_back((thread.to_owned(), turn.to_owned()));
         } else if value["type"] == "result" {
@@ -108,7 +108,7 @@ impl History {
 mod tests {
     use super::History;
 
-    use crate::id::ExecId;
+    use crate::id::ProcessLfid;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
@@ -120,14 +120,14 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
-        let exec = ExecId::new();
+        let process = ProcessLfid::new();
         conn.execute(
-            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-            [&exec],
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [&process],
         )
         .unwrap();
         let driver = store
-            .claim_session_driver("conversation", None, &exec, false)
+            .claim_session_driver("conversation", None, &process, false)
             .unwrap();
         let mut history = History {
             owner: Some((store.clone(), "conversation".into(), driver)),

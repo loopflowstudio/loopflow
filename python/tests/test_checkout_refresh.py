@@ -71,7 +71,7 @@ def test_main_refresh_repeats_and_observes_each_new_upstream(checkout: Checkout)
     assert len(journals) == 4
     for journal in journals:
         events = [json.loads(line) for line in journal.read_text().splitlines()]
-        assert events[0]["node"] == "exec"
+        assert events[0]["node"] == "process"
         assert all(event["trace_id"] == journal.parent.name for event in events)
         assert events[0]["command"][-1] == "sync"
         assert events[0]["event"] == "started"

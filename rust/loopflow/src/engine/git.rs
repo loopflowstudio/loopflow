@@ -123,28 +123,31 @@ fn ask(question: Question) -> std::io::Result<Output> {
 }
 
 /// `git -C repo args`, reusing a retained answer when this process keeps them.
+///
+/// The retained answers are never held while Git runs: a listing asks about
+/// every checkout side by side.
 pub(crate) fn retained_output(repo: &Path, args: &[&str]) -> std::io::Result<Output> {
+    if !retains_reads() {
+        return Command::new("git").arg("-C").arg(repo).args(args).output();
+    }
     let question = (
         repo.to_path_buf(),
         args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>(),
     );
-    {
-        let reads = retained();
-        let Some(reads) = reads.as_ref() else {
-            return Command::new("git").arg("-C").arg(repo).args(args).output();
-        };
-        let stands = if is_layout(&question.1) {
-            LAYOUT_RETENTION
-        } else {
-            CONTENT_RETENTION
-        };
-        if let Some((read_at, output)) = reads.get(&question) {
-            if read_at.elapsed() < stands {
-                return Ok(output.clone());
-            }
-        }
+    let stands = if is_layout(&question.1) {
+        LAYOUT_RETENTION
+    } else {
+        CONTENT_RETENTION
+    };
+    let standing = retained()
+        .as_ref()
+        .and_then(|reads| reads.get(&question))
+        .filter(|(read_at, _)| read_at.elapsed() < stands)
+        .map(|(_, output)| output.clone());
+    match standing {
+        Some(output) => Ok(output),
+        None => ask(question),
     }
-    ask(question)
 }
 
 /// Ask again what this process retains about `repo`'s contents. True when an
@@ -1633,6 +1636,30 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn git_reads_from_several_threads_run_side_by_side() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        // Each read leaves its mark, then succeeds only once the other's is
+        // there too: reads taken in turn would both give up.
+        let meet = "alias.meet=!f() { touch \"$1\"; n=0; \
+                    while [ ! -e \"$2\" ]; do n=$((n+1)); [ $n -gt 300 ] && exit 1; sleep 0.1; done; }; f";
+        let (first, second) = (dir.path().join("first"), dir.path().join("second"));
+        let read = |mine: &Path, theirs: &Path| {
+            let (mine, theirs) = (mine.to_string_lossy(), theirs.to_string_lossy());
+            run_git(dir.path(), &["-c", meet, "meet", &mine, &theirs])
+                .expect("run git")
+                .status
+                .success()
+        };
+
+        let (one, other) = thread::scope(|scope| {
+            let one = scope.spawn(|| read(&first, &second));
+            (read(&second, &first), one.join().expect("reader panicked"))
+        });
+
+        assert!(one && other);
+    }
 
     fn init_repo() -> TempDir {
         let dir = tempfile::tempdir().expect("create temp dir");

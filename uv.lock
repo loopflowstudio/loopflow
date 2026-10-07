@@ -183,7 +183,7 @@ wheels = [
 
 [[package]]
 name = "loopflow"
-version = "0.13.7"
+version = "0.13.8"
 source = { virtual = "." }
 dependencies = [
     { name = "pyyaml" },

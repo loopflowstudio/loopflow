@@ -65,6 +65,13 @@ History retains the original Exec and provider generation when a later driver
 recovers a missed native completion. Missing command outcome, usage or process
 evidence stays unknown.
 
+A capture's `events.jsonl` holds every provider event verbatim. SQLite history
+keeps what streaming increments add up to: a run of deltas is one event at the
+first delta's position, a Turn keeps its last cumulative diff, and the raw
+notification behind each increment stays in the file. Complete items, usage,
+input and outcomes are kept in both. Sizes and the reasoning are in the
+[storage footprint review](../reviews/storage-footprint.md).
+
 FlowSession owns one captured graph and progression. A Task selects one managed
 FlowSession and may have other attributed Flows. Taskless execution uses the same
 owner and driver. Every selected boundary is fenced by Flow identity, version,

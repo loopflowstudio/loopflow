@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
+use crate::chat::types::{ConversationEvent, ConversationItem, ItemDelta, Lifecycle, TurnUsage};
 use crate::engine::stream::{ResultSubtype, StreamEvent};
 use crate::store::{StoreError, StoreResult};
 
@@ -470,6 +470,139 @@ impl SessionHistory {
     }
 }
 
+/// The part of one capture's event stream that SQLite history has yet to keep.
+///
+/// `events.jsonl` holds every provider increment verbatim. History keeps what
+/// the increments add up to: a run of deltas becomes one event at the first
+/// delta's position, a Turn's cumulative diff is kept once, and the raw
+/// notification behind each increment stays in the file alone. Storing one row
+/// per streamed token made increments two thirds of all history rows.
+/// A process that dies mid-run leaves that run in the file only.
+#[derive(Debug, Default)]
+struct StreamedHistory {
+    run: Option<EventEnvelope>,
+    diff: Option<EventEnvelope>,
+}
+
+impl StreamedHistory {
+    /// The events history keeps now that `event` has arrived. Readers order
+    /// history by capture position, so a held event may be kept late.
+    fn admit(&mut self, event: EventEnvelope) -> Vec<EventEnvelope> {
+        let conversation = match &event.event {
+            CaptureEvent::ProviderOutput { stream, line }
+                if stream == "notification" && is_provider_increment(line) =>
+            {
+                return Vec::new();
+            }
+            CaptureEvent::Conversation { event } => Some(&**event),
+            _ => None,
+        };
+        match conversation {
+            Some(ConversationEvent::DiffUpdated { turn_id, .. }) => {
+                let earlier_turn = self
+                    .diff
+                    .take()
+                    .filter(|held| diff_turn(held) != Some(turn_id));
+                self.diff = Some(event);
+                earlier_turn.into_iter().collect()
+            }
+            Some(
+                increment @ (ConversationEvent::TextDelta { .. }
+                | ConversationEvent::ReasoningDelta { .. }
+                | ConversationEvent::ItemUpdated { .. }),
+            ) => {
+                if self
+                    .run
+                    .as_mut()
+                    .is_some_and(|run| extend_run(run, increment))
+                {
+                    return Vec::new();
+                }
+                self.run.replace(event).into_iter().collect()
+            }
+            Some(ConversationEvent::TurnCompleted { .. }) => {
+                let mut kept = self.settle();
+                kept.push(event);
+                kept
+            }
+            _ => self.run.take().into_iter().chain([event]).collect(),
+        }
+    }
+
+    /// Everything still held.
+    fn settle(&mut self) -> Vec<EventEnvelope> {
+        self.run
+            .take()
+            .into_iter()
+            .chain(self.diff.take())
+            .collect()
+    }
+}
+
+fn diff_turn(held: &EventEnvelope) -> Option<&String> {
+    match &held.event {
+        CaptureEvent::Conversation { event } => match &**event {
+            ConversationEvent::DiffUpdated { turn_id, .. } => Some(turn_id),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn extend_run(run: &mut EventEnvelope, increment: &ConversationEvent) -> bool {
+    let CaptureEvent::Conversation { event } = &mut run.event else {
+        return false;
+    };
+    match (&mut **event, increment) {
+        (
+            ConversationEvent::TextDelta { turn_id, content },
+            ConversationEvent::TextDelta {
+                turn_id: turn,
+                content: more,
+            },
+        )
+        | (
+            ConversationEvent::ReasoningDelta { turn_id, content },
+            ConversationEvent::ReasoningDelta {
+                turn_id: turn,
+                content: more,
+            },
+        ) if turn_id == turn => content.push_str(more),
+        (
+            ConversationEvent::ItemUpdated {
+                turn_id,
+                item_id,
+                data,
+            },
+            ConversationEvent::ItemUpdated {
+                turn_id: turn,
+                item_id: item,
+                data: more,
+            },
+        ) if turn_id == turn && item_id == item => match (data, more) {
+            (ItemDelta::Output { content }, ItemDelta::Output { content: more })
+            | (ItemDelta::PlanText { content }, ItemDelta::PlanText { content: more }) => {
+                content.push_str(more)
+            }
+            _ => return false,
+        },
+        _ => return false,
+    }
+    true
+}
+
+/// A provider notification that only adds to, or restates, a later complete one:
+/// `…/delta`, `…Delta`, `…_delta` and the cumulative Turn diff.
+fn is_provider_increment(line: &str) -> bool {
+    #[derive(Deserialize)]
+    struct Notification {
+        method: String,
+    }
+    serde_json::from_str::<Notification>(line).is_ok_and(|notification| {
+        notification.method.ends_with("elta") || notification.method == "turn/diff/updated"
+    })
+}
+
 #[derive(Debug)]
 enum RecorderMessage {
     Event(EventEnvelope),
@@ -519,14 +652,20 @@ impl SessionRecorder {
                 if let Err(error) = observe("manifest.json".into(), manifest.created_at, serde_json::json!(manifest)) {
                     tracing::warn!(%error, "Session capture observation unavailable");
                 }
+                let retain = |events: Vec<EventEnvelope>| {
+                    events.into_iter().try_for_each(|event| {
+                        observe(format!("events.jsonl:{}", event.seq), event.observed_at, serde_json::json!(event))
+                    })
+                };
+                let mut streamed = StreamedHistory::default();
                 while let Ok(message) = receiver.recv() {
                     let result = match message {
                         RecorderMessage::Event(event) => {
                             let result = append_json_line(&writer_dir.join("events.jsonl"), &event);
-                            result.and(observe(format!("events.jsonl:{}", event.seq), event.observed_at, serde_json::json!(event)))
+                            result.and(retain(streamed.admit(event)))
                         }
                         RecorderMessage::Drain(acknowledge) => {
-                            let result = sync_telemetry(&writer_dir);
+                            let result = retain(streamed.settle()).and(sync_telemetry(&writer_dir));
                             let _ = acknowledge.send(());
                             result
                         }
@@ -543,6 +682,9 @@ impl SessionRecorder {
                             tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
                         }
                     }
+                }
+                if let Err(error) = retain(streamed.settle()) {
+                    tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
                 }
             });
         match thread {
@@ -3795,6 +3937,78 @@ mod tests {
                 text: "final report".to_string(),
                 exact: true,
             })
+        );
+    }
+
+    #[test]
+    fn history_keeps_what_streamed_increments_add_up_to() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let turn = || "turn-1".to_string();
+        capture.record_conversation(ConversationEvent::TurnStarted { turn_id: turn() });
+        for word in ["streamed ", "one ", "token ", "at a time"] {
+            capture.record_raw(
+                "notification",
+                &serde_json::json!({"method": "item/agentMessage/delta", "params": {"delta": word}})
+                    .to_string(),
+            );
+            capture.record_conversation(ConversationEvent::TextDelta {
+                turn_id: turn(),
+                content: word.to_string(),
+            });
+        }
+        for diff in ["first", "first\nsecond"] {
+            capture.record_conversation(ConversationEvent::DiffUpdated {
+                turn_id: turn(),
+                diff: diff.to_string(),
+            });
+        }
+        capture.record_raw(
+            "notification",
+            &serde_json::json!({"method": "item/completed", "params": {}}).to_string(),
+        );
+        capture.record_conversation(ConversationEvent::TurnCompleted {
+            turn_id: turn(),
+            status: crate::chat::types::Lifecycle::Completed,
+        });
+        capture.finish("completed").unwrap();
+
+        let file = fs::read_to_string(capture.artifact_dir().join("events.jsonl")).unwrap();
+        assert_eq!(file.matches("item/agentMessage/delta").count(), 4);
+        assert_eq!(file.matches("\"type\":\"text_delta\"").count(), 4);
+        assert_eq!(file.matches("\"type\":\"diff_updated\"").count(), 2);
+
+        let history = super::row_store(&capture.artifact_dir())
+            .unwrap()
+            .input_events(&capture.artifact_key())
+            .unwrap();
+        let kept: Vec<_> = history
+            .iter()
+            .filter(|event| event["type"] == "conversation" || event["type"] == "provider_output")
+            .map(|event| {
+                let detail = &event["event"];
+                match event["type"].as_str().unwrap() {
+                    "provider_output" => event["line"].as_str().unwrap().to_string(),
+                    _ => format!(
+                        "{}:{}",
+                        detail["type"].as_str().unwrap(),
+                        detail["content"]
+                            .as_str()
+                            .or(detail["diff"].as_str())
+                            .unwrap_or_default()
+                    ),
+                }
+            })
+            .collect();
+        assert_eq!(
+            kept,
+            [
+                "turn_started:",
+                "text_delta:streamed one token at a time",
+                "diff_updated:first\nsecond",
+                r#"{"method":"item/completed","params":{}}"#,
+                "turn_completed:",
+            ]
         );
     }
 

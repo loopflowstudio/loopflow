@@ -1,0 +1,8 @@
+{"run": "baseline", "mode": "text", "samples": 20, "failed": 0, "median_s": 1.482, "p95_s": 1.709, "max_s": 2.553, "load_1m": 20.96435546875}
+{"run": "candidate", "mode": "text", "samples": 20, "failed": 0, "median_s": 1.227, "p95_s": 1.663, "max_s": 2.897, "load_1m": 20.96435546875}
+{"run": "baseline", "mode": "json", "samples": 20, "failed": 0, "median_s": 1.399, "p95_s": 1.809, "max_s": 2.179, "load_1m": 20.96435546875}
+{"run": "candidate", "mode": "json", "samples": 20, "failed": 0, "median_s": 1.124, "p95_s": 1.312, "max_s": 1.452, "load_1m": 20.96435546875}
+{"run": "baseline", "mode": "text", "samples": 20, "total_ms": [1438, 1672], "startup_ms": [87, 96], "local_git_ms": [1266, 1455], "remote_ms": [813, 1492], "receipt_ms": [4, 5], "failed": 0, "remote_timed_out": 0, "remote_unavailable": 0, "source": "lf wt timing"}
+{"run": "baseline", "mode": "json", "samples": 21, "total_ms": [1371, 2134], "startup_ms": [88, 138], "local_git_ms": [1280, 1992], "remote_ms": [813, 1201], "receipt_ms": [4, 6], "failed": 0, "remote_timed_out": 0, "remote_unavailable": 0, "source": "lf wt timing"}
+{"run": "candidate", "mode": "text", "samples": 20, "total_ms": [1220, 1657], "startup_ms": [84, 103], "local_git_ms": [308, 395], "remote_ms": [1031, 1485], "receipt_ms": [5, 5], "failed": 0, "remote_timed_out": 0, "remote_unavailable": 0, "source": "lf wt timing"}
+{"run": "candidate", "mode": "json", "samples": 21, "total_ms": [1118, 1444], "startup_ms": [86, 131], "local_git_ms": [312, 412], "remote_ms": [1002, 1275], "receipt_ms": [5, 6], "failed": 0, "remote_timed_out": 0, "remote_unavailable": 0, "source": "lf wt timing"}

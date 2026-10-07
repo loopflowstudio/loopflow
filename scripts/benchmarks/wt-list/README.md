@@ -24,6 +24,47 @@ database into that fresh Home first (a copy-on-write clone on APFS), so the run
 pays for a store of real size and writes only to the copy. `--offline` routes
 every remote call to a closed local port.
 
+## 2026-10-06: status reads in turn, installed 0.13.6
+
+Installed 0.13.6 on the main Home, 54 worktrees, 20 alternating pairs: text
+1.47 s median / 1.51 s p95, JSON 1.39 s / 1.44 s, no failures or timeouts.
+`lf wt timing` put local Git at 1.24 s, where 0.13.4 had read 0.39 s.
+
+**One lock made every Git read wait for the one before it.** #1452 gave the
+Desktop watcher a store of retained Git answers behind a mutex. A command that
+retains nothing still took that mutex and held it while `git` ran, so the 16
+listing threads ran one process at a time. Git's own trace of an installed
+listing shows it: 54 `status` reads summing 1.05 s of Git time, one overlapping
+pair among them, 2.02 s from first start to last exit (traced). The mutex is
+now released before Git starts; a test with two reads that each wait for the
+other fails in 32 s on the old code.
+
+Same host and repository, isolated empty Homes, one warm-up discarded, 20
+untraced alternating pairs per mode. `baseline` is installed 0.13.6;
+`candidate` is this branch. Phases are each binary's own `lf wt timing`,
+median / p95. Raw rows: [20261006/](20261006/).
+
+| Run | Mode | Median | p95 | Max | Local Git | Remote |
+|---|---|---|---|---|---|---|
+| baseline | text | 1.48 s | 1.71 s | 2.55 s | 1.27 / 1.46 s | 0.81 / 1.49 s |
+| baseline | JSON | 1.40 s | 1.81 s | 2.18 s | 1.28 / 1.99 s | 0.81 / 1.20 s |
+| candidate | text | 1.23 s | 1.66 s | 2.90 s | 0.31 / 0.40 s | 1.03 / 1.49 s |
+| candidate | JSON | 1.12 s | 1.31 s | 1.45 s | 0.31 / 0.41 s | 1.00 / 1.28 s |
+
+- **≤1 s warm p95 is still not met online.** Local Git is back to a third of a
+  second and the remote is what the listing waits for: start (0.09 s), the
+  reads before the request, then GitHub. This is the measured bottleneck, not
+  a proven lower bound.
+- The remote phase read 0.2 s longer once the status reads ran beside it. Load
+  was 19–37 throughout, from other workers on this host; whether a quiet host
+  shows the same overlap cost is not measured.
+- The traced rows (`status-side-by-side-*`, two rounds of ten) agree: 1.45–1.59 s
+  → 1.15–1.25 s median, with Git's summed time rising from 0.7 s to 2.5 s as
+  the processes share cores instead of queueing.
+- 71 and 67 Git processes, four `gh` requests, unchanged. Nothing is retained
+  between listings; dirty state is read from each checkout every time.
+- Installed figures for this change do not exist yet.
+
 ## 2026-10-05: GitHub's answer time, installed 0.13.4
 
 `lf wt timing` on the main Home after 0.13.4 was installed (JSON, 55 worktrees):

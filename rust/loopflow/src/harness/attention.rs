@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use serde_json::Value;
 
 use crate::exec::SessionDriver;
+use crate::program_status::Kind;
 use crate::session::SessionActivity;
 use crate::store::sqlite::SqliteStore;
 
@@ -20,7 +21,10 @@ pub(super) enum Signal {
     Working,
     ToolStarted(String),
     ToolResolved(String),
-    InputRequested(String),
+    InputRequested {
+        id: String,
+        kind: Kind,
+    },
     InputResolved(String),
     /// The provider handed the turn back; `true` when it succeeded.
     Yielded(bool),
@@ -53,7 +57,7 @@ impl Attention {
                 Signal::ToolResolved(id) => {
                     self.open_tools.remove(&id);
                 }
-                Signal::InputRequested(id) => {
+                Signal::InputRequested { id, .. } => {
                     self.pending_input.insert(id);
                 }
                 Signal::InputResolved(id) => {
@@ -187,14 +191,20 @@ pub(super) fn codex(rpc: &Value, from_client: bool) -> Vec<Signal> {
     };
     let params = &rpc["params"];
     if let Some(id) = rpc.get("id") {
-        let asks = method.ends_with("requestApproval")
-            || method.ends_with("requestUserInput")
-            || method.contains("elicitation");
-        return if asks {
-            vec![Signal::InputRequested(id.to_string())]
+        let kind = if method.ends_with("requestApproval") {
+            Some(Kind::Permission)
+        } else if method.ends_with("requestUserInput") || method.contains("elicitation") {
+            Some(Kind::Question)
         } else {
-            Vec::new()
+            None
         };
+        return kind
+            .map(|kind| Signal::InputRequested {
+                id: id.to_string(),
+                kind,
+            })
+            .into_iter()
+            .collect();
     }
     let item = &params["item"];
     let conversational = matches!(
@@ -247,7 +257,10 @@ pub(super) fn opencode(event: &Value, thread: &str) -> Vec<Signal> {
         }
         Some("message.part.delta") => vec![Signal::Working],
         Some("question.asked") => id(&properties["id"])
-            .map(Signal::InputRequested)
+            .map(|id| Signal::InputRequested {
+                id,
+                kind: Kind::Question,
+            })
             .into_iter()
             .collect(),
         Some("question.replied" | "question.rejected") => id(&properties["requestID"])
@@ -272,6 +285,7 @@ mod tests {
     use super::{claude, codex, opencode, Attention, Signal};
     use crate::exec::SessionDriver;
     use crate::id::ExecId;
+    use crate::program_status::Kind;
     use crate::store::sqlite::SqliteStore;
 
     /// A conversation whose driver saves what a recorded stream says, one
@@ -286,6 +300,49 @@ mod tests {
 
     const START: i64 = 1_000;
     const QUIET: i64 = crate::session::WAITING_QUIET_SECONDS;
+
+    #[test]
+    fn program_status_input_intent_keeps_the_explicit_request_kind() {
+        for (method, kind) in [
+            ("item/commandExecution/requestApproval", Kind::Permission),
+            ("item/fileChange/requestApproval", Kind::Permission),
+            ("item/tool/requestUserInput", Kind::Question),
+            ("mcpServer/elicitation/request", Kind::Question),
+        ] {
+            assert_eq!(
+                codex(&json!({"id": 7, "method": method, "params": {}}), false),
+                vec![Signal::InputRequested {
+                    id: "7".into(),
+                    kind,
+                }],
+                "{method}"
+            );
+        }
+        assert_eq!(
+            opencode(
+                &json!({"type": "question.asked", "properties": {"sessionID": "thread", "id": "question"}}),
+                "thread"
+            ),
+            vec![Signal::InputRequested {
+                id: "question".into(),
+                kind: Kind::Question,
+            }]
+        );
+    }
+
+    #[test]
+    fn program_status_does_not_invent_auth_or_automated_permission_requests() {
+        assert!(codex(
+            &json!({"id": 7, "method": "account/chatgptAuthTokens/refresh", "params": {}}),
+            false
+        )
+        .is_empty());
+        assert!(opencode(
+            &json!({"type": "permission.asked", "properties": {"sessionID": "thread", "id": "permission"}}),
+            "thread"
+        )
+        .is_empty());
+    }
 
     impl Driven {
         fn new(interactive: bool) -> Self {

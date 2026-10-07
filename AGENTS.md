@@ -239,7 +239,7 @@ Exec is one actual lf process, including direct and agent-issued nested commands
 AgentSession is one durable agent conversation, interactive or headless; identity,
 name, feedback and native history survive driver replacement. Product text says
 Session for interactive and Run for headless work. Waiting is the one attention
-state, judged in Rust from a provider stream `lf` owns. A step's result
+state, judged in Rust from owned provider streams and validated terminal reports. A step's result
 is how its process exited; a deciding or routing step also answers through the
 Session turn its Exec captured. Agent outcomes and retries belong in Session
 history; mechanical results are step Exec exits. A Session reaches its Flow

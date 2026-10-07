@@ -58,7 +58,9 @@
     "interactive": true,
     "primary_scope": null,
     "attention": "waiting",
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -119,7 +121,9 @@
     "interactive": true,
     "primary_scope": null,
     "attention": null,
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   },
   {
     "id": "run_00000000000000000000000000000003",
@@ -172,7 +176,9 @@
     "interactive": true,
     "primary_scope": null,
     "attention": null,
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   },
   {
     "id": "run_00000000000000000000000000000004",
@@ -220,7 +226,9 @@
     "interactive": true,
     "primary_scope": null,
     "attention": null,
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   },
   {
     "id": "run_00000000000000000000000000000006",
@@ -278,7 +286,9 @@
     "interactive": true,
     "primary_scope": null,
     "attention": null,
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   },
   {
     "id": "run_00000000000000000000000000000007",
@@ -331,7 +341,9 @@
     "interactive": true,
     "primary_scope": null,
     "attention": null,
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -391,6 +403,8 @@
     "interactive": true,
     "primary_scope": null,
     "attention": "waiting",
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   }
 ]

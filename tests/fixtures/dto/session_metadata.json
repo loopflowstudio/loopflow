@@ -44,5 +44,7 @@
   "workspace": null,
   "primary_scope": null,
   "attention": "waiting",
-  "task_primary": false
+  "task_primary": false,
+  "program_status": null,
+  "provider_generation": 1
 }

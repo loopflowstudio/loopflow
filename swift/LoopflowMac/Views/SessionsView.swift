@@ -207,6 +207,7 @@ final class SessionsStore: ObservableObject {
                 sessions.append(SessionItem(record: record, state: observedState))
             }
         }
+        surfaces.associateProgramStatus(sessions.map(\.record))
     }
 
     private func recover(_ id: String, replacing: Bool = false) async {
@@ -461,7 +462,9 @@ struct SessionsContentView: View {
                             model: model,
                             crumb: model.breadcrumb,
                             onOpenSession: openSession,
-                            onTaskDetails: { workspace.showsDetails = true }
+                            onTaskDetails: { workspace.showsDetails = true },
+                            programStatus: focusedProgramStatus,
+                            programStatusError: focusedProgramStatusSurface?.observationError
                         ) {
                             if taskPath != nil && !navigation.showsRetainedTerminals { workspaceCreation }
                             if terminalsVisible {
@@ -875,6 +878,26 @@ struct SessionsContentView: View {
         .accessibilityIdentifier("worktree-chip")
     }
 
+    private var focusedProgramStatusSurface: ProgramStatusSurface? {
+        let pane = multiplexer.focusedPane
+        switch pane.content {
+        case .session(let id): return store.surfaces.programStatus(for: .session(id))
+        case .shell: return store.surfaces.programStatus(for: .shell(pane.id))
+        case .empty, .flowLog, .files: return nil
+        }
+    }
+
+    private var focusedProgramStatus: ProgramStatusRecords? {
+        guard terminalsVisible else { return nil }
+        if case .session(let id) = multiplexer.focusedPane.content {
+            return store.sessions.first { $0.id == id }?.record.programStatus
+        }
+        if let id = focusedProgramStatusSurface?.sessionId {
+            return store.sessions.first { $0.id == id }?.record.programStatus
+        }
+        return focusedProgramStatusSurface?.snapshot
+    }
+
     /// Sessions attached to the focused pane: a Session pane's own record, or
     /// every conversation running inside a shell pane.
     private var focusedPaneSessions: [SessionItem] {
@@ -1237,6 +1260,14 @@ private struct SessionPaneView: View {
                 .font(Typography.code(11))
                 .foregroundStyle(TerminalPalette.dim)
                 .lineLimit(1)
+            if let status = _programStatus, status.summary != nil {
+                ProgramStatusLabel(status: status)
+                    .foregroundStyle(TerminalPalette.dim)
+            }
+            if let error = _programStatusSurface?.observationError {
+                Image(systemName: "exclamationmark.circle")
+                    .help(error).accessibilityLabel(error)
+            }
             Spacer(minLength: 8)
             if bellRinging {
                 Image(systemName: "bell.fill")
@@ -1519,6 +1550,18 @@ private struct SessionPaneView: View {
         case .flowLog: "Flow execs"
         case .files: "Files"
         }
+    }
+
+    private var _programStatusSurface: ProgramStatusSurface? {
+        _terminalIdentity.flatMap { sessions.surfaces.programStatus(for: $0) }
+    }
+
+    private var _programStatus: ProgramStatusRecords? {
+        if case .session = pane.content { return item?.record.programStatus }
+        if let id = _programStatusSurface?.sessionId {
+            return sessions.sessions.first { $0.id == id }?.record.programStatus
+        }
+        return _programStatusSurface?.snapshot
     }
 
     private var _terminalIdentity: TerminalIdentity? {

@@ -2,17 +2,28 @@
 
 ## Program Status direction (LOO-398, 2026-10-07)
 
-Jack Heart selected OSC 7501 reading for every Desktop pane, unchanged native
-provider passthrough, detached relay observation and lf emission for pipe-driven
-work/Flow position only. Reports feed one Rust Waiting judgment and override
-inference; they grant no exit, completion or process authority. Implement from
-the spec, without copying another implementation. LOO-384 remains relevant for
+Jack Heart selected every-pane Desktop reading, unchanged native passthrough and
+lf writing only for pipe-driven work/Flow position. Reports override inference
+in Rust's single Waiting judgment; they grant no process or completion authority.
+Implement from the spec, not other implementations. LOO-384 remains for
 non-reporters; provider adoption is unverified. LOO-402 owns broader presentation.
-LOO-394 owns the absent relay; its current PR #1484 covers only machine naming.
-Upstream tree `a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0` contains the protocol
-parser and libghostty-vt callback, but no embedder action, confirming Jack’s
-follow-up finding. An artifact bump alone is insufficient. Preserve both GhosttyKit patches.
-The design is draft; no source or installed acceptance is claimed.
+Jack authorized build and publication for review, not landing, and made LOO-394's
+absent relay a named follow-up. Its #1484 covers naming only.
+
+Jack approved the small embedded forwarding patch; `a60e9e2a…` has a parser but
+no embedded action. Source preserves both earlier patches and publishes the
+immutable lf2 framework, with matching public checksum and SwiftPM linking.
+The current pane's literal state/kind/message appears in the breadcrumb header
+and pane strip; whether Jack meant the Task header remains for review.
+Source SQL/CLI/DTO/Swift proofs establish separate read-path boundaries, not
+installed or composed native-pane acceptance. Provider generation and surface
+incarnation fence observations; viewer absence is not provider death.
+
+Live emission remains unfinished: a PTY short-wrote 62 of 74 OSC bytes, and the
+existing independent output paths cannot safely finish the escape before normal
+text. Establish shared output ownership before enabling emission. Details and
+remaining acceptance belong to `scratch/read-and-write-program-status.md`;
+original design is preserved at `c62c19f5c:scratch/read-and-write-program-status.md`.
 
 ## Storage footprint (LOO-390, 2026-10-06)
 
@@ -445,15 +456,12 @@ evidence: [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md),
 
 ## One main Home (LOO-342, curated 2026-10-04)
 
-Jack Heart approved the one-Home cutover: ordinary CLI commands, Task workers,
-Flow steps and agent tools use the installed CLI and `~/.lf`; an explicit
-`LF_HOME` experiment initializes once and needs a fresh directory after schema
-changes. [PR #1381](https://github.com/loopflowstudio/loopflow/pull/1381) merged
-at `6c73356074c4`; installed routing acceptance passed on v0.12.31 and the Task
-reads done (see the 2026-10-04 entry above). Current behavior belongs in
-[CLI docs](../../docs/lf.md#use-one-home) and [Homes](../../docs/architecture/homes.md#one-main-home).
-The dated cleanup receipts, v0.12.29–v0.12.31 release recovery and the exact
-configured checks are in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/cd344891b611914adf44eeb53844193d7a987d2c/wave/infrastructure/MEMORY.md#one-main-home-loo-342-branch-evidence-2026-09-30).
+Jack Heart approved one main Home for ordinary commands and workers. PR #1381
+merged at `6c73356074c4`; installed routing passed on v0.12.31 and LOO-342 is done.
+Current mechanics: [CLI docs](../../docs/lf.md#use-one-home) and
+[Homes](../../docs/architecture/homes.md#one-main-home). Exact configured checks
+and v0.12.29–v0.12.31 recovery evidence remain at
+`c62c19f5c:wave/infrastructure/MEMORY.md` under this heading and its linked archive.
 
 ### Legacy retirement completed (2026-10-04)
 

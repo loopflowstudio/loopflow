@@ -523,6 +523,16 @@ impl SessionMode {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Observe validated Program Status snapshots from an active local terminal
+    ObserveStatus {
+        id: String,
+        /// The terminal marker in the current provider client receipt
+        #[arg(long)]
+        terminal: String,
+        /// Provider generation from the Session reading
+        #[arg(long)]
+        generation: i64,
+    },
     /// Resume a conversation by ID, or the last interactive Session in this worktree
     Resume {
         /// Loopflow Session ID or Claude/Codex conversation ID

@@ -101,16 +101,19 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<Agen
     .transpose()
 }
 
-/// Whether agent_sessions row `session` waits on a person at `now`: its
-/// current driver's reading shows an unanswered question, or no unresolved
-/// tool call and either an interactive turn handed back or a quiet stream.
-/// No reading, or one from a driver that has let go, is not Waiting.
+/// Reported status wins within the provider generation; otherwise use the
+/// current driver's input/hand-back/quiet reading. Filter before pagination.
 fn waiting_sql(session: &str, now: i64) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act WHERE act.session_id={session}.id
-            AND {session}.completed_at IS NULL AND act.driver_generation={session}.driver_generation
-            AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
-                OR {now}-act.observed_at>={quiet}))))",
+            AND {session}.completed_at IS NULL AND act.provider_generation={session}.provider_generation
+            AND CASE WHEN act.program_status IS NOT NULL THEN
+                EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
+                    WHERE json_extract(r.value,'$.state')='blocked'
+                    OR ({session}.interactive=1 AND json_extract(r.value,'$.state')='idle'))
+            ELSE act.driver_generation={session}.driver_generation
+                AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
+                    OR {now}-act.observed_at>={quiet}))) END)",
         quiet = crate::session::WAITING_QUIET_SECONDS
     )
 }
@@ -210,7 +213,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
             WHERE e.session_id=s.id AND e.receipt_key='driver:'||(a.driver_generation-1)||':exit' AND e.kind='observed'),
         {waiting},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
-        EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id)
+        EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.provider_generation=a.provider_generation),a.provider_generation
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN flow_exec_steps fs ON fs.exec_id=captured.exec_id
@@ -263,6 +267,11 @@ fn read_summary(
             primary_scope: row.get(27)?,
             driver_outcome: row.get(28)?,
             waiting: row.get(29)?,
+            program_status: row
+                .get::<_, Option<String>>(32)?
+                .map(|json| serde_json::from_str(&json))
+                .transpose()?,
+            provider_generation: row.get(33)?,
             task_terminal: row.get(30)?,
             task_primary: row.get(31)?,
             captured: row.get(16)?,

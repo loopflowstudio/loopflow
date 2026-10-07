@@ -321,11 +321,19 @@ lf session list --task LOO-358 --interactive all --history
 ```
 
 `lf session list` defaults to unfinished interactive conversations.
-`--waiting` narrows that selection to conversations waiting on you: one that
-asked a question, handed its turn back, or went quiet for two minutes with no
-tool call outstanding. A long silent step can show up there. Waiting is read
-from a provider stream `lf` drives: a conversation in a native `claude` or
-`opencode` terminal never shows it.
+`--waiting` narrows that selection to conversations waiting on you. In Desktop,
+a program's OSC 7501 report takes precedence: any blocked record means Waiting,
+as does idle for an interactive Session. Working, done, error and explicit clear
+suppress the quiet-time inference for that provider generation. A blocked child
+still counts when its parent reports working.
+
+Without reports, the existing provider stream supplies questions, hand-back and
+the two-minute quiet rule when no tool call remains open. A long silent step can
+still show up there. Plain shell panes show their own reports without creating a
+Session. The focused pane's report appears in the workspace breadcrumb header
+and pane strip; its message is literal text. Reports never complete work.
+Desktop must be observing the terminal; detached relay observation and lf's own
+terminal emission remain follow-up work.
 `--all` changes repository scope, `--interactive all` includes background work,
 and `--history` includes completed conversations and historical reviews.
 

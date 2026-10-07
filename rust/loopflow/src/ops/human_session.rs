@@ -172,9 +172,11 @@ pub struct SessionPage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub primary_scope: Option<String>,
-    /// Waiting on a person, read from its provider's stream; absent when it is
+    /// Waiting on a person, judged from current stream or terminal reports; absent when it is
     /// working or nothing current says.
     pub attention: Option<SessionAttention>,
+    pub program_status: Option<crate::program_status::Records>,
+    pub provider_generation: i64,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
     pub task_ids: Vec<crate::durable::TaskId>,
@@ -467,6 +469,8 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     SessionRecord {
         primary_scope: session.primary_scope.clone(),
         attention: session_attention(session),
+        program_status: session.program_status.clone(),
+        provider_generation: session.provider_generation,
         task_primary: session.task_primary,
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
@@ -924,6 +928,8 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
     let mut reading = SessionRecord {
         primary_scope: metadata.primary_scope.clone(),
         attention: session_attention(&metadata),
+        program_status: metadata.program_status.clone(),
+        provider_generation: metadata.provider_generation,
         task_primary: metadata.task_primary,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
@@ -1332,6 +1338,8 @@ mod tests {
         let task = TaskId::new();
         let wave = crate::id::WaveId::new();
         let mut summary = crate::session::SessionSummary {
+            program_status: None,
+            provider_generation: 0,
             primary_scope: None,
             driver_outcome: None,
             waiting: false,
@@ -1861,4 +1869,111 @@ mod page_tests {
         );
         assert!(serde_json::from_str::<SessionPage>(r#"{"next":null}"#).is_err());
     }
+}
+
+/// The observer owns only this input stream, never the Session or its provider.
+/// A replacement observer fences the previous stream even on the same provider.
+pub(crate) async fn observe_program_status(
+    store: &SharedStore,
+    id: &str,
+    terminal: &str,
+    generation: i64,
+) -> Result<()> {
+    let session = find_session(store, id, false)
+        .await?
+        .context("Session not found")?;
+    let current = store
+        .sqlite
+        .session_summary(
+            &session.id,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )?
+        .context("Session disappeared")?;
+    anyhow::ensure!(
+        current.provider_generation == generation,
+        "Session provider changed"
+    );
+    // Re-read capture after the generation witness. A replacement before or
+    // during client inspection then fails the transactional generation check.
+    let session = store
+        .sqlite
+        .session(&session.id)?
+        .context("Session disappeared")?;
+    let native = NativeSession::of(&session)?;
+    let clients: Vec<_> = native
+        .clients()?
+        .into_iter()
+        .filter(|client| client.terminal_id.as_deref() == Some(terminal))
+        .collect();
+    anyhow::ensure!(
+        clients.len() == 1,
+        "terminal has no unique active Session client"
+    );
+    let stream = uuid::Uuid::new_v4().to_string();
+    anyhow::ensure!(
+        store
+            .sqlite
+            .begin_program_status(&session.id, generation, &stream)?,
+        "Session provider changed"
+    );
+    let mut last = None;
+    let mut sequence = 0;
+    let mut pending = None;
+    let mut next_write = std::time::Instant::now();
+    let mut bytes = Vec::new();
+    let mut chunk = [0; 8192];
+    loop {
+        let count = crate::program_status::read_observation_chunk(&mut chunk)?;
+        if count == Some(0) {
+            anyhow::ensure!(bytes.is_empty(), "incomplete Program Status snapshot");
+            break;
+        }
+        for byte in &chunk[..count.unwrap_or(0)] {
+            if *byte == b'\n' {
+                let records: crate::program_status::Records = serde_json::from_slice(&bytes)?;
+                bytes.clear();
+                anyhow::ensure!(
+                    records.seen && records.validate(),
+                    "invalid Program Status snapshot"
+                );
+                pending = Some(records);
+            } else {
+                anyhow::ensure!(
+                    bytes.len() < 512 * 1024,
+                    "Program Status snapshot exceeds limit"
+                );
+                bytes.push(*byte);
+            }
+        }
+        if std::time::Instant::now() >= next_write {
+            if let Some(records) = pending.take().filter(|r| last.as_ref() != Some(r)) {
+                sequence += 1;
+                anyhow::ensure!(
+                    store.sqlite.record_program_status(
+                        &session.id,
+                        generation,
+                        &stream,
+                        sequence,
+                        &records
+                    )?,
+                    "Program Status stream replaced"
+                );
+                last = Some(records);
+                next_write = std::time::Instant::now() + std::time::Duration::from_millis(250);
+            }
+        }
+    }
+    if let Some(records) = pending.filter(|r| last.as_ref() != Some(r)) {
+        anyhow::ensure!(
+            store.sqlite.record_program_status(
+                &session.id,
+                generation,
+                &stream,
+                sequence + 1,
+                &records
+            )?,
+            "Program Status stream replaced"
+        );
+    }
+    Ok(())
 }

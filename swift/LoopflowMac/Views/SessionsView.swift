@@ -760,9 +760,12 @@ struct SessionsContentView: View {
         guard identity.homeId == homeId, model.sessions.errorMessage == nil, model.sessions.value != nil,
               ensuredTasks.insert(task.task.id).inserted else { return }
         let (taskId, issue, origin) = (task.task.id, task.task.task.identifier, navigation)
+        // The Task selector owns placement. Its recorded checkout can be gone
+        // while its conversation remains available in the repository's Home.
+        let repo = store.repoPath
         Task { @MainActor in
             do {
-                let ensured = try await query.ensureTaskSession(issue: issue, cwd: identity.worktree)
+                let ensured = try await query.ensureTaskSession(issue: issue, cwd: repo)
                 origin.taskSessionErrors[taskId] = nil
                 await model.refresh()
                 guard model.selection == work, origin.selectedSessionId == nil,

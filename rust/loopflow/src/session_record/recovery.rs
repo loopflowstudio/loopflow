@@ -188,22 +188,26 @@ mod tests {
         store.test_session("native", &crate::session_record::new_artifact_key());
         let command = vec!["lf".into(), "session".into(), "resume".into()];
         crate::journal::with_runtime(ledger.home(), &command, || {
-            let exec = crate::journal::current_exec_id().unwrap();
-            let driver = super::super::claim_provider_driver(&store, "native", &exec, false)?;
+            let process = crate::journal::current_process_lfid().unwrap();
+            let driver = super::super::claim_provider_driver(&store, "native", &process, false)?;
             // Reservation and admission commit together, before any spawn call.
             assert!(store.session_provider_unstarted("native")?);
-            assert!(super::super::claim_provider_driver(&store, "native", &exec, false).is_err());
+            assert!(
+                super::super::claim_provider_driver(&store, "native", &process, false).is_err()
+            );
             store.release_session_driver("native", &driver)?;
-            let retry = super::super::claim_provider_driver(&store, "native", &exec, false)?;
+            let retry = super::super::claim_provider_driver(&store, "native", &process, false)?;
             store.record_session_provider_launch("native", &retry, true)?;
             let unknown = store.release_session_driver("native", &retry)?;
-            assert!(super::super::claim_provider_driver(&store, "native", &exec, false).is_err());
+            assert!(
+                super::super::claim_provider_driver(&store, "native", &process, false).is_err()
+            );
             assert_eq!(store.session_driver("native")?, Some(unknown.clone()));
             // Only the owner can record a known spawn failure, never a stale driver.
             assert!(store
                 .record_native_provider_exit("native", &retry, false)
                 .is_err());
-            let owner = store.claim_session_driver("native", Some(&unknown), &exec, false)?;
+            let owner = store.claim_session_driver("native", Some(&unknown), &process, false)?;
             store.record_session_provider_process(
                 "native",
                 &owner,
@@ -211,7 +215,9 @@ mod tests {
                 crate::journal::process_started_at(std::process::id())?.unwrap(),
             )?;
             store.release_session_driver("native", &owner)?;
-            assert!(super::super::claim_provider_driver(&store, "native", &exec, false).is_err());
+            assert!(
+                super::super::claim_provider_driver(&store, "native", &process, false).is_err()
+            );
             Ok(())
         })
         .unwrap();

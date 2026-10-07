@@ -675,7 +675,8 @@ cannot prove fixtures that require `git rev-parse HEAD`: run those in
 the assigned checkout when its schema suffices, and report that separate check.
 Do not count a fixture setup failure as a passing materialized test.
 
-After removing a public concept, run `uv run python scripts/check_architecture.py`;
+After adding, renaming or removing a public command owner or concept, run
+`uv run python scripts/check_architecture.py`;
 retained tables and subprocesses still need their actual owners in the map.
 For architecture/README documentation changes, run
 `cd website && uv run python dev.py test -k 'portable_architecture or readme_index_sync'`.

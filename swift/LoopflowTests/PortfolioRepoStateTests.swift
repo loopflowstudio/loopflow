@@ -94,7 +94,7 @@ struct PortfolioRepoStateTests {
           "retired_at":null,
           "superseded_by_wave_id":null,
           "retirement_reason":null,
-          "home":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}
+          "machine":{"id":"home_00000000000000000000000000000001","route":"local","created_at":"1970-01-01T00:00:00Z","observed_at":"1970-01-01T00:00:00Z"}
         }]
         """
         let query = RegistryQuery { args, _ in

@@ -470,7 +470,13 @@ pub(crate) fn apply_sqlite_with_backup(
     let result = match requires_migration_sqlite(conn) {
         Ok(false) => Ok(()),
         Ok(true) => {
-            apply_sqlite_transaction(conn, |conn| backup_before_migration(conn, path).map(|_| ()))
+            let migrated = apply_sqlite_transaction(conn, |conn| {
+                backup_before_migration(conn, path).map(|_| ())
+            });
+            if migrated.is_ok() {
+                prune_migration_backups(path);
+            }
+            migrated
         }
         Err(error) => Err(error),
     };
@@ -566,6 +572,55 @@ fn backup_before_migration(
             })?;
     }
     Ok(Some(backup_path))
+}
+
+/// Generations of pre-migration backups kept beside the store.
+const MIGRATION_BACKUPS_KEPT: usize = 2;
+
+/// Each release that migrates copies the whole store first. Nothing restores a
+/// generation older than the previous release, so once a migration commits only
+/// the newest generations stay. Names this writer did not produce are left
+/// alone, and a failed removal is retried by the next migration.
+fn prune_migration_backups(path: &Path) {
+    let (Some(parent), Some(file_name)) = (
+        path.parent(),
+        path.file_name().and_then(|name| name.to_str()),
+    ) else {
+        return;
+    };
+    let prefix = format!("{file_name}.backup-");
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return;
+    };
+    let mut backups: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            let name = entry.file_name();
+            let Some(generation) = name.to_str().and_then(|name| name.strip_prefix(&prefix)) else {
+                return false;
+            };
+            generation.rsplit_once('-').is_some_and(|(_, fingerprint)| {
+                fingerprint.len() == 16
+                    && fingerprint
+                        .bytes()
+                        .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+            })
+        })
+        .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
+        .collect();
+    backups.sort();
+    let superseded = backups.len().saturating_sub(MIGRATION_BACKUPS_KEPT);
+    for (_, backup) in backups.into_iter().take(superseded) {
+        if let Err(error) = std::fs::remove_file(&backup) {
+            tracing::warn!(%error, backup = %backup.display(), "superseded migration backup was not removed");
+            continue;
+        }
+        for sidecar in ["-shm", "-wal"] {
+            let mut name = backup.clone().into_os_string();
+            name.push(sidecar);
+            let _ = std::fs::remove_file(name);
+        }
+    }
 }
 
 fn valid_backup(path: &Path, expected_history: &str) -> bool {
@@ -4575,6 +4630,40 @@ mod tests {
             Some("0.10.001_initial")
         );
         assert!(!columns(&backup, "task_sessions").contains(&"lf_bin".to_string()));
+    }
+
+    #[test]
+    fn a_committed_migration_keeps_only_the_newest_backup_generations() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        apply_set(&conn, &MIGRATIONS[..1]).unwrap();
+        let old = |name: &str, age_secs: u64| {
+            let file = directory.path().join(name);
+            std::fs::write(&file, b"generation").unwrap();
+            let modified = std::time::SystemTime::now() - Duration::from_secs(age_secs);
+            std::fs::File::options()
+                .write(true)
+                .open(&file)
+                .unwrap()
+                .set_modified(modified)
+                .unwrap();
+            file
+        };
+        let oldest = old("loopflow.db.backup-0.9.001_a-0123456789abcdef", 300);
+        let sidecar = old("loopflow.db.backup-0.9.001_a-0123456789abcdef-shm", 300);
+        let previous = old("loopflow.db.backup-0.9.002_b-fedcba9876543210", 200);
+        let by_hand = old("loopflow.db.backup-before-abandon-20260930", 400);
+        let unfingerprinted = old("loopflow.db.backup-0.11.003_child_body_lease", 400);
+
+        apply_sqlite_with_backup(&conn, &path).unwrap();
+
+        find_backup(directory.path(), "loopflow.db.backup-0.10.001_initial-");
+        assert!(previous.exists());
+        assert!(!oldest.exists());
+        assert!(!sidecar.exists());
+        assert!(by_hand.exists());
+        assert!(unfingerprinted.exists());
     }
 
     #[test]

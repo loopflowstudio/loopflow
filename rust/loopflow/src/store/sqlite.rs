@@ -47,6 +47,9 @@ pub(crate) use task_work::{EndMove, OpenExecs};
 /// writes wait for that bounded local contention instead of dropping evidence.
 pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Bytes of write-ahead log kept on disk after a checkpoint resets it.
+const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
+
 /// The first rollback-to-WAL transition can return BUSY immediately even with
 /// a busy handler: two readers cannot both upgrade their journal lock. Reuse
 /// migration exclusion only for that transition; ordinary WAL opens stay reads.
@@ -61,6 +64,9 @@ fn configure_write_connection(conn: &Connection, path: &Path) -> StoreResult<()>
         }
     }
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    // A WAL file never shrinks by itself: one migration or burst leaves its
+    // high-water mark on disk forever. Truncate it whenever a checkpoint resets it.
+    conn.pragma_update(None, "journal_size_limit", WAL_SIZE_LIMIT_BYTES)?;
     Ok(())
 }
 
@@ -2486,6 +2492,34 @@ mod frontier_tests {
             frontier(&private).as_deref(),
             Some(latest_known_version().as_str())
         );
+    }
+}
+
+#[cfg(test)]
+mod wal_tests {
+    use super::{configure_write_connection, WAL_SIZE_LIMIT_BYTES};
+
+    #[test]
+    fn a_burst_does_not_leave_its_wal_on_disk() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        configure_write_connection(&conn, &path).unwrap();
+        conn.execute_batch("CREATE TABLE history (payload BLOB)")
+            .unwrap();
+        let wal = directory.path().join("loopflow.db-wal");
+
+        conn.execute(
+            "INSERT INTO history VALUES (zeroblob(?1))",
+            [2 * WAL_SIZE_LIMIT_BYTES],
+        )
+        .unwrap();
+        assert!(std::fs::metadata(&wal).unwrap().len() > WAL_SIZE_LIMIT_BYTES as u64);
+        // The commit above checkpointed; the next write restarts the log.
+        conn.execute("INSERT INTO history VALUES (x'00')", [])
+            .unwrap();
+
+        assert!(std::fs::metadata(&wal).unwrap().len() <= WAL_SIZE_LIMIT_BYTES as u64);
     }
 }
 

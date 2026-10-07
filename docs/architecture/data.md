@@ -66,6 +66,13 @@ History retains the original Exec and provider generation when a later driver
 recovers a missed native completion. Missing command outcome, usage or process
 evidence stays unknown.
 
+A capture's `events.jsonl` holds every provider event verbatim. SQLite history
+keeps what streaming increments add up to: a run of deltas is one event at the
+first delta's position, a Turn keeps its last cumulative diff, and the raw
+notification behind each increment stays in the file. Complete items, usage,
+input and outcomes are kept in both. Sizes and the reasoning are in the
+[storage footprint review](../reviews/storage-footprint.md).
+
 A Flow is one driver Exec and the step Execs it starts, and its ID is the
 driver Exec's. The driver keeps the cursor in memory and appends FlowExec: the
 Flow's name and compiled graph at launch, then each step's Exec, node and

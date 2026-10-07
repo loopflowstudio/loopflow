@@ -89,7 +89,7 @@ struct TaskFlowTests {
     @Test("Occurrence state keeps pass completions while iteration keeps each edge count")
     func occurrenceStates() throws {
         let snapshots = try JSONDecoder().decode([FlowProcessDetail].self, from: fixture("flow_process_progress.json"))
-        let review = snapshots[1].progress
+        let review = snapshots[1]
         let states = flowNodeStates(review.graph, latest: review)
         #expect(states[1] == .completed && states[3] == .completed)
         #expect(states[4] == .stopped)
@@ -98,30 +98,39 @@ struct TaskFlowTests {
         #expect(states[7] == .pending)
         #expect(review.iterations == [[1, 1]])
         #expect(review.returns[1].traversals == 1)
-        let running = snapshots[0].progress
+        let running = snapshots[0]
         #expect(running.iterations == [[2, 0]])
         #expect(flowIterationLabel([[2, 1], [3]]) == "loop 1 pass 3, loop 2 pass 2, loop 3 pass 4")
         #expect(flowIterationLabel([[], [2]]) == "pass 3")
         #expect(flowIterationLabel([[0, 0]]) == nil)
         #expect(running.returns.map(\.traversals) == [2, 0])
 
-        let blocked = snapshots[2].progress
+        let blocked = snapshots[2]
         #expect(flowNodeStates(blocked.graph, latest: blocked)[3] == .blocked)
         let evidence = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_stalled.json"))
         #expect(evidence.state == .stalled)
-        let stalled = FlowProcessProgress(flowProcessLfid: review.flowProcessLfid, graph: review.graph,
-            current: review.current, completed: review.completed, returns: review.returns,
-            iterations: review.iterations, execution: evidence.state, reason: evidence.reason)
-        #expect(flowNodeStates(stalled.graph, latest: stalled)[4] == .stalled)
         // A preview only marks human boundaries.
         let preview = flowNodeStates(review.graph, latest: nil)
         #expect(preview[4] == .pendingHuman && preview[1] == .pending)
     }
 
+    @Test("A stopped Flow preserves the last Process outcome", arguments: ["succeeded", "failed", "interrupted"])
+    func stoppedProcessOutcome(_ outcome: String) throws {
+        var wire = try #require(JSONSerialization.jsonObject(with: fixture("flow_detail.json")) as? [String: Any])
+        var entry = try #require(wire["entry"] as? [String: Any])
+        entry["state"] = "stopped"
+        wire["entry"] = entry
+        var steps = try #require(wire["steps"] as? [[String: Any]])
+        steps[steps.count - 1]["outcome"] = outcome
+        wire["steps"] = steps
+        let flow = try JSONDecoder().decode(FlowProcessDetail.self, from: JSONSerialization.data(withJSONObject: wire))
+        #expect(flowNodeStates(flow.graph, latest: flow)[try #require(flow.current)] ==
+                (outcome == "succeeded" ? .stopped : .blocked))
+    }
+
     @Test("Captured numeric IDs preserve nested containment and independent return counts")
     func nestedNumericIdentity() throws {
-        let snapshot = try JSONDecoder().decode(FlowProcessDetail.self, from: fixture("flow_numeric_nested.json"))
-        let latest = snapshot.progress
+        let latest = try JSONDecoder().decode(FlowProcessDetail.self, from: fixture("flow_numeric_nested.json"))
         let graph = latest.graph
         #expect(graph.steps.map(\.key) == [0, 1, 9])
         #expect(graph.node(5)?.label == "check")

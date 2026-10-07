@@ -673,15 +673,7 @@ pub fn workflow_arrive(task: &Task, end: &EndOptions) -> OpsResult<()> {
     })
 }
 
-/// Put the Task at `node` of its Workflow without running anything: go back,
-/// skip ahead, or record work that finished elsewhere. A Flow still running
-/// on an edge is left alone and no longer moves the Task when it ends.
-/// `end` completes the Task, with or without a Workflow; for a Task `lf` holds
-/// no record of, it completes the planning item.
-pub fn workflow_show(
-    _repo: &Path,
-    issue: &str,
-) -> OpsResult<Option<crate::ops::workflow::Workflow>> {
+pub fn workflow_show(issue: &str) -> OpsResult<Option<crate::ops::workflow::Workflow>> {
     block_on_task(async {
         let store = task_store().await?;
         let task = store
@@ -693,6 +685,11 @@ pub fn workflow_show(
     })
 }
 
+/// Put the Task at `node` of its Workflow without running anything: go back,
+/// skip ahead, or record work that finished elsewhere. A Flow still running
+/// on an edge is left alone and no longer moves the Task when it ends.
+/// `end` completes the Task, with or without a Workflow; for a Task `lf` holds
+/// no record of, it completes the planning item.
 pub fn workflow_set(
     repo: &Path,
     issue: &str,

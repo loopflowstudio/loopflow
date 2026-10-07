@@ -313,7 +313,7 @@ in native terminals, completion/reopening, graph clipping, provider transport,
 chapter ownership and live Home/Linear migration. LOO-353's outstanding acceptance
 work remains outstanding.
 
-## Deleted in this cut
+## Delete — do not maintain
 
 - Remove cross-kind builtin suppression and mixed `workflow::customize`; retain
   local override precedence and errors independently for each definition kind.
@@ -326,5 +326,13 @@ work remains outstanding.
   preserve persisted graph serialization and LOO-400's schema unchanged.
 - Delete Desktop name-only catalog lookup and destination; retain kind in
   navigation and customization and keep native Task panes alive.
+- Delete `FlowProcessProgress`, the Desktop copy of a Flow detail; diagrams read
+  `FlowProcessDetail` directly, with computed presentation labels. Remove its
+  copy-only identity assertion and synthetic progress-state construction.
+  Review also corrected the displayed Process success value from `ok` to
+  `succeeded`; success before a stopped driver must not draw as a failed step.
+- Remove full-catalog compilation from single-definition JSON inspection. List
+  and show share `flow_catalog_entry`; invalid local sources retain diagnostics,
+  and a missing definition never falls through to a skill.
 
-Checks (October 7): `cargo check`, focused Rust DTO/discovery/Task-launch/Workflow/Project/history tests, `documented_commands`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `uv run python scripts/check_architecture.py`, and Swift DTO/graph/headless/cache/benchmark-fixture tests pass; affected acceptance, packaging/website and native demo remain with gate/demo.
+Checks (October 7): implementation build, focused Rust/Swift, docs and architecture checks pass; compression: `cargo test -p loopflow --test flow_discovery_tests` (5), `cargo test -p loopflow --lib engine::flow_graph::tests`, `scripts/test_desktop.sh --filter 'TaskFlowTests|DTOFixtureTests|DesktopHeadlessTests'` (36), `cargo fmt`, and `cargo clippy --all-targets -- -D warnings` pass; affected acceptance, packaging/website and native demo remain with gate/demo.

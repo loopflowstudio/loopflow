@@ -730,15 +730,14 @@ struct WaveWorkflowView: View {
     @Environment(\.palette) private var palette
 
     private var catalog: [WorkflowCatalogEntry] { model.workflowCatalog.value ?? [] }
-    private var choices: [WorkflowCatalogEntry] { catalog }
-    private var entry: WorkflowCatalogEntry? { choices.first { $0.name == name } }
+    private var entry: WorkflowCatalogEntry? { catalog.first { $0.name == name } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             WorkSectionHeading(title: "Workflow") {
                 // A Project may name no workflow; the menu is where one is chosen.
                 Menu(name.isEmpty ? "None" : name) {
-                    ForEach(choices) { choice in
+                    ForEach(catalog) { choice in
                         Button(choice.unavailable == nil ? choice.name : "\(choice.name) (invalid)") {
                             Task { await model.setWorkflow(choice.name, wave: wave) }
                         }

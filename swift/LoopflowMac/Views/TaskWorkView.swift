@@ -255,9 +255,8 @@ struct FlowProcessView: View {
         Text(flow.id).font(Typography.code(10)).foregroundStyle(palette.textTertiary)
             .accessibilityIdentifier("flow-process-id-\(flow.id)")
         if let run {
-            let progress = run.progress
-            FlowDiagram(graph: run.graph, latest: progress, inspected: $inspected)
-            Text([progress.reason, flowIterationLabel(run.iterations)]
+            FlowDiagram(graph: run.graph, latest: run, inspected: $inspected)
+            Text([run.presentation.reason, flowIterationLabel(run.iterations)]
                 .compactMap { $0 }.joined(separator: " · "))
                 .accessibilityIdentifier("flow-process-status-\(flow.id)")
             ForEach(run.steps) { step in

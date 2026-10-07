@@ -157,9 +157,9 @@ workflow: feature
 
 A Task with no workflow takes that one up on its first `lf task run <task>`;
 naming another takes that up instead, and the Task keeps it.
-`lf project workflow set PROJECT NAME` rewrites only that line; it does not
-check that NAME loads. `lf task run` refuses a name that is not a workflow
-until a Flow or workflow is named. A Project written with the earlier
+`lf project workflow set PROJECT NAME` validates the Workflow and rewrites only
+that selection, preserving KRs and metric targets. `lf task run` refuses a name
+that is not a workflow until a Flow or workflow is named. A Project written with the earlier
 `flow:` line reads the same and is rewritten by the next plan update. Existing
 Projects observed before the status-model upgrade retain their identity and
 custom workflow. The first explicit `lf refresh` or chapter rotation

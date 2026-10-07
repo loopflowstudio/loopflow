@@ -44,7 +44,6 @@ struct DTOFixtureTests {
         #expect(detail.entry.state == .current)
         #expect(detail.steps.map(\.label) == ["implement", "compress", "sync", "realign", "loop-or-next", "implement"])
         #expect(detail.steps.last?.completedAt == nil)
-        #expect(detail.progress.flowProcessLfid == detail.entry.id)
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         wire.removeValue(forKey: "steps")
         #expect(throws: DecodingError.self) {

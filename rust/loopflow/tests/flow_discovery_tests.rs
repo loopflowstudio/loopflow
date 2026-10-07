@@ -278,3 +278,40 @@ fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
         .status
         .success());
 }
+
+#[test]
+fn showing_one_definition_does_not_require_catalog_enumeration() {
+    let repo = tempfile::tempdir().unwrap();
+    let run = |name: &str| {
+        Command::new(env!("CARGO_BIN_EXE_lf"))
+            .current_dir(repo.path())
+            .args(["flow", "show", name, "--json"])
+            .output()
+            .unwrap()
+    };
+    std::fs::create_dir(repo.path().join(".lf")).unwrap();
+    std::fs::write(repo.path().join(".lf/flows"), "not a directory").unwrap();
+    let shown = run("pursue");
+    assert!(
+        shown.status.success(),
+        "{}",
+        String::from_utf8_lossy(&shown.stderr)
+    );
+    let entry: serde_json::Value = serde_json::from_slice(&shown.stdout).unwrap();
+    assert_eq!(entry["name"], "pursue");
+    assert!(entry["graph"].is_object());
+    assert!(!run("no-such-flow").status.success());
+    assert!(
+        !run("implement").status.success(),
+        "skills are not Flow definitions"
+    );
+
+    std::fs::remove_file(repo.path().join(".lf/flows")).unwrap();
+    std::fs::create_dir(repo.path().join(".lf/flows")).unwrap();
+    std::fs::write(repo.path().join(".lf/flows/pursue.yaml"), "invalid: true\n").unwrap();
+    let invalid = run("pursue");
+    assert!(invalid.status.success());
+    let entry: serde_json::Value = serde_json::from_slice(&invalid.stdout).unwrap();
+    assert!(entry["graph"].is_null());
+    assert!(entry["unavailable"].is_string());
+}

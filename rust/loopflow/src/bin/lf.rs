@@ -951,7 +951,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         }
         TaskCommand::Workflow { cmd } => match cmd {
             loopflow::lf::TaskWorkflowCommand::Show { issue, json: _ } => {
-                let workflow = loopflow::ops::task::workflow_show(repo, issue)?;
+                let workflow = loopflow::ops::task::workflow_show(issue)?;
                 println!("{}", serde_json::to_string_pretty(&workflow)?);
                 Ok(())
             }

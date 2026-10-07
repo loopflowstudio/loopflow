@@ -102,21 +102,6 @@ public enum TaskExecutionState: String, Decodable, Sendable, Hashable {
     case unknown
 }
 
-/// Diagram presentation derived from one execution detail; no separate wire record.
-public struct FlowProcessProgress: Sendable, Hashable {
-    public let flowProcessLfid: String
-    public let graph: FlowGraph
-    public let current: UInt32?
-    /// Occurrences finished in the current pass only.
-    public let completed: [UInt32]
-    public let returns: [FlowReturn]
-    public let iterations: [[UInt32]]
-    public let execution: TaskExecutionState
-    public let reason: String
-
-
-}
-
 /// One launched step and how its process ended.
 public struct FlowStepProcess: Decodable, Sendable, Hashable, Identifiable {
     public let processLfid: String
@@ -151,26 +136,20 @@ public struct FlowProcessDetail: Decodable, Sendable, Hashable {
     public let cwd: String?
     public let steps: [FlowStepProcess]
 
-    /// The run in the shape the diagram draws. `current` records no driver
-    /// exit, which is not proof of a live process.
-    public var progress: FlowProcessProgress {
+    /// Labels derived from recorded exits; these do not establish process liveness.
+    public var presentation: (execution: TaskExecutionState, reason: String) {
         let last = steps.last
-        let execution: TaskExecutionState
-        let reason: String
         switch entry.state {
         case .current:
-            execution = .running
-            reason = last.map { "Running \($0.label)" } ?? "Starting"
+            return (.running, last.map { "Running \($0.label)" } ?? "Starting")
         case .completed:
-            execution = .idle
-            reason = "Completed"
+            return (.idle, "Completed")
         case .stopped:
-            let failed = last.flatMap { step in step.outcome.flatMap { $0 == "ok" ? nil : "\(step.label) · \($0)" } }
-            execution = failed == nil ? .idle : .blocked
-            reason = failed ?? "Stopped before its last step"
+            guard let last, let outcome = last.outcome, outcome != "succeeded" else {
+                return (.idle, "Stopped before its last step")
+            }
+            return (.blocked, "\(last.label) · \(outcome)")
         }
-        return FlowProcessProgress(flowProcessLfid: entry.id, graph: graph, current: current, completed: completed,
-                              returns: returns, iterations: iterations, execution: execution, reason: reason)
     }
 }
 

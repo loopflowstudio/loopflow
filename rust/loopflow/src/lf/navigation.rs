@@ -251,10 +251,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 cmd: FlowCommand::Show { name, json, .. },
             } => {
                 if *json {
-                    let entry = crate::engine::flow_graph::flow_catalog(&repo)?
-                        .into_iter()
-                        .find(|entry| entry.name == *name)
-                        .ok_or_else(|| anyhow::anyhow!("Flow {name:?} not found"))?;
+                    let entry = crate::engine::flow_graph::flow_catalog_entry(name, &repo)?;
                     println!("{}", serde_json::to_string(&entry)?);
                 } else {
                     crate::lf::commands::flow::show(name, &repo)?;

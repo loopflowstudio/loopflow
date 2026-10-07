@@ -369,7 +369,7 @@ final class WorkNavigation {
     enum Palette: Equatable {
         case search
         case flow(String)
-    case workflow(String)
+        case workflow(String)
     }
     var content: Content = .overview
     var palette: Palette?

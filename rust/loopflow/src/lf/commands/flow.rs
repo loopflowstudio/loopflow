@@ -77,7 +77,7 @@ pub fn show(name: &str, repo: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `lf flow list [--json]` — Flows and workflows with the topology each would pin.
+/// `lf flow list [--json]` — Flow definitions with the topology each would capture.
 pub fn list(repo: &Path, json: bool) -> Result<()> {
     let catalog = crate::engine::flow_graph::flow_catalog(repo)?;
     if json {

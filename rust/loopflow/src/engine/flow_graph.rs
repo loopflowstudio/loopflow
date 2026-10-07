@@ -135,43 +135,49 @@ pub struct FlowCatalogEntry {
 /// Every Flow available in `repo`, each read through the shared
 /// loader. A file that does not load stays listed with the reason.
 pub fn flow_catalog(repo: &Path) -> Result<Vec<FlowCatalogEntry>, crate::engine::LoadError> {
-    let source = |path: Option<std::path::PathBuf>| {
-        let path = path?;
-        let relative = path.strip_prefix(repo).unwrap_or(&path);
-        Some(relative.to_string_lossy().into_owned())
-    };
-    Ok(crate::engine::available_flow_names(repo)?
+    crate::engine::available_flow_names(repo)?
         .into_iter()
-        .map(|name| {
-            let compiled = crate::engine::load_flow(&name, repo)
-                .map_err(|error| error.to_string())
-                .and_then(|flow| {
-                    let resolved = resolve_flow(&flow, repo).map_err(|error| error.to_string())?;
-                    let bytes = serde_json::to_vec(&(&flow.name, &resolved))
-                        .map_err(|error| error.to_string())?;
-                    let composition = FlowComposition {
-                        revision: hex::encode(Sha256::digest(bytes)),
-                        items: composition_items(&resolved, &mut 0, &mut 0),
-                    };
-                    Ok((
-                        FlowGraph::new(&flow.name, &flatten_resolved(&resolved)),
-                        composition,
-                    ))
-                });
-            let (topology, unavailable) = match compiled {
-                Ok(topology) => (Some(topology), None),
-                Err(reason) => (None, Some(reason)),
+        .map(|name| flow_catalog_entry(&name, repo))
+        .collect()
+}
+
+/// Read only the requested definition; invalid sources retain their diagnostic.
+pub fn flow_catalog_entry(
+    name: &str,
+    repo: &Path,
+) -> Result<FlowCatalogEntry, crate::engine::LoadError> {
+    let compiled = match crate::engine::flow::load_authored_flow(name, repo) {
+        Err(error @ crate::engine::LoadError::FlowNotFound(_)) => return Err(error),
+        loaded => loaded.and_then(|flow| {
+            let resolved = resolve_flow(&flow, repo)?;
+            let bytes = serde_json::to_vec(&(&flow.name, &resolved))
+                .expect("resolved Flow composition is serializable");
+            let composition = FlowComposition {
+                revision: hex::encode(Sha256::digest(bytes)),
+                items: composition_items(&resolved, &mut 0, &mut 0),
             };
-            let (graph, composition) = topology.unzip();
-            FlowCatalogEntry {
-                source: source(crate::engine::flow::find_flow_source_path(&name, repo)),
-                name,
-                graph,
+            Ok((
+                FlowGraph::new(&flow.name, &flatten_resolved(&resolved)),
                 composition,
-                unavailable,
-            }
-        })
-        .collect())
+            ))
+        }),
+    };
+    let (graph, composition, unavailable) = match compiled {
+        Ok((graph, composition)) => (Some(graph), Some(composition), None),
+        Err(error) => (None, None, Some(error.to_string())),
+    };
+    Ok(FlowCatalogEntry {
+        name: name.to_string(),
+        source: crate::engine::flow::find_flow_source_path(name, repo).map(|path| {
+            path.strip_prefix(repo)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned()
+        }),
+        graph,
+        composition,
+        unavailable,
+    })
 }
 
 /// Participation stages and bounded references to the captured automated routes.

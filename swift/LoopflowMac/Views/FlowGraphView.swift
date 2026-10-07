@@ -20,7 +20,7 @@ enum FlowNodeState: Equatable {
 }
 
 /// Classify every drawn occurrence from the shared projection.
-func flowNodeStates(_ graph: FlowGraph, latest: FlowProcessProgress?) -> [UInt32: FlowNodeState] {
+func flowNodeStates(_ graph: FlowGraph, latest: FlowProcessDetail?) -> [UInt32: FlowNodeState] {
     var states: [UInt32: FlowNodeState] = [:]
     func visit(_ nodes: [FlowNode]) {
         for node in nodes {
@@ -32,11 +32,11 @@ func flowNodeStates(_ graph: FlowGraph, latest: FlowProcessProgress?) -> [UInt32
     return states
 }
 
-private func state(of node: FlowNode, latest: FlowProcessProgress?) -> FlowNodeState {
+private func state(of node: FlowNode, latest: FlowProcessDetail?) -> FlowNodeState {
     guard let latest else { return node.human ? .pendingHuman : .pending }
     let isCurrent = latest.current.map { node.contains($0) } ?? false
     if isCurrent {
-        switch latest.execution {
+        switch latest.presentation.execution {
         case .running, .starting: return .running
         case .blocked: return .blocked
         case .stalled: return .stalled
@@ -177,7 +177,7 @@ private struct CompositionDiagram: View {
 /// gets its own labelled row. Only an overwide loop row scrolls.
 struct FlowDiagram: View {
     let graph: FlowGraph
-    let latest: FlowProcessProgress?
+    let latest: FlowProcessDetail?
     @Binding var inspected: UInt32?
     var compositionSpans: [LoopSpan]? = nil
     /// Layout may fold nodes; detail reads the complete definition.
@@ -199,7 +199,7 @@ struct FlowDiagram: View {
 
     /// Top-level authored returns in authored order, numbered from 1. A launched
     /// Flow adds each edge's saved counts. Nested XOR returns appear in node detail.
-    static func spans(_ graph: FlowGraph, latest: FlowProcessProgress?) -> [LoopSpan] {
+    static func spans(_ graph: FlowGraph, latest: FlowProcessDetail?) -> [LoopSpan] {
         let steps = graph.steps
         return steps.enumerated().compactMap { to, node -> (Int, Int, FlowNode)? in
             guard let target = node.returnsTo,
@@ -552,7 +552,7 @@ struct LoopSpan {
 private struct FlowNodeDetail: View {
     let node: FlowNode
     let state: FlowNodeState
-    let latest: FlowProcessProgress?
+    let latest: FlowProcessDetail?
     let graph: FlowGraph
 
     @Environment(\.palette) private var palette

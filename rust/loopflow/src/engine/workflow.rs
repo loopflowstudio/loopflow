@@ -334,7 +334,7 @@ mod tests {
             .any(|edge| edge.to == END && edge.flow.is_none()));
         assert!(load_workflow("code", repo.path()).unwrap().is_some());
         assert!(load_workflow("pursue", repo.path()).unwrap().is_none());
-        // A repository Flow keeps its name from the builtin workflow.
+        // A repository Flow does not hide the same-named builtin Workflow.
         write(repo.path(), ".lf/flows/feature.yaml", "- implement\n");
         assert!(load_workflow("feature", repo.path()).unwrap().is_some());
         assert!(names_workflow("feature", repo.path()));

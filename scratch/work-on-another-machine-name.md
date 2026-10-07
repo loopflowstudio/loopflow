@@ -6,6 +6,9 @@ The complete multi-step design and dated decisions remain at
 `e50dbd749e3207599f9937ce45653f4c6f33a5cd:scratch/work-on-another-machine-name.md`.
 LOO-411 owns machine registration; credentials, detached work, relay, Desktop
 restoration and cross-machine observation belong to later Tasks.
+Jack Heart's constraints remain: no code, tests, help or config from herdr/cmux;
+no cross-version compatibility, shared resident process, hidden arguments or
+automatic turn/Flow retry. Each redesign deletes what it replaces.
 
 ## Outcome
 
@@ -34,12 +37,14 @@ or resetting them. Each machine owns its Workflow, Sessions and history.
   and launch retain their current-Project checks; no provider Project is created.
 - UUID v5 derives new Task IDs from the issue's stable ID. No schema migration.
 
-## Delete — do not maintain
+## Removed
 
 - The local-only `--task` lookup in `ops/run.rs`.
 - Random Task ID minting in `create_prepared_task`.
 - The PR-dependent fetch repair after placement has already selected a strategy.
 - Forwarding the origin's machine-local Work declaration over SSH.
+- The duplicate issue field and one-use constructor wrapper in `TaskSource`.
+- The second parent-branch fetch after `prepare_new_task` fetches all origin refs.
 
 Preserve stored Task/PR IDs, local edits, Workflow state and history. Transport
 requirements cannot move an existing Task's checkout or branch. A retained
@@ -48,10 +53,26 @@ checkout lacking the requested commit reports the needed branch/commit and
 
 ## Remaining
 
-Parent `76b4b28e6` is merged without conflicts. Publication remains. Gate owns affected suites and the real SSH
-transport acceptance; no installed machine or provider credential was exercised.
-Review kept SQLite admission intact, moved missing-code checks before planning
-reads, preserved checkout-recovery ordering, and stopped forwarding machine-local
-Work declarations and SSH source data to descendant invocations.
+Reconciled 2026-10-07. Parent `76b4b28e6` is integrated by `ec4c1ff28` without
+conflicts. Publication for review remains; no additional product decision is needed.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, and network-isolated Rust tests pass (4 remote adoption/public-dispatch, 8 binding, 5 preparation); the four remote tests and static checks also pass after parent sync and the recovery-order repair; full affected suites and real SSH transport remain with gate.
+Five remote tests now cover the public `lf ssh` command through its generated
+stdin preamble and a real recipient CLI. An isolated provider fixture reads the
+pushed implementation twice from the same adopted checkout. The source's legacy
+Task ID resolves to the portable issue and target's deterministic ID. A later
+pushed commit is rejected with `lf sync`, preserving the target's HEAD and local
+notes. SSH networking/authentication and the provider are simulated; no installed
+machine or real credentials were exercised.
+
+The other tests retain cold adoption on two stores, observation age, missing
+pushed code, source dirtiness and target removal evidence. Gate still owns full
+affected suites, real two-machine SSH acceptance, and focused preservation of
+existing Project selection/pending rotation and Workflow/Session history. The
+empty Workflow assertion proves no eager creation, not an existing Workflow's
+preservation. These limits remain explicit for review.
+
+Review closed the missing public-dispatch proof with the new test; no production
+repair was needed. Release's entry-point lesson informed that check. Its goal and
+relevant recovery evidence were read during this reconciliation.
+
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, network-isolated `task_remote_tests` (5), and `python/tests/test_loopflow_skill_alignment.py` (4) pass; unchanged preparation/binding results are retained; full affected suites and real SSH acceptance remain with gate.

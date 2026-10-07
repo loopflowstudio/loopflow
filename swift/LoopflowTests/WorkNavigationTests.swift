@@ -29,7 +29,7 @@ struct WorkNavigationTests {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
         let original = try session("independent", work: .task(id: "another-task"))
         var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
-        json["workspace"] = ["home_id": "local", "worktree": "/src/loopflow.review",
+        json["workspace"] = ["machine_id": "local", "worktree": "/src/loopflow.review",
                              "task_id": "ts_review00000000000000000000000000"]
         let associated = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
         let projection = WorkProjection(roadmaps: roadmap.waves, sessions: [associated])
@@ -404,7 +404,7 @@ struct WorkNavigationTests {
     func navigationRetainsWorkspace() async throws {
         let model = try model()
         await model.refresh()
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
         workspace.multiplexer.load(sessionId: "human")
         let sessionPane = workspace.multiplexer.focusedPaneId
@@ -691,7 +691,7 @@ struct WorkNavigationTests {
         model.navigation.renaming?.text = "Retained draft"
         let selection = model.selection
         let registry = SessionsWorkspaceRegistry()
-        let workspace = registry.workspace(for: WorkspaceIdentity(homeId: "local", worktree: "/src/loopflow"))
+        let workspace = registry.workspace(for: WorkspaceIdentity(machineId: "local", worktree: "/src/loopflow"))
         workspace.multiplexer.load(sessionId: "first")
         let pane = workspace.multiplexer.focusedPaneId
         _ = workspace.multiplexer.split(pane, axis: .vertical)
@@ -795,7 +795,7 @@ struct WorkNavigationTests {
         let waveJSON = String(decoding: try JSONEncoder().encode(waveId ?? (id == "project" ? "wave-1" : nil)), as: UTF8.self)
         return try JSONDecoder().decode(SessionRecord.self, from: Data("""
         {"id":"\(id)", "run_id": "\(id)", "interactive": true,"work":\(workJSON),"title":"\(id)",
-         "workspace":{"home_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
+         "workspace":{"machine_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
          "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(state: state.rawValue)),
          "ready_summary":null,"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}

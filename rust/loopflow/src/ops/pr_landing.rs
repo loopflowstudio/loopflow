@@ -269,15 +269,15 @@ fn admit_ci_fix(
             {
                 return Err(repair_error("Task automation is held"));
             }
-            let local = store.local_home().await.map_err(repair_error)?;
+            let local = store.local_machine().await.map_err(repair_error)?;
             let placement = store
                 .placement(&crate::durable::WorkRef::Task(task_id.clone()))
                 .await
                 .map_err(repair_error)?;
-            if placement.home_id != local.id {
+            if placement.machine_id != local.id {
                 return Err(repair_error(format!(
-                    "Task is placed on Home {}",
-                    placement.home_id
+                    "Task is placed on Machine {}",
+                    placement.machine_id
                 )));
             }
             if let Some(reason) = super::task_automation::admission_blocker(

@@ -1669,12 +1669,12 @@ fn verify_scheduled_telemetry(
         .find(|job| {
             job.wave == context.wave
                 && job.flow == "telemetry-daily"
-                && job.home_id == context.home_id
+                && job.machine_id == context.machine_id
                 && job.repo == context.repo
         })
         .ok_or_else(|| {
             OpsError::Message(
-                "required telemetry-daily cron is not installed on the release Home".into(),
+                "required telemetry-daily cron is not installed on the release Machine".into(),
             )
         })?;
     if telemetry.target_kind != CronTargetKind::Flow {
@@ -1697,7 +1697,7 @@ fn verify_scheduled_telemetry(
         .cloned()
         .collect();
     receipts.retain(|r| {
-        r.home_id == context.home_id
+        r.machine_id == context.machine_id
             && r.repo == context.repo
             && r.schedule == telemetry.schedule
             && r.target_kind == CronTargetKind::Flow
@@ -1773,12 +1773,12 @@ fn verify_scheduled_telemetry(
             &launch_agents,
             &context.wave,
             "telemetry-daily",
-            &context.home_id,
-            &context.home_id,
+            &context.machine_id,
+            &context.machine_id,
             CronSource::Recovery,
             &mut |receipt| {
                 if receipt.repo != context.repo
-                    || receipt.home_id != context.home_id
+                    || receipt.machine_id != context.machine_id
                     || receipt.schedule != observation.schedule
                     || receipt.target_kind != CronTargetKind::Flow
                     || receipt.lf_path != telemetry.lf_path

@@ -87,7 +87,7 @@ When the user asks about Loopflow state, read the shared surfaces instead of
 reconstructing it from processes, worktrees, or Linear:
 
 ```bash
-lf wave list --json              # every durable Wave and its Home/runtime evidence
+lf wave list --json              # every durable Wave and its Machine/runtime evidence
 lf wave status <wave> --json   # one Wave's Work hierarchy, Sessions, and Task conditions
 lf roadmap --json         # current plan across Waves joined to runtime truth
 ```
@@ -98,15 +98,15 @@ These are read surfaces. `lf wave status` is the focused operational view;
 ## Place And Run
 
 Execution placement is durable state, not authored goal text. A Work names one
-stable Home authority; the Home's SSH route may change without moving the Work.
+stable Machine authority; the Machine's SSH route may change without moving the Work.
 
 ```bash
-lf id                                      # this machine's HomeId
-lf wave place <wave-id> <home-id>          # only while no execution is live
+lf id                                      # this machine's MachineId
+lf wave place <wave-id> <machine-id>          # only while no execution is live
 lf --wave <wave> wave/operate                    # one finite pass here
 lf session ensure -w <wave>                      # its ongoing conversation; operates on every return
-lf ssh <home-id> status <wave> --json           # inspect it on that Home
-lf ssh <home-id> --wave <wave> wave/operate       # one finite pass there
+lf ssh <machine-id> status <wave> --json           # inspect it on that Machine
+lf ssh <machine-id> --wave <wave> wave/operate       # one finite pass there
 ```
 
 `lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator

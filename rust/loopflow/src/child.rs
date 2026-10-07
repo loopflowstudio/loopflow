@@ -77,8 +77,8 @@ pub struct ChildBodyHandoff {
     pub reason: String,
 }
 
-/// The `lf` binary and Home a child Work launch uses, resolved fresh at
-/// the launch boundary from the current Home — never persisted as Work state.
+/// The `lf` binary and Machine a child Work launch uses, resolved fresh at
+/// the launch boundary from the current Machine — never persisted as Work state.
 /// Work no longer pins a binary of its own.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChildExecutionContext {

@@ -30,7 +30,7 @@ struct DesktopStartupTests {
                     let previous = WorkModel(query: capture.query(latency: false, offline: false, reads: ReadCounts()),
                                                launchCandidates: [capture.repo], cache: saving)
                     await previous.refresh()
-                    previous.confirmHome(capture.homeId)
+                    previous.confirmMachine(capture.machineId)
                     saving.flush()
                 }
                 // `warm_reopen` is a second window in the process that saved; the
@@ -98,7 +98,7 @@ private final class ReadCounts: @unchecked Sendable {
 }
 
 /// One capture of the startup reads: `manifest.json` names the repository, the
-/// Home and each read's wire file and wall time.
+/// Machine and each read's wire file and wall time.
 private struct StartupCapture: Sendable {
     struct Read: Decodable, Sendable {
         let verb: String
@@ -107,12 +107,12 @@ private struct StartupCapture: Sendable {
     }
     struct Manifest: Decodable {
         let repo: String
-        let homeId: String
+        let machineId: String
         let reads: [Read]
     }
 
     let repo: String
-    let homeId: String
+    let machineId: String
     let totalSeconds: Double
     private let texts: [String: [(text: String, ms: Double)]]
     /// The captured Session page each cursor leads to.
@@ -121,7 +121,7 @@ private struct StartupCapture: Sendable {
     init(directory: URL) throws {
         let manifest = try JSONDecoder().decode(Manifest.self, from: Data(contentsOf: directory.appendingPathComponent("manifest.json")))
         repo = manifest.repo
-        homeId = manifest.homeId
+        machineId = manifest.machineId
         totalSeconds = manifest.reads.map(\.ms).reduce(0, +) / 1000
         var texts: [String: [(String, Double)]] = [:]
         for read in manifest.reads {

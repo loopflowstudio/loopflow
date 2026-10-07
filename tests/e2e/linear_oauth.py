@@ -352,7 +352,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lf", type=Path, default=Path("/root/.local/bin/lf"))
     args = parser.parse_args()
-    # This fixture seeds the selected installed Home; never run against a user's account.
+    # This fixture seeds the selected installed Machine; never run against a user's account.
     if not Path("/.dockerenv").exists() or socket.gethostbyname("api.linear.app") != "127.0.0.1":
         parser.error("run in a disposable Linux container with api.linear.app mapped to 127.0.0.1")
     active = json.loads((Path.home() / ".lf-machine/install/active.json").read_text())

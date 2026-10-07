@@ -2,7 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["websockets>=15,<16"]
 # ///
-"""Exercise a real Codex engine with credential-free local Responses and private Homes."""
+"""Exercise a real Codex engine with credential-free local Responses and private Machines."""
 
 import argparse
 import base64
@@ -224,7 +224,7 @@ def main() -> None:
     server = Responses()
     if not args.launch:
         assert args.lf_home and args.control, (
-            "lf ownership proof needs a private Home and control directory"
+            "lf ownership proof needs a private Machine and control directory"
         )
         server.command = shlex.join([str(args.lf), "session", "list", "--all", "--json"])
     serving = threading.Thread(target=server.serve_forever, daemon=True)
@@ -256,14 +256,14 @@ enabled = false
 [feedback]
 enabled = false
 """)
-            # Never inherit credentials, execution authority, or the real provider Home.
+            # Never inherit credentials, execution authority, or the real provider Machine.
             env = {key: os.environ[key] for key in ("PATH", "TMPDIR", "LANG") if key in os.environ}
             env.update(HOME=str(root), CODEX_HOME=str(home), LF_HOME=str(root / "lf"))
             if args.shared_provider_home:
                 del env["CODEX_HOME"]
             if args.launch:
                 # Pin bytes: another contributor may build the source path while
-                # this private-Home proof is running.
+                # this private-Machine proof is running.
                 binary = root / "bin" / "lf"
                 binary.parent.mkdir()
                 shutil.copy2(args.lf, binary)

@@ -123,7 +123,7 @@ keeps one command/result line, not an evidence ledger.
 
 Plan-writing skills must produce step-neutral artifacts: named, dated decisions,
 explicit acceptance or draft status, remaining work, and a one-line check result. Keep session/step
-instructions and ambient Home facts out of plans. Historical skill invocations
+instructions and ambient Machine facts out of plans. Historical skill invocations
 use plain names without dollar prefixes; verbatim transcripts remain separate
 reference evidence. Audit a plan as input to a different skill in a fresh Session:
 the plan cannot select that reader's skill or claim its execution environment.

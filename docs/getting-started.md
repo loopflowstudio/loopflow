@@ -28,7 +28,7 @@ A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 | Try loopflow from terminal | `lf init` |
 | Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
 | Steer and inspect from terminal | `lf --wave <name> wave/operate` → `lf wave status` |
-| Run on another machine | `lf ssh <home-id> --wave <name> wave/operate` ([Go Remote](#go-remote)) |
+| Run on another machine | `lf ssh <machine-id> --wave <name> wave/operate` ([Go Remote](#go-remote)) |
 
 ---
 
@@ -52,7 +52,7 @@ clipboard        634 ▏
 The `-c` flag pastes your clipboard. `lf` assembles context—operating guidance,
 scratch notes, and clipboard—and passes it to the coding agent. Before the
 provider starts, Loopflow reserves the AgentSession and captures its input in
-this Home. The store must be writable even for unbound work. Native history
+this Machine. The store must be writable even for unbound work. Native history
 retains provider outcomes and usage; Process records the command result. Add repo
 docs explicitly with `--docs` and changed file bodies with `--diff files`.
 
@@ -210,24 +210,24 @@ Open the repository in Loopflow on macOS to read Waves, Tasks and conversations.
 
 ## Go Remote
 
-Run agents while you sleep. A Home is a stable machine identity with local
+Run agents while you sleep. A Machine is a stable machine identity with local
 planning, process, journal, and conversation history; its SSH route can change.
 Bootstrap the remote identity once:
 
 ```bash
-lf ssh jack@mini.local home id --json
-lf observe <home-id> ssh://jack@mini.local
+lf ssh jack@mini.local machine id --json
+lf observe <machine-id> ssh://jack@mini.local
 lf wave list --json
-lf wave place <wave-id> <home-id>    # record origin-side planning state
-lf ssh <home-id> --wave shipper wave/operate
+lf wave place <wave-id> <machine-id>    # record origin-side planning state
+lf ssh <machine-id> --wave shipper wave/operate
 ```
 
-The target Home proves its identity before running the command and keeps the
+The target Machine proves its identity before running the command and keeps the
 resulting execution locally.
 
 Reads follow the same rule: `lf mon list`, `lf usage`, `lf wave list`, and `lf wave status`
-read the executing Home. Prefix the command with `lf ssh <home-id>` to read
-another Home. Loopflow does not silently aggregate or replicate execution records.
+read the executing Machine. Prefix the command with `lf ssh <machine-id>` to read
+another Machine. Loopflow does not silently aggregate or replicate execution records.
 
 Foreground `lf ssh` commands can choose from subscription accounts installed on
 the origin and target. A detached process sheds forwarded credentials

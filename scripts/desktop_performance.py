@@ -428,7 +428,7 @@ def _markdown(summary: dict, *, scoped: bool) -> str:
         f"# Desktop measurements: {summary['status']}",
         "",
         *([
-            "Endpoint: another process's commit to a private Home, through the real work reader, to native bitmap capture with text verification.",
+            "Endpoint: another process's commit to a private Machine, through the real work reader, to native bitmap capture with text verification.",
             "**Not compositor paint time. Frame-hitch evidence is unavailable.**",
             "The interval starts when the sqlite3 writer exits; each write waits for an idle reader.",
         ] if metadata.get("journey") == "write-visible" else [
@@ -741,8 +741,8 @@ def _seed_native_task(home: Path, checkout: Path, repo: Path, session: str) -> t
         )
         for column, identity in (("wave_id", wave), ("project_id", project), ("task_id", task)):
             db.execute(
-                f"INSERT INTO work_placements({column},home_id,placed_at) "
-                "SELECT ?,id,? FROM homes WHERE route='local'",
+                f"INSERT INTO work_placements({column},machine_id,placed_at) "
+                "SELECT ?,id,? FROM machines WHERE route='local'",
                 (identity, now),
             )
         db.execute("INSERT INTO pm_wave_sync VALUES(?,?,?,?)", (wave, "linear", wave, now))
@@ -995,7 +995,7 @@ def _checkout_inputs(database: Path, prefix: list[str], policy: Path, git: Path)
 
     def write_policy() -> None:
         # Git status reads tracked content and per-directory ignore files throughout
-        # each selected checkout. No parent directory or credential Home is granted.
+        # each selected checkout. No parent directory or credential Machine is granted.
         rules = [" (subpath " + json.dumps(str(path)) + ")\n" for path in sorted(trees)]
         roots = tuple(str(tree) + "/" for tree in trees)
         rules += [
@@ -1339,7 +1339,7 @@ def _private_home(home: Path, lf: Path) -> Path:
     live = Path(os.environ.get("LF_HOME") or Path.home() / ".lf").resolve()
     if home == live:
         raise SystemExit(
-            f"{home} is the Home in use. Copy it first: "
+            f"{home} is the Machine in use. Copy it first: "
             "scripts/benchmarks/desktop-performance/launch.py writes <work>/home."
         )
     if not (home / "loopflow.db").exists():
@@ -1418,9 +1418,9 @@ def _run(
                 ]
             )
         ).hexdigest(),
-        "population_source": "isolated DTO fixtures; no configured Home"
+        "population_source": "isolated DTO fixtures; no configured Machine"
         if journey == "run"
-        else "a private copy of a Home; the rows written are removed after each attempt",
+        else "a private copy of a Machine; the rows written are removed after each attempt",
         "resources_before": {
             "load_average": os.getloadavg(),
             "free_bytes": shutil.disk_usage(output).free,
@@ -1622,13 +1622,13 @@ def main() -> int:
     prepare.add_argument("--output", type=Path, required=True)
     written = commands.add_parser(
         "write-visible",
-        help="Commit from another process to a private Home and time the row appearing",
+        help="Commit from another process to a private Machine and time the row appearing",
     )
     written.add_argument(
         "--output", type=Path, required=True, help="New directory; never overwrites evidence"
     )
     written.add_argument(
-        "--home", type=Path, required=True, help="A private copy of a Home; rows are written to it"
+        "--home", type=Path, required=True, help="A private copy of a Machine; rows are written to it"
     )
     written.add_argument(
         "--repo", type=Path, required=True, help="Repository whose Waves the window shows"

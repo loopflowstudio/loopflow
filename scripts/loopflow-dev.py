@@ -570,7 +570,7 @@ def _apply_dev_identity(plist: Path) -> None:
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
     # The app is a live operator surface even when its Swift shell is a dev
     # build. Its bundled CLI forwards ordinary commands to the installed CLI;
-    # it has no authority to migrate the main Home.
+    # it has no authority to migrate the main Machine.
     target_dir = REPO_ROOT / "target" / "dev-app-control"
     cargo_cmd = [
         "/usr/bin/env",

@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// The Home-local identity of a repository checkout.
+/// The Machine-local identity of a repository checkout.
 ///
 /// Linked worktrees collapse to their main checkout and symlink spellings
 /// collapse to one absolute path. Provider repository identity remains

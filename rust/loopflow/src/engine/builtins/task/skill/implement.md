@@ -131,7 +131,7 @@ If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
 ## When the design is wrong
 
 Keep named, dated decisions, draft/accepted status and remaining work in the
-plan. Record one check-result line. Omit session instructions and ambient Home
+plan. Record one check-result line. Omit session instructions and ambient Machine
 facts; the plan must not direct its next reader. Keep transcripts separate and
 historical skill names unprefixed.
 

@@ -339,7 +339,7 @@ struct GhosttyTerminalInputTests {
         _ = NSApplication.shared
         let manager = GhosttyManager.shared
         manager.initialize()
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace(NSTemporaryDirectory()))
         let store = SessionsStore(repoPath: NSTemporaryDirectory(), surfaces: registry.surfaces)
         var views: [GhosttyMetalView] = []

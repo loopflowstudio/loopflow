@@ -31,7 +31,7 @@ argv -> Process admission -> Skill discovery -> prompt -> provider route
 ```
 
 The same admission applies to headless and interactive skills, inline prompts,
-helpers and reviews. It needs no planning parents, but requires its Home's
+helpers and reviews. It needs no planning parents, but requires its Machine's
 writable conversation store before provider launch. Optional Work enrichment
 confers no Flow authority. A failed admission cannot become an invisible file-only
 conversation. Large captured payloads remain outside SQLite behind indexed references.
@@ -71,7 +71,7 @@ Process does not reserve agent work or mark a Task Started.
 
 ## Publish before spawn
 
-1. Resolve one Home for the store and payload root; validate typed ancestry.
+1. Resolve one Machine for the store and payload root; validate typed ancestry.
 2. Reserve the conversation, history/capture reference and exact driver together.
 3. Publish immutable launch input and record publication before spawning.
 4. Start or connect the native provider and retain exact engine/thread/client

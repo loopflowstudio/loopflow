@@ -438,7 +438,7 @@ async fn managed_rows(
 fn next_action(row: &AccountRow, now: i64) -> String {
     let provider = row.provider.as_str();
     if row.scope == Scope::Forwarded {
-        return "inspect lf account on the origin Home".into();
+        return "inspect lf account on the origin Machine".into();
     }
     if row.scope == Scope::Local {
         return if row.cached_credential_state == "active"
@@ -853,7 +853,7 @@ mod tests {
                 "usage: unknown",
                 "next: lf account claude",
                 "wait for cooldown, then lf account claude",
-                "inspect lf account on the origin Home",
+                "inspect lf account on the origin Machine",
                 "needs login (identity or credential rejected)",
                 "verification unavailable",
                 "forwarded from origin",

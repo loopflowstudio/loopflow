@@ -41,7 +41,7 @@ separately after creation. Desktop’s **Realign Projects…** previews a retain
 file and applies the exact bytes reviewed. See [planning](architecture/planning.md)
 for the input format.
 
-## Use one Home
+## Use one Machine
 
 Ordinary commands, Task Flows and agent tools use the installed `lf` and
 `~/.lf`. Source builds forward there too. For an explicit disposable experiment:
@@ -50,7 +50,7 @@ Ordinary commands, Task Flows and agent tools use the installed `lf` and
 LF_HOME="$(mktemp -d)" target/debug/lf wave list --json
 ```
 
-Children stay in that Home. Experiments start empty; Loopflow does not upgrade,
+Children stay in that Machine. Experiments start empty; Loopflow does not upgrade,
 repair or preserve them. Use a fresh directory when its schema changes.
 
 ## Select where work happens
@@ -241,13 +241,13 @@ still need delivery or explicit abandonment.
 ## Check authorized deliveries in the background
 
 ```bash
-lf cron sync --repo                 # install this Home's minute delivery check
+lf cron sync --repo                 # install this Machine's minute delivery check
 lf task reconcile --json            # check recorded deliveries once
 lf task automation --json           # schedule coverage and CI repair holds
 lf cron sync --repo --disable       # remove the schedule
 ```
 
-Checks continue with Desktop closed while the placed Home's user is logged in.
+Checks continue with Desktop closed while the placed Machine's user is logged in.
 They record CI failures and settle verified merges. Flow recovery belongs to its
 caller: inspect execution and effect history before launching fresh work.
 
@@ -281,7 +281,7 @@ Use `lf task automate EXP-12 off` to hold future CI repair, and
 Flow. One failed repair startup may retry; a completed blocked repair waits for
 changed evidence.
 Pending or missing CI checks allow one timeout diagnosis/rerun after 30 minutes.
-Use an always-available Home for progress through laptop logout or shutdown.
+Use an always-available Machine for progress through laptop logout or shutdown.
 
 ## Accounts and children
 

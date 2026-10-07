@@ -188,7 +188,7 @@ impl EnvGuard {
         }
         let previous_lf_home = env::var_os("LF_HOME");
         let ambient = ambient::EnvGuard::new();
-        let lf_home = TempDir::new().expect("temp lf home dir");
+        let lf_home = TempDir::new().expect("temp lf machine dir");
         env::remove_var("LF_HOME");
         if let Some(home) = home {
             // Keep HOME-based config discovery intact while isolating its store.

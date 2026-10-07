@@ -140,7 +140,7 @@ Done when names observable behavior, not a list of implementation artifacts.
 ## Output
 
 Keep named, dated decisions, draft/accepted status and remaining work in the
-plan. Record one check-result line. Omit session instructions and ambient Home
+plan. Record one check-result line. Omit session instructions and ambient Machine
 facts; the plan must not direct its next reader. Keep transcripts separate and
 historical skill names unprefixed.
 

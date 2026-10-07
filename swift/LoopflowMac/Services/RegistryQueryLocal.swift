@@ -41,7 +41,7 @@ enum RegistryQueryLocal {
     }
 }
 
-/// Invalidate on replacement; let lf resolve the selected Home/store itself.
+/// Invalidate on replacement; let lf resolve the selected Machine/store itself.
 /// Metadata is sufficient here: these installation files are atomically replaced.
 private struct ReaderLaunchConfiguration: Equatable {
     let helper: String

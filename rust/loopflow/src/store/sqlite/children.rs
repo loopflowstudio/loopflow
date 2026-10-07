@@ -32,7 +32,7 @@ impl SqliteStore {
     pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<super::TaskCheckout>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT t.id, t.external_issue_id, t.issue_identifier, t.worktree, p.home_id
+            "SELECT t.id, t.external_issue_id, t.issue_identifier, t.worktree, p.machine_id
              FROM tasks t LEFT JOIN work_placements p ON p.task_id=t.id",
         )?;
         let rows = statement.query_map([], |row| {
@@ -42,8 +42,8 @@ impl SqliteStore {
                 issue_id: row.get(1)?,
                 issue_identifier: row.get(2)?,
                 worktree: PathBuf::from(row.get::<_, String>(3)?),
-                home_id: home
-                    .map(|id| crate::durable::HomeId::parse(&id))
+                machine_id: home
+                    .map(|id| crate::durable::MachineId::parse(&id))
                     .transpose()
                     .map_err(|error| invalid_column(4, error))?,
             })

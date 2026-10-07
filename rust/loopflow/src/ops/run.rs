@@ -538,7 +538,7 @@ mod tests {
                 "Parent memory"
             }));
         }
-        // A new Home reconstructs the same identity from the authored files.
+        // A new Machine reconstructs the same identity from the authored files.
         let (_fresh_home, fresh) = test_store().await;
         let recovered = crate::work::wave::ensure_wave_row(&fresh, repo.path(), "product/release")
             .await

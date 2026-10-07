@@ -49,7 +49,7 @@ pub fn load_user_name() -> Result<Option<String>, LoadError> {
         .and_then(normalize_user_name))
 }
 
-/// Resolve a direct invocation's participant before execution moves Homes.
+/// Resolve a direct invocation's participant before execution moves Machines.
 pub fn participant_name() -> Result<Option<String>, LoadError> {
     match std::env::var(USER_NAME_ENV) {
         Ok(name) => match normalize_user_name(&name) {
@@ -122,7 +122,7 @@ pub enum ProcessTarget {
 pub struct SessionConfig {
     #[serde(default)]
     pub launch: ProcessTarget,
-    /// Home-local terminal application used to present detached sessions.
+    /// Machine-local terminal application used to present detached sessions.
     #[serde(default)]
     pub terminal: Option<String>,
 }
@@ -443,7 +443,7 @@ pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError
     Ok(Some(config))
 }
 
-/// Load only Home-local user configuration.
+/// Load only Machine-local user configuration.
 pub fn load_global_config() -> Result<Option<Config>, LoadError> {
     let Some(value) = load_yaml_file(&global_config_path())? else {
         return Ok(None);

@@ -109,7 +109,7 @@ async fn stalled_dispatch() {
             &json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":"turn"}}}),
         )
         .unwrap();
-    // A distinct connection proves the Home's WAL writer is also free, not
+    // A distinct connection proves the Machine's WAL writer is also free, not
     // merely this SqliteStore's mutex.
     sql.execute(
         "UPDATE processes SET command='unrelated write' WHERE lfid=?1",

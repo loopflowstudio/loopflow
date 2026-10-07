@@ -19,7 +19,7 @@ struct TaskAutomationView: View {
                         perform { try await query.setAutomation(enabled: !status.enabled, cwd: repo) }
                     }
                 }
-                Text("Checks deliveries every minute while this Home is available. Flow recovery belongs to its caller.")
+                Text("Checks deliveries every minute while this Machine is available. Flow recovery belongs to its caller.")
                     .font(.caption).foregroundStyle(.secondary)
                 if let checked = status.lastSuccessAt {
                     Text("Last successful check: \(Date(timeIntervalSince1970: Double(checked)), style: .relative) ago")

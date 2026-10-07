@@ -179,7 +179,7 @@ pub struct AgentConfig {
     pub resume_token: Option<String>,
     /// Stable managed account identity selected before durable capture.
     pub provider_account_id: Option<ProviderAccountId>,
-    /// Home whose deterministic account directory resolves a recorded account.
+    /// Machine whose deterministic account directory resolves a recorded account.
     /// This is launch authority, not a replay input, and is never serialized.
     pub provider_account_authority_home: Option<std::path::PathBuf>,
     /// Working directory.

@@ -11,7 +11,7 @@
     "retired_at": null,
     "superseded_by_wave_id": null,
     "retirement_reason": null,
-    "home": {
+    "machine": {
       "id": "home_00000000000000000000000000000001",
       "route": "ssh://jack@mini-heart",
       "created_at": "1970-01-01T00:00:00Z",
@@ -115,7 +115,7 @@
         "reference": {
           "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
           "workspace": {
-            "home_id": "home_00000000000000000000000000000001",
+            "machine_id": "home_00000000000000000000000000000001",
             "slug": "infrastructure-task",
             "branch": "jack/infrastructure.task.20260713_1200",
             "worktree": "/src/loopflow.infrastructure.task",

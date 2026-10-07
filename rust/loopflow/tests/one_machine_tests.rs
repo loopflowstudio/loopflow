@@ -1,4 +1,4 @@
-//! Explicit experiments preserve one Home across real CLI processes.
+//! Explicit experiments preserve one Machine across real CLI processes.
 
 use std::fs;
 use std::path::Path;
@@ -99,7 +99,7 @@ fn local_promotion_and_retained_home_commands_are_removed() {
     let home = tempfile::tempdir().unwrap();
     for args in [
         vec![
-            "home",
+            "installation",
             "install",
             "local-preflight",
             "--store",
@@ -107,7 +107,7 @@ fn local_promotion_and_retained_home_commands_are_removed() {
             "--json",
         ],
         vec![
-            "home",
+            "installation",
             "install",
             "promote",
             "--from-build",
@@ -116,7 +116,7 @@ fn local_promotion_and_retained_home_commands_are_removed() {
             "/unused",
         ],
         vec![
-            "home",
+            "installation",
             "install",
             "promote",
             "--fresh",
@@ -124,7 +124,7 @@ fn local_promotion_and_retained_home_commands_are_removed() {
             "/unused",
         ],
         vec![
-            "home",
+            "installation",
             "install",
             "promote",
             "--reuse-home",
@@ -144,21 +144,21 @@ fn local_promotion_and_retained_home_commands_are_removed() {
 fn default_and_nested_commands_use_the_installed_cli_and_main_home() {
     use std::os::unix::fs::PermissionsExt;
 
-    use loopflow::machine_install::{
+    use loopflow::installation::{
         self, ActiveInstall, ArtifactIdentity, ArtifactRole, ArtifactSet, InstallSelection,
         InstallSource,
     };
     use sha2::{Digest, Sha256};
 
     assert!(Path::new("/.dockerenv").is_file());
-    let account = machine_install::account_home().unwrap();
+    let account = installation::account_home().unwrap();
     assert_eq!(account, Path::new("/home/lf-task-proof"));
-    let root = machine_install::root().unwrap();
+    let root = installation::root().unwrap();
     assert!(!root.exists());
     let files = tempfile::tempdir().unwrap();
     let cli = files.path().join("lf");
     // Simulate only the installed boundary; both incoming processes are the real source CLI.
-    fs::write(&cli, "#!/bin/sh\nif [ \"$1\" = home ]; then exec \"$SOURCE_CLI\" monitor list --json; fi\nprintf '%s\\n' \"$LF_HOME\" \"$LF_BIN\" \"$*\"\n").unwrap();
+    fs::write(&cli, "#!/bin/sh\nif [ \"$1\" = machine ]; then exec \"$SOURCE_CLI\" monitor list --json; fi\nprintf '%s\\n' \"$LF_HOME\" \"$LF_BIN\" \"$*\"\n").unwrap();
     fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
     let artifact = ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap();
     let set = ArtifactSet {
@@ -170,7 +170,7 @@ fn default_and_nested_commands_use_the_installed_cli_and_main_home() {
         artifacts: vec![artifact],
     };
     let main = account.join(".lf");
-    machine_install::write_active(
+    installation::write_active(
         &root,
         &ActiveInstall {
             schema_version: 1,
@@ -191,7 +191,7 @@ fn default_and_nested_commands_use_the_installed_cli_and_main_home() {
         .env("HOME", &account)
         .env("SOURCE_CLI", env!("CARGO_BIN_EXE_lf"))
         .env("LF_BIN", "/retired/lf")
-        .args(["home", "id", "--json"])
+        .args(["machine", "id", "--json"])
         .output()
         .unwrap();
     fs::remove_dir_all(&root).unwrap();

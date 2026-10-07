@@ -39,7 +39,7 @@ having this file.
 
 Record named, dated decisions, explicit draft or acceptance status, remaining
 work, and a one-line check result. Do not persist session/step instructions or facts about the
-current Home in plans. Report failed lookups as dated evidence separately.
+current Machine in plans. Report failed lookups as dated evidence separately.
 Historical skill invocations use plain names; dollar-prefixed mentions can
 activate installed native skills even inside Markdown quotes or code blocks.
 Keep verbatim transcripts as reference evidence, without silently editing quotes.
@@ -49,7 +49,7 @@ in references as `&#36;`, with an explicit notation key. Original files and
 gathered source components stay unchanged; Run context captures the submitted
 bytes with source attribution. Direct skill requests remain active.
 Scratch gathering warns with path and line about relative execution framing,
-ambient Home claims, and skill-shaped mentions, including nested/untracked
+ambient Machine claims, and skill-shaped mentions, including nested/untracked
 Markdown. Warnings are review signals, not a claim that every quoted example
 is wrong; they never block launch or rewrite a source file.
 

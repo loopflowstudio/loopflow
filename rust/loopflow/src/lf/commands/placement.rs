@@ -28,12 +28,14 @@ pub fn wave(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         };
         let work = WorkRef::Wave(wave_id.clone());
         match command {
-            WaveCommand::Place { home_id, json, .. } => {
+            WaveCommand::Place {
+                machine_id, json, ..
+            } => {
                 require_wave_repository(&store, &wave_id, repo).await?;
                 print(
-                    &store.place_work(&work, home_id).await?,
+                    &store.place_work(&work, machine_id).await?,
                     *json,
-                    &format!("Wave {name}: placed on {home_id}"),
+                    &format!("Wave {name}: placed on {machine_id}"),
                 )
             }
             WaveCommand::Rename {

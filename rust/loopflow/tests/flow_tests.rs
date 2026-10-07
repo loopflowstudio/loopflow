@@ -46,7 +46,7 @@ fn lf_json(repo: &Path, home: &Path, args: &[&str]) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
-/// Every Flow on this Home as `lf flow show --sessions --json` reads it back.
+/// Every Flow on this Machine as `lf flow show --sessions --json` reads it back.
 fn flow_details(repo: &Path, home: &Path) -> Vec<serde_json::Value> {
     lf_json(
         repo,

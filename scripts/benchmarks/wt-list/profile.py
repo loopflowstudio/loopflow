@@ -9,8 +9,8 @@ listing is the default read-only one.
         --lf target/release/lf --repo ~/src/loopflow --samples 10 --home fresh
 
 `--home fresh` points LF_HOME at a new empty directory so a branch build never
-touches the main Home. `--home main` measures the installed CLI where it runs.
-`--store ~/.lf/loopflow.db` copies that database into the fresh Home first, so
+touches the main Machine. `--home main` measures the installed CLI where it runs.
+`--store ~/.lf/loopflow.db` copies that database into the fresh Machine first, so
 the listing pays for a store of real size without writing to the original.
 """
 
@@ -136,9 +136,9 @@ def profile(
                 "gh_seconds": sum(gh),
             }
         )
-    # The same executable and Home with no repository work: process start,
+    # The same executable and Machine with no repository work: process start,
     # Exec admission and both ledger writes.
-    floor = [_run([str(lf), "home", "id"], repo, env) for _ in range(samples)]
+    floor = [_run([str(lf), "machine", "id"], repo, env) for _ in range(samples)]
     shutil.rmtree(work, ignore_errors=True)
 
     walls = [row["wall"] for row in rows]
@@ -188,7 +188,7 @@ def main() -> None:
     parser.add_argument("--mode", choices=["json", "text", "both"], default="both")
     parser.add_argument("--home", choices=["fresh", "main"], default="fresh")
     parser.add_argument("--offline", action="store_true")
-    parser.add_argument("--store", type=Path, help="database to copy into the fresh Home")
+    parser.add_argument("--store", type=Path, help="database to copy into the fresh Machine")
     args = parser.parse_args()
     modes = ["text", "json"] if args.mode == "both" else [args.mode]
     for mode in modes:

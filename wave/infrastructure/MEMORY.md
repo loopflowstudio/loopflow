@@ -1,5 +1,22 @@
 # infrastructure wave memory
 
+## Machine terminology (LOO-394, 2026-10-07)
+
+Jack Heart authorized the rename, then two changes to PR #1484 and republication
+only: discard old Desktop caches and name the installation scope `installation`.
+A machine is one OS user and data directory; `LF_HOME` retains its filesystem
+meaning. Opaque `home_…` IDs, cron plist keys and historical payloads survive.
+Cron reads released JSON keys. Desktop discards version-1 caches; this supersedes
+the earlier translation decision. Installation owns artifact updates and skill
+exports; short commands stay. Retain `~/.lf-machine/install` and the promotion
+lock path because released gates, receipts and jobs pin them; no relocation is
+proved. Retained binaries use the shared `install` shorthand. Exact-frontier
+fixtures seed released SQL without drafts. Local checks prove neither installed
+migration nor remote continuity. Schedule ownership and activation stay intact. Release's
+operation-entry lesson also applies to command removal: reject the retired
+option beneath a valid current owner; an unknown owner can produce a false pass.
+Corrected installation fixtures still require disposable OS-account isolation.
+
 ## Task decisions and delivered work (LOO-408, 2026-10-07)
 
 Jack Heart authorized autonomous repair, verification and landing, with verified
@@ -480,7 +497,7 @@ Flow steps and agent tools use the installed CLI and `~/.lf`; an explicit
 changes. [PR #1381](https://github.com/loopflowstudio/loopflow/pull/1381) merged
 at `6c73356074c4`; installed routing acceptance passed on v0.12.31 and the Task
 reads done (see the 2026-10-04 entry above). Current behavior belongs in
-[CLI docs](../../docs/lf.md#use-one-home) and [Homes](../../docs/architecture/homes.md#one-main-home).
+[CLI docs](../../docs/lf.md#use-one-machine) and [Homes](../../docs/architecture/machines.md#one-main-machine).
 The dated cleanup receipts, v0.12.29–v0.12.31 release recovery and the exact
 configured checks are in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/cd344891b611914adf44eeb53844193d7a987d2c/wave/infrastructure/MEMORY.md#one-main-home-loo-342-branch-evidence-2026-09-30).
 
@@ -525,15 +542,14 @@ local Git is the larger phase, with no measured hard lower bound. Numbers and me
   admission or completion** without a completion receipt (Jack authorized).
   Live or unknown providers still block.
 
-## Environment variables (LOO-341, branch evidence 2026-10-01)
+## Environment variables (LOO-341, reconciled 2026-10-07)
 
-Jack Heart requested the audit in [Environment](../../docs/architecture/environment.md).
-`LF_HOME` alone selects the Home; its database is `loopflow.db`. Shared Exec-context
-names drive shell and tmux clearing. The unreviewed branch evidence and retired
-variable inventory remain at
+Jack Heart's audit lives in [Environment](../../docs/architecture/environment.md).
+`LF_HOME` selects the machine's data directory and `loopflow.db`; shared Exec
+names drive shell/tmux clearing. Earlier branch evidence remains at
 `c31279995a4ea0eec09c053e39c2f71a81d26034:wave/infrastructure/MEMORY.md`.
-LOO-370 removes those presence-based runtime decisions. Its accepted scope excludes
-conversion; source gate and delivery remain unfinished.
+LOO-370's October 6 completion above supersedes this section's pending-delivery
+claim; it establishes no physical capture conversion.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 
@@ -601,7 +617,7 @@ app acceptance or remote app transport. Home placement is distinct from a data
 directory, and database isolation does not isolate provider or checkout effects.
 Restore saved Task/PR/checkout identity; explicit replacement owns new definitions.
 Authored command removals must cover runtime, app and DTO consumers. Current
-mechanics belong to docs/lf.md and docs/architecture/homes.md; superseded command
+mechanics belong to docs/lf.md and docs/architecture/machines.md; superseded command
 names and store-selection policies are historical evidence, not instructions.
 
 ## Managed account identity (LOO-339, branch evidence 2026-09-30)
@@ -694,24 +710,13 @@ verification uses disposable stores; no old branch binary may migrate main.
 
 ## Data model and performance decisions (reconciled 2026-09-30)
 
-Jack Heart selected direct representations of user objects and one owner per
-record. The September 26 four-store Session diagnosis and exact quotation remain
-at `6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`
-under this heading; the accepted cutover below supersedes that diagnosed model.
-
-LOO-298 ([PR #1296](https://github.com/loopflowstudio/loopflow/pull/1296)) implements
-the three-owner model in this branch. Run no longer exists as a product object
-or table. Current contracts belong in [architecture-reference](../../docs/architecture-reference.md)
-and [CLI reference](../../docs/lf-reference.md); branch code is not installed acceptance.
-
-Jack Heart authorized autonomous landing on 2026-09-30: “try to do this all
-autonomously, no need to review with me.” Land #1296 as one PR after technical
-verification, without a demo or review wait. The independent resource-recovery,
-publication-continuity and resident-Wave cuts already landed as #1358, #1359 and
-#1360; local main history records them. Exec/Chapter extraction would remove
-only about 10% and requires manual cutting, so the old decomposition is rejected.
-Jack selected merging main, not rebasing; `e3a2c7e2c` integrated #1360. Landing
-authorization is not evidence that #1296 merged or that a release migrated data.
+Jack Heart selected public objects with one SQLite owner, direct skill/operation
+Execs and compiled Flow graphs. The four-store Session counterexample, LOO-298's
+autonomous single-PR landing authorization, rejected decomposition and merge-not-rebase
+decision remain at
+`08191d19269af96e15d79918689a04b4fa44dc30:wave/infrastructure/MEMORY.md`
+under this heading. Current contracts belong in the architecture and CLI references;
+source history does not establish installed conversion or configured acceptance.
 
 **One client, one main Home.** Jack reports only this machine is a client; the
 pinned dev Home is gone and its active Tasks were moved by hand to `~/.lf`.

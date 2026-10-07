@@ -254,7 +254,7 @@ pub(crate) fn experimental_store_diagnostic(
         return error;
     };
     StoreError::IncompatibleDevelopment(format!(
-        "{reason}\nDatabase: {}\nCustom Homes are disposable. Start a new experiment with a fresh LF_HOME; this Home will not be upgraded or repaired.",
+        "{reason}\nDatabase: {}\nCustom Machines are disposable. Start a new experiment with a fresh LF_HOME; this Machine will not be upgraded or repaired.",
         conn.path().unwrap_or(":memory:")
     ))
 }
@@ -680,7 +680,7 @@ fn hash_text(digest: &mut Sha256, value: &str) {
 /// Scan every stored row for a dangling reference. This reads the whole
 /// database, so opening a store never runs it: every connection enforces
 /// foreign keys and only a migration can violate them. Migrations check before
-/// they commit; `lf home doctor` and installation preflight diagnose in full.
+/// they commit; `lf machine doctor` and installation preflight diagnose in full.
 fn validate_foreign_keys(conn: &rusqlite::Connection) -> StoreResult<()> {
     let mut statement = conn.prepare("PRAGMA foreign_key_check")?;
     if statement.query([])?.next()?.is_some() {
@@ -1073,7 +1073,7 @@ fn pending_migrations<'a>(
         }
         return match MigrationId::parse_version(version) {
             Some(_) => Err(StoreError::InvalidData(format!(
-                "database migration {version} is unknown to lf {} (latest known {}); this database needs a newer release or the matching divergent local build; run lf home doctor with that binary",
+                "database migration {version} is unknown to lf {} (latest known {}); this database needs a newer release or the matching divergent local build; run lf machine doctor with that binary",
                 env!("CARGO_PKG_VERSION"),
                 set.last()
                     .map(Migration::version)
@@ -2473,6 +2473,46 @@ mod tests {
         );
     }
 
+    #[test]
+    fn machine_rename_preserves_released_identity_and_placement() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "rename_home_to_machine");
+        let id: String = conn
+            .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO waves (id, name, repo, created_at)
+            VALUES ('rename-wave', 'rename', '/repo', 7);
+            INSERT INTO work_placements (wave_id, home_id, placed_at)
+            SELECT 'rename-wave', id, 8 FROM homes WHERE route='local';
+            INSERT INTO homes (id, route, created_at, observed_at)
+            VALUES ('home_00000000000000000000000000000001', 'ssh://jack@mini', 9, 10);",
+        )
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("rename_home_to_machine"))
+            .unwrap();
+        let retained: (String, i64) = conn
+            .query_row(
+                "SELECT machine_id, placed_at FROM work_placements WHERE wave_id='rename-wave'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(retained, (id.clone(), 8));
+        assert!(crate::durable::MachineId::parse(&id).is_ok());
+        let remote: (String, i64, i64) = conn.query_row(
+            "SELECT route, created_at, observed_at FROM machines WHERE id='home_00000000000000000000000000000001'",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert_eq!(remote, ("ssh://jack@mini".into(), 9, 10));
+        assert!(conn.prepare("SELECT * FROM homes").is_err());
+        assert!(conn
+            .execute("UPDATE work_placements SET machine_id='missing'", [])
+            .is_err());
+        validate_foreign_keys(&conn).unwrap();
+    }
+
     #[tokio::test]
     async fn retired_home_landings_remain_readable_and_fence_old_supervisors() {
         use std::sync::Arc;
@@ -2604,7 +2644,7 @@ mod tests {
         assert_eq!(store.pending_pr_landings("owner/repo").unwrap().len(), 6);
         let conn = rusqlite::Connection::open(&path).unwrap();
         assert!(conn.execute(
-            "UPDATE pr_landings SET supervisor_placement='home', supervisor_home_id='retired_home',
+            "UPDATE pr_landings SET supervisor_placement='home', supervisor_machine_id='retired_home',
                 supervisor_process_id=456, supervisor_heartbeat_at=50 WHERE id='home_watching' AND generation=8", [],
         ).is_err());
         let retained_ci: (String, i64, i64) = conn.query_row(
@@ -4550,7 +4590,7 @@ mod tests {
             message.contains("latest known 0.10.001_initial"),
             "{message}"
         );
-        assert!(message.contains("run lf home doctor"), "{message}");
+        assert!(message.contains("run lf machine doctor"), "{message}");
     }
 
     /// The pre-loop store's flat ledger (`001_initial`, `002_...`, …) was abandoned

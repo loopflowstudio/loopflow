@@ -5,7 +5,7 @@ uv run python scripts/benchmarks/desktop-performance/timings.py
 uv run python scripts/benchmarks/desktop-performance/timings.py --json
 uv run python scripts/benchmarks/desktop-performance/timings.py --home /path/to/home
 
-Reads `<Home>/desktop-cache/timings/{launches,reads}.ndjson`, which the app
+Reads `<Machine>/desktop-cache/timings/{launches,reads}.ndjson`, which the app
 appends to while it runs. Launch milliseconds count from kernel process start.
 """
 

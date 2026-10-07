@@ -24,7 +24,7 @@ def test_snapshot_copies_a_live_home_including_its_write_ahead_log(tmp_path: Pat
     source = tmp_path / "live home"
     source.mkdir()
     (source / "config.yaml").write_text("team: LOO\n", encoding="utf-8")
-    # Held open so the second row stays in the write-ahead log, as in a running Home.
+    # Held open so the second row stays in the write-ahead log, as in a running Machine.
     with closing(sqlite3.connect(source / "loopflow.db")) as live:
         live.execute("pragma journal_mode=wal")
         live.execute("create table tasks (title text)")

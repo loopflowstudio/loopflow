@@ -172,7 +172,7 @@ it only when a person asked to see the PR.
 Every read the conducting surfaces offer is `--json`:
 
 ```bash
-lf wave list --json                    # every durable Wave and its Home/runtime evidence
+lf wave list --json                    # every durable Wave and its Machine/runtime evidence
 lf wave status <wave> --json           # hierarchy plus one Rust-derived metric_portfolio
 lf roadmap --json                      # every Wave repeats that required portfolio envelope
 lf activity --task INF-123 --json
@@ -191,8 +191,8 @@ and `lf roadmap` joins the current Linear plan to that runtime truth.
 carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
 those projections; they do not rebuild the joins.
 
-All of these reads are local to the executing Home. Use `lf ssh <home-id> ...`
-to execute the same read remotely. The historical `lf mon show` interface and `lf usage` read that Home's evidence;
+All of these reads are local to the executing Machine. Use `lf ssh <machine-id> ...`
+to execute the same read remotely. The historical `lf mon show` interface and `lf usage` read that Machine's evidence;
 their transitional wire shape is recorded in the cutover status. They do not
 query a central execution service.
 

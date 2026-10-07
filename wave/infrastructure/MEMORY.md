@@ -12,7 +12,8 @@ acceptance ritual is superseded; its recorded decisions remain history.
 
 Installed 0.13.9 reproduces LOO-353's five pending turns, one reserved input and
 two unknown processes despite its merged PR's completion intent. Source fixtures
-prove preservation; installed acceptance awaits published repair. Current
+prove preservation. PR #1483's Process/LFID vocabulary and migration are integrated
+without another draft; installed acceptance awaits published repair. Current
 Infrastructure reads retain LOO-285's unattended settlement proof, LOO-304's
 performance/soak acceptance, LOO-375's installed timing and LOO-390's prevention
 measurement. Their merge status alone proves none of those outcomes. Legacy

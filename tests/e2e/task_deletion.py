@@ -146,7 +146,9 @@ def _abandon_retains_execution(
         assert result.returncode == 0, result.stderr
         assert issue["state"]["type"] == "canceled"
         assert db.execute("SELECT abandoned_at IS NOT NULL FROM tasks").fetchone() == (1,)
-        assert db.execute("SELECT * FROM processes WHERE lfid=?", (process,)).fetchall() == processes
+        assert (
+            db.execute("SELECT * FROM processes WHERE lfid=?", (process,)).fetchall() == processes
+        )
         assert (
             db.execute("SELECT * FROM agent_sessions WHERE id='retained-session'").fetchall()
             == sessions

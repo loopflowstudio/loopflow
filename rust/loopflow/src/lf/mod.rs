@@ -925,6 +925,13 @@ pub enum TaskCommand {
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
+    /// Move a Task that has no recorded work to another Wave's current Project
+    Refile {
+        issue: String,
+        /// The Wave to file it under
+        #[arg(short = 'w', long)]
+        wave: String,
+    },
     /// Read the thread or publish a comment; agent comments default to progress
     Comment {
         issue: String,
@@ -974,6 +981,7 @@ impl TaskCommand {
             | Self::Save { issue, .. }
             | Self::Delete { issue }
             | Self::Edit { issue, .. }
+            | Self::Refile { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. }

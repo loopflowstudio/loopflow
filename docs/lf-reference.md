@@ -1444,6 +1444,16 @@ Edit a Task's title or notes, before or after placement
 | `--wave / -w` | wave |
 | `--help / -h` | Print help |
 
+## lf task refile
+
+Move a Task that has no recorded work to another Wave's current Project
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--wave / -w` | The Wave to file it under |
+| `--help / -h` | Print help |
+
 ## lf task comment
 
 Read the thread or publish a comment; agent comments default to progress

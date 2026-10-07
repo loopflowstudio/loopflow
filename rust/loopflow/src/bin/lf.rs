@@ -1230,6 +1230,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             println!("{}: updated task {}", result.wave, result.id);
             Ok(())
         }
+        TaskCommand::Refile { issue, wave } => {
+            let result = loopflow::ops::task::task_refile(repo, issue, wave)?;
+            println!("{}: filed task {}", result.wave, result.id);
+            Ok(())
+        }
         TaskCommand::Comment {
             issue,
             message,

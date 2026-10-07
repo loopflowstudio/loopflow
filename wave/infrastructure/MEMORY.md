@@ -32,8 +32,8 @@ first-install offer and recovery hints. Existing lf is never replaced; status,
 batch and JSON never install. Personal masters stay separate; agent forwarding
 has its own socket scope. Jack selected global `--machine <label>`, removing
 `lf ssh` without an alias; LOO-411 owns this pending cutover. Loopback proofs
-establish reuse, not installation or account continuity. Shared masters outlive
-commands: retained account routes need cancellation; LOO-413 deletes that broker.
+establish reuse, not installation or account continuity. LOO-413 deletes the
+account broker, lent routes and their environment/fixture machinery together.
 
 ## Resident machine logins (LOO-413, 2026-10-07)
 

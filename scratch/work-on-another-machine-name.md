@@ -66,10 +66,11 @@ provider-owned refresh, historical captures, current machine records and routes.
 
 - Integrate LOO-411's global `--machine` selector before publication, per Jack
   Heart's comment `e332b3bb-603b-4dc4-bee4-1e5b704d5721`. The current base still
-  exposes `lf ssh`; its removal belongs to the parent. October 7's fresh GitHub
-  read during compression reconfirms open PR #1489 at `32607f1d24ad`, already
-  integrated here; `lf sync --plan` again reports `noop`. The parent must publish
-  the selector before this integration can proceed. Adapt resident account
+  exposes `lf ssh`; its removal belongs to the parent. October 7 realignment
+  verified GitHub's published PR #1489 is open at `32607f1d24ad`, already
+  integrated here; `lf sync --plan` reports `noop`. Remote availability is now
+  verified: no published selector exists to integrate. Once the parent publishes
+  it, integration uses `lf sync`. Adapt resident account
   selection to the global dispatch and update surviving `lf ssh` examples and
   diagnostics together. Prove selected-account restriction, literal prompt flags
   after `--`, headless missing-login recovery and retired-command rejection through
@@ -89,8 +90,9 @@ Review repairs: interrupted file-to-SQLite registration reuses the received logi
 remote flags cannot relax the selected identity; credential-free and previously
 encrypted machines differ when Keychain cannot be read. The obsolete lease owner,
 lent routes and injected Codex-token login are deleted. Receiving uses `receive`
-to preserve the established `lf install` shorthand. Release child memory was read
-for preservation and operation-entry lessons; no release work or schedule changed.
+to preserve the established `lf install` shorthand. Release's operation-entry
+lesson applies: SSH helper and receive-command proofs do not establish the four
+required global-selector behaviors. No additional product decision is needed.
 
 Compression reuses the verified fresh-login identity and parses the remote CLI
 once. Account selection no longer wraps each resolved provider/account pair;

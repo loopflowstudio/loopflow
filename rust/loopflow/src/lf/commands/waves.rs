@@ -25,7 +25,7 @@ use crate::lf::output::Colors;
 use crate::ops::task_execution::TaskExecutionState;
 use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot};
 use crate::session_record::SessionHistory;
-use crate::store::sqlite::OpenExecs;
+use crate::store::sqlite::OpenProcesses;
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
 use crate::work::task::{
@@ -747,7 +747,7 @@ async fn roadmap_snapshot(
 struct SharedTaskReads {
     checkouts: Vec<crate::store::sqlite::TaskCheckout>,
     local_machine: crate::durable::MachineId,
-    open: OpenExecs,
+    open: OpenProcesses,
 }
 
 impl SharedTaskReads {
@@ -757,7 +757,7 @@ impl SharedTaskReads {
         Ok(Self {
             checkouts,
             local_machine: store.local_machine().await?.id,
-            open: store.sqlite.open_execs()?,
+            open: store.sqlite.open_processes()?,
         })
     }
 }
@@ -1272,7 +1272,7 @@ async fn snapshot_task_detail(
         None => None,
     };
     let launch_refusal = match (task, worktree_blocker.as_ref()) {
-        (Some(task), None) => crate::ops::task::task_exec_refusal(store, task).await?,
+        (Some(task), None) => crate::ops::task::task_process_refusal(store, task).await?,
         (Some(_), Some(_)) | (None, _) => None,
     };
     let next_move = task.map(|_| {

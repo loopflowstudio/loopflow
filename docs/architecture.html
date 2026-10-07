@@ -2030,8 +2030,8 @@ h3:hover .anchor-link,
           <p class="docs-deck">A developer's path through the whole system</p>
         </header>
 <p>Loopflow records commands, preserves agent conversations, and drives Flows.
-Exec owns a process and AgentSession a conversation; a Flow is one driver Exec
-and the step Execs it starts.</p>
+Process records an lf command and its outcome; AgentSession records a conversation; a Flow is one lf process
+and the step processes it starts.</p>
 <p>This guide specifies the accepted model. The reference owns
 <a href="https://loopflow.studio/architecture/reference#cutover-status">cutover status</a>, the remaining work
 map and the checked current-source inventory.</p>
@@ -2043,7 +2043,7 @@ lives in <a href="https://loopflow.studio/architecture/reference">Architecture R
 <pre tabindex="0"><code class="language-bash">lf implement
 </code></pre>
 <p>That command discovers <code>implement</code>, assembles its context, chooses a provider,
-records its Exec, reserves an AgentSession, captures the input, then launches the
+records its Process, reserves an AgentSession, captures the input, then launches the
 provider. It needs no Wave, Project, Task, or daemon. The conversation persists
 after that command exits; a later command can connect to the same AgentSession.</p>
 <pre tabindex="0"><code class="language-text">request
@@ -2060,8 +2060,8 @@ and its immutable input. SQLite owns identity, attribution, driver authority and
 history references; payload files retain large captured inputs and output.
 Admission failure stops before provider launch. General command logging has a
 different boundary: unavailable/bootstrap stores leave explicitly unrecorded
-Execs rather than bypassing installation authority to create a receipt.</p>
-<p>AgentSession history records provider outcomes, retries and usage. Exec records
+Processes rather than bypassing installation authority to create a receipt.</p>
+<p>AgentSession history records provider outcomes, retries and usage. Process records
 the command's outcome. A provider can finish successfully before a later command
 operation fails; neither result overwrites the other. Missing telemetry stays
 missing. The <a href="https://loopflow.studio/architecture/reference#core-models-and-apis">execution contract</a>
@@ -2104,7 +2104,7 @@ defines these ownership boundaries.</p>
 <tr>
 <td>Record command and conversation evidence</td>
 <td><a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow/src/journal"><code>journal/</code></a> and the store</td>
-<td>Exec completion, AgentSession history and immutable payloads</td>
+<td>Process completion, AgentSession history and immutable payloads</td>
 </tr>
 </tbody>
 </table>
@@ -2227,7 +2227,7 @@ user / agent --&gt; lf CLI --------+----------+-----------+
               discovery / prompt / route / harness
                               |
                               v
-                        Exec / AgentSession
+                        Process / AgentSession
                               |
                               v
                   status / roadmap / usage / app
@@ -2243,13 +2243,13 @@ ledger.</p>
 <pre tabindex="0"><code class="language-text">Repository
   `-- Wave                    enduring objective, memory and cadence
         `-- Linear Project    status + shared chapter name + Flow + KRs
-              `-- Task        identity, worktree, PR and every Flow exec for it
+              `-- Task        identity, worktree, PR and every Flow process for it
 
-Exec                          one actual lf process; immutable causal parent
-AgentSession                  one conversation; nullable current driver Exec
+Process                          one actual lf process; immutable causal parent
+AgentSession                  one conversation; nullable current driver Process
   `-- history                 provider starts, outcomes, retries and usage
-Flow                          one driver Exec; cursor in its memory, graph in FlowExec
-  `-- step Execs              plain commands; the driver records each one's node
+Flow                          one lf process; cursor in its memory, graph in FlowProcess
+  `-- step processes              plain commands; the driver records each one's node
 </code></pre>
 <table tabindex="0">
 <thead>
@@ -2271,9 +2271,9 @@ Flow                          one driver Exec; cursor in its memory, graph in Fl
 <td>Repository or builtin YAML</td>
 </tr>
 <tr>
-<td>Exec</td>
+<td>Process</td>
 <td>One actual lf process, its caller and command completion</td>
-<td><code>execs</code></td>
+<td><code>processes</code></td>
 </tr>
 <tr>
 <td>AgentSession</td>
@@ -2283,7 +2283,7 @@ Flow                          one driver Exec; cursor in its memory, graph in Fl
 <tr>
 <td>Running Flow</td>
 <td>One driver process and the steps it starts, including taskless execution</td>
-<td>The driver Exec and its child step Execs in <code>execs</code></td>
+<td>The driver Process and its child step processes in <code>processes</code></td>
 </tr>
 <tr>
 <td>Wave</td>
@@ -2333,21 +2333,21 @@ or steer turns and mutate Session state, including queued writes. It does not
 replace the provider generation or interrupt an existing turn. Client replacement
 leaves the engine alive and never authorizes killing a shared engine
 for one thread. Engine PID, client PID and conversation driver are distinct.</p>
-<p>Exec ancestry records the actual lf caller. A direct child names its parent's
-Exec; an agent-issued child also records <code>via_agent</code> and AgentSession provenance.
+<p>Process ancestry records the actual lf caller. A direct child names its parent's
+Process; an agent-issued child also records <code>via_agent</code> and AgentSession provenance.
 The provider's generation resolves to the current driver at child admission.
 A delayed command from a replaced provider retains historical provenance; old
-Exec parents are never rewritten. Causal ancestry grants no control authority.</p>
+Process parents are never rewritten. Causal ancestry grants no control authority.</p>
 <p>Every Flow naming a Task, or run in its checkout, is equally its work;
 none is privileged. <code>task run</code> always runs a fresh one.
 Taskless and Task-owned Flows use the same driver. It holds the compiled graph
 and cursor in memory; template composition compiles into the graph, and loop
-passes are positions in it. Each step is a real child Exec whose argv carries
+passes are positions in it. Each step is a real child Process whose argv carries
 the Flow name, launch sequence and position. A step's result is how its process
 exited; a deciding or routing step also answers through the Session turn its
-Exec captured. Mechanical work creates no agent conversation. A Session reaches
-its Flow through the step Exec that captured its input. A killed driver leaves
-its Execs as history; nothing resumes it, and its caller launches fresh work.</p>
+Process captured. Mechanical work creates no agent conversation. A Session reaches
+its Flow through the step Process that captured its input. A killed driver leaves
+its Processes as history; nothing resumes it, and its caller launches fresh work.</p>
 <p>Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
 target and writes; Desktop confirms it. Bind cannot clear or move an assignment
@@ -2355,13 +2355,13 @@ or change Flow membership. Done and landed Tasks remain valid targets. Earlier
 usage retains its recorded owner; binding affects subsequent work, and uncertain
 mid-turn allocation remains unknown.</p>
 <p><code>tasks.started_at</code> is set once when actual Task work is reserved or first bound.
-Recording an inspection command's Exec does not start a Task. Chapter retirement
+Recording an inspection command's Process does not start a Task. Chapter retirement
 also checks authored work, PRs and Flows; missing history alone cannot
 prove untouched backlog. Rotation converges from fresh Linear facts using the
 explicit target name and stable Project identities. A partially rotated repository
 must be retryable; unrelated competing plans remain unresolved.</p>
 <p>The <a href="https://loopflow.studio/architecture/reference#core-models-and-apis">reference</a> owns the field and
-write contracts and the current-state conversion boundary. Exec and AgentSession
+write contracts and the current-state conversion boundary. Process and AgentSession
 are the execution owners; Run has no separate lifecycle.</p>
 <h2 id="follow-the-common-paths">Follow the common paths<a class="anchor-link" href="#follow-the-common-paths" title="Link to this section">#</a></h2>
 <h3 id="direct-work">Direct work<a class="anchor-link" href="#direct-work" title="Link to this section">#</a></h3>

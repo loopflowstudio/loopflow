@@ -191,7 +191,7 @@ public final class MultiplexerStore {
         _notify()
     }
 
-    /// Reveal a Task's Flow exec log or files beside existing terminals,
+    /// Reveal a Task's Flow process log or files beside existing terminals,
     /// never replacing them.
     public func show(_ content: PaneContent) {
         if let pane = layout.allPanes.first(where: { $0.content == content }) {

@@ -36,7 +36,7 @@ def repo(tmp_path: Path) -> Path:
             "| --- | --- | --- | --- | --- | --- | --- |\n"
             "| **Wave** | Goal | [`Wave`](../rust/loopflow/src/wave/types.rs) | "
             "`schema_migrations`, `waves` | `lf` | `lf wave` | "
-            "`provider:linear`, `exec:git` |\n"
+            "`provider:linear`, `process:git` |\n"
             """<!-- architecture-map:end -->
 
 <!-- architecture-projections:start -->

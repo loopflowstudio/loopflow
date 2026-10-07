@@ -363,7 +363,7 @@ private struct ReferencePopover: View {
 /// Resolve a Wave repo's GitHub base URL from its `origin` remote (local `git`,
 /// no network). Returns nil when the remote isn't GitHub or can't be read.
 func resolveGitHubBase(repoPath: String) -> URL? {
-    let process = Process()
+    let process = Foundation.Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
     process.arguments = ["git", "-C", repoPath, "remote", "get-url", "origin"]
     let pipe = Pipe()

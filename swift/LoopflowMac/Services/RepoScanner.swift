@@ -61,7 +61,7 @@ struct RepoScanner {
     }
 
     private func git(_ args: [String], at url: URL) -> String? {
-        let process = Process()
+        let process = Foundation.Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", url.normalizedFilePath] + args
         let output = Pipe()

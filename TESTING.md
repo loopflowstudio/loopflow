@@ -456,7 +456,7 @@ cargo test -p loopflow --lib task_stop_waits_for_selected_step_after_driver_deat
 ```
 
 The proof covers retained and released driver claims, child exit, interrupted
-Exec history, and an unresolved mechanical outcome. Linux also holds interrupt
+Process history, and an unresolved mechanical outcome. Linux also holds interrupt
 cleanup after the effect exits to exercise settlement ordering. It uses no
 configured provider or installed Machine.
 
@@ -510,8 +510,8 @@ the observer's original body identity and later establish a stall for that captu
 See [boundary-specific checks](#boundary-specific-checks) for Task controls,
 Linear response shapes and isolated Session fixtures.
 
-`exec_ownership_tests::interruption_records_the_exec_without_a_fabricated_signal_name`
-checks the OS exit, durable Exec outcome and absence of its owned scorecard child.
+`process_ownership_tests::interruption_records_the_process_without_a_fabricated_signal_name`
+checks the OS exit, durable Process outcome and absence of its owned scorecard child.
 It retains child output for failures. On Linux, `cc` builds the test-only
 `support/hold_group_kill.c` interposer: after delivering the real group kill it
 holds the signal hook for 200 ms, exposing normal command return racing cleanup.
@@ -695,7 +695,7 @@ uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow
 ```
 
 Detached repair proofs enter through the compiled CLI so admission records its
-Exec before launching a child. Assert the published tag and completed repair;
+Process before launching a child. Assert the published tag and completed repair;
 an in-process `release_run` call does not exercise that execution boundary.
 Include stale failure observations after repair completion: a fresh authoritative
 merge must still settle the release and publish its tag, even if repair admission
@@ -732,7 +732,7 @@ toolchain explicitly.
 CLI owner-tree changes must include `cargo test -p loopflow --lib engine::flow_graph::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.
-Task status reads a Flow from its Execs and their processes. Run
+Task status reads a Flow from recorded command outcomes and OS liveness. Run
 `cargo test -p loopflow --lib ops::task_execution::tests` for running, between
 steps, stopped and failed.
 Managed Task fixtures must bind the checkout's Team and Initiative before
@@ -754,7 +754,7 @@ product contract; its two cross-store promotion/continuation cases were removed.
 
 The adoption case starts with planning and no Task row. Public checkout/run
 reuse a dirty existing Git worktree or fetch an open PR's unseen remote branch,
-retain the PR identity, and leave an earlier Flow's Execs untouched after source
+retain the PR identity, and leave an earlier Flow's Processes untouched after source
 changes. Linear planning and GitHub reads are fixtures; Git and CLI paths are real.
 
 The disposable OS account authors fixture installation records for routing proofs;
@@ -774,7 +774,7 @@ responses, absence, and provider failure. Neither is configured live-provider pr
 The mechanical Flow proof uses that disposable account without an installation
 selection. A claim followed by admission failure/release leaves Started absent;
 the real worker records operation history and Started together. It retains the
-captured Flow after the template disappears and records an ordinary child Exec without creating an AgentSession.
+captured Flow after the template disappears and records an ordinary child Process without creating an AgentSession.
 The default-Machine proof sends two nested source CLI processes through a simulated
 installed executable and checks that both select the main Machine despite stale
 control pins. The explicit-Machine Flow proof runs locally in `one_machine_tests`. The declaration proof starts Task Y
@@ -884,7 +884,7 @@ Supply the matching v0.13.3 CLI archive from its published release. The fixture
 checks its pinned SHA256 before extraction, creates a temporary Machine with stub
 providers, and exercises ordinary public commands with both binaries. It preserves
 capture paths/bytes, native identity, usage and released review feedback through
-candidate reads, replay, resume, review settlement and nested Exec ancestry.
+candidate reads, replay, resume, review settlement and nested Process ancestry.
 `runs/` remains the one opaque capture root; no migration or installation runs.
 Provider and terminal transport are simulated, so this is not installed acceptance.
 
@@ -935,9 +935,9 @@ default. Synthetic migration success does not authorize conversion of an install
 Machine or prove configured-provider resumption.
 
 When changing how a Flow step is described or read back, include the step
-argument and Exec inventory tests and the public Session lifecycle proofs. A
-Flow is its driver Exec and step Execs; assert on those Execs and on the Session
-turn a step Exec captured.
+argument and Process inventory tests and the public Session lifecycle proofs. A
+Flow is its driver Process and step Processes; assert on those Processes and on the Session
+turn a step Process captured.
 
 ```bash
 cargo test -p loopflow --lib ops::flow_run
@@ -968,7 +968,7 @@ fixture, restore it afterward, and serialize environment changes with
 `test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `SessionHome`
 in conversation tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
-Enter `journal::with_runtime` after selecting the fixture Machine so its Exec and
+Enter `journal::with_runtime` after selecting the fixture Machine so its Process and
 the Session driver references share the same database. Simulated finite-provider
 harnesses must record their owned child exit; an absent endpoint is not exit
 evidence.
@@ -1027,7 +1027,7 @@ spawn failure first resolves the conversation's `lf`. Pin a fixture executable
 under the environment lock and restore the pin afterward.
 
 Release repair checks must cover completion before inherited checkout locks close.
-Use the public release path with a delayed repair launcher; a terminal Exec receipt
+Use the public release path with a delayed repair launcher; a terminal Process receipt
 does not prove that its process or descendants released their descriptors.
 
 When a subprocess fixture signals readiness with file contents, write a sibling

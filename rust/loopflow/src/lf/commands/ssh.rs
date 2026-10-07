@@ -266,7 +266,7 @@ fn run_with_env(
     drop(broker);
     match outcome {
         SshOutcome::Success => Ok(()),
-        SshOutcome::CommandFailure(code) => Err(crate::exec::CommandExit(
+        SshOutcome::CommandFailure(code) => Err(crate::process::CommandExit(
             u8::try_from(code).expect("SSH command exit status fits a byte"),
         )
         .into()),
@@ -586,7 +586,7 @@ fn build_preamble(
         .collect::<Vec<_>>()
         .join(" ");
     // Under a lease the shell must survive the command so its EXIT trap can
-    // remove the forwarded socket; without one, exec saves a process.
+    // remove the forwarded socket; without one, process saves a process.
     lines.push(if lease_handle.is_some() {
         remote_cmd
     } else {
@@ -803,7 +803,7 @@ mod tests {
     }
 
     #[test]
-    fn preamble_exports_every_credential_and_execs_command() {
+    fn preamble_exports_every_credential_and_processes_command() {
         let cmd = vec!["lf".to_string(), "pr".to_string()];
         let handle = lease_handle();
         let preamble = build_preamble(

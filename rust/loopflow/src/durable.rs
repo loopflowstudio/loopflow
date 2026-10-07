@@ -308,7 +308,7 @@ pub struct FlowPage {
     pub next: Option<String>,
 }
 
-/// One Flow drawn from its Execs: the authored graph while its steps still fit
+/// One Flow drawn from its Processes: the authored graph while its steps still fit
 /// it, else the sequence the steps recorded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowDetail {
@@ -321,13 +321,13 @@ pub struct FlowDetail {
     pub iterations: Vec<Vec<u32>>,
     pub cwd: Option<std::path::PathBuf>,
     /// Every step the driver launched, in order.
-    pub steps: Vec<FlowStepExec>,
+    pub steps: Vec<FlowStepProcess>,
 }
 
 /// One launched step and how its process ended.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowStepExec {
-    pub exec_id: crate::id::ExecId,
+pub struct FlowStepProcess {
+    pub process_lfid: crate::id::ProcessLfid,
     pub label: String,
     pub key: u32,
     pub iterations: Vec<Vec<u32>>,
@@ -337,7 +337,7 @@ pub struct FlowStepExec {
     pub exit_code: Option<i32>,
 }
 
-impl FlowStepExec {
+impl FlowStepProcess {
     /// The step's label with the pass any returned loop is on: "implement · pass 2".
     pub fn position(&self) -> String {
         match crate::engine::flow_graph::loop_passes(&self.iterations) {

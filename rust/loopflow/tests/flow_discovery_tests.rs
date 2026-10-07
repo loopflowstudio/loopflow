@@ -57,7 +57,7 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
     let expected_repo = loopflow::repository::CanonicalRepo::discover(dir.path())
         .unwrap()
         .to_string();
-    // A Flow whose definition no longer exists: only its Execs describe it.
+    // A Flow whose definition no longer exists: only its Processes describe it.
     let flow = support::record_flow(
         dir.path(),
         std::path::Path::new(&expected_repo),

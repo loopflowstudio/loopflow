@@ -27,7 +27,7 @@ backlog, completion, external and review waits, local recovery blockers, and
 unavailable evidence. Rust and Swift decode the same Task rows; consumers never
 reconstruct the condition from process flags.
 
-`activity_snapshot.json` pins `lf ps --json`: exact live Exec and provider
+`activity_snapshot.json` pins `lf ps --json`: exact live Process and provider
 processes carry OS-derived state, while a provider without exact ownership
 stays separate from the call tree. Desktop receives the same wire type through
 the Work observation stream; it does not poll `lf ps`.

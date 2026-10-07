@@ -152,7 +152,7 @@ recorded Work attribution.
 ### 2. Intelligence adaptation — and failure to adapt
 
 Adapted (observed): the ledger contract itself predates the chapter's runtime
-churn (post-057: trace=run_id, span=process_lfid, cumulative-usage rule,
+churn (post-057: trace=run_id, span=process_id, cumulative-usage rule,
 `lf usage` reading the ledger directly after the `lfd::client` module died
 with its only consumer — an early, real instance of the lfd-demotion pattern).
 In the last five weeks, Intelligence produced the replay-contract stack

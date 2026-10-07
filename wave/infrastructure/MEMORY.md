@@ -481,6 +481,12 @@ local Git is the larger phase, with no measured hard lower bound. Numbers and me
   evidence). Installed 0.13.4 read 1.80 s median over three samples, 1.62 s of
   it the remote. Asking 16 branches per request side by side: 1.45 s → 1.03 s
   median on a fresh Home. One unanswered request leaves every branch unknown.
+- **A lock around a cache serialized every Git read** (branch evidence,
+  2026-10-06). #1452's retained-read mutex was held while `git` ran even in
+  commands that retain nothing; installed 0.13.6 read 1.24 s local Git against
+  0.13.4's 0.39 s. Released before the spawn: 1.27 s → 0.31 s local, 1.45 s →
+  1.17 s listing median at load 19–37. GitHub (about 1.0 s) is the measured
+  remainder, not a proven floor.
 - **Every store open scanned the whole database** (PR 2). The first installed
   sample read 8.09 s: 4.91 s before listing, 1.90 s in receipts. Opening ran
   `PRAGMA foreign_key_check`, and one command opens the store five times, so
@@ -498,7 +504,8 @@ local Git is the larger phase, with no measured hard lower bound. Numbers and me
   the store in `<Home>/perf/wt-list.jsonl`, read with `lf wt timing`.
 - **Jack Heart's delivery contract:** land after autonomous checks and honest
   benchmarks; installed timing is post-merge validation, so the Task stays
-  open. Seven installed samples are not a p95; ≤1 s warm p95 online is unmet.
+  open. Installed 0.13.6: 1.47 s text, 1.39 s JSON median over 20 pairs; ≤1 s
+  warm p95 online is unmet.
 - **Install preflight/promote read the OS account's Home whatever `LF_HOME`
   says.** Tests running them are container-only installation proofs.
 - **A closed Session with a confirmed-dead provider no longer blocks Task

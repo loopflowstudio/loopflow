@@ -210,8 +210,14 @@ silently merged. Phone use is LOO-396.
 
 ## Open choices
 
-1. Must Workflow position follow the person between machines? If yes, the Git
-   ref residue is required.
+1. Must Workflow position follow the person between machines? Jack Heart,
+   2026-10-07: "I am not sure I want execution state to go across machines."
+   If it stays put, no residue store is needed: a Task's Workflow position,
+   Sessions and history live on the machine where it runs, other machines see
+   what Linear and GitHub show (started, PR open, done), and you reach the Task
+   through `lf ssh <machine>`. The cost is that running the same Task on a
+   second machine starts its Workflow from the beginning there. Moving a
+   started Task between machines would be a separate, explicit act.
 2. Claude on a machine: `setup-token` is inference-only (may fail loopflow's
    identity check and usage polling, has no file form, interactive use
    unverified) versus a normal login with a pasted code (own refresh chain, full

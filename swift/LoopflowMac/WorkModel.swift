@@ -321,7 +321,7 @@ final class WorkModel {
     private(set) var comments = TaskReadings<TaskComments>()
     /// The shown Task's work, from the workspace reader's `task` part.
     private(set) var taskWork = TaskReadings<TaskWork>()
-    /// That Task's Flow execs keyed by driver Exec, from the same part.
+    /// That Task's Flow processes keyed by driver Process, from the same part.
     private(set) var flowRuns: [String: FlowDetail] = [:]
     /// Conversation history, read only on disclosure.
     private(set) var sessionHistory = TaskReadings<[SessionHistory]>()

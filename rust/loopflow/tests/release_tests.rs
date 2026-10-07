@@ -1998,7 +1998,7 @@ esac
         &format!("touch '{}'", repaired.display()),
     );
     // Completion can be recorded before the repair's inherited descriptors close.
-    // Keep its launcher alive briefly after the real Exec exits to expose that gap.
+    // Keep its launcher alive briefly after the real Process exits to expose that gap.
     let lf = format!(
         r#"#!/bin/sh
 if [ "$1 $2" = 'task __repair' ]; then

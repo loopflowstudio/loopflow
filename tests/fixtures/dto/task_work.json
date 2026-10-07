@@ -27,11 +27,10 @@
       "ended_at": null
     }
   ],
-  "execs": [
+  "processes": [
     {
-      "id": "11111111-1111-4111-8111-111111111111",
       "trace_id": "22222222-2222-4222-8222-222222222222",
-      "parent_exec_id": null,
+      "parent_process_lfid": null,
       "via_agent": null,
       "caller_session_id": null,
       "caller_provider_generation": null,
@@ -43,12 +42,13 @@
       "outcome": "failed",
       "exit_code": 42,
       "signal": null,
-      "error": null
+      "error": null,
+      "lfid": "11111111-1111-4111-8111-111111111111",
+      "pid": null
     },
     {
-      "id": "33333333-3333-4333-8333-333333333333",
       "trace_id": "22222222-2222-4222-8222-222222222222",
-      "parent_exec_id": "11111111-1111-4111-8111-111111111111",
+      "parent_process_lfid": "11111111-1111-4111-8111-111111111111",
       "via_agent": true,
       "caller_session_id": "conversation",
       "caller_provider_generation": 2,
@@ -60,7 +60,9 @@
       "outcome": null,
       "exit_code": null,
       "signal": null,
-      "error": null
+      "error": null,
+      "lfid": "33333333-3333-4333-8333-333333333333",
+      "pid": null
     }
   ],
   "workflow": {
@@ -107,7 +109,7 @@
     "position": {
       "kind": "edge",
       "edge": 2,
-      "exec_id": "11111111-1111-4111-8111-111111111111",
+      "process_lfid": "11111111-1111-4111-8111-111111111111",
       "running": true
     },
     "outgoing": [],
@@ -118,7 +120,7 @@
         "from": "start",
         "to": "end",
         "edge": null,
-        "exec_id": null,
+        "process_lfid": null,
         "actor": "person",
         "session_id": null,
         "note": "completed before Workflows",
@@ -130,7 +132,7 @@
         "from": "start",
         "to": "start",
         "edge": null,
-        "exec_id": "22222222-2222-4222-8222-222222222222",
+        "process_lfid": "22222222-2222-4222-8222-222222222222",
         "actor": "person",
         "session_id": null,
         "note": null,
@@ -142,7 +144,7 @@
         "from": "start",
         "to": "design",
         "edge": 0,
-        "exec_id": "22222222-2222-4222-8222-222222222222",
+        "process_lfid": "22222222-2222-4222-8222-222222222222",
         "actor": "person",
         "session_id": null,
         "note": null,
@@ -154,7 +156,7 @@
         "from": "start",
         "to": "design",
         "edge": 0,
-        "exec_id": "22222222-2222-4222-8222-222222222222",
+        "process_lfid": "22222222-2222-4222-8222-222222222222",
         "actor": "edge",
         "session_id": null,
         "note": null,
@@ -166,7 +168,7 @@
         "from": "design",
         "to": "demo",
         "edge": 2,
-        "exec_id": "11111111-1111-4111-8111-111111111111",
+        "process_lfid": "11111111-1111-4111-8111-111111111111",
         "actor": "conversation",
         "session_id": "manual",
         "note": "take the smaller approach",

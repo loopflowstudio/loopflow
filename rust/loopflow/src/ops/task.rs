@@ -34,7 +34,7 @@ use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::ops::workflow::WorkflowPosition;
 use crate::planning::{LinearIssueId, TaskPlan};
-use crate::store::sqlite::{EndMove, OpenExecs};
+use crate::store::sqlite::{EndMove, OpenProcesses};
 use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, Store,
     StoreError,
@@ -56,7 +56,7 @@ pub enum TaskWaitUntil {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TaskExecOptions {
+pub struct TaskProcessOptions {
     pub wave: Option<String>,
     pub reason: Option<String>,
     pub agent: Option<String>,
@@ -72,8 +72,8 @@ pub struct TaskExecOptions {
 pub struct EndOptions {
     /// Reach `end` although Linear already calls the active Task complete.
     pub force: bool,
-    /// Historical Execs whose unknown outcome is accepted for completion only.
-    pub accept_unknown_exec: Vec<crate::id::ExecId>,
+    /// Historical Processes whose unknown outcome is accepted for completion only.
+    pub accept_unknown_process: Vec<crate::id::ProcessLfid>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -452,9 +452,9 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 pub fn task_place(
     repo: &Path,
     issue: &str,
-    options: TaskExecOptions,
+    options: TaskProcessOptions,
 ) -> OpsResult<(Task, Option<String>)> {
-    let TaskExecOptions {
+    let TaskProcessOptions {
         flow,
         agent,
         reason,
@@ -611,12 +611,12 @@ async fn traverse_workflow(
             }));
         }
     };
-    let exec = crate::journal::current_exec_id()
-        .ok_or_else(|| task_error("a workflow move requires a registered Exec"))?;
+    let process = crate::journal::current_process_lfid()
+        .ok_or_else(|| task_error("a workflow move requires a registered Process"))?;
     if let Some(definition) = &take_up {
         store
             .sqlite
-            .take_up_workflow(&task.id, definition, &exec, note)
+            .take_up_workflow(&task.id, definition, &process, note)
             .map_err(task_error)?;
     }
     let edge = edge.clone();
@@ -635,7 +635,7 @@ async fn traverse_workflow(
         }
         store
             .sqlite
-            .choose_workflow_edge(&task.id, &workflow, index, &exec, note)
+            .choose_workflow_edge(&task.id, &workflow, index, &process, note)
             .map_err(task_error)?
     };
     if !chose {
@@ -653,14 +653,14 @@ async fn traverse_workflow(
 /// its target. A Task moved elsewhere in the meantime stays where it was put.
 /// Arriving at `end` completes the Task; refused, the Task stays on its edge.
 pub fn workflow_arrive(task: &Task, end: &EndOptions) -> OpsResult<()> {
-    let Some(exec) = crate::journal::current_exec_id() else {
+    let Some(process) = crate::journal::current_process_lfid() else {
         return Ok(());
     };
     block_on_task(async {
         let store = task_store().await?;
         let target = store
             .sqlite
-            .workflow_edge_target(&task.id, &exec)
+            .workflow_edge_target(&task.id, &process)
             .map_err(task_error)?;
         if target.as_deref() == Some(END) {
             reach_end(&store, &mut task.clone(), EndMove::Arrive, None, end).await?;
@@ -668,7 +668,7 @@ pub fn workflow_arrive(task: &Task, end: &EndOptions) -> OpsResult<()> {
         }
         store
             .sqlite
-            .arrive_workflow_edge(&task.id, &exec)
+            .arrive_workflow_edge(&task.id, &process)
             .map_err(task_error)
     })
 }
@@ -691,9 +691,9 @@ pub fn workflow_set(
             None => format!("{issue}: completed"),
         });
     }
-    if end.force || !end.accept_unknown_exec.is_empty() {
+    if end.force || !end.accept_unknown_process.is_empty() {
         return Err(task_error(
-            "--force and --accept-unknown-exec apply only to reaching `end`",
+            "--force and --accept-unknown-process apply only to reaching `end`",
         ));
     }
     let note = note.map(str::trim).filter(|note| !note.is_empty());
@@ -727,11 +727,11 @@ pub fn workflow_set(
                 nodes.join(", ")
             )));
         }
-        let exec = crate::journal::current_exec_id()
-            .ok_or_else(|| task_error("a workflow move requires a registered Exec"))?;
+        let process = crate::journal::current_process_lfid()
+            .ok_or_else(|| task_error("a workflow move requires a registered Process"))?;
         if !store
             .sqlite
-            .set_workflow_node(&task.id, node, &exec, note)
+            .set_workflow_node(&task.id, node, &process, note)
             .map_err(task_error)?
         {
             return Err(none());
@@ -747,7 +747,7 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
     prepare_task(
         repo,
         issue,
-        TaskExecOptions {
+        TaskProcessOptions {
             name: options.name,
             stack_on: options.stack_on,
             directive: options.directive,
@@ -756,8 +756,8 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
     )
 }
 
-fn prepare_task(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult<Task> {
-    let TaskExecOptions {
+fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsResult<Task> {
+    let TaskProcessOptions {
         wave: expected_wave,
         name,
         stack_on,
@@ -863,7 +863,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult
         &main_repo,
         &resolved.item.name,
         Some(&resolved.item),
-        &TaskExecOptions {
+        &TaskProcessOptions {
             wave: expected_wave,
             reason,
             name,
@@ -1034,7 +1034,7 @@ async fn prepare_new_task(
     main_repo: &Path,
     title: &str,
     item: Option<&crate::pm::PmItem>,
-    options: &TaskExecOptions,
+    options: &TaskProcessOptions,
 ) -> OpsResult<PreparedTask> {
     let directive = options
         .directive
@@ -1317,15 +1317,15 @@ fn create_prepared_task(
         finish_task_checkout(&store, &task, &pr).await?;
         // A new Task stands at `start` of its Project's workflow. A Project
         // that names none leaves the Task without one until a run names it.
-        if let (Some(exec), Some(definition)) = (
-            crate::journal::current_exec_id(),
+        if let (Some(process), Some(definition)) = (
+            crate::journal::current_process_lfid(),
             load_workflow(&project_workflow, &task.worktree)
                 .ok()
                 .flatten(),
         ) {
             store
                 .sqlite
-                .take_up_workflow(&task.id, &definition, &exec, None)
+                .take_up_workflow(&task.id, &definition, &process, None)
                 .map_err(task_error)?;
         }
         Ok(task)
@@ -1406,7 +1406,11 @@ pub(crate) fn resolve_task_agent(
     agent: Option<&str>,
     skill: Option<&crate::engine::Skill>,
 ) -> String {
-    crate::engine::exec::resolve_agent(agent, skill, &load_config_or_default(Some(worktree)))
+    crate::engine::process_prompt::resolve_agent(
+        agent,
+        skill,
+        &load_config_or_default(Some(worktree)),
+    )
 }
 
 async fn select_task_agent(
@@ -1435,25 +1439,25 @@ fn task_configuration_refusal(task: &Task, skill: Option<&crate::engine::Skill>)
     .map(|error| error.to_string())
 }
 
-pub(crate) async fn task_exec_refusal(
+pub(crate) async fn task_process_refusal(
     store: &SharedStore,
     task: &Task,
 ) -> crate::store::StoreResult<Option<String>> {
     if let Some(refusal) = task_configuration_refusal(task, None) {
         return Ok(Some(refusal));
     }
-    persisted_task_exec_refusal(store, task).await
+    persisted_task_process_refusal(store, task).await
 }
 
-async fn persisted_task_exec_refusal(
+async fn persisted_task_process_refusal(
     store: &SharedStore,
     task: &Task,
 ) -> crate::store::StoreResult<Option<String>> {
     let event = store.latest_task_event(&task.id).await?;
-    Ok(task_event_exec_refusal(event.as_ref()).map(str::to_string))
+    Ok(task_event_process_refusal(event.as_ref()).map(str::to_string))
 }
 
-pub(crate) fn task_event_exec_refusal(
+pub(crate) fn task_event_process_refusal(
     event: Option<&crate::work::task::TaskEvent>,
 ) -> Option<&str> {
     match event.map(|event| &event.kind) {
@@ -3618,7 +3622,7 @@ fn task_execution_status(repo: &Path, issue: Option<&str>) -> OpsResult<Option<T
                 None => Err(task_error("this checkout's Task was deleted; use an explicit Task identifier to read its history")),
             };
         }
-        let launch_refusal = task_exec_refusal(&store, &task)
+        let launch_refusal = task_process_refusal(&store, &task)
             .await
             .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?;
         if launch_refusal.is_none() && task_worktree_blocker(&store, &task).await?.is_none() {
@@ -3706,9 +3710,9 @@ pub fn task_end(
             .await
             .map_err(|error| task_error(format!("failed to read Task: {error}")))?
         else {
-            if !end.accept_unknown_exec.is_empty() {
+            if !end.accept_unknown_process.is_empty() {
                 return Err(task_error(
-                    "historical Exec acceptance requires a placed Task",
+                    "historical Process acceptance requires a placed Task",
                 ));
             }
             super::pm::complete_planning_task(repo, issue, note.unwrap_or("Completed")).await?;
@@ -3762,7 +3766,7 @@ async fn reach_end(
     }
     // Task history also carries placement initialization. Do not let a new
     // acceptance event hide that unfinished placement from the gate.
-    if !options.accept_unknown_exec.is_empty() {
+    if !options.accept_unknown_process.is_empty() {
         if let Some(blocker) = task_worktree_blocker(store, task).await? {
             return Err(task_error(blocker.reason));
         }
@@ -3770,7 +3774,7 @@ async fn reach_end(
     lifecycle::accept_historical_uncertainty(
         store,
         task,
-        &options.accept_unknown_exec,
+        &options.accept_unknown_process,
         note.unwrap_or("Task reached end"),
     )?;
     // The completion gate requires every active PR to be settled. Do not
@@ -4001,15 +4005,15 @@ pub(crate) async fn task_completion_gate(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<CompletionGate> {
-    let open = store.sqlite.open_execs().map_err(task_error)?;
+    let open = store.sqlite.open_processes().map_err(task_error)?;
     task_completion_gate_among(store, task, &open).await
 }
 
-/// The gate for one Task of many, against unfinished Execs read once.
+/// The gate for one Task of many, against unfinished Processes read once.
 pub(crate) async fn task_completion_gate_among(
     store: &SharedStore,
     task: &Task,
-    open: &OpenExecs,
+    open: &OpenProcesses,
 ) -> OpsResult<CompletionGate> {
     let mut gate = CompletionGate {
         satisfied: true,
@@ -4225,8 +4229,9 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             let launch_refusal = if worktree_blocker.is_some() {
                 None
             } else {
-                task_configuration_refusal(&task, None)
-                    .or_else(|| task_event_exec_refusal(latest_event.as_ref()).map(str::to_string))
+                task_configuration_refusal(&task, None).or_else(|| {
+                    task_event_process_refusal(latest_event.as_ref()).map(str::to_string)
+                })
             };
             let action_evidence = TaskActionEvidence {
                 status: work_status.clone(),
@@ -4909,7 +4914,7 @@ pub fn task_wait(issue: &str, until: TaskWaitUntil, timeout: Option<Duration>) -
 mod tests {
     use super::{
         apply_merged_task_landing, checkout_execution_boundary, lock_task_pr_mutation,
-        resolve_task_create_input, task_event_exec_refusal,
+        resolve_task_create_input, task_event_process_refusal,
     };
     use crate::child::ChildRef;
     use crate::durable::{TaskState, WorkRef, WorkStatus};
@@ -4980,10 +4985,11 @@ mod tests {
             .block_on(fixture.store.heal_task_pr_base(&pr))
             .unwrap();
 
-        let exec = crate::exec::Exec {
-            id: crate::id::ExecId::new(),
+        let process = crate::process::Process {
+            lfid: crate::id::ProcessLfid::new(),
+            pid: None,
             trace_id: crate::id::TraceId::new(),
-            parent_exec_id: None,
+            parent_process_lfid: None,
             via_agent: None,
             caller_session_id: None,
             caller_provider_generation: None,
@@ -4997,13 +5003,13 @@ mod tests {
             signal: None,
             error: None,
         };
-        fixture.store.sqlite.record_exec(&exec).unwrap();
+        fixture.store.sqlite.record_process(&process).unwrap();
         let gate = || {
             runtime
                 .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
                 .unwrap()
         };
-        let accept = |ids: &[crate::id::ExecId]| {
+        let accept = |ids: &[crate::id::ProcessLfid]| {
             super::lifecycle::accept_historical_uncertainty(
                 &fixture.store,
                 &fixture.task,
@@ -5012,9 +5018,17 @@ mod tests {
             )
         };
         assert!(!gate().satisfied);
-        assert!(accept(&[crate::id::ExecId::new()]).is_err());
-        accept(std::slice::from_ref(&exec.id)).unwrap();
-        accept(std::slice::from_ref(&exec.id)).unwrap();
+        assert!(accept(&[crate::id::ProcessLfid::new()]).is_err());
+        accept(std::slice::from_ref(&process.lfid)).unwrap();
+        // A released decision remains effective without rewriting its history.
+        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        conn.execute(
+            "UPDATE task_events SET kind_json=json_remove(json_set(kind_json, '$.exec_ids',
+             json_extract(kind_json, '$.process_lfids')), '$.process_lfids')
+             WHERE task_id=?1 AND json_extract(kind_json, '$.kind')='historical_uncertainty_accepted'",
+            [fixture.task.id.as_str()],
+        ).unwrap();
+        accept(std::slice::from_ref(&process.lfid)).unwrap();
         let events = fixture
             .store
             .sqlite
@@ -5033,7 +5047,7 @@ mod tests {
         assert!(gate()
             .blockers
             .iter()
-            .all(|reason| !reason.contains(exec.id.as_str())));
+            .all(|reason| !reason.contains(process.lfid.as_str())));
         // The PR was never published and its branch never moved: reaching
         // `end` retires it.
         assert_eq!(
@@ -5046,18 +5060,18 @@ mod tests {
             .unwrap();
         assert!(gate().satisfied);
 
-        // An exact acceptance never hides a different unfinished Exec.
-        let mut other = exec.clone();
-        other.id = crate::id::ExecId::new();
-        fixture.store.sqlite.record_exec(&other).unwrap();
+        // An exact acceptance never hides a different unfinished Process.
+        let mut other = process.clone();
+        other.lfid = crate::id::ProcessLfid::new();
+        fixture.store.sqlite.record_process(&other).unwrap();
         assert!(gate()
             .blockers
             .iter()
-            .any(|reason| reason.contains(other.id.as_str())));
+            .any(|reason| reason.contains(other.lfid.as_str())));
         other.completed_at = Some(other.started_at + 1);
         other.outcome = Some("succeeded".into());
         other.exit_code = Some(0);
-        fixture.store.sqlite.record_exec(&other).unwrap();
+        fixture.store.sqlite.record_process(&other).unwrap();
 
         // Current Session ownership blocks even after acceptance was recorded.
         let session = fixture.store.sqlite.test_session(
@@ -5067,7 +5081,7 @@ mod tests {
         fixture
             .store
             .sqlite
-            .claim_session_driver(&session.id, None, &exec.id, true)
+            .claim_session_driver(&session.id, None, &process.lfid, true)
             .unwrap();
         let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
         conn.execute(
@@ -5075,7 +5089,7 @@ mod tests {
             rusqlite::params![repo.path().to_str().unwrap(), session.id],
         )
         .unwrap();
-        assert!(accept(std::slice::from_ref(&exec.id)).is_err());
+        assert!(accept(std::slice::from_ref(&process.lfid)).is_err());
         assert!(!gate().satisfied);
         conn.execute(
             "UPDATE agent_sessions SET completed_at=2 WHERE id=?1",
@@ -5085,19 +5099,19 @@ mod tests {
         assert!(gate().satisfied);
 
         // A later receipt keeps an observed live process protected.
-        let root = ledger.home().join(crate::journal::EXEC_PROCESS_ROOT);
+        let root = ledger.home().join(crate::journal::PROCESS_RECEIPT_ROOT);
         std::fs::create_dir_all(&root).unwrap();
         let pid = std::process::id();
-        let receipt = crate::journal::ExecProcessReceipt {
+        let receipt = crate::journal::ProcessReceipt {
             schema_version: 1,
-            trace_id: exec.trace_id.to_string(),
-            exec_id: exec.id.to_string(),
+            trace_id: process.trace_id.to_string(),
+            process_lfid: process.lfid.to_string(),
             pid,
             started_at: crate::journal::process_started_at(pid).unwrap().unwrap(),
         };
-        let path = root.join(format!("{}.json", exec.id));
+        let path = root.join(format!("{}.json", process.lfid));
         std::fs::write(&path, serde_json::to_vec(&receipt).unwrap()).unwrap();
-        assert!(accept(std::slice::from_ref(&exec.id)).is_err());
+        assert!(accept(std::slice::from_ref(&process.lfid)).is_err());
         assert!(!gate().satisfied);
         std::fs::remove_file(path).unwrap();
         assert!(gate().satisfied);
@@ -5105,7 +5119,7 @@ mod tests {
             super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task)
                 .unwrap()
                 .iter()
-                .any(|reason| reason.contains(exec.id.as_str()))
+                .any(|reason| reason.contains(process.lfid.as_str()))
         );
         assert!(crate::ops::task_automation::admission_blocker(
             &fixture.store.sqlite,
@@ -5131,7 +5145,10 @@ mod tests {
                 .unwrap(),
             WorkStatus::Done
         );
-        assert_eq!(fixture.store.sqlite.exec(&exec.id).unwrap(), Some(exec));
+        assert_eq!(
+            fixture.store.sqlite.process(&process.lfid).unwrap(),
+            Some(process)
+        );
     }
 
     #[test]
@@ -5456,7 +5473,7 @@ mod tests {
             .any(|reason| reason.contains(live.as_str())));
         let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
         conn.execute(
-            "UPDATE execs SET completed_at=started_at,outcome='interrupted' WHERE completed_at IS NULL",
+            "UPDATE processes SET completed_at=started_at,outcome='interrupted' WHERE completed_at IS NULL",
             [],
         )
         .unwrap();
@@ -5464,10 +5481,11 @@ mod tests {
 
         // A reboot proves stale execution exited without settling the Flow.
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let exec = crate::exec::Exec {
-            id: crate::id::ExecId::new(),
+        let process = crate::process::Process {
+            lfid: crate::id::ProcessLfid::new(),
+            pid: None,
             trace_id: crate::id::TraceId::new(),
-            parent_exec_id: None,
+            parent_process_lfid: None,
             via_agent: None,
             caller_session_id: None,
             caller_provider_generation: None,
@@ -5481,7 +5499,7 @@ mod tests {
             signal: None,
             error: None,
         };
-        fixture.store.sqlite.record_exec(&exec).unwrap();
+        fixture.store.sqlite.record_process(&process).unwrap();
         let session = fixture
             .store
             .sqlite
@@ -5505,10 +5523,13 @@ mod tests {
         assert_eq!(unresolved.len(), 2, "{unresolved:?}");
         assert!(unresolved
             .iter()
-            .any(|reason| reason.contains(exec.id.as_str())));
+            .any(|reason| reason.contains(process.lfid.as_str())));
         assert!(unresolved.iter().any(|reason| reason.contains("stalled")));
         assert!(after_boot.is_empty(), "{after_boot:?}");
-        assert_eq!(fixture.store.sqlite.exec(&exec.id).unwrap(), Some(exec));
+        assert_eq!(
+            fixture.store.sqlite.process(&process.lfid).unwrap(),
+            Some(process)
+        );
         assert_eq!(
             fixture
                 .store
@@ -6326,14 +6347,14 @@ mod tests {
         let repo = loopflow_test_support::TestRepo::new();
         for (options, message) in [
             (
-                super::TaskExecOptions {
+                super::TaskProcessOptions {
                     name: Some("bad.name".into()),
                     ..Default::default()
                 },
                 "kebab-case",
             ),
             (
-                super::TaskExecOptions {
+                super::TaskProcessOptions {
                     directive: Some("  ".into()),
                     ..Default::default()
                 },
@@ -6356,7 +6377,7 @@ mod tests {
     #[tokio::test]
     async fn task_preparation_preserves_occupied_placement_and_resolves_base_without_creating() {
         let repo = loopflow_test_support::TestRepo::new();
-        let options = super::TaskExecOptions {
+        let options = super::TaskProcessOptions {
             name: Some("existing-task".into()),
             ..Default::default()
         };
@@ -6390,7 +6411,7 @@ mod tests {
             repo.path(),
             "Clean task",
             None,
-            &super::TaskExecOptions::default(),
+            &super::TaskProcessOptions::default(),
         )
         .await
         .unwrap();
@@ -6415,7 +6436,7 @@ mod tests {
             repo.path(),
             "Pinned base",
             None,
-            &super::TaskExecOptions::default(),
+            &super::TaskProcessOptions::default(),
         )
         .await
         .unwrap();
@@ -6459,7 +6480,7 @@ mod tests {
             repo.path(),
             "New task",
             None,
-            &super::TaskExecOptions {
+            &super::TaskProcessOptions {
                 name: Some("missing-base".into()),
                 ..Default::default()
             },
@@ -6494,7 +6515,7 @@ mod tests {
             repo.path(),
             "Child",
             None,
-            &super::TaskExecOptions {
+            &super::TaskProcessOptions {
                 name: Some("child-task".into()),
                 stack_on: Some("FIX-1".into()),
                 ..Default::default()
@@ -6591,7 +6612,7 @@ mod tests {
 
         let event = store.latest_task_event(&task.id).await.unwrap().unwrap();
         assert_eq!(event, settled);
-        assert_eq!(task_event_exec_refusal(Some(&event)), Some(blocker));
+        assert_eq!(task_event_process_refusal(Some(&event)), Some(blocker));
         assert!(matches!(
             event.kind,
             TaskEventKind::Failed {

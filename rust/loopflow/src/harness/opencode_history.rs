@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::exec::SessionDriver;
+use crate::process::SessionDriver;
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
 
@@ -54,16 +54,16 @@ impl History {
         for (request, receipt) in receipts {
             if self.requests.contains(&request) && !self.started.contains(&request) {
                 if let Some((store, session, driver)) = &self.owner {
-                    let exec = driver
-                        .exec_id
+                    let process = driver
+                        .process_lfid
                         .as_ref()
-                        .context("OpenCode request has no driving Exec")?;
+                        .context("OpenCode request has no driving Process")?;
                     store.record_session_turn_origin(
                         session,
                         thread,
                         &request,
                         driver.provider_generation,
-                        exec,
+                        process,
                     )?;
                 }
                 self.started.insert(request.clone());
@@ -277,7 +277,7 @@ pub(super) async fn post(
 mod tests {
     use super::{native_receipts, record_receipts, History};
 
-    use crate::id::ExecId;
+    use crate::id::ProcessLfid;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
@@ -288,16 +288,16 @@ mod tests {
         let path = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let input = crate::session_record::new_artifact_key();
-        let exec = ExecId::new();
+        let process = ProcessLfid::new();
         let sql = rusqlite::Connection::open(&path).unwrap();
         sql.execute(
-            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-            [exec.as_str()],
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [process.as_str()],
         )
         .unwrap();
         store.test_session("session", &input);
         let driver = store
-            .claim_session_driver("session", None, &exec, false)
+            .claim_session_driver("session", None, &process, false)
             .unwrap();
         let mut history = History::new(Some((store.clone(), "session".into(), driver.clone())));
         let request = history.request();
@@ -323,9 +323,9 @@ mod tests {
         store
             .replace_session_input(session.captured, replacement.clone())
             .unwrap();
-        let second = ExecId::new();
+        let second = ProcessLfid::new();
         sql.execute(
-            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
             [second.as_str()],
         )
         .unwrap();
@@ -350,7 +350,7 @@ mod tests {
         );
         assert_eq!(
             recovered.recorded_outcome, None,
-            "provider completion does not complete its Exec"
+            "provider completion does not complete its Process"
         );
         assert_eq!(
             store
@@ -373,6 +373,6 @@ mod tests {
                 row.kind,
                 SessionEventKind::Captured | SessionEventKind::Observed
             ))
-            .all(|row| row.exec_id.as_deref() == Some(exec.as_str())));
+            .all(|row| row.process_lfid.as_deref() == Some(process.as_str())));
     }
 }

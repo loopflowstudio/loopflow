@@ -89,13 +89,13 @@ struct DesktopHeadlessTests {
         try await eventually { model.taskWork[task.id].value != nil }
         let shown = try #require(model.taskWork[task.id].value)
         let view = TaskWorkView(model: model, task: task)
-        for id in shown.sessions.map(\.id) + shown.execs.map(\.id) {
+        for id in shown.sessions.map(\.id) + shown.processes.map(\.id) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
         }
 
-        // Any Flow exec is one line that opens to its id, its launched graph,
+        // Any Flow process is one line that opens to its id, its launched graph,
         // where it stands and every step it started.
-        let log = FlowExecLog(model: model, taskId: task.id)
+        let log = FlowProcessLog(model: model, taskId: task.id)
         let flow = try #require(shown.flows.first)
         #expect(throws: (any Error).self) {
             try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-status-\(flow.id)")
@@ -107,7 +107,7 @@ struct DesktopHeadlessTests {
         let status = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-status-\(flow.id)").text().string()
         #expect(status == "Running implement · pass 2")
         for step in detail.steps {
-            _ = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-step-\(step.execId)")
+            _ = try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-step-\(step.processLfid)")
         }
         #expect(detail.progress.execution == .running)
         #expect(detail.progress.current == 0)
@@ -216,9 +216,9 @@ struct DesktopHeadlessTests {
         }
 
         // Stopped, it holds the Task and is offered again with the other edge leaving its node.
-        let exec = "11111111-1111-4111-8111-111111111111"
+        let process = "11111111-1111-4111-8111-111111111111"
         let stopped = try view(
-            position: ["kind": "edge", "edge": 2, "exec_id": exec, "running": false], outgoing: [1, 2])
+            position: ["kind": "edge", "edge": 2, "process_lfid": process, "running": false], outgoing: [1, 2])
         let again = try stopped.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-run-2")
         #expect(try again.accessibilityValue().string() == "Stopped")
         #expect(try !again.button().isDisabled())

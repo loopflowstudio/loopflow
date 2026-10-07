@@ -46,8 +46,8 @@ extension WorkModel {
                               detail: flow.kind == .workflow ? "Workflow" : "Flow template", key: flow.name))
         }
         if let selection, selection.kind == .task, let found = task(id: selection.id) {
-            rows.append(.init(id: .flowLog(selection.id), title: "Flow execs of \(found.task.task.identifier)",
-                              detail: "Action · Open the log", key: "Flow execs"))
+            rows.append(.init(id: .flowLog(selection.id), title: "Flow processes of \(found.task.task.identifier)",
+                              detail: "Action · Open the log", key: "Flow processes"))
         }
         if let id = navigation.selectedSessionId, let session = sessions.value?.first(where: { $0.id == id }) {
             if session.titleSource != .unavailable {

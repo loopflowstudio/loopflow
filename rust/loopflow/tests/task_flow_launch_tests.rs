@@ -133,7 +133,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
                 .iter()
                 .all(|(outcome, _)| outcome.as_deref() == Some("succeeded")));
         }
-        // However the Task was named, the Flow left the same Execs.
+        // However the Task was named, the Flow left the same Processes.
         let recorded = support::recorded_flows(home.path());
         assert_eq!(recorded[0].1.len(), 1);
         assert_eq!(
@@ -381,7 +381,7 @@ fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
     assert_eq!(workflow["nodes"][0]["skill"], "research");
     assert_eq!(workflow["position"], at("findings"));
     assert_eq!(workflow["outgoing"], serde_json::json!([1]));
-    // The edge's Flow is an ordinary Flow exec; its driver chose the edge and,
+    // The edge's Flow is an ordinary Flow process; its driver chose the edge and,
     // having succeeded, wrote the arrival.
     let flows = support::recorded_flows(task.home.path());
     assert_eq!(flows.len(), 1);
@@ -395,7 +395,7 @@ fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
         ]
     );
     let history = workflow["history"].as_array().unwrap();
-    assert_eq!(history[1]["exec_id"], history[2]["exec_id"]);
+    assert_eq!(history[1]["process_lfid"], history[2]["process_lfid"]);
     assert_eq!(history[1]["actor"], "person");
     assert_eq!(history[2]["actor"], "edge");
     task.ok(&["task", "run", "INF-123"]);
@@ -472,7 +472,7 @@ fn a_landing_that_settles_later_is_recorded_by_moving_the_task() {
     assert_eq!(set["note"], "merged by hand");
     assert_eq!(set["actor"], "person");
     assert_eq!(set["session_id"], serde_json::Value::Null);
-    // One Flow exec reached the node; the failing edge was attempted three times.
+    // One Flow process reached the node; the failing edge was attempted three times.
     assert_eq!(support::recorded_flows(task.home.path()).len(), 4);
     // The Task is done; nothing runs until it is put back on its workflow.
     assert_eq!(task.state(), "done");
@@ -552,13 +552,13 @@ fn a_plain_flow_run_in_the_worktree_does_not_move_the_task() {
     assert!(error.contains("lf task run <issue> rounds"), "{error}");
 }
 
-/// The Flow execs started beneath `task_run`, by outcome, oldest first.
+/// The Flow processes started beneath `task_run`, by outcome, oldest first.
 fn attempts(home: &Path, task_run: &str) -> Vec<String> {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     let mut rows = db
         .prepare(
-            "SELECT d.outcome FROM flow_execs f JOIN execs d ON d.id=f.exec_id
-             WHERE d.parent_exec_id=?1 ORDER BY d.rowid",
+            "SELECT d.outcome FROM flow_processes f JOIN processes d ON d.lfid=f.process_lfid
+             WHERE d.parent_process_lfid=?1 ORDER BY d.rowid",
         )
         .unwrap();
     let outcomes = rows
@@ -575,7 +575,7 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
     task.ok(&["-b", "task", "run", "INF-123", "gated"]);
     let carrier = |workflow: &serde_json::Value| {
         let chose = workflow["history"].as_array().unwrap().last().unwrap();
-        chose["exec_id"].as_str().unwrap().to_string()
+        chose["process_lfid"].as_str().unwrap().to_string()
     };
     // Every attempt fails: the Task run gives up and the edge holds the Task.
     let output = task.run(&["-b", "task", "run", "INF-123", "gate"]);
@@ -584,7 +584,10 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
     let stopped = task.workflow();
     assert_eq!(stopped["position"]["edge"], 2);
     assert_eq!(stopped["position"]["running"], false);
-    assert_eq!(stopped["position"]["exec_id"], carrier(&stopped).as_str());
+    assert_eq!(
+        stopped["position"]["process_lfid"],
+        carrier(&stopped).as_str()
+    );
     assert_eq!(
         attempts(task.home.path(), &carrier(&stopped)),
         ["failed", "failed", "failed"]
@@ -620,14 +623,14 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
     );
     let workflow = task.workflow();
     assert_eq!(workflow["position"], at("accepted"));
-    // One Task run: chosen once, arrived once, three Flow execs beneath it.
+    // One Task run: chosen once, arrived once, three Flow processes beneath it.
     let kinds: Vec<_> = moves(&workflow).into_iter().map(|(kind, _)| kind).collect();
     assert_eq!(
         kinds,
         ["took_up", "chose", "arrived", "chose", "chose", "arrived"]
     );
     let arrived = workflow["history"].as_array().unwrap().last().unwrap();
-    let task_run = arrived["exec_id"].as_str().unwrap();
+    let task_run = arrived["process_lfid"].as_str().unwrap();
     assert_eq!(
         attempts(task.home.path(), task_run),
         ["failed", "failed", "succeeded"]

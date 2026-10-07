@@ -2,7 +2,7 @@
 //!
 //! Each invocation appends one line to `<Home>/perf/wt-list.jsonl`. The file is
 //! written beside the store, never through it: under SQLite contention the
-//! Exec row is the record that goes missing, and those are the slowest runs.
+//! Process row is the record that goes missing, and those are the slowest runs.
 //! A sample holds durations, counts, the repository root and the `lf` version;
 //! no arguments, branch names, output or credentials.
 use std::collections::BTreeMap;
@@ -30,14 +30,14 @@ pub struct Sample {
     pub json: bool,
     pub sync: bool,
     pub outcome: Outcome,
-    /// Process start to process end, including both Exec receipts.
+    /// Process start to process end, including both Process receipts.
     pub total_ms: u64,
-    /// Process start until the listing began: launch, routing, Exec admission
+    /// Process start until the listing began: launch, routing, Process admission
     /// and the start receipt.
     pub startup_ms: u64,
     /// Absent when the command ended before the listing was read.
     pub listing: Option<ListingSample>,
-    /// Absent when the process was interrupted or had no Exec.
+    /// Absent when the process was interrupted or had no Process.
     pub receipts: Option<ReceiptSample>,
 }
 
@@ -61,7 +61,7 @@ pub struct ListingSample {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiptSample {
-    /// Time spent writing the start and finish Exec receipts to SQLite.
+    /// Time spent writing the start and finish Process receipts to SQLite.
     pub wait_ms: u64,
     pub unrecorded: u32,
 }

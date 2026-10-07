@@ -4,7 +4,7 @@
 //! it. Each step is an ordinary command that knows nothing of its Flow; whether
 //! the Flow or a step is running, finished or failed is read from their Processes.
 use crate::engine::flow_graph::FlowGraph;
-use crate::id::ProcessId;
+use crate::id::ProcessLfid;
 use crate::process::Process;
 
 /// A step's agent sees which Flow started it: the driver Process's id. Steps of
@@ -32,8 +32,8 @@ pub(crate) struct FlowProcess {
 }
 
 impl FlowProcess {
-    pub(crate) fn id(&self) -> &ProcessId {
-        &self.driver.id
+    pub(crate) fn id(&self) -> &ProcessLfid {
+        &self.driver.lfid
     }
 
     pub(crate) fn latest(&self) -> Option<&FlowProcessStep> {
@@ -75,7 +75,7 @@ impl FlowProcess {
                 .steps
                 .iter()
                 .map(|step| crate::durable::FlowStepProcess {
-                    process_id: step.process.id.clone(),
+                    process_lfid: step.process.lfid.clone(),
                     label: self.label(step),
                     key: step.key,
                     iterations: step.iterations.clone(),

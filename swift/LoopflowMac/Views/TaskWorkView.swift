@@ -271,8 +271,8 @@ struct FlowRunView: View {
                             .frame(minWidth: 52, alignment: .trailing)
                     }
                 }
-                .help(step.processId)
-                .accessibilityIdentifier("flow-run-step-\(step.processId)")
+                .help(step.processLfid)
+                .accessibilityIdentifier("flow-run-step-\(step.processLfid)")
             }
         } else {
             Text("Reading Flow…")

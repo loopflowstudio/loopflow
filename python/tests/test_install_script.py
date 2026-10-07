@@ -21,7 +21,7 @@ install = importlib.util.module_from_spec(spec)
 sys.path.insert(0, str(SCRIPTS_DIR))
 try:
     sys.modules[MODULE_NAME] = install
-    spec.loader.process_module(install)
+    spec.loader.exec_module(install)
 finally:
     sys.path.pop(0)
 

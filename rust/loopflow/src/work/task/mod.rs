@@ -665,7 +665,7 @@ pub enum TaskEventKind {
     },
     HistoricalUncertaintyAccepted {
         #[serde(alias = "exec_ids")] // Append-only decisions keep their original bytes.
-        process_ids: Vec<crate::id::ProcessId>,
+        process_lfids: Vec<crate::id::ProcessLfid>,
         reason: String,
     },
     FlowFinished {

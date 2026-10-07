@@ -751,7 +751,7 @@ async fn connect_live_codex(
     if thread != provider.provider_session_id {
         bail!("Recorded conversation differs from the live provider thread");
     }
-    let process = crate::journal::current_process_id()
+    let process = crate::journal::current_process_lfid()
         .ok_or_else(|| anyhow!("Connecting requires the current lf Process"))?;
     let driver =
         match store

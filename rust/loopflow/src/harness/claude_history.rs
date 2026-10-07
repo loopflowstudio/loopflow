@@ -41,7 +41,7 @@ impl History {
                 return Ok(());
             }
             let process = driver
-                .process_id
+                .process_lfid
                 .as_ref()
                 .context("Claude request has no driving Process")?;
             store.record_session_turn_origin(
@@ -108,7 +108,7 @@ impl History {
 mod tests {
     use super::History;
 
-    use crate::id::ProcessId;
+    use crate::id::ProcessLfid;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
@@ -120,9 +120,9 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
-        let process = ProcessId::new();
+        let process = ProcessLfid::new();
         conn.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
             [&process],
         )
         .unwrap();

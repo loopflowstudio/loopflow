@@ -21,7 +21,7 @@ release_loopflow = importlib.util.module_from_spec(spec)
 sys.path.insert(0, str(SCRIPTS_DIR))
 try:
     sys.modules[MODULE_NAME] = release_loopflow
-    spec.loader.process_module(release_loopflow)
+    spec.loader.exec_module(release_loopflow)
 finally:
     sys.path.pop(0)
 

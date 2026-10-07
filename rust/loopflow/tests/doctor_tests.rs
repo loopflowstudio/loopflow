@@ -35,7 +35,7 @@ fn run_lf(home: &Path, args: &[&str]) -> Output {
         .env("GIT_WORK_TREE", home)
         .env("GIT_ALLOW_PROTOCOL", "file")
         .env_remove("LF_TRACE_ID")
-        .env_remove("LF_PROCESS_ID")
+        .env_remove("LF_PROCESS_LFID")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_CAPTURE_KEY")
         .output()
@@ -56,9 +56,10 @@ fn continuity_check(output: &Output) -> serde_json::Value {
 fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
     store
         .record_process(&Process {
-            id: loopflow::id::ProcessId::new(),
+            lfid: loopflow::id::ProcessLfid::new(),
+            pid: None,
             trace_id: loopflow::id::TraceId::new(),
-            parent_process_id: None,
+            parent_process_lfid: None,
             via_agent: Some(false),
             caller_session_id: None,
             caller_provider_generation: None,
@@ -284,7 +285,7 @@ fn doctor_accepts_machine_commands_without_a_repository() {
         OffsetDateTime::now_utc().unix_timestamp(),
     );
     let mut event = store.processes_since(0).unwrap().pop().unwrap();
-    event.id = loopflow::id::ProcessId::new();
+    event.lfid = loopflow::id::ProcessLfid::new();
     event.repo = None;
     event.command = Some("lf help".to_string());
     store.record_process(&event).unwrap();

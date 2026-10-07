@@ -55,7 +55,7 @@ impl History {
             if self.requests.contains(&request) && !self.started.contains(&request) {
                 if let Some((store, session, driver)) = &self.owner {
                     let process = driver
-                        .process_id
+                        .process_lfid
                         .as_ref()
                         .context("OpenCode request has no driving Process")?;
                     store.record_session_turn_origin(
@@ -277,7 +277,7 @@ pub(super) async fn post(
 mod tests {
     use super::{native_receipts, record_receipts, History};
 
-    use crate::id::ProcessId;
+    use crate::id::ProcessLfid;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
 
@@ -287,10 +287,10 @@ mod tests {
         let path = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         let input = crate::session_record::new_artifact_key();
-        let process = ProcessId::new();
+        let process = ProcessLfid::new();
         let sql = rusqlite::Connection::open(&path).unwrap();
         sql.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
             [process.as_str()],
         )
         .unwrap();
@@ -322,9 +322,9 @@ mod tests {
         store
             .replace_session_input(session.captured, replacement.clone())
             .unwrap();
-        let second = ProcessId::new();
+        let second = ProcessLfid::new();
         sql.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
             [second.as_str()],
         )
         .unwrap();
@@ -369,6 +369,6 @@ mod tests {
         assert!(rows
             .iter()
             .filter(|row| row.kind != crate::session::SessionEventKind::Captured)
-            .all(|row| row.process_id.as_deref() == Some(process.as_str())));
+            .all(|row| row.process_lfid.as_deref() == Some(process.as_str())));
     }
 }

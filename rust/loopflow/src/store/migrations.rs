@@ -1395,7 +1395,12 @@ mod tests {
             .unwrap();
         conn.execute_batch(&current_draft_sql("process_names"))
             .unwrap();
-        for ((_, current), expected) in tables.iter().zip(before) {
+        for ((_, current), mut expected) in tables.iter().zip(before) {
+            if *current == "processes" {
+                for row in &mut expected {
+                    row.push(rusqlite::types::Value::Null);
+                }
+            }
             assert_eq!(rows(current), expected, "{current}");
         }
         assert!(rows("pragma_foreign_key_check").is_empty());
@@ -1406,14 +1411,14 @@ mod tests {
         assert!(conn
             .execute("UPDATE flow_process_steps SET node=8", [])
             .is_err());
-        assert!(conn.execute("INSERT INTO flow_process_steps(flow_process_id,process_id,node,iterations) VALUES('parent','parent',0,'[]')", []).is_err());
+        assert!(conn.execute("INSERT INTO flow_process_steps(flow_process_lfid,process_lfid,node,iterations) VALUES('parent','parent',0,'[]')", []).is_err());
         conn.execute("UPDATE tasks SET started_at=started_at WHERE id='t'", [])
             .unwrap();
         assert!(conn
             .execute("UPDATE tasks SET started_at=started_at+1 WHERE id='t'", [])
             .is_err());
         conn.execute(
-            "UPDATE processes SET completed_at=4,outcome='succeeded',exit_code=0 WHERE id='parent'",
+            "UPDATE processes SET completed_at=4,outcome='succeeded',exit_code=0 WHERE lfid='parent'",
             [],
         )
         .unwrap();

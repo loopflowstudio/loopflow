@@ -21,7 +21,7 @@ _spec = importlib.util.spec_from_file_location("resource_envelope", SCRIPT)
 assert _spec is not None and _spec.loader is not None
 resources = importlib.util.module_from_spec(_spec)
 sys.modules["resource_envelope"] = resources
-_spec.loader.process_module(resources)
+_spec.loader.exec_module(resources)
 
 
 def _policy(**overrides) -> "resources.ResourcePolicy":

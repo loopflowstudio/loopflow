@@ -277,7 +277,7 @@ pub(crate) fn resume_session_with_env(
     // A native resume has no CaptureHandle, but still owns an exact driver.
     // Remote connections already claimed their surviving engine's driver.
     let owned = if remote.is_none() {
-        if let Some(process) = crate::journal::current_process_id() {
+        if let Some(process) = crate::journal::current_process_lfid() {
             let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
             let session = store
                 .session_for_artifact(artifact_key)?
@@ -650,7 +650,7 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
     let Some(input) = environment.get(crate::session_record::CAPTURE_KEY_ENV) else {
         return Ok(());
     };
-    let Some(process) = crate::journal::current_process_id() else {
+    let Some(process) = crate::journal::current_process_lfid() else {
         return Ok(());
     };
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;

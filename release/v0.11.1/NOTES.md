@@ -21,7 +21,7 @@ A Session used to re-derive its execution context from whichever process happene
 
 - **Execution context is pinned at birth** — `lf_bin`, `db_path`, and `lf_home` are recorded on the Session and reproduced on every relaunch. A Session created before this migration has no pinned context and none can be invented for it, so it refuses to launch and says why rather than guessing (#882).
 - **Terminal intent is durable** — `abandon_requested_at` and `abandon_reason` are written the moment the Abandon command is queued. A supervisor reading the Session sees the abandonment, not a stale `Running` (#882).
-- **tmux-launched sessions land on the right store** — the session shell command clears inherited `LF_RUN_ID`, `LF_PROCESS_ID`, `LF_HOME`, and `LF_DB_PATH`, and explicit env wins over inherited (#882).
+- **tmux-launched sessions land on the right store** — the session shell command clears inherited `LF_RUN_ID`, `LF_PROCESS_LFID`, `LF_HOME`, and `LF_DB_PATH`, and explicit env wins over inherited (#882).
 
 ## `lf status` delivers what it promised
 

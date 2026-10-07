@@ -1589,9 +1589,9 @@ mod tests {
                 .unwrap();
         store.test_session("saved", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
-        let process = crate::id::ProcessId::new();
+        let process = crate::id::ProcessLfid::new();
         sql.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
             [process.as_str()],
         )
         .unwrap();

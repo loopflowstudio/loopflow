@@ -470,14 +470,14 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
 pub(super) fn accept_historical_uncertainty(
     store: &SharedStore,
     task: &Task,
-    process_ids: &[crate::id::ProcessId],
+    process_lfids: &[crate::id::ProcessLfid],
     reason: &str,
 ) -> OpsResult<()> {
-    if process_ids.is_empty() {
+    if process_lfids.is_empty() {
         return Ok(());
     }
     let work = store.sqlite.task_work(&task.id).map_err(task_error)?;
-    for id in process_ids {
+    for id in process_lfids {
         if !historical_unknown_process(store, &work, id)? {
             return Err(task_error(format!(
                 "Process {id} is not an unowned historical unknown in Task {}; retained all execution protection",
@@ -489,7 +489,7 @@ pub(super) fn accept_historical_uncertainty(
         .sqlite
         .task_accepted_unknown_processes(&task.id)
         .map_err(task_error)?;
-    let mut new_ids: Vec<_> = process_ids
+    let mut new_ids: Vec<_> = process_lfids
         .iter()
         .filter(|id| !accepted.contains(*id))
         .cloned()
@@ -502,7 +502,7 @@ pub(super) fn accept_historical_uncertainty(
             .append_task_event(
                 &task.id,
                 &crate::work::task::TaskEventKind::HistoricalUncertaintyAccepted {
-                    process_ids: new_ids,
+                    process_lfids: new_ids,
                     reason: reason.to_string(),
                 },
             )
@@ -514,20 +514,20 @@ pub(super) fn accept_historical_uncertainty(
 fn historical_unknown_process(
     store: &SharedStore,
     work: &crate::task_work::TaskWork,
-    id: &crate::id::ProcessId,
+    id: &crate::id::ProcessLfid,
 ) -> OpsResult<bool> {
-    let Some(process) = work.processes.iter().find(|process| &process.id == id) else {
+    let Some(process) = work.processes.iter().find(|process| &process.lfid == id) else {
         return Ok(false);
     };
     // Any process receipt disqualifies acceptance, regardless of liveness.
     // Without a receipt, completion or a previous boot already proves exit.
-    if crate::journal::current_process_id().as_ref() == Some(id)
+    if crate::journal::current_process_lfid().as_ref() == Some(id)
         || process.completed_at.is_some()
         || crate::journal::began_before_boot(process.started_at)
         || crate::journal::read_process_receipts_at(&crate::store::lf_home_dir())
             .map_err(task_error)?
             .iter()
-            .any(|receipt| receipt.process_id == id.as_str())
+            .any(|receipt| receipt.process_lfid == id.as_str())
     {
         return Ok(false);
     }
@@ -551,7 +551,7 @@ fn historical_unknown_process(
             .session_driver(&session.id)
             .map_err(task_error)?
         {
-            if driver.process_id.as_ref() == Some(id) || &driver.provider_process_id == id {
+            if driver.process_lfid.as_ref() == Some(id) || &driver.provider_process_lfid == id {
                 return Ok(false);
             }
         }
@@ -566,7 +566,7 @@ fn historical_unknown_process(
             .flow_process(&flow.summary.id)
             .map_err(task_error)?
             .is_some_and(|(flow, _)| {
-                &flow.driver.id == id || flow.steps.iter().any(|step| &step.process.id == id)
+                &flow.driver.lfid == id || flow.steps.iter().any(|step| &step.process.lfid == id)
             })
         {
             return Ok(false);
@@ -596,7 +596,7 @@ pub(super) fn completion_work_blockers(
         }
     }
     work.processes
-        .retain(|process| !accepted.contains(&process.id));
+        .retain(|process| !accepted.contains(&process.lfid));
     execution_blockers(store, &work)
 }
 
@@ -629,13 +629,13 @@ fn execution_blockers(
     // The caller cannot outlive the processes that launched it, nor wait on
     // the Flow whose step it is. Lineage exempts waiting, not authority.
     let mut lineage = HashSet::new();
-    let mut next = crate::journal::current_process_id();
+    let mut next = crate::journal::current_process_lfid();
     while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
         next = store
             .sqlite
             .process(&id)
             .map_err(task_error)?
-            .and_then(|process| process.parent_process_id);
+            .and_then(|process| process.parent_process_lfid);
     }
     // A Flow is its driver and step Processes; the loop over Processes below judges
     // them. Sessions are judged here on their own evidence.
@@ -666,15 +666,15 @@ fn execution_blockers(
         .iter()
         .filter(|process| process.completed_at.is_none())
     {
-        if lineage.contains(&process.id) {
+        if lineage.contains(&process.lfid) {
             continue;
         }
-        if crate::journal::process_evidence(&store.sqlite, &process.id)
+        if crate::journal::process_evidence(&store.sqlite, &process.lfid)
             != crate::journal::ProcessIdentityEvidence::Dead
         {
             blockers.push(format!(
                 "Process {} has live or unresolved execution; inspect `lf monitor show {}`",
-                process.id, process.id
+                process.lfid, process.lfid
             ));
         }
     }

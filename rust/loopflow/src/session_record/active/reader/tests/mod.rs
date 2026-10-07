@@ -314,7 +314,7 @@ async fn discovery_cost_matrix() {
     let process = serde_json::to_vec(&crate::journal::ProcessReceipt {
         schema_version: 1,
         trace_id: crate::id::TraceId::new().to_string(),
-        process_id: crate::id::ProcessId::new().to_string(),
+        process_lfid: crate::id::ProcessLfid::new().to_string(),
         pid: stale.pid,
         started_at: 0,
     })

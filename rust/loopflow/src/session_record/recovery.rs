@@ -19,7 +19,7 @@ pub(super) fn prepare_after_restart(
     session: &str,
     expected: Option<&SessionDriver>,
 ) -> StoreResult<bool> {
-    let Some(expected) = expected.filter(|driver| driver.process_id.is_none()) else {
+    let Some(expected) = expected.filter(|driver| driver.process_lfid.is_none()) else {
         return Ok(false);
     };
     let Some(boot) = host_boot() else {
@@ -85,7 +85,7 @@ fn host_boot() -> Option<HostBoot> {
 #[cfg(test)]
 mod tests {
     use super::HostBoot;
-    use crate::id::ProcessId;
+    use crate::id::ProcessLfid;
     use crate::store::sqlite::SqliteStore;
 
     #[test]
@@ -188,14 +188,14 @@ mod tests {
         let input = crate::session_record::new_artifact_key();
         store.test_session("stranded", &input);
         let sql = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let process = ProcessId::new();
+        let process = ProcessLfid::new();
         sql.execute(
-            "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome,error)
+            "INSERT INTO processes(lfid,trace_id,started_at,completed_at,outcome,error)
              VALUES(?1,'00000000-0000-0000-0000-000000000001',1,2,'failed','Saved conversation thread differs; reconnect with its recorded provider')",
             [process.as_str()],
         ).unwrap();
         sql.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,process_id,payload)
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,process_lfid,payload)
             VALUES('stranded','captured','legacy-input',1,?1,'{}')",
             [process.as_str()],
         )
@@ -236,7 +236,7 @@ mod tests {
         let witness = serde_json::json!({
             "type": "recovery_boot", "host": boot,
             "provider_generation": released.provider_generation,
-            "provider_exec_id": released.provider_process_id,
+            "provider_exec_id": released.provider_process_lfid,
             "previous": null,
         });
         sql.execute(
@@ -311,9 +311,9 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         store.test_session("engine", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let process = ProcessId::new();
+        let process = ProcessLfid::new();
         sql.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'00000000-0000-0000-0000-000000000001',1)",
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'00000000-0000-0000-0000-000000000001',1)",
             [process.as_str()],
         )
         .unwrap();

@@ -816,8 +816,8 @@ pub enum TaskCommand {
         #[arg(long)]
         force: bool,
         /// Accept one historical Process's unknown outcome when reaching `end`; retain its checkout
-        #[arg(long, value_name = "PROCESS_ID")]
-        accept_unknown_process: Vec<crate::id::ProcessId>,
+        #[arg(long, value_name = "PROCESS_LFID")]
+        accept_unknown_process: Vec<crate::id::ProcessLfid>,
     },
     /// File a Task in the current chapter
     Create {

@@ -3,14 +3,15 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::TaskId;
-use crate::id::{ProcessId, TraceId, WaveId};
+use crate::id::{ProcessLfid, TraceId, WaveId};
 
 /// One recorded lf process. Unknown historical caller and exit evidence stays absent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Process {
-    pub id: ProcessId,
+    pub lfid: ProcessLfid,
+    pub pid: Option<u32>,
     pub trace_id: TraceId,
-    pub parent_process_id: Option<ProcessId>,
+    pub parent_process_lfid: Option<ProcessLfid>,
     pub via_agent: Option<bool>,
     pub caller_session_id: Option<String>,
     pub caller_provider_generation: Option<i64>,
@@ -29,9 +30,9 @@ pub struct Process {
 /// Contains searches are literal; command case folding follows SQLite lower().
 #[derive(Debug, Clone, Default)]
 pub struct ProcessFilter {
-    pub id: Option<ProcessId>,
+    pub lfid: Option<ProcessLfid>,
     pub repo: Option<String>,
-    pub parent_process_id: Option<ProcessId>,
+    pub parent_process_lfid: Option<ProcessLfid>,
     pub caller_session_id: Option<String>,
     pub command_contains: Option<String>,
     pub identity_contains: Option<String>,
@@ -57,13 +58,13 @@ pub enum ProcessWorkFilter {
     Wave(WaveId),
 }
 
-/// Exclusive continuation in started_at DESC, id ASC order. Reuse the same filters.
+/// Exclusive continuation in started_at DESC, lfid ASC order. Reuse the same filters.
 /// A cursor is not a cross-request snapshot: late observations or changed outcomes may
 /// change membership. Refresh from the first page to observe those changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessCursor {
     pub started_at: i64,
-    pub id: ProcessId,
+    pub lfid: ProcessLfid,
 }
 
 /// At most the requested number of command rows; no Session or Flow payloads.
@@ -97,16 +98,16 @@ pub struct AgentCaller {
     pub session_id: String,
     pub provider_generation: i64,
     #[serde(rename = "origin_exec_id")] // Retained provider environments use this format.
-    pub origin_process_id: ProcessId,
+    pub origin_process_lfid: ProcessLfid,
 }
 
 /// Separate fences: reconnecting a driver does not replace its live provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionDriver {
-    pub process_id: Option<ProcessId>,
+    pub process_lfid: Option<ProcessLfid>,
     pub generation: i64,
     pub provider_generation: i64,
-    pub provider_process_id: ProcessId,
+    pub provider_process_lfid: ProcessLfid,
 }
 
 impl SessionDriver {
@@ -114,7 +115,7 @@ impl SessionDriver {
         AgentCaller {
             session_id,
             provider_generation: self.provider_generation,
-            origin_process_id: self.provider_process_id.clone(),
+            origin_process_lfid: self.provider_process_lfid.clone(),
         }
     }
 }
@@ -125,10 +126,10 @@ pub(crate) struct SessionProcessObservation {
     pub id: String,
     pub title: String,
     pub work: Option<crate::durable::WorkRef>,
-    pub driver_process_id: Option<ProcessId>,
+    pub driver_process_lfid: Option<ProcessLfid>,
     pub driver_trace_id: Option<String>,
     pub driver_generation: i64,
-    pub provider_process_id: Option<ProcessId>,
+    pub provider_process_lfid: Option<ProcessLfid>,
     pub provider_pid: Option<u32>,
     pub provider_started_at: Option<i64>,
 }

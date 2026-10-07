@@ -183,6 +183,9 @@ An open conversation keeps the instructions it launched with; `replace` it
 after an upgrade.
 
 Monitor keeps live processes, recorded outcomes and missing observations distinct.
+A process has a durable `lfid` and an optional Unix `pid`. Inspect by LFID; PIDs
+can be reused. `parent_process_lfid` names the recorded parent, and historical
+rows without PID evidence keep `pid: null`.
 Its overview explains each item's state and next action. A mechanical Process has
 no provider conclusion. JSON reads emit one document; the active watch emits
 newline-delimited snapshots. Progress and errors go to stderr.
@@ -213,7 +216,7 @@ for the recorded branch remain unresolved. `lf ci watch`
 starts a ci-fix when a recorded landing fails its required checks.
 
 ```bash
-lf task move EXP-12 end --accept-unknown-process PROCESS_ID --reason 'Accepted historical uncertainty; delivery verified'
+lf task move EXP-12 end --accept-unknown-process PROCESS_LFID --reason 'Accepted historical uncertainty; delivery verified'
 ```
 
 Explicit acceptance records the named Process's unknown outcome in Task history

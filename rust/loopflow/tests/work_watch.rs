@@ -466,7 +466,7 @@ fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
 
     // An Process can change a planning condition, so planning is read; nothing
     // displayed changed, so nothing is sent.
-    conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome) VALUES('process_00000000000000000000000000000001','trace_00000000000000000000000000000001','/elsewhere',1,2,'succeeded')", []).unwrap();
+    conn.execute("INSERT INTO processes(lfid,trace_id,cwd,started_at,completed_at,outcome) VALUES('process_00000000000000000000000000000001','trace_00000000000000000000000000000001','/elsewhere',1,2,'succeeded')", []).unwrap();
     assert!(watch
         .parts(Duration::from_millis(1500))
         .iter()

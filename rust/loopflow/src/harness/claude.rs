@@ -629,9 +629,9 @@ mod tests {
         std::env::set_var("LF_HOME", home.path());
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
         let conn = rusqlite::Connection::open(&database).unwrap();
-        let process = crate::id::ProcessId::new();
+        let process = crate::id::ProcessLfid::new();
         conn.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'trace',1)",
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'trace',1)",
             [&process],
         )
         .unwrap();

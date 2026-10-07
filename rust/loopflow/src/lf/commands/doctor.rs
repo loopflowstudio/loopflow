@@ -615,12 +615,12 @@ fn check_identity(events: &[Process]) -> Check {
 fn check_lineage(events: &[Process]) -> Check {
     let processes: HashMap<&str, &str> = events
         .iter()
-        .map(|event| (event.id.as_str(), event.trace_id.as_str()))
+        .map(|event| (event.lfid.as_str(), event.trace_id.as_str()))
         .collect();
     let dangling: HashSet<&str> = events
         .iter()
         .filter_map(|event| {
-            let parent = event.parent_process_id.as_ref()?.as_str();
+            let parent = event.parent_process_lfid.as_ref()?.as_str();
             (processes.get(parent).copied() != Some(event.trace_id.as_str())).then_some(parent)
         })
         .collect();
@@ -721,9 +721,10 @@ mod tests {
 
     fn row(ts: i64, event: &str) -> Process {
         Process {
-            id: crate::id::ProcessId::new(),
+            lfid: crate::id::ProcessLfid::new(),
+            pid: None,
             trace_id: crate::id::TraceId::new(),
-            parent_process_id: None,
+            parent_process_lfid: None,
             via_agent: Some(false),
             caller_session_id: None,
             caller_provider_generation: None,

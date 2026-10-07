@@ -250,7 +250,7 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
     assert json.loads((home / "tool-result.json").read_text())["code"] == 0
     with sqlite3.connect(database) as db:
         parents = db.execute(
-            "SELECT e.parent_process_id,s.provider_process_id FROM processes e "
+            "SELECT e.parent_process_lfid,s.provider_process_lfid FROM processes e "
             "JOIN agent_sessions s ON s.id=e.caller_session_id"
         ).fetchall()
         assert parents and all(parent == owner for parent, owner in parents)

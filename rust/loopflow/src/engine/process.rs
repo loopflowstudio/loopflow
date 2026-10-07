@@ -248,7 +248,7 @@ fn session_environment(
 ) -> Vec<(String, String)> {
     let inherited_context = [
         "LF_TRACE_ID",
-        "LF_PROCESS_ID",
+        "LF_PROCESS_LFID",
         crate::lf::WORK_DECLARATION_ENV,
     ]
     .into_iter()
@@ -366,7 +366,7 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     "LF_HUMAN_SESSION_RUN",
     "LF_REVIEW_RUN_RESERVATION",
     crate::journal::LF_TRACE_ID_ENV,
-    crate::journal::LF_PROCESS_ID_ENV,
+    crate::journal::LF_PROCESS_LFID_ENV,
     crate::work::wave::context::WAVE_ID_ENV,
     crate::session_record::CAPTURE_KEY_ENV,
     crate::process::AGENT_CALLER_ENV,
@@ -653,7 +653,7 @@ mod tests {
             &argv,
             &[
                 ("LF_TRACE_ID", "run-1"),
-                ("LF_PROCESS_ID", "process-1"),
+                ("LF_PROCESS_LFID", "process-1"),
                 ("LF_HOME", "/tmp/lf"),
             ],
         );
@@ -661,7 +661,7 @@ mod tests {
         assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.ends_with(
-            "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
+            "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_LFID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
         ));
     }
 }

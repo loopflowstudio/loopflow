@@ -48,7 +48,7 @@ pub(crate) struct GitOperationOwner {
     // Released sequencer receipts retain these field names on disk.
     #[serde(rename = "run_id")]
     trace_id: Option<String>,
-    process_id: Option<String>,
+    process_lfid: Option<String>,
     pub(crate) worktree: PathBuf,
     pub(crate) branch: String,
     pub(crate) head: String,
@@ -226,7 +226,7 @@ fn adopt_operation(
     owner.id = GitOperationId::new();
     owner.root_pid = std::process::id();
     owner.trace_id = std::env::var(crate::journal::LF_TRACE_ID_ENV).ok();
-    owner.process_id = std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok();
+    owner.process_lfid = std::env::var(crate::journal::LF_PROCESS_LFID_ENV).ok();
     write_json(&mut file, &owner)?;
     Ok(OperationAuthorization::Adopted(SyncOperation {
         file,
@@ -240,7 +240,7 @@ fn new_owner(worktree: &Path, target_ref: &str) -> OpsResult<GitOperationOwner> 
         id: GitOperationId::new(),
         root_pid: std::process::id(),
         trace_id: std::env::var(crate::journal::LF_TRACE_ID_ENV).ok(),
-        process_id: std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok(),
+        process_lfid: std::env::var(crate::journal::LF_PROCESS_LFID_ENV).ok(),
         worktree: canonical(worktree),
         branch: current_branch(worktree)?.unwrap_or_else(|| "HEAD".to_string()),
         head: rev_parse(worktree, "HEAD")?,

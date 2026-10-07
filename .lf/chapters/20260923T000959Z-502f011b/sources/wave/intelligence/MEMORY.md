@@ -7,9 +7,9 @@ context, its launch situation, execution, and outcome.
 
 ## The ledger contract (post-057, the branch that made `run_events` an API)
 
-- **`run_id` is the trace; `process_id` is the span.** A nested `lf` inherits
-  `LF_RUN_ID` (by design) but never inherits `LF_PROCESS_ID` — it reads the
-  parent's value as its `parent_process_id`, then overwrites the variable with
+- **`run_id` is the trace; `process_lfid` is the span.** A nested `lf` inherits
+  `LF_RUN_ID` (by design) but never inherits `LF_PROCESS_LFID` — it reads the
+  parent's value as its `parent_process_lfid`, then overwrites the variable with
   its own freshly minted id. Before this, 134 run_ids carried more than one
   command (one carried nine) and `lf runs` spliced two processes into one row:
   label from the first event, cost from the last terminal row.
@@ -22,7 +22,7 @@ context, its launch situation, execution, and outcome.
 - **`repo` is the absolute main-repo root**, never a basename. The old
   `.file_name()` derivation made 888 of 898 values temp roots.
 - **Every usage field is cumulative to that point in the process.** A span's own
-  figure is the diff against the previous boundary row in the same `process_id`;
+  figure is the diff against the previous boundary row in the same `process_lfid`;
   the terminal row is the process total. One rule, no per-field exceptions —
   cost was the exception (`=` where tokens used `+=`) and it silently
   undercounted 28 multi-skill runs.
@@ -32,13 +32,13 @@ context, its launch situation, execution, and outcome.
   that follows reports zero of its own rather than counting it twice.
 - **057 truncated the table.** Pre-contract rows could not be attributed to a
   process, their cost was undercounted, and their repo was a basename. Carrying
-  them would have forced a nullable `process_id`, a legacy branch in every
-  reader, and a `lf doctor` that could never go green. `process_id` is
+  them would have forced a nullable `process_lfid`, a legacy branch in every
+  reader, and a `lf doctor` that could never go green. `process_lfid` is
   `NOT NULL`; there is no legacy path anywhere. The per-repo file journals
   (`.lf/journal/runs/*/events.jsonl`) remain the durable per-repo record.
 - **`SpanDto` is boundary-shaped, not process-shaped.** It carries `repo`,
   `wave`, `flow`, `skill`; `TraceSpan`'s id is composite, because one process
-  contributes several boundary rows and `process_id` alone no longer identifies
+  contributes several boundary rows and `process_lfid` alone no longer identifies
   one. (This supersedes the earlier "one SpanDto per process" assumption, which
   could not coexist with `own_spend` diffing boundaries inside a process.)
 - **`lf doctor` runs daily**, via `.lf/flows/telemetry-daily.yaml` wired into
@@ -245,7 +245,7 @@ Stale-binary check: `strings "$D/Loopflow" | grep -c "Tokens by skill"`.
 ## Glossary
 
 - **trace** — a `run_id`. The whole tree, stable across nested `lf`.
-- **span** — a `process_id`. One process, minted once, never inherited.
+- **span** — a `process_lfid`. One process, minted once, never inherited.
 - **boundary** — one usage-bearing row inside a span (a skill frame, or the
   terminal run row). Readings are cumulative; `own_spend` diffs them.
 - **Wave memory** — the committed `MEMORY.md` files selected for a Run's
@@ -259,7 +259,7 @@ Wave-memory resolution lives in `wave/memory.rs`; the read-only CLI is
 server.
 
 Telemetry: writer in `journal/mod.rs` (`RunContext`, `ledger_insert`,
-`LF_PROCESS_ID_ENV`); storage in `lfdb/` (migrations 055–058); readers in
+`LF_PROCESS_LFID_ENV`); storage in `lfdb/` (migrations 055–058); readers in
 `lf/commands/{runs,usage,tokens,doctor}.rs`, with `own_spend` in `runs.rs`;
 Swift consumer in `swift/Loopflow/Services/RegistryQuery.swift` and
 `swift/LoopflowMac/Views/TelemetryDashboardView.swift`.

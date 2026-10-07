@@ -8,7 +8,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::durable::{FlowFilter, FlowInventoryEntry, FlowPage, TaskId};
 use crate::engine::flow_graph::FlowGraph;
-use crate::id::{ProcessId, WaveId};
+use crate::id::{ProcessLfid, WaveId};
 use crate::ops::flow_run::{FlowProcess, FlowProcessStep};
 use crate::session::{FlowSummary, FlowSummaryState};
 use crate::store::{StoreError, StoreResult};
@@ -32,30 +32,30 @@ pub(super) fn flows_in(
         .expect("Process select ends with its table");
     let drivers = conn
         .prepare(&format!(
-            "{columns},f.flow,f.graph FROM flow_processes f JOIN processes e ON e.id=f.process_id
+            "{columns},f.flow,f.graph FROM flow_processes f JOIN processes e ON e.lfid=f.process_lfid
              WHERE ({scope}) ORDER BY e.rowid"
         ))?
         .query_map(values, |row| {
             Ok((
                 read_process(row)?,
-                row.get::<_, String>(15)?,
-                row.get::<_, String>(16)?,
+                row.get::<_, String>("flow")?,
+                row.get::<_, String>("graph")?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut steps = conn.prepare(&format!(
-        "{columns},fs.node,fs.iterations FROM flow_process_steps fs JOIN processes e ON e.id=fs.process_id
-         WHERE fs.flow_process_id=?1 ORDER BY fs.seq"
+        "{columns},fs.node,fs.iterations FROM flow_process_steps fs JOIN processes e ON e.lfid=fs.process_lfid
+         WHERE fs.flow_process_lfid=?1 ORDER BY fs.seq"
     ))?;
     drivers
         .into_iter()
         .map(|(driver, name, graph)| {
             let steps = steps
-                .query_map([&driver.id], |row| {
+                .query_map([&driver.lfid], |row| {
                     Ok((
                         read_process(row)?,
-                        row.get::<_, u32>(15)?,
-                        row.get::<_, String>(16)?,
+                        row.get::<_, u32>("node")?,
+                        row.get::<_, String>("iterations")?,
                     ))
                 })?
                 .map(|row| {
@@ -103,17 +103,17 @@ pub(super) fn entry_in(conn: &Connection, flow: &FlowProcess) -> StoreResult<Flo
             .optional()?,
         None => conn
             .query_row(
-                "SELECT c.wave_id FROM session_events c JOIN processes e ON e.id=c.process_id
-                 WHERE c.kind='captured' AND e.parent_process_id=?1 AND c.wave_id IS NOT NULL
+                "SELECT c.wave_id FROM session_events c JOIN processes e ON e.lfid=c.process_lfid
+                 WHERE c.kind='captured' AND e.parent_process_lfid=?1 AND c.wave_id IS NOT NULL
                  ORDER BY c.seq DESC LIMIT 1",
-                [&driver.id],
+                [&driver.lfid],
                 |row| row.get(0),
             )
             .optional()?,
     };
     Ok(FlowInventoryEntry {
         summary: FlowSummary {
-            id: driver.id.to_string(),
+            id: driver.lfid.to_string(),
             name: flow.name.clone(),
             state,
             task_id: task
@@ -187,7 +187,7 @@ impl SqliteStore {
             return Ok(None);
         };
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let Some(flow) = flows_in(&conn, "e.id=?1", &[&driver.id])?.pop() else {
+        let Some(flow) = flows_in(&conn, "e.lfid=?1", &[&driver.lfid])?.pop() else {
             return Ok(None);
         };
         let entry = entry_in(&conn, &flow)?;
@@ -213,13 +213,13 @@ impl SqliteStore {
     /// A driver's one write about its Flow: the name and graph it launched with.
     pub(crate) fn record_flow_process(
         &self,
-        driver: &ProcessId,
+        driver: &ProcessLfid,
         flow: &str,
         graph: &FlowGraph,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO flow_processes(process_id,flow,graph) VALUES(?1,?2,?3)",
+            "INSERT INTO flow_processes(process_lfid,flow,graph) VALUES(?1,?2,?3)",
             params![driver, flow, serde_json::to_string(graph)?],
         )?;
         Ok(())
@@ -228,14 +228,14 @@ impl SqliteStore {
     /// A driver's record of one step it started, as that step's Process.
     pub(crate) fn record_flow_step(
         &self,
-        driver: &ProcessId,
-        step: &ProcessId,
+        driver: &ProcessLfid,
+        step: &ProcessLfid,
         key: u32,
         iterations: &[Vec<u32>],
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO flow_process_steps(flow_process_id,process_id,node,iterations) VALUES(?1,?2,?3,?4)",
+            "INSERT INTO flow_process_steps(flow_process_lfid,process_lfid,node,iterations) VALUES(?1,?2,?3,?4)",
             params![driver, step, key, serde_json::to_string(iterations)?],
         )?;
         Ok(())
@@ -254,13 +254,13 @@ impl SqliteStore {
     /// The first Process `parent` started after `mark`.
     pub(crate) fn child_process_after(
         &self,
-        parent: &ProcessId,
+        parent: &ProcessLfid,
         mark: i64,
-    ) -> StoreResult<Option<ProcessId>> {
+    ) -> StoreResult<Option<ProcessLfid>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT id FROM processes WHERE parent_process_id=?1 AND rowid>?2 ORDER BY rowid LIMIT 1",
+                "SELECT lfid FROM processes WHERE parent_process_lfid=?1 AND rowid>?2 ORDER BY rowid LIMIT 1",
                 params![parent, mark],
                 |row| row.get(0),
             )
@@ -275,13 +275,13 @@ impl SqliteStore {
     /// The conversation, captured input and its event a process opened last.
     pub(crate) fn process_input(
         &self,
-        process: &ProcessId,
+        process: &ProcessLfid,
     ) -> StoreResult<Option<(String, String, i64)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
                 "SELECT session_id,receipt_key,seq FROM session_events
-                 WHERE kind='captured' AND process_id=?1 ORDER BY seq DESC LIMIT 1",
+                 WHERE kind='captured' AND process_lfid=?1 ORDER BY seq DESC LIMIT 1",
                 params![process],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -299,16 +299,16 @@ impl SqliteStore {
         cwd: &str,
         steps: &[(&str, Option<&str>)],
         driver_outcome: Option<&str>,
-    ) -> ProcessId {
+    ) -> ProcessLfid {
         use crate::engine::{ConcreteSkill, ConcreteStep, Skill};
-        let driver = ProcessId::new();
-        let insert = |id: &ProcessId,
-                      parent: Option<&ProcessId>,
+        let driver = ProcessLfid::new();
+        let insert = |id: &ProcessLfid,
+                      parent: Option<&ProcessLfid>,
                       argv: Vec<String>,
                       outcome: Option<&str>| {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.execute(
-                "INSERT INTO processes(id,trace_id,parent_process_id,command,repo,cwd,started_at,completed_at,outcome)
+                "INSERT INTO processes(lfid,trace_id,parent_process_lfid,command,repo,cwd,started_at,completed_at,outcome)
                  VALUES(?1,?8,?2,?3,?4,?4,?5,?6,?7)",
                 params![
                     id,
@@ -344,7 +344,7 @@ impl SqliteStore {
         self.record_flow_process(&driver, name, &FlowGraph::new(name, &compiled))
             .unwrap();
         for (index, (label, outcome)) in steps.iter().enumerate() {
-            let step = ProcessId::new();
+            let step = ProcessLfid::new();
             let mut argv = vec!["lf".to_string()];
             argv.extend(label.split(' ').map(str::to_string));
             insert(&step, Some(&driver), argv, *outcome);
@@ -386,7 +386,7 @@ mod tests {
             .flow_inventory(&FlowFilter::default(), None, all)
             .unwrap();
         assert_eq!(page.entries.len(), 3);
-        let state = |id: &crate::id::ProcessId| {
+        let state = |id: &crate::id::ProcessLfid| {
             page.entries
                 .iter()
                 .find(|entry| entry.summary.id == id.as_str())
@@ -417,7 +417,7 @@ mod tests {
             .is_err());
         assert!(conn
             .execute(
-                "INSERT INTO flow_process_steps(flow_process_id,process_id,node,iterations) VALUES(?1,?2,0,'[]')",
+                "INSERT INTO flow_process_steps(flow_process_lfid,process_lfid,node,iterations) VALUES(?1,?2,0,'[]')",
                 rusqlite::params![running, done],
             )
             .is_err());

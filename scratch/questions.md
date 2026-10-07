@@ -1,11 +1,10 @@
 # Assumptions
 
-Jack Heart delegated the depth and Flow naming questions on 2026-10-07. The
-selected cut includes schema and wire names, with FlowProcess describing the
-existing metadata. Persisted history formats retain necessary decoding; no new
-public compatibility surface is selected.
+Jack Heart approved durable `lfid` and optional Unix `pid` on October 7 and
+released the earlier review stop for PR #1483. Historical PID evidence is not
+reconstructed from current process lists or PID reuse; the one draft leaves it
+absent. Existing stored JSON spellings remain readable.
 
-`lf context --skill compress` reports the externally supplied goal at 24,022 /
-16,000 tokens (8,022 over). That provider-owned input includes the workspace
-inventory and is not an authored memory or scratch file; it is left intact.
-Memory and scratch remain within limits.
+The externally supplied goal exceeds its 16,000-token budget because it embeds
+the workspace inventory. That provider-owned source is not edited as a plan;
+authored memory and scratch remain subject to their existing budgets.

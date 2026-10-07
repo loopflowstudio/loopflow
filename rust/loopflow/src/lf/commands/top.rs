@@ -129,7 +129,7 @@ pub(crate) struct ProcessSnapshot {
 
 #[derive(Debug, Clone)]
 struct OwnedProviderProcess {
-    process_id: String,
+    process_lfid: String,
     process: OsProcess,
 }
 
@@ -179,7 +179,7 @@ pub(crate) fn live_process_providers(
         .collect::<Vec<_>>();
     let owners = receipts
         .iter()
-        .map(|receipt| (receipt.pid, receipt.process_id.clone()))
+        .map(|receipt| (receipt.pid, receipt.process_lfid.clone()))
         .collect::<HashMap<_, _>>();
     let mut gaps = Vec::new();
     let (providers, unclaimed) = claim_provider_processes(snapshot, &by_pid, &owners);
@@ -211,7 +211,7 @@ pub(crate) fn live_process_providers(
             providers: providers
                 .iter()
                 .filter(|provider| {
-                    provider.process_id == receipt.process_id
+                    provider.process_lfid == receipt.process_lfid
                         && !native_pids.contains(&provider.process.pid)
                         && !provider.process.kernel_state.starts_with('Z')
                 })
@@ -304,8 +304,8 @@ impl ProcessKind {
 #[derive(Debug, Clone)]
 struct ProcessRecord {
     trace_id: String,
-    id: String,
-    parent_id: Option<String>,
+    lfid: String,
+    parent_process_lfid: Option<String>,
     label: String,
     repo: Option<String>,
     worktree: Option<String>,
@@ -475,13 +475,13 @@ fn read_activity_data(path: &Path, live_processes: &[ProcessReceipt]) -> Result<
     Ok(store.read_process_snapshot(|store| {
         let mut processes = Vec::new();
         for receipt in live_processes {
-            let id = crate::id::ProcessId::parse(&receipt.process_id)
+            let id = crate::id::ProcessLfid::parse(&receipt.process_lfid)
                 .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
             if let Some(process) = store.process(&id)? {
                 processes.push(ProcessRecord {
                     trace_id: process.trace_id.to_string(),
-                    id: process.id.to_string(),
-                    parent_id: process.parent_process_id.map(|id| id.to_string()),
+                    lfid: process.lfid.to_string(),
+                    parent_process_lfid: process.parent_process_lfid.map(|id| id.to_string()),
                     label: command_label(process.command.as_deref()),
                     repo: process.repo,
                     worktree: process.cwd,
@@ -612,7 +612,7 @@ fn collect_activity(
         .iter()
         .map(|process| {
             (
-                process.id.clone(),
+                process.lfid.clone(),
                 receipt_evidence(process, &processes.receipts, &process_by_pid),
             )
         })
@@ -621,20 +621,20 @@ fn collect_activity(
         .into_iter()
         .filter(|process| {
             matches!(
-                receipt_evidence.get(&process.id),
+                receipt_evidence.get(&process.lfid),
                 Some(ReceiptEvidence::Present(pid)) if *pid != current_pid
             )
         })
         .collect::<Vec<_>>();
-    let live_process_ids = live_processes
+    let live_process_lfids = live_processes
         .iter()
-        .map(|process| process.id.clone())
+        .map(|process| process.lfid.clone())
         .collect::<HashSet<_>>();
     let owner_by_pid = receipt_evidence
         .iter()
-        .filter_map(|(process_id, evidence)| match evidence {
-            ReceiptEvidence::Present(pid) if live_process_ids.contains(process_id) => {
-                Some((*pid, process_id.clone()))
+        .filter_map(|(process_lfid, evidence)| match evidence {
+            ReceiptEvidence::Present(pid) if live_process_lfids.contains(process_lfid) => {
+                Some((*pid, process_lfid.clone()))
             }
             ReceiptEvidence::Absent | ReceiptEvidence::Missing => None,
             ReceiptEvidence::Present(_) => None,
@@ -646,15 +646,15 @@ fn collect_activity(
     let mut nodes = Vec::new();
     for process in live_processes {
         let evidence = receipt_evidence
-            .get(&process.id)
+            .get(&process.lfid)
             .copied()
             .unwrap_or(ReceiptEvidence::Missing);
         nodes.push(ActivityNode {
-            id: process_node_id(&process.id),
+            id: process_node_id(&process.lfid),
             parent_id: process
-                .parent_id
+                .parent_process_lfid
                 .as_deref()
-                .filter(|parent| live_process_ids.contains(*parent))
+                .filter(|parent| live_process_lfids.contains(*parent))
                 .map(process_node_id),
             kind: ActivityNodeKind::Process,
             label: process.label,
@@ -684,7 +684,7 @@ fn collect_activity(
         })
         .collect::<HashMap<_, _>>();
     for owned in owned_providers {
-        let parent_id = process_node_id(&owned.process_id);
+        let parent_id = process_node_id(&owned.process_lfid);
         let (repo, worktree, wave) = process_context
             .get(&parent_id)
             .cloned()
@@ -755,10 +755,9 @@ fn receipt_evidence(
     receipts: &[ProcessReceipt],
     process_by_pid: &HashMap<u32, &OsProcess>,
 ) -> ReceiptEvidence {
-    let Some(receipt) = receipts
-        .iter()
-        .find(|receipt| receipt.process_id == process.id && receipt.trace_id == process.trace_id)
-    else {
+    let Some(receipt) = receipts.iter().find(|receipt| {
+        receipt.process_lfid == process.lfid && receipt.trace_id == process.trace_id
+    }) else {
         return ReceiptEvidence::Missing;
     };
     if receipt_matches_live_process(receipt, process_by_pid) {
@@ -809,7 +808,7 @@ fn claim_provider_processes(
             continue;
         };
         owned.push(OwnedProviderProcess {
-            process_id: owner,
+            process_lfid: owner,
             process: process.clone(),
         });
     }
@@ -1162,8 +1161,8 @@ mod tests {
     ) -> ProcessRecord {
         ProcessRecord {
             trace_id: trace.into(),
-            id: process.into(),
-            parent_id: parent.map(str::to_owned),
+            lfid: process.into(),
+            parent_process_lfid: parent.map(str::to_owned),
             label: format!("lf {command}"),
             repo: Some("/src/loopflow".into()),
             worktree: Some("/src/loopflow".into()),
@@ -1188,7 +1187,7 @@ mod tests {
         ProcessReceipt {
             schema_version: 1,
             trace_id: "trace".to_string(),
-            process_id: process.to_string(),
+            process_lfid: process.to_string(),
             pid,
             started_at,
         }
@@ -1199,12 +1198,12 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let record = crate::id::ProcessId::new();
-        let missing = crate::id::ProcessId::new();
+        let record = crate::id::ProcessLfid::new();
+        let missing = crate::id::ProcessLfid::new();
         let trace = crate::id::TraceId::new();
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute(
-            "INSERT INTO processes(id,trace_id,command,repo,cwd,started_at) VALUES(?1,?2,?3,'/repo','/checkout',1000)",
+            "INSERT INTO processes(lfid,trace_id,command,repo,cwd,started_at) VALUES(?1,?2,?3,'/repo','/checkout',1000)",
             rusqlite::params![record, trace, r#"["lf","implement"]"#],
         ).unwrap();
         let recorded = store.process(&record).unwrap().unwrap();
@@ -1213,7 +1212,7 @@ mod tests {
         assert_eq!(recorded.exit_code, None);
         assert!(store.process(&missing).unwrap().is_none());
         conn.execute(
-            "UPDATE processes SET completed_at=9000,outcome='failed',exit_code=42 WHERE id=?1",
+            "UPDATE processes SET completed_at=9000,outcome='failed',exit_code=42 WHERE lfid=?1",
             [&record],
         )
         .unwrap();

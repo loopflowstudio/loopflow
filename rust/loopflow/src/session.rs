@@ -14,7 +14,7 @@ pub struct SessionEvent {
     pub provider_turn: Option<String>,
     pub kind: SessionEventKind,
     pub provider_generation: Option<i64>,
-    pub process_id: Option<String>,
+    pub process_lfid: Option<String>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
     pub observed_at: i64,

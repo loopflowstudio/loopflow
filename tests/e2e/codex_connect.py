@@ -570,7 +570,7 @@ def _public_connection_contract(
         with sqlite3.connect(_database(env)) as database:
             outcome = database.execute(
                 "SELECT outcome FROM processes "
-                "WHERE id=(SELECT provider_process_id FROM agent_sessions WHERE id=?)",
+                "WHERE lfid=(SELECT provider_process_lfid FROM agent_sessions WHERE id=?)",
                 (session,),
             ).fetchone()[0]
         assert outcome == "interrupted", outcome
@@ -606,7 +606,7 @@ def _public_connection_contract(
         # ordinary connect, with the current turn and shared sibling untouched.
         with sqlite3.connect(_database(env)) as database:
             before_prepare = database.execute(
-                "SELECT driver_process_id,driver_generation,provider_endpoint,provider_thread,"
+                "SELECT driver_process_lfid,driver_generation,provider_endpoint,provider_thread,"
                 "provider_generation FROM agent_sessions WHERE id=?",
                 (session,),
             ).fetchone()
@@ -621,7 +621,7 @@ def _public_connection_contract(
         assert all(previous.poll() is None for previous in processes)
         with sqlite3.connect(_database(env)) as database:
             after_prepare = database.execute(
-                "SELECT driver_process_id,driver_generation,provider_endpoint,provider_thread,"
+                "SELECT driver_process_lfid,driver_generation,provider_endpoint,provider_thread,"
                 "provider_generation FROM agent_sessions WHERE id=?",
                 (session,),
             ).fetchone()
@@ -642,11 +642,11 @@ def _public_connection_contract(
                 (session,),
             ).fetchone()
             driver, observed_generation, interactive = database.execute(
-                "SELECT driver_process_id,provider_generation,interactive "
+                "SELECT driver_process_lfid,provider_generation,interactive "
                 "FROM agent_sessions WHERE id=?",
                 (session,),
             ).fetchone()
-            before = {row[0] for row in database.execute("SELECT id FROM processes")}
+            before = {row[0] for row in database.execute("SELECT lfid FROM processes")}
         assert observed_generation == generation and interactive == 1
         assert retained_connection == (endpoint, thread, generation)
         assert driver != before_prepare[0]
@@ -654,7 +654,7 @@ def _public_connection_contract(
         engine.wait_turn(active)
         with sqlite3.connect(_database(env)) as database:
             after = database.execute(
-                "SELECT id,parent_process_id,caller_session_id,caller_provider_generation "
+                "SELECT lfid,parent_process_lfid,caller_session_id,caller_provider_generation "
                 "FROM processes WHERE via_agent=1"
             ).fetchall()
         children = [row for row in after if row[0] not in before]
@@ -689,7 +689,7 @@ def _public_connection_contract(
             assert processes[2].returncode == 0, error.decode()
             with sqlite3.connect(_database(env)) as database:
                 closed = database.execute(
-                    "SELECT provider_endpoint,provider_thread,driver_process_id FROM agent_sessions WHERE id=?",
+                    "SELECT provider_endpoint,provider_thread,driver_process_lfid FROM agent_sessions WHERE id=?",
                     (session,),
                 ).fetchone()
             assert closed == (None, thread, None), closed
@@ -1145,13 +1145,13 @@ def _flow_decision_retry_contract(
     with sqlite3.connect(_database(env)) as db:
         # A Flow is its driver Process and the step Processes that driver recorded.
         results["flow"] = db.execute(
-            "SELECT d.outcome FROM flow_processes f JOIN processes d ON d.id=f.process_id"
+            "SELECT d.outcome FROM flow_processes f JOIN processes d ON d.lfid=f.process_lfid"
         ).fetchone()
         results["history"] = db.execute(
             "SELECT seq,kind,provider_turn,payload FROM session_events ORDER BY seq"
         ).fetchall()
         results["steps"] = db.execute(
-            "SELECT e.command FROM flow_process_steps s JOIN processes e ON e.id=s.process_id ORDER BY s.seq"
+            "SELECT e.command FROM flow_process_steps s JOIN processes e ON e.lfid=s.process_lfid ORDER BY s.seq"
         ).fetchall()
     outputs = [
         item["output"]

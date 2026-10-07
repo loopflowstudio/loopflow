@@ -52,7 +52,7 @@ mod tests {
     use rusqlite::params;
 
     use super::{SqliteStore, StoreRevisions};
-    use crate::id::{ProcessId, TraceId, WaveId};
+    use crate::id::{ProcessLfid, TraceId, WaveId};
 
     /// Tables no workspace surface reads. A new table belongs here or in a
     /// domain; `session_events` is covered except for transcript and usage rows.
@@ -172,10 +172,10 @@ mod tests {
             })
             .unwrap();
         let driver = crate::process::SessionDriver {
-            process_id: None,
+            process_lfid: None,
             generation,
             provider_generation: 0,
-            provider_process_id: ProcessId::new(),
+            provider_process_lfid: ProcessLfid::new(),
         };
         let record = |observed_at, open_tools, pending_input, yielded| {
             let before = store.revisions().unwrap();
@@ -245,8 +245,8 @@ mod tests {
             )
             .unwrap();
             conn.execute(
-                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
-                params![ProcessId::new(), TraceId::new()],
+                "INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
+                params![ProcessLfid::new(), TraceId::new()],
             )
             .unwrap();
         }

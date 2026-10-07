@@ -2,14 +2,15 @@
 
 ## Process vocabulary (LOO-400, 2026-10-07)
 
-Jack Heart requested “process” for a command that ran, authorizing autonomous
-source publication through pr-review only. LOO-400 renames records, Flow metadata,
-Rust/Swift DTOs and SQL in place, retaining IDs/outcomes. LOO-397 owns command
-placement. Released SQL and dated evidence retain their spelling. Captures,
-receipts, retained provider environments and append-only decisions need historical
-decoding to preserve replay, parentage and accepted uncertainty. Release memory's
-retained-landing incident demonstrates the receipt obligation. No parallel
-lifecycle/control authority, installation proof or landing permission is implied.
+Jack Heart selected Process and authorized PR #1483's LFID/PID refinement and
+landing (comment `32c00054-4c60-4b96-bdf4-4d5f142ab881`), releasing the review stop.
+`process.lfid` names durable identity; `pid` names a reusable Unix PID.
+`process_lfid` and `parent_process_lfid` name references. One draft retains IDs,
+parents, outcomes and unknown PIDs. LOO-397 owns command placement.
+A lost boot witness proved schema renames cannot rename
+append-only JSON. Captures, receipts and retained provider environments likewise
+keep their decoding. Release's retained-landing incident requires this distinction.
+Fixtures prove neither installation nor control authority.
 
 ## Storage footprint (LOO-390, 2026-10-06)
 
@@ -442,10 +443,9 @@ required boundary is headless app/view checks; mounted judgment is optional.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 
-Jack Heart selected one editable draft per Task and one client. Released SQL stays
-immutable; custom Homes retain exact-schema validation. Mechanics and branch
-evidence: [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md),
-`986be7988:wave/infrastructure/MEMORY.md`. Not shipped.
+Jack Heart selected one editable draft per Task and immutable released SQL.
+Mechanics: [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md).
+Unshipped branch evidence: `986be7988:wave/infrastructure/MEMORY.md`.
 
 ## One main Home (LOO-342, curated 2026-10-04)
 

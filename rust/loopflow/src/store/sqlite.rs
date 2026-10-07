@@ -577,7 +577,7 @@ impl SqliteStore {
         // An older ledger without the current process owner is not a writable
         // observation destination. Leave upgrade decisions to ordinary admission.
         conn.prepare(
-            "SELECT id, trace_id, started_at, completed_at, outcome, exit_code FROM processes LIMIT 0",
+            "SELECT lfid, trace_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
         )?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -867,7 +867,7 @@ fn validate_wave_parent(
 
 fn validate_process_schema(conn: &Connection) -> StoreResult<()> {
     conn.prepare(
-        "SELECT id,trace_id,parent_process_id,started_at,completed_at,outcome FROM processes LIMIT 0",
+        "SELECT lfid,trace_id,parent_process_lfid,started_at,completed_at,outcome,pid FROM processes LIMIT 0",
     )?;
     Ok(())
 }
@@ -2140,15 +2140,15 @@ impl SqliteStore {
     pub fn record_process(&self, process: &crate::process::Process) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO processes(id,trace_id,parent_process_id,command,repo,cwd,started_at,
-                via_agent,caller_session_id,caller_provider_generation,completed_at,outcome,exit_code,signal,error)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
-             ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
+            "INSERT INTO processes(lfid,trace_id,parent_process_lfid,command,repo,cwd,started_at,
+                via_agent,caller_session_id,caller_provider_generation,completed_at,outcome,exit_code,signal,error,pid)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+             ON CONFLICT(lfid) DO UPDATE SET completed_at=excluded.completed_at,
                 outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
              WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
-            params![process.id,process.trace_id,process.parent_process_id,process.command,process.repo,process.cwd,
+            params![process.lfid,process.trace_id,process.parent_process_lfid,process.command,process.repo,process.cwd,
                 process.started_at,process.via_agent,process.caller_session_id,process.caller_provider_generation,
-                process.completed_at,process.outcome,process.exit_code,process.signal,process.error],
+                process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid],
         )?;
         Ok(())
     }
@@ -2174,10 +2174,10 @@ impl SqliteStore {
         result
     }
 
-    pub fn process_is_recorded(&self, process_id: &str) -> StoreResult<bool> {
+    pub fn process_is_recorded(&self, process_lfid: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT 1 FROM processes WHERE id=?1")?;
-        Ok(query.exists([process_id])?)
+        let mut query = conn.prepare("SELECT 1 FROM processes WHERE lfid=?1")?;
+        Ok(query.exists([process_lfid])?)
     }
 }
 

@@ -139,7 +139,7 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
     super::pm::require_planning_home(&store, &wave).await?;
     store
         .sqlite
-        .record_project_activation(wave.id(), crate::journal::current_process_id().as_ref())
+        .record_project_activation(wave.id(), crate::journal::current_process_lfid().as_ref())
         .map_err(project_error)?;
     let acquisition = super::pm::lock_wave_planning(&wave).await?;
     let ctx = super::pm::resolve_context(repo, wave.slug()).await?;

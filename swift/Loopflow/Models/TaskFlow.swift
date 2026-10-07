@@ -122,7 +122,7 @@ public struct LatestTaskFlow: Decodable, Sendable, Hashable {
 
 /// One launched step and how its process ended.
 public struct FlowStepProcess: Decodable, Sendable, Hashable, Identifiable {
-    public let processId: String
+    public let processLfid: String
     public let label: String
     public let key: UInt32
     public let iterations: [[UInt32]]
@@ -131,11 +131,11 @@ public struct FlowStepProcess: Decodable, Sendable, Hashable, Identifiable {
     public let outcome: String?
     public let exitCode: Int32?
 
-    public var id: String { processId }
+    public var id: String { processLfid }
 
     enum CodingKeys: String, CodingKey {
         case label, key, iterations, outcome
-        case processId = "process_id"
+        case processLfid = "process_lfid"
         case startedAt = "started_at"
         case completedAt = "completed_at"
         case exitCode = "exit_code"

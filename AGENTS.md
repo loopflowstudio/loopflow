@@ -157,7 +157,7 @@ When editing `*.rs` files:
 - Conversion methods: `as_` (cheap/borrowed), `to_` (allocates), `into_` (consumes self)
 - No `get_` prefix on getters: `fn name(&self)` not `fn get_name(&self)`
 - Return `Option<T>` for "not found", `Result<T, E>` for "something went wrong"
-- Newtypes for domain concepts: `struct ProcessId(String)` not `type ProcessId = String`
+- Newtypes for domain concepts: `struct ProcessLfid(String)` not `type ProcessLfid = String`
 - Every `unsafe` block requires a `// SAFETY:` comment explaining invariants
 - When a name conflicts with a keyword: use `r#type` or `type_`, not `typ`
 - Use `#[non_exhaustive]` on public enums that may grow
@@ -236,6 +236,8 @@ and execution. Preserve unreviewed backlog until explicit disposition; missing e
 Current navigation stays Wave → Task and Linear retains past Projects.
 
 Process is one actual lf process, including direct and agent-issued nested commands.
+Its `lfid` is durable Loopflow identity; `pid` is the optional Unix PID and may
+collide across history. References use `process_lfid` and `parent_process_lfid`.
 AgentSession is one durable agent conversation, interactive or headless; identity,
 name, feedback and native history survive driver replacement. Product text says
 Session for interactive and Run for headless work. Waiting is the one attention

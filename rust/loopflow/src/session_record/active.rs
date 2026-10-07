@@ -72,13 +72,13 @@ fn project(
     snapshot.gaps.extend(live.gaps);
     let mut drivers = BTreeMap::new();
     for session in &ownership.sessions {
-        let Some(driver) = &session.driver_process_id else {
+        let Some(driver) = &session.driver_process_lfid else {
             continue;
         };
         let receipts = live
             .processes
             .iter()
-            .filter(|process| process.receipt.process_id == driver.as_str())
+            .filter(|process| process.receipt.process_lfid == driver.as_str())
             .collect::<Vec<_>>();
         if receipts.len() == 1
             && session.driver_trace_id.as_deref() == Some(receipts[0].receipt.trace_id.as_str())
@@ -156,13 +156,13 @@ fn project(
             // own this process. Its historical origin blocks guessing, not work.
             if ownership.sessions.iter().any(|session| {
                 session
-                    .provider_process_id
+                    .provider_process_lfid
                     .as_ref()
-                    .is_some_and(|origin| origin.as_str() == owner.receipt.process_id)
+                    .is_some_and(|origin| origin.as_str() == owner.receipt.process_lfid)
                     && session.provider_pid.is_none()
                     && !drivers.contains_key(session.id.as_str())
             }) {
-                snapshot.gaps.push(format!("Live process {}: an earlier Session in Process {} has no exact engine identity; attribution is unresolved", process.pid, owner.receipt.process_id));
+                snapshot.gaps.push(format!("Live process {}: an earlier Session in Process {} has no exact engine identity; attribution is unresolved", process.pid, owner.receipt.process_lfid));
                 continue;
             }
             let sessions = ownership
@@ -170,7 +170,7 @@ fn project(
                 .iter()
                 .filter(|session| {
                     drivers.get(session.id.as_str()).is_some_and(|driver|
-                        *driver == owner.receipt.process_id.as_str())
+                        *driver == owner.receipt.process_lfid.as_str())
                         // Exact identity already rejected this Session's old process.
                         && session.provider_pid != Some(process.pid)
                 })
@@ -228,7 +228,7 @@ mod tests {
 
     use super::{project, ActiveSessionsSnapshot, DiscoveryState};
 
-    use crate::id::ProcessId;
+    use crate::id::ProcessLfid;
     use crate::journal::ProcessReceipt;
     use crate::lf::commands::top::{test_process, ActivityState, ProcessSnapshot};
     use crate::process::{SessionProcessObservation, SessionProcessOwnership};
@@ -480,25 +480,25 @@ mod tests {
         assert_eq!(started, after);
     }
 
-    fn session(id: &str, process: &ProcessId) -> SessionProcessObservation {
+    fn session(id: &str, process: &ProcessLfid) -> SessionProcessObservation {
         SessionProcessObservation {
             id: id.into(),
             title: format!("Conversation {id}"),
             work: None,
-            driver_process_id: Some(process.clone()),
+            driver_process_lfid: Some(process.clone()),
             driver_trace_id: Some("trace".into()),
             driver_generation: 1,
-            provider_process_id: Some(process.clone()),
+            provider_process_lfid: Some(process.clone()),
             provider_pid: None,
             provider_started_at: None,
         }
     }
 
-    fn receipt(process: &ProcessId, pid: u32) -> ProcessReceipt {
+    fn receipt(process: &ProcessLfid, pid: u32) -> ProcessReceipt {
         ProcessReceipt {
             schema_version: 1,
             trace_id: "trace".into(),
-            process_id: process.to_string(),
+            process_lfid: process.to_string(),
             pid,
             started_at: 100,
         }
@@ -526,9 +526,9 @@ mod tests {
 
     #[test]
     fn sequential_sessions_do_not_borrow_a_retained_engine() {
-        let process = ProcessId::new();
+        let process = ProcessLfid::new();
         let mut first = session("first", &process);
-        first.driver_process_id = None;
+        first.driver_process_lfid = None;
         first.driver_trace_id = None;
         first.provider_pid = Some(51);
         first.provider_started_at = Some(100);
@@ -578,7 +578,7 @@ mod tests {
             .gaps
             .iter()
             .any(|gap| gap.contains("earlier Session")));
-        first.driver_process_id = Some(process);
+        first.driver_process_lfid = Some(process);
         first.driver_trace_id = Some("trace".into());
         let mut reused_pid = first.clone();
         reused_pid.provider_started_at = Some(1);
@@ -599,8 +599,8 @@ mod tests {
 
     #[test]
     fn child_process_is_distinct_and_pid_or_trace_mismatch_cannot_claim_work() {
-        let root = ProcessId::new();
-        let child = ProcessId::new();
+        let root = ProcessLfid::new();
+        let child = ProcessLfid::new();
         let first = session("root", &root);
         let second = session("child", &child);
         let mut processes = ProcessSnapshot {
@@ -626,7 +626,7 @@ mod tests {
 
     #[test]
     fn shared_engine_is_not_broadcast_and_native_clients_survive_driver_exit() {
-        let process = ProcessId::new();
+        let process = ProcessLfid::new();
         let mut first = session("first", &process);
         first.provider_pid = Some(51);
         first.provider_started_at = Some(100);
@@ -645,9 +645,9 @@ mod tests {
         let snapshot = observe(vec![first.clone(), second.clone()], &processes);
         assert!(snapshot.sessions.is_empty());
         assert!(snapshot.gaps.iter().any(|g| g.contains("2 possible")));
-        first.driver_process_id = None;
+        first.driver_process_lfid = None;
         first.driver_trace_id = None;
-        second.driver_process_id = None;
+        second.driver_process_lfid = None;
         second.driver_trace_id = None;
         processes.receipts.clear();
         processes.processes.remove(0);

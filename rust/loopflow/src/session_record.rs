@@ -365,7 +365,7 @@ pub struct SessionHistory {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProviderHistory {
     pub reference: ProviderHistoryReference,
-    pub process_id: Option<crate::id::ProcessId>,
+    pub process_lfid: Option<crate::id::ProcessLfid>,
     pub task_id: Option<crate::durable::TaskId>,
     pub wave_id: Option<crate::id::WaveId>,
     pub started_at: Option<i64>,
@@ -1047,9 +1047,9 @@ fn project_provider_history(
                 start_seq: start.map(|event| event.seq),
                 completion_seq: completed.map(|event| event.seq),
             },
-            process_id: start
-                .and_then(|event| event.process_id.as_deref())
-                .map(crate::id::ProcessId::parse)
+            process_lfid: start
+                .and_then(|event| event.process_lfid.as_deref())
+                .map(crate::id::ProcessLfid::parse)
                 .transpose()
                 .map_err(std::io::Error::other)?,
             task_id: start
@@ -1116,7 +1116,7 @@ fn project_provider_history(
                 })?,
                 attempt_key: attempt.into(),
             },
-            process_id: None,
+            process_lfid: None,
             task_id: origin
                 .and_then(|event| event.task_id.as_deref())
                 .map(crate::durable::TaskId::parse)
@@ -2257,7 +2257,7 @@ impl CaptureHandle {
     /// Claim an admitted conversation and retain the exact provider provenance
     /// used by its tools. A later driver transfer never rewrites this process.
     pub(crate) fn claim_conversation_driver(&self) -> StoreResult<()> {
-        let Some(process_id) = crate::journal::current_process_id() else {
+        let Some(process_lfid) = crate::journal::current_process_lfid() else {
             if crate::journal::is_cli_process() {
                 return Err(StoreError::InvalidAuthority(
                     "agent Process requires an admitted Process; command observation failed".into(),
@@ -2282,14 +2282,14 @@ impl CaptureHandle {
         let expected = store.session_driver(&session.id)?;
         if let Some(process) = expected
             .as_ref()
-            .and_then(|driver| driver.process_id.as_ref())
+            .and_then(|driver| driver.process_lfid.as_ref())
         {
             let receipt = crate::journal::read_process_receipts_at(&crate::store::lf_home_dir())
                 .ok()
                 .and_then(|receipts| {
                     receipts
                         .into_iter()
-                        .find(|receipt| receipt.process_id == process.as_str())
+                        .find(|receipt| receipt.process_lfid == process.as_str())
                 });
             let dead = receipt.is_some_and(|receipt| {
                 match crate::journal::process_started_at(receipt.pid) {
@@ -2320,7 +2320,7 @@ impl CaptureHandle {
         let driver = store.claim_session_driver(
             &session.id,
             expected.as_ref(),
-            &process_id,
+            &process_lfid,
             replace_provider,
         )?;
         if replace_provider {
@@ -2582,7 +2582,7 @@ impl SessionCapture {
                 completed_at: None,
                 created_at: manifest.created_at.unix_timestamp(),
             },
-            crate::journal::current_process_id().as_ref(),
+            crate::journal::current_process_lfid().as_ref(),
         )?;
         Ok(Some(session))
     }
@@ -4077,7 +4077,7 @@ mod tests {
         }
         let expected = store.session_driver(&session.id).unwrap().unwrap();
         crate::journal::with_runtime(ledger.home(), &command, || {
-            let process = crate::journal::current_process_id().unwrap();
+            let process = crate::journal::current_process_lfid().unwrap();
             let driver =
                 store.claim_session_driver(&session.id, Some(&expected), &process, true)?;
             store.record_session_provider_launch(&session.id, &driver, false)?;

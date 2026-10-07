@@ -144,7 +144,7 @@ PYTHON
         let executables: Vec<String> = conn
             .prepare(
                 "SELECT json_extract(e.command,'$[0]') FROM processes e
-                 JOIN flow_process_steps s ON s.process_id=e.id WHERE e.outcome='succeeded'",
+                 JOIN flow_process_steps s ON s.process_lfid=e.lfid WHERE e.outcome='succeeded'",
             )
             .unwrap()
             .query_map([], |row| row.get(0))
@@ -175,7 +175,7 @@ PYTHON
             String::from_utf8_lossy(&output.stderr)
         );
         let driver: String = conn
-            .query_row("SELECT process_id FROM flow_processes", [], |row| {
+            .query_row("SELECT process_lfid FROM flow_processes", [], |row| {
                 row.get(0)
             })
             .unwrap();

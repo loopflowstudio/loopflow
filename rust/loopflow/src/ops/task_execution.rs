@@ -59,11 +59,11 @@ pub(crate) async fn task_execution_and_flow(
     let entry = store.sqlite.flow_entry(&flow)?;
     let evidence = |process: &crate::process::Process| match process.completed_at {
         Some(_) => ProcessIdentityEvidence::Dead,
-        None => crate::journal::process_evidence(&store.sqlite, &process.id),
+        None => crate::journal::process_evidence(&store.sqlite, &process.lfid),
     };
     let step = flow.latest().map(|step| &step.process);
     let input = match step {
-        Some(step) => store.sqlite.process_input(&step.id)?,
+        Some(step) => store.sqlite.process_input(&step.lfid)?,
         None => None,
     };
     let mut snapshot = project_execution(
@@ -134,7 +134,7 @@ fn project_execution(
     let (state, reason) = match (driver, step) {
         (_, ProcessIdentityEvidence::Live) => (
             TaskExecutionState::Running,
-            format!("Step Process {} is running {label}", process.id),
+            format!("Step Process {} is running {label}", process.lfid),
         ),
         (ProcessIdentityEvidence::Live, _) => (
             TaskExecutionState::Starting,

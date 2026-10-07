@@ -349,10 +349,10 @@ impl ActiveSessionReader {
                     .iter()
                     .map(|(input, _)| input.clone())
                     .collect::<Vec<_>>();
-                let process_ids = processes
+                let process_lfids = processes
                     .receipts
                     .iter()
-                    .map(|receipt| receipt.process_id.clone())
+                    .map(|receipt| receipt.process_lfid.clone())
                     .collect::<Vec<_>>();
                 let pids = processes
                     .processes
@@ -362,7 +362,7 @@ impl ActiveSessionReader {
                 let ownership =
                     match store
                         .sqlite
-                        .session_process_ownership(&inputs, &process_ids, &pids)
+                        .session_process_ownership(&inputs, &process_lfids, &pids)
                     {
                         Ok(ownership) => ownership,
                         Err(error) => {
@@ -389,7 +389,7 @@ impl ActiveSessionReader {
                 // outside Home. Filesystem notifications are not its invalidation.
                 match store
                     .sqlite
-                    .session_process_ownership(&inputs, &process_ids, &pids)
+                    .session_process_ownership(&inputs, &process_lfids, &pids)
                 {
                     Ok(after) => changed |= ownership != after,
                     Err(error) => {

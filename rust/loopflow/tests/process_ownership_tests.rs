@@ -7,7 +7,7 @@ use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use loopflow::harness::codex_connection::CodexConnection;
-use loopflow::id::ProcessId;
+use loopflow::id::ProcessLfid;
 use loopflow::session::{AgentSession, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
@@ -22,17 +22,17 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         .await
         .unwrap();
     let connection = rusqlite::Connection::open(&database).unwrap();
-    let parent = ProcessId::new();
+    let parent = ProcessLfid::new();
     let raw = serde_json::to_string(&["lf", "pr", "land", "--strict", "%_ literal"]).unwrap();
     connection
         .execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,?1,1)",
             [&parent],
         )
         .unwrap();
-    let ids = [ProcessId::new(), ProcessId::new()];
+    let ids = [ProcessLfid::new(), ProcessLfid::new()];
     for (index, id) in ids.iter().enumerate() {
-        connection.execute("INSERT INTO processes(id,trace_id,parent_process_id,via_agent,caller_session_id,command,started_at)
+        connection.execute("INSERT INTO processes(lfid,trace_id,parent_process_lfid,via_agent,caller_session_id,command,started_at)
             VALUES(?1,?1,?2,?3,?4,?5,?6)", rusqlite::params![id,parent,index != 0,
                 if index == 0 { None } else { Some("caller-session") },raw,10-index as i64]).unwrap();
     }
@@ -56,7 +56,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         "--json",
     ]))
     .unwrap();
-    assert_eq!(first.entries[0].id, ids[0]);
+    assert_eq!(first.entries[0].lfid, ids[0]);
     assert_eq!(first.entries[0].via_agent, Some(false));
     assert_eq!(first.entries[0].command.as_ref(), Some(&raw));
     assert_eq!(first.entries[0].outcome, None);
@@ -78,7 +78,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         "--json",
     ]))
     .unwrap();
-    assert_eq!(second.entries[0].id, ids[1]);
+    assert_eq!(second.entries[0].lfid, ids[1]);
     assert_eq!(
         second.entries[0].caller_session_id.as_deref(),
         Some("caller-session")
@@ -123,7 +123,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     connection.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
         VALUES('caller-session','Historical','human',1,1,'/missing',?1,?2)",
         rusqlite::params![task.as_str(),wave]).unwrap();
-    connection.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,process_id,task_id,wave_id,observed_at,payload)
+    connection.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,process_lfid,task_id,wave_id,observed_at,payload)
         VALUES('caller-session','thread','turn','started','',?1,?2,?3,1,'unreadable history')",
         rusqlite::params![ids[1],task.as_str(),wave]).unwrap();
     for args in [
@@ -142,7 +142,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         assert_eq!(
             page.entries
                 .iter()
-                .map(|process| &process.id)
+                .map(|process| &process.lfid)
                 .collect::<Vec<_>>(),
             vec![&ids[1]]
         );
@@ -172,19 +172,19 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         .unwrap();
     connection
         .execute(
-            "UPDATE processes SET repo=?2 WHERE id=?1",
+            "UPDATE processes SET repo=?2 WHERE lfid=?1",
             rusqlite::params![ids[1], paths[0]],
         )
         .unwrap();
     connection
         .execute(
-            "UPDATE processes SET repo=?2 WHERE id=?1",
+            "UPDATE processes SET repo=?2 WHERE lfid=?1",
             rusqlite::params![ids[0], paths[1]],
         )
         .unwrap();
     connection.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,wave_id)
         VALUES('other-session','Other','human',1,1,'/missing',?1)", [&other_wave]).unwrap();
-    connection.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,process_id,wave_id,observed_at,payload)
+    connection.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,process_lfid,wave_id,observed_at,payload)
         VALUES('other-session','thread','turn','started','',?1,?2,1,'unreadable history')", rusqlite::params![ids[0],other_wave]).unwrap();
     for (repo, expected) in repos.iter().zip([&ids[1], &ids[0]]) {
         let result = command(
@@ -199,7 +199,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         assert_eq!(
             page.entries
                 .iter()
-                .map(|process| &process.id)
+                .map(|process| &process.lfid)
                 .collect::<Vec<_>>(),
             vec![expected]
         );
@@ -222,7 +222,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         "--json",
     ]))
     .unwrap();
-    assert_eq!(explicit.entries[0].id, ids[0]);
+    assert_eq!(explicit.entries[0].lfid, ids[0]);
     let zero = command(
         home.path(),
         home.path(),
@@ -365,7 +365,7 @@ async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
         .unwrap();
     assert_eq!((count, completed), (3, 3));
     let (child, parent): (String,String) = conn.query_row(
-        "SELECT c.id,p.id FROM processes c JOIN processes p ON c.parent_process_id=p.id WHERE c.command LIKE '%__screenshot-supervisor%'",
+        "SELECT c.lfid,p.lfid FROM processes c JOIN processes p ON c.parent_process_lfid=p.lfid WHERE c.command LIKE '%__screenshot-supervisor%'",
         [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
     assert_ne!(child, parent);
     assert!(!home.path().join("missing.png").exists());
@@ -542,7 +542,7 @@ fn wait_file(path: &Path, child: &mut Child) {
 
 struct Driver {
     child: Child,
-    id: ProcessId,
+    id: ProcessLfid,
     stop: std::path::PathBuf,
     output: std::path::PathBuf,
 }
@@ -566,7 +566,7 @@ impl Driver {
         wait_file(&ready, &mut child);
         Self {
             child,
-            id: ProcessId::parse(std::fs::read_to_string(ready).unwrap().trim()).unwrap(),
+            id: ProcessLfid::parse(std::fs::read_to_string(ready).unwrap().trim()).unwrap(),
             stop: home.join(format!("{name}.stop")),
             output,
         }
@@ -598,7 +598,7 @@ name = os.environ['LF_TEST_DRIVER']
 subprocess.run([os.environ['LF_TEST_BINARY'], 'session', 'list', '--all', '--json'],
                check=True, stdout=subprocess.DEVNULL)
 (home / (name + '.pid')).write_text(str(os.getpid()))
-(home / (name + '.ready')).write_text(os.environ['LF_PROCESS_ID'])
+(home / (name + '.ready')).write_text(os.environ['LF_PROCESS_LFID'])
 while not (home / (name + '.stop')).exists():
     time.sleep(.02)
 print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))
@@ -646,7 +646,7 @@ async fn interruption_records_the_process_without_a_fabricated_signal_name() {
     let conn = rusqlite::Connection::open(database).unwrap();
     let row: (String, i32, Option<String>) = conn
         .query_row(
-            "SELECT outcome,exit_code,signal FROM processes WHERE id=?1",
+            "SELECT outcome,exit_code,signal FROM processes WHERE lfid=?1",
             [driver.id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -749,9 +749,9 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
         .unwrap();
     wait_file(&control.join("before.done"), &mut engine);
     let vacant = store.release_session_driver(session_id, &first).unwrap();
-    assert_eq!(vacant.process_id, None);
+    assert_eq!(vacant.process_lfid, None);
     assert_eq!(vacant.provider_generation, first.provider_generation);
-    assert_eq!(vacant.provider_process_id, first.provider_process_id);
+    assert_eq!(vacant.provider_process_lfid, first.provider_process_lfid);
     assert_eq!(
         store.session_driver(session_id).unwrap(),
         Some(vacant.clone())
@@ -779,7 +779,7 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
     let conn = rusqlite::Connection::open(&database).unwrap();
     let parents: Vec<String> = conn
         .prepare(
-            "SELECT parent_process_id FROM processes WHERE caller_session_id=?1 ORDER BY rowid",
+            "SELECT parent_process_lfid FROM processes WHERE caller_session_id=?1 ORDER BY rowid",
         )
         .unwrap()
         .query_map([session_id], |row| row.get(0))
@@ -796,7 +796,7 @@ async fn actual_engine_children_follow_driver_handoff_but_not_provider_replaceme
     );
     let direct_children: i64 = conn
         .query_row(
-            "SELECT count(*) FROM processes WHERE parent_process_id=?1 AND via_agent=0",
+            "SELECT count(*) FROM processes WHERE parent_process_lfid=?1 AND via_agent=0",
             [original_id.as_str()],
             |row| row.get(0),
         )
@@ -924,7 +924,7 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
     assert_eq!(store.session_driver(session).unwrap(), Some(second));
     let conn = rusqlite::Connection::open(database).unwrap();
     let parents: Vec<String> = conn.prepare(
-        "SELECT parent_process_id FROM processes WHERE caller_session_id=?1 AND via_agent=1 ORDER BY rowid"
+        "SELECT parent_process_lfid FROM processes WHERE caller_session_id=?1 AND via_agent=1 ORDER BY rowid"
     ).unwrap().query_map([session], |row| row.get(0)).unwrap().map(Result::unwrap).collect();
     assert_eq!(parents.first(), Some(&original.id.to_string()));
     assert!(
@@ -980,9 +980,9 @@ async fn monitor_prune_preserves_unknown_outcomes_and_removes_only_settled_dead_
     std::fs::create_dir_all(&directory).unwrap();
 
     for terminal in [false, true] {
-        let id = ProcessId::new();
+        let id = ProcessLfid::new();
         conn.execute(
-            "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?1,1,?2,?3)",
+            "INSERT INTO processes(lfid,trace_id,started_at,completed_at,outcome) VALUES(?1,?1,1,?2,?3)",
             rusqlite::params![id, terminal.then_some(2), terminal.then_some("failed")],
         )
         .unwrap();
@@ -1027,9 +1027,11 @@ async fn monitor_prune_preserves_unknown_outcomes_and_removes_only_settled_dead_
             }
         }
         let outcome: Option<String> = conn
-            .query_row("SELECT outcome FROM processes WHERE id=?1", [&id], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT outcome FROM processes WHERE lfid=?1",
+                [&id],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(outcome.as_deref(), terminal.then_some("failed"));
     }

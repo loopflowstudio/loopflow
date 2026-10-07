@@ -270,7 +270,7 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{claude, codex, opencode, Attention, Signal};
-    use crate::id::ProcessId;
+    use crate::id::ProcessLfid;
     use crate::process::SessionDriver;
     use crate::store::sqlite::SqliteStore;
 
@@ -294,9 +294,9 @@ mod tests {
             let store = SqliteStore::open_ephemeral(&path).unwrap();
             store.test_session("conversation", "run_00000000000000000000000000000001");
             let conn = rusqlite::Connection::open(&path).unwrap();
-            let process = ProcessId::new();
+            let process = ProcessLfid::new();
             conn.execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
                 [&process],
             )
             .unwrap();

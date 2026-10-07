@@ -73,7 +73,7 @@ pub struct EndOptions {
     /// Reach `end` although Linear already calls the active Task complete.
     pub force: bool,
     /// Historical Processes whose unknown outcome is accepted for completion only.
-    pub accept_unknown_process: Vec<crate::id::ProcessId>,
+    pub accept_unknown_process: Vec<crate::id::ProcessLfid>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -611,7 +611,7 @@ async fn traverse_workflow(
             }));
         }
     };
-    let process = crate::journal::current_process_id()
+    let process = crate::journal::current_process_lfid()
         .ok_or_else(|| task_error("a workflow move requires a registered Process"))?;
     if let Some(definition) = &take_up {
         store
@@ -653,7 +653,7 @@ async fn traverse_workflow(
 /// its target. A Task moved elsewhere in the meantime stays where it was put.
 /// Arriving at `end` completes the Task; refused, the Task stays on its edge.
 pub fn workflow_arrive(task: &Task, end: &EndOptions) -> OpsResult<()> {
-    let Some(process) = crate::journal::current_process_id() else {
+    let Some(process) = crate::journal::current_process_lfid() else {
         return Ok(());
     };
     block_on_task(async {
@@ -727,7 +727,7 @@ pub fn workflow_set(
                 nodes.join(", ")
             )));
         }
-        let process = crate::journal::current_process_id()
+        let process = crate::journal::current_process_lfid()
             .ok_or_else(|| task_error("a workflow move requires a registered Process"))?;
         if !store
             .sqlite
@@ -1318,7 +1318,7 @@ fn create_prepared_task(
         // A new Task stands at `start` of its Project's workflow. A Project
         // that names none leaves the Task without one until a run names it.
         if let (Some(process), Some(definition)) = (
-            crate::journal::current_process_id(),
+            crate::journal::current_process_lfid(),
             load_workflow(&project_workflow, &task.worktree)
                 .ok()
                 .flatten(),
@@ -4982,9 +4982,10 @@ mod tests {
             .unwrap();
 
         let process = crate::process::Process {
-            id: crate::id::ProcessId::new(),
+            lfid: crate::id::ProcessLfid::new(),
+            pid: None,
             trace_id: crate::id::TraceId::new(),
-            parent_process_id: None,
+            parent_process_lfid: None,
             via_agent: None,
             caller_session_id: None,
             caller_provider_generation: None,
@@ -5004,7 +5005,7 @@ mod tests {
                 .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
                 .unwrap()
         };
-        let accept = |ids: &[crate::id::ProcessId]| {
+        let accept = |ids: &[crate::id::ProcessLfid]| {
             super::lifecycle::accept_historical_uncertainty(
                 &fixture.store,
                 &fixture.task,
@@ -5013,17 +5014,17 @@ mod tests {
             )
         };
         assert!(!gate().satisfied);
-        assert!(accept(&[crate::id::ProcessId::new()]).is_err());
-        accept(std::slice::from_ref(&process.id)).unwrap();
+        assert!(accept(&[crate::id::ProcessLfid::new()]).is_err());
+        accept(std::slice::from_ref(&process.lfid)).unwrap();
         // A released decision remains effective without rewriting its history.
         let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
         conn.execute(
             "UPDATE task_events SET kind_json=json_remove(json_set(kind_json, '$.exec_ids',
-             json_extract(kind_json, '$.process_ids')), '$.process_ids')
+             json_extract(kind_json, '$.process_lfids')), '$.process_lfids')
              WHERE task_id=?1 AND json_extract(kind_json, '$.kind')='historical_uncertainty_accepted'",
             [fixture.task.id.as_str()],
         ).unwrap();
-        accept(std::slice::from_ref(&process.id)).unwrap();
+        accept(std::slice::from_ref(&process.lfid)).unwrap();
         let events = fixture
             .store
             .sqlite
@@ -5042,7 +5043,7 @@ mod tests {
         assert!(gate()
             .blockers
             .iter()
-            .all(|reason| !reason.contains(process.id.as_str())));
+            .all(|reason| !reason.contains(process.lfid.as_str())));
         // The PR was never published and its branch never moved: reaching
         // `end` retires it.
         assert_eq!(
@@ -5057,12 +5058,12 @@ mod tests {
 
         // An exact acceptance never hides a different unfinished Process.
         let mut other = process.clone();
-        other.id = crate::id::ProcessId::new();
+        other.lfid = crate::id::ProcessLfid::new();
         fixture.store.sqlite.record_process(&other).unwrap();
         assert!(gate()
             .blockers
             .iter()
-            .any(|reason| reason.contains(other.id.as_str())));
+            .any(|reason| reason.contains(other.lfid.as_str())));
         other.completed_at = Some(other.started_at + 1);
         other.outcome = Some("succeeded".into());
         other.exit_code = Some(0);
@@ -5076,7 +5077,7 @@ mod tests {
         fixture
             .store
             .sqlite
-            .claim_session_driver(&session.id, None, &process.id, true)
+            .claim_session_driver(&session.id, None, &process.lfid, true)
             .unwrap();
         let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
         conn.execute(
@@ -5084,7 +5085,7 @@ mod tests {
             rusqlite::params![repo.path().to_str().unwrap(), session.id],
         )
         .unwrap();
-        assert!(accept(std::slice::from_ref(&process.id)).is_err());
+        assert!(accept(std::slice::from_ref(&process.lfid)).is_err());
         assert!(!gate().satisfied);
         conn.execute(
             "UPDATE agent_sessions SET completed_at=2 WHERE id=?1",
@@ -5100,13 +5101,13 @@ mod tests {
         let receipt = crate::journal::ProcessReceipt {
             schema_version: 1,
             trace_id: process.trace_id.to_string(),
-            process_id: process.id.to_string(),
+            process_lfid: process.lfid.to_string(),
             pid,
             started_at: crate::journal::process_started_at(pid).unwrap().unwrap(),
         };
-        let path = root.join(format!("{}.json", process.id));
+        let path = root.join(format!("{}.json", process.lfid));
         std::fs::write(&path, serde_json::to_vec(&receipt).unwrap()).unwrap();
-        assert!(accept(std::slice::from_ref(&process.id)).is_err());
+        assert!(accept(std::slice::from_ref(&process.lfid)).is_err());
         assert!(!gate().satisfied);
         std::fs::remove_file(path).unwrap();
         assert!(gate().satisfied);
@@ -5114,7 +5115,7 @@ mod tests {
             super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task)
                 .unwrap()
                 .iter()
-                .any(|reason| reason.contains(process.id.as_str()))
+                .any(|reason| reason.contains(process.lfid.as_str()))
         );
         assert!(crate::ops::task_automation::admission_blocker(
             &fixture.store.sqlite,
@@ -5141,7 +5142,7 @@ mod tests {
             WorkStatus::Done
         );
         assert_eq!(
-            fixture.store.sqlite.process(&process.id).unwrap(),
+            fixture.store.sqlite.process(&process.lfid).unwrap(),
             Some(process)
         );
     }
@@ -5477,9 +5478,10 @@ mod tests {
         // A reboot proves stale execution exited without settling the Flow.
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         let process = crate::process::Process {
-            id: crate::id::ProcessId::new(),
+            lfid: crate::id::ProcessLfid::new(),
+            pid: None,
             trace_id: crate::id::TraceId::new(),
-            parent_process_id: None,
+            parent_process_lfid: None,
             via_agent: None,
             caller_session_id: None,
             caller_provider_generation: None,
@@ -5517,11 +5519,11 @@ mod tests {
         assert_eq!(unresolved.len(), 2, "{unresolved:?}");
         assert!(unresolved
             .iter()
-            .any(|reason| reason.contains(process.id.as_str())));
+            .any(|reason| reason.contains(process.lfid.as_str())));
         assert!(unresolved.iter().any(|reason| reason.contains("stalled")));
         assert!(after_boot.is_empty(), "{after_boot:?}");
         assert_eq!(
-            fixture.store.sqlite.process(&process.id).unwrap(),
+            fixture.store.sqlite.process(&process.lfid).unwrap(),
             Some(process)
         );
         assert_eq!(

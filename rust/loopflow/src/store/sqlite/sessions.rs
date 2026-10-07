@@ -14,13 +14,13 @@ use super::SqliteStore;
 /// `s`'s current input. Sessions carry no Flow column of their own.
 macro_rules! session_flow {
     () => {
-        "(SELECT fs.flow_process_id FROM session_events captured JOIN flow_process_steps fs ON fs.process_id=captured.process_id WHERE captured.seq=s.current_capture)"
+        "(SELECT fs.flow_process_lfid FROM session_events captured JOIN flow_process_steps fs ON fs.process_lfid=captured.process_lfid WHERE captured.seq=s.current_capture)"
     };
 }
 /// That step's node and loop counts, as its driver recorded them.
 macro_rules! session_step {
     ($column:literal) => {
-        concat!("(SELECT fs.", $column, " FROM session_events captured JOIN flow_process_steps fs ON fs.process_id=captured.process_id WHERE captured.seq=s.current_capture)")
+        concat!("(SELECT fs.", $column, " FROM session_events captured JOIN flow_process_steps fs ON fs.process_lfid=captured.process_lfid WHERE captured.seq=s.current_capture)")
     };
 }
 pub(super) const SESSION_FLOW: &str = session_flow!();
@@ -198,8 +198,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
     let order = if by_id { "s.id" } else { "s.title,s.id" };
     // A Flow is the driver Process above the step that captured the current input.
     format!("WITH page AS MATERIALIZED ({page})
-        SELECT s.*,driver.id,flow.flow,driver.outcome,driver.completed_at,step.started_at,
-        (fs.seq=(SELECT MAX(later.seq) FROM flow_process_steps later WHERE later.flow_process_id=fs.flow_process_id)),
+        SELECT s.*,driver.lfid,flow.flow,driver.outcome,driver.completed_at,step.started_at,
+        (fs.seq=(SELECT MAX(later.seq) FROM flow_process_steps later WHERE later.flow_process_lfid=fs.flow_process_lfid)),
         w.slug,t.issue_identifier,
         ((SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
@@ -213,10 +213,10 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
-        LEFT JOIN flow_process_steps fs ON fs.process_id=captured.process_id
-        LEFT JOIN flow_processes flow ON flow.process_id=fs.flow_process_id
-        LEFT JOIN processes step ON step.id=fs.process_id
-        LEFT JOIN processes driver ON driver.id=fs.flow_process_id
+        LEFT JOIN flow_process_steps fs ON fs.process_lfid=captured.process_lfid
+        LEFT JOIN flow_processes flow ON flow.process_lfid=fs.flow_process_lfid
+        LEFT JOIN processes step ON step.lfid=fs.process_lfid
+        LEFT JOIN processes driver ON driver.lfid=fs.flow_process_lfid
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         ORDER BY {order}", super::task_work::session_tasks("a"),
@@ -757,7 +757,7 @@ impl SqliteStore {
     pub fn create_session(
         &self,
         session: AgentSession,
-        caller_process: Option<&crate::id::ProcessId>,
+        caller_process: Option<&crate::id::ProcessLfid>,
     ) -> StoreResult<AgentSession> {
         let _admission = self.lock_session_checkouts(&session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -779,7 +779,7 @@ impl SqliteStore {
         scope: &PrimaryScope,
         replacing: Option<&str>,
         session: AgentSession,
-        caller_process: Option<&crate::id::ProcessId>,
+        caller_process: Option<&crate::id::ProcessLfid>,
     ) -> StoreResult<AgentSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -929,7 +929,7 @@ impl SqliteStore {
         replace_input_in(
             &tx,
             &mut session,
-            crate::journal::current_process_id().as_ref(),
+            crate::journal::current_process_lfid().as_ref(),
         )?;
         let session = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
@@ -1107,7 +1107,7 @@ pub(super) fn retain_history_in(
 pub(super) fn reserve_session_in(
     conn: &Transaction<'_>,
     mut session: AgentSession,
-    caller: Option<&crate::id::ProcessId>,
+    caller: Option<&crate::id::ProcessLfid>,
 ) -> StoreResult<AgentSession> {
     resolve_ancestry_in(conn, &mut session)?;
     insert_session_in(conn, &mut session, caller)?;
@@ -1139,9 +1139,9 @@ fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
     if let Some(caller) = crate::journal::agent_caller().filter(|caller| caller.session_id == id) {
         let current: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1
-                AND provider_generation=?2 AND provider_process_id=?3
-                AND driver_process_id IS NOT NULL)",
-            params![id, caller.provider_generation, caller.origin_process_id],
+                AND provider_generation=?2 AND provider_process_lfid=?3
+                AND driver_process_lfid IS NOT NULL)",
+            params![id, caller.provider_generation, caller.origin_process_lfid],
             |row| row.get(0),
         )?;
         if !current {
@@ -1194,7 +1194,7 @@ fn capture_in(
     conn: &Connection,
     session: &AgentSession,
     observed_at: i64,
-    process: Option<&crate::id::ProcessId>,
+    process: Option<&crate::id::ProcessLfid>,
 ) -> StoreResult<i64> {
     let saved: Option<(i64, String, Option<String>)> = conn
         .query_row(
@@ -1215,7 +1215,7 @@ fn capture_in(
     let payload = serde_json::json!({"artifact_key":session.artifact_key,
         "caller_key":session.caller_artifact_key,"cwd":session.cwd,"skill":session.skill,
         "provider":session.provider,"model":session.model,"work_source":session.work_source});
-    conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,process_id,task_id,wave_id,observed_at,payload)
+    conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,task_id,wave_id,observed_at,payload)
         VALUES(?1,'captured',?2,?3,?4,?5,?6,?7)",
         params![session.id,session.artifact_key,process,session.task_id.as_ref().map(TaskId::as_str),
             session.wave_id.as_ref().map(crate::id::WaveId::as_str),observed_at,serde_json::to_string(&payload)?])?;
@@ -1225,7 +1225,7 @@ fn capture_in(
 fn insert_session_in(
     conn: &Connection,
     session: &mut AgentSession,
-    process: Option<&crate::id::ProcessId>,
+    process: Option<&crate::id::ProcessLfid>,
 ) -> StoreResult<()> {
     conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,completed_at,
@@ -1276,7 +1276,7 @@ fn insert_session_in(
 pub(super) fn replace_input_in(
     conn: &Transaction<'_>,
     session: &mut AgentSession,
-    process: Option<&crate::id::ProcessId>,
+    process: Option<&crate::id::ProcessLfid>,
 ) -> StoreResult<()> {
     // Workspace admission owns location; replacing input cannot move Task membership.
     session.cwd = conn
@@ -1557,8 +1557,8 @@ mod metadata_tests {
             .unwrap();
             // The step Process captured this conversation's input.
             conn.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,process_id,observed_at,payload)
-                 VALUES('session','captured',?1,(SELECT id FROM processes WHERE parent_process_id=?2),1,
+                "INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload)
+                 VALUES('session','captured',?1,(SELECT lfid FROM processes WHERE parent_process_lfid=?2),1,
                     json_object('artifact_key',?1))",
                 params![input, driver],
             )
@@ -1605,7 +1605,7 @@ mod metadata_tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE processes SET outcome='succeeded',completed_at=2 WHERE id=?1",
+                "UPDATE processes SET outcome='succeeded',completed_at=2 WHERE lfid=?1",
                 params![driver],
             )
             .unwrap();

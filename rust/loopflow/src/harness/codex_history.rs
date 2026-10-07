@@ -152,7 +152,7 @@ impl History {
             .collect();
         for turn in correlated {
             let driver = &self.replies[&turn];
-            if let Some(process) = &driver.process_id {
+            if let Some(process) = &driver.process_lfid {
                 store.record_session_turn_origin(
                     session,
                     thread,
@@ -214,7 +214,7 @@ fn completion(store: &SqliteStore, session: &str, thread: &str, turn: &Value) ->
 #[cfg(test)]
 mod tests {
     use super::History;
-    use crate::id::ProcessId;
+    use crate::id::ProcessLfid;
     use crate::process::SessionDriver;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
@@ -225,25 +225,25 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("history.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let first = ProcessId::new();
-        let second = ProcessId::new();
+        let first = ProcessLfid::new();
+        let second = ProcessLfid::new();
         let conn = rusqlite::Connection::open(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
         for process in [&first, &second] {
             conn.execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
                 [process.as_str()],
             )
             .unwrap();
         }
         let original = SessionDriver {
-            process_id: Some(first.clone()),
+            process_lfid: Some(first.clone()),
             generation: 1,
             provider_generation: 1,
-            provider_process_id: first.clone(),
+            provider_process_lfid: first.clone(),
         };
         let replacement = SessionDriver {
-            process_id: Some(second.clone()),
+            process_lfid: Some(second.clone()),
             generation: 2,
             ..original.clone()
         };
@@ -271,7 +271,7 @@ mod tests {
             }
             let before = store.session_history("conversation", 0, 0).unwrap();
             assert_eq!(
-                before.last().unwrap().process_id.as_deref(),
+                before.last().unwrap().process_lfid.as_deref(),
                 Some(first.as_str())
             );
             // A reconnect discovers the existing turn; another input receives
@@ -312,7 +312,7 @@ mod tests {
             .find(|event| event.provider_turn.as_deref() == Some("unknown"))
             .unwrap();
         assert_eq!(unknown.kind, SessionEventKind::Started);
-        assert_eq!(unknown.process_id, None);
+        assert_eq!(unknown.process_lfid, None);
         assert_eq!(unknown.provider_generation, None);
         assert!(
             store

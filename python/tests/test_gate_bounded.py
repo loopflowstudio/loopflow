@@ -22,7 +22,7 @@ _spec = importlib.util.spec_from_file_location("gate_test_runner", SCRIPT)
 assert _spec is not None and _spec.loader is not None
 gate = importlib.util.module_from_spec(_spec)
 sys.modules["gate_test_runner"] = gate
-_spec.loader.process_module(gate)
+_spec.loader.exec_module(gate)
 
 _resource_spec = importlib.util.spec_from_file_location(
     "gate_resource_envelope", ROOT / "scripts/resource_envelope.py"
@@ -30,7 +30,7 @@ _resource_spec = importlib.util.spec_from_file_location(
 assert _resource_spec is not None and _resource_spec.loader is not None
 resources = importlib.util.module_from_spec(_resource_spec)
 sys.modules[_resource_spec.name] = resources
-_resource_spec.loader.process_module(resources)
+_resource_spec.loader.exec_module(resources)
 
 
 def _resource_report() -> dict[str, object]:

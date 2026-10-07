@@ -395,7 +395,7 @@ fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
         ]
     );
     let history = workflow["history"].as_array().unwrap();
-    assert_eq!(history[1]["process_id"], history[2]["process_id"]);
+    assert_eq!(history[1]["process_lfid"], history[2]["process_lfid"]);
     assert_eq!(history[1]["actor"], "person");
     assert_eq!(history[2]["actor"], "edge");
     task.ok(&["task", "run", "INF-123"]);
@@ -557,8 +557,8 @@ fn attempts(home: &Path, task_run: &str) -> Vec<String> {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     let mut rows = db
         .prepare(
-            "SELECT d.outcome FROM flow_processes f JOIN processes d ON d.id=f.process_id
-             WHERE d.parent_process_id=?1 ORDER BY d.rowid",
+            "SELECT d.outcome FROM flow_processes f JOIN processes d ON d.lfid=f.process_lfid
+             WHERE d.parent_process_lfid=?1 ORDER BY d.rowid",
         )
         .unwrap();
     let outcomes = rows
@@ -575,7 +575,7 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
     task.ok(&["-b", "task", "run", "INF-123", "gated"]);
     let carrier = |workflow: &serde_json::Value| {
         let chose = workflow["history"].as_array().unwrap().last().unwrap();
-        chose["process_id"].as_str().unwrap().to_string()
+        chose["process_lfid"].as_str().unwrap().to_string()
     };
     // Every attempt fails: the Task run gives up and the edge holds the Task.
     let output = task.run(&["-b", "task", "run", "INF-123", "gate"]);
@@ -585,7 +585,7 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
     assert_eq!(stopped["position"]["edge"], 2);
     assert_eq!(stopped["position"]["running"], false);
     assert_eq!(
-        stopped["position"]["process_id"],
+        stopped["position"]["process_lfid"],
         carrier(&stopped).as_str()
     );
     assert_eq!(
@@ -630,7 +630,7 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
         ["took_up", "chose", "arrived", "chose", "chose", "arrived"]
     );
     let arrived = workflow["history"].as_array().unwrap().last().unwrap();
-    let task_run = arrived["process_id"].as_str().unwrap();
+    let task_run = arrived["process_lfid"].as_str().unwrap();
     assert_eq!(
         attempts(task.home.path(), task_run),
         ["failed", "failed", "succeeded"]

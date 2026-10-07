@@ -1,9 +1,8 @@
 {
   "entries": [
     {
-      "id": "11111111-1111-4111-8111-111111111111",
       "trace_id": "22222222-2222-4222-8222-222222222222",
-      "parent_process_id": null,
+      "parent_process_lfid": null,
       "via_agent": null,
       "caller_session_id": null,
       "caller_provider_generation": null,
@@ -15,12 +14,13 @@
       "outcome": "failed",
       "exit_code": 42,
       "signal": null,
-      "error": null
+      "error": null,
+      "lfid": "11111111-1111-4111-8111-111111111111",
+      "pid": null
     },
     {
-      "id": "33333333-3333-4333-8333-333333333333",
       "trace_id": "22222222-2222-4222-8222-222222222222",
-      "parent_process_id": "11111111-1111-4111-8111-111111111111",
+      "parent_process_lfid": "11111111-1111-4111-8111-111111111111",
       "via_agent": true,
       "caller_session_id": "conversation",
       "caller_provider_generation": 2,
@@ -32,11 +32,13 @@
       "outcome": null,
       "exit_code": null,
       "signal": null,
-      "error": null
+      "error": null,
+      "lfid": "33333333-3333-4333-8333-333333333333",
+      "pid": 4242
     }
   ],
   "next": {
     "started_at": 1790640000,
-    "id": "33333333-3333-4333-8333-333333333333"
+    "lfid": "33333333-3333-4333-8333-333333333333"
   }
 }

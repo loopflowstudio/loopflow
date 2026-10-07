@@ -119,7 +119,7 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str) -> Result<()> {
     let store = block_on(open_flow_store())?;
     let store = &store.sqlite;
     let process =
-        journal::current_process_id().context("a Task run requires a registered Process")?;
+        journal::current_process_lfid().context("a Task run requires a registered Process")?;
     // An interrupted Task run takes its running attempt with it.
     static ATTEMPT_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     crate::engine::agent::register_interrupt_cleanup(|| {
@@ -181,7 +181,7 @@ fn execute(
     report_outcome(block_on(async {
         let driver = Driver {
             store: open_flow_store().await?,
-            process: journal::current_process_id()
+            process: journal::current_process_lfid()
                 .context("a Flow requires a registered Process")?,
             flow: flow_name,
             steps: items,
@@ -400,7 +400,7 @@ impl Drop for EnvVarGuard {
 /// Process that child registered.
 struct Driver<'a> {
     store: SharedStore,
-    process: crate::id::ProcessId,
+    process: crate::id::ProcessLfid,
     flow: &'a str,
     steps: &'a [ConcreteStep],
     message: Option<&'a str>,
@@ -436,7 +436,7 @@ impl Driver<'_> {
     }
 
     /// Record the Process this driver's newest child registered, once it has.
-    fn record_step(&self, mark: i64) -> Result<Option<crate::id::ProcessId>> {
+    fn record_step(&self, mark: i64) -> Result<Option<crate::id::ProcessLfid>> {
         let Some(step) = self.store.sqlite.child_process_after(&self.process, mark)? else {
             return Ok(None);
         };
@@ -452,7 +452,7 @@ impl Driver<'_> {
         &self,
         label: &str,
         args: &[String],
-    ) -> Result<(StepExit, Option<crate::id::ProcessId>)> {
+    ) -> Result<(StepExit, Option<crate::id::ProcessLfid>)> {
         // The absolute selected path becomes argv[0] in the child's Process record.
         let mut command =
             tokio::process::Command::new(crate::engine::process::resolve_pinned_lf_binary()?);
@@ -533,7 +533,7 @@ impl Driver<'_> {
     }
 
     /// The conversation and input a step's Process captured; none for an operation.
-    fn captured(&self, step: Option<&crate::id::ProcessId>) -> Result<Option<(String, String)>> {
+    fn captured(&self, step: Option<&crate::id::ProcessLfid>) -> Result<Option<(String, String)>> {
         let Some(step) = step else { return Ok(None) };
         Ok(self
             .store
@@ -542,7 +542,7 @@ impl Driver<'_> {
             .map(|(session, input, _)| (session, input)))
     }
 
-    fn turn_events(&self, step: Option<&crate::id::ProcessId>) -> Result<Vec<serde_json::Value>> {
+    fn turn_events(&self, step: Option<&crate::id::ProcessLfid>) -> Result<Vec<serde_json::Value>> {
         Ok(match self.captured(step)? {
             Some((_, input)) => self.store.sqlite.input_events(&input)?,
             None => Vec::new(),
@@ -553,7 +553,7 @@ impl Driver<'_> {
     fn answer(
         &self,
         label: &str,
-        step: Option<&crate::id::ProcessId>,
+        step: Option<&crate::id::ProcessLfid>,
     ) -> Result<(String, Option<String>)> {
         let (session, input) = self
             .captured(step)?

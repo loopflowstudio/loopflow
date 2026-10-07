@@ -2,7 +2,7 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::id::ProcessId;
+use crate::id::ProcessLfid;
 use crate::session::{SessionEvent, SessionEventKind};
 use crate::session_record::{FinalAnswer, ProviderSessionRef};
 use crate::store::{StoreError, StoreResult};
@@ -194,7 +194,7 @@ impl SqliteStore {
         thread: &str,
         turn: &str,
         generation: i64,
-        process: &ProcessId,
+        process: &ProcessLfid,
     ) -> StoreResult<i64> {
         let seq = self.record_session_event(
             session,
@@ -205,8 +205,8 @@ impl SqliteStore {
         )?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
-            "UPDATE session_events SET process_id=?4,provider_generation=?5 WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3
-             AND kind='started' AND (process_id IS NULL OR process_id=?4)
+            "UPDATE session_events SET process_lfid=?4,provider_generation=?5 WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3
+             AND kind='started' AND (process_lfid IS NULL OR process_lfid=?4)
              AND (provider_generation IS NULL OR provider_generation=?5)",
             params![session, thread, turn, process, generation],
         )?;
@@ -267,7 +267,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT e.seq,e.session_id,e.provider_thread,e.provider_turn,e.kind,
-                    origin.provider_generation,CASE WHEN e.kind='captured' THEN e.process_id ELSE origin.process_id END,
+                    origin.provider_generation,CASE WHEN e.kind='captured' THEN e.process_lfid ELSE origin.process_lfid END,
                     CASE WHEN e.kind IN ('observed','captured') THEN e.task_id ELSE origin.task_id END,
                     CASE WHEN e.kind IN ('observed','captured') THEN e.wave_id ELSE origin.wave_id END,e.observed_at,e.payload
              FROM session_events e LEFT JOIN session_events origin
@@ -330,7 +330,7 @@ impl SqliteStore {
                 provider_turn,
                 kind,
                 provider_generation,
-                process_id,
+                process_lfid,
                 task_id,
                 wave_id,
                 observed_at,
@@ -355,7 +355,7 @@ impl SqliteStore {
                     }
                 },
                 provider_generation,
-                process_id,
+                process_lfid,
                 task_id,
                 wave_id,
                 observed_at,
@@ -765,7 +765,7 @@ mod tests {
             matches!(&provider.reference, crate::session_record::ProviderHistoryReference::NativeTurn {
             turn, start_seq: None, completion_seq: Some(_), .. } if turn == "recent")
         );
-        assert!(provider.process_id.is_none());
+        assert!(provider.process_lfid.is_none());
         assert!(provider.task_id.is_none());
         assert!(provider.started_at.is_none());
         assert_eq!(provider.outcome.as_deref(), Some("completed"));
@@ -825,13 +825,13 @@ mod tests {
             let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
             let session =
                 store.test_session("conversation", &crate::session_record::new_artifact_key());
-            let first = crate::id::ProcessId::new();
-            let second = crate::id::ProcessId::new();
+            let first = crate::id::ProcessLfid::new();
+            let second = crate::id::ProcessLfid::new();
             {
                 let conn = store.conn.lock().unwrap();
                 for process in [&first, &second] {
                     conn.execute(
-                        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
                         [process.as_str()],
                     )
                     .unwrap();
@@ -905,7 +905,7 @@ mod tests {
                 .session_driver(&session.id)
                 .unwrap()
                 .unwrap()
-                .process_id
+                .process_lfid
                 .is_none());
         }
     }
@@ -939,11 +939,11 @@ mod tests {
             ("task", None, false),
         ] {
             let session = store.test_session(id, &crate::session_record::new_artifact_key());
-            let process = crate::id::ProcessId::new();
+            let process = crate::id::ProcessLfid::new();
             {
                 let conn = store.conn.lock().unwrap();
                 conn.execute(
-                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
                     [process.as_str()],
                 )
                 .unwrap();
@@ -1019,15 +1019,15 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let session =
             store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let first = crate::id::ProcessId::new();
-        let second = crate::id::ProcessId::new();
+        let first = crate::id::ProcessLfid::new();
+        let second = crate::id::ProcessLfid::new();
         for process in [&first, &second] {
             store
                 .conn
                 .lock()
                 .unwrap()
                 .execute(
-                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
                     [process.as_str()],
                 )
                 .unwrap();
@@ -1092,15 +1092,15 @@ mod tests {
             crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
                 .unwrap();
         let session = store.session("conversation").unwrap().unwrap();
-        let first = crate::id::ProcessId::new();
-        let second = crate::id::ProcessId::new();
+        let first = crate::id::ProcessLfid::new();
+        let second = crate::id::ProcessLfid::new();
         for process in [&first, &second] {
             store
                 .conn
                 .lock()
                 .unwrap()
                 .execute(
-                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
                     [process.as_str()],
                 )
                 .unwrap();
@@ -1153,10 +1153,10 @@ mod tests {
             .unwrap();
         let history = store.summary_for_input(&session.id, &first_input).unwrap();
         assert_eq!(history.len(), 4);
-        assert!(history
-            .iter()
-            .all(|event| event.process_id.as_deref() == Some(first.as_str())
-                && event.provider_generation == Some(1)));
+        assert!(history.iter().all(
+            |event| event.process_lfid.as_deref() == Some(first.as_str())
+                && event.provider_generation == Some(1)
+        ));
         assert!(store
             .summary_for_input(&session.id, &replacement.artifact_key)
             .unwrap()
@@ -1211,7 +1211,7 @@ mod tests {
                 .unwrap()
                 .last()
                 .unwrap()
-                .process_id,
+                .process_lfid,
             None
         );
         // Even with a start, a late first usage snapshot is a lower bound, not the thread total.
@@ -1410,21 +1410,21 @@ mod tests {
         );
         assert_eq!(history[0].payload, completed);
         assert_eq!(history[0].provider_generation, None);
-        assert_eq!(history[0].process_id, None);
+        assert_eq!(history[0].process_lfid, None);
         assert!(store
             .session_history("conversation", seq, 100)
             .unwrap()
             .is_empty());
 
-        let first = crate::id::ProcessId::new();
-        let second = crate::id::ProcessId::new();
+        let first = crate::id::ProcessLfid::new();
+        let second = crate::id::ProcessLfid::new();
         for process in [&first, &second] {
             store
                 .conn
                 .lock()
                 .unwrap()
                 .execute(
-                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                    "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
                     [process.as_str()],
                 )
                 .unwrap();
@@ -1480,8 +1480,8 @@ mod tests {
             .unwrap();
         let events = store.session_history("conversation", seq, 100).unwrap();
         assert_eq!(events[1].provider_generation, Some(1));
-        assert_eq!(events[1].process_id.as_deref(), Some(first.as_str()));
+        assert_eq!(events[1].process_lfid.as_deref(), Some(first.as_str()));
         assert_eq!(events[2].provider_generation, None);
-        assert_eq!(events[2].process_id, None);
+        assert_eq!(events[2].process_lfid, None);
     }
 }

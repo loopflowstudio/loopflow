@@ -45,7 +45,7 @@ public struct Workflow: Codable, Sendable, Equatable {
         public let to: String
         public let edge: Int?
         /// The `lf` process that made the move; `nil` when none was registered.
-        public let processId: String?
+        public let processLfid: String?
         public let actor: Actor
         public let sessionId: String?
         public let note: String?
@@ -53,7 +53,7 @@ public struct Workflow: Codable, Sendable, Equatable {
 
         enum CodingKeys: String, CodingKey {
             case workflow, kind, from, to, edge, actor, note, at
-            case processId = "process_id"
+            case processLfid = "process_lfid"
             case sessionId = "session_id"
         }
     }
@@ -62,11 +62,11 @@ public struct Workflow: Codable, Sendable, Equatable {
     /// Process carries it; one that no longer runs has stopped and holds the Task.
     public enum Position: Codable, Sendable, Equatable {
         case node(String)
-        case edge(index: Int, processId: String, running: Bool)
+        case edge(index: Int, processLfid: String, running: Bool)
 
         enum CodingKeys: String, CodingKey {
             case kind, node, edge, running
-            case processId = "process_id"
+            case processLfid = "process_lfid"
         }
 
         public init(from decoder: Decoder) throws {
@@ -77,7 +77,7 @@ public struct Workflow: Codable, Sendable, Equatable {
             case "edge":
                 self = .edge(
                     index: try container.decode(Int.self, forKey: .edge),
-                    processId: try container.decode(String.self, forKey: .processId),
+                    processLfid: try container.decode(String.self, forKey: .processLfid),
                     running: try container.decode(Bool.self, forKey: .running))
             case let kind:
                 throw DecodingError.dataCorruptedError(
@@ -91,10 +91,10 @@ public struct Workflow: Codable, Sendable, Equatable {
             case .node(let node):
                 try container.encode("node", forKey: .kind)
                 try container.encode(node, forKey: .node)
-            case .edge(let index, let processId, let running):
+            case .edge(let index, let processLfid, let running):
                 try container.encode("edge", forKey: .kind)
                 try container.encode(index, forKey: .edge)
-                try container.encode(processId, forKey: .processId)
+                try container.encode(processLfid, forKey: .processLfid)
                 try container.encode(running, forKey: .running)
             }
         }

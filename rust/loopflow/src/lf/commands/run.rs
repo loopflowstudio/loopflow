@@ -1360,7 +1360,7 @@ mod tests {
         std::fs::write(
             &provider,
             r#"#!/bin/sh
-printf '%s\n' "$LF_CAPTURE_KEY|${LF_RUN_DIR-unset}|${LF_TRACE_ID-unset}|${LF_PROCESS_ID-unset}" >> "$LF_TEST_RUN_EVIDENCE"
+printf '%s\n' "$LF_CAPTURE_KEY|${LF_RUN_DIR-unset}|${LF_TRACE_ID-unset}|${LF_PROCESS_LFID-unset}" >> "$LF_TEST_RUN_EVIDENCE"
 if [ -n "${LF_TEST_ATTEMPT_FILE:-}" ] && [ ! -e "$LF_TEST_ATTEMPT_FILE" ]; then
   touch "$LF_TEST_ATTEMPT_FILE"
   printf '%s\n' '{"type":"result","is_error":true,"result":"service unavailable"}'
@@ -1377,7 +1377,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             "LF_BIN",
             "LF_HOME",
             crate::journal::LF_TRACE_ID_ENV,
-            crate::journal::LF_PROCESS_ID_ENV,
+            crate::journal::LF_PROCESS_LFID_ENV,
             crate::session_record::CAPTURE_KEY_ENV,
             "LF_RUN_DIR",
         ];
@@ -1392,7 +1392,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         std::env::set_var("LF_HOME", home.path());
         let registry = home.path().join("loopflow.db");
         std::env::set_var(crate::journal::LF_TRACE_ID_ENV, "trace_stale");
-        std::env::set_var(crate::journal::LF_PROCESS_ID_ENV, "process_stale");
+        std::env::set_var(crate::journal::LF_PROCESS_LFID_ENV, "process_stale");
         std::env::set_var("LF_RUN_DIR", home.path().join("stale-run"));
 
         let task = "prove the captured Session launch";

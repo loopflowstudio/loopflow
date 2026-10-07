@@ -322,7 +322,7 @@ fn admit_ci_fix(
         if retry && reservation.retries >= config.automation.retries {
             return Err(repair_error("repair startup exhausted automatic retries"));
         }
-        let launcher = crate::journal::current_process_id()
+        let launcher = crate::journal::current_process_lfid()
             .ok_or_else(|| repair_error("repair admission requires a recorded Process"))?;
         let session = if let Some(id) = &reservation.session {
             store
@@ -446,9 +446,9 @@ fn admit_ci_fix(
 
 /// A reservation still held by the caller was never handed to a repair worker;
 /// a long-lived watcher must be able to retry its own unacknowledged launch.
-fn repair_live(store: &SharedStore, process: Option<&crate::id::ProcessId>) -> bool {
+fn repair_live(store: &SharedStore, process: Option<&crate::id::ProcessLfid>) -> bool {
     process.is_some_and(|process| {
-        Some(process) != crate::journal::current_process_id().as_ref()
+        Some(process) != crate::journal::current_process_lfid().as_ref()
             && crate::journal::process_evidence(&store.sqlite, process)
                 != crate::journal::ProcessIdentityEvidence::Dead
     })
@@ -479,8 +479,8 @@ fn ci_timeout_failure(head_sha: &str) -> LandingObservation {
 fn live_checkout_process(
     store: &SharedStore,
     worktree: &Path,
-) -> OpsResult<Option<crate::id::ProcessId>> {
-    let caller = crate::journal::current_process_id();
+) -> OpsResult<Option<crate::id::ProcessLfid>> {
+    let caller = crate::journal::current_process_lfid();
     Ok(store
         .sqlite
         .processes_since(0)
@@ -488,11 +488,11 @@ fn live_checkout_process(
         .into_iter()
         .find(|process| {
             process.cwd.as_deref() == worktree.to_str()
-                && Some(&process.id) != caller.as_ref()
-                && crate::journal::process_evidence(&store.sqlite, &process.id)
+                && Some(&process.lfid) != caller.as_ref()
+                && crate::journal::process_evidence(&store.sqlite, &process.lfid)
                     != crate::journal::ProcessIdentityEvidence::Dead
         })
-        .map(|process| process.id))
+        .map(|process| process.lfid))
 }
 
 pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
@@ -517,13 +517,13 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
             .find(|row| row.incident.identity == identity)
             .ok_or_else(|| repair_error("repair incident disappeared"))?
             .incident;
-        let process = crate::journal::current_process_id()
+        let process = crate::journal::current_process_lfid()
             .ok_or_else(|| repair_error("repair worker has no Process"))?;
         if !store
             .sqlite
             .handoff_repair(
                 identity,
-                &crate::id::ProcessId::parse(launcher).map_err(repair_error)?,
+                &crate::id::ProcessLfid::parse(launcher).map_err(repair_error)?,
                 &process,
             )
             .map_err(repair_error)?
@@ -589,7 +589,7 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
         .sqlite
         .finish_repair(
             identity,
-            &crate::journal::current_process_id().expect("repair has a process"),
+            &crate::journal::current_process_lfid().expect("repair has a process"),
             failure.as_deref(),
             conclusion,
             captured,

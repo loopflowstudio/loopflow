@@ -12,7 +12,7 @@ PROOFS = {
     "task_flow_read_keeps_captured_topology_and_counts_both_returns": "flow_tests",
     "installation_uses_candidate_authority_from_any_checkout": "global_commands",
     "installation_reaches_candidate_verdict_with_an_unreadable_task_registry": "global_commands",
-    "early_observation_records_preflight_and_screenshot_child_ancestry": "exec_ownership_tests",
+    "early_observation_records_preflight_and_screenshot_child_ancestry": "process_ownership_tests",
 }
 
 

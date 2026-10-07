@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use tokio::net::UnixStream;
 use tokio_tungstenite::{accept_async, client_async, tungstenite::Message, WebSocketStream};
 
-use crate::exec::SessionDriver;
+use crate::process::SessionDriver;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 

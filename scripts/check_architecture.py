@@ -249,7 +249,7 @@ def _discover_executable_edges(root: Path) -> set[str]:
         if "tests" in relative.parts or MIGRATIONS in relative.parents:
             continue
         source = _production_rust(path.read_text())
-        edges.update(f"exec:{name}" for name in COMMAND_EDGE.findall(source))
+        edges.update(f"process:{name}" for name in COMMAND_EDGE.findall(source))
     return edges
 
 

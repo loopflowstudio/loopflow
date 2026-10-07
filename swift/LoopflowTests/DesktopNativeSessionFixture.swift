@@ -79,7 +79,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
             try? FileManager.default.removeItem(at: output)
             try? FileManager.default.removeItem(at: errors)
         }
-        let process = Process()
+        let process = Foundation.Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = argv
         process.environment = environment
@@ -115,7 +115,7 @@ struct DesktopNativeSessionTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LOOPFLOW_TEST_CANARY"] != nil))
     func ownedChildrenCanExitButHostSignalsStayDenied() async throws {
         #expect(kill(getppid(), 0) == -1 && errno == EPERM)
-        let child = Process()
+        let child = Foundation.Process()
         let input = Pipe()
         child.executableURL = URL(fileURLWithPath: "/bin/cat")
         child.standardInput = input
@@ -155,7 +155,7 @@ struct DesktopNativeSessionTests {
     func inheritedSandboxRejectsExternalEffects() throws {
         let canary = try #require(ProcessInfo.processInfo.environment["LOOPFLOW_TEST_CANARY"])
         for script in ["IFS= read -r line < \"$1\"", ": > \"$1\"", "exec \"$1\"", "exec /bin/launchctl list"] {
-            let process = Process()
+            let process = Foundation.Process()
             process.executableURL = URL(fileURLWithPath: "/bin/sh")
             process.arguments = ["-c", script, "probe", canary]
             process.standardOutput = FileHandle.nullDevice

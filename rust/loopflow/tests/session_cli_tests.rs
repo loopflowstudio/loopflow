@@ -16,7 +16,7 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
         .env_remove("LF_CAPTURE_KEY")
         .env_remove("LF_RUN_DIR")
         .env_remove("LF_TRACE_ID")
-        .env_remove("LF_PROCESS_ID")
+        .env_remove("LF_PROCESS_LFID")
         .env_remove("LF_FLOW_ID")
         .env_remove("LF_HUMAN_SESSION")
         .env_remove("LF_WAVE_ID")
@@ -120,7 +120,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
             "LF_CAPTURE_KEY",
             "LF_RUN_DIR",
             "LF_TRACE_ID",
-            "LF_PROCESS_ID",
+            "LF_PROCESS_LFID",
             "LF_HUMAN_SESSION",
             "LF_FLOW_ID",
         ] {
@@ -369,14 +369,14 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let selected: String = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap()
             .query_row("SELECT receipt_key FROM session_events WHERE seq=(SELECT current_capture FROM agent_sessions WHERE id=?1)", [id], |row| row.get(0)).unwrap();
         assert_eq!(std::fs::read_to_string(evidence).unwrap(), selected);
-        let caller: loopflow::exec::AgentCaller =
+        let caller: loopflow::process::AgentCaller =
             serde_json::from_slice(&std::fs::read(home.path().join("resumed.caller")).unwrap())
                 .unwrap();
         assert_eq!(caller.session_id, id);
         let recorded: (i64, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .query_row(
-                "SELECT provider_generation,provider_exec_id FROM agent_sessions WHERE id=?1",
+                "SELECT provider_generation,provider_process_lfid FROM agent_sessions WHERE id=?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -384,7 +384,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         assert_eq!(
             (
                 caller.provider_generation,
-                caller.origin_exec_id.to_string()
+                caller.origin_process_lfid.to_string()
             ),
             recorded
         );
@@ -408,7 +408,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
             let failure: String = database
                 .query_row(
-                    "SELECT error FROM execs WHERE error LIKE '%rejecting-lf%' AND error LIKE '%before becoming resumable%'",
+                    "SELECT error FROM processes WHERE error LIKE '%rejecting-lf%' AND error LIKE '%before becoming resumable%'",
                     [],
                     |row| row.get(0),
                 )

@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::engine::config::load_config;
 use crate::engine::context_budget::ContextBudgetReport;
-use crate::engine::exec::{preview_exec_prompt, ExecPromptInput};
+use crate::engine::process_prompt::{preview_process_prompt, ProcessPromptInput};
 use crate::engine::prompt::Surface;
 
 #[derive(Debug, Serialize)]
@@ -71,16 +71,16 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>, skill: &str) -> R
     }
     .to_string();
     let config = load_config(Some(&repo))?.unwrap_or_default();
-    let prepared = preview_exec_prompt(
+    let prepared = preview_process_prompt(
         &config,
-        ExecPromptInput {
+        ProcessPromptInput {
             repo_root: repo.clone(),
             wave: wave.clone(),
             message,
             skill: Some(skill.to_owned()),
             surface: Surface::Headless,
             // A query never reads the desktop clipboard.
-            source_overrides: crate::engine::exec::ContextSourceOverrides {
+            source_overrides: crate::engine::process_prompt::ContextSourceOverrides {
                 clipboard: Some(false),
                 ..Default::default()
             },

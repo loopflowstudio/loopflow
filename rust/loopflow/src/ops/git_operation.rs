@@ -48,8 +48,7 @@ pub(crate) struct GitOperationOwner {
     // Released sequencer receipts retain these field names on disk.
     #[serde(rename = "run_id")]
     trace_id: Option<String>,
-    #[serde(rename = "process_id")]
-    exec_id: Option<String>,
+    process_lfid: Option<String>,
     pub(crate) worktree: PathBuf,
     pub(crate) branch: String,
     pub(crate) head: String,
@@ -227,7 +226,7 @@ fn adopt_operation(
     owner.id = GitOperationId::new();
     owner.root_pid = std::process::id();
     owner.trace_id = std::env::var(crate::journal::LF_TRACE_ID_ENV).ok();
-    owner.exec_id = std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok();
+    owner.process_lfid = std::env::var(crate::journal::LF_PROCESS_LFID_ENV).ok();
     write_json(&mut file, &owner)?;
     Ok(OperationAuthorization::Adopted(SyncOperation {
         file,
@@ -241,7 +240,7 @@ fn new_owner(worktree: &Path, target_ref: &str) -> OpsResult<GitOperationOwner> 
         id: GitOperationId::new(),
         root_pid: std::process::id(),
         trace_id: std::env::var(crate::journal::LF_TRACE_ID_ENV).ok(),
-        exec_id: std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok(),
+        process_lfid: std::env::var(crate::journal::LF_PROCESS_LFID_ENV).ok(),
         worktree: canonical(worktree),
         branch: current_branch(worktree)?.unwrap_or_else(|| "HEAD".to_string()),
         head: rev_parse(worktree, "HEAD")?,
@@ -250,7 +249,10 @@ fn new_owner(worktree: &Path, target_ref: &str) -> OpsResult<GitOperationOwner> 
     })
 }
 
-pub(crate) fn prepare_agent_exec(worktree: &Path, env: &BTreeMap<String, String>) -> OpsResult<()> {
+pub(crate) fn prepare_agent_process(
+    worktree: &Path,
+    env: &BTreeMap<String, String>,
+) -> OpsResult<()> {
     if absolute_git_dir(worktree).is_err() {
         return Ok(());
     }
@@ -261,10 +263,10 @@ pub(crate) fn prepare_agent_exec(worktree: &Path, env: &BTreeMap<String, String>
         .or_else(|| std::env::var(LF_GIT_OPERATION_ID_ENV).ok())
         .map(|value| GitOperationId::parse(&value))
         .transpose()?;
-    fence_agent_exec(worktree, requested_operation.as_ref())
+    fence_agent_process(worktree, requested_operation.as_ref())
 }
 
-fn fence_agent_exec(
+fn fence_agent_process(
     worktree: &Path,
     requested_operation: Option<&GitOperationId>,
 ) -> OpsResult<()> {

@@ -1,7 +1,7 @@
 //! Durable state for one Linear Task.
 //!
 //! A Task owns one durable worktree, serial PR chain, and Flow progression.
-//! Sessions, Flows and Execs record work against that state.
+//! Sessions, Flows and Processes record work against that state.
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -664,7 +664,8 @@ pub enum TaskEventKind {
         summary: String,
     },
     HistoricalUncertaintyAccepted {
-        exec_ids: Vec<crate::id::ExecId>,
+        #[serde(alias = "exec_ids")] // Append-only decisions keep their original bytes.
+        process_lfids: Vec<crate::id::ProcessLfid>,
         reason: String,
     },
     FlowFinished {

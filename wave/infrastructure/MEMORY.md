@@ -1,5 +1,17 @@
 # infrastructure wave memory
 
+## Process vocabulary (LOO-400, 2026-10-07)
+
+Jack Heart selected Process and authorized PR #1483's LFID/PID refinement and
+landing (comment `32c00054-4c60-4b96-bdf4-4d5f142ab881`).
+`process.lfid` names durable identity; `pid` names a reusable Unix PID.
+`process_lfid` and `parent_process_lfid` name references. One draft retains IDs,
+parents, outcomes and unknown PIDs. LOO-397 owns command placement.
+A lost boot witness proved schema renames cannot rename
+append-only JSON. Captures, receipts and retained provider environments likewise
+keep their decoding. Release's retained-landing incident requires this distinction.
+Fixtures prove neither installation nor control authority.
+
 ## Storage footprint (LOO-390, 2026-10-06)
 
 Jack Heart authorized autonomous investigation, cleanup and delivery. Findings,
@@ -21,18 +33,13 @@ Unknown ownership is not permission to delete. Test `session_record` with `LF_*`
 
 ## Retained capture storage and autonomous cleanup (2026-10-05)
 
-Jack Heart requested that Infrastructure resolve LOO-370 without another
-interactive Session. Infrastructure chose to retain one opaque `~/.lf/runs`
-physical capture root and finish the semantic/runtime cleanup against existing
-paths. This explicitly changes the earlier physical-layout replacement
-requirement; it does not satisfy or prove a migration. The Task brief was updated
-and the decision delivered in comment `3829b49e-2ade-4bee-8850-2ae2297399a8`
-on [LOO-370](https://linear.app/loopflow/issue/LOO-370/finish-removing-the-retired-run-model-from-runtime-and-tooling).
-Preserve populated history and one storage owner, remove unnecessary offline
-conversion machinery, and retain the alias/recovery counterevidence in history.
-PR #1450 (`1af81fe03`) is now integrated here: Session identity controls
-conversations while capture keys select history. Installed migration, live
-interruption and release remain unauthorized by this source-delivery decision.
+Jack Heart delegated LOO-370's autonomous source delivery. Infrastructure selected
+one opaque `~/.lf/runs` root, superseding physical relocation; the Task brief and
+comment `3829b49e-2ade-4bee-8850-2ae2297399a8` record that decision. PR #1450
+(`1af81fe03`) is integrated. Session identity controls conversations; capture keys
+select history. Preservation constraints and contrary evidence remain under
+Capture cutover below. This decision authorizes neither installed conversion nor
+live interruption. Earlier detail: `6448e3c9e:wave/infrastructure/MEMORY.md`.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -44,9 +51,8 @@ implementation and configured acceptance remain unfinished; neither approval
 establishes readiness. Earlier detail remains at
 `c4373492cfc0c77fc27a7887045f74c48b381e72:wave/infrastructure/MEMORY.md`.
 
-The Infrastructure Project recommends `code` after Jack's accepted review and
-v0.13.3 installation; KRs/targets and captured reviews remain. October 5 detail:
-`57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
+The Infrastructure Project recommends `code`; KRs/targets and reviews remain.
+Accepted review and v0.13.3 installation: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
 
 LOO-326 completed on October 6 through installed v0.13.5's exact historical-Exec
 acceptance; its unknown outcome and checkout remain intact. Exact evidence is
@@ -437,10 +443,9 @@ required boundary is headless app/view checks; mounted judgment is optional.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 
-Jack Heart selected one editable draft per Task and one client. Released SQL stays
-immutable; custom Homes retain exact-schema validation. Mechanics and branch
-evidence: [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md),
-`986be7988:wave/infrastructure/MEMORY.md`. Not shipped.
+Jack Heart selected one editable draft per Task and immutable released SQL.
+Mechanics: [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md).
+Unshipped branch evidence: `986be7988:wave/infrastructure/MEMORY.md`.
 
 ## One main Home (LOO-342, curated 2026-10-04)
 
@@ -943,24 +948,15 @@ published machine artifacts only; `lf task sync` (which replaced `lf rebase` in
 #1367) owns checkout updates. The schedule is opt-in login plus weekly, Monday
 09:00 local, with positional daily/hourly/5min. The separate daemon is retired.
 
-Observed October 4 with published 0.13.0
-([evidence](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#installation-and-checkout-closure-loo-292-2026-10-04)):
-the login schedule caught up 0.12.32 → 0.13.0 after a shutdown with exact-store
-preflight and no migration; the 5min cadence fired twice through launchd and
-weekly was restored byte-identical; receipt, signature and /Applications hashes
-match and a repeat install changes no identity; an Ubuntu 24.04 container
-without Git installed and repaired a missing entry; sandboxed
-`lf task sync` caught up a stale main while preserving unpublished, staged,
-modified and untracked bytes. No Monday 09:00 firing or sleep-coalesced wake
-has been observed; neither is Loopflow code.
-
-Unresolved, not blocking: the currency probe (`--version` plus a 30 s preflight)
-returned not-current once at load ~14, starting a redundant download; preflight
-measured 6–13 s then, so timeout is a hypothesis. Reloading the schedule killed
-that run mid-install and the installation stayed intact. A hand-truncated entry
-gate is not healed by reinstall (gate writes are atomic, so only tampering
-produces it). Interactive app acceptance was not exercised beyond the running
-0.13.0 app.
+Published 0.13.0's October 4 installation and checkout acceptance, exact hashes,
+cadence receipts and retained limitations remain at
+`6448e3c9e:wave/infrastructure/MEMORY.md`
+under this heading. Installation preserved the Home, repaired a missing entry in
+an isolated Ubuntu container and preserved caller bytes during checkout sync.
+No Monday firing, sleep-coalesced wake or interactive app acceptance was proved.
+Unresolved: a currency probe triggered a redundant download under load; timeout
+is only a hypothesis. Reload killed that download without damaging installation.
+A hand-truncated entry gate is not healed by reinstall.
 
 ## Shipped history
 

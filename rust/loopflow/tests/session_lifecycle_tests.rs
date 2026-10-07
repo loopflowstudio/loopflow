@@ -538,7 +538,7 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
         assert!(recovered["artifact_key"].is_null());
         assert!(recovered["task_id"].is_null());
         assert!(recovered["wave_id"].is_null());
-        assert!(recovered["providers"][0]["exec_id"].is_null());
+        assert!(recovered["providers"][0]["process_lfid"].is_null());
         assert!(recovered["providers"][0]["reference"]["start_seq"].is_null());
         assert_eq!(recovered["providers"][0]["outcome"], "completed");
         assert_eq!(recovered["usage"]["input_tokens"], 12);
@@ -865,12 +865,12 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     let origin: String = fixture
         .db()
         .query_row(
-            "SELECT id FROM execs ORDER BY started_at,id LIMIT 1",
+            "SELECT lfid FROM processes ORDER BY started_at,lfid LIMIT 1",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    let origin = loopflow::id::ExecId::parse(&origin).unwrap();
+    let origin = loopflow::id::ProcessLfid::parse(&origin).unwrap();
     let driver = store.session_driver(&session).unwrap().unwrap_or_else(|| {
         store
             .claim_session_driver(&session, None, &origin, true)
@@ -925,7 +925,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         let work = fixture.run_parents(&capture);
         assert_eq!(work.0, expected);
         assert_eq!(work.2.as_deref(), source);
-        let parent: String = fixture.db().query_row("SELECT parent_exec_id FROM execs WHERE caller_session_id=?1 ORDER BY rowid DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
+        let parent: String = fixture.db().query_row("SELECT parent_process_lfid FROM processes WHERE caller_session_id=?1 ORDER BY rowid DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
         assert_eq!(parent, origin.as_str());
     }
     // A stale provider keeps its original causal parent and grants no Work.
@@ -947,7 +947,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
 }
 
 #[test]
-fn declared_agent_tools_use_their_checkout_and_keep_the_exec_parent() {
+fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
     let fixture = Fixture::new(false);
     let x = fixture.repo.create_named_worktree("task-x");
     let task =
@@ -983,7 +983,7 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_exec_parent() {
         Some(sibling.id.to_string())
     );
     let (caller, ..) = fixture.session_row(&captures[0]);
-    let parent: (String, String) = fixture.db().query_row("SELECT c.parent_exec_id,s.provider_exec_id FROM execs c JOIN agent_sessions s ON s.id=c.caller_session_id WHERE c.caller_session_id=?1", [&caller], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+    let parent: (String, String) = fixture.db().query_row("SELECT c.parent_process_lfid,s.provider_process_lfid FROM processes c JOIN agent_sessions s ON s.id=c.caller_session_id WHERE c.caller_session_id=?1", [&caller], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
     assert_eq!(parent.0, parent.1);
     for line in std::fs::read_to_string(fixture.home.path().join("declarations"))
         .unwrap()
@@ -1066,10 +1066,10 @@ fn declared_agent_can_start_another_tasks_flow() {
     );
     // The step ran in Y's checkout under a driver X's conversation started.
     let observed: (String, String) = fixture.db().query_row(
-        "SELECT step.cwd,s.task_id FROM execs step JOIN execs driver ON driver.id=step.parent_exec_id
-         JOIN execs launch ON launch.id=driver.parent_exec_id
+        "SELECT step.cwd,s.task_id FROM processes step JOIN processes driver ON driver.lfid=step.parent_process_lfid
+         JOIN processes launch ON launch.lfid=driver.parent_process_lfid
          JOIN agent_sessions s ON s.id=launch.caller_session_id
-         JOIN flow_exec_steps recorded ON recorded.exec_id=step.id",
+         JOIN flow_process_steps recorded ON recorded.process_lfid=step.lfid",
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),
     ).unwrap();
@@ -1110,7 +1110,7 @@ impl LockedStore {
 }
 
 #[test]
-fn failed_exec_observation_cannot_admit_a_provider() {
+fn failed_process_observation_cannot_admit_a_provider() {
     let fixture = Fixture::new(false);
     let initialized = fixture.run(&["session", "list", "--all", "--json"]);
     assert!(initialized.status.success(), "{initialized:?}");
@@ -1118,8 +1118,8 @@ fn failed_exec_observation_cannot_admit_a_provider() {
     fixture
         .db()
         .execute_batch(
-            "CREATE TRIGGER refuse_fixture_exec BEFORE INSERT ON execs
-         BEGIN SELECT RAISE(ABORT, 'fixture refuses Exec observation'); END;",
+            "CREATE TRIGGER refuse_fixture_process BEFORE INSERT ON processes
+         BEGIN SELECT RAISE(ABORT, 'fixture refuses Process observation'); END;",
         )
         .unwrap();
     for args in [
@@ -1130,11 +1130,11 @@ fn failed_exec_observation_cannot_admit_a_provider() {
         assert_eq!(output.status.code(), Some(1), "{output:?}");
         assert!(
             fixture.launches().is_empty(),
-            "a writable Session store cannot replace Exec admission"
+            "a writable Session store cannot replace Process admission"
         );
     }
     assert_eq!(
-        fixture.count("execs"),
+        fixture.count("processes"),
         1,
         "retain the earlier inspection only"
     );
@@ -1155,7 +1155,7 @@ fn malformed_caller_cannot_use_library_agent_admission() {
         assert_eq!(output.status.code(), Some(1), "{output:?}");
         assert!(
             String::from_utf8_lossy(&output.stderr)
-                .contains("agent Exec requires an admitted Exec"),
+                .contains("agent Process requires an admitted Process"),
             "{output:?}"
         );
         assert!(
@@ -1164,14 +1164,14 @@ fn malformed_caller_cannot_use_library_agent_admission() {
         );
     }
     // A diagnostic command is still usable. Invalid provenance never becomes
-    // a fabricated root/direct Exec merely to make logging succeed.
+    // a fabricated root/direct Process merely to make logging succeed.
     let output = fixture
         .command(&["session", "list", "--all", "--json"])
         .env("LF_AGENT_CALLER", "not-json")
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
-    assert_eq!(fixture.count("execs"), 0);
+    assert_eq!(fixture.count("processes"), 0);
 }
 
 #[test]
@@ -1398,7 +1398,7 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
         std::thread::sleep(Duration::from_millis(20));
     };
     assert!(!status.success());
-    // The Flow stopped at its decision; its driver's Exec says why.
+    // The Flow stopped at its decision; its driver's Process says why.
     let flows = support::recorded_flows(fixture.home.path());
     assert_eq!(flows.len(), 1);
     let (outcome, steps) = &flows[0];
@@ -1411,7 +1411,7 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
     let error: String = fixture
         .db()
         .query_row(
-            "SELECT d.error FROM execs d JOIN flow_execs f ON f.exec_id=d.id",
+            "SELECT d.error FROM processes d JOIN flow_processes f ON f.process_lfid=d.lfid",
             [],
             |row| row.get(0),
         )

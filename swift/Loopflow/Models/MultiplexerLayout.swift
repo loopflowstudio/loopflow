@@ -14,7 +14,7 @@ public enum PaneContent: Codable, Sendable, Equatable {
     case empty
     case session(id: String)
     case shell
-    /// Every Flow exec of a Task.
+    /// Every Flow process of a Task.
     case flowLog(taskId: String)
     /// A Task's worktree files.
     case files(taskId: String)

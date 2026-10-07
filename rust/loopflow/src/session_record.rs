@@ -83,9 +83,9 @@ pub enum SessionFlowMembership {
     Independent,
 }
 
-/// Replayable, provider-facing inputs for one ordinary headless exec.
+/// Replayable, provider-facing inputs for one ordinary headless process.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AgentExecRequest {
+pub struct AgentProcessRequest {
     pub system_prompt: String,
     pub task_prompt: String,
     pub agent: String,
@@ -97,7 +97,7 @@ pub struct AgentExecRequest {
     pub chrome: bool,
 }
 
-impl AgentExecRequest {
+impl AgentProcessRequest {
     pub(crate) fn from_prepared(
         config: &crate::engine::AgentConfig,
         capabilities: &crate::engine::AgentCapabilities,
@@ -168,7 +168,8 @@ pub struct SessionCaptureManifest {
     pub skill: Option<String>,
     pub subjects: Vec<SubjectAttribution>,
     pub flow: Option<SessionFlowMembership>,
-    pub exec: Option<AgentExecRequest>,
+    #[serde(rename = "exec")] // Existing capture manifests remain replayable.
+    pub process: Option<AgentProcessRequest>,
     pub context: Option<SessionContextRef>,
     pub runtime_path: Option<PathBuf>,
     pub runtime_digest: Option<String>,
@@ -330,7 +331,7 @@ pub struct SessionUsage {
 }
 
 /// History beneath one conversation's immutable captured input. This is not a
-/// resumable object. Provider records retain separate outcomes and driving Execs;
+/// resumable object. Provider records retain separate outcomes and driving Processes;
 /// recorder completion is historical evidence, never native success or process exit.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionHistory {
@@ -360,11 +361,11 @@ pub struct SessionHistory {
 }
 
 /// An exact native turn, or an older provider observation with unknown native
-/// identity. References identify evidence; they confer no exec/settlement API.
+/// identity. References identify evidence; they confer no process/settlement API.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProviderHistory {
     pub reference: ProviderHistoryReference,
-    pub exec_id: Option<crate::id::ExecId>,
+    pub process_lfid: Option<crate::id::ProcessLfid>,
     pub task_id: Option<crate::durable::TaskId>,
     pub wave_id: Option<crate::id::WaveId>,
     pub started_at: Option<i64>,
@@ -1046,9 +1047,9 @@ fn project_provider_history(
                 start_seq: start.map(|event| event.seq),
                 completion_seq: completed.map(|event| event.seq),
             },
-            exec_id: start
-                .and_then(|event| event.exec_id.as_deref())
-                .map(crate::id::ExecId::parse)
+            process_lfid: start
+                .and_then(|event| event.process_lfid.as_deref())
+                .map(crate::id::ProcessLfid::parse)
                 .transpose()
                 .map_err(std::io::Error::other)?,
             task_id: start
@@ -1069,7 +1070,7 @@ fn project_provider_history(
             usage,
         });
     }
-    // Old provider records have no reliable Exec or native-turn identity. Keep
+    // Old provider records have no reliable Process or native-turn identity. Keep
     // their own key and result, never substitute the enclosing recorder exit.
     let mut attempts = BTreeMap::<&str, Vec<&EventEnvelope>>::new();
     for event in envelopes {
@@ -1115,7 +1116,7 @@ fn project_provider_history(
                 })?,
                 attempt_key: attempt.into(),
             },
-            exec_id: None,
+            process_lfid: None,
             task_id: origin
                 .and_then(|event| event.task_id.as_deref())
                 .map(crate::durable::TaskId::parse)
@@ -1265,7 +1266,7 @@ pub(crate) fn resolve_manifest(
         }
     }
     let database = database_in(lf_home).map_err(std::io::Error::other)?;
-    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)
+    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)
         .map_err(std::io::Error::other)?;
     let artifact = store
         .resolve_history_input(selector)
@@ -1290,7 +1291,7 @@ pub(crate) fn resolve_manifest(
 
 pub(crate) fn read_provider_session(dir: &Path) -> std::io::Result<Option<ProviderSessionRef>> {
     let input = input_id_from_dir(dir)?;
-    crate::store::sqlite::SqliteStore::open_execs_read_only(
+    crate::store::sqlite::SqliteStore::open_processes_read_only(
         &row_database(dir).map_err(std::io::Error::other)?,
     )
     .and_then(|store| store.input_provider_session(&input))
@@ -1986,7 +1987,7 @@ pub(crate) struct CaptureHandle(Arc<Mutex<SessionCapture>>);
 pub(crate) fn register_session_driver_interrupt(
     store: &crate::store::sqlite::SqliteStore,
     session: String,
-    driver: crate::exec::SessionDriver,
+    driver: crate::process::SessionDriver,
 ) {
     let store = store.clone();
     crate::engine::agent::register_interrupt_cleanup(move || {
@@ -2066,8 +2067,8 @@ impl CaptureHandle {
             content_sha256: hex::encode(Sha256::digest(&bytes)),
             bytes: bytes.len() as u64,
         });
-        // Finalize exec provenance on the existing identity. Preparation did
-        // not freeze a prompt, runtime, or model selection before exec.
+        // Finalize process provenance on the existing identity. Preparation did
+        // not freeze a prompt, runtime, or model selection before process.
         manifest.harness = spec.harness;
         manifest.model = spec.model;
         manifest.surface = spec.surface;
@@ -2094,17 +2095,19 @@ impl CaptureHandle {
 
     pub(crate) fn begin_with_request(
         spec: SessionCaptureSpec,
-        exec: AgentExecRequest,
+        process: AgentProcessRequest,
     ) -> StoreResult<Self> {
-        let context =
-            crate::trace::PreparedTurnContext::from_prompts(&exec.system_prompt, &exec.task_prompt);
-        Self::begin_with_context(spec, &context, Some(exec))
+        let context = crate::trace::PreparedTurnContext::from_prompts(
+            &process.system_prompt,
+            &process.task_prompt,
+        );
+        Self::begin_with_context(spec, &context, Some(process))
     }
 
     pub(crate) fn begin_with_context(
         spec: SessionCaptureSpec,
         context: &crate::trace::PreparedTurnContext,
-        exec: Option<AgentExecRequest>,
+        process: Option<AgentProcessRequest>,
     ) -> StoreResult<Self> {
         #[cfg(test)]
         let home = std::env::var_os("LF_HOME")
@@ -2119,7 +2122,7 @@ impl CaptureHandle {
             spec,
             new_artifact_key(),
             inherited_capture_key()?,
-            exec,
+            process,
             Some(context),
         )
     }
@@ -2127,13 +2130,13 @@ impl CaptureHandle {
     pub(crate) fn begin_reserved_with_context(
         spec: SessionCaptureSpec,
         artifact_key: String,
-        exec: Option<AgentExecRequest>,
+        process: Option<AgentProcessRequest>,
         context: &crate::trace::PreparedTurnContext,
         publish: impl FnOnce(&String) -> StoreResult<()>,
     ) -> StoreResult<Self> {
         let home = crate::store::lf_home_dir();
         let caller = inherited_capture_key()?;
-        Self::begin_reserved_at(&home, spec, artifact_key, caller, exec, context, publish)
+        Self::begin_reserved_at(&home, spec, artifact_key, caller, process, context, publish)
     }
 
     fn begin_reserved_at(
@@ -2141,15 +2144,16 @@ impl CaptureHandle {
         spec: SessionCaptureSpec,
         artifact_key: String,
         caller: Option<String>,
-        exec: Option<AgentExecRequest>,
+        process: Option<AgentProcessRequest>,
         context: &crate::trace::PreparedTurnContext,
         publish: impl FnOnce(&String) -> StoreResult<()>,
     ) -> StoreResult<Self> {
-        let (manifest, context) = prepare_manifest(spec, artifact_key, caller, exec, Some(context))
-            .map_err(record_error)?;
+        let (manifest, context) =
+            prepare_manifest(spec, artifact_key, caller, process, Some(context))
+                .map_err(record_error)?;
         let (manifest, dir) = reconcile_reserved_manifest(home, manifest, context.as_deref())
             .map_err(record_error)?;
-        // Only the reservation transaction grants exec authority. A rejected
+        // Only the reservation transaction grants process authority. A rejected
         // publication must not start a recorder or settle somebody else's capture.
         publish(&manifest.artifact_key)?;
         Ok(Self(Arc::new(Mutex::new(SessionCapture::from_manifest(
@@ -2161,17 +2165,19 @@ impl CaptureHandle {
     pub(crate) fn begin_replay_at(
         lf_home: &Path,
         spec: SessionCaptureSpec,
-        exec: AgentExecRequest,
+        process: AgentProcessRequest,
         caller_artifact_key: String,
     ) -> StoreResult<Self> {
-        let context =
-            crate::trace::PreparedTurnContext::from_prompts(&exec.system_prompt, &exec.task_prompt);
+        let context = crate::trace::PreparedTurnContext::from_prompts(
+            &process.system_prompt,
+            &process.task_prompt,
+        );
         Self::begin_at_with_id(
             lf_home,
             spec,
             new_artifact_key(),
             Some(caller_artifact_key),
-            Some(exec),
+            Some(process),
             Some(&context),
         )
     }
@@ -2192,16 +2198,18 @@ impl CaptureHandle {
     fn begin_at_with_request(
         lf_home: &Path,
         spec: SessionCaptureSpec,
-        exec: AgentExecRequest,
+        process: AgentProcessRequest,
     ) -> StoreResult<Self> {
-        let context =
-            crate::trace::PreparedTurnContext::from_prompts(&exec.system_prompt, &exec.task_prompt);
+        let context = crate::trace::PreparedTurnContext::from_prompts(
+            &process.system_prompt,
+            &process.task_prompt,
+        );
         Self::begin_at_with_id(
             lf_home,
             spec,
             new_artifact_key(),
             inherited_capture_key()?,
-            Some(exec),
+            Some(process),
             Some(&context),
         )
     }
@@ -2211,12 +2219,12 @@ impl CaptureHandle {
         spec: SessionCaptureSpec,
         artifact_key: String,
         caller_artifact_key: Option<String>,
-        exec: Option<AgentExecRequest>,
+        process: Option<AgentProcessRequest>,
         context: Option<&crate::trace::PreparedTurnContext>,
     ) -> StoreResult<Self> {
         let work = spec.work.clone();
         let (manifest, context_bytes) =
-            prepare_manifest(spec, artifact_key, caller_artifact_key, exec, context)
+            prepare_manifest(spec, artifact_key, caller_artifact_key, process, context)
                 .map_err(record_error)?;
         let dir = record_dir(lf_home, &manifest.artifact_key).expect("artifact key is a UUID");
         let reserved = SessionCapture::record_row(&manifest, &dir, work)?;
@@ -2247,15 +2255,15 @@ impl CaptureHandle {
     }
 
     /// Claim an admitted conversation and retain the exact provider provenance
-    /// used by its tools. A later driver transfer never rewrites this exec.
+    /// used by its tools. A later driver transfer never rewrites this process.
     pub(crate) fn claim_conversation_driver(&self) -> StoreResult<()> {
-        let Some(exec_id) = crate::journal::current_exec_id() else {
+        let Some(process_lfid) = crate::journal::current_process_lfid() else {
             if crate::journal::is_cli_process() {
                 return Err(StoreError::InvalidAuthority(
-                    "agent Exec requires an admitted Exec; command observation failed".into(),
+                    "agent Process requires an admitted Process; command observation failed".into(),
                 ));
             }
-            // Library callers outside an actual lf process have no Exec to name.
+            // Library callers outside an actual lf process have no Process to name.
             return Ok(());
         };
         let mut capture = self.0.lock().expect("Session capture mutex poisoned");
@@ -2266,21 +2274,23 @@ impl CaptureHandle {
         let Some(session) = store.session_for_artifact(&capture.manifest.artifact_key)? else {
             if crate::journal::is_cli_process() {
                 return Err(StoreError::InvalidAuthority(
-                    "agent Exec requires an admitted conversation".into(),
+                    "agent Process requires an admitted conversation".into(),
                 ));
             }
             return Ok(());
         };
         let expected = store.session_driver(&session.id)?;
-        if let Some(exec) = expected.as_ref().and_then(|driver| driver.exec_id.as_ref()) {
-            let receipt =
-                crate::journal::read_exec_process_receipts_at(&crate::store::lf_home_dir())
-                    .ok()
-                    .and_then(|receipts| {
-                        receipts
-                            .into_iter()
-                            .find(|receipt| receipt.exec_id == exec.as_str())
-                    });
+        if let Some(process) = expected
+            .as_ref()
+            .and_then(|driver| driver.process_lfid.as_ref())
+        {
+            let receipt = crate::journal::read_process_receipts_at(&crate::store::lf_home_dir())
+                .ok()
+                .and_then(|receipts| {
+                    receipts
+                        .into_iter()
+                        .find(|receipt| receipt.process_lfid == process.as_str())
+                });
             let dead = receipt.is_some_and(|receipt| {
                 match crate::journal::process_started_at(receipt.pid) {
                     Ok(Some(current)) => (current - receipt.started_at).abs() > 3,
@@ -2310,7 +2320,7 @@ impl CaptureHandle {
         let driver = store.claim_session_driver(
             &session.id,
             expected.as_ref(),
-            &exec_id,
+            &process_lfid,
             replace_provider,
         )?;
         if replace_provider {
@@ -2360,7 +2370,7 @@ impl CaptureHandle {
         Ok(())
     }
 
-    pub(crate) fn session_driver(&self) -> Option<(String, crate::exec::SessionDriver)> {
+    pub(crate) fn session_driver(&self) -> Option<(String, crate::process::SessionDriver)> {
         self.0
             .lock()
             .expect("Session capture mutex poisoned")
@@ -2379,7 +2389,7 @@ impl CaptureHandle {
         }
         if let Some((session, driver)) = &capture.driver {
             environment.insert(
-                crate::exec::AGENT_CALLER_ENV.into(),
+                crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&driver.caller(session.clone()))
                     .expect("caller provenance serializes"),
             );
@@ -2505,7 +2515,7 @@ impl Drop for CaptureHandle {
 
 #[derive(Debug)]
 struct SessionCapture {
-    driver: Option<(String, crate::exec::SessionDriver)>,
+    driver: Option<(String, crate::process::SessionDriver)>,
     manifest: SessionCaptureManifest,
     dir: PathBuf,
     provider: String,
@@ -2537,7 +2547,7 @@ impl SessionCapture {
             Some(SessionFlowMembership::Step(step)) => Some(step),
             Some(SessionFlowMembership::Independent) | None => None,
         };
-        // Mechanical commands have an Exec and, in a Flow, operation history.
+        // Mechanical commands have a process and, in a Flow, operation history.
         // Capturing their diagnostics does not create an agent conversation.
         if manifest.harness == "loopflow" {
             return Ok(None);
@@ -2572,7 +2582,7 @@ impl SessionCapture {
                 completed_at: None,
                 created_at: manifest.created_at.unix_timestamp(),
             },
-            crate::journal::current_exec_id().as_ref(),
+            crate::journal::current_process_lfid().as_ref(),
         )?;
         Ok(Some(session))
     }
@@ -2584,9 +2594,9 @@ impl SessionCapture {
             provider: manifest.harness.clone(),
             model: manifest.model.clone(),
             account_id: manifest
-                .exec
+                .process
                 .as_ref()
-                .and_then(|exec| exec.account_id.clone()),
+                .and_then(|process| process.account_id.clone()),
             account_observed: false,
             provider_session_id: None,
             manifest,
@@ -2935,7 +2945,7 @@ fn resolve_capture(key: &str) -> StoreResult<(PathBuf, crate::session::AgentSess
     let home = crate::store::lf_home_dir();
     let dir = record_dir(&home, key)
         .ok_or_else(|| record_error(std::io::Error::other("invalid capture key")))?;
-    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database_in(&home)?)?;
+    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database_in(&home)?)?;
     let owner = store.session_for_artifact(key)?.ok_or_else(|| {
         record_error(std::io::Error::other(
             "capture does not belong to a recorded Session in this Home",
@@ -2969,7 +2979,7 @@ fn prepare_manifest(
     spec: SessionCaptureSpec,
     artifact_key: String,
     caller_artifact_key: Option<String>,
-    exec: Option<AgentExecRequest>,
+    process: Option<AgentProcessRequest>,
     context: Option<&crate::trace::PreparedTurnContext>,
 ) -> std::io::Result<(SessionCaptureManifest, Option<Vec<u8>>)> {
     let (runtime_path, runtime_digest) = runtime_identity();
@@ -3001,7 +3011,7 @@ fn prepare_manifest(
         skill: spec.skill,
         subjects: spec.subjects,
         flow: Some(spec.flow),
-        exec,
+        process,
         context: context_ref,
         runtime_path,
         runtime_digest,
@@ -3012,7 +3022,7 @@ fn prepare_manifest(
 }
 
 /// Resume artifact publication only. The caller must still claim the SQL
-/// reservation before launching; readable artifacts confer no exec authority.
+/// reservation before launching; readable artifacts confer no process authority.
 fn reconcile_reserved_manifest(
     home: &Path,
     mut manifest: SessionCaptureManifest,
@@ -3238,7 +3248,7 @@ mod tests {
 
     use super::{
         read_provider_clients, read_provider_session, remove_provider_client,
-        write_provider_client, AgentExecRequest, CaptureHandle, SessionCaptureManifest,
+        write_provider_client, AgentProcessRequest, CaptureHandle, SessionCaptureManifest,
         SessionCaptureSpec, SubjectAttribution, TerminalReceipt,
     };
     use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
@@ -3450,10 +3460,10 @@ mod tests {
         let id = CaptureHandle::prepare_at(home.path(), prepared, None).unwrap();
         let (dir, _) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
         step.task_pr_id = Some(crate::work::task::TaskPrId::new());
-        let mut exec = spec(home.path());
-        exec.flow = super::SessionFlowMembership::Step(step);
+        let mut process = spec(home.path());
+        process.flow = super::SessionFlowMembership::Step(step);
         let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
-        let capture = CaptureHandle::start_prepared(home.path(), &id, exec, &context).unwrap();
+        let capture = CaptureHandle::start_prepared(home.path(), &id, process, &context).unwrap();
         capture.finish("completed").unwrap();
 
         let manifest = super::read_manifest(&dir).unwrap();
@@ -3467,7 +3477,7 @@ mod tests {
     fn helper_capture_admits_a_headless_conversation_with_its_input_and_outcome() {
         let _guard = crate::journal::TestLedgerGuard::new();
         let home = tempfile::tempdir().unwrap();
-        let exec = AgentExecRequest::from_prepared(
+        let process = AgentProcessRequest::from_prepared(
             &AgentConfig {
                 task_prompt: "repair the failed operation".into(),
                 ..Default::default()
@@ -3475,7 +3485,7 @@ mod tests {
             &AgentCapabilities::default(),
         );
         let capture =
-            CaptureHandle::begin_at_with_request(home.path(), spec(home.path()), exec).unwrap();
+            CaptureHandle::begin_at_with_request(home.path(), spec(home.path()), process).unwrap();
         let store = super::row_store(&capture.artifact_dir()).unwrap();
         let session = store
             .session_for_artifact(&capture.artifact_key())
@@ -3488,7 +3498,7 @@ mod tests {
         assert_eq!(
             super::read_manifest(&capture.artifact_dir())
                 .unwrap()
-                .exec
+                .process
                 .unwrap()
                 .task_prompt,
             "repair the failed operation"
@@ -3513,7 +3523,7 @@ mod tests {
     }
 
     #[test]
-    fn reserved_publication_recovers_artifacts_without_repeating_exec_authority() {
+    fn reserved_publication_recovers_artifacts_without_repeating_process_authority() {
         for boundary in [
             "before_artifacts",
             "context_staged",
@@ -3579,7 +3589,7 @@ mod tests {
                 bytes.unwrap()
             );
             // SQL has granted authority once, but no provider has started.
-            // An absent provider receipt does not grant a second exec.
+            // An absent provider receipt does not grant a second process.
             assert!(CaptureHandle::begin_reserved_at(
                 home.path(),
                 spec(home.path()),
@@ -3737,7 +3747,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_round_trips_the_exact_prepared_exec_without_ambient_authority() {
+    fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
         let home = tempfile::tempdir().unwrap();
         let config = AgentConfig {
             system_prompt: "system context\r\nwith unicode λ\n \t".to_string(),
@@ -3754,7 +3764,7 @@ mod tests {
             ..AgentConfig::default()
         };
         let expected =
-            AgentExecRequest::from_prepared(&config, &AgentCapabilities { chrome: true });
+            AgentProcessRequest::from_prepared(&config, &AgentCapabilities { chrome: true });
         let capture =
             CaptureHandle::begin_at_with_request(home.path(), spec(home.path()), expected.clone())
                 .unwrap();
@@ -3767,7 +3777,7 @@ mod tests {
         assert!(saved.get("run_id").is_none());
         assert!(saved.get("launch").is_none());
         let manifest: SessionCaptureManifest = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(manifest.exec, Some(expected));
+        assert_eq!(manifest.process, Some(expected));
         let context_ref = manifest.context.expect("manifest references exact context");
         let context = fs::read(capture.artifact_dir().join(&context_ref.path)).unwrap();
         assert_eq!(context_ref.bytes, context.len() as u64);
@@ -4020,7 +4030,10 @@ mod tests {
         let capture = CaptureHandle::begin_at_with_request(
             ledger.home(),
             spec(ledger.home()),
-            AgentExecRequest::from_prepared(&AgentConfig::default(), &AgentCapabilities::default()),
+            AgentProcessRequest::from_prepared(
+                &AgentConfig::default(),
+                &AgentCapabilities::default(),
+            ),
         )
         .unwrap();
         let store = super::row_store(&capture.artifact_dir()).unwrap();
@@ -4064,8 +4077,9 @@ mod tests {
         }
         let expected = store.session_driver(&session.id).unwrap().unwrap();
         crate::journal::with_runtime(ledger.home(), &command, || {
-            let exec = crate::journal::current_exec_id().unwrap();
-            let driver = store.claim_session_driver(&session.id, Some(&expected), &exec, true)?;
+            let process = crate::journal::current_process_lfid().unwrap();
+            let driver =
+                store.claim_session_driver(&session.id, Some(&expected), &process, true)?;
             store.record_session_provider_launch(&session.id, &driver, false)?;
             store.record_session_provider_launch(&session.id, &driver, true)?;
             assert!(!store.session_provider_unstarted(&session.id)?);

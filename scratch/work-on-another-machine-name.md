@@ -4,16 +4,23 @@ Status: LOO-411 implements step 2, the machine record, stacked on LOO-394 / PR #
 Jack Heart authorized implementation and publication on 2026-10-07, then stopping
 for review. The rename is inherited; later remote-work slices remain intent.
 
-## Remaining for LOO-411 (reconciled 2026-10-07)
+## Remaining for LOO-411 (review additions, 2026-10-07)
 
-- Affected gate checks and an isolated real-SSH connection proof remain. Existing
-  public-command fixtures simulate SSH; they establish command behavior, not a
-  configured transport or installed migration. Installation proof belongs to
-  disposable OS-account/container verification.
-- Publication remains, followed by Jack Heart's review. No landing or later
-  remote-work implementation is authorized for this slice.
-- No product decision is needed for the machine record. Later slices retain
-  the unresolved Codex holder and shell-pane choices below.
+Jack Heart reviewed PR #1489 and requested three additions in comment
+`1d47fbe6-24aa-4ba1-90f6-2a5f02c93476`: share an OpenSSH connection using a
+private Loopflow control socket; offer the published installer (default yes)
+only when interactive add finds no lf; distinguish sign-in, unknown/changed host
+keys, unreachable hosts and missing lf with recovery commands. Existing lf is
+never replaced, status and background use never install. Republish #1489 and
+stop for review; landing and later remote-work slices remain unauthorized.
+
+- The three review additions are implemented. Focused command/PTY tests and a
+  disposable real-SSH sharing proof pass. Affected gate and actual installer
+  proof remain with gate/CI; installer verification requires disposable OS-account
+  isolation, not host HOME overrides.
+- Republish the same PR, then stop for Jack Heart's review.
+- No product decision is needed. Later slices retain the unresolved Codex holder
+  and shell-pane choices below.
 
 Do not lift code, tests, help text or config from herdr or cmux (Jack Heart,
 2026-10-07). Their behaviour is described here from docs and reading; write
@@ -33,7 +40,7 @@ merged into it.
 ## Full remote-work demo — later slices
 
 ```sh
-lf machine add mini          # SSH and lf already work; identity and connection recorded
+lf machine add mini          # name the connection; offer installation if lf is missing
 lf machine status            # reachable / needs sign-in / error; never prompts
 lf ssh mini --task LOO-123 implement   # mini has never seen LOO-123; prints Session and reconnect command
 # close the laptop, wait, open it
@@ -162,7 +169,7 @@ Versions across machines (Jack Heart, 2026-10-07, comment
 1958673f-baba-470e-b73a-1a544007dd86): no stable cross-version interface,
 capability negotiation or support for older remotes. Status shows both versions;
 connecting reports differences and names the remote update command. This
-supersedes the earlier proposal. No automatic peer installation or replacement.
+supersedes the earlier proposal. The October 7 PR review permits offering first installation during interactive add; an existing peer is never replaced.
 
 Review decisions on PR 1 (Jack Heart, 2026-10-07): drop the Desktop cache
 translation and discard old cache files; rename the install scope so "machine"
@@ -340,6 +347,15 @@ its own plan when started.
 
 ## Delete — do not maintain
 
+Review additions replace the unshared bounded SSH arguments and undifferentiated
+connection error on the existing probe/command path. No second transport or
+installer implementation. Use the public installer; a private control directory
+isolates Loopflow from personal SSH masters. OpenSSH expires idle connections
+after 60 seconds; per-command account forwarding is cancelled on return. Explicit
+agent forwarding uses a separate control namespace so a later ordinary probe
+cannot inherit it. Headless, batch and JSON add report the manual install command.
+
+
 Jack Heart, 2026-10-07: a redesign cleans up in the same diff. Where several
 building blocks exist for one job and none quite works, delete them and keep
 the code minimal; do not add another beside them.
@@ -372,7 +388,7 @@ Codex's disposition remains unresolved as noted above:
 
 ## Forbidden outcomes
 
-- A shared resident process, or anything that restarts or retries a turn or Flow.
+- A shared Loopflow resident process, or anything that restarts or retries a turn or Flow.
 - tmux as the holder, or a terminal emulator of our own inside the holder.
 - Hidden arguments.
 - A secret on a command line, or credentials sent to a host that was not added.
@@ -441,12 +457,26 @@ Review finding: removal must release the active destination as well as the label
 so a replacement machine can be added there without deleting the old identity.
 The route's uniqueness index covers the local identity and named connections;
 unnamed history remains intact. An unsupported peer still contributes its version
-when the identity command fails. Machine commands and the regenerated command reference are implemented;
-publication remains. Real SSH/accounts and installed migration
-are not proved by the simulated transport fixtures.
+when the identity command fails. Machine commands and the command reference are
+implemented. PR #1489 is the review surface; the reviewed additions await republication.
+
+Review additions preserve the existing identity-before-credential path. The
+simulated installer proves the interactive offer, refusal, default acceptance,
+reprobe and registration, and the no-install paths for existing/broken lf,
+status, batch and JSON. It proves no downloaded installer or migration.
+A disposable loopback sshd and generated test keys exercised add, status and two
+ssh commands through one TCP connection while a separately configured personal
+master remained usable. Its remote lf was a stub; this proves transport reuse,
+not account forwarding or configured mini continuity. OpenSSH semantics come from
+[ssh_config](https://man.openbsd.org/ssh_config) and [ssh](https://man.openbsd.org/ssh).
+
+Simulated review findings fixed: distinguish a genuinely absent executable from
+an existing lf exiting 127; cancel each account-forwarding route after its command
+because a persistent master otherwise retains it. Explicit agent forwarding has
+its own socket namespace. No schema or later-slice changes.
 
 Earlier migration, command-discovery and Swift fixture results, including the
 two open-output-handle observations, remain at
 `e7cd8050ee3882a71a2374c693d0ef6543b2219c:scratch/work-on-another-machine-name.md`.
 
-Checks: realign `git diff --check` passes and `lf context --wave infrastructure --skill realign --json` fits both budgets; reused unchanged-code passes for `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `cargo nextest run -p loopflow --lib --test machine_commands -E 'test(store::durable::tests::) | test(lf::commands::ssh::tests::) | test(lf::commands::machine::tests::) | binary(machine_commands)' --no-fail-fast` (21 tests, inherited LF_/LOOPFLOW_ authority cleared, LF_BIN pinned to this checkout); affected gate and isolated installation remain with gate/CI, configured SSH and installed migration unproved.
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo nextest run -p loopflow --lib --test machine_commands -E 'test(lf::commands::ssh::tests::) | test(lf::commands::machine::tests::) | binary(machine_commands)' --no-fail-fast` pass (21 tests; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned); `uv run python /tmp/loo411-real-ssh.py` passes (evidence `/tmp/loo411-ssh-h3in2iav`); affected gate and isolated published-installer proof remain with gate/CI.

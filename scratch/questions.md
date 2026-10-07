@@ -31,5 +31,7 @@ contracts, not alternate commands or runtime owners. No installed store is touch
 LOO-411, 2026-10-07: the migration helper mistakes the stacked parent's draft for
 this Task's. Keep the parent's rename immutable and add this Task's one draft,
 dependent on it; the parent renames an existing released table, not a new owner.
-Jack Heart's later scope reduction explicitly requires version diagnosis, not remote installation. This slice
-reports how to update an unsupported/older peer and does not replace it itself.
+Jack Heart's October 7 PR review now permits a first-install offer during
+interactive add, default yes; existing lf is never replaced. Batch, JSON and
+nonterminal use report the install command. A 60-second idle lifetime is the
+reversible choice for private OpenSSH sharing.

@@ -555,8 +555,11 @@ and planning facts travel; Workflow, paths and execution authority stay local.
 Fetch before remote placement decisions, including branches without PRs.
 Keep copied observation ages and target removal evidence. Cold adoption seeds
 only an unselected Wave's exact issue Project; existing selection and rotation
-remain authoritative. Public-dispatch fixtures prove no real SSH or installation. Later slices own
-credentials and disconnect survival.
+remain authoritative. Source requirements end at dispatch; descendants must not
+inherit them or the origin's Work declaration. Release's entry-point lesson
+applies: recipient fixtures inject the payload, while the SSH test stops before
+connecting. Neither proves successful transport or installation. Later slices
+own credentials and disconnect survival.
 
 ## Synced planning integration (LOO-334)
 

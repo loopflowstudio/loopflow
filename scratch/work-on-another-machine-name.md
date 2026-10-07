@@ -13,13 +13,15 @@ Jack Heart reviewed PR #1489 and requested three additions in comment
 private Loopflow control socket; offer the published installer (default yes)
 only when interactive add finds no lf; distinguish sign-in, unknown/changed host
 keys, unreachable hosts and missing lf with recovery commands. Existing lf is
-never replaced, status and background use never install. Republish #1489 and
-stop for review; landing and later remote-work slices remain unauthorized.
+never replaced, status and background use never install. Republication of #1489
+and Jack's review remain; landing and later slices are outside this authorization.
 
 - The three review additions are implemented. Focused command/PTY tests and a
   disposable real-SSH sharing proof pass. Affected gate and actual installer
   proof remain with gate/CI; installer verification requires disposable OS-account
-  isolation, not host HOME overrides.
+  isolation, not host HOME overrides. The loopback proof used a stub remote lf
+  and no account broker; it does not establish forwarding cleanup or account
+  continuity on a shared connection.
 - Jack Heart's review of the same PR is the delivery boundary; no landing is authorized.
 - No product decision is needed. Later slices retain the unresolved Codex holder
   and shell-pane choices below.
@@ -36,8 +38,10 @@ Mac app or a phone.
 
 ## Placement
 
-Infrastructure Wave (execution continuity). The design belongs to LOO-394; this copy drives LOO-411, the second step, stacked on the first so it does not wait for it to land (Jack Heart, 2026-10-07). LOO-393 and LOO-395 are
-merged into it.
+Infrastructure Wave (execution continuity). The design belongs to LOO-394;
+this copy drives LOO-411's machine record. Jack Heart initially selected stacking
+on the rename on October 7; its merged base is now integrated. LOO-393 and
+LOO-395's intent is retained in the later slices.
 
 ## Full remote-work demo — later slices
 
@@ -142,15 +146,11 @@ PR 1 changes the Home names below to machine. The remote-work limitations remain
 
 ## PR 1: inherited rename
 
-LOO-394 / PR #1484 owns the Home-to-machine rename and its verification.
-The parent tip `76b4b28e67302c6e8d6d2a9d7616810574207e3f` is integrated by
-`bf22b0bcfffb986a56793b4762de2df0a95b360f`; it includes the cache/install-scope
-decisions below. This local ancestry does not establish hosted delivery.
-Jack Heart's later decisions discard old Desktop caches and name installation
-scope `installation`. Opaque identities, scheduled-job keys, Desktop selection
-keys, install paths and historical payloads retain their bytes. Parent evidence
-remains at `06e88761d:scratch/work-on-another-machine-name.md`; this Task adds
-only the machine-record slice and claims no installed migration.
+PR #1484 merged as `626789dcd` and is integrated. Jack Heart selected cache
+discard and the `installation` scope; opaque IDs, selection/schedule keys, install
+paths and historical payloads retain their bytes. Parent verification remains at
+`06e88761d:scratch/work-on-another-machine-name.md`; earlier stack ancestry is at
+`5840a8126:scratch/work-on-another-machine-name.md`. No installed migration is claimed.
 
 ## Machine record and later design
 
@@ -165,7 +165,8 @@ one way to run a command there and requires an added machine before any
 credential crosses.
 
 First connect probes the installed `lf` and reads its machine identity. Missing
-or incompatible commands produce an explicit update instruction.
+lf produces an install offer only during interactive add, otherwise an install
+command. An existing incompatible lf produces an update instruction.
 
 Versions across machines (Jack Heart, 2026-10-07, comment
 1958673f-baba-470e-b73a-1a544007dd86): no stable cross-version interface,
@@ -326,8 +327,7 @@ Decided by Jack Heart, 2026-10-07: "Fine to break things up into multiple
 PRs." Each one deletes what it replaces. Follow-ups are intent only; each gets
 its own plan when started.
 
-1. Rename Home to machine. PR #1484's updated tip is integrated here, including
-   the accepted cache discard and installation scope. This branch is stacked on it.
+1. Rename Home to machine. PR #1484 is merged and integrated.
 2. `This slice` (LOO-411). Machine record: `lf machine add`, `list`, `status`, `rename`, `remove`;
    ssh aliases; identity fetched at add; repository path. Deletes `lf machine
    observe`, the hard-coded repository path and the `user@host` rule.
@@ -367,6 +367,10 @@ Removed in this slice: `MachineCommand::Observe`, `Store::observe_machine`,
 tests, `DEFAULT_REPO`, and the raw-host SSH fallback. Compression also removes
 `run_with_env`, `ssh_connection_args`, the second SSH runtime, and per-machine
 queries during listing. One row reader serves local, by-ID and list reads.
+The review-addition compression removes `SshOutcome` and `ssh_args`: SSH returns
+the existing command result directly, and forwarding setup/cancellation reuse
+one route and connection argument vector. This avoids rebuilding transport state
+during cleanup and retains remote exit codes, broker cleanup and diagnostics.
 
 Remaining targets belong to later slices. Each removes what it replaces;
 Codex's disposition remains unresolved as noted above:
@@ -381,12 +385,12 @@ Codex's disposition remains unresolved as noted above:
   (`reject_detached_account_forwarding`) and the ambient fallback that exports
   the laptop's raw provider tokens over ssh.
 - Random Task id minting for new Tasks.
-- Rename slice removes `capture_home_command`, its unused capture subprocess and
-  error type, plus the cache migration's duplicate JSON serialization. Installer
-  subprocesses use `install` without a command-group prefix so retained binaries
-  remain callable across the rename. The `home:` GOAL key is already ignored by
-  config parsing; its rejection fixture stays. `/detach` remains with the later
-  relay slice.
+- `/detach` remains with the later relay slice.
+
+The inherited rename already removed `capture_home_command`, its unused capture
+subprocess and error type, and the cache migration's duplicate serialization.
+Installer subprocesses use `install` so retained binaries remain callable across
+the rename. The ignored `home:` GOAL key retains its rejection fixture.
 
 ## Forbidden outcomes
 
@@ -483,4 +487,7 @@ Earlier migration, command-discovery and Swift fixture results, including the
 two open-output-handle observations, remain at
 `e7cd8050ee3882a71a2374c693d0ef6543b2219c:scratch/work-on-another-machine-name.md`.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo nextest run -p loopflow --lib --test machine_commands -E 'test(lf::commands::ssh::tests::) | test(lf::commands::machine::tests::) | binary(machine_commands)' --no-fail-fast` pass (21 tests after sync, one nextest output-handle leak warning in the pure exit-classifier test; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned); `uv run python /tmp/loo411-real-ssh.py` passes (evidence `/tmp/loo411-ssh-h3in2iav`); affected gate and isolated published-installer proof remain with gate/CI.
+Prior loopback SSH command/evidence and the exit-classifier output-handle warning
+remain at `5840a8126:scratch/work-on-another-machine-name.md`.
+
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo nextest run -p loopflow --lib --test machine_commands -E 'test(lf::commands::ssh::tests::) | test(lf::commands::machine::tests::) | binary(machine_commands)' --no-fail-fast` pass after compression (21 tests, one nextest output-handle leak warning in the unchanged credential-redaction test; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned); realign: `git diff --check` and `lf context --skill realign` pass, with prior code checks reused; affected gate and isolated published-installer proof remain with gate/CI.

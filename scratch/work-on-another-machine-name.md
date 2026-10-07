@@ -177,58 +177,52 @@ silently merged. Phone use is LOO-396.
 
 ## Open choices
 
-1. Holder for interactive conversations. Jack Heart, 2026-10-07: tmux
-   everywhere "made the terminal experience worse", though he is not certain
-   that is always true.
-   - A. tmux everywhere. A second terminal emulator sits between the program
-     and the real terminal, so anything both layers must understand degrades:
-     Ghostty shell integration and command blocks, key encoding, scrollback,
-     selection. Hard dependency on every machine; reverses a removal.
-   - B1. A multiplexer of our own, as herdr does: the holder parses the
-     program's output into a screen model and sends rows to a client that
-     redraws them. Same class of cost as tmux; herdr re-fixes key and mouse
-     encoding every release.
-   - B2. A transparent relay: a detached `lf` per Session owns the terminal
-     device and passes bytes through unchanged to whichever client is attached,
-     so loopflow's own Ghostty surface still does all the emulation. Reattach
-     replays captured bytes or asks the program to repaint. A resident process
-     with a per-Session socket and no shared state. Is that inside or outside
-     "do not restore that service"? LOO-283 already lists tmux vs a transparent
-     terminal relay as open.
-   - C. No terminal holder. The work runs headless under a detached `lf`, which
-     already drives Claude over pipes and Codex through its engine and records
-     every event. Nothing relays a terminal. Returning has two verbs: watch
-     (read the recorded output as it arrives) and take over (open the native
-     client on the conversation). Taking over a Codex conversation joins the
-     live engine. Taking over a Claude conversation mid-turn interrupts that
-     turn, or waits for it to end.
+1. Holder for interactive conversations: our own multiplexer, or a transparent
+   relay.
 
-   Jack Heart, 2026-10-07, on this choice: "I'm okay with a resident process
-   with a listener per session." "I'm okay with attaching and restarting the
-   Claude process"; interrupting a turn "is not ideal but maybe not completely
-   unsolvable. The important thing is just that it survives the laptop
-   closing."
+   Decided by Jack Heart, 2026-10-07:
+   - tmux is out. It "made the terminal experience worse."
+   - No holder at all is "probably also not desirable."
+   - A resident process with a listener per Session is acceptable. Per Session
+     means per agent conversation, not per Task or Wave.
+   - Restarting the Claude process on attach is acceptable; interrupting a turn
+     "is not ideal but maybe not completely unsolvable. The important thing is
+     just that it survives the laptop closing."
+   - Loopflow will not compete on multiplexing. Jack expects to sit on top of a
+     live Ghostty, on Superlogical's Rex ("the multiplexer for all work", macOS
+     beta on 2026-10-07, with a CLI and server API), or on herdr, and can
+     imagine versions of Loopflow built on herdr.
 
-   Proposal from that: C first. It meets the stated requirement with no new
-   process, listener or terminal code, and it matches the direction of sending
-   a message to a persistent conversation (`lf -b session resume ID MESSAGE`
-   exists) over holding a terminal open. B2 remains available later for one
-   case C does not cover: a person typing in a native Claude client on the
-   machine when the connection drops mid-turn.
+   The two remaining options:
+   - Own multiplexer (herdr's way). The holder parses the program's output into
+     a screen model and sends rows to a client that redraws them. Gives exact
+     screen on reattach, clients of different sizes, and screen-based features.
+     Costs a terminal emulator's worth of upkeep: every keyboard protocol,
+     graphics, link and shell-integration feature must be parsed, stored and
+     re-emitted, and each new agent interface can break it. herdr is about 280k
+     lines with a team on it and still re-fixes key and mouse handling every
+     release. This is the thing Jack says Loopflow will not compete on.
+   - Transparent relay. A detached `lf` per Session owns the terminal device
+     and passes bytes through unchanged; Loopflow's Ghostty surface still does
+     all emulation. Its surface does not grow with terminal features, because
+     it does not interpret them. Costs: `lf` must own a terminal device (it
+     owns none today), drain it when nobody is attached, carry window size, and
+     on reattach restore the modes the program set at start (alternate screen,
+     mouse, bracketed paste, keyboard protocol). Raw replay of captured output
+     is not safe as-is because it contains queries a fresh terminal would
+     answer. One client sets the size. A client on a different terminal type
+     gets a degraded view.
 
-   What B2 costs, for the record: `lf` must own a terminal device (it owns none
-   today); drain it when no client is attached; carry window size from client
-   to program; and on reattach restore the modes the program set at start
-   (alternate screen, mouse reporting, bracketed paste, keyboard protocol),
-   which means tracking them. Replaying raw captured output is not safe as-is:
-   it contains queries a fresh terminal would answer, typing garbage into the
-   program. Clients of different sizes or terminal types need a rule. Holders
-   outlive `lf` upgrades, so the attach protocol needs a version check.
+   Proposal: the relay, kept small enough to delete. It is the option whose
+   upkeep does not track the terminal ecosystem, and the one easiest to drop
+   when a multiplexer Loopflow can sit on exists. Where Loopflow already runs
+   inside herdr or Rex, that host is the holder and the relay is not started.
+   Headless work needs neither (part 4). Codex needs neither (its engine socket
+   already reattaches). LOO-283 lists tmux versus a transparent relay as open.
 
-   "Per Session" means per agent conversation, not per Task or Wave. A Task can
-   have several. Each agent step of a Flow is its own conversation, one live at
-   a time. Under C the detached `lf` is the process that already exists for a
-   headless run and exits when the turn ends.
+   Do not build a pluggable holder interface now. One implementation, the
+   relay; add the second by reshaping it when a real second host exists.
+
 2. Must Workflow position follow the person between machines? If yes, the Git
    ref residue is required.
 3. Claude on a machine: `setup-token` is inference-only (may fail loopflow's
@@ -270,6 +264,7 @@ the ones it replaces go in the same change:
 ## Forbidden outcomes
 
 - A shared resident process, or anything that restarts or retries a turn or Flow.
+- tmux as the holder, or a terminal emulator of our own inside the holder.
 - Hidden arguments.
 - A secret on a command line, or credentials sent to a host that was not added.
 - Two Tasks for one issue.

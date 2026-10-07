@@ -52,7 +52,7 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::id::ExecId;
+    use crate::id::ProcessLfid;
     use crate::program_status::{Records, Report};
     use crate::session::{SessionActivity, SessionFilter};
     use crate::store::sqlite::SqliteStore;
@@ -62,18 +62,18 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", "run_00000000000000000000000000000001");
-        let exec = ExecId::new();
+        let process_lfid = ProcessLfid::new();
         store
             .conn
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [&exec],
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&process_lfid],
             )
             .unwrap();
         let first = store
-            .claim_session_driver("session", None, &exec, true)
+            .claim_session_driver("session", None, &process_lfid, true)
             .unwrap();
         store
             .record_session_activity(
@@ -125,7 +125,7 @@ mod tests {
             )
             .unwrap());
         let second = store
-            .claim_session_driver("session", Some(&first), &exec, false)
+            .claim_session_driver("session", Some(&first), &process_lfid, false)
             .unwrap();
         assert_eq!(
             store.session_summaries(&filter, 500).unwrap()[0]
@@ -166,7 +166,7 @@ mod tests {
             .unwrap());
         assert!(store.session_summaries(&filter, 500).unwrap().is_empty());
         let third = store
-            .claim_session_driver("session", Some(&second), &exec, true)
+            .claim_session_driver("session", Some(&second), &process_lfid, true)
             .unwrap();
         assert!(!store
             .record_program_status(

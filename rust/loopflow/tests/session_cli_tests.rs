@@ -1059,11 +1059,11 @@ fn program_status_cli_observes_waiting_without_completing_work() {
     .unwrap();
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let exec = loopflow::id::ExecId::new();
+    let process_lfid = loopflow::id::ProcessLfid::new();
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
-        "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'00000000-0000-0000-0000-000000000001',1)",
-        [&exec],
+        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'00000000-0000-0000-0000-000000000001',1)",
+        [&process_lfid],
     )
     .unwrap();
     // A native conversation needs no lf driver claim for passive display.
@@ -1152,7 +1152,12 @@ fn program_status_cli_observes_waiting_without_completing_work() {
         assert!(wait_for(state)["attention"].is_null());
     }
     assert!(store.session(&id).unwrap().unwrap().completed_at.is_none());
-    assert!(store.exec(&exec).unwrap().unwrap().completed_at.is_none());
+    assert!(store
+        .process(&process_lfid)
+        .unwrap()
+        .unwrap()
+        .completed_at
+        .is_none());
     let mut invalid = records("blocked");
     invalid["records"][0]["msg"] = serde_json::json!("bad\ncontrol");
     writeln!(input, "{invalid}").unwrap();
@@ -1164,7 +1169,7 @@ fn program_status_cli_observes_waiting_without_completing_work() {
     );
     let driver = store.session_driver(&id).unwrap();
     store
-        .claim_session_driver(&id, driver.as_ref(), &exec, true)
+        .claim_session_driver(&id, driver.as_ref(), &process_lfid, true)
         .unwrap();
     let stale = run(
         home.path(),

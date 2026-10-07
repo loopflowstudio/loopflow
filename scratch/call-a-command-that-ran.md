@@ -79,8 +79,8 @@ sharing a PID remain independent. Flow projections now read their extra columns 
 name instead of relying on the Process field count. Python's external
 `importlib.exec_module` API is restored after the initial rename changed it.
 
-Publication and the walkthrough still name the earlier head. Refresh both and
-hand PR #1483 to the authorized landing operation. No further design/demo approval
+The walkthrough now pins implementation `1a2c42ee3`. PR #1483 awaits
+publication of this refinement and the authorized landing handoff. No further design/demo approval
 is required. Installed migration remains unproved; rendering is unavailable.
 The install exact-frontier fixture needs CI's materialized migration graph; it
 cannot classify a store with an unpublished draft as canonical. The earlier full

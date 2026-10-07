@@ -1,51 +1,29 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-400 · Recorded commands are processes</title>
-<style>
-:root{color-scheme:light;--ink:#202521;--quiet:#586259;--line:#d7dcd5;--paper:#fcfcf8;--accent:#255540}
-*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.55 system-ui,-apple-system,sans-serif}
-main{max-width:1080px;margin:auto;padding:56px 32px 100px}a{color:var(--accent);text-underline-offset:3px}a:focus-visible,summary:focus-visible{outline:3px solid #bd6715;outline-offset:4px}
-h1{font-size:clamp(30px,5vw,48px);font-weight:620;line-height:1.12;letter-spacing:-.025em;margin:12px 0 20px}h2{font-size:27px;line-height:1.25;margin:0 0 20px}p{max-width:850px;margin:12px 0 20px}.meta,figcaption{color:var(--quiet);font-size:13px}.meta code{overflow-wrap:anywhere}
-nav{display:flex;flex-wrap:wrap;gap:12px 25px;margin:30px 0}section{border-top:1px solid var(--line);padding-top:32px;margin-top:44px;scroll-margin-top:20px}
-table{border-collapse:collapse;width:100%;margin:25px 0}th,td{text-align:left;vertical-align:top;padding:14px 18px 14px 0;border-bottom:1px solid var(--line)}th{font-size:14px}td:first-child{width:24%}
-figure{margin:25px 0}figcaption{margin-bottom:8px;overflow-wrap:anywhere}pre{margin:0;padding:22px;background:#eef1eb;border-left:3px solid #72937c;overflow-x:auto;font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;tab-size:4}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}p code,td code{font-size:.9em}.terminal{background:#202b25;color:#f2f5ef;border-color:#9bb48f}.note{color:var(--quiet)}summary{cursor:pointer;font-weight:600}details{margin:24px 0}ul{padding-left:24px}
-@media(max-width:650px){main{padding:30px 18px 65px}table,thead,tbody,tr,td{display:block}thead{display:none}tr{padding:12px 0;border-bottom:1px solid var(--line)}td{padding:5px 0;border:0}td:first-child{width:100%;font-weight:650}td::before{content:attr(data-label);display:block;color:var(--quiet);font-size:12px;font-weight:500}pre{padding:15px;font-size:12px}}
-@media print{main{padding:0;max-width:none}nav{display:none}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:10px}section{break-before:auto}a{color:inherit}details>*{display:block}}
-</style></head><body><main>
-<p class="meta">LOO-400 · <a href="https://github.com/loopflowstudio/loopflow/pull/1483">PR #1483</a> · Review boundary</p>
-<h1>Recorded commands are processes</h1>
-<p>Inspect a command that ran, read its parent and exit status, and see the same word in Desktop and the data beneath it. Jack Heart selected the rename and delegated its implementation depth; this cut replaces the existing names through Rust, Swift, JSON and SQLite.</p>
-<p class="meta">Published comparison: <code>6448e3c9e → 51c409ab8</code>. Excerpts are pinned to the published head. This local walkthrough is not part of that published diff.</p>
-<nav aria-label="Review stops"><a href="#inspect">Inspect a command</a><a href="#desktop">Read Task work</a><a href="#history">Keep existing history</a><a href="#evidence">Evidence and limits</a></nav>
-<table><thead><tr><th>When you…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody>
-<tr><td data-label="When">Inspect a recorded command</td><td data-label="Result">The output names a process, its parent when known, and the observed exit status. Unknown stays unknown.</td><td data-label="Code"><a href="#inspect"><code>show</code></a> resolves the identity and prints the <code>Process</code> record from SQLite.</td></tr>
-<tr><td data-label="When">Open a Task's recorded work</td><td data-label="Result">The command rows say “Process”; conversations still say Session or Run.</td><td data-label="Code"><a href="#desktop"><code>TaskWorkView</code></a> draws the shared Task-work DTO and uses the record's command and outcome.</td></tr>
-<tr><td data-label="When">Upgrade an existing store</td><td data-label="Result">The same IDs, parent links, exits, conversations and Flow steps survive under the new schema names.</td><td data-label="Code"><a href="#history"><code>process_names.sql</code></a> renames the existing tables and columns and replaces the affected indexes and triggers.</td></tr>
-</tbody></table>
-<section id="inspect"><h2>1. Inspect a command that ran</h2>
-<p>The following output was captured before publication from the implementation now at <code>51c409ab8</code>, using the source-built CLI and a disposable Home. “lf” abbreviates that binary's path. This command was direct, so its recorded parent is null.</p>
-<pre class="terminal"><code>$ lf monitor show 28db04b5-208f-4c8d-9c45-d0899445438b --json
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Recorded processes · PR 1483</title><style>
+:root{color-scheme:light dark}*{box-sizing:border-box}body{margin:0;background:#faf9f6;color:#232522;font:17px/1.6 system-ui,sans-serif}main{max-width:1050px;margin:auto;padding:56px 32px}h1{font-size:38px;line-height:1.15;margin:0 0 18px}h2{font-size:26px;margin:54px 0 12px}p{max-width:80ch}a{color:#315c50;text-underline-offset:3px}nav{display:flex;gap:24px;flex-wrap:wrap;margin:28px 0}pre{background:#efeee9;padding:22px;overflow:auto;font:14px/1.55 ui-monospace,monospace;border-left:2px solid #c6cec6}figure{margin:26px 0}figcaption,.meta{font-size:13px;color:#5d625b}table{border-collapse:collapse;width:100%;font-size:15px}th,td{text-align:left;padding:16px 14px;vertical-align:top;border-bottom:1px solid #d8d9d2}th:first-child,td:first-child{padding-left:0}code{font-family:ui-monospace,monospace}a:focus-visible{outline:2px solid #315c50;outline-offset:4px}@media(max-width:650px){main{padding:28px 18px}h1{font-size:30px}table,tbody,tr,td{display:block}thead{display:none}tr{margin-bottom:22px}td{padding:6px 0;border:0}td:before{content:attr(data-label) ": ";font-weight:600}pre{padding:14px;font-size:13px}}@media(prefers-color-scheme:dark){body{background:#191c1a;color:#eceee8}pre{background:#252a26}a{color:#a1cab5}.meta,figcaption{color:#bcc2b8}th,td{border-color:#41483f}}@media print{body{background:white;color:black}main{max-width:none;padding:0}pre{white-space:pre-wrap;overflow:visible;font-size:10px}a{color:inherit}nav{display:none}}
+</style><main>
+<h1>Inspect a command as a process</h1>
+<p>PR #1483 replaces Loopflow’s Exec vocabulary across the CLI, Desktop, Rust, Swift and storage. Each process exposes a durable <code>lfid</code> and an optional Unix <code>pid</code>. Historical PIDs can repeat without combining records.</p>
+<p class="meta">Implementation source: 1a2c42ee3f596bbb44c1c411c7a1b606eb31baaf. Compared with 6448e3c9e7e519585378feaffe04606bc1b55d3e. This walkthrough adds no product changes beyond that source. Jack Heart approved the LFID/PID refinement and landing on October 7; installation remains separate.</p><nav aria-label="Reading route"><a href="#inspect">Inspect</a><a href="#identity">Identity</a><a href="#upgrade">Upgrade</a><a href="#proof">Proof</a></nav>
+<table><thead><tr><th>When someone…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody>
+<tr><td data-label="When someone">Inspects a recorded command</td><td data-label="What happens">Its LFID resolves one record with its parent, PID if observed, and exit status.</td><td data-label="Where"><a href="#inspect">Process carries the wire fields; record_process saves the outcome.</a></td></tr>
+<tr><td data-label="When someone">Reads history after the OS reuses a PID</td><td data-label="What happens">Both commands keep their own LFIDs, parents and outcomes.</td><td data-label="Where"><a href="#identity">SQLite keys updates by LFID; the regression finishes one command without changing the other.</a></td></tr>
+<tr><td data-label="When someone">Upgrades and reopens retained history</td><td data-label="What happens">Renamed references keep the original identities. Missing PID evidence stays absent, and saved provider ancestry remains readable.</td><td data-label="Where"><a href="#upgrade">One migration renames columns; AgentCaller retains the stored origin_exec_id encoding.</a></td></tr>
+</tbody></table><section id="inspect"><h2>Inspect by durable identity</h2>
+<p class="meta">Captured in a disposable Home using the built source CLI. JSON below is an excerpt; other fields are omitted. The PID matched the child spawned by the check.</p>
+<pre><code>lf monitor show e525a36e-2fd5-4e7a-bed8-506cd40e0cea --json
 {
-  &quot;id&quot;: &quot;28db04b5-208f-4c8d-9c45-d0899445438b&quot;,
-  &quot;trace_id&quot;: &quot;922898ad-6557-452e-9110-4b80dabdcfe4&quot;,
-  &quot;parent_process_id&quot;: null,
-  &quot;via_agent&quot;: false,
-  &quot;started_at&quot;: 1791395533,
-  &quot;completed_at&quot;: 1791395533,
+  &quot;lfid&quot;: &quot;e525a36e-2fd5-4e7a-bed8-506cd40e0cea&quot;,
+  &quot;pid&quot;: 74385,
+  &quot;parent_process_lfid&quot;: null,
   &quot;outcome&quot;: &quot;succeeded&quot;,
-  &quot;exit_code&quot;: 0,
-  &quot;signal&quot;: null,
-  &quot;error&quot;: null
-}
-[Session, command and path fields omitted from this excerpt]</code></pre>
-<p><code>Exec</code> becomes <code>Process</code>, and <code>parent_exec_id</code> becomes <code>parent_process_id</code>. A process ID remains the durable UUID; it is not an OS PID. No result is inferred from whether an OS process still exists.</p>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/51c409ab86e49c0a3f172abb9a4d8b4673335895/rust/loopflow/src/process.rs#L7-L27">rust/loopflow/src/process.rs · Process · 51c409ab8:7–27</a></figcaption><pre><code>
-/// One recorded lf process. Unknown historical caller and exit evidence stays absent.
+  &quot;exit_code&quot;: 0
+}</code></pre><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/1a2c42ee3f596bbb44c1c411c7a1b606eb31baaf/rust/loopflow/src/process.rs#L8-L27">rust/loopflow/src/process.rs · Process · 1a2c42ee3 · L8–27</a></figcaption><pre><code>/// One recorded lf process. Unknown historical caller and exit evidence stays absent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Process {
-    pub id: ProcessId,
+    pub lfid: ProcessLfid,
+    pub pid: Option&lt;u32&gt;,
     pub trace_id: TraceId,
-    pub parent_process_id: Option&lt;ProcessId&gt;,
+    pub parent_process_lfid: Option&lt;ProcessLfid&gt;,
     pub via_agent: Option&lt;bool&gt;,
     pub caller_session_id: Option&lt;String&gt;,
     pub caller_provider_generation: Option&lt;i64&gt;,
@@ -58,141 +36,95 @@ pub struct Process {
     pub exit_code: Option&lt;i32&gt;,
     pub signal: Option&lt;String&gt;,
     pub error: Option&lt;String&gt;,
+}</code></pre></figure><p>Compared with the base, <code>Exec.id</code> becomes <code>Process.lfid</code>; <code>pid</code> is new and nullable. The ordinary journal records <code>std::process::id()</code> at admission. Swift mirrors these fields and derives its Identifiable key from LFID.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/1a2c42ee3f596bbb44c1c411c7a1b606eb31baaf/rust/loopflow/src/store/sqlite.rs#L2140-L2154">rust/loopflow/src/store/sqlite.rs · record_process · 1a2c42ee3 · L2140–2154</a></figcaption><pre><code>    pub fn record_process(&amp;self, process: &amp;crate::process::Process) -&gt; StoreResult&lt;()&gt; {
+        let conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
+        conn.execute(
+            &quot;INSERT INTO processes(lfid,trace_id,parent_process_lfid,command,repo,cwd,started_at,
+                via_agent,caller_session_id,caller_provider_generation,completed_at,outcome,exit_code,signal,error,pid)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+             ON CONFLICT(lfid) DO UPDATE SET completed_at=excluded.completed_at,
+                outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
+             WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL&quot;,
+            params![process.lfid,process.trace_id,process.parent_process_lfid,process.command,process.repo,process.cwd,
+                process.started_at,process.via_agent,process.caller_session_id,process.caller_provider_generation,
+                process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid],
+        )?;
+        Ok(())
+    }</code></pre></figure></section><section id="identity"><h2>A PID can name several historical commands</h2><p>The update key is LFID. PID supplies observed OS identity, not authority to signal a live process. Existing exact receipt and birth-time checks still own liveness and control.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/1a2c42ee3f596bbb44c1c411c7a1b606eb31baaf/rust/loopflow/src/store/sqlite/processes.rs#L852-L874">rust/loopflow/src/store/sqlite/processes.rs · PID reuse regression · 1a2c42ee3 · L852–874</a></figcaption><pre><code>    #[test]
+    fn durable_identity_keeps_reused_and_unknown_pids_distinct() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&amp;dir.path().join(&quot;store.db&quot;)).unwrap();
+        let historical = insert_process(&amp;store, 1, 1);
+        let retained = store.process(&amp;historical).unwrap().unwrap();
+        assert_eq!(retained.pid, None);
+        let mut first = retained.clone();
+        first.lfid = ProcessLfid::new();
+        first.pid = Some(4242);
+        store.record_process(&amp;first).unwrap();
+        let mut second = first.clone();
+        second.lfid = ProcessLfid::new();
+        second.parent_process_lfid = Some(first.lfid.clone());
+        store.record_process(&amp;second).unwrap();
+        first.completed_at = Some(3);
+        first.outcome = Some(&quot;failed&quot;.into());
+        first.exit_code = Some(42);
+        store.record_process(&amp;first).unwrap();
+        assert_eq!(store.process(&amp;first.lfid).unwrap(), Some(first));
+        assert_eq!(store.process(&amp;second.lfid).unwrap(), Some(second));
+        assert_eq!(store.process(&amp;historical).unwrap(), Some(retained));
+    }</code></pre></figure><p>A Flow still consists of its one lf process and the step processes it starts. The rename adds no lifecycle owner. Flow projections read their additional columns by name, so adding PID does not shift the Flow name or step position.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/1a2c42ee3f596bbb44c1c411c7a1b606eb31baaf/rust/loopflow/src/ops/flow_run.rs#L15-L32">rust/loopflow/src/ops/flow_run.rs · FlowProcessStep and FlowProcess · 1a2c42ee3 · L15–32</a></figcaption><pre><code>#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FlowProcessStep {
+    pub process: Process,
+    /// The step&#x27;s node in the Flow&#x27;s graph, counted in preorder.
+    pub key: u32,
+    /// Returns taken on each loop edge, per nesting level, outermost first.
+    pub iterations: Vec&lt;Vec&lt;u32&gt;&gt;,
 }
-</code></pre></figure>
-<p>A missing identity fails without changing history. Use <code>lf monitor list --all --json</code> to find the recorded identity, then inspect it. That recovery command is a suggested action; the failure below was captured.</p>
-<pre class="terminal"><code>$ lf monitor show missing-command --json
-Error: Process or Session missing-command was not found
-[exit 1]</code></pre>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/51c409ab86e49c0a3f172abb9a4d8b4673335895/rust/loopflow/src/lf/commands/monitor.rs#L323-L375">rust/loopflow/src/lf/commands/monitor.rs · show · 51c409ab8:323–375</a></figcaption><pre><code>fn show(
-    id: &amp;str,
-    json: bool,
-    events: bool,
-    final_answer: bool,
-    input: Option&lt;&amp;str&gt;,
-    context: bool,
-) -&gt; anyhow::Result&lt;()&gt; {
-    let process = tokio::runtime::Runtime::new()?.block_on(async {
-        let store = open_store(&amp;storage_config_from_env()?).await?;
-        let process = store.resolve_process(id).await?;
-        let session = store.session(id).await?;
-        anyhow::ensure!(
-            process.is_none() || session.is_none(),
-            &quot;Identity matches both a process and a Session; use an exact identity&quot;
-        );
-        anyhow::ensure!(
-            process.is_some() || session.is_some(),
-            &quot;Process or Session {id} was not found&quot;
-        );
-        if let Some(input) = input {
-            anyhow::ensure!(session.is_some(), &quot;--input requires a Session identity&quot;);
-            let captured = store.sqlite.input_history(input)?;
-            anyhow::ensure!(
-                captured.session_id == id,
-                &quot;Input does not belong to Session {id}&quot;
-            );
-        }
-        Ok::&lt;_, anyhow::Error&gt;(process)
-    })?;
-    match process {
-        Some(process) =&gt; {
-            anyhow::ensure!(
-                !events &amp;&amp; !final_answer &amp;&amp; !context,
-                &quot;--events, --final and --context inspect Session evidence; Processes record command outcomes&quot;
-            );
-            if json {
-                println!(&quot;{}&quot;, serde_json::to_string_pretty(&amp;process)?);
-            } else {
-                print_process(&amp;process);
-                println!(&quot;{}&quot;, serde_json::to_string_pretty(&amp;process)?);
-            }
-            Ok(())
-        }
-        None =&gt; super::session_history::inspect(
-            input.unwrap_or(id),
-            events,
-            final_answer,
-            context,
-            json,
-        ),
-    }
-}</code></pre></figure>
-<p class="note">The read path and authority rules already existed. This PR changes the public vocabulary and owning types. Session-only flags still reject a process record; causal parentage grants no control authority.</p>
-</section>
-<section id="desktop"><h2>2. Read a Task's recorded work</h2>
-<p>The Rust and Swift wire shape changes together: <code>execs</code> becomes <code>processes</code>. Task execution state remains <code>execution</code>; it is a separate concept. The Desktop label is implemented below, with headless view and DTO checks passing. No interactive screenshot is claimed.</p>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/51c409ab86e49c0a3f172abb9a4d8b4673335895/swift/Loopflow/Models/TaskWork.swift#L4-L9">swift/Loopflow/Models/TaskWork.swift · TaskWork (closing brace omitted) · 51c409ab8:4–9</a></figcaption><pre><code>public struct TaskWork: Codable, Sendable, Equatable {
-    public let sessions: [TaskSession]
-    public let flows: [TaskFlowMember]
-    public let processes: [Process]
-    /// The Task&#x27;s Workflow; `nil` when it runs only ad hoc Flows.
-    public let workflow: Workflow?</code></pre></figure>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/51c409ab86e49c0a3f172abb9a4d8b4673335895/swift/LoopflowMac/Views/TaskWorkView.swift#L152-L165">swift/LoopflowMac/Views/TaskWorkView.swift · TaskWorkView.body (error branch follows) · 51c409ab8:152–165</a></figcaption><pre><code>            if let work = model.taskWork[task.id].value {
-                ForEach(work.sessions) { session in
-                    row(session.interactive ? &quot;Session&quot; : &quot;Run&quot;, id: session.id, name: session.title,
-                        state: session.completedAt == nil ? &quot;open&quot; : &quot;completed&quot;)
-                }
-                ForEach(work.processes) { process in
-                    row(&quot;Process&quot;, id: process.id, name: process.command ?? &quot;Unknown command&quot;,
-                        state: process.outcome ?? &quot;unknown&quot;)
-                }
-                if work.sessions.isEmpty &amp;&amp; work.processes.isEmpty {
-                    Text(&quot;No recorded work.&quot;)
-                }
-            }
-            if let error = model.taskWork[task.id].errorMessage {</code></pre></figure>
-<p class="note">Swift's OS launch object is named explicitly as <code>Foundation.Process</code>. The new <code>Loopflow.Process</code> is the decoded durable command record. The rename adds no second store or lifecycle.</p>
-</section>
-<section id="history"><h2>3. Change the names without losing evidence</h2>
-<p>One draft upgrades the released schema. <code>FlowProcess</code> describes existing append-only metadata on the Flow's lf process; its steps remain ordinary child processes. The migration retains their records and rebuilds the affected constraints and revision triggers.</p>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/51c409ab86e49c0a3f172abb9a4d8b4673335895/rust/loopflow/src/store/migrations/drafts/process_names.sql#L47-L73">rust/loopflow/src/store/migrations/drafts/process_names.sql · migration: table and column renames · 51c409ab8:47–73</a></figcaption><pre><code>ALTER TABLE &quot;waves&quot; RENAME COLUMN &quot;project_activation_exec_id&quot; TO &quot;project_activation_process_id&quot;;
 
-ALTER TABLE &quot;ci_incidents&quot; RENAME COLUMN &quot;repair_exec_id&quot; TO &quot;repair_process_id&quot;;
+/// One Flow process as its driver recorded it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FlowProcess {
+    pub driver: Process,
+    pub name: String,
+    pub graph: FlowGraph,
+    /// Steps in launch order. A repeated or corrected step is another entry.
+    pub steps: Vec&lt;FlowProcessStep&gt;,
+}</code></pre></figure></section><section id="upgrade"><h2>Keep the old evidence readable</h2><p>The single draft upgrades the released schema directly. SQLite rewrites retained foreign-key references. Existing rows receive a null PID; neither current process lists nor a reused PID reconstruct missing evidence.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/1a2c42ee3f596bbb44c1c411c7a1b606eb31baaf/rust/loopflow/src/store/migrations/drafts/process_names.sql#L44-L74">rust/loopflow/src/store/migrations/drafts/process_names.sql · process_names · 1a2c42ee3 · L44–74</a></figcaption><pre><code>ALTER TABLE &quot;waves&quot; RENAME COLUMN &quot;project_activation_exec_id&quot; TO &quot;project_activation_process_lfid&quot;;
 
-ALTER TABLE &quot;execs&quot; RENAME COLUMN &quot;parent_exec_id&quot; TO &quot;parent_process_id&quot;;
+ALTER TABLE &quot;ci_incidents&quot; RENAME COLUMN &quot;repair_exec_id&quot; TO &quot;repair_process_lfid&quot;;
+
+ALTER TABLE &quot;execs&quot; RENAME COLUMN &quot;parent_exec_id&quot; TO &quot;parent_process_lfid&quot;;
 
 ALTER TABLE &quot;execs&quot; RENAME TO &quot;processes&quot;;
 
-ALTER TABLE &quot;session_events&quot; RENAME COLUMN &quot;exec_id&quot; TO &quot;process_id&quot;;
+ALTER TABLE &quot;processes&quot; RENAME COLUMN &quot;id&quot; TO &quot;lfid&quot;;
 
-ALTER TABLE &quot;agent_sessions&quot; RENAME COLUMN &quot;driver_exec_id&quot; TO &quot;driver_process_id&quot;;
+ALTER TABLE &quot;processes&quot; ADD COLUMN &quot;pid&quot; INTEGER;
 
-ALTER TABLE &quot;agent_sessions&quot; RENAME COLUMN &quot;provider_exec_id&quot; TO &quot;provider_process_id&quot;;
+ALTER TABLE &quot;session_events&quot; RENAME COLUMN &quot;exec_id&quot; TO &quot;process_lfid&quot;;
 
-ALTER TABLE &quot;flow_execs&quot; RENAME COLUMN &quot;exec_id&quot; TO &quot;process_id&quot;;
+ALTER TABLE &quot;agent_sessions&quot; RENAME COLUMN &quot;driver_exec_id&quot; TO &quot;driver_process_lfid&quot;;
+
+ALTER TABLE &quot;agent_sessions&quot; RENAME COLUMN &quot;provider_exec_id&quot; TO &quot;provider_process_lfid&quot;;
+
+ALTER TABLE &quot;flow_execs&quot; RENAME COLUMN &quot;exec_id&quot; TO &quot;process_lfid&quot;;
 
 ALTER TABLE &quot;flow_execs&quot; RENAME TO &quot;flow_processes&quot;;
 
-ALTER TABLE &quot;flow_exec_steps&quot; RENAME COLUMN &quot;flow_exec_id&quot; TO &quot;flow_process_id&quot;;
+ALTER TABLE &quot;flow_exec_steps&quot; RENAME COLUMN &quot;flow_exec_id&quot; TO &quot;flow_process_lfid&quot;;
 
-ALTER TABLE &quot;flow_exec_steps&quot; RENAME COLUMN &quot;exec_id&quot; TO &quot;process_id&quot;;
+ALTER TABLE &quot;flow_exec_steps&quot; RENAME COLUMN &quot;exec_id&quot; TO &quot;process_lfid&quot;;
 
 ALTER TABLE &quot;flow_exec_steps&quot; RENAME TO &quot;flow_process_steps&quot;;
 
-ALTER TABLE &quot;task_workflows&quot; RENAME COLUMN &quot;exec_id&quot; TO &quot;process_id&quot;;
+ALTER TABLE &quot;task_workflows&quot; RENAME COLUMN &quot;exec_id&quot; TO &quot;process_lfid&quot;;
 
-ALTER TABLE &quot;task_workflow_moves&quot; RENAME COLUMN &quot;exec_id&quot; TO &quot;process_id&quot;;</code></pre></figure>
-<p>The populated upgrade test compares every column before and after for processes, Flow steps, Session history, Task workflow and its move history. It also checks foreign keys, append-only restrictions, first-start preservation and revision increments. The existing migration tests passed separately.</p>
-<p>Names embedded in retained files need a narrower boundary. Capture manifests, provider environments and receipts retain their existing encoding; old trace nodes and acceptance decisions remain readable. Released SQL, dated release notes and opaque history are unchanged.</p>
-<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/51c409ab86e49c0a3f172abb9a4d8b4673335895/rust/loopflow/src/journal/mod.rs#L159-L167">rust/loopflow/src/journal/mod.rs · ProcessReceipt (closing brace omitted) · 51c409ab8:159–167</a></figcaption><pre><code>/// Exact, process-local ownership evidence for a live Loopflow Process.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) struct ProcessReceipt {
-    pub schema_version: u32,
-    pub trace_id: String,
-    #[serde(rename = &quot;exec_id&quot;)] // Persisted receipt format survives upgrades.
-    pub process_id: String,
-    pub pid: u32,
-    pub started_at: i64,</code></pre></figure>
-<p class="note">This exception is deliberate: replacing the receipt directory or field spelling would hide retained evidence during recovery. <code>--accept-unknown-process</code> emits the new event field, while the historical reader also recognizes original <code>exec_ids</code> decisions without rewriting them. The completion test covers that released spelling.</p>
-</section>
-<section id="evidence"><h2>Evidence and review boundary</h2>
-<p>The implementation and focused checks are complete. Jack Heart requested publication through pr-review. Command placement remains with LOO-397; this PR adds no new ps command and requests no merge, installation or Task completion.</p>
-<details><summary>Checks supporting this walkthrough</summary><ul>
-<li>Rust all-target check, formatting and Clippy passed.</li>
-<li>85 existing migration tests passed; the new populated migration test passed after fixing its fixture assumptions.</li>
-<li>Process discovery, Flow inventory, journal, retained acceptance, capture, DTO, ownership and observation checks passed.</li>
-<li>42 headless Desktop tests passed across DTOs, Task views, Flow views and workspace-reader transport. Optional display diagnostics were skipped.</li>
-<li>Architecture and README/index synchronization checks passed. Disposable CLI help and inspection were captured.</li>
-</ul></details>
-<p class="note">Installation-only checks remain with isolated CI. Full gate, installed migration and interactive judgment are unproved. There is no rendering environment here: this self-contained HTML was checked structurally and its excerpts compared with the pinned revision, but desktop and narrow-width appearance have not been rendered.</p>
-</section></main></body></html>
+ALTER TABLE &quot;task_workflow_moves&quot; RENAME COLUMN &quot;exec_id&quot; TO &quot;process_lfid&quot;;</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/1a2c42ee3f596bbb44c1c411c7a1b606eb31baaf/rust/loopflow/src/process.rs#L95-L102">rust/loopflow/src/process.rs · AgentCaller · 1a2c42ee3 · L95–102</a></figcaption><pre><code>/// Stable provenance installed in one provider conversation&#x27;s tool environment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentCaller {
+    pub session_id: String,
+    pub provider_generation: i64,
+    #[serde(rename = &quot;origin_exec_id&quot;)] // Retained provider environments use this format.
+    pub origin_process_lfid: ProcessLfid,
+}</code></pre></figure><p>The initial rename missed released boot-witness JSON. The repaired reader and regression preserve that witness, provider generation and native thread after restart. Capture manifests and process receipts also keep their existing encodings; public DTOs expose only the new names. A missing receipt still leaves exit evidence unknown.</p>
+</section><section id="proof"><h2>Proof and limits</h2><p>The final affected Rust run passed 1,841 tests; the headless Desktop suite passed 388; Python passed 406. Clippy, formatting, architecture, Swift boundaries, migration immutability, and disposable CLI help/list/show checks passed. Tests cover populated released history, PID reuse, absent PID evidence and Rust/Swift wire agreement.</p><p>The canonical install-compatibility check requires CI’s materialized migration graph. Isolated installation checks and installed migration remain unproved here. This page was checked against the pinned source but could not be rendered in this environment.</p></section></main></html>

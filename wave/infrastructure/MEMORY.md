@@ -3,7 +3,7 @@
 ## Process vocabulary (LOO-400, 2026-10-07)
 
 Jack Heart selected Process and authorized PR #1483's LFID/PID refinement and
-landing (comment `32c00054-4c60-4b96-bdf4-4d5f142ab881`), releasing the review stop.
+landing (comment `32c00054-4c60-4b96-bdf4-4d5f142ab881`).
 `process.lfid` names durable identity; `pid` names a reusable Unix PID.
 `process_lfid` and `parent_process_lfid` name references. One draft retains IDs,
 parents, outcomes and unknown PIDs. LOO-397 owns command placement.

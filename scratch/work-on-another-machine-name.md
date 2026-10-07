@@ -66,7 +66,9 @@ same panes.
   account to the machine: "if we know about account A on this machine, then we
   should start the process for adding A to the remote machine if it's not
   there." It never silently runs as a different account.
-- Home may become "machine". Not decided.
+- Home becomes "machine", deep: what people read and type, and code and
+  schema too. "Deep, but probably can be isolated into its own commit (I don't
+  need to review it)."
 - 2026-10-04/05, product Wave memory: no automatic restart or retry of a turn
   or Flow; the caller owns recovery; `-b` prints and blocks and the caller
   backgrounds; no hidden arguments; "do not restore that service".
@@ -115,6 +117,22 @@ credential crosses.
 
 First connect: probe, find `lf`, check capability, offer install (default yes).
 Replacing a running remote `lf` asks first and says what would stop.
+
+Rename, in its own commit with no behaviour change (decided above): commands,
+help, errors, docs, builtin skills, Rust and Swift identifiers, wire fields and
+fixtures, tables and columns. Points the commit must settle:
+- `LF_HOME` names the data directory, a different thing; it keeps its name.
+- "Provider home" and "account home" are also different things and stay.
+- "machine" already names the install scope in code (`machine_install.rs`, the
+  machine promotion lock). Rename or absorb that use so one word has one
+  meaning.
+- A Home is per data directory and OS user, so two users on one box are two
+  machines in this vocabulary. Say so in the glossary.
+- The `home_` id prefix is stored in every database and scheduled job. Either
+  migrate stored ids or keep the stored value and rename everything around it;
+  the second avoids rewriting identifiers already written to launchd plists.
+- Rough size: `home_id` about 240 and `HomeId` about 83 in Rust, about 167
+  `homeId` in Swift, about 72 SQL occurrences, about 158 doc mentions.
 
 ### 2. The Task on a machine that has never seen it
 
@@ -231,12 +249,9 @@ silently merged. Phone use is LOO-396.
    identity check and usage polling, has no file form, interactive use
    unverified) versus a normal login with a pasted code (own refresh chain, full
    scope).
-3. Home to machine: only what people read and type, or code and schema too? A
-   Home is per data directory and OS user; "machine" already names the install
-   scope in code; the `home_` id prefix is persisted.
-4. Tasks that already exist on two machines with different random ids: backfill
+3. Tasks that already exist on two machines with different random ids: backfill
    rule, or leave per-machine?
-5. Shape: one PR, or a keystone (parts 1 and 2) with parts 3 to 6 as follow-ups?
+4. Shape: one PR, or a keystone (parts 1 and 2) with parts 3 to 6 as follow-ups?
 
 ## Delete — do not maintain
 

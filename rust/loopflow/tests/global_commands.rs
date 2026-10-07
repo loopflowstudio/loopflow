@@ -263,11 +263,11 @@ fn repository_errors_do_not_prevent_home_command_admission() {
     assert!(!identity.trim().is_empty());
     let database = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
     let commands: i64 = database
-        .query_row("SELECT count(*) FROM execs", [], |row| row.get(0))
+        .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
         .unwrap();
     assert_eq!(
         commands, 2,
-        "the failed sync and Home read each own an Exec"
+        "the failed sync and Home read each own a process"
     );
     let output = command(
         home.path(),

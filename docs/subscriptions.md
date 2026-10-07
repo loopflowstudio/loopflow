@@ -136,7 +136,7 @@ local service credentials have separate sections: an expired local token says
 nothing about a managed account. Missing local tokens leave ambient auth
 uninspected. Cached inspection reads account state without starting a provider,
 decrypting local tokens or creating an encryption key. The CLI records the
-command's Exec in its Home; this can initialize an empty store, but creates no
+command's Process in its Home; this can initialize an empty store, but creates no
 account, route or conversation. An inherited account lease carries no cached identity catalog:
 `--cached` reports forwarded identities as uninspected without contacting the
 origin broker. Local token metadata is cached evidence, not server acceptance;

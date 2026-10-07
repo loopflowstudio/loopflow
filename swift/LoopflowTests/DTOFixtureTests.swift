@@ -16,7 +16,7 @@ struct DTOFixtureTests {
         #expect(work.sessions[1].flowId == work.flows[0].id)
         #expect(work.flows[0].name == "pursue")
         #expect(work.flows[0].state == .current)
-        #expect(!work.execs.isEmpty)
+        #expect(!work.processes.isEmpty)
         let workflow = try #require(work.workflow)
         #expect(workflow.nodes.map(\.name) == ["design", "demo"])
         #expect(workflow.nodes.map(\.description) == ["you review the plan", "you try the change"])
@@ -26,18 +26,18 @@ struct DTOFixtureTests {
             .named("research")?.workflow
         #expect(research?.edges.last?.flow == nil)
         #expect(research?.edges.last?.launchName == "end")
-        #expect(workflow.position == .edge(index: 2, execId: work.flows[0].id, running: true))
+        #expect(workflow.position == .edge(index: 2, processLfid: work.flows[0].id, running: true))
         #expect(workflow.outgoing.isEmpty)
         #expect(workflow.history.map(\.kind) == [.set, .tookUp, .chose, .arrived, .chose])
         #expect(workflow.history.map(\.actor) == [.person, .person, .person, .edge, .conversation])
-        // A move no registered process made names no Exec.
-        #expect(workflow.history[0].execId == nil)
+        // A move no registered process made names no Process.
+        #expect(workflow.history[0].processLfid == nil)
         #expect(workflow.history.last?.sessionId == work.sessions[0].id)
         #expect(workflow.history.last?.note == "take the smaller approach")
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
     }
 
-    @Test("A Flow exec keeps its launched graph and every step, and requires each field")
+    @Test("A Flow process keeps its launched graph and every step, and requires each field")
     func flowDetailFixture() throws {
         let data = try loadFixtureData("flow_detail.json")
         let detail = try JSONDecoder().decode(FlowDetail.self, from: data)
@@ -86,18 +86,20 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Exec pages retain command outcomes, caller evidence and continuation")
-    func execPageFixture() throws {
-        let data = try loadFixtureData("exec_page.json")
-        let page = try JSONDecoder().decode(ExecPage.self, from: data)
+    @Test("Process pages retain command outcomes, caller evidence and continuation")
+    func processPageFixture() throws {
+        let data = try loadFixtureData("process_page.json")
+        let page = try JSONDecoder().decode(ProcessPage.self, from: data)
         #expect(page.entries[0].exitCode == 42)
         #expect(page.entries[0].viaAgent == nil)
-        #expect(page.entries[1].parentExecID == page.entries[0].id)
+        #expect(page.entries[0].pid == nil)
+        #expect(page.entries[1].pid == 4242)
+        #expect(page.entries[1].parentProcessLFID == page.entries[0].lfid)
         #expect(page.entries[1].outcome == nil)
-        #expect(page.next?.id == page.entries[1].id)
-        #expect(try JSONDecoder().decode(ExecPage.self, from: JSONEncoder().encode(page)) == page)
+        #expect(page.next?.lfid == page.entries[1].lfid)
+        #expect(try JSONDecoder().decode(ProcessPage.self, from: JSONEncoder().encode(page)) == page)
         #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(ExecPage.self, from: Data("{}".utf8))
+            try JSONDecoder().decode(ProcessPage.self, from: Data("{}".utf8))
         }
     }
 
@@ -120,7 +122,7 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("session_history.json")
         let events = try JSONDecoder().decode([SessionEvent].self, from: data)
         #expect(events[1].kind == .completed)
-        #expect(events[1].execID == nil)
+        #expect(events[1].processLFID == nil)
         #expect(events[2].kind == .observed)
         #expect(events[2].providerThread == nil)
         #expect(events[2].providerTurn == nil)
@@ -564,7 +566,7 @@ struct DTOFixtureTests {
     }
 }
 
-@Test("Session input history retains distinct native results and unknown Exec")
+@Test("Session input history retains distinct native results and unknown Process")
 func sessionInputHistoryFixture() throws {
     let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         .deletingLastPathComponent().deletingLastPathComponent()
@@ -572,7 +574,7 @@ func sessionInputHistoryFixture() throws {
     let value = try JSONDecoder().decode(SessionHistory.self, from: Data(contentsOf: url))
     #expect(value.providers.count == 2)
     #expect(value.providers[0].outcome == "failed")
-    #expect(value.providers[0].execId == nil)
+    #expect(value.providers[0].processLfid == nil)
     #expect(value.providers[0].usage.inputTokens == nil)
     #expect(value.providers[1].outcome == "completed")
     #expect(value.providers[1].usage.inputTokens == 0)

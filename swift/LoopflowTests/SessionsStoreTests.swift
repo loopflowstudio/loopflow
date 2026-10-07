@@ -258,7 +258,7 @@ private func session(id: String, state: String, replacing: Bool = false) -> Stri
 }
 
 private func runGit(_ args: [String], at directory: URL) throws {
-    let process = Process()
+    let process = Foundation.Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
     process.arguments = ["git", "-C", directory.path] + args
     process.standardOutput = Pipe()

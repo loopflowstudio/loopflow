@@ -14,15 +14,15 @@ final class CIWatchers {
     static let shared = CIWatchers()
 
     private struct Watcher {
-        let process: Process
+        let process: Foundation.Process
         var windows: Int
     }
 
-    private let launch: (String) -> Process?
+    private let launch: (String) -> Foundation.Process?
     private var watchers: [String: Watcher] = [:]
     private var quitObserver: NSObjectProtocol?
 
-    init(launch: @escaping (String) -> Process? = CIWatchers.launchWatcher) {
+    init(launch: @escaping (String) -> Foundation.Process? = CIWatchers.launchWatcher) {
         self.launch = launch
     }
 
@@ -67,7 +67,7 @@ final class CIWatchers {
         watchers.removeAll()
     }
 
-    nonisolated private static func launchWatcher(_ repoPath: String) -> Process? {
+    nonisolated private static func launchWatcher(_ repoPath: String) -> Foundation.Process? {
         guard let lfPath = try? LocalWaveAgentLauncher.controlLfPath() else { return nil }
         let process = LocalWaveAgentLauncher.queryProcess(
             command(lfPath: lfPath, parentPID: ProcessInfo.processInfo.processIdentifier),

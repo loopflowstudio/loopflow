@@ -14,7 +14,7 @@ pub struct SessionEvent {
     pub provider_turn: Option<String>,
     pub kind: SessionEventKind,
     pub provider_generation: Option<i64>,
-    pub exec_id: Option<String>,
+    pub process_lfid: Option<String>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
     pub observed_at: i64,
@@ -228,10 +228,10 @@ pub(crate) struct SessionSummary {
     pub task_identifier: Option<String>,
 }
 
-/// A Flow as its driver Exec records it; Current says nothing about a live process.
+/// A Flow as its driver Process records it; Current says nothing about a live process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowSummary {
-    /// The driver Exec.
+    /// The driver Process.
     pub id: String,
     pub name: String,
     pub state: FlowSummaryState,
@@ -252,7 +252,7 @@ pub enum FlowSummaryState {
 }
 
 impl FlowSummaryState {
-    /// What a driver Exec's recorded outcome and exit time say of its Flow.
+    /// What a driver Process's recorded outcome and exit time say of its Flow.
     pub(crate) fn of_driver(outcome: Option<&str>, completed_at: Option<i64>) -> Self {
         match (outcome, completed_at) {
             (Some("succeeded"), _) => Self::Completed,

@@ -114,7 +114,7 @@ struct GhosttyShellBlockTests {
 
         func run(rc: String) throws -> String {
             try rc.write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
-            let process = Process()
+            let process = Foundation.Process()
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
             process.arguments = [
                 "-i",

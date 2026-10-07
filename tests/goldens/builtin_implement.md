@@ -9,7 +9,7 @@ Read-only inspection and ordinary edits/tests run directly here.
 - **Task**: one intended outcome with its brief, checkout and PR chain.
 - **Session**: one agent conversation, interactive or headless.
 - **Flow**: a Task's authored sequence of steps and reviews.
-- **Exec**: one actual `lf` process.
+- **Process**: one actual `lf` process.
 
 ## Execute Here First
 

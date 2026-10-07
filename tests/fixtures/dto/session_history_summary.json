@@ -36,7 +36,7 @@
         "start_seq": 1,
         "completion_seq": 3
       },
-      "exec_id": null,
+      "process_lfid": null,
       "task_id": null,
       "wave_id": null,
       "started_at": 11,
@@ -65,7 +65,7 @@
         "start_seq": 4,
         "completion_seq": 6
       },
-      "exec_id": "22222222-2222-4222-8222-222222222222",
+      "process_lfid": "22222222-2222-4222-8222-222222222222",
       "task_id": "task_22222222222222222222222222222222",
       "wave_id": null,
       "started_at": 16,

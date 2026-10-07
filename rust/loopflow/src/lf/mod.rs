@@ -224,7 +224,7 @@ impl Cli {
         args
     }
 
-    pub(crate) fn exec_options(&self) -> Self {
+    pub(crate) fn process_options(&self) -> Self {
         Self {
             cron_receipt: self.cron_receipt.clone(),
             cron_lock_fd: self.cron_lock_fd,
@@ -825,9 +825,9 @@ pub enum TaskCommand {
         /// Reach `end` although Linear already calls the active Task complete
         #[arg(long)]
         force: bool,
-        /// Accept one historical Exec's unknown outcome when reaching `end`; retain its checkout
-        #[arg(long, value_name = "EXEC_ID")]
-        accept_unknown_exec: Vec<crate::id::ExecId>,
+        /// Accept one historical Process's unknown outcome when reaching `end`; retain its checkout
+        #[arg(long, value_name = "PROCESS_LFID")]
+        accept_unknown_process: Vec<crate::id::ProcessLfid>,
     },
     /// File a Task in the current chapter
     Create {
@@ -924,6 +924,13 @@ pub enum TaskCommand {
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
+    /// Move a Task that has no recorded work to another Wave's current Project
+    Refile {
+        issue: String,
+        /// The Wave to file it under
+        #[arg(short = 'w', long)]
+        wave: String,
+    },
     /// Read the thread or publish a comment; agent comments default to progress
     Comment {
         issue: String,
@@ -973,6 +980,7 @@ impl TaskCommand {
             | Self::Save { issue, .. }
             | Self::Delete { issue }
             | Self::Edit { issue, .. }
+            | Self::Refile { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
@@ -1395,7 +1403,7 @@ pub enum HomeCommand {
         #[arg(long = "no-prune")]
         no_prune: bool,
     },
-    /// Diagnose installation, storage, Exec integrity and scheduled receipts
+    /// Diagnose installation, storage, Process integrity and scheduled receipts
     Doctor {
         /// Diagnose repository planning without changing it
         #[arg(long)]
@@ -2338,14 +2346,14 @@ mod tests {
             "--reason",
             "Delivered",
             "--force",
-            "--accept-unknown-exec",
+            "--accept-unknown-process",
             "00000000-0000-0000-0000-000000000001",
         ])
         .unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason, force: true, accept_unknown_exec } })
+            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason, force: true, accept_unknown_process } })
                 if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")
-                    && accept_unknown_exec.iter().map(|id| id.as_str()).collect::<Vec<_>>() == ["00000000-0000-0000-0000-000000000001"]));
+                    && accept_unknown_process.iter().map(|id| id.as_str()).collect::<Vec<_>>() == ["00000000-0000-0000-0000-000000000001"]));
         assert!(Cli::try_parse_from([
             "lf",
             "task",

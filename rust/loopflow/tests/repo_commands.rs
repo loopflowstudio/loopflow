@@ -90,7 +90,7 @@ fn ci_remains_a_read_only_home_report_outside_a_checkout() {
         .unwrap();
     let completed: i64 = db
         .query_row(
-            "SELECT count(*) FROM execs WHERE outcome='succeeded'",
+            "SELECT count(*) FROM processes WHERE outcome='succeeded'",
             [],
             |row| row.get(0),
         )

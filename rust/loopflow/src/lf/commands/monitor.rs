@@ -3,7 +3,9 @@ use std::num::NonZeroU32;
 use anyhow::Context;
 use clap::Subcommand;
 
-use crate::exec::{Exec, ExecCursor, ExecFilter, ExecOutcomeFilter, ExecWorkFilter};
+use crate::process::{
+    Process, ProcessCursor, ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter,
+};
 use crate::repository::CanonicalRepo;
 use crate::store::{open_store, storage_config_from_env};
 
@@ -20,8 +22,8 @@ pub enum MonitorCommand {
         limit: NonZeroU32,
         /// Continue with the previous page's next object, encoded as JSON
         #[arg(long, value_parser = parse_cursor)]
-        after: Option<ExecCursor>,
-        /// Direct children of an exact or unambiguous parent Exec
+        after: Option<ProcessCursor>,
+        /// Direct children of an exact or unambiguous parent Process
         #[arg(long)]
         parent: Option<String>,
         /// Commands issued by this AgentSession
@@ -39,7 +41,7 @@ pub enum MonitorCommand {
         #[arg(long)]
         wave: Option<String>,
     },
-    /// Inspect an Exec or Session by identity
+    /// Inspect a process or Session by identity
     Show {
         id: String,
         #[arg(long, conflicts_with_all = ["events", "final_answer"])]
@@ -149,7 +151,7 @@ pub enum MonitorCommand {
     },
 }
 
-fn parse_cursor(value: &str) -> Result<ExecCursor, String> {
+fn parse_cursor(value: &str) -> Result<ProcessCursor, String> {
     serde_json::from_str(value).map_err(|error| error.to_string())
 }
 
@@ -248,13 +250,13 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
                 CanonicalRepo::current()?.map(|repo| repo.to_string())
             };
             let performed_work = match (task, wave) {
-                (Some(task), _) => Some(ExecWorkFilter::Task(
+                (Some(task), _) => Some(ProcessWorkFilter::Task(
                     store
                         .sqlite
                         .resolve_task_id(task, repo.as_deref())?
                         .context("Task was not found")?,
                 )),
-                (_, Some(wave)) => Some(ExecWorkFilter::Wave(
+                (_, Some(wave)) => Some(ProcessWorkFilter::Wave(
                     store
                         .sqlite
                         .resolve_wave_id(wave, repo.as_deref())?
@@ -262,35 +264,35 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
                 )),
                 _ => None,
             };
-            let filter = ExecFilter {
+            let filter = ProcessFilter {
                 repo,
-                parent_exec_id: match parent {
+                parent_process_lfid: match parent {
                     Some(parent) => Some(
                         store
-                            .resolve_exec(parent)
+                            .resolve_process(parent)
                             .await?
-                            .context("Parent Exec was not found")?
-                            .id,
+                            .context("Parent Process was not found")?
+                            .lfid,
                     ),
                     None => None,
                 },
                 caller_session_id: caller.clone(),
                 command_contains: search.clone(),
                 outcome: outcome.as_deref().map(|value| match value {
-                    "succeeded" => ExecOutcomeFilter::Succeeded,
-                    "failed" => ExecOutcomeFilter::Failed,
-                    "interrupted" => ExecOutcomeFilter::Interrupted,
-                    _ => ExecOutcomeFilter::Unknown,
+                    "succeeded" => ProcessOutcomeFilter::Succeeded,
+                    "failed" => ProcessOutcomeFilter::Failed,
+                    "interrupted" => ProcessOutcomeFilter::Interrupted,
+                    _ => ProcessOutcomeFilter::Unknown,
                 }),
                 performed_work,
                 ..Default::default()
             };
-            let page = store.execs(&filter, after.as_ref(), *limit).await?;
+            let page = store.processes(&filter, after.as_ref(), *limit).await?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&page)?);
             } else {
-                for exec in &page.entries {
-                    print_exec(exec);
+                for process in &page.entries {
+                    print_process(process);
                 }
                 if let Some(next) = page.next {
                     println!(
@@ -304,16 +306,16 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
     }
 }
 
-fn print_exec(exec: &Exec) {
-    let command = exec.command.as_deref().unwrap_or("unknown command");
+fn print_process(process: &Process) {
+    let command = process.command.as_deref().unwrap_or("unknown command");
     let display = serde_json::from_str::<Vec<String>>(command)
         .map(|argv| argv.join(" "))
         .unwrap_or_else(|_| command.to_string());
     println!(
         "{}  {}  {}  {}",
-        exec.id,
-        exec.started_at,
-        exec.outcome.as_deref().unwrap_or("unknown"),
+        process.lfid,
+        process.started_at,
+        process.outcome.as_deref().unwrap_or("unknown"),
         display
     );
 }
@@ -326,17 +328,17 @@ fn show(
     input: Option<&str>,
     context: bool,
 ) -> anyhow::Result<()> {
-    let exec = tokio::runtime::Runtime::new()?.block_on(async {
+    let process = tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
-        let exec = store.resolve_exec(id).await?;
+        let process = store.resolve_process(id).await?;
         let session = store.session(id).await?;
         anyhow::ensure!(
-            exec.is_none() || session.is_none(),
-            "Identity matches both an Exec and a Session; use an exact identity"
+            process.is_none() || session.is_none(),
+            "Identity matches both a process and a Session; use an exact identity"
         );
         anyhow::ensure!(
-            exec.is_some() || session.is_some(),
-            "Exec or Session {id} was not found"
+            process.is_some() || session.is_some(),
+            "Process or Session {id} was not found"
         );
         if let Some(input) = input {
             anyhow::ensure!(session.is_some(), "--input requires a Session identity");
@@ -346,19 +348,19 @@ fn show(
                 "Input does not belong to Session {id}"
             );
         }
-        Ok::<_, anyhow::Error>(exec)
+        Ok::<_, anyhow::Error>(process)
     })?;
-    match exec {
-        Some(exec) => {
+    match process {
+        Some(process) => {
             anyhow::ensure!(
                 !events && !final_answer && !context,
-                "--events, --final and --context inspect Session evidence; Execs record command outcomes"
+                "--events, --final and --context inspect Session evidence; Processes record command outcomes"
             );
             if json {
-                println!("{}", serde_json::to_string_pretty(&exec)?);
+                println!("{}", serde_json::to_string_pretty(&process)?);
             } else {
-                print_exec(&exec);
-                println!("{}", serde_json::to_string_pretty(&exec)?);
+                print_process(&process);
+                println!("{}", serde_json::to_string_pretty(&process)?);
             }
             Ok(())
         }
@@ -387,7 +389,7 @@ struct MonitorOverview {
     observed_at: i64,
     items: Vec<MonitorItem>,
     active: crate::session_record::active::ActiveSessionsSnapshot,
-    recent_commands: crate::exec::ExecPage,
+    recent_commands: crate::process::ProcessPage,
     sessions_next: Option<String>,
     flows_next: Option<String>,
     gaps: Vec<String>,
@@ -482,7 +484,7 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
             let at = detail
                 .as_ref()
                 .and_then(|detail| detail.steps.last())
-                .map(crate::durable::FlowStepExec::position)
+                .map(crate::durable::FlowStepProcess::position)
                 .unwrap_or_else(|| "an unreadable step".into());
             let (state, reason) = match summary.state {
                 crate::session::FlowSummaryState::Completed => {
@@ -492,8 +494,8 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                     ("stopped", format!("Driver exited at {at}"))
                 }
                 crate::session::FlowSummaryState::Current => {
-                    match crate::id::ExecId::parse(&summary.id)
-                        .map(|driver| crate::journal::exec_process_evidence(&store.sqlite, &driver))
+                    match crate::id::ProcessLfid::parse(&summary.id)
+                        .map(|driver| crate::journal::process_evidence(&store.sqlite, &driver))
                     {
                         Ok(crate::journal::ProcessIdentityEvidence::Live) => {
                             ("running", format!("Driver is at {at}"))
@@ -520,8 +522,8 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
             });
         }
         let recent_commands = store
-            .execs(
-                &ExecFilter {
+            .processes(
+                &ProcessFilter {
                     repo,
                     ..Default::default()
                 },
@@ -549,7 +551,7 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
             );
         }
         for command in &report.recent_commands.entries {
-            print_exec(command);
+            print_process(command);
         }
         for gap in &report.gaps {
             println!("Unavailable: {gap}");

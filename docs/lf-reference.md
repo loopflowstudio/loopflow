@@ -22,8 +22,8 @@ limits this launch and its children. A Flow retains its provider selections;
 children check their destination's access before starting a provider.
 Account observations distinguish unavailable, expired and measured capacity.
 
-JSON readers emit one document; `monitor active --watch --json` and
-`monitor work --watch --json` emit NDJSON until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
+JSON readers emit one document; `monitor active --watch --json` emits NDJSON
+until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
 operation succeeded; 1 denotes an operational failure, 2 a syntax or lookup
 failure, and 130 interruption. A successful auto-merge request is not a merge.
 
@@ -35,10 +35,10 @@ lf flow show FLOW_ID --sessions --json
 lf task interrupt EXP-12
 ```
 
-Each start is a new Flow: one driver Exec and the step Execs it starts. Its ID
-is the driver Exec's. `--state` selects `current` (the driver has no recorded
+Each start is a new Flow: one lf process and the step processes it starts. Its ID
+is the Flow process's. `--state` selects `current` (the driver has no recorded
 exit), `completed` (it succeeded) or `stopped` (it exited before the last
-step). A stopped Flow's Execs are its history; nothing resumes it. Inspect
+step). A stopped Flow's Processes are its history; nothing resumes it. Inspect
 them, then launch the work that remains.
 
 ## lf
@@ -301,7 +301,7 @@ List a bounded page of recorded commands, newest first
 | `--all` | Include all repositories Default: false. |
 | `--limit` | limit Default: 100. |
 | `--after` | Continue with the previous page's next object, encoded as JSON |
-| `--parent` | Direct children of an exact or unambiguous parent Exec |
+| `--parent` | Direct children of an exact or unambiguous parent Process |
 | `--caller` | Commands issued by this AgentSession |
 | `--search` | Literal command text, ignoring ASCII case |
 | `--outcome` | outcome |
@@ -311,7 +311,7 @@ List a bounded page of recorded commands, newest first
 
 ## lf monitor show
 
-Inspect an Exec or Session by identity
+Inspect a process or Session by identity
 
 | Argument | What it does |
 |---|---|
@@ -340,7 +340,7 @@ Stream planning and activity for the selected Work, each part again only when it
 
 | Argument | What it does |
 |---|---|
-| `--json` | json |
+| `--json` | json Default: false. |
 | `--watch` | Stream NDJSON until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
@@ -686,12 +686,12 @@ Refresh shared planning from Linear
 
 ## lf repo new-chapter
 
-Rotate selected Waves using exact destinations and KRs in a retained plan
+Advance every Wave to the named Project plan
 
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
-| `--plan <path>` | Required retained JSON plan with exact Wave and successor IDs |
+| `--plan` | plan |
 | `--dry-run` | dry run Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -952,7 +952,7 @@ Internal command; invoked by the owning operation.
 
 ## lf home doctor
 
-Diagnose installation, storage, Exec integrity and scheduled receipts
+Diagnose installation, storage, Process integrity and scheduled receipts
 
 | Argument | What it does |
 |---|---|
@@ -1312,7 +1312,7 @@ Put a Task at a node of its workflow without running anything; `end` completes i
 | `<node>` | `start`, `end` or one of the workflow's nodes |
 | `--reason` | Why, kept in the Task's workflow history |
 | `--force` | Reach `end` although Linear already calls the active Task complete Default: false. |
-| `--accept-unknown-exec` | Accept one historical Exec's unknown outcome when reaching `end`; retain its checkout |
+| `--accept-unknown-process` | Accept one historical Process's unknown outcome when reaching `end`; retain its checkout |
 | `--help / -h` | Print help |
 
 ## lf task create
@@ -1428,6 +1428,16 @@ Edit a Task's title or notes, before or after placement
 | `--title` | title |
 | `--notes` | notes |
 | `--wave / -w` | wave |
+| `--help / -h` | Print help |
+
+## lf task refile
+
+Move a Task that has no recorded work to another Wave's current Project
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--wave / -w` | The Wave to file it under |
 | `--help / -h` | Print help |
 
 ## lf task comment
@@ -1554,7 +1564,7 @@ List authored flows, or Flows that ran
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--sessions` | List or show Flows that ran, from their Execs, instead of reusable templates Default: false. |
+| `--sessions` | List or show Flows that ran, from their Processes, instead of reusable templates Default: false. |
 | `--all` | Include every repository and flows with unknown repository evidence Default: false. |
 | `--limit` | Page size (default 100) |
 | `--after` | Previous page's next identity; retain the same filters |

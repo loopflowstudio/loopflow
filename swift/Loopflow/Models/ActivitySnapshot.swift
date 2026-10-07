@@ -1,7 +1,7 @@
 import Foundation
 
 public enum ActivityNodeKind: String, Codable, Sendable, Hashable {
-    case exec
+    case process
     case providerProcess = "provider_process"
 }
 

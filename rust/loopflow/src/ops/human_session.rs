@@ -560,7 +560,7 @@ pub(crate) async fn serve_conversation(store: &SharedStore, artifact_key: &Strin
         .session_for_artifact(artifact_key)
         .await?
         .ok_or_else(|| anyhow!("Conversation input {artifact_key} no longer exists"))?;
-    let launch_lock = lock_session_exec(&session.id)?;
+    let launch_lock = lock_session_process(&session.id)?;
     let session = store
         .session(&session.id)
         .await?
@@ -595,7 +595,7 @@ async fn serve_locked(
         .current_dir(&session.cwd)
         .env(HUMAN_SESSION_ENV, serde_json::to_string(&token)?);
     command.args(conversation_launch_args(store, session).await);
-    let mut child = spawn_session_exec(&mut command, &session.artifact_key).await?;
+    let mut child = spawn_session_process(&mut command, &session.artifact_key).await?;
     drop(launch_lock);
     // Provider termination never completes a Session.
     let status = child.wait().await.context("wait for session agent")?;
@@ -676,7 +676,7 @@ pub(crate) async fn open(
     let admitted;
     let session = if resume {
         let id = session.id.clone();
-        let _launch = tokio::task::spawn_blocking(move || lock_session_exec(&id)).await??;
+        let _launch = tokio::task::spawn_blocking(move || lock_session_process(&id)).await??;
         admitted = primary::admit_workspace(store, session.clone()).await?;
         &admitted
     } else {
@@ -691,7 +691,7 @@ pub(crate) async fn open(
         return Ok(surface);
     };
     if resume {
-        crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
+        crate::lf::commands::util::require_provider_session_process(&native.dir)?;
     }
     if resume
         && native.provider == "codex"
@@ -755,12 +755,12 @@ async fn connect_live_codex(
     if thread != provider.provider_session_id {
         bail!("Recorded conversation differs from the live provider thread");
     }
-    let exec = crate::journal::current_exec_id()
-        .ok_or_else(|| anyhow!("Connecting requires the current lf Exec"))?;
+    let process = crate::journal::current_process_lfid()
+        .ok_or_else(|| anyhow!("Connecting requires the current lf Process"))?;
     let driver =
         match store
             .sqlite
-            .claim_session_driver(&session.id, expected.as_ref(), &exec, false)
+            .claim_session_driver(&session.id, expected.as_ref(), &process, false)
         {
             Ok(driver) => driver,
             Err(crate::store::StoreError::InvalidAuthority(_))
@@ -833,7 +833,7 @@ async fn connect_live_codex(
 /// launch its prepared input, else append another attempt to the Session.
 async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     let lock_id = id.to_string();
-    let launch_lock = tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
+    let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     // Resolve the current input under the launch lock, including completion
     // or replacement that happened while this opener waited.
     let session = store
@@ -1087,7 +1087,7 @@ fn session_not_found(id: &str) -> anyhow::Error {
     anyhow!("Session {id} was not found")
 }
 
-pub(crate) async fn spawn_session_exec(
+pub(crate) async fn spawn_session_process(
     command: &mut tokio::process::Command,
     artifact_key: &String,
 ) -> Result<tokio::process::Child> {
@@ -1103,7 +1103,7 @@ pub(crate) async fn spawn_session_exec(
     };
     let database = crate::store::database_path_from_env()?;
     // Capture the child before it parses arguments. Its own Session recorder may
-    // never start; the opening Exec must retain enough evidence to diagnose it.
+    // never start; the opening Process must retain enough evidence to diagnose it.
     // Arguments and environment values can contain prompts or credentials.
     let launch = format!(
         "Session input {artifact_key}: executable {} (sha256 {digest}), cwd {}, Home {}, database {}",
@@ -1131,6 +1131,15 @@ pub(crate) async fn spawn_session_exec(
             Err(error) => return Err(error.into()),
         }
         if let Some(status) = child.try_wait().context("probe human Session input")? {
+            // A finite terminal can publish native history and exit between
+            // probes. Its successful exit does not make that history unusable.
+            if status.success() {
+                if let Ok((dir, _)) = crate::session_record::resolve_manifest(&home, artifact_key) {
+                    if crate::session_record::read_provider_session(&dir)?.is_some() {
+                        return Ok(child);
+                    }
+                }
+            }
             bail!("{launch}: exited with {status} before becoming resumable");
         }
         if tokio::time::Instant::now() >= deadline {
@@ -1167,7 +1176,7 @@ pub(crate) fn resume_native_session(
     let Some(provider_session) = store.sqlite.input_provider_session(artifact_key)? else {
         return Ok(false);
     };
-    crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
+    crate::lf::commands::util::require_provider_session_process(&native.dir)?;
     native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
@@ -1215,7 +1224,7 @@ pub(crate) fn human_open_argv(
 const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository, Wave or Task. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
 
 #[cfg(not(test))]
-async fn conversation_exec_is_running(id: &str) -> Result<bool> {
+async fn conversation_process_is_running(id: &str) -> Result<bool> {
     let status = tokio::process::Command::new("tmux")
         .args([
             "has-session",
@@ -1235,7 +1244,7 @@ async fn conversation_exec_is_running(id: &str) -> Result<bool> {
 }
 
 #[cfg(test)]
-async fn conversation_exec_is_running(id: &str) -> Result<bool> {
+async fn conversation_process_is_running(id: &str) -> Result<bool> {
     Ok(tests::CONVERSATION_LAUNCHERS
         .lock()
         .unwrap()
@@ -1269,7 +1278,7 @@ async fn start_durable_session(name: &str, _cwd: &Path, argv: &[String]) -> Resu
     Ok(())
 }
 
-pub(crate) fn lock_session_exec(id: &str) -> Result<File> {
+pub(crate) fn lock_session_process(id: &str) -> Result<File> {
     let directory = crate::store::lf_home_dir().join(LAUNCH_LOCK_DIRECTORY);
     fs::create_dir_all(&directory).context("create Session directory")?;
     let name = hex::encode(&Sha256::digest(id.as_bytes())[..16]);
@@ -1692,12 +1701,12 @@ mod tests {
         use crate::session_record::SessionFlowStep;
         // Captures from before node keys carried a leaf index and scalar visit.
         let old: SessionFlowStep = serde_json::from_value(serde_json::json!({
-            "task_id": null, "task_pr_id": null, "invocation_id": "exec_old",
+            "task_id": null, "task_pr_id": null, "invocation_id": "process_old",
             "flow": "review", "step": "review-design", "iteration": 3, "step_index": 1
         }))
         .unwrap();
         assert_eq!((old.node, old.key, old.iterations), (None, None, None));
-        assert_eq!(old.invocation_id, "exec_old");
+        assert_eq!(old.invocation_id, "process_old");
     }
 
     #[test]

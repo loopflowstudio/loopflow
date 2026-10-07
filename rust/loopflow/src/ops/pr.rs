@@ -286,9 +286,14 @@ pub(crate) fn normalize_task_pr_copy(
             "Merging PR {} leaves the Task open for another serial PR.",
             context.sequence
         ),
-        TaskPrCopyLifecycle::Completes => {
-            format!("Merging PR {} completes the Task.", context.sequence)
-        }
+        TaskPrCopyLifecycle::Completes => match &context.follow_up {
+            Some(work) => format!(
+                "Merging PR {} delivers source; {}",
+                context.sequence,
+                work.summary(time::OffsetDateTime::now_utc().unix_timestamp())
+            ),
+            None => format!("Merging PR {} completes the Task.", context.sequence),
+        },
     };
     let managed = format!(
         "{TASK_PR_CONTEXT_START}\n> [!NOTE]\n> **Task:** {task_link}\n> **PR lifecycle:** {pr_lifecycle}\n{TASK_PR_CONTEXT_END}"
@@ -2516,6 +2521,7 @@ esac
 
     fn task_pr_context() -> TaskPrContext {
         TaskPrContext {
+            follow_up: None,
             title: "Make Task PR copy explain intent and lifecycle".to_string(),
             identifier: "LOO-249".to_string(),
             url: "https://linear.app/loopflow/issue/LOO-249/task-pr-copy".to_string(),

@@ -45,6 +45,9 @@ struct TaskWorkflowHeader: View {
                         .disabled(unavailable != nil)
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
                         .accessibilityIdentifier("task-workflow-start")
+                    Button("Complete") { Task { await model.moveTask(to: "end", task: task, wave: wave) } }
+                        .disabled(acting)
+                        .accessibilityIdentifier("task-workflow-end")
                     Spacer()
                 } else {
                     Text(work.errorMessage.map { "Workflow could not be read: \($0)" }
@@ -53,6 +56,12 @@ struct TaskWorkflowHeader: View {
                     Spacer()
                 }
                 if acting { ProgressView().controlSize(.small) }
+            }
+            if task.actions.reason.contains("Remaining work:") {
+                Text(task.actions.reason)
+                    .foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("task-remaining-work")
             }
             // Linear called the Task complete while it is active here.
             if let conflict = task.runtime?.planningConflict {

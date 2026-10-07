@@ -1572,12 +1572,22 @@ esac
                     mark_issue_updated(&mut state.issues[0]);
                 });
             } else {
-                // A later GitHub failure preserves enough evidence for a retry.
+                // Cleanup failure cannot undo cancellation; retry retains the PR and checkout.
                 std::fs::write(repo.join(".git/fail-close"), "").unwrap();
-                assert!(crate::ops::task::task_abandon(caller, selector, false)
-                    .unwrap_err()
-                    .to_string()
-                    .contains("GitHub unavailable"));
+                assert_eq!(
+                    crate::ops::task::task_abandon(caller, selector, false).unwrap(),
+                    "FIX-1"
+                );
+                assert_eq!(
+                    runtime
+                        .block_on(
+                            fixture
+                                .store
+                                .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                        )
+                        .unwrap(),
+                    WorkStatus::Abandoned
+                );
                 assert_eq!(
                     runtime
                         .block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),

@@ -779,7 +779,7 @@ Task row ----> managed worktree ----> commits
 5. PR landing is fenced by landing generation. A check repairs an unchanged
    incident once; a moved head requires fresh evidence. A blocked landing still
    observes merge, and explicit arm or land resumes it.
-6. Landing with `-c` completes the Task; bare landing keeps it open. Serial PR
+6. Verified merge completes the Task unless explicit remaining work keeps it open. Serial PR
    rotation and separately stacked dependent Tasks retain their own identities.
 
 GitHub remains merge truth. SQLite stores the observed PR/head/check/disposition

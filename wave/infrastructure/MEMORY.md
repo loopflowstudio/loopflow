@@ -17,6 +17,25 @@ operation-entry lesson also applies to command removal: reject the retired
 option beneath a valid current owner; an unknown owner can produce a false pass.
 Corrected installation fixtures still require disposable OS-account isolation.
 
+## Task decisions and delivered work (LOO-408, 2026-10-07)
+
+Jack Heart authorized autonomous repair, verification and landing, with verified
+merges completing Tasks by default. Explicit remaining work carries its outcome,
+evidence condition and next check; overdue calls for a decision, never invented
+success. Task state changes must preserve Session turns, reservations, process
+outcomes, ancestry and live controls. Historical uncertainty can retain a checkout,
+but cannot veto an authorized completion or cancellation. The old per-Exec
+acceptance ritual is superseded; its recorded decisions remain history.
+
+Installed 0.13.9 reproduces LOO-353's five pending turns, one reserved input and
+two unknown processes despite its merged PR's completion intent. Source fixtures
+prove preservation. PR #1483's Process/LFID vocabulary and migration are integrated
+without another draft; installed acceptance awaits published repair. Current
+Infrastructure reads retain LOO-285's unattended settlement proof, LOO-304's
+performance/soak acceptance, LOO-375's installed timing and LOO-390's prevention
+measurement. Their merge status alone proves none of those outcomes. Legacy
+keep-open requests without explicit remaining work need scope reconciliation.
+
 ## Process vocabulary (LOO-400, 2026-10-07)
 
 Jack Heart approved Process, LFID/PID and PR #1483 landing
@@ -320,27 +339,15 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Installed worker recovery (2026-10-02 PDT; curated October 5)
+## Installed worker recovery (curated 2026-10-07)
 
-Jack Heart authorized recovery and published installation of v0.12.32 after
-PR #1415 merged. Exact release/workflow identities, preserved-file checks and
-recovery observations remain at
-`8d8f68dc1e8cae33fd3b05a28a50b864d4d503ab:wave/infrastructure/MEMORY.md`
-under this heading. The published installer preserved the Home with no migration;
-LOO-367 resumed its saved Flow. LOO-285's focused CI-repair ownership checks and
-operator-triggered release established neither automatic settlements nor completion.
-
-LOO-295 reconciled merged PR #1283 while preserving all eight unrelated files;
-its later October 4 acceptance above supersedes the then-open review obligation.
-LOO-292's later closure likewise supersedes its pending demo. The retained
-`invalid stored landing placement: home` defect interrupted reconciliation and
-release settlement; supported re-entry completed the same release without deleting
-records or worktrees. LOO-373 owns repair and exact evidence in Release memory.
-
-Jack questioned serial releases. The operator committed to batching demonstrated
-recovery repairs with installed-state preflight; this was not Jack's approval of
-a new release policy. Source merges, installation and configured acceptance remain
-separate facts.
+October 2 recovery evidence remains at
+`6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`
+under this heading. Published v0.12.32 preserved the Home without migration and
+resumed LOO-367. LOO-295 and LOO-292's later acceptance above supersedes their
+then-open review obligations. LOO-373 owns the retained landing-placement defect;
+re-entry preserved records and checkouts. Manual releases prove no automatic settlements. The operator's batching proposal was not Jack Heart's
+approval of a new release policy; source, installation and acceptance stay distinct.
 
 ## Optional chapters and Task workflows (2026-10-02)
 
@@ -553,12 +560,11 @@ reconstruct ownership from paths. Membership is additive, includes descendants
 at component boundaries and closed history, and survives a missing checkout.
 It changes neither recorded usage attribution nor process/Flow authority.
 
-The managed Flow remains one marked member for worker progression, claims,
-Task review settlement and worker delivery authority. Independent unfinished
-Flows, pending Ask/review Sessions and live or unresolved Execs preserve work
-during completion, recovery and cleanup. General membership cannot settle or
-signal them. Current mechanics live in the architecture reference; this branch
-entry is not evidence of shipment or configured Desktop acceptance.
+Every Flow naming the Task is equally its work; the earlier marked-worker model
+is superseded. Membership grants no process or settlement authority. LOO-408
+separates Task decisions from execution and retains conservative checkout cleanup.
+Earlier branch details remain at
+`6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`.
 
 ## Synced planning integration (LOO-334, 2026-09-30)
 

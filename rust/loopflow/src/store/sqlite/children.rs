@@ -129,6 +129,13 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task_project(&transaction, task)?;
+        if let Some(TaskEventKind::FollowUp {
+            remaining: Some(work),
+            ..
+        }) = task_follow_up_in(&transaction, &task.id)?
+        {
+            return Err(StoreError::InvalidAuthority(work.summary(now_unix())));
+        }
         if let Some(pr) = skipped_pr {
             if transaction.execute(
                 "UPDATE task_prs SET abandoned_at=?3, updated_at=?3
@@ -590,20 +597,56 @@ impl SqliteStore {
         task_events_after_in(&conn, task_id, cursor)
     }
 
-    pub(crate) fn task_accepted_unknown_processes(
+    pub fn task_follow_up(
         &self,
         task_id: &TaskId,
-    ) -> StoreResult<Vec<crate::id::ProcessLfid>> {
+    ) -> StoreResult<Option<crate::work::task::TaskFollowUp>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT DISTINCT accepted.value FROM task_events,
-             json_each(COALESCE(json_extract(task_events.kind_json, '$.process_lfids'),
-                                json_extract(task_events.kind_json, '$.exec_ids'))) AS accepted
-             WHERE task_id=?1 AND json_extract(kind_json, '$.kind')='historical_uncertainty_accepted'",
+        Ok(match task_follow_up_in(&conn, task_id)? {
+            Some(TaskEventKind::FollowUp { remaining, .. }) => remaining,
+            _ => None,
+        })
+    }
+
+    pub(crate) fn task_follow_up_resolved(&self, task_id: &TaskId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(matches!(
+            task_follow_up_in(&conn, task_id)?,
+            Some(TaskEventKind::FollowUp {
+                remaining: None,
+                ..
+            })
+        ))
+    }
+
+    pub(crate) fn set_task_follow_up(
+        &self,
+        task_id: &TaskId,
+        remaining: Option<crate::work::task::TaskFollowUp>,
+        reason: &str,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let previous = task_follow_up_in(&tx, task_id)?;
+        if matches!(&previous, Some(TaskEventKind::FollowUp { remaining: old, .. }) if old == &remaining)
+        {
+            return Ok(());
+        }
+        if super::durable::task_state_in(&tx, task_id)?.is_terminal() {
+            return Err(StoreError::InvalidAuthority(
+                "Task is terminal; its outcome is preserved".into(),
+            ));
+        }
+        insert_task_event_in(
+            &tx,
+            task_id,
+            &TaskEventKind::FollowUp {
+                remaining,
+                reason: reason.into(),
+            },
         )?;
-        let rows = statement.query_map([task_id.as_str()], |row| row.get(0))?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StoreError::from)
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn task_event(&self, task_id: &TaskId, event_id: i64) -> StoreResult<Option<TaskEvent>> {
@@ -1752,4 +1795,17 @@ pub(super) fn insert_project_event_in(
         kind: kind.clone(),
         created_at: crate::store::rows::unix_to_datetime(created_at),
     })
+}
+
+fn task_follow_up_in(conn: &Connection, task_id: &TaskId) -> StoreResult<Option<TaskEventKind>> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT kind_json FROM task_events WHERE task_id=?1
+         AND json_extract(kind_json, '$.kind')='follow_up' ORDER BY id DESC LIMIT 1",
+            [task_id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    json.map(|json| serde_json::from_str(&json).map_err(StoreError::from))
+        .transpose()
 }

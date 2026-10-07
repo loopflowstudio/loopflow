@@ -932,6 +932,39 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
+        TaskCommand::FollowUp {
+            issue,
+            outcome,
+            evidence,
+            check_at,
+            clear,
+        } => {
+            let remaining = match (outcome, evidence, check_at) {
+                (Some(outcome), Some(evidence), Some(at)) => {
+                    Some(loopflow::work::task::TaskFollowUp {
+                        outcome: outcome.clone(),
+                        evidence: evidence.clone(),
+                        check_at: time::OffsetDateTime::parse(
+                            at,
+                            &time::format_description::well_known::Rfc3339,
+                        )?
+                        .unix_timestamp(),
+                    })
+                }
+                _ => None,
+            };
+            println!(
+                "{}",
+                loopflow::ops::task::task_follow_up(
+                    issue,
+                    remaining,
+                    clear
+                        .as_deref()
+                        .unwrap_or("Accepted work remains after delivery")
+                )?
+            );
+            Ok(())
+        }
         TaskCommand::Automate { issue, state } => Ok(loopflow::ops::task_automation::select(
             issue,
             state == "on",
@@ -963,7 +996,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             node,
             reason,
             force,
-            accept_unknown_process,
         } => {
             println!(
                 "{}",
@@ -972,10 +1004,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     issue,
                     node,
                     reason.as_deref(),
-                    &loopflow::ops::task::EndOptions {
-                        force: *force,
-                        accept_unknown_process: accept_unknown_process.clone(),
-                    },
+                    &loopflow::ops::task::EndOptions { force: *force },
                 )?
             );
             Ok(())
@@ -1508,10 +1537,7 @@ fn dispatch(
             },
     }) = &cli.command
     {
-        let end = loopflow::ops::task::EndOptions {
-            force: *force,
-            accept_unknown_process: Vec::new(),
-        };
+        let end = loopflow::ops::task::EndOptions { force: *force };
         let directory = loopflow::repo::working_directory()?;
         let repo = loopflow::ops::task::task_repository(&directory, Some(issue))?;
         let (task, flow) = loopflow::ops::task::task_place(

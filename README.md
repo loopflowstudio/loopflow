@@ -114,8 +114,8 @@ lf task run INF-123 --reason "reconcile all scratch first" # publish direction, 
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
 lf --task INF-123 skill task/session               # ongoing conversation that keeps applying task/operate
-lf arm -c                                          # request exact-head auto-merge and return
-lf land -c                                         # hand off delivery; complete the Task after verified merge
+lf arm                                             # request exact-head auto-merge and return
+lf land                                            # complete the Task after verified merge
 lf pr reconcile                                      # check recorded deliveries once and settle merges
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```

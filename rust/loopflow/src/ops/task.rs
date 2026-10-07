@@ -34,7 +34,7 @@ use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::ops::workflow::WorkflowPosition;
 use crate::planning::{LinearIssueId, TaskPlan};
-use crate::store::sqlite::{EndMove, OpenProcesses};
+use crate::store::sqlite::EndMove;
 use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, Store,
     StoreError,
@@ -72,8 +72,6 @@ pub struct TaskProcessOptions {
 pub struct EndOptions {
     /// Reach `end` although Linear already calls the active Task complete.
     pub force: bool,
-    /// Historical Processes whose unknown outcome is accepted for completion only.
-    pub accept_unknown_process: Vec<crate::id::ProcessLfid>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -691,10 +689,8 @@ pub fn workflow_set(
             None => format!("{issue}: completed"),
         });
     }
-    if end.force || !end.accept_unknown_process.is_empty() {
-        return Err(task_error(
-            "--force and --accept-unknown-process apply only to reaching `end`",
-        ));
+    if end.force {
+        return Err(task_error("--force applies only to reaching `end`"));
     }
     let note = note.map(str::trim).filter(|note| !note.is_empty());
     block_on_task(async {
@@ -1825,6 +1821,7 @@ pub(crate) struct TaskPrContext {
     pub(crate) url: String,
     pub(crate) sequence: u32,
     pub(crate) merge_request: Option<PrMergeRequest>,
+    pub(crate) follow_up: Option<crate::work::task::TaskFollowUp>,
 }
 
 impl TaskPrContext {
@@ -1889,6 +1886,7 @@ async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsRes
         identifier: task.plan.identifier.clone(),
         url: url.to_string(),
         sequence: pr.sequence,
+        follow_up: store.sqlite.task_follow_up(&task.id).map_err(task_error)?,
         merge_request: pr
             .merge_request()
             .filter(|request| {
@@ -2325,7 +2323,7 @@ async fn resolve_verifier_upstream(
 }
 
 /// Core parity proof. Takes the store + task explicitly so it can be
-/// exercised in tests without a live LF_HOME (mirrors `ensure_working_pr`).
+/// exercised in tests without a live LF_HOME (mirrors `rotate_task_pr`).
 pub(crate) async fn verify_task_pr_range_in(
     store: &SharedStore,
     task: &Task,
@@ -2685,7 +2683,13 @@ pub(crate) async fn settle_task_landing(
         }
     };
     apply_merged_task_landing(store, &mut task, &pr, landing).await?;
-    if landing.after_merge == Some(AfterMerge::CompleteTask) {
+    if landing.after_merge == Some(AfterMerge::CompleteTask)
+        && store
+            .sqlite
+            .task_follow_up(&task.id)
+            .map_err(task_error)?
+            .is_none()
+    {
         if let PmWritebackState::Pending { error, .. } = &task.pm_writeback {
             return Err(task_error(format!("Linear completion pending: {error}")));
         }
@@ -2719,7 +2723,9 @@ async fn apply_merged_task_landing(
     match landing.after_merge {
         Some(AfterMerge::CompleteTask) => reconcile_task_completion(store, task).await,
         Some(AfterMerge::ContinueTask) if landing.next_slug.is_some() => {
-            ensure_working_pr(store, task).await.map(|_| ())
+            rotate_task_pr(store, task, RotateOptions::default())
+                .await
+                .map(|_| ())
         }
         Some(AfterMerge::ContinueTask) | None => Ok(()),
     }
@@ -3047,7 +3053,7 @@ fn next_pr_slug(settled: &TaskPr, slug_override: Option<&str>) -> String {
 }
 
 /// The deterministic next serial branch for a settled Task PR — the same branch
-/// `ensure_working_pr_with_options` would cut. The recovery gate reads this so
+/// `rotate_task_pr` would cut. The recovery gate reads this so
 /// a partial rotation (worktree already on the next branch) is adopted, not
 /// refused as an unrelated branch.
 fn deterministic_next_branch(
@@ -3069,13 +3075,6 @@ fn deterministic_next_branch(
     Ok(format!("{author}/{}-{slug}", task.workspace_slug))
 }
 
-pub(crate) async fn ensure_working_pr(
-    store: &SharedStore,
-    task: &mut Task,
-) -> OpsResult<Option<TaskPr>> {
-    ensure_working_pr_with_options(store, task, RotateOptions::runner()).await
-}
-
 /// How a serial-PR rotation treats the worktree. Automated settlement rotates
 /// only a clean tree (`carry_dirty = false`); the operator's `lf pr next` carries the
 /// preserved follow-up edits forward onto the next serial branch
@@ -3084,12 +3083,6 @@ pub(crate) async fn ensure_working_pr(
 pub(crate) struct RotateOptions {
     carry_dirty: bool,
     slug_override: Option<String>,
-}
-
-impl RotateOptions {
-    fn runner() -> Self {
-        Self::default()
-    }
 }
 
 enum CommittedFollowUp {
@@ -3276,7 +3269,7 @@ fn roll_back_failed_rotation(
     Ok(())
 }
 
-async fn ensure_working_pr_with_options(
+async fn rotate_task_pr(
     store: &SharedStore,
     task: &mut Task,
     rotate: RotateOptions,
@@ -3324,15 +3317,8 @@ async fn ensure_working_pr_with_options(
         }
     }
     let committed_carry = committed_follow_up_range(&task.worktree, &settled)?;
-    // A settled completing PR normally never rotates. Two things independently
-    // authorize one more serial PR: follow-up committed past the merged tip,
-    // which the completion gate refuses to settle over, and a pending
-    // directive, which the successor exists to incorporate.
-    if settled.after_merge() == AfterMerge::CompleteTask
-        && !matches!(&committed_carry, CommittedFollowUp::Range { .. })
-    {
-        return Ok(None);
-    }
+    // Reaching this operation is explicit next-PR intent, either `pr next`
+    // or the merged request's named successor. No worker infers a rotation.
     let sequence = settled.sequence + 1;
     let slug = next_pr_slug(&settled, rotate.slug_override.as_deref());
     let branch = deterministic_next_branch(task, &settled, rotate.slug_override.as_deref())?;
@@ -3547,7 +3533,7 @@ pub fn pr_next(repo: &Path, slug: Option<&str>) -> OpsResult<TaskPr> {
             carry_dirty: true,
             slug_override,
         };
-        ensure_working_pr_with_options(&store, &mut task, rotate)
+        rotate_task_pr(&store, &mut task, rotate)
             .await?
             .ok_or_else(|| task_error("Task has no settled PR to rotate from"))
     })
@@ -3693,6 +3679,55 @@ pub(crate) async fn planning_conflict(
         .and_then(|record| planning_conflict_of(state, &record.item, &task.plan.identifier)))
 }
 
+/// Record or resolve accepted work remaining after delivery. History keeps both decisions.
+pub fn task_follow_up(
+    issue: &str,
+    remaining: Option<crate::work::task::TaskFollowUp>,
+    reason: &str,
+) -> OpsResult<String> {
+    if reason.trim().is_empty() {
+        return Err(task_error("a follow-up decision needs a reason"));
+    }
+    if let Some(work) = &remaining {
+        if work.outcome.trim().is_empty()
+            || work.evidence.trim().is_empty()
+            || time::OffsetDateTime::from_unix_timestamp(work.check_at).is_err()
+        {
+            return Err(task_error(
+                "remaining work needs an outcome, evidence condition and valid next check",
+            ));
+        }
+    }
+    block_on_task(async {
+        let store = task_store().await?;
+        let mut task = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("follow-up needs a placed Task"))?;
+        store
+            .sqlite
+            .set_task_follow_up(&task.id, remaining.clone(), reason.trim())
+            .map_err(task_error)?;
+        if remaining.is_none() {
+            reconcile_delivered_task(&store, &mut task).await?;
+            if task_work_status(&store, &task).await? == WorkStatus::Done {
+                return Ok(
+                    "Task completed; remaining-work decisions and execution history preserved"
+                        .into(),
+                );
+            }
+        }
+        Ok(remaining.map_or_else(
+            || {
+                "Remaining work resolved; delivery reconciliation completes the Task after verified merge"
+                    .into()
+            },
+            |work| work.summary(time::OffsetDateTime::now_utc().unix_timestamp()),
+        ))
+    })
+}
+
 /// Put the Task at `end`, completing it. A Task with no Workflow ends on one
 /// with nothing between. `None` is a Task `lf` holds no record of: its
 /// planning item is completed without a checkout.
@@ -3710,11 +3745,6 @@ pub fn task_end(
             .await
             .map_err(|error| task_error(format!("failed to read Task: {error}")))?
         else {
-            if !end.accept_unknown_process.is_empty() {
-                return Err(task_error(
-                    "historical Process acceptance requires a placed Task",
-                ));
-            }
             super::pm::complete_planning_task(repo, issue, note.unwrap_or("Completed")).await?;
             return Ok(None);
         };
@@ -3724,7 +3754,7 @@ pub fn task_end(
 }
 
 /// Put the Task at `end` of its Workflow by `how`. Reaching `end` is
-/// completion: refused while delivery or execution is unsettled, it writes
+/// completion: refused while delivery is unsettled, it writes
 /// Linear and retires the checkout, unless the edge taken ran nothing.
 /// Returns false when `how` no longer applied to where the Task stood.
 async fn reach_end(
@@ -3764,25 +3794,10 @@ async fn reach_end(
             "Task worktree has uncommitted changes; publish or explicitly abandon them first",
         ));
     }
-    // Task history also carries placement initialization. Do not let a new
-    // acceptance event hide that unfinished placement from the gate.
-    if !options.accept_unknown_process.is_empty() {
-        if let Some(blocker) = task_worktree_blocker(store, task).await? {
-            return Err(task_error(blocker.reason));
-        }
-    }
-    lifecycle::accept_historical_uncertainty(
-        store,
-        task,
-        &options.accept_unknown_process,
-        note.unwrap_or("Task reached end"),
-    )?;
     // The completion gate requires every active PR to be settled. Do not
     // bypass that fact or infer merge from a green head.
     let gate = task_completion_gate(store, task).await?;
     if let Some(refusal) = gate.refusal(&task.plan.identifier) {
-        // Explicit historical acceptance survives retry. A refusal leaves
-        // delivery state unchanged, including any discardable successor.
         return Err(task_error(refusal));
     }
     reconcile_pm_writeback(store, task, None).await?;
@@ -3974,7 +3989,7 @@ pub(crate) struct CompletionGate {
     /// passes it as the completion transaction's `skipped_pr`, which retires the
     /// row and writes the terminal status together. Discarding it any earlier
     /// would leave a non-terminal Task with no active PR — the state
-    /// [`ensure_working_pr_with_options`] rotates another empty PR from.
+    /// [`rotate_task_pr`] rotates another empty PR from.
     pub discardable_successor: Option<TaskPr>,
 }
 
@@ -4005,16 +4020,6 @@ pub(crate) async fn task_completion_gate(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<CompletionGate> {
-    let open = store.sqlite.open_processes().map_err(task_error)?;
-    task_completion_gate_among(store, task, &open).await
-}
-
-/// The gate for one Task of many, against unfinished Processes read once.
-pub(crate) async fn task_completion_gate_among(
-    store: &SharedStore,
-    task: &Task,
-    open: &OpenProcesses,
-) -> OpsResult<CompletionGate> {
     let mut gate = CompletionGate {
         satisfied: true,
         blockers: Vec::new(),
@@ -4030,8 +4035,10 @@ pub(crate) async fn task_completion_gate_among(
         return Ok(gate);
     }
 
-    gate.blockers
-        .extend(lifecycle::completion_work_blockers(store, task, open)?);
+    if let Some(work) = store.sqlite.task_follow_up(&task.id).map_err(task_error)? {
+        gate.blockers
+            .push(work.summary(time::OffsetDateTime::now_utc().unix_timestamp()));
+    }
 
     // Work committed past the tip GitHub merged is owned by no PR; completing
     // would strand it outside the Task. Only the newest PR can still hold it: a
@@ -4042,7 +4049,7 @@ pub(crate) async fn task_completion_gate_among(
         .await
         .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
     if let Some(newest) = prs.last() {
-        if newest.phase() == PrPhase::Merged && newest.after_merge() == AfterMerge::CompleteTask {
+        if newest.phase() == PrPhase::Merged {
             let number = newest
                 .github()
                 .map(|github| github.number)
@@ -4112,9 +4119,81 @@ async fn merged_completing_pr(store: &SharedStore, task: &Task) -> OpsResult<Opt
         .task_prs(&task.id)
         .await
         .map_err(|error| task_error(format!("failed to read Task PRs: {error}")))?;
+    let resolved = store
+        .sqlite
+        .task_follow_up_resolved(&task.id)
+        .map_err(task_error)?;
     Ok(prs
         .into_iter()
-        .find(|pr| pr.phase() == PrPhase::Merged && pr.after_merge() == AfterMerge::CompleteTask))
+        .rev()
+        .find(|pr| pr.phase() == PrPhase::Merged)
+        .filter(|pr| {
+            pr.after_merge() == AfterMerge::CompleteTask || (pr.next_slug().is_none() && resolved)
+        }))
+}
+
+/// Reconcile retained delivery on the repository's existing periodic check.
+/// Historical keep-open decisions need a scope decision; elapsed age is no evidence.
+pub(crate) async fn reconcile_delivered_task(
+    store: &SharedStore,
+    task: &mut Task,
+) -> OpsResult<()> {
+    match task_work_status(store, task).await? {
+        WorkStatus::Abandoned => return Ok(()),
+        WorkStatus::Done => return reconcile_task_completion(store, task).await,
+        WorkStatus::Ready => {}
+    }
+    let prs = store.task_prs(&task.id).await.map_err(task_error)?;
+    if !prs.iter().any(|pr| {
+        matches!(
+            pr.phase(),
+            PrPhase::Open | PrPhase::Publishing | PrPhase::Merged
+        )
+    }) {
+        return Ok(());
+    }
+    reconcile_task_pr_observation(store, task, crate::ops::pr::PrReadFreshness::Fresh).await?;
+    if let Observation::Degraded { reason, .. } = &task.observation {
+        return Err(task_error(reason));
+    }
+    let prs = store.task_prs(&task.id).await.map_err(task_error)?;
+    let Some(latest) = prs.iter().rev().find(|pr| pr.phase() == PrPhase::Merged) else {
+        return Ok(());
+    };
+    if task_work_status(store, task).await? == WorkStatus::Done {
+        return reconcile_task_completion(store, task).await;
+    }
+    if let Some(work) = store.sqlite.task_follow_up(&task.id).map_err(task_error)? {
+        if time::OffsetDateTime::now_utc().unix_timestamp() >= work.check_at {
+            return Err(task_error(
+                work.summary(time::OffsetDateTime::now_utc().unix_timestamp()),
+            ));
+        }
+        return Ok(());
+    }
+    if latest.after_merge() == AfterMerge::ContinueTask
+        && (latest.next_slug().is_some()
+            || !store
+                .sqlite
+                .task_follow_up_resolved(&task.id)
+                .map_err(task_error)?)
+    {
+        return Err(task_error(match latest.next_slug() {
+            Some(next) => format!("PR merged; remaining PR work: {next}; run `lf pr next {next}`"),
+            None => "Earlier delivery kept this Task open without a recorded remaining outcome; inspect its accepted scope, then record `lf task follow-up` or move it to `end`".into(),
+        }));
+    }
+    reconcile_task_completion(store, task).await?;
+    if task_work_status(store, task).await? != WorkStatus::Done {
+        let gate = task_completion_gate(store, task).await?;
+        if let Some(pr) = &gate.discardable_successor {
+            return Err(task_error(format!("Unpublished PR {} has no commits yet; inspect whether that remaining work is still needed, then continue it or explicitly land/end the Task", pr.sequence)));
+        }
+        if let Some(reason) = gate.refusal(&task.plan.identifier) {
+            return Err(task_error(reason));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) async fn reconcile_task_completion(
@@ -4139,14 +4218,15 @@ pub(crate) async fn reconcile_task_completion(
         return Ok(());
     };
     let gate = task_completion_gate(store, task).await?;
-    // Automatic completion leaves legacy empty successors for explicit
-    // `lf task move ISSUE end`; current CompleteTask merges do not rotate.
+    // A separately started successor is an explicit scope decision, even
+    // before its first commit. Only an explicit end/land discards an empty PR.
     if !gate.satisfied || gate.discardable_successor.is_some() {
         return Ok(());
     }
-    // Linear completing the Task first is a conflict a person settles.
-    if planning_conflict(store, task).await?.is_some() {
-        return Ok(());
+    if !is_clean(&task.worktree)? {
+        return Err(task_error(
+            "Task has uncommitted follow-up work; retained it for delivery or explicit abandonment",
+        ));
     }
     let url = pr.github().map(|github| github.url.as_str());
     reconcile_pm_writeback(store, task, url).await?;
@@ -4156,9 +4236,9 @@ pub(crate) async fn reconcile_task_completion(
     store
         .complete_task(
             task,
-            None,
+            gate.discardable_successor.as_ref(),
             EndMove::Set,
-            Some("its completing pull request merged"),
+            Some("its pull request merged"),
         )
         .await
         .map_err(task_error)?;
@@ -4970,7 +5050,7 @@ mod tests {
     }
 
     #[test]
-    fn accepted_historical_uncertainty_completes_without_releasing_execution_protection() {
+    fn task_decision_preserves_unknown_history_and_live_process_protection() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let repo = loopflow_test_support::TestRepo::new();
@@ -5004,101 +5084,49 @@ mod tests {
             error: None,
         };
         fixture.store.sqlite.record_process(&process).unwrap();
-        let gate = || {
-            runtime
-                .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
-                .unwrap()
-        };
-        let accept = |ids: &[crate::id::ProcessLfid]| {
-            super::lifecycle::accept_historical_uncertainty(
-                &fixture.store,
-                &fixture.task,
-                ids,
-                "Jack Heart accepted this historical uncertainty",
-            )
-        };
-        assert!(!gate().satisfied);
-        assert!(accept(&[crate::id::ProcessLfid::new()]).is_err());
-        accept(std::slice::from_ref(&process.lfid)).unwrap();
-        // A released decision remains effective without rewriting its history.
-        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
-        conn.execute(
-            "UPDATE task_events SET kind_json=json_remove(json_set(kind_json, '$.exec_ids',
-             json_extract(kind_json, '$.process_lfids')), '$.process_lfids')
-             WHERE task_id=?1 AND json_extract(kind_json, '$.kind')='historical_uncertainty_accepted'",
-            [fixture.task.id.as_str()],
-        ).unwrap();
-        accept(std::slice::from_ref(&process.lfid)).unwrap();
-        let events = fixture
-            .store
-            .sqlite
-            .task_events_after(&fixture.task.id, 0)
-            .unwrap();
-        assert_eq!(
-            events
-                .iter()
-                .filter(|event| matches!(
-                    event.kind,
-                    TaskEventKind::HistoricalUncertaintyAccepted { .. }
-                ))
-                .count(),
-            1
-        );
-        assert!(gate()
-            .blockers
-            .iter()
-            .all(|reason| !reason.contains(process.lfid.as_str())));
-        // The PR was never published and its branch never moved: reaching
-        // `end` retires it.
-        assert_eq!(
-            gate().discardable_successor.map(|pr| pr.id),
-            Some(pr.id.clone())
-        );
-        pr.abandoned_at = Some(time::OffsetDateTime::now_utc());
-        runtime
-            .block_on(fixture.store.settle_task_pr(&pr, None))
-            .unwrap();
-        assert!(gate().satisfied);
-
-        // An exact acceptance never hides a different unfinished Process.
-        let mut other = process.clone();
-        other.lfid = crate::id::ProcessLfid::new();
-        fixture.store.sqlite.record_process(&other).unwrap();
-        assert!(gate()
-            .blockers
-            .iter()
-            .any(|reason| reason.contains(other.lfid.as_str())));
-        other.completed_at = Some(other.started_at + 1);
-        other.outcome = Some("succeeded".into());
-        other.exit_code = Some(0);
-        fixture.store.sqlite.record_process(&other).unwrap();
-
-        // Current Session ownership blocks even after acceptance was recorded.
         let session = fixture.store.sqlite.test_session(
-            "accept-current-session",
+            "reserved-session",
             &crate::session_record::new_artifact_key(),
         );
+        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        conn.execute("UPDATE agent_sessions SET cwd=?1,task_id=?2,wave_id=?3,input_published=0,interactive=0 WHERE id=?4",
+            rusqlite::params![repo.path().to_str().unwrap(), fixture.task.id.as_str(), fixture.task.wave_id.as_str(), session.id]).unwrap();
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,'captured',?2,1,'{}')",
+            rusqlite::params![session.id, crate::session_record::new_artifact_key()]).unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET current_capture=?1 WHERE id=?2",
+            rusqlite::params![conn.last_insert_rowid(), session.id],
+        )
+        .unwrap();
         fixture
             .store
             .sqlite
-            .claim_session_driver(&session.id, None, &process.lfid, true)
+            .record_session_event(
+                &session.id,
+                "thread",
+                "turn",
+                crate::session::SessionEventKind::Started,
+                &serde_json::json!({}),
+            )
             .unwrap();
-        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
-        conn.execute(
-            "UPDATE agent_sessions SET cwd=?1,interactive=1 WHERE id=?2",
-            rusqlite::params![repo.path().to_str().unwrap(), session.id],
-        )
-        .unwrap();
-        assert!(accept(std::slice::from_ref(&process.lfid)).is_err());
-        assert!(!gate().satisfied);
-        conn.execute(
-            "UPDATE agent_sessions SET completed_at=2 WHERE id=?1",
-            [&session.id],
-        )
-        .unwrap();
-        assert!(gate().satisfied);
+        let before = fixture.store.sqlite.session(&session.id).unwrap();
+        let blockers =
+            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task).unwrap();
+        assert!(blockers
+            .iter()
+            .any(|reason| reason.contains("reserved input")));
+        assert!(blockers
+            .iter()
+            .any(|reason| reason.contains("unresolved provider turn")));
+        assert!(blockers
+            .iter()
+            .any(|reason| reason.contains(process.lfid.as_str())));
+        let gate = runtime
+            .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
+            .unwrap();
+        assert!(gate.satisfied, "{:?}", gate.blockers);
 
-        // A later receipt keeps an observed live process protected.
+        // Exact live identity does not change the decision or confer stop authority.
         let root = ledger.home().join(crate::journal::PROCESS_RECEIPT_ROOT);
         std::fs::create_dir_all(&root).unwrap();
         let pid = std::process::id();
@@ -5109,35 +5137,32 @@ mod tests {
             pid,
             started_at: crate::journal::process_started_at(pid).unwrap().unwrap(),
         };
-        let path = root.join(format!("{}.json", process.lfid));
-        std::fs::write(&path, serde_json::to_vec(&receipt).unwrap()).unwrap();
-        assert!(accept(std::slice::from_ref(&process.lfid)).is_err());
-        assert!(!gate().satisfied);
-        std::fs::remove_file(path).unwrap();
-        assert!(gate().satisfied);
+        let receipt_path = root.join(format!("{}.json", process.lfid));
+        let receipt_bytes = serde_json::to_vec(&receipt).unwrap();
+        std::fs::write(&receipt_path, &receipt_bytes).unwrap();
         assert!(
-            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task)
+            runtime
+                .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
                 .unwrap()
-                .iter()
-                .any(|reason| reason.contains(process.lfid.as_str()))
+                .satisfied
         );
-        assert!(crate::ops::task_automation::admission_blocker(
-            &fixture.store.sqlite,
-            &fixture.task.id,
-            None
-        )
-        .unwrap()
-        .is_some());
-        runtime
-            .block_on(
-                fixture
-                    .store
-                    .complete_task(&fixture.task, None, EndMove::Set, None),
-            )
-            .unwrap();
-        runtime
-            .block_on(super::cleanup_completed_task(&fixture.store, &fixture.task))
-            .unwrap();
+        for attempt in 0..2 {
+            runtime
+                .block_on(fixture.store.complete_task(
+                    &fixture.task,
+                    if attempt == 0 {
+                        gate.discardable_successor.as_ref()
+                    } else {
+                        None
+                    },
+                    EndMove::Set,
+                    None,
+                ))
+                .unwrap();
+            runtime
+                .block_on(super::cleanup_completed_task(&fixture.store, &fixture.task))
+                .unwrap();
+        }
         assert!(repo.path().exists());
         assert_eq!(
             runtime
@@ -5148,6 +5173,19 @@ mod tests {
         assert_eq!(
             fixture.store.sqlite.process(&process.lfid).unwrap(),
             Some(process)
+        );
+        assert_eq!(fixture.store.sqlite.session(&session.id).unwrap(), before);
+        assert!(fixture
+            .store
+            .sqlite
+            .session_has_pending_turn(&session.id)
+            .unwrap());
+        assert_eq!(std::fs::read(receipt_path).unwrap(), receipt_bytes);
+        assert!(
+            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task)
+                .unwrap()
+                .iter()
+                .any(|reason| reason.contains("live or unresolved"))
         );
     }
 
@@ -5447,7 +5485,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dead_flow_is_history_while_a_live_driver_holds_completion() {
+    fn a_dead_flow_is_history_while_a_live_driver_retains_the_checkout() {
         let _ledger = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let fixture = runtime.block_on(task_fixture("WORK-1"));
@@ -6052,6 +6090,47 @@ mod tests {
 
         pr.merge_commit = Some(landed_head);
         store.settle_task_pr(&pr, None).await.unwrap();
+        let follow_up = crate::work::task::TaskFollowUp {
+            outcome: "Installed latency meets budget".into(),
+            evidence: "20 samples below 1s p95".into(),
+            check_at: now.unix_timestamp() - 1,
+        };
+        store
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::FollowUp {
+                    remaining: Some(follow_up.clone()),
+                    reason: "Accepted production check".into(),
+                },
+            )
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            apply_merged_task_landing(&store, &mut task, &pr, &landing)
+                .await
+                .unwrap();
+            assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
+            let gate = super::task_completion_gate(&store, &task).await.unwrap();
+            assert!(gate.reason().contains("overdue"));
+            assert_eq!(
+                store.sqlite.task_follow_up(&task.id).unwrap(),
+                Some(follow_up.clone())
+            );
+        }
+        store
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::FollowUp {
+                    remaining: None,
+                    reason: "Installed measurements meet the budget".into(),
+                },
+            )
+            .await
+            .unwrap();
+        apply_merged_task_landing(&store, &mut task, &pr, &landing)
+            .await
+            .unwrap();
+        assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
         apply_merged_task_landing(&store, &mut task, &pr, &landing)
             .await
             .unwrap();

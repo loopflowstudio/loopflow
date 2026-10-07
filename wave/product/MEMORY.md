@@ -105,6 +105,13 @@ flow -b) apis."
   at `end`; the abandoned mark stays.
 - "run is one conceptual attempt, exec is one lf invocation." `lf task run`
   moves the Workflow and `lf run` does not: "worth it to keep lf run simple."
+- LOO-386 steers, October 6: "run for workflow api and exec for flow datamodel."
+  One Task run may start several Flow execs; a headless conversation also spans
+  Execs. Edges stay named by their Flow/skill, unique from one node; decision
+  labels are not being introduced. Jack: "Flow is too deeply engrained to
+  explore really changing it right now." Pipeline, Step flow and Compute flow
+  remain suggestions. The October 7 LOO-386 draft proposes retaining Flow and
+  separating definition catalogs; no rename is approved or implemented here.
 - Dropping per-node steer acknowledgement was "potentially bad": it had
   stopped runaway token counts. Restored as `--steers-after`.
 - The first Task sheet was "kinda yucky." Wanted and built: the Workflow graph
@@ -136,8 +143,9 @@ flow -b) apis."
   checkout; an empty unpublished PR is retired at `end` (reverses part of
   W2-151). Risk: if Linear completes an issue when its PR merges before `lf`
   settles the landing, the Task stays active and flagged until forced.
-- `feature` ends at a published PR with no design-review pause; `ship` lands
-  after the demo; `code` equals `pursue`. Main's `lf flow end` (#1435) is
+- The earlier `feature` without a design-review pause is superseded: inspected
+  at `6448e3c9e` on October 7, its nodes are `design` and `demo`, with `ship`
+  reaching `end`. `code` equals `pursue`. Main's `lf flow end` (#1435) is
   dropped. `lf commit -p` pushes; plain commit stays local.
 - Waiting is one reading per Session, saved at most every 5 s: an unanswered
   question, or no open tool call and a hand-back or 120 s of quiet. Codex
@@ -186,39 +194,24 @@ Eleven `ops::chapter` tests fail only in `cargo test --lib`.
 
 ## Session and operate pairs (2026-10-05)
 
-Jack Heart's decisions on [LOO-383](https://linear.app/loopflow/issue/LOO-383):
-the Wave conversation is operations, and “reliably finishing stuff ive started
-and isnt blocked on me” is the goal.
+Jack Heart, [LOO-383](https://linear.app/loopflow/issue/LOO-383): the Wave
+conversation operates; keep started Tasks moving, leave unstarted backlog alone,
+and inline the operate procedure in each session skill. `task/session` stays
+plain; its primary wrapper remembers the ID (LOO-364). Jack approved the demo
+and requested PR-linked reports grouped as waiting on him, moving and stuck.
+Leaving unarmed merges to Jack is unreviewed.
 
-- Operators keep every started Task moving and leave unstarted backlog alone
-  “for now at least.” A defined Flow with steps left proceeds without asking.
-  A Task whose Flow ended before landing waits on Jack; how a Task changes its
-  Flow is wanted and undesigned.
-- Each session carries its operate procedure inline (“just make it work
-  reliably”). The branch composes session file plus operate body at build time.
-- `task/session` is a plain skill; a primary Task Session is “just a smaller
-  wrapper around this that saves that id in a field” (LOO-364).
+PR #1439 supersedes stopped-Flow continuation: a Task run starts fresh execs;
+reconcile never resumes. The agent's unreviewed policy waits on Jack at nodes
+and reruns failed edges for three attempts. Historical decisions and the dated
+disabled-cron observation: `6448e3c9e:wave/product/MEMORY.md`, this heading.
 
-Lessons: the observed failure copied `next_move.owner: wave` into the reply, so
-the operator reported its own queue as a handoff. A status label naming the
-reader's own scope must say so in the prompt. Nothing re-invokes a
-conversation. On Jack's Home that day the minute check was disabled and
-Product's declared `wave/operate` cron was not installed. Before continuing
-work, check every Flow and unfinished Exec against `lf ps --json`, or a
-second driver starts.
-
-Jack approved the branch in demo review and asked for the operator report
-grouped as waiting on him, moving and stuck, with PR links. Leaving an unarmed
-merge to the person is the branch's choice; Jack did not answer.
-
-PR #1439 changed the contract: `lf task run` always starts a fresh Flow,
-nothing continues a stopped one and reconcile never resumes. The agent's
-unreviewed replacement: a Task at a node waits on Jack; a failed edge is
-rerun, three more attempts.
-
-Limits: the [review](../../docs/reviews/session-operate-prompts.md) holds
-simulated walk-throughs and two read-only model runs. Installed behavior is
-unshown; an open conversation keeps its old text until `lf session replace`.
+An operator once reported `next_move.owner: wave` as someone else's handoff:
+name the reader's own responsibility explicitly. Nothing re-invokes a
+conversation. Inspect every Flow/unfinished Exec against `lf ps --json` before
+launching again. The [review](../../docs/reviews/session-operate-prompts.md) has
+simulations and two read-only model runs, not installed proof. Open conversations
+keep old instructions until `lf session replace`.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 
@@ -896,12 +889,12 @@ lfd and resident-cron contracts remain in
 
 ## Shared planning and runtime vocabulary
 
-Wave → Task is the public planning model. Chapter/Project identity remains internal
-and historical. Shared status, roadmap, cached plan and Rust/Swift fixtures must
-change together; hiding a Project array only in Swift retains the obsolete contract.
-Run records launch provenance and can be prepared before a provider starts; Session
-names human continuity/boundary; Exec supplies process ownership evidence. None can
-substitute for another merely because identifiers coincide.
+Wave → Task is public planning; Chapter/Project identity stays internal and
+historical. Shared status, roadmap, cached plan and Rust/Swift fixtures change
+together. AgentSession owns interactive Session/headless Run continuity and
+history; Exec owns an lf invocation; FlowExec records one Flow driver's graph
+and steps. A Task run may start several Flow execs. No separate Run owner is
+restored because identifiers happen to coincide.
 
 ## Swift data path — RegistryQuery is the single reader
 

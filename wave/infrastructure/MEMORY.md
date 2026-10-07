@@ -27,13 +27,13 @@ Release's operation-entry lesson also applies to command removal: reject the ret
 option beneath a valid current owner; an unknown owner can produce a false pass.
 Corrected installation fixtures still require disposable OS-account isolation.
 
-Jack Heart's PR #1489 review adds private OpenSSH sharing, an interactive
-first-install offer (default yes), and distinct connection failures with recovery
-commands. Existing lf is never replaced; status, batch and JSON never install.
-This supersedes the installation exclusion. Personal SSH masters stay separate. Account-forwarding routes must be cancelled on command
-exit because shared masters outlive commands. Fixtures and loopback SSH prove
-local behavior and reuse only; installation, account continuity and migration
-remain unproved. Republish for review.
+Jack Heart's PR #1489 review permits private OpenSSH sharing, an interactive
+first-install offer (default yes), and distinct failures with recovery commands,
+superseding installation exclusion. Existing lf is never replaced; status, batch
+and JSON never install. Personal masters stay separate; explicit agent forwarding
+gets its own socket scope. Cancel account routes on return: shared masters outlive
+commands. Fixtures and loopback SSH prove behavior and reuse, not real broker
+cleanup, installation, account continuity or migration. Republication and review remain.
 
 ## Task decisions and delivered work (LOO-408, 2026-10-07)
 

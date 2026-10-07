@@ -61,13 +61,17 @@ moves the captured graph to start without reloading, execution or history loss.
 Definition navigation carries kind and name. Task projections separate Workflow
 selection, latest FlowProcessDetail, execution evidence and TaskRunControl.
 Completed execution retains its graph; latest grants no primary authority.
-LOO-400 owns Process/LFID and the migration. Historical captures stay readable.
+LOO-400's landed `e467ea995` supplies Process/LFID and the migration. Historical
+captures stay readable.
 
 Implementation choices: definition list/customize under `project workflow`,
 Project addressing by IDs or unique name/slug, and Flow inspection `--processes`.
-Catalog read failure must not look like a builtin-only inventory. Headless
-fixtures cover the local cut; configured provider, live planning and Jack's
-finished-demo judgment remain unshown. No chapter KR is claimed.
+Catalog read failure must not look like a builtin-only inventory; inspecting one
+definition need not enumerate the catalog. Diagrams consume FlowProcessDetail
+directly: a copied progress model duplicated identity and graph. Process success
+is `succeeded`, not `ok`; the latter drew a successful step as failed after a
+stopped driver. Headless fixtures cover the local cut; configured provider, live
+planning and Jack's finished-demo judgment remain unshown. No chapter KR is claimed.
 
 ## Task conversation and Workflows (LOO-353, PR #1439; 2026-10-04 to 10-06)
 
@@ -577,8 +581,8 @@ animates. Research sources and Jack's decisions are preserved in
 Jack separated follow-ups LOO-298/299/300 (detail at `9771ff7d7`) so LOO-291 can deliver S1–S5, the recorder,
 signposts and assign-on-change fixes. The accepted Run/Session tables and universal
 bind are future implementation, documented in [Infrastructure memory](../infrastructure/MEMORY.md#data-model-and-performance-decisions-2026-09-26).
-Chapter history becoming navigable is part of that approved model; the current
-Wave → Task UI is a scope limit, not a prohibition on a Chapter object.
+Chapter history remains part of that direction; the current contract uses past
+Linear Projects, with no Chapter table. Navigation stays Wave → Task.
 The [scope handoff](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/deferred-work.md)
 records the split. Local proof does not establish merger or Jack's acceptance.
 

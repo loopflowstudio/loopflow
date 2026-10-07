@@ -146,14 +146,18 @@ Proposal: Linear, GitHub and Git are already the official live copy. Derive.
 
 - A missing `--task` selector falls into LOO-334's adoption path instead of
   failing.
-- Fetch the branch before planning placement.
+- Fetch whenever a decision depends on what the remote has, starting with
+  branch placement.
 - Mint Task ids deterministically from the Linear issue id for new Tasks.
 - `lf ssh` sends the issue identifier and the Task's portable fields with the
   request, so the first run on a cold machine needs no Linear round trip.
 
 The second machine works on the same remote branch (decided above). Placing a
 Task fetches its branch and checks it out, so a skill run there sees the code
-already written. Today placement tests `origin/<branch>` without fetching, and
+already written. Jack Heart, 2026-10-07: "fetch anytime it's necessary." Any
+step that depends on what the remote has (placing a Task, choosing a base,
+deciding whether a branch exists) fetches first instead of trusting a stale
+local view. Today placement tests `origin/<branch>` without fetching, and
 a pushed branch with no PR is recreated from main; that is the defect to
 remove. Work that exists only on the first machine, unpushed, is not there:
 say which branch or commit is missing and that it needs a push, and never

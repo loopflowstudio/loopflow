@@ -27,21 +27,23 @@ Release's operation-entry lesson also applies to command removal: reject the ret
 option beneath a valid current owner; an unknown owner can produce a false pass.
 Corrected installation fixtures still require disposable OS-account isolation.
 
-Jack Heart's PR #1489 review permits private OpenSSH sharing, an interactive
-first-install offer (default yes), and distinct failures with recovery commands,
-superseding installation exclusion. Existing lf is never replaced; status, batch
-and JSON never install. Personal masters stay separate; explicit agent forwarding
-gets its own socket scope. Cancel account routes on return: shared masters outlive
-commands. Fixtures and loopback SSH prove behavior and reuse, not real broker
-cleanup, installation, account continuity or migration. Republication and review remain.
+Jack Heart's PR #1489 review permits private OpenSSH sharing, a default-yes
+first-install offer and recovery hints. Existing lf is never replaced; status,
+batch and JSON never install. Personal masters stay separate; agent forwarding
+has its own socket scope. Jack selected global `--machine <label>`, removing
+`lf ssh` without an alias; LOO-411 owns this pending cutover. Loopback proofs
+establish reuse, not installation or account continuity. Shared masters outlive
+commands: retained account routes need cancellation; LOO-413 deletes that broker.
 
 ## Resident machine logins (LOO-413, 2026-10-07)
 
-Jack Heart authorized publication for review, forbidding real credential experiments.
-Transfer only over stdin to added machines. Preserve received logins across
-registration failure; remote preferences cannot relax selected identity. Retain
-the encryption key in a private file; locked Keychain never proves absence.
-Independent refresh chains, rebooted Mac access and installed acceptance remain unproved.
+Jack Heart authorized publication for review, forbidding real credential experiments
+and landing. Transfer over stdin only to added machines. Preserve received logins
+across registration failure; remote preferences cannot relax selected identity.
+Retain the encryption key atomically in a private file. An unreadable Keychain
+permits a new key only without existing encrypted tokens.
+Independent refresh chains, one-approval login, rebooted Mac
+access and installed acceptance remain unproved; fixtures cannot establish them.
 
 ## Task decisions and delivered work (LOO-408, 2026-10-07)
 
@@ -803,11 +805,9 @@ captures and manually transferred Tasks; import neither old turns nor driver aut
   Chapter creation requires KRs, and backlog survives until explicit disposition.
   No Chapter table, second deployed client or distributed transaction is implied.
 
-The integrated gate, implementation lessons and compression receipts remain at
-`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`
-under this heading. The original full gate had seven failures; focused repairs
-passed, but did not establish a full final-tree pass, configured acceptance or
-installed conversion. The production diff was +6,202 lines, not a reduction.
+LOO-298's gate and +6,202-line diff:
+`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`.
+Full gate, configured acceptance and installed conversion remained unproved.
 Preserve ID ordering through Session projection, use dedicated PR stacking writes,
 and resolve automatic checkpoints through the same Work binding as execution.
 Provider stubs must contain conflict-agent launches: one bad fixture launched

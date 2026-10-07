@@ -25,8 +25,11 @@ file-backed login. Linear mints a new OAuth grant in memory and installs the tok
 and refresh grant in the target SQLite store after comparing provider user IDs.
 Neither provider account directories nor browser profiles are copied wholesale.
 
-`lf --machine mini --account codex=person@ implement` connects that account when missing
-and restricts the remote invocation to the same login. Remote launches use isolated
+Jack Heart selected `lf --machine mini --account codex=person@ implement` on
+October 7 (`e332b3bb-603b-4dc4-bee4-1e5b704d5721`). This checkout still dispatches
+through `MachineCommand::Ssh`; the accepted selector awaits LOO-411 integration.
+The existing launch path connects that account when missing and restricts the
+remote invocation to the same login. Remote launches use isolated
 account homes so native activation cannot require an unlocked Mac Keychain.
 Unselected read commands do not mint logins. Missing logins require a foreground
 terminal; headless callers get the explicit connect command rather than starting
@@ -61,14 +64,22 @@ provider-owned refresh, historical captures, current machine records and routes.
 
 - Integrate LOO-411's global `--machine` selector before publication, per Jack
   Heart's comment `e332b3bb-603b-4dc4-bee4-1e5b704d5721`. The current base still
-  exposes `lf ssh`; its removal belongs to the parent.
+  exposes `lf ssh`; its removal belongs to the parent. Both locally available
+  parent refs remain `32607f1d24ad` at this reconciliation. Adapt resident account
+  selection to the global dispatch and update surviving `lf ssh` examples and
+  diagnostics together. Prove selected-account restriction, literal prompt flags
+  after `--`, headless missing-login recovery and retired-command rejection through
+  the public selector with isolated fixtures.
 - Publish the stacked PR and stop for Jack Heart's review. No landing.
 - Gate/CI owns the full affected suite. The focused source checks cover account
   routing, native receipt/registration, byte preservation, command discovery and
   token-key handling. No installed store or real credential was used.
-- Hand verification: independent Claude/Codex refresh chains; independent Linear
+- Hand verification, first: a second login for the same account leaves the first
+  signed in. Then independent Claude/Codex refresh chains; independent Linear
   grants refreshed on different days; copied gh token usable on both machines;
-  Mac after reboot with a locked Keychain. Fixtures cannot establish these results.
+  Mac after reboot with a locked Keychain; at most one browser approval per account
+  and no remote terminal. Fixtures cannot establish these results. Real-account
+  verification requires separate authorization under Jack Heart's fixture-only scope.
 
 Review repairs: interrupted file-to-SQLite registration reuses the received login;
 remote flags cannot relax the selected identity; credential-free and previously
@@ -83,4 +94,4 @@ the replay API no longer accepts a Session ID used only by the deleted broker.
 Literal account/home flags after `--` remain prompt text. Provider selection's
 ambiguity and duplicate checks are retained on the surviving local path.
 
-Checks: `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` passed; `uv run python scripts/test_network.py cargo nextest run -p loopflow --lib -E 'test(provider_account::) | test(lf::commands::account::account_first_tests::) | test(lf::commands::machine_credentials::) | test(lf::commands::ssh::)' --no-fail-fast` passed 69 tests (one retained-output-handle leak in `exhausted_venues_name_every_attempt_and_both_repairs`); gate/CI owns broader checks and parent integration needs its focused proof. Real-provider and installed acceptance remain unproved.
+Checks: `git diff --check` passed; `lf context --skill realign` fits all budgets; reused `61bfe5a6e`'s `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings` and `uv run python scripts/test_network.py cargo nextest run -p loopflow --lib -E 'test(provider_account::) | test(lf::commands::account::account_first_tests::) | test(lf::commands::machine_credentials::) | test(lf::commands::ssh::)' --no-fail-fast` (69 passed; retained-output-handle leak in `exhausted_venues_name_every_attempt_and_both_repairs`); gate/CI owns broader checks and selector integration needs its focused proof.

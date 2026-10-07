@@ -12,7 +12,10 @@ exports; short commands stay. Retain `~/.lf-machine/install` and the promotion
 lock path because released gates, receipts and jobs pin them; no relocation is
 proved. Retained binaries use the shared `install` shorthand. Exact-frontier
 fixtures seed released SQL without drafts. Local checks prove neither installed
-migration nor remote continuity. Schedule ownership and activation stay intact.
+migration nor remote continuity. Schedule ownership and activation stay intact. Release's
+operation-entry lesson also applies to command removal: reject the retired
+option beneath a valid current owner; an unknown owner can produce a false pass.
+Corrected installation fixtures still require disposable OS-account isolation.
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 

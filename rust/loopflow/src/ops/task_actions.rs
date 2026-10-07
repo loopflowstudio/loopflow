@@ -50,18 +50,19 @@ pub struct TaskActionEvidence<'a> {
 }
 
 pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
-    if !matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
-        if let Some(remaining) = evidence
-            .completion_refusal
-            .filter(|reason| reason.contains("Remaining work:"))
-        {
-            return action(TaskAction::NoAction, remaining);
-        }
+    if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
+        return action(TaskAction::NoAction, "Task is terminal");
     }
-    if !matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned)
-        && !evidence.abandon_intent
-        && evidence.latest_pr_phase != Some(PrPhase::Merged)
+    if evidence.abandon_intent {
+        return action(TaskAction::NoAction, "Task is being abandoned");
+    }
+    if let Some(remaining) = evidence
+        .completion_refusal
+        .filter(|reason| reason.contains("Remaining work:"))
     {
+        return action(TaskAction::NoAction, remaining);
+    }
+    if evidence.latest_pr_phase != Some(PrPhase::Merged) {
         if let Some(execution) = evidence
             .execution
             .filter(|execution| execution.state != TaskExecutionState::Idle)
@@ -72,13 +73,7 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
             return action(TaskAction::NoAction, refusal);
         }
     }
-    let model = if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
-        action(TaskAction::NoAction, "Task is terminal")
-    } else if evidence.abandon_intent {
-        action(TaskAction::NoAction, "Task is being abandoned")
-    } else {
-        phase_action(evidence)
-    };
+    let model = phase_action(evidence);
     let model = apply_predecessor(model, evidence.predecessor_phase);
     apply_resume_refusal(model, evidence.resume_refusal)
 }
@@ -123,12 +118,10 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
         Some(PrPhase::Abandoned) => {
             action(TaskAction::StartNextPr, "PR abandoned; start the next PR")
         }
-        Some(PrPhase::Working) => body_action(evidence),
-        None if evidence.resume_refusal.is_some() => action(
-            TaskAction::NoAction,
-            evidence.resume_refusal.expect("checked above"),
+        Some(PrPhase::Working) | None => action(
+            TaskAction::Resume,
+            "run the next work with `lf task run`; inspect earlier Flows and independent Sessions first",
         ),
-        None => body_action(evidence),
     }
 }
 
@@ -148,17 +141,6 @@ fn merged_action(evidence: &TaskActionEvidence) -> TaskActionModel {
             TaskAction::NoAction,
             "PR merged; delivery reconciliation completes the Task",
         ),
-    }
-}
-
-fn body_action(evidence: &TaskActionEvidence) -> TaskActionModel {
-    if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
-        action(TaskAction::NoAction, "Task is terminal")
-    } else {
-        action(
-            TaskAction::Resume,
-            "run the next work with `lf task run`; inspect earlier Flows and independent Sessions first",
-        )
     }
 }
 
@@ -235,6 +217,23 @@ mod tests {
             predecessor_phase: None,
             abandon_intent: false,
             launch_refusal: None,
+        }
+    }
+
+    #[test]
+    fn abandoned_parent_never_recommends_resuming_terminal_or_canceling_tasks() {
+        for (status, abandon_intent, reason) in [
+            (WorkStatus::Done, false, "Task is terminal"),
+            (WorkStatus::Abandoned, false, "Task is terminal"),
+            (WorkStatus::Ready, true, "Task is being abandoned"),
+        ] {
+            let mut evidence = evidence(PrPhase::Working, None, None);
+            evidence.status = status;
+            evidence.abandon_intent = abandon_intent;
+            evidence.predecessor_phase = Some(PrPhase::Abandoned);
+            let model = derive_task_actions(&evidence);
+            assert_eq!(model.recommended, Some(TaskAction::NoAction));
+            assert_eq!(model.reason, reason);
         }
     }
 

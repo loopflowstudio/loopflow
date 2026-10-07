@@ -1,7 +1,8 @@
 # Work on another machine
 
-Status: draft for review, 2026-10-07. Nothing here is accepted except the items
-under "Decided by Jack Heart". Everything else is proposal or open choice.
+Status: draft for review, 2026-10-07. The items under "Decided by Jack Heart"
+are accepted. Everything else is proposal: mechanisms, command names, the
+sequence's ordering and the acceptance checks have not been reviewed.
 
 Do not lift code, tests, help text or config from herdr or cmux (Jack Heart,
 2026-10-07). Their behaviour is described here from docs and reading; write
@@ -77,6 +78,9 @@ same panes.
   That is accepted, with one requirement: "it should use the same remote
   branch, so if we run `implement` for example it would see the existing
   implementation."
+- Tasks that already exist on two machines with different ids stay per-machine
+  for now. "Probably going to require some iteration on this, but as long as
+  the high-level approach is working, let's get it tested rather than block."
 - Home becomes "machine", deep: what people read and type, and code and
   schema too. "Deep, but probably can be isolated into its own commit (I don't
   need to review it)."
@@ -281,9 +285,33 @@ silently merged. Phone use is LOO-396.
 
 ## Open choices
 
-1. Tasks that already exist on two machines with different random ids: backfill
-   rule, or leave per-machine?
-2. Shape: one PR, or a keystone (parts 1 and 2) with parts 3 to 6 as follow-ups?
+None from the 2026-10-07 conversation remain. Review may raise more.
+
+## Sequence
+
+Decided by Jack Heart, 2026-10-07: "Fine to break things up into multiple
+PRs." Each one deletes what it replaces. Follow-ups are intent only; each gets
+its own plan when started.
+
+1. Rename Home to machine. No behaviour change. `This slice`.
+2. Machine record: `lf machine add`, `list`, `status`, `rename`, `remove`;
+   ssh aliases; identity fetched at add; repository path. Deletes `lf home
+   observe`, the hard-coded repository path and the `user@host` rule.
+3. A Task on a machine that has never seen it: one resolver, fetch whenever
+   the remote decides, deterministic ids for new Tasks. Deletes the local-only
+   `--task` path and random id minting for new Tasks.
+4. Credentials on the machine: mint a fresh login on the laptop and forward it;
+   connect a missing account at launch; file-backed storage on a Mac target.
+   Deletes the raw-token fallback and, once resident credentials exist, the
+   detached-form string check.
+5. Headless work that outlives the connection: detached launch from `lf ssh`,
+   the launch request id, an explicit stop, and watching recorded output.
+   First end-to-end test on Jack's mini: start, close the laptop, come back.
+6. The transparent relay and `session attach` over ssh. Deletes the tmux
+   launcher with its hidden command, the setsid launcher's separate path if the
+   relay subsumes it, and the unreachable remote branch of `human_open_argv`.
+7. Mac app: saved pane arrangement, panes attach to their Session's relay.
+8. Waiting counts per machine in `lf machine status`.
 
 ## Delete — do not maintain
 

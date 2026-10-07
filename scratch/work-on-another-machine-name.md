@@ -66,6 +66,12 @@ same panes.
   account to the machine: "if we know about account A on this machine, then we
   should start the process for adding A to the remote machine if it's not
   there." It never silently runs as a different account.
+- Execution state does not cross machines. A Task's Workflow position,
+  conversations and history stay on the machine where it runs. Running the
+  same Task on a second machine starts its Workflow from the beginning there.
+  That is accepted, with one requirement: "it should use the same remote
+  branch, so if we run `implement` for example it would see the existing
+  implementation."
 - Home becomes "machine", deep: what people read and type, and code and
   schema too. "Deep, but probably can be isolated into its own commit (I don't
   need to review it)."
@@ -145,10 +151,17 @@ Proposal: Linear, GitHub and Git are already the official live copy. Derive.
 - `lf ssh` sends the issue identifier and the Task's portable fields with the
   request, so the first run on a cold machine needs no Linear round trip.
 
-What derivation cannot carry: a custom workspace slug, agent preference, an
-unpublished stack parent, and Workflow position. If any must follow the person,
-keep that residue in a Git ref per Task (`refs/loopflow/tasks/<issue-id>`,
-compare-and-swap by lease push, one fetch for catch-up, no merge needed).
+The second machine works on the same remote branch (decided above). Placing a
+Task fetches its branch and checks it out, so a skill run there sees the code
+already written. Today placement tests `origin/<branch>` without fetching, and
+a pushed branch with no PR is recreated from main; that is the defect to
+remove. Work that exists only on the first machine, unpushed, is not there:
+say which branch or commit is missing and that it needs a push, and never
+commit, push or reset on the person's behalf.
+
+No residue store. A custom workspace slug, agent preference, an unpublished
+stack parent and Workflow position stay on the machine that has them. The Git
+ref namespace considered earlier is not needed.
 
 Set aside pending Jack's decision: Linear attachments as the store (LOO-393's
 draft). No compare-and-swap, one query per Task for catch-up, visible clutter
@@ -237,21 +250,13 @@ silently merged. Phone use is LOO-396.
 
 ## Open choices
 
-1. Must Workflow position follow the person between machines? Jack Heart,
-   2026-10-07: "I am not sure I want execution state to go across machines."
-   If it stays put, no residue store is needed: a Task's Workflow position,
-   Sessions and history live on the machine where it runs, other machines see
-   what Linear and GitHub show (started, PR open, done), and you reach the Task
-   through `lf ssh <machine>`. The cost is that running the same Task on a
-   second machine starts its Workflow from the beginning there. Moving a
-   started Task between machines would be a separate, explicit act.
-2. Claude on a machine: `setup-token` is inference-only (may fail loopflow's
+1. Claude on a machine: `setup-token` is inference-only (may fail loopflow's
    identity check and usage polling, has no file form, interactive use
    unverified) versus a normal login with a pasted code (own refresh chain, full
    scope).
-3. Tasks that already exist on two machines with different random ids: backfill
+2. Tasks that already exist on two machines with different random ids: backfill
    rule, or leave per-machine?
-4. Shape: one PR, or a keystone (parts 1 and 2) with parts 3 to 6 as follow-ups?
+3. Shape: one PR, or a keystone (parts 1 and 2) with parts 3 to 6 as follow-ups?
 
 ## Delete — do not maintain
 

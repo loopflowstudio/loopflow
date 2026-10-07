@@ -76,7 +76,19 @@ pub(super) fn flows_of_task(
 ) -> StoreResult<Vec<crate::ops::flow_run::FlowExec>> {
     super::flow_inventory::flows_in(
         conn,
-        &format!("e.id IN ({})", exec_ids("?1")),
+        // Test each actual Flow driver, rather than collecting every associated
+        // Exec (including ordinary commands) before reading the Flow inventory.
+        &format!(
+            "EXISTS(SELECT 1 FROM ({}) tw WHERE {})
+             OR EXISTS(SELECT 1 FROM session_events se INDEXED BY session_exec_membership
+                 WHERE se.exec_id=e.id AND se.session_id IN ({}))
+             OR EXISTS(SELECT 1 FROM agent_sessions a
+                 WHERE a.driver_exec_id=e.id AND a.id IN ({}))",
+            tasks("?1"),
+            checkout("e.cwd"),
+            session_ids("?1"),
+            session_ids("?1"),
+        ),
         &[&task.as_str()],
     )
 }
@@ -740,6 +752,70 @@ mod tests {
         assert!(
             steps < 30_000,
             "Pending-turn check rescanned history: {steps} VM steps"
+        );
+    }
+
+    #[test]
+    fn task_flows_include_captured_and_current_session_drivers_elsewhere() {
+        use std::sync::atomic::{AtomicI32, Ordering};
+        static SCANNED: AtomicI32 = AtomicI32::new(0);
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        let captured = store.test_flow("captured", "/elsewhere", &[("implement", None)], None);
+        let current = store.test_flow("current", "/elsewhere", &[("implement", None)], None);
+        store.test_flow("unrelated", "/elsewhere", &[("implement", None)], None);
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1','/repo/task',1)", params![task.as_str(), project.as_str()]).unwrap();
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,driver_exec_id,wave_id) VALUES('bound','bound','human',1,0,'/elsewhere',?1,?2,?3)", params![task.as_str(), current, wave]).unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload) VALUES('bound','started','captured-flow',?1,1,'{}')", [&captured]).unwrap();
+            conn.execute_batch(
+                "WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<5000)
+                INSERT INTO execs(id,trace_id,cwd,started_at)
+                SELECT printf('command-%d',i),'trace','/repo/task',1 FROM n",
+            )
+            .unwrap();
+            conn.trace_v2(
+                rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
+                Some(|event| {
+                    if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
+                        SCANNED.fetch_add(
+                            statement.get_status(rusqlite::StatementStatus::FullscanStep),
+                            Ordering::Relaxed,
+                        );
+                    }
+                }),
+            );
+        }
+        let flows = store.task_flows(&task).unwrap();
+        assert_eq!(
+            flows.iter().map(|flow| &flow.driver.id).collect::<Vec<_>>(),
+            [&captured, &current]
+        );
+        assert!(
+            SCANNED.load(Ordering::Relaxed) < 1000,
+            "Flow lookup scanned ordinary command history"
+        );
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("DELETE FROM flow_exec_steps; DELETE FROM flow_execs;")
+            .unwrap();
+        SCANNED.store(0, Ordering::Relaxed);
+        assert!(store.task_flows(&task).unwrap().is_empty());
+        assert!(
+            SCANNED.load(Ordering::Relaxed) < 1000,
+            "Empty Flow inventory scanned ordinary command history"
         );
     }
 

@@ -30,9 +30,11 @@ pub(super) fn flows_in(
     let columns = EXEC_SELECT
         .strip_suffix(" FROM execs e")
         .expect("Exec select ends with its table");
+    // Start from actual Flow drivers, not the much larger command history.
+    // CROSS JOIN preserves that order even when a scope includes history.
     let drivers = conn
         .prepare(&format!(
-            "{columns},f.flow,f.graph FROM flow_execs f JOIN execs e ON e.id=f.exec_id
+            "{columns},f.flow,f.graph FROM flow_execs f CROSS JOIN execs e ON e.id=f.exec_id
              WHERE ({scope}) ORDER BY e.rowid"
         ))?
         .query_map(values, |row| {

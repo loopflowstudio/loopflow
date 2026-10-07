@@ -162,6 +162,26 @@ credential crosses.
 First connect: probe, find `lf`, check capability, offer install (default yes).
 Replacing a running remote `lf` asks first and says what would stop.
 
+Versions across machines (proposal; Jack Heart asked on 2026-10-07 whether to
+keep `lf` versions in sync across machines or make mixed versions compatible).
+Loopflow ships daily and the style guide rules out compatibility layers, so
+skew will be common and supporting arbitrary old versions is the expensive
+answer. Proposed instead: detect skew and make it one step to fix.
+- Connecting asks the remote what it can do through one stable public command,
+  not through whichever command the current release happens to use. PR 1 showed
+  the cost: the identity check runs `lf machine id`, so a remote one release
+  behind fails with an unhelpful message.
+- `lf machine status` shows each machine's version beside the local one.
+- When the remote is behind, say so and offer to update it (default yes).
+  Updating never stops work running there without an explicit yes.
+- Each machine's own scheduled update keeps running; this covers the window
+  between them.
+
+Review decisions on PR 1 (Jack Heart, 2026-10-07): drop the Desktop cache
+translation and discard old cache files; rename the install scope so "machine"
+has one meaning; accept that machines reached by id upgrade together for now;
+nothing outside the repository needs changing.
+
 ### 2. The Task on a machine that has never seen it
 
 Proposal: Linear, GitHub and Git are already the official live copy. Derive.

@@ -1,5 +1,19 @@
 # infrastructure wave memory
 
+## Program Status direction (LOO-398, 2026-10-07)
+
+Jack Heart selected OSC 7501 reading for every Desktop pane, unchanged native
+provider passthrough, detached relay observation and lf emission for pipe-driven
+work/Flow position only. Reports feed one Rust Waiting judgment and override
+inference; they grant no exit, completion or process authority. Implement from
+the spec, without copying another implementation. LOO-384 remains relevant for
+non-reporters; provider adoption is unverified. LOO-402 owns broader presentation.
+LOO-394 owns the absent relay; its current PR #1484 covers only machine naming.
+Upstream tree `a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0` contains the protocol
+parser and libghostty-vt callback, but no embedder action, confirming Jack’s
+follow-up finding. An artifact bump alone is insufficient. Preserve both GhosttyKit patches.
+The design is draft; no source or installed acceptance is claimed.
+
 ## Storage footprint (LOO-390, 2026-10-06)
 
 Jack Heart authorized autonomous investigation, cleanup and delivery. Findings,
@@ -19,20 +33,16 @@ is the system of record, capture retention, binary/artifact pruning, and about
 23 GiB of legacy `traces`, `backups`, `lfd.db*` and `logs` with no reader.
 Unknown ownership is not permission to delete. Test `session_record` with `LF_*` cleared.
 
-## Retained capture storage and autonomous cleanup (2026-10-05)
+## Retained capture storage and autonomous cleanup (curated 2026-10-07)
 
-Jack Heart requested that Infrastructure resolve LOO-370 without another
-interactive Session. Infrastructure chose to retain one opaque `~/.lf/runs`
-physical capture root and finish the semantic/runtime cleanup against existing
-paths. This explicitly changes the earlier physical-layout replacement
-requirement; it does not satisfy or prove a migration. The Task brief was updated
-and the decision delivered in comment `3829b49e-2ade-4bee-8850-2ae2297399a8`
-on [LOO-370](https://linear.app/loopflow/issue/LOO-370/finish-removing-the-retired-run-model-from-runtime-and-tooling).
-Preserve populated history and one storage owner, remove unnecessary offline
-conversion machinery, and retain the alias/recovery counterevidence in history.
-PR #1450 (`1af81fe03`) is now integrated here: Session identity controls
-conversations while capture keys select history. Installed migration, live
-interruption and release remain unauthorized by this source-delivery decision.
+Jack Heart delegated autonomous LOO-370 source delivery. Infrastructure retained
+one opaque `~/.lf/runs` root, explicitly superseding physical relocation in
+Task comment `3829b49e-2ade-4bee-8850-2ae2297399a8`. PR #1450 (`1af81fe03`)
+is integrated; Session identity controls conversations, capture keys select
+history. Preserve payloads and alias/recovery counterevidence. This authorizes
+neither installed migration nor interruption. Details and original scope:
+`6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`;
+current preservation boundaries remain under Capture cutover below.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -272,34 +282,25 @@ automatic shared failover. Isolated agents retain their own account/fallback.
 The updated Linear brief owns the current scope; stop-bundling's branch evidence
 does not yet establish shipment.
 
-Renamed from `systems` on 2026-07-08; current schedules supersede historical ones.
+Renamed from `systems` July 8; current schedules supersede history.
 
 The 2026-09-30 [LOO-298 decisions](#data-model-and-performance-decisions-reconciled-2026-09-30)
 supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Installed worker recovery (2026-10-02 PDT; curated October 5)
+## Installed worker recovery (2026-10-02 PDT; curated October 7)
 
-Jack Heart authorized recovery and published installation of v0.12.32 after
-PR #1415 merged. Exact release/workflow identities, preserved-file checks and
-recovery observations remain at
-`8d8f68dc1e8cae33fd3b05a28a50b864d4d503ab:wave/infrastructure/MEMORY.md`
-under this heading. The published installer preserved the Home with no migration;
-LOO-367 resumed its saved Flow. LOO-285's focused CI-repair ownership checks and
-operator-triggered release established neither automatic settlements nor completion.
-
-LOO-295 reconciled merged PR #1283 while preserving all eight unrelated files;
-its later October 4 acceptance above supersedes the then-open review obligation.
-LOO-292's later closure likewise supersedes its pending demo. The retained
-`invalid stored landing placement: home` defect interrupted reconciliation and
-release settlement; supported re-entry completed the same release without deleting
-records or worktrees. LOO-373 owns repair and exact evidence in Release memory.
-
-Jack questioned serial releases. The operator committed to batching demonstrated
-recovery repairs with installed-state preflight; this was not Jack's approval of
-a new release policy. Source merges, installation and configured acceptance remain
-separate facts.
+Jack Heart authorized published v0.12.32 recovery. Exact release identities,
+preserved-file checks and LOO-367's resumed saved Flow remain at
+`8d8f68dc1e8cae33fd3b05a28a50b864d4d503ab:wave/infrastructure/MEMORY.md`.
+LOO-295 and LOO-292's later acceptance above supersedes their pending demos.
+LOO-373 retains the `invalid stored landing placement: home` defect; supported
+re-entry settled the release without deleting records or checkouts. LOO-285's
+operator-triggered release proved no automatic settlement. Jack questioned
+serial releases; batching repairs was the operator's commitment, not Jack's
+approval of a new release policy. Full dated account:
+`6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`.
 
 ## Optional chapters and Task workflows (2026-10-02)
 
@@ -540,9 +541,8 @@ entry is not evidence of shipment or configured Desktop acceptance.
 
 ## Synced planning integration (LOO-334, 2026-09-30)
 
-Main's landed cutover supersedes the intermediate-schema bridge. Retained
-integration detail: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
-Planning preserves Task/PR identity without inferring execution progress.
+The landed cutover supersedes the bridge; planning preserves Task/PR identity,
+not execution progress. Detail: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 
@@ -936,31 +936,19 @@ setup remains unselected. No receipt redesign was selected: switch phase alone
 cannot substitute for durable advancement evidence. Current mechanics and proof
 commands belong in docs/lf.md and TESTING.md.
 
-## Installation and checkout closure (LOO-292, 2026-10-04)
+## Installation and checkout closure (LOO-292, curated 2026-10-07)
 
-Jack Heart requested closing LOO-292 on actual machine evidence. Install updates
-published machine artifacts only; `lf task sync` (which replaced `lf rebase` in
-#1367) owns checkout updates. The schedule is opt-in login plus weekly, Monday
-09:00 local, with positional daily/hourly/5min. The separate daemon is retired.
-
-Observed October 4 with published 0.13.0
-([evidence](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#installation-and-checkout-closure-loo-292-2026-10-04)):
-the login schedule caught up 0.12.32 → 0.13.0 after a shutdown with exact-store
-preflight and no migration; the 5min cadence fired twice through launchd and
-weekly was restored byte-identical; receipt, signature and /Applications hashes
-match and a repeat install changes no identity; an Ubuntu 24.04 container
-without Git installed and repaired a missing entry; sandboxed
-`lf task sync` caught up a stale main while preserving unpublished, staged,
-modified and untracked bytes. No Monday 09:00 firing or sleep-coalesced wake
-has been observed; neither is Loopflow code.
-
-Unresolved, not blocking: the currency probe (`--version` plus a 30 s preflight)
-returned not-current once at load ~14, starting a redundant download; preflight
-measured 6–13 s then, so timeout is a hypothesis. Reloading the schedule killed
-that run mid-install and the installation stayed intact. A hand-truncated entry
-gate is not healed by reinstall (gate writes are atomic, so only tampering
-produces it). Interactive app acceptance was not exercised beyond the running
-0.13.0 app.
+Jack Heart closed LOO-292 on October 4 machine evidence: published 0.13.0's
+login catch-up, two 5min launchd firings, byte-identical weekly restoration,
+matching artifact hashes/idempotent install, Ubuntu installation without Git,
+and checkout sync preserving unpublished/staged/modified/untracked work.
+Installation changes machine artifacts; sync changes checkouts. The opt-in
+Monday 09:00 schedule replaces the daemon. Exact evidence and limitations:
+`6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`
+under this heading. No Monday firing, sleep-coalesced wake or interactive app
+acceptance was observed. One slow currency probe caused a redundant download;
+timeout remained a hypothesis. Schedule reload interrupted it without damage.
+Reinstall does not heal a hand-truncated entry gate; gate writes are atomic.
 
 ## Shipped history
 

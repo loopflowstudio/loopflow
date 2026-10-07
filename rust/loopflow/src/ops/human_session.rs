@@ -1316,6 +1316,143 @@ fn active_session_token() -> Result<HumanSessionToken> {
     serde_json::from_str(&raw).context("active session token is invalid")
 }
 
+/// The observer owns only this input stream, never the Session or its provider.
+/// A replacement observer fences the previous stream even on the same provider.
+pub(crate) async fn observe_program_status(
+    store: &SharedStore,
+    id: &str,
+    terminal: &str,
+    generation: i64,
+) -> Result<()> {
+    let session = find_session(store, id, false)
+        .await?
+        .context("Session not found")?;
+    let current = store
+        .sqlite
+        .session_summary(
+            &session.id,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )?
+        .context("Session disappeared")?;
+    anyhow::ensure!(
+        current.provider_generation == generation,
+        "Session provider changed"
+    );
+    // Re-read capture after the generation witness. A replacement before or
+    // during client inspection then fails the transactional generation check.
+    let session = store
+        .sqlite
+        .session(&session.id)?
+        .context("Session disappeared")?;
+    let native = NativeSession::of(&session)?;
+    let clients = native
+        .clients()?
+        .into_iter()
+        .filter(|client| client.terminal_id.as_deref() == Some(terminal))
+        .count();
+    anyhow::ensure!(clients == 1, "terminal has no unique active Session client");
+    let stream = uuid::Uuid::new_v4().to_string();
+    anyhow::ensure!(
+        store
+            .sqlite
+            .begin_program_status(&session.id, generation, &stream)?,
+        "Session provider changed"
+    );
+    let mut last = None;
+    let mut sequence = 0;
+    let mut pending = None;
+    let mut next_write = std::time::Instant::now();
+    let mut bytes = Vec::new();
+    let mut chunk = [0; 8192];
+    loop {
+        let count = read_observation_chunk(&mut chunk)?;
+        if count == Some(0) {
+            anyhow::ensure!(bytes.is_empty(), "incomplete Program Status snapshot");
+            break;
+        }
+        for byte in &chunk[..count.unwrap_or(0)] {
+            if *byte == b'\n' {
+                let records: crate::program_status::Records = serde_json::from_slice(&bytes)?;
+                bytes.clear();
+                anyhow::ensure!(
+                    records.seen && records.validate(),
+                    "invalid Program Status snapshot"
+                );
+                pending = Some(records);
+            } else {
+                anyhow::ensure!(
+                    bytes.len() < 512 * 1024,
+                    "Program Status snapshot exceeds limit"
+                );
+                bytes.push(*byte);
+            }
+        }
+        if std::time::Instant::now() >= next_write {
+            if let Some(records) = pending.take().filter(|r| last.as_ref() != Some(r)) {
+                sequence += 1;
+                anyhow::ensure!(
+                    store.sqlite.record_program_status(
+                        &session.id,
+                        generation,
+                        &stream,
+                        sequence,
+                        &records
+                    )?,
+                    "Program Status stream replaced"
+                );
+                last = Some(records);
+                next_write = std::time::Instant::now() + std::time::Duration::from_millis(250);
+            }
+        }
+    }
+    if let Some(records) = pending.filter(|r| last.as_ref() != Some(r)) {
+        anyhow::ensure!(
+            store.sqlite.record_program_status(
+                &session.id,
+                generation,
+                &stream,
+                sequence + 1,
+                &records
+            )?,
+            "Program Status stream replaced"
+        );
+    }
+    Ok(())
+}
+
+// This command is the sole stdin reader. Polling avoids a blocking stdin worker
+// that could survive a replaced observer and keep the process alive indefinitely.
+#[cfg(unix)]
+fn read_observation_chunk(bytes: &mut [u8]) -> std::io::Result<Option<usize>> {
+    let mut fd = libc::pollfd {
+        fd: libc::STDIN_FILENO,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: fd points to one initialized pollfd for the process's stdin.
+    let ready = unsafe { libc::poll(&mut fd, 1, 250) };
+    if ready < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if ready == 0 {
+        return Ok(None);
+    }
+    // SAFETY: bytes is writable for its stated length; this is the only reader.
+    let count = unsafe { libc::read(fd.fd, bytes.as_mut_ptr().cast(), bytes.len()) };
+    if count < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(Some(count as usize))
+    }
+}
+#[cfg(not(unix))]
+fn read_observation_chunk(_: &mut [u8]) -> std::io::Result<Option<usize>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "terminal observation requires Unix",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1878,111 +2015,4 @@ mod page_tests {
         );
         assert!(serde_json::from_str::<SessionPage>(r#"{"next":null}"#).is_err());
     }
-}
-
-/// The observer owns only this input stream, never the Session or its provider.
-/// A replacement observer fences the previous stream even on the same provider.
-pub(crate) async fn observe_program_status(
-    store: &SharedStore,
-    id: &str,
-    terminal: &str,
-    generation: i64,
-) -> Result<()> {
-    let session = find_session(store, id, false)
-        .await?
-        .context("Session not found")?;
-    let current = store
-        .sqlite
-        .session_summary(
-            &session.id,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )?
-        .context("Session disappeared")?;
-    anyhow::ensure!(
-        current.provider_generation == generation,
-        "Session provider changed"
-    );
-    // Re-read capture after the generation witness. A replacement before or
-    // during client inspection then fails the transactional generation check.
-    let session = store
-        .sqlite
-        .session(&session.id)?
-        .context("Session disappeared")?;
-    let native = NativeSession::of(&session)?;
-    let clients: Vec<_> = native
-        .clients()?
-        .into_iter()
-        .filter(|client| client.terminal_id.as_deref() == Some(terminal))
-        .collect();
-    anyhow::ensure!(
-        clients.len() == 1,
-        "terminal has no unique active Session client"
-    );
-    let stream = uuid::Uuid::new_v4().to_string();
-    anyhow::ensure!(
-        store
-            .sqlite
-            .begin_program_status(&session.id, generation, &stream)?,
-        "Session provider changed"
-    );
-    let mut last = None;
-    let mut sequence = 0;
-    let mut pending = None;
-    let mut next_write = std::time::Instant::now();
-    let mut bytes = Vec::new();
-    let mut chunk = [0; 8192];
-    loop {
-        let count = crate::program_status::read_observation_chunk(&mut chunk)?;
-        if count == Some(0) {
-            anyhow::ensure!(bytes.is_empty(), "incomplete Program Status snapshot");
-            break;
-        }
-        for byte in &chunk[..count.unwrap_or(0)] {
-            if *byte == b'\n' {
-                let records: crate::program_status::Records = serde_json::from_slice(&bytes)?;
-                bytes.clear();
-                anyhow::ensure!(
-                    records.seen && records.validate(),
-                    "invalid Program Status snapshot"
-                );
-                pending = Some(records);
-            } else {
-                anyhow::ensure!(
-                    bytes.len() < 512 * 1024,
-                    "Program Status snapshot exceeds limit"
-                );
-                bytes.push(*byte);
-            }
-        }
-        if std::time::Instant::now() >= next_write {
-            if let Some(records) = pending.take().filter(|r| last.as_ref() != Some(r)) {
-                sequence += 1;
-                anyhow::ensure!(
-                    store.sqlite.record_program_status(
-                        &session.id,
-                        generation,
-                        &stream,
-                        sequence,
-                        &records
-                    )?,
-                    "Program Status stream replaced"
-                );
-                last = Some(records);
-                next_write = std::time::Instant::now() + std::time::Duration::from_millis(250);
-            }
-        }
-    }
-    if let Some(records) = pending.filter(|r| last.as_ref() != Some(r)) {
-        anyhow::ensure!(
-            store.sqlite.record_program_status(
-                &session.id,
-                generation,
-                &stream,
-                sequence + 1,
-                &records
-            )?,
-            "Program Status stream replaced"
-        );
-    }
-    Ok(())
 }

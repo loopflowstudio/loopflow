@@ -53,7 +53,7 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use crate::id::ProcessLfid;
-    use crate::program_status::{Records, Report};
+    use crate::program_status::{Kind, Records, Report, State};
     use crate::session::{SessionActivity, SessionFilter};
     use crate::store::sqlite::SqliteStore;
 
@@ -99,7 +99,15 @@ mod tests {
             .unwrap());
         let mut records = Records {
             seen: true,
-            records: vec![Report::parse(b"state=working").unwrap()],
+            records: vec![Report {
+                state: State::Working,
+                id: None,
+                kind: None,
+                progress: None,
+                app: None,
+                title: None,
+                msg: None,
+            }],
         };
         assert!(store
             .record_program_status(
@@ -112,9 +120,13 @@ mod tests {
             .unwrap());
         assert!(store.session_summaries(&filter, 500).unwrap().is_empty());
         assert_eq!(store.next_quiet_waiting(1).unwrap(), None);
-        records
-            .records
-            .push(Report::parse(b"state=blocked:id=worker:kind=question:msg=SGk=").unwrap());
+        records.records.push(Report {
+            state: State::Blocked,
+            id: Some("worker".into()),
+            kind: Some(Kind::Question),
+            msg: Some("Hi".into()),
+            ..records.records[0].clone()
+        });
         assert!(store
             .record_program_status(
                 "session",

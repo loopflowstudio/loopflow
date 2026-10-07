@@ -7,7 +7,6 @@ use std::collections::BTreeSet;
 use serde_json::Value;
 
 use crate::process::SessionDriver;
-use crate::program_status::Kind;
 use crate::session::SessionActivity;
 use crate::store::sqlite::SqliteStore;
 
@@ -21,10 +20,7 @@ pub(super) enum Signal {
     Working,
     ToolStarted(String),
     ToolResolved(String),
-    InputRequested {
-        id: String,
-        kind: Kind,
-    },
+    InputRequested(String),
     InputResolved(String),
     /// The provider handed the turn back; `true` when it succeeded.
     Yielded(bool),
@@ -57,7 +53,7 @@ impl Attention {
                 Signal::ToolResolved(id) => {
                     self.open_tools.remove(&id);
                 }
-                Signal::InputRequested { id, .. } => {
+                Signal::InputRequested(id) => {
                     self.pending_input.insert(id);
                 }
                 Signal::InputResolved(id) => {
@@ -191,20 +187,14 @@ pub(super) fn codex(rpc: &Value, from_client: bool) -> Vec<Signal> {
     };
     let params = &rpc["params"];
     if let Some(id) = rpc.get("id") {
-        let kind = if method.ends_with("requestApproval") {
-            Some(Kind::Permission)
-        } else if method.ends_with("requestUserInput") || method.contains("elicitation") {
-            Some(Kind::Question)
+        let asks = method.ends_with("requestApproval")
+            || method.ends_with("requestUserInput")
+            || method.contains("elicitation");
+        return if asks {
+            vec![Signal::InputRequested(id.to_string())]
         } else {
-            None
+            Vec::new()
         };
-        return kind
-            .map(|kind| Signal::InputRequested {
-                id: id.to_string(),
-                kind,
-            })
-            .into_iter()
-            .collect();
     }
     let item = &params["item"];
     let conversational = matches!(
@@ -257,10 +247,7 @@ pub(super) fn opencode(event: &Value, thread: &str) -> Vec<Signal> {
         }
         Some("message.part.delta") => vec![Signal::Working],
         Some("question.asked") => id(&properties["id"])
-            .map(|id| Signal::InputRequested {
-                id,
-                kind: Kind::Question,
-            })
+            .map(Signal::InputRequested)
             .into_iter()
             .collect(),
         Some("question.replied" | "question.rejected") => id(&properties["requestID"])
@@ -285,7 +272,6 @@ mod tests {
     use super::{claude, codex, opencode, Attention, Signal};
     use crate::id::ProcessLfid;
     use crate::process::SessionDriver;
-    use crate::program_status::Kind;
     use crate::store::sqlite::SqliteStore;
 
     /// A conversation whose driver saves what a recorded stream says, one
@@ -302,36 +288,7 @@ mod tests {
     const QUIET: i64 = crate::session::WAITING_QUIET_SECONDS;
 
     #[test]
-    fn program_status_input_intent_keeps_the_explicit_request_kind() {
-        for (method, kind) in [
-            ("item/commandExecution/requestApproval", Kind::Permission),
-            ("item/fileChange/requestApproval", Kind::Permission),
-            ("item/tool/requestUserInput", Kind::Question),
-            ("mcpServer/elicitation/request", Kind::Question),
-        ] {
-            assert_eq!(
-                codex(&json!({"id": 7, "method": method, "params": {}}), false),
-                vec![Signal::InputRequested {
-                    id: "7".into(),
-                    kind,
-                }],
-                "{method}"
-            );
-        }
-        assert_eq!(
-            opencode(
-                &json!({"type": "question.asked", "properties": {"sessionID": "thread", "id": "question"}}),
-                "thread"
-            ),
-            vec![Signal::InputRequested {
-                id: "question".into(),
-                kind: Kind::Question,
-            }]
-        );
-    }
-
-    #[test]
-    fn program_status_does_not_invent_auth_or_automated_permission_requests() {
+    fn automated_auth_and_permission_requests_do_not_wait_for_input() {
         assert!(codex(
             &json!({"id": 7, "method": "account/chatgptAuthTokens/refresh", "params": {}}),
             false

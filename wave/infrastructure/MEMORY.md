@@ -4,25 +4,25 @@
 
 Jack Heart selected every-pane Desktop reading, unchanged native passthrough and
 lf writing only for pipe-driven work/Flow position. Reports override inference
-in Rust's single Waiting judgment; they grant no process or completion authority.
-Implement from the spec, not other implementations. LOO-384 remains for
-non-reporters; provider adoption is unverified. LOO-402 owns broader presentation.
+in Rust's single Waiting judgment; they grant no execution authority.
+Implement from the spec. LOO-384 remains for non-reporters; provider adoption is
+unverified. LOO-402 owns broader presentation.
 Jack authorized build and publication for review, not landing, and made LOO-394's
 absent relay a named follow-up. Its #1484 covers naming only.
 
-Jack approved the small embedded forwarding patch; `a60e9e2a…` has a parser but
-no embedded action. Source preserves both earlier patches and publishes the
-immutable lf2 framework, with matching public checksum and SwiftPM linking.
-The current pane's literal state/kind/message appears in the breadcrumb header
-and pane strip; whether Jack meant the Task header remains for review.
-Source SQL/CLI/DTO/Swift proofs establish separate read-path boundaries, not
-installed or composed native-pane acceptance. Provider generation and surface
-incarnation fence observations; viewer absence is not provider death.
+Jack approved the embedded patch at `a60e9e2a…`; both earlier patches survive
+in immutable lf2, verified by public checksum and SwiftPM
+linking. Literal state/kind/message appears in the breadcrumb header and pane
+strip; Task-header intent remains for review. SQL/CLI/DTO/Swift proofs establish
+separate boundaries, not installed or composed native-pane acceptance. Provider
+generation and surface incarnation fence observations; viewer absence is not death.
 
 Live emission remains unfinished: a PTY short-wrote 62 of 74 OSC bytes, and the
 existing independent output paths cannot safely finish the escape before normal
-text. Establish shared output ownership before enabling emission. Details and
-remaining acceptance belong to `scratch/read-and-write-program-status.md`;
+text. Flow children inherit terminal descriptors; a parent mutex cannot serialize
+them, and piping native children changes terminal behavior. Extending this Task
+with PTY transport or deferring emission to LOO-394 remains an unresolved choice,
+not Jack's scope decision. Details and acceptance: `scratch/read-and-write-program-status.md`;
 original design is preserved at `c62c19f5c:scratch/read-and-write-program-status.md`.
 
 ## Process vocabulary (LOO-400, 2026-10-07)

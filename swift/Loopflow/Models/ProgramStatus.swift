@@ -58,7 +58,7 @@ public struct ProgramStatusReport: Codable, Sendable, Hashable {
 
 public struct ProgramStatusRecords: Codable, Sendable, Hashable {
     public let seen: Bool
-    /// Oldest update first, newest last, matching Rust's bounded reducer.
+    /// Oldest update first, newest last, matching the terminal reducer.
     public let records: [ProgramStatusReport]
 
     public init(seen: Bool, records: [ProgramStatusReport]) {

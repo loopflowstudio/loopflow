@@ -17,16 +17,14 @@ struct LocalWaveAgentLauncherTests {
             "PATH": "/usr/bin:/bin",
             "LF_HOME": "/tmp/loopflow-development-home",
             "LF_WAVE_ID": "launching-wave",
-            "LF_FLOW_STEP": "launching-step",
+            "LF_FLOW_ID": "launching-step",
             "LF_RUN_ID": "launching-run",
-            "LF_WORK_ADVANCE_CLAIM": "launching-task-claim",
         ])
 
         #expect(environment["LF_HOME"] == "/tmp/loopflow-development-home")
         #expect(environment["LF_WAVE_ID"] == nil)
-        #expect(environment["LF_FLOW_STEP"] == nil)
+        #expect(environment["LF_FLOW_ID"] == nil)
         #expect(environment["LF_RUN_ID"] == nil)
-        #expect(environment["LF_WORK_ADVANCE_CLAIM"] == nil)
     }
 
     @Test("the launcher's terminal and agent output policy are dropped; account authority stays")
@@ -57,26 +55,11 @@ struct LocalWaveAgentLauncherTests {
     }
 
 
-    @Test("Task controls use the bounded worker commands")
+    @Test("Task controls use the Task commands")
     func taskControlCommandShapes() {
         let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
 
-        #expect(LocalWaveAgentLauncher.taskRunCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "--task", "W2-131", "flow", "start",
-        ])
-        #expect(LocalWaveAgentLauncher.taskCreateCommand(
-            lfPath: lf,
-            title: "Refine LOOPFLOW.md 5e41e69b",
-            wave: "context-lab",
-            directive: "Refine text for LOOPFLOW.md."
-        ) == [
-            lf, "task", "create", "--run", "--wave", "context-lab", "--title", "Refine LOOPFLOW.md 5e41e69b",
-            "--notes", "Refine text for LOOPFLOW.md.",
-            "--json",
-        ])
-        #expect(LocalWaveAgentLauncher.taskRunCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "--task", "W2-131", "flow", "start",
-        ])
+        #expect(LocalWaveAgentLauncher.taskRunArguments(issue: "W2-131") == ["-b", "task", "run", "W2-131"])
         #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
             lf, "task", "interrupt", "W2-131",
         ])
@@ -92,23 +75,6 @@ struct LocalWaveAgentLauncherTests {
         #expect(command == [lf, "pr", "open"])
         #expect(!command.contains { $0.contains("github.com") })
         #expect(!command.contains { $0.hasPrefix("http") })
-    }
-
-    @Test("Task start uses the exact CLI receipt as workspace identity")
-    func taskCreateReceiptDecodes() throws {
-        let receipt = try LocalWaveAgentLauncher.taskCreateReceipt("""
-        {
-          "issue_identifier": "W2-201",
-          "project": "auditability",
-          "wave": "product"
-        }
-        """)
-
-        #expect(receipt == TaskCreateReceipt(
-            issueIdentifier: "W2-201",
-            project: "auditability",
-            wave: "product"
-        ))
     }
 
     @Test("Prepared checkout receipts retain the owning Home and require its evidence")

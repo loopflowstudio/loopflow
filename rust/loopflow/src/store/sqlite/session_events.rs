@@ -25,50 +25,6 @@ impl SqliteStore {
         .map_err(|error| StoreError::InvalidData(error.to_string()))
     }
 
-    /// Only an exact completion consumed by this Flow node acknowledges direction.
-    /// Missing evidence replays input; retries and other nodes cannot consume it.
-    pub(crate) fn completed_step_steer_id(
-        &self,
-        flow: &crate::durable::FlowSession,
-    ) -> StoreResult<i64> {
-        let node = flow
-            .invocation
-            .node_id(&flow.cursor)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        let inputs: Vec<String> = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            let mut query = conn.prepare(
-                "SELECT DISTINCT capture.receipt_key FROM flow_events consumed
-                 JOIN session_events done ON done.seq=consumed.session_event
-                 JOIN session_events start ON start.session_id=done.session_id
-                    AND start.provider_thread=done.provider_thread AND start.provider_turn=done.provider_turn
-                    AND start.kind='started'
-                 JOIN session_events capture ON capture.seq=start.captured_event AND capture.kind='captured'
-                 WHERE consumed.flow_id=?1 AND consumed.node=?2 AND consumed.kind='consumed'
-                    AND done.kind='completed' AND json_extract(done.payload,'$.status')='completed'",
-            )?;
-            let rows = query.query_map(params![flow.id(), node], |row| row.get(0))?;
-            rows.collect::<Result<_, _>>()?
-        };
-        let mut through = 0;
-        for input in inputs {
-            for event in self.input_events(&input)? {
-                if event["type"] != "user_input" {
-                    continue;
-                }
-                let op = event["op"].as_str().unwrap_or_default();
-                let id = if op == "steer_seed_through" {
-                    event["text"].as_str().and_then(|id| id.parse::<i64>().ok())
-                } else {
-                    op.strip_prefix("steer_transport_accepted:")
-                        .and_then(|id| id.parse().ok())
-                };
-                through = through.max(id.unwrap_or(0));
-            }
-        }
-        Ok(through)
-    }
-
     /// Original input order survives importing earlier observations after later ones.
     pub(crate) fn input_events(&self, input: &str) -> StoreResult<Vec<Value>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -136,6 +92,42 @@ impl SqliteStore {
         super::sessions::retain_history_in(&tx, session, std::slice::from_ref(observation))?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Replace the Session's reading with its current driver's.
+    pub(crate) fn record_session_activity(
+        &self,
+        session: &str,
+        driver: &crate::exec::SessionDriver,
+        activity: &crate::session::SessionActivity,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded)
+             VALUES(?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(session_id) DO UPDATE SET driver_generation=excluded.driver_generation,
+                observed_at=excluded.observed_at,open_tools=excluded.open_tools,
+                pending_input=excluded.pending_input,yielded=excluded.yielded",
+            params![session, driver.generation, activity.observed_at,
+                activity.open_tools as i64, activity.pending_input as i64, activity.yielded],
+        )?;
+        Ok(())
+    }
+
+    /// When the next open Session becomes Waiting through quiet alone, which
+    /// no write announces. `None` when no reading is counting toward it.
+    pub(crate) fn next_quiet_waiting(&self, now: i64) -> StoreResult<Option<i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let quiet = crate::session::WAITING_QUIET_SECONDS;
+        Ok(conn.query_row(
+            "SELECT MIN(act.observed_at)+?2 FROM session_activity act
+             JOIN agent_sessions s ON s.id=act.session_id
+             WHERE s.completed_at IS NULL AND act.driver_generation=s.driver_generation
+             AND act.pending_input=0 AND act.open_tools=0
+             AND NOT (s.interactive=1 AND act.yielded=1) AND ?1-act.observed_at<?2",
+            params![now, quiet],
+            |row| row.get(0),
+        )?)
     }
 
     /// Retain a provider observation even when its conversational driver has
@@ -628,7 +620,7 @@ mod tests {
             session.id = format!("conversation-{at}");
             session.artifact_key = format!("run_{at:032x}");
             session.created_at = at;
-            let session = store.create_session(session, None, None).unwrap();
+            let session = store.create_session(session, None).unwrap();
             store
                 .record_session_event(
                     &session.id,
@@ -919,7 +911,7 @@ mod tests {
     }
 
     #[test]
-    fn session_exit_retires_orphans_but_preserves_primary_and_review_obligations() {
+    fn session_exit_retires_orphans_but_preserves_primary_and_task_conversations() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let wave = crate::id::WaveId::new();
@@ -941,11 +933,10 @@ mod tests {
                 rusqlite::params![task.as_str(), project.as_str()],
             ).unwrap();
         }
-        for (id, kind, primary, retired) in [
-            ("orphan", "conversation", None, true),
-            ("primary", "conversation", Some("repository"), false),
-            ("task", "conversation", None, false),
-            ("review", "flow_review", None, false),
+        for (id, primary, retired) in [
+            ("orphan", None, true),
+            ("primary", Some("repository"), false),
+            ("task", None, false),
         ] {
             let session = store.test_session(id, &crate::session_record::new_artifact_key());
             let exec = crate::id::ExecId::new();
@@ -957,8 +948,8 @@ mod tests {
                 )
                 .unwrap();
                 conn.execute(
-                    "UPDATE agent_sessions SET kind=?2,primary_scope=?3 WHERE id=?1",
-                    rusqlite::params![id, kind, primary],
+                    "UPDATE agent_sessions SET primary_scope=?2 WHERE id=?1",
+                    rusqlite::params![id, primary],
                 )
                 .unwrap();
                 if id == "task" {
@@ -976,7 +967,7 @@ mod tests {
             let saved = store.session(id).unwrap().unwrap();
             assert_eq!(saved.completed_at.is_some(), retired);
             assert_eq!(saved.captured, session.captured);
-            let summary = store.session_summary(id).unwrap().unwrap();
+            let summary = store.session_summary(id, 0).unwrap().unwrap();
             assert_eq!(summary.driver_outcome.as_deref(), Some("interrupted"));
             let history = store.session_history(id, 0, 100).unwrap();
             assert!(history
@@ -988,7 +979,7 @@ mod tests {
                 .any(|event| event.kind == SessionEventKind::Completed));
         }
         assert!(!store
-            .session_summaries(&crate::session::SessionFilter::default())
+            .session_summaries(&crate::session::SessionFilter::default(), 0)
             .unwrap()
             .iter()
             .any(|session| session.id == "orphan"));
@@ -1012,12 +1003,11 @@ mod tests {
         }
         for _ in 0..2 {
             let rows = store
-                .session_summaries(&crate::session::SessionFilter::default())
+                .session_summaries(&crate::session::SessionFilter::default(), 0)
                 .unwrap();
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].id, session.id);
             assert!(rows[0].completed_at.is_none());
-            assert_eq!(rows[0].latest_turn.as_deref(), Some("completed"));
         }
     }
 
@@ -1067,15 +1057,6 @@ mod tests {
             .unwrap()
             .completed_at
             .is_none());
-        assert_eq!(
-            store
-                .session_summary(&session.id)
-                .unwrap()
-                .unwrap()
-                .latest_turn
-                .as_deref(),
-            Some("interrupted")
-        );
         let resumed = store
             .claim_session_driver(&session.id, Some(&original), &second, true)
             .unwrap();

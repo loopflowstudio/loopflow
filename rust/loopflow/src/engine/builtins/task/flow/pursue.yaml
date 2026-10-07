@@ -1,11 +1,5 @@
-- step:
-    id: implement
-    name: implement
+- implement
 - compress
 - flow: refresh
-- step:
-    id: decide
-    name: loop-decide
-    repeat:
-      from: implement
+- loop: implement
 - pr-publish

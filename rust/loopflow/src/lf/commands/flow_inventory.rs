@@ -10,13 +10,13 @@ use crate::store::{open_store, storage_config_from_env};
 
 #[derive(Debug, Default, Args)]
 pub struct FlowInventoryArgs {
-    /// List or show saved FlowSessions instead of reusable templates
+    /// List or show Flows that ran, from their Execs, instead of reusable templates
     #[arg(long)]
     pub sessions: bool,
     /// Include every repository and flows with unknown repository evidence
     #[arg(long)]
     pub all: bool,
-    /// FlowSession page size (default 100)
+    /// Page size (default 100)
     #[arg(long)]
     pub limit: Option<NonZeroU32>,
     /// Previous page's next identity; retain the same filters
@@ -25,7 +25,7 @@ pub struct FlowInventoryArgs {
     /// Literal name or identity containment
     #[arg(long)]
     pub search: Option<String>,
-    #[arg(long, value_parser = ["current", "completed", "replaced"])]
+    #[arg(long, value_parser = ["current", "completed", "stopped"])]
     pub state: Option<String>,
     /// Retained Task ID or issue identifier, including completed Tasks
     #[arg(long, conflicts_with = "taskless")]
@@ -35,9 +35,6 @@ pub struct FlowInventoryArgs {
     pub for_wave: Option<String>,
     #[arg(long)]
     pub taskless: bool,
-    /// Whether the Task currently selects this FlowSession
-    #[arg(long, action = clap::ArgAction::Set)]
-    pub managed: Option<bool>,
 }
 
 impl FlowInventoryArgs {
@@ -51,7 +48,6 @@ impl FlowInventoryArgs {
             && self.for_task.is_none()
             && self.for_wave.is_none()
             && !self.taskless
-            && self.managed.is_none()
     }
 }
 
@@ -88,12 +84,11 @@ pub fn list(args: &FlowInventoryArgs, json: bool) -> Result<()> {
                 .transpose()?,
             state: args.state.as_deref().map(|state| match state {
                 "completed" => FlowSummaryState::Completed,
-                "replaced" => FlowSummaryState::Replaced,
+                "stopped" => FlowSummaryState::Stopped,
                 _ => FlowSummaryState::Current,
             }),
             repo,
             taskless: args.taskless,
-            managed: args.managed,
             search: args.search.clone(),
         };
         let page = store
@@ -109,11 +104,8 @@ pub fn list(args: &FlowInventoryArgs, json: bool) -> Result<()> {
         } else {
             for entry in page.entries {
                 println!(
-                    "{}  {:?}  {}{}",
-                    entry.summary.id,
-                    entry.summary.state,
-                    entry.summary.name.as_deref().unwrap_or("unknown template"),
-                    if entry.managed { "  [managed]" } else { "" }
+                    "{}  {:?}  {}",
+                    entry.summary.id, entry.summary.state, entry.summary.name,
                 );
             }
             if let Some(next) = page.next {
@@ -130,11 +122,21 @@ pub fn inspect(selector: &str, json: bool) -> Result<()> {
         let detail = store
             .flow_detail(selector)
             .await?
-            .context("FlowSession was not found")?;
-        if !json {
-            println!("Resume with lf flow resume {}", detail.entry.summary.id);
+            .context("no Flow has that driver Exec")?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&detail)?);
+            return Ok(());
         }
-        println!("{}", serde_json::to_string_pretty(&detail)?);
+        let summary = &detail.entry.summary;
+        println!("{}  {:?}  {}", summary.id, summary.state, summary.name);
+        for step in &detail.steps {
+            println!(
+                "  {}  {}  {}",
+                step.exec_id,
+                step.position(),
+                step.outcome.as_deref().unwrap_or("no recorded exit"),
+            );
+        }
         Ok(())
     })
 }

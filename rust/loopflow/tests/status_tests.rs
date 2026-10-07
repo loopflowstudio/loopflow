@@ -45,7 +45,7 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
     Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
-            flow: "feature".into(),
+            workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new(uuid::Uuid::new_v4().to_string()).expect("Linear Project id"),
             slug: slug.to_string(),
@@ -81,7 +81,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             "name": project.plan.name,
             "summary": "Keep status truthful.",
             "metric_targets": [],
-            "flow": "feature", "status": "started",
+            "workflow": "feature", "status": "started",
             "krs": [{"text": "Current state and history stay distinct", "holds": false}],
             "initiative_ids": ["initiative-infrastructure"],
             "team_ids": ["team-infrastructure"]
@@ -208,7 +208,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     let stale = Project {
         id: ProjectId::parse(STALE_WORK_ID).expect("recorded Project Work id"),
         plan: ProjectPlan {
-            flow: "feature".into(),
+            workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id"),
             slug: "technical-architecture".to_string(),
@@ -281,7 +281,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     let current = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
-            flow: "feature".into(),
+            workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new("95159066-9098-4d0b-8903-01459dc7ec14")
                 .expect("current PM Project id"),
@@ -316,7 +316,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
                 "name": "Auditability",
                 "summary": "Every claim points to its receipt.",
                 "metric_targets": [],
-                "flow": "feature", "status": "started",
+                "workflow": "feature", "status": "started",
                 "krs": [{"text": "Every visible state carries its reason", "holds": false}],
                 "initiative_ids": ["initiative-product"],
                 "team_ids": ["team-product"]
@@ -452,7 +452,7 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
             "work_id": project.id.as_str(),
             "slug": project.plan.slug,
             "name": project.plan.name,
-            "flow": "feature",
+            "workflow": "feature",
             "status": "started",
             "current": true,
             "metric_targets": [],
@@ -589,7 +589,7 @@ Count dispatched Task loops that settle without rescue.
             "name": "Loopflow API",
             "summary": "One product contract.",
             "metric_targets": [{"metric_id": "task-loop-trust", "target": {"kind": "at_least", "value": 1.0}}],
-            "flow": "feature", "status": "started",
+            "workflow": "feature", "status": "started",
             "krs": [{"text": "Task loops earn trust for one week", "holds": false}],
             "initiative_ids": ["initiative-product"],
             "team_ids": ["team-product"]
@@ -730,7 +730,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
             assert_eq!(projects[0]["id"], "95159066-9098-4d0b-8903-01459dc7ec14");
             assert_eq!(projects[0]["slug"], "auditability");
             assert_eq!(projects[0]["status"], "started");
-            assert_eq!(projects[0]["flow"], "feature");
+            assert_eq!(projects[0]["workflow"], "feature");
             assert_eq!(view["tasks"]["state"], "ok");
             assert_eq!(view["tasks"]["items"].as_array().unwrap().len(), 1);
             assert_eq!(view["tasks"]["items"][0]["task"]["identifier"], "PRD-52");
@@ -738,7 +738,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
             assert_eq!(unavailable.len(), 1);
             assert_eq!(unavailable[0]["work_id"], PERSISTED_TASK_ID);
             assert_eq!(unavailable[0]["task_identifier"], "W2-127");
-            assert_eq!(unavailable[0]["status"], "ready");
+            assert_eq!(unavailable[0]["status"], "not_ready");
             assert_eq!(unavailable[0]["owner"], "wave");
             assert!(unavailable[0]["recovery"]
                 .as_str()
@@ -888,7 +888,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
     conn.execute("DELETE FROM task_prs", []).unwrap();
     let before: (i64, i64, i64) = conn
         .query_row(
-            "SELECT (SELECT COUNT(*) FROM task_events), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM flow_sessions)",
+            "SELECT (SELECT COUNT(*) FROM task_events), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM flow_execs)",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -935,7 +935,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
     }
     let after: (i64, i64, i64) = conn
         .query_row(
-            "SELECT (SELECT COUNT(*) FROM task_events), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM flow_sessions)",
+            "SELECT (SELECT COUNT(*) FROM task_events), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM flow_execs)",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )

@@ -26,7 +26,6 @@ mod ci_incidents;
 mod durable;
 mod execs;
 mod flow_inventory;
-mod flows;
 mod metrics;
 mod planning;
 mod pr_landings;
@@ -37,9 +36,11 @@ mod session_events;
 pub(crate) mod sessions;
 mod task_work;
 
+#[cfg(test)]
+pub(crate) use durable::task_state_sql;
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
-pub(crate) use task_work::OpenExecs;
+pub(crate) use task_work::{EndMove, OpenExecs};
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable
@@ -137,7 +138,10 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-    let mut statement = conn.prepare("SELECT worktree FROM tasks WHERE work_state='ready'")?;
+    let mut statement = conn.prepare(&format!(
+        "SELECT t.worktree FROM tasks t WHERE {}",
+        durable::task_open_sql("t")
+    ))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     rows.map(|row| row.map(PathBuf::from).map_err(StoreError::from))
         .collect()
@@ -724,8 +728,10 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
-            "UPDATE tasks SET work_state='abandoned', work_terminal_at=?2
-             WHERE external_issue_id=?1 AND work_state='ready'",
+            &format!(
+                "UPDATE tasks AS t SET abandoned_at=?2 WHERE t.external_issue_id=?1 AND {}",
+                durable::task_open_sql("t")
+            ),
             params![issue_id, now_unix()],
         )?;
         record_task_deletion_in(&tx, wave_id, issue_id, identifier)?;

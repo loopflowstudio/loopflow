@@ -353,24 +353,8 @@ struct SessionRenameDraft: Equatable {
     var submitting = false
 }
 
-/// A diagram selection keeps the invocation and occurrence together.
-struct FlowNodeSelection: Equatable {
-    /// nil identifies the unstarted preview, never an old invocation.
-    let invocationId: String?
-    let node: UInt32
-}
-
-/// One Task's Flow selection and in-flight control. Presentation only: the
-/// pinned Flow and its saved position stay with Rust.
+/// One Task's in-flight `lf task run` or `lf task move` and its refusal.
 struct TaskFlowDraft: Equatable {
-    enum Picker: Equatable { case preview, restart }
-    /// Flow chosen for the next Start; `nil` follows the recommendation.
-    var preview: String?
-    var selectedNode: FlowNodeSelection?
-    var picker: Picker?
-    var search = ""
-    /// Replacement awaiting explicit confirmation.
-    var pendingRestart: String?
     var acting = false
     var error: String?
 }
@@ -420,6 +404,8 @@ final class WorkNavigation {
     var expandedHistory: Set<String> = []
     /// Wave planning notices whose Details are open, keyed by Task ID.
     var expandedNotices: Set<String> = []
+    /// Flow execs whose graph and steps are open, keyed by driver Exec.
+    var expandedFlowRuns: Set<String> = []
     var repositoryCollapsed = false
     /// The orphan Session section's disclosure. `nil` follows the default:
     /// collapsed beside planned Work, open when orphans are all there is.

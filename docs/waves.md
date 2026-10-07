@@ -85,7 +85,8 @@ remains a single skill; whether it should use the VSM Flow is still undecided.
 Each pass reads dated evidence and replies in the invoking conversation. It
 gives every started Task one disposition: moving, acted on and verified,
 waiting on a named person or dependency, paused, or unknown. A started Task
-with Flow steps left and no live worker is continued; unstarted backlog is
+whose Flow stopped or failed is read and its remaining work run fresh; one at
+a workflow node waits on you; unstarted backlog is
 listed and left for you to select. A no-action result is valid only when every
 started Task already has a disposition. Failed reads and stale provider data remain explicit
 gaps; they cannot justify closing work or treating a Task as idle.
@@ -96,8 +97,8 @@ Wave or Task. Return accepted decisions to those owners with their practical
 consequence. Changes beyond accepted direction stay proposals for review.
 Repository synthesis does not own identity alone.
 
-Tasks keep progressing through their selected Flows and human review gates
-when both operators are absent. Projects belong to Waves; they have no separate
+Running Task Flows keep progressing when both operators are absent; review
+happens in the Task conversation. Projects belong to Waves; they have no separate
 operator. Scheduling and connected chat are separate integration work. These
 manual passes neither install jobs nor post replies to a channel.
 
@@ -119,7 +120,7 @@ not change that selection. Reading never creates a binding or activates a Projec
 legacy Home-local YAML selection once, preserving its original bytes in SQLite;
 later file edits cannot change selection.
 
-Projects hold Tasks, KRs, metric targets and an optional default Flow. Projects
+Projects hold Tasks, KRs, metric targets and an optional workflow. Projects
 created together share a chapter name, such as `2026-10`; there is no chapter table.
 Current navigation stays Wave → Task. Completed Projects retain their history.
 
@@ -144,29 +145,34 @@ Project names never choose an endpoint or overwrite a later binding.
 The operation is recoverable within its owning Home, not atomic across provider
 mutations. Read-only planning and unrelated Wave ensure remain independent of it.
 
-Set the Project's default Flow in its content:
+Name the workflow the Project's Tasks take up in its content:
 
 ```markdown
-flow: feature
+workflow: feature
 
 ## KRs
 
 - [ ] A new contributor ships a change without an undocumented dependency.
 ```
 
-`lf --task <task> flow start` uses that Flow unless a template argument selects another. Existing
+A Task with no workflow takes that one up on its first `lf task run <task>`;
+naming another takes that up instead, and the Task keeps it.
+`lf update-plan --wave <wave> --workflow NAME` rewrites only that line; it does not
+check that NAME loads. `lf task run` refuses a name that is not a workflow
+until a Flow or workflow is named. A Project written with the earlier
+`flow:` line reads the same and is rewritten by the next plan update. Existing
 Projects observed before the status-model upgrade retain their identity and
-custom default Flow. The first explicit `lf refresh` or chapter rotation
-converts their old `recommended:` line to `flow:` and marks the recorded current
+custom workflow. The first explicit `lf refresh` or chapter rotation
+converts their old `recommended:` line to `workflow:` and marks the recorded current
 Project In Progress. Until then, planning reads project that same conversion
 without changing Linear. Deliberately Planned successors stay Planned; archived
 predecessors stay historical even if their old status says In Progress.
 
 If no receipt identifies the old current Project, adoption requires a single
 unambiguous candidate. Resolve competing plans in Linear; names and dates never
-break the tie. A missing default stays missing. Creation, adoption, plan edits and
-rotation do not require a Flow; launching a Flow still requires an explicit or
-configured selection.
+break the tie. A missing workflow stays missing. Creation, adoption, plan edits and
+rotation do not require one; a bare `lf task run` still needs the Task or its
+Project to name a workflow.
 Unobserved backlog on another Home is unresolved, so a missing local Task row
 never establishes that work should be canceled.
 
@@ -230,7 +236,7 @@ observations into the local store.
 Set targets in the chapter plan, not the instrument contract:
 
 ```json
-{"metric_targets":[{"metric_id":"task-loop-trust","target":{"kind":"at_least","value":1}}],"flow":"feature","krs":[]}
+{"metric_targets":[{"metric_id":"task-loop-trust","target":{"kind":"at_least","value":1}}],"workflow":"feature","krs":[]}
 ```
 
 Apply this complete Wave plan with
@@ -339,17 +345,19 @@ See [Homes and processes](architecture/homes.md) and
 ```bash
 lf wave status infra --json
 lf update-plan --wave infra --plan plan.json
+lf update-plan --wave infra --workflow research    # only the workflow
+lf flow customize research                     # .lf/workflows/research.yaml, written from the builtin
 ```
 
 `plan.json` contains the complete current plan:
 
 ```json
-{"metric_targets":[],"flow":"task-design","krs":[{"text":"A new contributor ships a change using the architecture guide without an undocumented dependency.","holds":false}]}
+{"metric_targets":[],"workflow":"feature","krs":[{"text":"A new contributor ships a change using the architecture guide without an undocumented dependency.","holds":false}]}
 ```
 
 The Wave objective names who benefits and what improves. Chapter KRs prove observable outcomes
 across a stated window. Update the current plan explicitly; a new chapter copies only
-the default Flow, retaining any explicitly prepared successor plan.
+the workflow, retaining any explicitly prepared successor plan.
 
 ## Linear
 
@@ -366,7 +374,7 @@ lf repo connect --all                  # all nested Waves reuse it
 lf refresh infra              # refresh the local SQLite snapshot
 lf wave status infra                   # deterministic cache-only read
 lf task create --wave infra --title "Daemon data integrity"
-lf task complete 1207... --summary "Dark mode delivered"
+lf task move 1207... end --reason "Dark mode delivered"
 ```
 
 A managed Project belongs to exactly one Initiative and exactly the repository
@@ -380,28 +388,31 @@ Every concrete file-writing change begins with a Linear task and runs as a
 durable Task Work in its own stable sibling worktree:
 
 ```bash
-lf task create --run --wave <wave> --title "add retry to token refresh"
-pbpaste | lf task create --run --wave incidents
+lf task create --wave <wave> --title "add retry to token refresh"
+pbpaste | lf task create --wave incidents
 lf checkout INF-123
 lf --task INF-123 research "write scratch/retry-analysis.md"
-lf --task INF-123 flow start
-lf --task INF-124 flow start --stack-on INF-123 # dependent work before the parent merges
-lf --task INF-125 flow start incident
+lf task run INF-123
+lf task run INF-124 --stack-on INF-123 # dependent work before the parent merges
+lf task run INF-125 incident
 ```
 
 Task Work advances through one active remote branch and PR to `main`. Its
-Project's Flow supplies the default; `--flow` selects any other template.
-Launch creates an invocation containing the expanded graph and its execution
-state. Source edits and chapter transfers do not change that captured graph.
-Finished and replaced invocations remain history; the Task has at most one
-managed FlowSession. Completion leaves Task Work open until an explicit
-completion or delivery operation settles it.
+Project's `workflow:` (`feature`, `code`, `research`, or a file in
+`.lf/workflows/`) is the one it takes up. The Task moves through its
+nodes: each `lf task run` takes one edge leaving the current node and runs
+that edge's Flow, and at a node the Task waits on you in its conversation.
+See [workflows](authoring.md#workflows).
+Each launch starts a fresh Flow: one driver process holding the expanded graph
+and the step processes it starts. Every Flow remains history and none is privileged. A finished Flow
+leaves Task Work open until an explicit completion or delivery operation
+settles it.
 
 Task context includes the Wave's `GOAL.md` and `MEMORY.md` plus its Project's
 KRs and targets. Explicit PR rotation selects the next serial branch while
 preserving the Task's worktree directory.
 
-AgentSessions and FlowSessions own typed nullable Task/Wave ancestry.
+AgentSessions and Execs own typed nullable Task/Wave ancestry.
 Historical work events retain their original attribution. Launching `lf` in a registered Task checkout binds automatically unless
 an explicit selector overrides it. A later bind can attach a conversation to
 a done or landed Task without reopening Work. Assignment is permanent and
@@ -414,28 +425,30 @@ Loopflow adds the canonical Task name, Linear link, and merge consequence.
 Publication refreshes that context without replacing the title or summary.
 
 Task events remain durable evidence for the next finite Wave pass. Status,
-steering, resume and recovery use the same commands for people and agents:
+steering and recovery use the same commands for people and agents:
 [The Agent API → Steer](agent-api.md#steer).
 
 ```bash
 lf land --next parser-proof   # after verified merge, rotate to the next
 lf land -c                    # after verified merge, complete the Task
-lf task complete INF-124 --summary "investigation recorded"   # no PR needed
+lf task move INF-124 end --reason "investigation recorded"   # no PR needed
 ```
 
-`task complete` also finishes planning-only Tasks without creating a checkout.
-It records the summary once in Linear; repeating the command preserves it.
-Placed Tasks still require a clean checkout and settled PRs. If their local
-completion reports pending PM writeback, repeat the same command to reconcile
-Linear without changing the original completion. Canceled and duplicate issues
-cannot be changed to completed through this command.
 
-`task complete` also finishes planning-only Tasks without creating a checkout.
-It records the summary once in Linear; repeating the command preserves it.
-Placed Tasks still require a clean checkout and settled PRs. If their local
-completion reports pending PM writeback, repeat the same command to reconcile
-Linear without changing the original completion. Canceled and duplicate issues
-cannot be changed to completed through this command.
+A Task's state is where it stands on its workflow: ready at `start`, active
+between, done at `end`. Reaching `end`, by an edge or by `task move`, completes
+the Task; no other command does. It is refused over uncommitted changes, an
+unsettled PR or unresolved execution, and retires a PR whose branch never moved.
+An edge that runs nothing lands nothing: it accepts uncommitted changes and
+keeps the checkout.
+`task move ISSUE end` also finishes planning-only Tasks without creating a
+checkout, recording the reason once in Linear. If completion reports pending PM
+writeback, repeat the command to reconcile Linear. Canceled and duplicate
+issues cannot be changed to completed.
+
+Linear completing a Task that is active here is shown on the Task as an error.
+Its work goes on; `end` then takes `--force`. Linear completing a Task that
+never left `start` withdraws it from what is offered.
 
 Keep each PR reviewable — roughly 1000 LOC. A Task may need several serial
 PRs, but it still needs one concrete finish line.

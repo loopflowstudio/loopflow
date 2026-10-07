@@ -31,7 +31,7 @@ struct TaskCaptureTests {
         #expect(model.selectedSessionSkill == "wave/session")
         let updated = WorkNavigator(model: model, onOpenSession: { _ in }, onNewSession: { launches.append($0) })
         try updated.inspect().find(viewWithAccessibilityIdentifier: "work-create-task").button().tap()
-        #expect(launches.map { $0.arguments(lf: "lf") } == [["lf", "--mode", "interactive", "skill", "wave/session"]])
+        #expect(launches.map { $0.arguments(lf: "lf") } == [["lf", "--interactive", "skill", "wave/session"]])
         #expect(WorkModel(query: query, repoPath: repo).selectedSessionSkill == "wave/session")
         #expect(WorkModel(query: query, repoPath: other).selectedSessionSkill == "capture-tasks")
         model.selectSessionSkill("debug", repo: other)
@@ -78,7 +78,7 @@ struct TaskCaptureTests {
             let launch = try #require(captured)
             let name = selection == nil || selection?.id == "missing" ? nil : wave.wave.name
             #expect(launch == SessionSkillLaunch(repoPath: "/src/loopflow", wave: name, skill: "capture-tasks"))
-            let expected = ["/path with spaces/lf", "--mode", "interactive"] + (name.map { ["--wave", $0] } ?? []) + ["skill", "capture-tasks"]
+            let expected = ["/path with spaces/lf", "--interactive"] + (name.map { ["--wave", $0] } ?? []) + ["skill", "capture-tasks"]
             #expect(launch.arguments(lf: "/path with spaces/lf") == expected)
             #expect(model.selection == selection)
         }

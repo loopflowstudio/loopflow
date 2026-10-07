@@ -18,7 +18,7 @@ struct SessionsStoreTests {
         #expect(item(store, "a")?.state == .pending)
         #expect(item(store, "b")?.surface == nil)
 
-        store.reconcile(try records([session(id: "a", state: "active")]))
+        store.reconcile(try records([session(id: "a", state: "waiting")]))
 
         #expect(store.sessions.map(\.id) == ["a", "b"])
         #expect(item(store, "a")?.state == .pending)
@@ -51,11 +51,11 @@ struct SessionsStoreTests {
             repoPath: "/tmp/repo",
             query: RegistryQuery { args, _ in
                 #expect(args == ["session", "connect", "native", "--json", "--replace"])
-                return session(id: "native", state: "closed", kind: "conversation")
+                return session(id: "native", state: "closed")
             }
         )
         store.reconcile(try records([
-            session(id: "native", state: "active", kind: "conversation"),
+            session(id: "native", state: "active"),
         ]))
 
         await store.select("native")
@@ -72,11 +72,11 @@ struct SessionsStoreTests {
         let store = SessionsStore(
             repoPath: "/tmp/repo",
             query: RegistryQuery { _, _ in
-                session(id: "native", state: "closed", kind: "conversation", replacing: replacing)
+                session(id: "native", state: "closed", replacing: replacing)
             }
         )
         store.reconcile(try records([
-            session(id: "native", state: replacing ? "active" : "closed", kind: "conversation"),
+            session(id: "native", state: replacing ? "active" : "closed"),
         ]))
 
         if replacing {
@@ -87,7 +87,7 @@ struct SessionsStoreTests {
         let prepared = try #require(item(store, "native")?.surface)
         #expect(prepared.openArgv.contains("--replace") == replacing)
         store.reconcile(try records([
-            session(id: "native", state: "active", kind: "conversation"),
+            session(id: "native", state: "active"),
         ]))
 
         #expect(item(store, "native")?.state == .prepared)
@@ -103,11 +103,11 @@ struct SessionsStoreTests {
         let store = SessionsStore(
             repoPath: "/tmp/repo",
             query: RegistryQuery { _, _ in
-                session(id: "native", state: "active", kind: "conversation")
+                session(id: "native", state: "active")
             }
         )
         store.reconcile(try records([
-            session(id: "native", state: "active", kind: "conversation"),
+            session(id: "native", state: "active"),
         ]))
         await store.moveHere("native")
         store.recordPaneLive("native")
@@ -132,86 +132,34 @@ struct SessionsStoreTests {
             }
         )
         store.reconcile(try records([
-            session(id: "native", state: "closed", kind: "conversation"),
+            session(id: "native", state: "closed"),
         ]))
 
         await store.select("native")
         #expect(item(store, "native")?.error != nil)
 
         store.reconcile(try records([
-            session(id: "native", state: "closed", kind: "conversation"),
+            session(id: "native", state: "closed"),
         ]))
         #expect(item(store, "native")?.error != nil)
 
         store.reconcile(try records([
-            session(id: "native", state: "active", kind: "conversation"),
+            session(id: "native", state: "active"),
         ]))
         #expect(item(store, "native")?.state == .elsewhere)
     }
 
-    @Test("Completing an interactive Session removes it from Sessions")
-    func completionRemovesInteractiveSession() async throws {
-        let calls = SessionCalls()
-        let store = SessionsStore(
-            repoPath: "/tmp/repo",
-            query: RegistryQuery { args, cwd in
-                await calls.append(args)
-                #expect(cwd == "/tmp/repo")
-                if args == ["session", "complete", "native"] {
-                    return "Session native completed"
-                }
-                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
-                return "[]"
-            }
-        )
-        store.reconcile(try records([
-            session(id: "native", state: "active", kind: "conversation"),
-        ]))
 
-        let completed = await store.complete("native")
-
-        #expect(completed)
-        #expect(store.sessions.isEmpty)
-        #expect(await calls.values == [
-            ["session", "complete", "native"],
-        ])
-    }
-
-    @Test("A ready review stays visible until completion")
-    func readyDoesNotDisappear() throws {
+    @Test("Retained review feedback stays visible")
+    func retainedFeedbackDoesNotDisappear() throws {
         let store = SessionsStore(repoPath: "/tmp/repo")
-        store.reconcile(try records([session(id: "review", state: "ready")]))
+        store.reconcile(try records([session(id: "review", state: "waiting")]))
 
         #expect(store.sessions.map(\.id) == ["review"])
-        #expect(store.sessions.first?.record.state == .ready)
+        #expect(store.sessions.first?.record.attention == .waiting)
         #expect(store.sessions.first?.record.readySummary == "Ready for review")
     }
 
-    @Test("Completing a review removes its Session")
-    func resolutionNamesTheSession() async throws {
-        let calls = SessionCalls()
-        let store = SessionsStore(
-            repoPath: "/tmp/repo",
-            query: RegistryQuery { args, cwd in
-                await calls.append(args)
-                #expect(cwd == "/tmp/repo")
-                if args == ["session", "complete", "review"] {
-                    return "Review feedback returned"
-                }
-                #expect(args == ["session", "list", "--json", "--page", "--limit", "100"])
-                return "[]"
-            }
-        )
-        store.reconcile(try records([session(id: "review", state: "ready")]))
-
-        let decided = await store.complete("review")
-
-        #expect(decided)
-        #expect(store.sessions.isEmpty)
-        #expect(await calls.values == [
-            ["session", "complete", "review"],
-        ])
-    }
 
     @Test("Session actions use the main repository for a linked worktree")
     func sessionStoreUsesMainRepository() throws {
@@ -252,20 +200,21 @@ private func records(_ entries: [String]) throws -> [SessionRecord] {
     )
 }
 
-private func session(id: String, state: String, kind: String = "flow", replacing: Bool = false) -> String {
-    """
+private func session(id: String, state: String, replacing: Bool = false) -> String {
+    // A conversation waiting on a person has no client; `waiting` is its attention.
+    let wire = state == "waiting" ? "unknown" : state
+    return """
     {
       "id": "\(id)", "run_id": "\(id)", "interactive": true,
-      "kind": "\(kind)",
       "work": { "kind": "task", "id": "task-\(id)" },
       "title": "Design the control surface",
       "detail": "review-design",
       "cwd": "/tmp/repo.\(id)",
-      "state": "\(state)",
-      "ready_summary": \(state == "ready" ? "\"Ready for review\"" : "null"),
+      "state": "\(wire)", "attention": \(state == "waiting" ? "\"waiting\"" : "null"),
+      "ready_summary": \(state == "waiting" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
-      "actions": \(sessionActionFixtureJSON(kind: kind, state: state)),
-      "title_source": "generated", "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "terminal_ids": [],
+      "actions": \(sessionActionFixtureJSON(state: wire)),
+      "title_source": "generated", "task_primary": false, "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "terminal_ids": [],
       "open_argv": ["lf", "session", "connect", "\(id)"\(replacing ? ", \"--replace\"" : "")]
     }
     """

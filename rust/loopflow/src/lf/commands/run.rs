@@ -1,8 +1,8 @@
 use crate::engine::{
     check_cli_available, exec_agent, missing_agent_message, parse_agent, prepare_exec_prompt,
     write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextSourceOverrides,
-    ExecPromptInput, ExecTarget, ProcessConfig, PromptComponents, Skill, SkillSyncOptions,
-    StreamFormat, Surface,
+    ExecPromptInput, ExecTarget, ProcessConfig, PromptComponents, SkillSyncOptions, StreamFormat,
+    Surface,
 };
 use crate::lf::commands::util::exec_session_with_env;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -26,9 +26,6 @@ use tracing::{debug, info, instrument, trace, warn};
 /// | None    | None    | Interactive chat                      |
 #[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
-    if let Some(flow) = saved_flow(cli)? {
-        return run_flow_skill(flow, skill, cli);
-    }
     if let Some(binding) = implicit_binding(cli)? {
         let mut bound = cli.exec_options();
         bound.wave = Some(binding.wave_name.clone());
@@ -53,116 +50,22 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
     exec_prompt(&built, cli).map(|_| ())
 }
 
-/// Read a Flow command's captured definition; ordinary skill commands have none.
-pub fn saved_flow(cli: &Cli) -> Result<Option<crate::durable::FlowSession>> {
-    let Some(value) = &cli.flow_step else {
-        return Ok(None);
-    };
-    let token: crate::ops::flow_run::ActiveStep = serde_json::from_str(value)?;
+/// `lf -b session resume ID MESSAGE`: one more headless turn of a conversation,
+/// run as its skill with `message` and the provider's own history.
+pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    let flow = store
-        .flow(&token.invocation)?
-        .ok_or_else(|| anyhow!("Flow disappeared"))?;
-    anyhow::ensure!(
-        flow.version == token.version && !flow.finished && !flow.is_human(),
-        "Flow boundary changed before skill execution"
-    );
-    Ok(Some(flow))
-}
-
-fn run_flow_skill(flow: crate::durable::FlowSession, name: Option<&str>, cli: &Cli) -> Result<()> {
-    let claim = std::env::var(crate::durable::TASK_WORKER_CLAIM_ENV)
-        .ok()
-        .map(|value| serde_json::from_str::<crate::durable::TaskWorkerClaim>(&value))
-        .transpose()?;
-    std::env::remove_var(crate::durable::TASK_WORKER_CLAIM_ENV);
-    anyhow::ensure!(
-        flow.claim == claim,
-        "Flow claim changed before skill execution"
-    );
-    let exec = crate::journal::current_exec_id()
-        .ok_or_else(|| anyhow!("skill command requires a registered Exec"))?;
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    let binding = implicit_binding(cli)?;
-    let task = binding.as_ref().and_then(|binding| match &binding.work {
-        crate::durable::WorkRef::Task(id) => Some(id.clone()),
-        _ => None,
-    });
-    anyhow::ensure!(
-        task == flow.task_id,
-        "Flow Task and current checkout disagree; restore the Flow checkout before resuming"
-    );
-    let flow = store.reserve_attempt(flow.id(), flow.version, claim.as_ref(), Some(&exec))?;
-    let skill = crate::engine::current_skill(&flow.invocation.steps, &flow.cursor)
-        .ok_or_else(|| anyhow!("captured boundary has no skill"))?;
-    anyhow::ensure!(
-        name == Some(skill.skill.name.as_str()),
-        "command does not name the selected Flow skill"
-    );
-    let mut launch = cli.exec_options();
-    launch.mode = Some(crate::lf::LaunchMode::Batch);
-    launch.task = task.as_ref().map(ToString::to_string);
-    launch.wave = flow
-        .wave_id
-        .as_ref()
-        .map(|id| {
-            store
-                .get_wave(id)?
-                .map(|wave| wave.slug().to_owned())
-                .ok_or_else(|| anyhow!("owning Wave {id} is not registered"))
-        })
-        .transpose()?;
-    launch.bound_cwd = Some(flow.cwd.clone());
-    launch.model = launch.model.or_else(|| flow.model.clone());
-    let _token = super::flow::EnvVarGuard::set(
-        crate::ops::flow_run::FLOW_STEP_ENV,
-        &crate::ops::flow_run::ActiveStep::of(&flow).env_value()?,
-    );
-    let mut message = flow.message.clone().unwrap_or_default();
-    if let Some(repeat) = &skill.repeat {
-        let edge = skill.id.as_deref().expect("repeat occurrence has an id");
-        let traversals = flow
-            .cursor
-            .leaf()
-            .progress
-            .repeats
-            .get(edge)
-            .copied()
-            .unwrap_or(0);
-        message.push_str(&format!("\n\nDecision occurrence {edge}: pass {}. The backward edge returns to {}. Compare the preceding pass's intended progress with its observed results; new evidence counts as progress. Missing prior evidence is an evidence gap, not proof of no progress.", u64::from(traversals) + 1, repeat.from));
+    let session = store
+        .session(id)?
+        .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
+    let mut turn = cli.exec_options();
+    if turn.model.is_none() {
+        turn.model = match (&session.provider, &session.model) {
+            (Some(provider), Some(model)) => Some(format!("{provider}:{model}")),
+            (provider, _) => provider.clone(),
+        };
     }
-    if let Some(direction) = &flow.cursor.leaf().progress.direction {
-        message.push_str(&format!(
-            "\n\nPrevious step feedback or iteration direction:\n{direction}"
-        ));
-    }
-    if let Some(output) = flow
-        .current_step()
-        .and_then(crate::engine::flow_output::FlowOutput::for_step_instructions)
-    {
-        message.push_str(&output);
-    }
-    let mut built = build_prompt_at(
-        Some(&skill.skill.name),
-        Some(&message),
-        &launch,
-        flow.cwd.clone(),
-        false,
-        None,
-        Some(skill.skill.clone()),
-    )?;
-    built.subjects = launch.work_subject_selector().into_iter().collect();
-    built.work = binding
-        .as_ref()
-        .map(|binding| crate::session::SessionWork {
-            task_id: task,
-            wave_id: Some(binding.wave_id.clone()),
-            source: binding.source,
-        })
-        .or_else(|| flow.declared_work().filter(|work| work.task_id.is_none()));
-    built.claim = claim;
-    print_context_header(&built, &launch);
-    exec_prompt(&built, &launch).map(|_| ())
+    turn.resume = Some(session.id);
+    run(session.skill.as_deref(), Some(message), &turn)
 }
 
 #[doc(hidden)]
@@ -221,11 +124,7 @@ fn exec_bound(
         bound_message(binding, message)
     };
     let cli = &launch;
-    let resolved_skill = skill
-        .map(crate::ops::human_session::active_flow_skill)
-        .transpose()?
-        .flatten();
-    let mut built = build_bound_prompt_at(skill, &message, cli, &binding.cwd, resolved_skill)?;
+    let mut built = build_bound_prompt_at(skill, &message, cli, &binding.cwd)?;
     built.agent_config.cwd = Some(binding.cwd.clone());
     built.agent_config.env.insert(
         crate::work::wave::context::WAVE_ID_ENV.to_string(),
@@ -294,7 +193,6 @@ struct PromptBuild {
     log_name: String,
     subjects: Vec<String>,
     work: Option<crate::session::SessionWork>,
-    claim: Option<crate::durable::TaskWorkerClaim>,
 }
 
 fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
@@ -315,12 +213,7 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         repo_root
     };
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
-    let saved = skill
-        .map(crate::ops::human_session::active_flow_skill)
-        .transpose()?
-        .flatten();
-    let native = saved.is_none();
-    build_prompt_at(skill, message, cli, repo_root, native, None, saved)
+    build_prompt_at(skill, message, cli, repo_root, true, None)
 }
 
 fn build_bound_prompt_at(
@@ -328,7 +221,6 @@ fn build_bound_prompt_at(
     message: &str,
     cli: &Cli,
     repo_root: &Path,
-    resolved_skill: Option<Skill>,
 ) -> Result<PromptBuild> {
     // A Work-bound launch carries context that cannot be reconstructed by a
     // vendor skill sigil: the selected Work seed and the Task worktree's exact
@@ -343,7 +235,6 @@ fn build_bound_prompt_at(
             crate::trace::ContextAssetKind::Goal,
             crate::trace::ContextScope::Task,
         )),
-        resolved_skill,
     )
 }
 
@@ -374,7 +265,13 @@ fn prepare_task_input(
         if let Err(error) = crate::ops::linear_observe::refresh_task_comments(&store, &task).await {
             tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
         }
-        let seed = crate::ops::task_input::prepare(&store, &task, wave.slug()).await?;
+        let seed = crate::ops::task_input::read_seed(
+            &store,
+            &task,
+            wave.slug(),
+            cli.steers_after.unwrap_or(0),
+        )
+        .await?;
         Ok(Some((store, seed)))
     })
 }
@@ -386,7 +283,6 @@ fn build_prompt_at(
     repo_root: PathBuf,
     use_native_skill_exec: bool,
     message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
-    resolved_skill: Option<Skill>,
 ) -> Result<PromptBuild> {
     let is_interactive = is_interactive_run(cli, skill, message);
     let task_input = prepare_task_input(cli)?;
@@ -418,13 +314,9 @@ fn build_prompt_at(
     );
 
     let discover_start = Instant::now();
-    let discovered_skill = match (resolved_skill, skill) {
-        (Some(skill), _) => Some(skill),
-        (None, Some(skill_name)) => Some(crate::lf::discovery::discover_skill(
-            &repo_root, skill_name,
-        )?),
-        (None, None) => None,
-    };
+    let discovered_skill = skill
+        .map(|name| crate::lf::discovery::discover_skill(&repo_root, name))
+        .transpose()?;
     debug!(
         elapsed_ms = discover_start.elapsed().as_millis(),
         "discovered skill"
@@ -594,7 +486,6 @@ fn build_prompt_at(
         log_name,
         subjects: Vec::new(),
         work: None,
-        claim: None,
     })
 }
 
@@ -613,11 +504,10 @@ fn is_interactive_run_with_tty(
     message: Option<&str>,
     attached_tty: bool,
 ) -> bool {
-    match cli.mode {
-        Some(crate::lf::LaunchMode::Batch) => false,
-        Some(_) => true,
-        None => attached_tty || (skill.is_none() && message.is_none()),
+    if cli.batch {
+        return false;
     }
+    cli.interactive || cli.tui || cli.ide || attached_tty || (skill.is_none() && message.is_none())
 }
 
 fn should_exec_via_skill(skill_name: &str) -> bool {
@@ -698,10 +588,12 @@ fn forced_launch_target(cli: &Cli, skill: Option<&str>) -> Option<ExecTarget> {
     if skill == Some("default") {
         return Some(ExecTarget::Tui);
     }
-    match cli.mode {
-        Some(crate::lf::LaunchMode::Ide) => Some(ExecTarget::Ide),
-        Some(crate::lf::LaunchMode::Tui) => Some(ExecTarget::Tui),
-        _ => None,
+    if cli.ide {
+        Some(ExecTarget::Ide)
+    } else if cli.tui {
+        Some(ExecTarget::Tui)
+    } else {
+        None
     }
 }
 
@@ -716,7 +608,7 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         } else {
             "tui"
         };
-        let capture = begin_capture(built, surface, &built.agent_config)?;
+        let capture = begin_capture(built, surface, &built.agent_config, None)?;
         let provider_session_id = if target == ExecTarget::Tui && built.harness == "claude" {
             let artifact_key = capture.artifact_key();
             let raw_id = artifact_key
@@ -776,7 +668,7 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
     let agent_config = built.agent_config.clone();
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
-    let capture = begin_capture(built, "headless", &agent_config)?;
+    let capture = begin_capture(built, "headless", &agent_config, cli.resume.as_deref())?;
 
     let result = exec_headless_prompt(built, &capture, &effective_system, &agent_config);
     let outcome = if result.is_ok() {
@@ -876,6 +768,7 @@ fn begin_capture(
     built: &PromptBuild,
     surface: &str,
     prepared_config: &AgentConfig,
+    resume: Option<&str>,
 ) -> Result<CaptureHandle> {
     let cwd = built
         .agent_config
@@ -888,7 +781,6 @@ fn begin_capture(
         .cloned()
         .map(SubjectAttribution::declared)
         .collect::<Vec<_>>();
-    let step = crate::ops::flow_run::capture_membership()?;
     let spec = SessionCaptureSpec {
         harness: built.harness.clone(),
         model: built.model.clone(),
@@ -898,52 +790,13 @@ fn begin_capture(
         worktree: Some(built.repo_root.clone()),
         skill: built.skill_name.clone(),
         subjects,
-        flow: step.membership,
+        flow: crate::session_record::SessionFlowMembership::Independent,
         work: built.work.clone(),
     };
-    let capture = if let Some((token, captured, artifact_key)) = step.reserved {
-        // The step command reserved this capture; publication retains its claim.
-        let (provider, model) = (spec.harness.clone(), spec.model.clone());
-        CaptureHandle::begin_reserved_with_context(
-            spec,
-            artifact_key,
-            (surface == "headless")
-                .then(|| AgentExecRequest::from_prepared(prepared_config, &built.capabilities)),
-            &built.context,
-            |_artifact| {
-                let path = crate::store::database_path_from_env()
-                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
-                crate::store::sqlite::SqliteStore::new(&path)?.publish_attempt(
-                    &token.invocation,
-                    token.version,
-                    captured,
-                    built.claim.as_ref(),
-                    &provider,
-                    model.as_deref(),
-                )
-            },
-        )
-    } else if let Some((artifact_key, membership)) = crate::ops::human_session::reserved_capture()?
-    {
-        let spec = SessionCaptureSpec {
-            flow: membership,
-            ..spec
-        };
-        let (provider, model) = (spec.harness.clone(), spec.model.clone());
-        CaptureHandle::begin_reserved_with_context(
-            spec,
-            artifact_key,
-            None,
-            &built.context,
-            |artifact_key| {
-                crate::ops::human_session::publish_capture_binding(
-                    artifact_key,
-                    &provider,
-                    model.as_deref(),
-                )
-                .map_err(|error| crate::store::StoreError::InvalidAuthority(error.to_string()))
-            },
-        )
+    let capture = if let Some(session) = resume {
+        // A headless resume is another turn of the same conversation.
+        let input = crate::ops::human_session::continue_conversation(session)?;
+        CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &input, spec, &built.context)
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
         CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &id, spec, &built.context)
     } else {
@@ -1292,7 +1145,7 @@ mod tests {
 
     use crate::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
-    use crate::engine::{Config, ExecTarget, Skill, Surface};
+    use crate::engine::{Config, ExecTarget, Surface};
     use crate::lf::Cli;
     use crate::test_ambient::EnvGuard;
     use crate::trace::{ContextAssetKind, ContextScope};
@@ -1302,13 +1155,10 @@ mod tests {
 
     #[test]
     fn bare_lf_stays_in_terminal_and_operate_honors_launch_mode() {
-        for mode in [
-            None,
-            Some(crate::lf::LaunchMode::Ide),
-            Some(crate::lf::LaunchMode::Tui),
-        ] {
+        for (ide, tui) in [(false, false), (true, false), (false, true)] {
             let cli = Cli {
-                mode,
+                ide,
+                tui,
                 ..Default::default()
             };
             assert_eq!(
@@ -1317,7 +1167,7 @@ mod tests {
             );
         }
         let cli = Cli {
-            mode: Some(crate::lf::LaunchMode::Ide),
+            ide: true,
             ..Default::default()
         };
         assert_eq!(
@@ -1355,7 +1205,7 @@ mod tests {
                 (Some("both"), true, true),
                 (Some("none"), false, false),
             ] {
-                let mut args = vec!["lf", "--mode", "batch"];
+                let mut args = vec!["lf", "--batch"];
                 if let Some(choice) = choice {
                     args.extend(["--diff", choice]);
                 }
@@ -1366,8 +1216,7 @@ mod tests {
                     }
                     let cli = Cli::parse_from(args);
                     let built =
-                        build_bound_prompt_at(None, "inspect changes", &cli, repo.path(), None)
-                            .unwrap();
+                        build_bound_prompt_at(None, "inspect changes", &cli, repo.path()).unwrap();
                     assert_eq!(
                         built
                             .components
@@ -1413,7 +1262,7 @@ mod tests {
             ".lf/config.yaml",
             "user:\n  name: Repository Owner\ndiff: false\ndiff_files: false\npaste: false\n",
         );
-        let cli = Cli::parse_from(["lf", "--mode", "batch"]);
+        let cli = Cli::parse_from(["lf", "--batch"]);
 
         for name in ["Jack", "Jacqueline", "  "] {
             std::fs::write(
@@ -1423,14 +1272,9 @@ mod tests {
             .unwrap();
             // Each assembly reloads personal config, including the correction.
             for _ in 0..2 {
-                let built = build_bound_prompt_at(
-                    None,
-                    "choose the prototype path",
-                    &cli,
-                    repo.path(),
-                    None,
-                )
-                .unwrap();
+                let built =
+                    build_bound_prompt_at(None, "choose the prototype path", &cli, repo.path())
+                        .unwrap();
                 assert_eq!(
                     built.components.user_name.as_deref(),
                     if name.trim().is_empty() {
@@ -1453,7 +1297,7 @@ mod tests {
             }
         }
         std::fs::remove_file(home.path().join("config.yaml")).unwrap();
-        let built = build_bound_prompt_at(None, "continue", &cli, repo.path(), None).unwrap();
+        let built = build_bound_prompt_at(None, "continue", &cli, repo.path()).unwrap();
         assert_eq!(built.components.user_name.as_deref(), Some("Git User"));
     }
 
@@ -1473,10 +1317,10 @@ mod tests {
             ".lf/config.yaml",
             "diff: false\ndiff_files: false\npaste: false\n",
         );
-        let cli = Cli::parse_from(["lf", "--mode", "batch"]);
+        let cli = Cli::parse_from(["lf", "--batch"]);
         for (caller, expected) in [("Jack", "Jack"), ("", "Host Owner")] {
             std::env::set_var("LF_USER_NAME", caller);
-            let built = build_bound_prompt_at(None, "continue", &cli, repo.path(), None).unwrap();
+            let built = build_bound_prompt_at(None, "continue", &cli, repo.path()).unwrap();
             assert_eq!(built.components.user_name.as_deref(), Some(expected));
             assert!(built.agent_config.task_prompt.contains(expected));
             assert_eq!(built.agent_config.env["LF_USER_NAME"], expected);
@@ -1582,9 +1426,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             log_name: "generic-run-proof".to_string(),
             subjects: vec!["task:LOO-265".to_string()],
             work: None,
-            claim: None,
         };
-        let capture = begin_capture(&built, "headless", &built.agent_config).unwrap();
+        let capture = begin_capture(&built, "headless", &built.agent_config, None).unwrap();
         let artifact_key = capture.artifact_key();
         let run_dir = capture.artifact_dir();
 
@@ -1699,7 +1542,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 log_name: log_name.to_string(),
                 subjects: vec!["task:LOO-267".to_string()],
                 work: None,
-                claim: None,
             }
         }
 
@@ -1785,8 +1627,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .unwrap()
             .success());
 
-        let built =
-            build_bound_prompt_at(Some("proof"), "reconcile", &cli, repo.path(), None).unwrap();
+        let built = build_bound_prompt_at(Some("proof"), "reconcile", &cli, repo.path()).unwrap();
         assert!(built
             .agent_config
             .task_prompt
@@ -1807,12 +1648,11 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.create_file("scratch/z-untracked.md", "untracked evidence bytes");
 
         let cli = Cli {
-            mode: Some(crate::lf::LaunchMode::Batch),
+            batch: true,
             wave: Some("ship".to_string()),
             ..Cli::default()
         };
-        let built =
-            build_bound_prompt_at(Some("proof"), "continue", &cli, repo.path(), None).unwrap();
+        let built = build_bound_prompt_at(Some("proof"), "continue", &cli, repo.path()).unwrap();
 
         let committed = built
             .agent_config
@@ -1843,7 +1683,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         repo.stage_all();
         repo.commit("bound basis");
         let cli = Cli {
-            mode: Some(crate::lf::LaunchMode::Interactive),
+            interactive: true,
             ..Cli::default()
         };
 
@@ -1852,7 +1692,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             "<lf:work kind=\"task\" id=\"task_test\">Task seed</lf:work>",
             &cli,
             repo.path(),
-            None,
         )
         .unwrap();
         repo.create_file(
@@ -1881,14 +1720,14 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn forced_session_handoff_counts_as_interactive() {
-        let cli = Cli::parse_from(["lf", "--mode", "ide", "gate"]);
+        let cli = Cli::parse_from(["lf", "--ide", "gate"]);
 
         assert!(is_interactive_run(&cli, Some("gate"), None));
     }
 
     #[test]
     fn batch_named_skill_is_headless() {
-        let cli = Cli::parse_from(["lf", "--mode", "batch", "design"]);
+        let cli = Cli::parse_from(["lf", "--batch", "design"]);
         assert!(!is_interactive_run(&cli, Some("design"), None));
     }
 
@@ -1916,7 +1755,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ".lf/skills/proof.md",
             "# Proof\n\nInstructions that must reach the provider.",
         );
-        let cli = Cli::parse_from(["lf", "--mode", "tui", "proof"]);
+        let cli = Cli::parse_from(["lf", "--tui", "proof"]);
 
         let built = build_prompt_at(
             Some("proof"),
@@ -1924,7 +1763,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             &cli,
             repo.path().to_path_buf(),
             true,
-            None,
             None,
         )
         .unwrap();
@@ -1953,14 +1791,13 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let goal =
             "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         repo.create_file("wave/release/GOAL.md", goal);
-        let cli = Cli::parse_from(["lf", "--mode", "ide", "--wave", "release", "design"]);
+        let cli = Cli::parse_from(["lf", "--ide", "--wave", "release", "design"]);
         let built = build_prompt_at(
             Some("design"),
             Some("plan the release"),
             &cli,
             repo.path().to_path_buf(),
             true,
-            None,
             None,
         )
         .unwrap();
@@ -1973,43 +1810,6 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .assets
             .iter()
             .any(|asset| { asset.source_path.as_deref() == Some("wave/release/GOAL.md") }));
-    }
-
-    #[test]
-    fn persisted_skill_spec_is_the_prompt_authority() {
-        let repo = loopflow_test_support::TestRepo::new();
-        repo.create_file(
-            ".lf/skills/proof.md",
-            "# Mutated\n\nThis source was edited after the Flow started.",
-        );
-        let skill = Skill {
-            name: "proof".to_string(),
-            agent: None,
-            default_agent: None,
-            action_style: None,
-            content: Some(
-                "# Persisted\n\nThese are the instructions captured at Flow start.".to_string(),
-            ),
-        };
-
-        let built = build_prompt_at(
-            Some("proof"),
-            Some("prove it"),
-            &Cli::default(),
-            repo.path().to_path_buf(),
-            false,
-            None,
-            Some(skill),
-        )
-        .unwrap();
-        assert!(built
-            .agent_config
-            .task_prompt
-            .contains("captured at Flow start"));
-        assert!(!built
-            .agent_config
-            .task_prompt
-            .contains("edited after the Flow started"));
     }
 
     #[test]

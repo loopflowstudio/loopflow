@@ -1,7 +1,0 @@
-# Prove the result, review the demo together, then settle the Task.
-- gate
-- step:
-    id: review_demo
-    name: demo
-    human: true
-- cmd: pr land -c

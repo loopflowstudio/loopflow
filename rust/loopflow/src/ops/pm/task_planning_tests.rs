@@ -24,7 +24,7 @@ async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) 
     let (repo, wave) = fixture.planning_repo().await;
     let project = serde_json::from_value(json!({
         "id": "project-1", "slug": "Chapter", "name": "Chapter", "summary": "",
-        "metric_targets": [], "flow": "feature", "status": "started", "krs": [],
+        "metric_targets": [], "workflow": "feature", "status": "started", "krs": [],
         "initiative_ids": ["initiative-1"], "team_ids": ["team-1"]
     }))
     .unwrap();
@@ -113,7 +113,7 @@ fn planning_project(id: &str, current: &str) -> serde_json::Value {
         "prior-project" => "Previous chapter",
         _ => "Next chapter",
     };
-    json!({"id":id, "name":name, "description":"", "content":"flow: feature",
+    json!({"id":id, "name":name, "description":"", "content":"workflow: feature",
         "status":{"type":if completed { "completed" } else { "started" }},
         "updatedAt":if completed { "2026-09-30T12:00:01Z" } else { "2026-09-30T12:00:00Z" },
         "archivedAt":null,
@@ -446,16 +446,13 @@ fn task_creation_and_edit_do_not_require_a_post_write_wave_snapshot() {
     }));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        let crate::ops::task::TaskCreateResult::Created(created) = crate::ops::task::task_create(
+        let created = crate::ops::task::task_create(
             &repo,
             Some("product"),
             Some("Continue training".into()),
             Some("Retain the issue".into()),
-            None,
         )
-        .unwrap() else {
-            panic!("backlog creation unexpectedly launched work")
-        };
+        .unwrap();
         crate::ops::task::task_edit(
             &repo,
             &created.identifier,
@@ -503,7 +500,6 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
                 Some("product"),
                 Some("Future work".into()),
                 Some("Full directive".into()),
-                None,
             )
         };
         {
@@ -520,9 +516,7 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
                 1
             );
         }
-        let crate::ops::task::TaskCreateResult::Created(first) = create().unwrap() else {
-            panic!("creation without --run must return the issue");
-        };
+        let first = create().unwrap();
         let edit = || {
             crate::ops::task::task_edit(
                 &repo,
@@ -544,9 +538,7 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
             assert!(error.contains("Retry the same Task command"), "{error}");
         }
         edit().unwrap();
-        let crate::ops::task::TaskCreateResult::Created(retry) = create().unwrap() else {
-            panic!("creation without --run must return the issue");
-        };
+        let retry = create().unwrap();
         assert_eq!(first.id, retry.id);
         assert_eq!(first.name, "Future work");
         assert_eq!(retry.name, "Edited future work");
@@ -558,7 +550,7 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
             .unwrap();
         assert!(retry.description.ends_with(marker));
         let snapshot = crate::ops::task_pm::load_wave(&repo, "product", PmRefresh::Never).unwrap();
-        assert_eq!(snapshot.items, vec![*retry]);
+        assert_eq!(snapshot.items, vec![retry]);
     });
     assert_eq!(
         runtime.block_on(async { state.lock().await.issues.len() }),
@@ -656,7 +648,6 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
             Some("product"),
             Some("Future work".into()),
             Some("Preserve this issue's outcome".into()),
-            None,
         )
         .unwrap();
     });
@@ -916,16 +907,13 @@ fi
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        let crate::ops::task::TaskCreateResult::Created(item) = crate::ops::task::task_create(
+        let item = crate::ops::task::task_create(
             &repo,
             Some("product"),
             Some("Future work".into()),
             Some("A directive".into()),
-            None,
-        )
-        .unwrap() else {
-            panic!("creation without --run must return the issue");
-        };
+)
+        .unwrap();
         let task = registered.then(|| {
             for args in [
                 vec!["add", "."],
@@ -1025,7 +1013,7 @@ fi
             .as_ref()
             .map_or(item.identifier.as_str(), |task| task.id.as_str());
         let complete = |summary: &str| match merge {
-            None | Some(PrMergeMode::User) => crate::ops::task::task_complete(&repo, selector, summary.into(), &[]),
+            None | Some(PrMergeMode::User) => crate::ops::task::task_end(&repo, selector, Some(summary), &Default::default()),
             Some(PrMergeMode::Auto) => runtime.block_on(async {
                 let task = task.as_ref().unwrap();
                 let pr = fixture.store.task_prs(&task.id).await.unwrap().remove(0);
@@ -1171,7 +1159,7 @@ fi
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             let terminal: i64 = conn
                 .query_row(
-                    "SELECT work_terminal_at FROM tasks WHERE id=?1",
+                    "SELECT updated_at FROM task_workflows WHERE task_id=?1",
                     [task.id.as_str()],
                     |row| row.get(0),
                 )
@@ -1259,7 +1247,7 @@ fi
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             assert_eq!(
                 conn.query_row(
-                    "SELECT work_terminal_at FROM tasks WHERE id=?1",
+                    "SELECT updated_at FROM task_workflows WHERE task_id=?1",
                     [task.id.as_str()],
                     |row| row.get::<_, i64>(0)
                 )
@@ -1398,16 +1386,13 @@ esac
         let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
         let (url, server) = runtime.block_on(serve(state.clone()));
         PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-            let crate::ops::task::TaskCreateResult::Created(item) = crate::ops::task::task_create(
+            let item = crate::ops::task::task_create(
                 &repo,
                 Some("product"),
                 Some("Cancel me".into()),
                 Some("Keep history".into()),
-                None,
             )
-            .unwrap() else {
-                panic!("planning issue")
-            };
+            .unwrap();
             let timestamp = time::OffsetDateTime::now_utc();
             let project = runtime
                 .block_on(fixture.store.list_projects(Some(wave.id())))
@@ -1457,35 +1442,12 @@ esac
             runtime
                 .block_on(fixture.store.create_task(&task, &pr, None))
                 .unwrap();
-            runtime
-                .block_on(fixture.store.start_task_flow(
-                    &task.id,
-                    crate::durable::FlowSession {
-                        task_id: Some(task.id.clone()),
-                        wave_id: Some(task.wave_id.clone()),
-                        cwd: task.worktree.clone(),
-                        message: None,
-                        model: None,
-                        finished: false,
-                        invocation: crate::durable::test_flow_invocation(
-                            "review",
-                            0,
-                            "review",
-                            Some("review"),
-                            true,
-                        ),
-                        selected_capture: None,
-                        pending_session_id: None,
-                        ready_summary: None,
-                        cursor: Default::default(),
-                        version: 0,
-                        worker_generation: 0,
-                        claim: None,
-                        failure: None,
-                        updated_at: timestamp,
-                    },
-                ))
-                .unwrap();
+            fixture.store.sqlite.test_flow(
+                "review",
+                &task.worktree.to_string_lossy(),
+                &[("review", Some("failed"))],
+                Some("failed"),
+            );
             assert_eq!(
                 crate::ops::task::task_repository(&checkout, None).unwrap(),
                 checkout.canonicalize().unwrap()
@@ -1603,10 +1565,8 @@ esac
             .is_empty());
             assert!(git(&repo, &["branch", "--list", "cancel-me"]).is_empty());
             assert!(repo.join(".git/pr-closed").exists());
-            assert!(runtime
-                .block_on(fixture.store.task_flow(&task.id))
-                .unwrap()
-                .is_none());
+            // The Flow's Execs remain as history; abandonment retires nothing.
+            assert_eq!(fixture.store.sqlite.task_flows(&task.id).unwrap().len(), 1);
             assert_eq!(
                 runtime
                     .block_on(
@@ -1664,7 +1624,6 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
             Some("product"),
             Some("Eligible work".into()),
             Some("Cancel only repository work".into()),
-            None,
         )
         .unwrap();
         for plan in [true, false] {
@@ -1779,7 +1738,6 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
             Some("product"),
             Some("Planning work".into()),
             Some("Retain evidence".into()),
-            None,
         )
         .unwrap();
         assert!(crate::ops::task::task_sweep(&repo, true)

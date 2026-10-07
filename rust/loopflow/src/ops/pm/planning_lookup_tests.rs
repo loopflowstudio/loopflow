@@ -1265,7 +1265,7 @@ async fn project_binding_preserves_exact_backlog_identity_and_retries() {
             assert_eq!(first, repeated);
             assert_eq!(first.status, crate::pm::ProjectStatus::Backlog);
             assert_eq!(first.name, "Summer work — customer requests");
-            assert!(first.flow.is_empty());
+            assert!(first.workflow.is_empty());
             assert_eq!(first.krs.len(), 1);
             assert_eq!(first.krs[0].text, "Preserve work");
             assert!(!first.krs[0].holds);
@@ -1324,7 +1324,7 @@ async fn project_binding_rejects_delayed_backlog_after_accepted_completion() {
         name: "Completed plan".into(),
         summary: String::new(),
         metric_targets: vec![],
-        flow: String::new(),
+        workflow: String::new(),
         status: crate::pm::ProjectStatus::Completed,
         krs: vec![],
         initiative_ids: vec!["initiative-1".into()],

@@ -95,21 +95,28 @@ fn exec_query(
         });
     }
     if let Some(work) = &filter.performed_work {
-        let (column, value) = match work {
-            ExecWorkFilter::Task(id) => ("task_id", id.as_str()),
-            ExecWorkFilter::Wave(id) => ("wave_id", id.as_str()),
+        let (column, value, tasks, close) = match work {
+            ExecWorkFilter::Task(id) => ("task_id", id.as_str(), "tw.id=", ""),
+            ExecWorkFilter::Wave(id) => (
+                "wave_id",
+                id.as_str(),
+                "tw.project_id IN (SELECT id FROM projects WHERE wave_id=",
+                ")",
+            ),
         };
         let value = bind(Value::Text(value.into()));
-        // Native starts retain their original assignment. Mechanical starts
-        // reference their owning captured Flow. Neither a current Session bind
-        // nor an Exec's command context establishes performed work.
+        // Native starts retain their original assignment. A Flow's steps ran
+        // in their Task's checkout. Neither a current Session bind nor
+        // another Exec's command context establishes performed work.
         sql.push_str(&format!(
             " AND e.id IN (
             SELECT exec_id FROM session_events
             WHERE kind='started' AND {column}={value} AND exec_id IS NOT NULL
             UNION
-            SELECT h.exec_id FROM flow_events h JOIN flow_sessions f ON f.id=h.flow_id
-            WHERE h.kind='operation_started' AND f.{column}={value} AND h.exec_id IS NOT NULL
+            SELECT op.id FROM flow_exec_steps fs JOIN execs op ON op.id=fs.exec_id
+            JOIN tasks tw ON {tasks}{value}{close}
+            WHERE tw.worktree!=''
+              AND (op.cwd=rtrim(tw.worktree,'/') OR instr(op.cwd,rtrim(tw.worktree,'/')||'/')=1)
         )"
         ));
     }
@@ -665,15 +672,6 @@ impl SqliteStore {
         let _dispatch = self.lock_session_driver(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let closed_review: bool = tx.query_row(
-            "SELECT kind='flow_review' AND completed_at IS NOT NULL FROM agent_sessions WHERE id=?1",
-            [session], |row| row.get(0),
-        )?;
-        if closed_review {
-            return Err(StoreError::InvalidAuthority(
-                "review has been closed".into(),
-            ));
-        }
         let current = driver_in(&tx, session)?;
         if current.as_ref() != expected {
             return Err(StoreError::InvalidAuthority(
@@ -768,10 +766,11 @@ impl SqliteStore {
         tx.execute(
             &format!(
                 "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1
-             AND s.completed_at IS NULL AND s.kind='conversation' AND s.primary_scope IS NULL
-             AND s.wave_id IS NULL AND s.flow_session_id IS NULL
+             AND s.completed_at IS NULL AND s.primary_scope IS NULL
+             AND s.wave_id IS NULL AND {} IS NULL
              AND s.driver_exec_id=s.provider_exec_id
              AND NOT EXISTS({}) AND ?3 IN ('completed','interrupted')",
+                super::sessions::SESSION_FLOW,
                 super::task_work::session_tasks("s")
             ),
             params![session, now, outcome],
@@ -1166,13 +1165,26 @@ mod discovery_tests {
                 [&observer],
             )
             .unwrap();
-            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,
-                worker_generation,updated_at,state,ended_at) VALUES('mechanical',?1,?2,'{\"id\":\"mechanical\"}',0,0,1,0,1,'completed',2)",params![first.as_str(),wave]).unwrap();
+            // A Flow's driver recorded both Execs as steps in the first Task's checkout.
+            conn.execute(
+                "UPDATE tasks SET worktree='/repo.first' WHERE id=?1",
+                [first.as_str()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO flow_execs(exec_id,flow,graph) VALUES(?1,'proof','{}')",
+                [&observer],
+            )
+            .unwrap();
             for exec in [&shared, &mechanical] {
                 conn.execute(
-                    "INSERT INTO flow_events(flow_id,node,iterations,kind,exec_id,payload)
-                    VALUES('mechanical',0,'[]','operation_started',?1,'unreadable payload')",
-                    [exec],
+                    "UPDATE execs SET cwd='/repo.first',parent_exec_id=?2 WHERE id=?1",
+                    params![exec, observer],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO flow_exec_steps(flow_exec_id,exec_id,node,iterations) VALUES(?2,?1,0,'[]')",
+                    params![exec, observer],
                 )
                 .unwrap();
             }

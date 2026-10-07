@@ -96,7 +96,7 @@ struct TaskHistoryFilterTests {
         #expect(visible(try task("canceled", date: nil, runtime: "ready", missing: true), TaskHistoryFilter()))
     }
 
-    @Test func unresolvedReviewAndRetainedSessionSurviveHiddenHistory() throws {
+    @Test func unresolvedFlowAndRetainedSessionSurviveHiddenHistory() throws {
         let row = try task("canceled", date: nil, runtime: "done", missing: true)
         #expect(visible(try task("canceled", date: nil, runtime: "done", missing: true, review: true), TaskHistoryFilter()))
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: Data(contentsOf: fixtures.appendingPathComponent("sessions.json")))
@@ -287,11 +287,16 @@ struct TaskHistoryFilterTests {
         try checkCount()
         _ = try view.inspect().find(text: "Completed · date unavailable")
         #expect(model.taskHistoryFilters[wave.wave.id]?.showCompleted == true)
-        // Inspection remains available even for hidden terminal inventory;
-        // Rust's admission decision still governs the production Start button.
+        // A hidden Task can still be inspected; Rust's admission decision
+        // governs Start in its workspace header.
+        var work = try #require(JSONSerialization.jsonObject(
+            with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
+        work["workflow"] = NSNull()
+        let unstarted = try JSONDecoder().decode(TaskWork.self, from: JSONSerialization.data(withJSONObject: work))
         for id in ["LOO-318", "recent", "LOO-309"] {
-            model.select(.task(id: id))
-            let start = try view.inspect().find(viewWithAccessibilityIdentifier: "task-flow-start").button()
+            let task = try #require(model.task(id: id)?.task)
+            let header = TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .available(unstarted))
+            let start = try header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button()
             #expect(start.isDisabled() == (id != "LOO-309"))
         }
     }

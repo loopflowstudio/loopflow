@@ -390,7 +390,7 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
         let driver = store
             .claim_session_driver(&session, None, &exec, false)
             .unwrap();
-        let mut history = History::new(Some((store.clone(), session.clone(), driver)), None);
+        let mut history = History::new(Some((store.clone(), session.clone(), driver)));
         let request = history.request();
         let mut display = opencode_mapping::ReaderState::new(session.clone(), None, "opencode");
         let mut message = json!({

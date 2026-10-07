@@ -43,7 +43,7 @@ lf arm                               # request auto-merge; return
 lf land                              # watch CI, repair, and finish merged
 lf land -c                           # complete the Task after merge
 lf sync --plan                  # show strategy; bare `lf sync` applies it
-lf --task CHILD flow start --stack-on PARENT  # dependent Task, separate worktree
+lf task run CHILD --stack-on PARENT  # dependent Task, separate worktree
 ```
 
 **Publish** makes a PR ready for review without opening a browser. **Submit**
@@ -72,7 +72,7 @@ guess a Wave, start a server, or repair auth as a prerequisite for ordinary
 implementation. Durable delegated work starts from an existing Linear task:
 
 ```bash
-lf --task <issue-id> flow start                 # durable Task Work, own worktree
+lf task run <issue-id>                 # durable Task Work, own worktree
 lf comment <issue-id> "smaller approach" # post direction for the Task advancer
 lf task status <issue-id> --json       # inspect durable state
 lf wait <issue-id> --until terminal

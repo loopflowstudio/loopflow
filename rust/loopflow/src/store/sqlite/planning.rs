@@ -517,13 +517,13 @@ fn project_accepted_planning(
         };
         tx.execute(
             "INSERT INTO projects(id,wave_id,external_project_id,project_slug,project_name,
-             project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,flow,status)
+             project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,workflow,status)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,?10)
              ON CONFLICT(id) DO UPDATE SET project_slug=excluded.project_slug,
              project_name=excluded.project_name,project_prompt_context=excluded.project_prompt_context,
-             pm_snapshot_synced_at=excluded.pm_snapshot_synced_at,flow=excluded.flow,status=excluded.status",
+             pm_snapshot_synced_at=excluded.pm_snapshot_synced_at,workflow=excluded.workflow,status=excluded.status",
             params![id.as_str(),wave_id,project.id,project.slug,project.name,
-                project.prompt_context(),observed_at,super::super::rows::now_unix(),project.flow,project.status.as_str()],
+                project.prompt_context(),observed_at,super::super::rows::now_unix(),project.workflow,project.status.as_str()],
         )?;
         super::durable::inherit_project_placement(tx, &id)?;
     }
@@ -925,7 +925,7 @@ mod tests {
         let wave = WaveId::new();
         let snapshot = json!({"projects":[{
             "id":"project", "slug":"chapter", "name":"Chapter", "summary":"Proof",
-            "metric_targets":[], "flow":"feature", "status":"started", "krs":[],
+            "metric_targets":[], "workflow":"feature", "status":"started", "krs":[],
             "initiative_ids":["initiative"], "team_ids":["team"]
         }],"items":[{
             "id":"issue", "identifier":"FIX-1", "url":null, "name":"Retained title",
@@ -954,6 +954,8 @@ mod tests {
             "normalize_pm_planning",
             "pm_issue_revisions",
             "pm_project_evidence",
+            "project_readiness",
+            "task_flow_observations",
         ] {
             sqlite.apply_migration_for_test(name).unwrap();
         }

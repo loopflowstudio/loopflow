@@ -43,7 +43,11 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
         Some(PrCommand::Reconcile) => {
             let repo = find_repo_root()?;
             crate::ops::task::reconcile_checkout_pr(&repo)?;
-            crate::ops::pr_landing::reconcile_repository(&repo, &progress)?;
+            let report = crate::ops::pr_landing::reconcile_repository(&repo)?;
+            if !report.errors.is_empty() {
+                anyhow::bail!(report.errors.join("\n"));
+            }
+            progress.status("delivery check complete");
             Ok(())
         }
         Some(PrCommand::Checks { watch, logs }) => pr_checks(*watch, *logs),
@@ -746,6 +750,7 @@ pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
 
 pub fn run_commit(
     message: Option<&str>,
+    push: bool,
     no_add: bool,
     paths: &[String],
     agent_override: Option<&str>,
@@ -758,6 +763,7 @@ pub fn run_commit(
         &repo_root,
         &CommitOptions {
             add: !no_add,
+            push,
             message: message.map(str::to_string),
             agent: agent_override.map(str::to_string),
             ..CommitOptions::for_task("commit")
@@ -1678,6 +1684,31 @@ fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
         println!("{}", json);
     }
 
+    Ok(())
+}
+
+/// `repo release run` under a cron firing: the release is accounted to the
+/// receipt its launcher named.
+pub fn run_cron_release(
+    version_input: Option<&str>,
+    target_name: Option<&str>,
+    cli: &crate::lf::Cli,
+) -> Result<()> {
+    let cron = cli
+        .cron_receipt
+        .as_ref()
+        .zip(cli.cron_lock_fd)
+        .map(|(id, fd)| crate::ops::cron::accounting::CronExecution {
+            receipt_id: id.clone(),
+            lock_fd: fd,
+        });
+    crate::ops::release_run_with_cron(
+        &find_repo_root()?,
+        version_input.unwrap_or("patch"),
+        target_name,
+        &CliProgress,
+        cron.as_ref(),
+    )?;
     Ok(())
 }
 

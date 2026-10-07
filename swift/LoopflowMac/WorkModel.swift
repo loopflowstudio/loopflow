@@ -10,12 +10,6 @@ struct StreamedWaveDetail: Sendable {
     let reason: String?
 }
 
-enum TaskFlowControlRequest: Equatable, Sendable {
-    case start(flow: String)
-    case restart(flow: String)
-    case resume
-}
-
 enum WorkReading<Value> {
     case loading
     case available(Value)
@@ -309,13 +303,6 @@ final class WorkModel {
     }
     private(set) var waves: WorkReading<[Wave]> = .loading
     private(set) var processActivity: WorkReading<ActivitySnapshot> = .loading
-    private(set) var activeSessions: WorkReading<ActiveSessionsSnapshot> = .loading
-    private(set) var isRefreshingActiveSessions = false
-    private(set) var activeSessionsNeedsRetry = false
-    @ObservationIgnored private var activeSessionsObservation: ActiveSessionsObservation?
-    @ObservationIgnored private var activeSessionsTask: Task<Void, Never>?
-    private var activeSessionsGeneration = 0
-    private var activeSessionsDemanded = false
     private var sessionReadings: [String: WorkReading<[SessionRecord]>] = [:]
     private(set) var sessions: WorkReading<[SessionRecord]> {
         get { sessionReadings[repoPath ?? ""] ?? .loading }
@@ -329,7 +316,10 @@ final class WorkModel {
     }
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
+    /// The shown Task's work, from the workspace reader's `task` part.
     private(set) var taskWork = TaskReadings<TaskWork>()
+    /// That Task's Flow execs keyed by driver Exec, from the same part.
+    private(set) var flowRuns: [String: FlowDetail] = [:]
     /// Conversation history, read only on disclosure.
     private(set) var sessionHistory = TaskReadings<[SessionHistory]>()
     private(set) var taskContext = TaskReadings<ContextReport>()
@@ -386,6 +376,7 @@ final class WorkModel {
     @ObservationIgnored private var planningFloor = 0
     @ObservationIgnored private var sessionsFloor = 0
     @ObservationIgnored private var scopeFloor = 0
+    @ObservationIgnored private var taskFloor = 0
     @ObservationIgnored private var planningWaiters: [(id: Int, resume: CheckedContinuation<Void, Never>)] = []
     private var processActivityRefreshInFlight = false
     private var workActivityGeneration = 0
@@ -591,15 +582,15 @@ final class WorkModel {
                 workObservation = opened
                 workOpened = .now
                 appliedSequence = [:]
-                (planningFloor, sessionsFloor, scopeFloor, sentScope) = (0, 0, 0, nil)
+                (planningFloor, sessionsFloor, scopeFloor, taskFloor, sentScope) = (0, 0, 0, 0, nil)
                 syncWorkScope()
                 for try await frame in opened.frames {
                     guard !Task.isCancelled else { break }
                     await apply(frame)
                     if frame.content.part != "heartbeat" { delay = .seconds(1) }
                 }
-                if !Task.isCancelled { throw RegistryQueryError("Work observation ended") }
-            } catch ActiveSessionsObservationError.configurationChanged {
+                if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
+            } catch WorkObservationError.configurationChanged {
                 // The installed `lf` or its Home selection was replaced.
                 delay = .milliseconds(100)
             } catch {
@@ -702,7 +693,7 @@ final class WorkModel {
                 cache?.saveSessions([page], repo: repoPath)
             }
         case .task(let body):
-            guard answers >= scopeFloor, let shown = selection, shown.kind == .task,
+            guard answers >= max(taskFloor, scopeFloor), let shown = selection, shown.kind == .task,
                   let task = task(id: shown.id)?.task else { return }
             guard let body else {
                 taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value, reason: reason)
@@ -711,6 +702,8 @@ final class WorkModel {
             guard body.task == task.task.identifier else { return }
             let next = WorkReading.available(body.work)
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
+            let runs = Dictionary(body.flowRuns.map { ($0.entry.id, $0) }) { _, newer in newer }
+            if flowRuns != runs { flowRuns = runs }
         case .wave(let body):
             guard answers >= scopeFloor, let detailWaveId else { return }
             guard body == nil || body?.wave == detailWaveId else { return }
@@ -784,6 +777,7 @@ final class WorkModel {
         savedSessionRepos = []
         waveDetail = nil
         taskWork = TaskReadings<TaskWork>()
+        flowRuns = [:]
     }
 
     /// One explicit read of everything, for a change the cadence should not wait on.
@@ -791,7 +785,7 @@ final class WorkModel {
         if workObservation != nil {
             // Frames read before this request may predate the caller's write.
             let id = send { .refresh(id: $0) }
-            (planningFloor, sessionsFloor) = (id, id)
+            (planningFloor, sessionsFloor, taskFloor) = (id, id, id)
             await withCheckedContinuation { planningWaiters.append((id, $0)) }
             return
         }
@@ -842,124 +836,6 @@ final class WorkModel {
         if previous == nil { processActivity = .loading }
         let next = reading(from: await readProcessActivity(), lastGood: previous)
         if processActivity != next { processActivity = next }
-    }
-
-    /// First demand starts a window-owned reader; navigation never restarts it.
-    func observeActiveSessions() {
-        guard !activeSessionsDemanded else { return }
-        activeSessionsDemanded = true
-        startActiveSessions()
-    }
-
-    func refreshActiveSessions() async {
-        activeSessionsDemanded = true
-        if activeSessionsNeedsRetry || activeSessionsTask == nil {
-            await stopActiveSessions()
-            startActiveSessions()
-        } else {
-            await activeSessionsObservation?.request(.refresh)
-        }
-    }
-
-    func rescanActiveSessions() async {
-        guard let observation = activeSessionsObservation, !activeSessionsNeedsRetry else { return }
-        activeSessions = .unavailable(lastGood: activeSessions.value, reason: "Rediscovering active Sessions after wake")
-        isRefreshingActiveSessions = true
-        await observation.request(.rescan)
-    }
-
-    /// Attached once to the window root, independently of repository or pane visibility.
-    func activeSessionsLifetime() async {
-        do {
-            while !Task.isCancelled { try await Task.sleep(for: .seconds(3600)) }
-        } catch { }
-        await stopActiveSessions()
-        activeSessionsDemanded = false
-    }
-
-    func stopActiveSessions() async {
-        activeSessionsGeneration += 1
-        let generation = activeSessionsGeneration
-        let task = activeSessionsTask
-        task?.cancel()
-        await task?.value
-        guard activeSessionsGeneration == generation else { return }
-        activeSessionsTask = nil
-        activeSessionsObservation = nil
-        isRefreshingActiveSessions = false
-    }
-
-    deinit { activeSessionsTask?.cancel() }
-
-    private func startActiveSessions() {
-        guard activeSessionsTask == nil else { return }
-        activeSessionsGeneration += 1
-        let generation = activeSessionsGeneration
-        isRefreshingActiveSessions = true
-        activeSessionsNeedsRetry = false
-        let query = query
-        activeSessionsTask = Task { [weak self] in
-            // Only configuration replacement retries automatically. Transport failures
-            // retain evidence and wait for the explicit Retry action.
-            while !Task.isCancelled {
-                var observation: ActiveSessionsObservation?
-                var replace = false
-                var discoveryFailed = false
-                do {
-                    let opened = try await query.watchActiveSessions()
-                    observation = opened
-                    guard !Task.isCancelled, self?.activeSessionsGeneration == generation else {
-                        await opened.cancel()
-                        return
-                    }
-                    self?.activeSessionsObservation = opened
-                    for try await snapshot in opened.snapshots {
-                        guard !Task.isCancelled, self?.activeSessionsGeneration == generation else { break }
-                        self?.receiveActiveSessions(snapshot)
-                        if snapshot.discovery == .unavailable {
-                            discoveryFailed = true
-                            break
-                        }
-                    }
-                    if !Task.isCancelled && !discoveryFailed {
-                        throw RegistryQueryError("Active Session observation ended")
-                    }
-                } catch ActiveSessionsObservationError.configurationChanged {
-                    replace = true
-                    if self?.activeSessionsGeneration == generation {
-                        self?.activeSessions = .loading
-                    }
-                } catch {
-                    if !Task.isCancelled, let self, self.activeSessionsGeneration == generation {
-                        self.activeSessions = .unavailable(lastGood: self.activeSessions.value, reason: error.localizedDescription)
-                        self.activeSessionsNeedsRetry = true
-                    }
-                }
-                await observation?.cancel()
-                guard !Task.isCancelled, let self, self.activeSessionsGeneration == generation else { return }
-                self.activeSessionsObservation = nil
-                if replace {
-                    self.activeSessions = .loading
-                    self.isRefreshingActiveSessions = true
-                    continue
-                }
-                self.activeSessionsTask = nil
-                self.isRefreshingActiveSessions = false
-                return
-            }
-        }
-    }
-
-    private func receiveActiveSessions(_ snapshot: ActiveSessionsSnapshot) {
-        isRefreshingActiveSessions = snapshot.discovery == .scanning
-        activeSessionsNeedsRetry = snapshot.discovery == .unavailable
-        switch snapshot.discovery {
-        case .ready:
-            activeSessions = .available(snapshot)
-        case .scanning, .unavailable:
-            let reason = snapshot.discovery == .scanning ? "Discovering active Sessions…" : "Active Session discovery unavailable"
-            activeSessions = .unavailable(lastGood: activeSessions.value, reason: ([reason] + snapshot.gaps).joined(separator: "; "))
-        }
     }
 
     func refreshPortfolio(
@@ -1182,12 +1058,6 @@ final class WorkModel {
         }
     }
 
-    func loadTaskWork(task: RoadmapTask, wave: WaveSnapshot) async {
-        await loadTaskReading(\.taskWork, task: task.id) { [query] in
-            try await query.taskWork(task: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
-        }
-    }
-
     func loadSessionHistory(task: RoadmapTask, wave: WaveSnapshot) async {
         await loadTaskReading(\.sessionHistory, task: task.id) { [query] in
             try await query.taskHistory(task: task.task.identifier, cwd: WaveOrigin.resolve(wave.repo))
@@ -1216,8 +1086,16 @@ final class WorkModel {
         self[keyPath: readings].values[taskId] = reading(from: result, lastGood: self[keyPath: readings][taskId].value)
     }
 
-    /// Read the Flow catalogue for the current repository the first time a
-    /// Task needs it, or again when the picker is opened (`force`).
+    /// Definitions are files, which no store revision follows. Coming back
+    /// from an editor, read the catalogue this window already shows again, so
+    /// a saved mistake shows as invalid.
+    func rereadDefinitions() async {
+        guard flowCatalogReadings[repoPath ?? ""] != nil else { return }
+        await loadFlowCatalog(force: true)
+    }
+
+    /// Read the Flow catalogue for the current repository the first time it
+    /// is needed, or again after its definitions may have changed (`force`).
     func loadFlowCatalog(force: Bool = false) async {
         let key = repoPath ?? ""
         if !force, flowCatalogReadings[key]?.value != nil { return }
@@ -1228,10 +1106,39 @@ final class WorkModel {
         flowCatalogReadings[key] = reading(from: result, lastGood: previous)
     }
 
-    /// Run one Rust-owned Task Flow control, then refresh the shared reading.
+    /// Why a Wave's last workflow or source change was refused, by Wave.
+    private(set) var workflowErrors: [String: String] = [:]
+
+    /// Make `name` the workflow of the Wave's current chapter, then reread planning.
+    func setWorkflow(_ name: String, wave: WaveSnapshot) async {
+        do {
+            try await query.setWorkflow(name, wave: wave.name, cwd: WaveOrigin.resolve(wave.repo))
+            workflowErrors[wave.id] = nil
+            await refresh()
+        } catch {
+            workflowErrors[wave.id] = error.localizedDescription
+        }
+    }
+
+    /// The repository file to edit for a Flow or workflow. A builtin gets its
+    /// `.lf/` file here; the catalog is reread so the entry names it.
+    func definitionSource(_ entry: FlowCatalogEntry, wave: WaveSnapshot) async -> URL? {
+        do {
+            let path = try await query.customizeDefinition(entry.name, cwd: repoPath)
+            workflowErrors[wave.id] = nil
+            await loadFlowCatalog(force: true)
+            return URL(fileURLWithPath: path)
+        } catch {
+            workflowErrors[wave.id] = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Launch a fresh Flow for the Task, then refresh the shared reading.
+    /// Without `flow`, Rust takes up the Project's workflow or the only edge.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
-    func performFlowControl(_ control: TaskFlowControlRequest, task: RoadmapTask, wave: WaveSnapshot) async {
+    func startFlow(_ flow: String?, task: RoadmapTask, wave: WaveSnapshot) async {
         let owner = navigation
         let taskId = task.id
         guard owner.flowDrafts[taskId]?.acting != true else { return }
@@ -1240,14 +1147,26 @@ final class WorkModel {
         let issue = task.task.identifier
         let cwd = WaveOrigin.resolve(wave.repo)
         do {
-            switch control {
-            case .start(let flow):
-                try await query.runTaskFlow(issue: issue, flow: flow, cwd: cwd)
-            case .restart(let flow):
-                try await query.restartTaskFlow(issue: issue, flow: flow, cwd: cwd)
-            case .resume:
-                try await query.runTaskFlow(issue: issue, flow: nil, cwd: cwd)
-            }
+            try await query.runTaskFlow(issue: issue, flow: flow, cwd: cwd)
+            owner.flowDrafts[taskId] = nil
+            await refresh()
+        } catch {
+            owner.flowDrafts[taskId]?.acting = false
+            owner.flowDrafts[taskId]?.error = error.localizedDescription
+        }
+    }
+
+    /// Put the Task at a node of its Workflow, then refresh the shared
+    /// reading. A refusal is kept on that Task's draft.
+    func moveTask(to node: String, force: Bool = false, task: RoadmapTask, wave: WaveSnapshot) async {
+        let owner = navigation
+        let taskId = task.id
+        guard owner.flowDrafts[taskId]?.acting != true else { return }
+        owner.flowDrafts[taskId, default: TaskFlowDraft()].acting = true
+        owner.flowDrafts[taskId]?.error = nil
+        do {
+            try await query.moveTask(
+                issue: task.task.identifier, node: node, force: force, cwd: WaveOrigin.resolve(wave.repo))
             owner.flowDrafts[taskId] = nil
             await refresh()
         } catch {
@@ -1349,22 +1268,6 @@ final class WorkModel {
         }
     }
 
-    func sessionResolved(_ id: String, repo: String) {
-        // A pre-resolution read must not resurrect the completed human boundary.
-        // Resolution may finish after the human has switched repositories.
-        supersedeSessions()
-        if navigationByRepo[repo]?.selectedSessionId == id {
-            navigationByRepo[repo]?.selectedSessionId = nil
-        }
-        switch sessionReadings[repo] {
-        case .available(let records):
-            sessionReadings[repo] = .available(records.filter { $0.id != id })
-        case .unavailable(let records, let reason):
-            sessionReadings[repo] = .unavailable(lastGood: records?.filter { $0.id != id }, reason: reason)
-        case .loading, nil:
-            break
-        }
-    }
 
     func wave(id: String) -> WaveRoadmap? {
         roadmap.value?.waves.first { $0.wave.id == id }

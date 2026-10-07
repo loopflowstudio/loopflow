@@ -174,9 +174,9 @@ impl ClaudeHarness {
             stdout,
             super::claude_history::History {
                 owner,
-                selection: config.flow_selection.clone(),
                 requests: self.requests.clone(),
                 pending: VecDeque::new(),
+                attention: Default::default(),
             },
         );
         self.stderr_task = Some(spawn_stderr_logger(stderr, "claude_harness"));
@@ -682,7 +682,6 @@ mod tests {
         harness.config = Some(AgentConfig {
             chrome: false,
             session_driver: None,
-            flow_selection: None,
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             agent: None,
@@ -739,7 +738,6 @@ mod tests {
         AgentConfig {
             chrome: false,
             session_driver: None,
-            flow_selection: None,
             system_prompt: String::new(),
             task_prompt: String::new(),
             agent: None,

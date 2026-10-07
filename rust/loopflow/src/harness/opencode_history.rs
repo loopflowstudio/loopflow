@@ -6,7 +6,6 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::durable::FlowTurnSelection;
 use crate::exec::SessionDriver;
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
@@ -14,23 +13,31 @@ use crate::store::sqlite::SqliteStore;
 #[derive(Debug, Default)]
 pub(super) struct History {
     pub(super) owner: Option<(SqliteStore, String, SessionDriver)>,
-    pub(super) selection: Option<FlowTurnSelection>,
     requests: HashSet<String>,
     started: HashSet<String>,
     completed: HashSet<String>,
+    attention: super::attention::Attention,
 }
 
 impl History {
-    pub(super) fn new(
-        owner: Option<(SqliteStore, String, SessionDriver)>,
-        selection: Option<FlowTurnSelection>,
-    ) -> Self {
+    pub(super) fn new(owner: Option<(SqliteStore, String, SessionDriver)>) -> Self {
         Self {
             owner,
-            selection,
             ..Self::default()
         }
     }
+    /// One server event of conversation `thread`, read for attention only.
+    pub(super) fn attend(&mut self, thread: &str, event: &Value) {
+        if let Some((store, session, driver)) = &self.owner {
+            self.attention.record(
+                store,
+                session,
+                driver,
+                super::attention::opencode(event, thread),
+            );
+        }
+    }
+
     pub(super) fn request(&mut self) -> String {
         let id = format!("msg_{}", uuid::Uuid::new_v4().simple());
         self.requests.insert(id.clone());
@@ -51,17 +58,13 @@ impl History {
                         .exec_id
                         .as_ref()
                         .context("OpenCode request has no driving Exec")?;
-                    let start = store.record_session_turn_origin(
+                    store.record_session_turn_origin(
                         session,
                         thread,
                         &request,
                         driver.provider_generation,
                         exec,
                     )?;
-                    if let Some(selection) = &self.selection {
-                        store.select_flow_turn(selection, session, driver, start)?;
-                        self.selection = None;
-                    }
                 }
                 self.started.insert(request.clone());
                 events.push(ConversationEvent::TurnStarted {
@@ -223,20 +226,6 @@ fn record_receipts(
     Ok(())
 }
 
-pub(crate) async fn recover(
-    store: &SqliteStore,
-    session: &str,
-    endpoint: &str,
-    thread: &str,
-) -> Result<()> {
-    let messages = read_messages(&reqwest::Client::new(), endpoint, thread).await?;
-    for (request, receipt) in native_receipts(thread, &messages) {
-        // Readback cannot assign an initiating Exec or manufacture missing starts.
-        record_receipts(store, session, thread, &request, &receipt)?;
-    }
-    Ok(())
-}
-
 pub(super) async fn read_messages(
     client: &reqwest::Client,
     endpoint: &str,
@@ -309,10 +298,7 @@ mod tests {
         let driver = store
             .claim_session_driver("session", None, &exec, false)
             .unwrap();
-        let mut history = History::new(
-            Some((store.clone(), "session".into(), driver.clone())),
-            None,
-        );
+        let mut history = History::new(Some((store.clone(), "session".into(), driver.clone())));
         let request = history.request();
         let message = |id: &str, input: u64, finish: &str| {
             json!({

@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use crate::durable::{render_steers, Steer, TaskId, WorkRef};
-use crate::engine::process::{execution_context, pin_control_binary, start_lf_session_with_env};
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
@@ -151,7 +150,10 @@ pub async fn resolve_work_selection(
             .map_err(run_error)?
             .pop()
             .ok_or_else(|| run_error(format!("Task {} has no recorded PR", task.id)))?;
-        let context = render_task_context(&task, &project.plan, &pr, wave.slug(), &steers);
+        let mut context = render_task_context(&task, &project.plan, &pr, wave.slug(), &steers);
+        if let Ok(Some(workflow)) = store.sqlite.workflow(&task.id) {
+            context.push_str(&format!("\n\n{}", workflow.guidance(&task.plan.identifier)));
+        }
         let cwd = if crate::engine::git::current_branch(repo)
             .ok()
             .flatten()
@@ -281,69 +283,6 @@ fn run_error(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
 
-#[derive(Debug)]
-pub(crate) struct TaskWorkerExec {
-    pub task_id: TaskId,
-    pub wave_id: WaveId,
-    pub cwd: PathBuf,
-    pub tmux_name: String,
-    pub environment: Vec<(String, String)>,
-}
-
-pub(crate) async fn exec_task_worker(request: TaskWorkerExec) -> OpsResult<()> {
-    let mut environment = request.environment;
-    let execution = execution_context()
-        .map_err(|error| OpsError::Message(format!("cannot resolve current lf binary: {error}")))?;
-    let control_bin = pin_control_binary(&execution.lf_bin)
-        .to_string_lossy()
-        .to_string();
-    let argv = vec![
-        control_bin.clone(),
-        "task".to_string(),
-        "__worker".to_string(),
-        request.task_id.to_string(),
-    ];
-    environment.extend([
-        (
-            crate::lf::WORK_DECLARATION_ENV.to_string(),
-            format!("task:{}", request.task_id),
-        ),
-        (
-            crate::work::wave::context::WAVE_ID_ENV.to_string(),
-            request.wave_id.as_str().to_string(),
-        ),
-        ("LF_BIN".to_string(), control_bin),
-        (
-            "LF_HOME".to_string(),
-            execution.lf_home.to_string_lossy().to_string(),
-        ),
-    ]);
-    if let Some(switch_id) = std::env::var_os(crate::machine_install::INSTALL_SWITCH_ENV)
-        .filter(|value| !value.is_empty())
-    {
-        environment.push((
-            crate::machine_install::INSTALL_SWITCH_ENV.to_string(),
-            switch_id.to_string_lossy().into_owned(),
-        ));
-    }
-    environment.push((
-        crate::engine::config::USER_NAME_ENV.to_string(),
-        crate::engine::config::participant_name()
-            .map_err(run_error)?
-            .unwrap_or_default(),
-    ));
-    if let Ok(options) = std::env::var(crate::lf::TASK_SKILL_OPTIONS_ENV) {
-        environment.push((crate::lf::TASK_SKILL_OPTIONS_ENV.to_string(), options));
-    }
-    let environment = environment
-        .iter()
-        .map(|(key, value)| (key.as_str(), value.as_str()))
-        .collect::<Vec<_>>();
-    start_lf_session_with_env(&request.tmux_name, &request.cwd, &argv, &environment)
-        .await
-        .map_err(|error| OpsError::Message(format!("failed to launch Task worker: {error}")))
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -377,7 +316,7 @@ mod tests {
         Project {
             id: ProjectId::new(),
             plan: ProjectPlan {
-                flow: "feature".into(),
+                workflow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
                 id: LinearProjectId::new(planning_id).unwrap(),
                 slug: slug.to_string(),
@@ -843,9 +782,8 @@ mod tests {
                 }),
                 task_id,
                 wave_id: None,
-                flow_session_id: None,
+                flow_id: None,
                 bound_at: None,
-                kind: crate::session::SessionKind::Conversation,
                 interactive: false,
                 repo: None,
                 title: "Investigation".into(),
@@ -857,16 +795,16 @@ mod tests {
             }
         };
         let worker = store
-            .create_session(session(Some(task.id.clone()), None), None)
+            .create_session(session(Some(task.id.clone()), None))
             .await
             .unwrap();
         // Reader fixture: inherited admission is separately proved through public
         // child commands. A causal input reference does not itself assign Work.
         let helper = store
-            .create_session(
-                session(Some(task.id.clone()), Some(worker.artifact_key.clone())),
-                None,
-            )
+            .create_session(session(
+                Some(task.id.clone()),
+                Some(worker.artifact_key.clone()),
+            ))
             .await
             .unwrap();
         assert_eq!(helper.wave_id, Some(wave.id().clone()));
@@ -874,10 +812,7 @@ mod tests {
             helper.work_source,
             Some(crate::session::WorkSource::Inherited)
         );
-        store
-            .create_session(session(None, None), None)
-            .await
-            .unwrap();
+        store.create_session(session(None, None)).await.unwrap();
         for selector in [
             task.plan.identifier.as_str(),
             task.id.as_str(),
@@ -921,10 +856,10 @@ mod tests {
         );
         for _ in 0..55 {
             store
-                .create_session(
-                    session(Some(task.id.clone()), Some(worker.artifact_key.clone())),
-                    None,
-                )
+                .create_session(session(
+                    Some(task.id.clone()),
+                    Some(worker.artifact_key.clone()),
+                ))
                 .await
                 .unwrap();
         }
@@ -1027,7 +962,7 @@ mod tests {
                 summary: String::new(),
 
                 metric_targets: Vec::new(),
-                flow: "feature".into(),
+                workflow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
                 krs: vec![PmKr {
                     text: "One model everywhere".to_string(),
@@ -1060,7 +995,7 @@ mod tests {
             .context
             .contains("Drive the 'runtime' Wave's goal forward"));
         assert!(binding.context.contains("- local-delivery\n"));
-        assert!(binding.context.contains("- feature\n"));
+        assert!(binding.context.contains("- pursue\n"));
         assert!(binding.context.contains("metric-portfolio"));
         assert!(resolve_work_binding(&store, &repo, "project:loopflow-api")
             .await

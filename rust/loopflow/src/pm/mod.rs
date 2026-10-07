@@ -97,7 +97,7 @@ pub struct ChapterMetricTarget {
 #[serde(deny_unknown_fields)]
 pub struct ProjectContent {
     pub metric_targets: Vec<ChapterMetricTarget>,
-    pub flow: String,
+    pub workflow: String,
     pub krs: Vec<PmKr>,
 }
 
@@ -109,7 +109,7 @@ pub struct PmProject {
     pub name: String,
     pub summary: String,
     pub metric_targets: Vec<ChapterMetricTarget>,
-    pub flow: String,
+    pub workflow: String,
     pub status: ProjectStatus,
     pub krs: Vec<PmKr>,
     pub initiative_ids: Vec<String>,
@@ -124,8 +124,8 @@ impl PmProject {
             "Project metric targets:\n{}",
             serde_json::to_string(&self.metric_targets).expect("metric targets serialize")
         );
-        if !self.flow.trim().is_empty() {
-            context.push_str(&format!("\n\nProject Task flow: {}", self.flow));
+        if !self.workflow.trim().is_empty() {
+            context.push_str(&format!("\n\nProject Task workflow: {}", self.workflow));
         }
         if !self.krs.is_empty() {
             context.push_str("\n\nKRs:");
@@ -177,6 +177,14 @@ pub struct PmItem {
 impl PmItem {
     pub fn terminal_reason(&self) -> Option<&'static str> {
         terminal_reason(self.state.as_deref(), self.completed)
+    }
+
+    /// Linear calls the item complete, not canceled or duplicate.
+    pub fn is_complete(&self) -> bool {
+        match self.state.as_deref() {
+            Some(state) => state == "completed",
+            None => self.completed,
+        }
     }
 }
 
@@ -429,19 +437,25 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
     enum Section {
         None,
         Targets,
-        Flows,
         Krs,
     }
 
     let mut section = Section::None;
     let mut targets = Vec::new();
-    let mut flow = String::new();
+    let mut workflow = String::new();
+    let mut authored_as_flow = String::new();
     let mut krs = Vec::new();
     let mut current_kr: Option<PmKr> = None;
     for line in content.lines() {
         let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix("workflow:") {
+            workflow = value.trim().to_string();
+            continue;
+        }
+        // Projects written before the line was renamed; the next write
+        // through `lf` renders `workflow:`.
         if let Some(value) = trimmed.strip_prefix("flow:") {
-            flow = value.trim().to_string();
+            authored_as_flow = value.trim().to_string();
             continue;
         }
         match trimmed {
@@ -459,13 +473,6 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
                 section = Section::Krs;
                 continue;
             }
-            "## Flows" => {
-                if let Some(kr) = current_kr.take() {
-                    krs.push(kr);
-                }
-                section = Section::Flows;
-                continue;
-            }
             _ => {}
         }
 
@@ -481,14 +488,6 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
             Section::Targets => {
                 if !trimmed.starts_with("```") {
                     targets.push(line);
-                }
-            }
-            Section::Flows => {
-                let Some((name, value)) = trimmed.split_once(':') else {
-                    continue;
-                };
-                if name.trim() == "flow" {
-                    flow = value.trim().to_string();
                 }
             }
             Section::Krs => {
@@ -532,9 +531,12 @@ pub fn parse_project_content(content: &str) -> PmResult<ProjectContent> {
         serde_json::from_str(&targets.join("\n"))
             .map_err(|error| PmError::Message(format!("invalid chapter metric targets: {error}")))?
     };
+    if workflow.is_empty() {
+        workflow = authored_as_flow;
+    }
     let content = ProjectContent {
         metric_targets,
-        flow,
+        workflow,
         krs,
     };
     content.validate()?;
@@ -565,9 +567,9 @@ pub fn render_project_content(project: &ProjectContent) -> String {
         serde_json::to_string_pretty(&project.metric_targets)
             .expect("validated metric targets serialize")
     );
-    let flow = project.flow.trim();
-    if !flow.is_empty() {
-        content.push_str(&format!("\n\nflow: {flow}"));
+    let workflow = project.workflow.trim();
+    if !workflow.is_empty() {
+        content.push_str(&format!("\n\nworkflow: {workflow}"));
     }
     content.push_str("\n\n## KRs");
     for kr in &project.krs {
@@ -775,13 +777,22 @@ mod tests {
     }
 
     #[test]
-    fn project_content_without_flow_preserves_krs() {
+    fn project_content_without_workflow_preserves_krs() {
         let content = parse_project_content("## KRs\n- [ ] Keep this proof\n").unwrap();
-        assert!(content.flow.is_empty());
+        assert!(content.workflow.is_empty());
         assert_eq!(content.krs[0].text, "Keep this proof");
         let rendered = render_project_content(&content);
         assert!(!rendered.contains("flow:"));
         assert_eq!(parse_project_content(&rendered).unwrap(), content);
+    }
+
+    #[test]
+    fn a_project_written_with_a_flow_line_names_that_workflow_until_rewritten() {
+        let earlier = parse_project_content("flow: research\n\n## KRs\n").unwrap();
+        assert_eq!(earlier.workflow, "research");
+        assert!(render_project_content(&earlier).contains("\n\nworkflow: research\n"));
+        let both = parse_project_content("flow: research\nworkflow: code\n").unwrap();
+        assert_eq!(both.workflow, "code");
     }
 
     #[test]
@@ -791,7 +802,7 @@ mod tests {
                 metric_id: "throughput".into(),
                 target: crate::work::wave::metrics::MetricTarget::AtLeast { value: 0.95 },
             }],
-            flow: "feature".to_string(),
+            workflow: "feature".to_string(),
             krs: vec![
                 PmKr {
                     text: "One proof holds".to_string(),
@@ -811,7 +822,7 @@ mod tests {
             parse_project_content(local).unwrap(),
             ProjectContent {
                 metric_targets: Vec::new(),
-                flow: String::new(),
+                workflow: String::new(),
                 krs: vec![PmKr {
                     text: "One proof holds across wrapped lines.".to_string(),
                     holds: false,

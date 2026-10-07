@@ -28,7 +28,6 @@ use super::land::LandOptions;
 use super::pr::{
     merge_gate_state, merge_needs_integration, observe_pr_merge, MergeRequest, PrInfo,
 };
-use super::progress::Progress;
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(tag = "status", content = "summary", rename_all = "snake_case")]
@@ -284,7 +283,6 @@ fn admit_ci_fix(
             if let Some(reason) = super::task_automation::admission_blocker(
                 &store.sqlite,
                 &task.id,
-                false,
                 reservation.session.as_deref(),
             )? {
                 return Err(repair_error(reason));
@@ -302,11 +300,10 @@ fn admit_ci_fix(
                 if Some(&session.id) != reservation.session.as_ref()
                     && session.cwd == landing.worktree
                     && session.completed_at.is_none()
-                    && (session.kind != crate::session::SessionKind::Conversation
-                        || store
-                            .sqlite
-                            .session_has_pending_turn(&session.id)
-                            .map_err(repair_error)?)
+                    && store
+                        .sqlite
+                        .session_has_pending_turn(&session.id)
+                        .map_err(repair_error)?
                 {
                     return Err(repair_error(format!(
                         "Session {} has unresolved work",
@@ -347,13 +344,12 @@ fn admit_ci_fix(
                 iterations: None,
                 task_id: landing.task_id.clone(),
                 wave_id: None,
-                flow_session_id: None,
+                flow_id: None,
                 work_source: landing
                     .task_id
                     .as_ref()
                     .map(|_| crate::session::WorkSource::Declared),
                 bound_at: None,
-                kind: crate::session::SessionKind::Conversation,
                 interactive: false,
                 repo: None,
                 title: format!("Repair PR #{}", landing.pr_number),
@@ -1290,15 +1286,22 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         {
             return crate::ops::task::cleanup_completed_task(store, &task).await;
         }
-        eprintln!("Task {} remains open; retained its checkout for the saved Flow and next PR. Use `lf task complete {} --summary TEXT` when delivery is finished.", task.plan.identifier, task.plan.identifier);
+        eprintln!("Task {} remains open; retained its checkout for further work and the next PR. Use `lf task move {} end` when delivery is finished.", task.plan.identifier, task.plan.identifier);
         return Ok(());
     }
+    // Only a Flow still being driven needs the checkout; a stopped one is history.
     if store
         .sqlite
-        .landing_has_pending_flow(&landing.id)
+        .flows_at(&landing.worktree)
         .map_err(|error| OpsError::Message(error.to_string()))?
+        .iter()
+        .any(|flow| {
+            flow.driver.completed_at.is_none()
+                && crate::journal::exec_process_evidence(&store.sqlite, flow.id())
+                    != crate::journal::ProcessIdentityEvidence::Dead
+        })
     {
-        eprintln!("PR merged; retained its checkout for the saved Flow.");
+        eprintln!("PR merged; retained its checkout for the Flow that landed it.");
         return Ok(());
     }
     if crate::engine::worktrees::is_persistent_worktree(&landing.worktree)? {
@@ -1485,30 +1488,35 @@ pub(crate) fn repair_running(store: &SharedStore, landing: &PrLanding) -> OpsRes
         .any(|exec| repair_live(store, Some(exec))))
 }
 
-pub fn reconcile_repository(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryCheck {
+    pub checked_at: i64,
+    pub errors: Vec<String>,
+}
+
+pub fn reconcile_repository(repo: &Path) -> OpsResult<DeliveryCheck> {
     let runtime = tokio::runtime::Runtime::new()?;
     let result = runtime.block_on(async {
         let store = landing_store().await?;
-        let mut errors = Vec::new();
+        let mut report = DeliveryCheck {
+            checked_at: OffsetDateTime::now_utc().unix_timestamp(),
+            errors: Vec::new(),
+        };
         reconcile_repository_async(
             repo,
             &store,
             tokio::time::Instant::now() + Duration::from_secs(45),
-            &mut errors,
+            &mut report.errors,
         )
         .await?;
-        if errors.is_empty() {
-            progress.status("delivery check complete");
-            Ok(())
-        } else {
-            Err(OpsError::Message(errors.join("\n")))
-        }
+        Ok(report)
     });
+    // Timed-out observations retain their landing locks until the worker exits.
     runtime.shutdown_background();
     result
 }
 
-pub(crate) async fn reconcile_repository_async(
+async fn reconcile_repository_async(
     repo: &Path,
     store: &SharedStore,
     deadline: tokio::time::Instant,

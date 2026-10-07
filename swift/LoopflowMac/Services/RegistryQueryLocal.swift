@@ -11,29 +11,21 @@ enum RegistryQueryLocal {
         try await Task.detached(priority: .userInitiated) {
             try LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
         }.value
-    }, watchActiveSessions: {
-        try await Task.detached(priority: .userInitiated) {
-            let configuration = try ActiveSessionsLaunchConfiguration.current()
-            let process = LocalWaveAgentLauncher.queryProcess(
-                [configuration.helper, "monitor", "active", "--watch", "--json"]
-            )
-            process.environment = configuration.environment
-            return try LocalActiveSessionsObservation.start(
-                process: process,
-                configurationChanged: { try ActiveSessionsLaunchConfiguration.current() != configuration }
-            )
-        }.value
     }, watchWork: {
         try await Task.detached(priority: .userInitiated) {
-            let configuration = try ActiveSessionsLaunchConfiguration.current()
+            let configuration = try ReaderLaunchConfiguration.current()
             let process = LocalWaveAgentLauncher.queryProcess(
                 [configuration.helper, "monitor", "work", "--watch", "--json"]
             )
             process.environment = configuration.environment
             return try LocalWorkObservation.start(
                 process: process,
-                configurationChanged: { try ActiveSessionsLaunchConfiguration.current() != configuration }
+                configurationChanged: { try ReaderLaunchConfiguration.current() != configuration }
             )
+        }.value
+    }, start: { args, cwd in
+        try await Task.detached(priority: .userInitiated) {
+            try LocalWaveAgentLauncher.startLf(args, cwd: cwd)
         }.value
     }) { args, cwd in
         try await Perf.measure(Perf.lf, args.prefix(2).joined(separator: " ")) {
@@ -51,7 +43,7 @@ enum RegistryQueryLocal {
 
 /// Invalidate on replacement; let lf resolve the selected Home/store itself.
 /// Metadata is sufficient here: these installation files are atomically replaced.
-private struct ActiveSessionsLaunchConfiguration: Equatable {
+private struct ReaderLaunchConfiguration: Equatable {
     let helper: String
     let environment: [String: String]
     let files: [String]

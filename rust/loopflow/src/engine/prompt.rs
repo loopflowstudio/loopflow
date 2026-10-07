@@ -2101,14 +2101,13 @@ mod tests {
             assert!(!prompt.contains("LOO-267"));
 
             let scope = name.split_once('/').map(|(scope, _)| scope);
-            assert_eq!(prompt.contains("flow start"), scope.is_some(), "{name}");
-            for procedure in ["lf restart", "lf wave place"] {
-                assert_eq!(
-                    prompt.contains(procedure),
-                    scope == Some("repo"),
-                    "{name}: {procedure}"
-                );
-            }
+            let orchestrates = scope.is_some();
+            assert_eq!(prompt.contains("lf task run"), orchestrates, "{name}");
+            assert_eq!(
+                prompt.contains("lf wave place"),
+                scope == Some("repo"),
+                "{name}: lf wave place"
+            );
             if scope.is_none() {
                 assert!(!prompt.contains("doppler run"), "{name}");
             }

@@ -2,50 +2,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use anyhow::Result;
 use fs2::FileExt;
 use sha2::{Digest, Sha256};
-use tokio::sync::Notify;
 
-#[derive(Debug, Clone)]
-pub(crate) struct LookupPause {
-    action: &'static str,
-    selector: String,
-    pub reached: Arc<Notify>,
-    pub proceed: Arc<Notify>,
-}
-
-static PAUSE: Mutex<Option<LookupPause>> = Mutex::new(None);
 static CLIENTS: Mutex<Option<HashMap<String, (String, bool)>>> = Mutex::new(None);
-
-impl LookupPause {
-    pub fn at(action: &'static str, selector: &str) -> Self {
-        let pause = Self {
-            action,
-            selector: selector.into(),
-            reached: Arc::new(Notify::new()),
-            proceed: Arc::new(Notify::new()),
-        };
-        assert!(PAUSE.lock().unwrap().replace(pause.clone()).is_none());
-        pause
-    }
-}
-
-pub(super) async fn after_lookup(action: &str, selector: &str) {
-    let pause = PAUSE
-        .lock()
-        .unwrap()
-        .as_ref()
-        .filter(|pause| pause.action == action && pause.selector == selector)
-        .cloned();
-    if let Some(pause) = pause {
-        pause.reached.notify_one();
-        pause.proceed.notified().await;
-        PAUSE.lock().unwrap().take();
-    }
-}
 
 #[derive(Debug)]
 pub(crate) struct NativeClients;
@@ -64,15 +27,6 @@ impl NativeClients {
         Self
     }
 
-    pub fn add(&self, session: &str, run: &str) {
-        CLIENTS
-            .lock()
-            .unwrap()
-            .as_mut()
-            .unwrap()
-            .insert(run.to_owned(), (session.into(), true));
-    }
-
     pub fn active(&self) -> HashSet<String> {
         CLIENTS
             .lock()
@@ -89,7 +43,6 @@ impl NativeClients {
 impl Drop for NativeClients {
     fn drop(&mut self) {
         CLIENTS.lock().unwrap().take();
-        PAUSE.lock().unwrap().take();
     }
 }
 

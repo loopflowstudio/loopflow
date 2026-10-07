@@ -17,7 +17,7 @@ Project ensure has no chapter or KR requirement.
 Return one entry for the retained chapter plan:
 
 ```json
-{"wave_id":"<Wave UUID>","successor_id":"<Project UUID>","create":true,"project_name":"October — reliability","content":{"metric_targets":[],"flow":"","krs":[{"text":"Observable improvement","holds":false}]}}
+{"wave_id":"<Wave UUID>","successor_id":"<Project UUID>","create":true,"project_name":"October — reliability","content":{"metric_targets":[],"workflow":"","krs":[{"text":"Observable improvement","holds":false}]}}
 ```
 
 Allocate a new UUID v4 once, or preserve an explicitly selected existing Project

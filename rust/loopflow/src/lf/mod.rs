@@ -1,10 +1,8 @@
-/// Prompt flags forwarded to a managed Task's ordinary skill commands.
-#[doc(hidden)]
 /// Explicit Work declaration inherited by descendants; checkout inference never writes it.
 pub const WORK_DECLARATION_ENV: &str = "LF_AS";
 
-pub const TASK_SKILL_OPTIONS_ENV: &str = "LF_TASK_SKILL_OPTIONS";
-
+/// The caller's prompt and provider flags for the Task Flow it launches.
+#[doc(hidden)]
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -26,14 +24,6 @@ pub enum DiffContext {
     Patch,
     Both,
     None,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum LaunchMode {
-    Interactive,
-    Batch,
-    Tui,
-    Ide,
 }
 
 #[derive(Parser, Debug, Default)]
@@ -95,9 +85,21 @@ pub struct Cli {
     #[arg(long)]
     pub yolo: bool,
 
-    /// Choose the provider surface; omission inherits configuration and terminal context
-    #[arg(long, value_enum)]
-    pub mode: Option<LaunchMode>,
+    /// Run interactively
+    #[arg(short = 'i', long = "interactive", conflicts_with = "batch")]
+    pub interactive: bool,
+
+    /// Run headless: print the output and return when the work ends
+    #[arg(short = 'b', long = "batch")]
+    pub batch: bool,
+
+    /// Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch)
+    #[arg(long, conflicts_with_all = ["ide", "batch"])]
+    pub tui: bool,
+
+    /// Hand off Claude or Codex to the vendor app (overrides session.launch)
+    #[arg(long, conflicts_with = "batch")]
+    pub ide: bool,
 
     /// Override Chrome integration; omission inherits configuration
     #[arg(long, value_enum)]
@@ -126,6 +128,10 @@ pub struct Cli {
     #[arg(long, value_name = "TASK", conflicts_with = "wt")]
     pub task: Option<String>,
 
+    /// Give the agent only Task direction newer than this steer
+    #[arg(long = "steers-after", value_name = "STEER")]
+    pub steers_after: Option<i64>,
+
     /// Execute in an existing worktree by name or branch
     #[arg(long, value_name = "NAME", conflicts_with = "task")]
     pub wt: Option<String>,
@@ -138,9 +144,9 @@ pub struct Cli {
     #[arg(long = "no-loopflow")]
     pub no_loopflow: bool,
 
-    /// Execute a skill from this saved Flow boundary, without resolving its definition again.
-    #[arg(long = "__flow-step", hide = true)]
-    pub flow_step: Option<String>,
+    /// The conversation `lf -b session resume ID MESSAGE` continues.
+    #[arg(skip)]
+    pub resume: Option<String>,
 }
 
 impl Cli {
@@ -171,7 +177,7 @@ impl Cli {
     /// definition remain captured; Work resolves from the declaration or checkout.
     #[doc(hidden)]
     pub fn step_args(&self) -> Vec<String> {
-        let mut args = vec!["--mode".to_string(), "batch".to_string()];
+        let mut args = vec!["--batch".to_string()];
         for (flag, enabled) in [
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
@@ -212,6 +218,9 @@ impl Cli {
         if let Some(turns) = self.max_turns {
             args.extend(["--max-turns".to_string(), turns.to_string()]);
         }
+        if let Some(steer) = self.steers_after {
+            args.extend(["--steers-after".to_string(), steer.to_string()]);
+        }
         args
     }
 
@@ -229,16 +238,20 @@ impl Cli {
             shared: self.shared,
             account_lease_probe: self.account_lease_probe,
             yolo: self.yolo,
-            mode: self.mode,
+            interactive: self.interactive,
+            batch: self.batch,
+            tui: self.tui,
+            ide: self.ide,
             chrome: self.chrome,
             diff: self.diff,
             max_turns: self.max_turns,
             wave: self.wave.clone(),
             task: self.task.clone(),
+            steers_after: self.steers_after,
             wt: self.wt.clone(),
             bound_cwd: self.bound_cwd.clone(),
             no_loopflow: self.no_loopflow,
-            flow_step: self.flow_step.clone(),
+            resume: self.resume.clone(),
         }
     }
 
@@ -301,10 +314,13 @@ pub enum Commands {
     Commit {
         #[arg(short = 'm', long = "message")]
         message: Option<String>,
+        /// Push the branch after committing
+        #[arg(short = 'p', long = "push")]
+        push: bool,
         #[arg(long = "no-add")]
         no_add: bool,
         /// Commit only these paths, preserving other staged and unstaged edits
-        #[arg(value_name = "PATH", conflicts_with = "no_add")]
+        #[arg(value_name = "PATH", conflicts_with_all = ["no_add", "push"])]
         paths: Vec<String>,
     },
 
@@ -435,9 +451,6 @@ pub enum Commands {
         /// Captured input identity or an unambiguous displayed prefix
         run: String,
     },
-    /// Execute one captured Flow boundary in its own process.
-    #[command(name = "__flow-step", hide = true)]
-    FlowStep { id: String, version: u64 },
     /// Run a definition, preferring a flow over a same-named skill
     Run {
         name: String,
@@ -467,35 +480,14 @@ pub enum SkillCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum FlowCommand {
-    /// Start or continue a Task through its saved Flow
-    Start {
-        /// Template for a new Task Flow; existing saved progress remains authoritative
-        template: Option<String>,
-        #[arg(long)]
-        name: Option<String>,
-        /// Fork this Task's worktree from another Task's active PR
-        #[arg(long = "stack-on", value_name = "PARENT_TASK")]
-        stack_on: Option<String>,
-        #[arg(long)]
-        directive: Option<String>,
-        /// Explain what changed after an execution blocker
-        #[arg(long)]
-        reason: Option<String>,
-        /// Retry uncertain native work after confirmed engine exit.
-        #[arg(long)]
-        retry: bool,
-        #[arg(long)]
-        json: bool,
-    },
-
-    /// List authored flows or saved FlowSessions
+    /// List authored flows, or Flows that ran
     List {
         #[arg(long)]
         json: bool,
         #[command(flatten)]
         inventory: commands::flow_inventory::FlowInventoryArgs,
     },
-    /// Inspect an authored flow or a saved FlowSession
+    /// Inspect an authored flow, or one that ran
     Show {
         name: String,
         #[arg(long)]
@@ -503,14 +495,9 @@ pub enum FlowCommand {
         #[arg(long)]
         sessions: bool,
     },
-    /// Continue a saved Flow invocation
-    Resume {
-        invocation: String,
-        #[arg(long)]
-        retry: bool,
-    },
-    /// End a stopped Flow without running its remaining steps; its history stays
-    End { invocation: String },
+    /// Print the repository file that defines a Flow or workflow, creating
+    /// it from the builtin when the repository has none
+    Customize { name: String },
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -540,6 +527,8 @@ pub enum SessionCommand {
     Resume {
         /// Loopflow Session ID or Claude/Codex conversation ID
         id: Option<String>,
+        /// With `-b`: send this as the conversation's next headless turn
+        message: Option<String>,
     },
     /// Read this conversation's native start, usage and completion receipts
     History {
@@ -566,9 +555,9 @@ pub enum SessionCommand {
         /// Include completed conversations and historical reviews
         #[arg(long)]
         history: bool,
-        /// Only conversations waiting for review or a reply
+        /// Only conversations waiting on you
         #[arg(long)]
-        needs_me: bool,
+        waiting: bool,
         /// Maximum conversations; 0 reads the complete matching inventory
         #[arg(long, default_value_t = 100)]
         limit: usize,
@@ -602,11 +591,17 @@ pub enum SessionCommand {
         #[arg(long = "try", conflicts_with = "replace")]
         try_open: bool,
     },
-    /// Find or start the one ongoing conversation of this repository or a Wave
+    /// Find or start the one ongoing conversation of this repository, a Wave or a Task
     Ensure {
         /// The Wave's conversation instead of the repository's
         #[arg(short = 'w', long)]
         wave: Option<String>,
+        /// The Task's: the one chosen, else its only or most recently used conversation
+        #[arg(long, conflicts_with = "wave")]
+        task: Option<String>,
+        /// Make this conversation of the Task its primary
+        #[arg(long, value_name = "SESSION", requires = "task")]
+        choose: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -615,11 +610,6 @@ pub enum SessionCommand {
         id: String,
         #[arg(long)]
         json: bool,
-    },
-    /// Complete a review or interactive session
-    Complete {
-        /// Session ID or provider conversation ID
-        id: String,
     },
     /// Rename a Session; a human name is never replaced by a suggestion
     Rename {
@@ -646,27 +636,9 @@ pub enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Mark the active session ready for your review
-    Ready {
-        #[arg(value_name = "SUMMARY", required = true, num_args = 1..)]
-        summary: Vec<String>,
-    },
-    /// Run the exact review skill in its durable terminal
-    #[command(name = "serve-flow", hide = true)]
-    ServeFlow {
-        task_id: crate::work::task::TaskId,
-        invocation_id: String,
-        flow: String,
-        node_id: String,
-        skill: String,
-        iteration: u32,
-    },
     /// Run one prepared conversation in its durable terminal
     #[command(name = "serve-conversation", hide = true)]
     ServeConversation { input: String },
-    /// Stop one exact native provider client after its review completes
-    #[command(name = "stop-client", hide = true)]
-    StopClient { input: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -744,12 +716,16 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Replace the current chapter's KRs, targets, and Flow recommendation
+    /// Replace the current chapter's KRs, targets and workflow
     UpdatePlan {
         #[arg(short = 'w', long)]
         wave: Option<String>,
-        #[arg(long)]
-        plan: std::path::PathBuf,
+        /// The complete plan as JSON
+        #[arg(long, required_unless_present = "workflow")]
+        plan: Option<std::path::PathBuf>,
+        /// Change only the workflow, keeping KRs and targets
+        #[arg(long, conflicts_with = "plan")]
+        workflow: Option<String>,
     },
 }
 
@@ -776,17 +752,17 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
-    /// Inspect repository scheduling and Task enrollment
+    /// Inspect delivery scheduling and Task CI repair settings
     Automation {
         #[arg(long)]
         json: bool,
     },
-    /// Check enrolled Tasks and authorized deliveries once, then exit
+    /// Check authorized deliveries once, then exit
     Reconcile {
         #[arg(long)]
         json: bool,
     },
-    /// Enroll or hold a Task without interrupting running work
+    /// Enable or hold CI repair for a Task without interrupting running work
     Automate {
         issue: String,
         #[arg(value_parser = ["on", "off"])]
@@ -795,10 +771,7 @@ pub enum TaskCommand {
     /// Run a reserved CI repair in its own process
     #[command(name = "__repair", hide = true)]
     Repair { incident: String, launcher: String },
-    /// Internal: drive a Task Flow from its claimed boundary
-    #[command(name = "__worker", hide = true)]
-    Worker { task_id: crate::work::task::TaskId },
-    /// Ensure tracked Task Work and its worktree without starting a worker
+    /// Ensure tracked Task Work and its worktree without launching a Flow
     Checkout {
         issue: String,
         #[arg(long)]
@@ -811,7 +784,42 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// File a Task in the current chapter; optionally prepare and run it
+    /// Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
+    Run {
+        issue: String,
+        /// The edge's Flow, or a workflow to take up; the Task's only edge or its
+        /// Project's workflow when omitted
+        flow: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+        /// Fork this Task's worktree from another Task's active PR
+        #[arg(long = "stack-on", value_name = "PARENT_TASK")]
+        stack_on: Option<String>,
+        #[arg(long)]
+        directive: Option<String>,
+        /// Direction for this run, published to the Task
+        #[arg(long)]
+        reason: Option<String>,
+        /// Reach `end` although Linear already calls the active Task complete
+        #[arg(long)]
+        force: bool,
+    },
+    /// Put a Task at a node of its workflow without running anything; `end` completes it
+    Move {
+        issue: String,
+        /// `start`, `end` or one of the workflow's nodes
+        node: String,
+        /// Why, kept in the Task's workflow history
+        #[arg(long)]
+        reason: Option<String>,
+        /// Reach `end` although Linear already calls the active Task complete
+        #[arg(long)]
+        force: bool,
+        /// Accept one historical Exec's unknown outcome when reaching `end`; retain its checkout
+        #[arg(long, value_name = "EXEC_ID")]
+        accept_unknown_exec: Vec<crate::id::ExecId>,
+    },
+    /// File a Task in the current chapter
     Create {
         /// Wave name; defaults to the bound Wave
         #[arg(long)]
@@ -822,21 +830,10 @@ pub enum TaskCommand {
         /// Description; defaults to a report read from stdin
         #[arg(long)]
         notes: Option<String>,
-        /// Validate placement and execution before filing, then run the Task
-        #[arg(long)]
-        run: bool,
-        #[arg(long, requires = "run")]
-        name: Option<String>,
-        /// Select a Flow for this Task worker; defaults to the chapter recommendation
-        #[arg(long, value_name = "FLOW", requires = "run")]
-        flow: Option<String>,
-        /// Fork this Task's worktree from another Task's active PR
-        #[arg(long = "stack-on", value_name = "PARENT_TASK", requires = "run")]
-        stack_on: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Show durable Task facts and current worker evidence
+    /// Show durable Task facts and its recorded work
     Status {
         /// Task issue; defaults to the Task in this checkout
         issue: Option<String>,
@@ -886,17 +883,6 @@ pub enum TaskCommand {
         path: String,
         #[arg(long)]
         revision: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Complete planning work, or a placed Task whose pull requests are settled
-    Complete {
-        issue: String,
-        #[arg(long)]
-        summary: String,
-        /// Accept one historical Exec's unknown outcome for completion only; retain its checkout
-        #[arg(long, value_name = "EXEC_ID")]
-        accept_unknown_exec: Vec<crate::id::ExecId>,
         #[arg(long)]
         json: bool,
     },
@@ -956,24 +942,12 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Stop the pinned Flow and begin a new one in a fresh Task worker;
-    /// uses valid cached planning, even offline. New advice requires Linear publication.
-    Restart {
-        issue: String,
-        advice: Option<String>,
-        /// Replacement Flow; validated before any checkpoint or stop
-        #[arg(long)]
-        flow: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
 }
 
 impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
-            Self::Worker { .. }
-            | Self::Create { .. }
+            Self::Create { .. }
             | Self::Sweep { .. }
             | Self::Reconcile { .. }
             | Self::Repair { .. }
@@ -981,17 +955,17 @@ impl TaskCommand {
             Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
             Self::Checkout { issue, .. }
+            | Self::Run { issue, .. }
+            | Self::Move { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }
-            | Self::Complete { issue, .. }
             | Self::Delete { issue }
             | Self::Edit { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
-            | Self::Wait { issue, .. }
-            | Self::Restart { issue, .. } => Some(issue),
+            | Self::Wait { issue, .. } => Some(issue),
         }
     }
 }
@@ -1916,8 +1890,7 @@ mod tests {
     fn direct_work_selector_accepts_an_inline_question() {
         let cli = Cli::try_parse_from([
             "lf",
-            "--mode",
-            "batch",
+            "--batch",
             "--wave",
             "product",
             ":",
@@ -2287,51 +2260,27 @@ mod tests {
             Some(Commands::External(_))
         ));
         assert!(Cli::try_parse_from(["lf", "task", "create", "--name", "placed"]).is_err());
-        assert!(Cli::try_parse_from([
-            "lf",
-            "task",
-            "create",
-            "--run",
-            "--directive",
-            "duplicate description"
-        ])
-        .is_err());
-        let cli = Cli::try_parse_from([
-            "lf",
-            "task",
-            "create",
-            "--run",
-            "--title",
-            "New task",
-            "--notes",
-            "Full report",
-            "--name",
-            "placed",
-        ])
-        .unwrap();
+        assert!(Cli::try_parse_from(["lf", "task", "create", "--run"]).is_err());
         assert!(
-            matches!(cli.command, Some(Commands::Task { cmd: TaskCommand::Create { run: true, title: Some(title), notes: Some(notes), .. } }) if title == "New task" && notes == "Full report")
+            Cli::try_parse_from(["lf", "flow", "start", "proof"]).is_ok_and(|cli| !matches!(
+                cli.command,
+                Some(Commands::Flow {
+                    cmd: FlowCommand::List { .. } | FlowCommand::Show { .. }
+                })
+            ))
         );
+        let cli = Cli::try_parse_from(["lf", "-b", "task", "run", "INF-123", "proof"]).unwrap();
+        assert!(cli.batch);
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Task {
+                cmd: TaskCommand::Run { issue, flow: Some(flow), .. }
+            }) if issue == "INF-123" && flow == "proof"
+        ));
     }
 
     #[test]
     fn task_completion_and_pr_dispositions_parse() {
-        let complete = Cli::try_parse_from([
-            "lf",
-            "task",
-            "complete",
-            "INF-123",
-            "--summary",
-            "Root cause recorded",
-        ])
-        .expect("parse task complete");
-        assert!(matches!(
-            complete.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Complete { issue, summary, .. }
-            }) if issue == "INF-123" && summary == "Root cause recorded"
-        ));
-
         let land = Cli::try_parse_from(["lf", "pr", "land", "-c"]).expect("parse completing land");
         assert!(matches!(
             land.command,
@@ -2369,46 +2318,39 @@ mod tests {
     }
 
     #[test]
-    fn task_completion_has_one_public_command() {
+    fn reaching_end_is_the_one_completion_command() {
         let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "move",
+            "LOO-42",
+            "end",
+            "--reason",
+            "Delivered",
+            "--force",
+            "--accept-unknown-exec",
+            "00000000-0000-0000-0000-000000000001",
+        ])
+        .unwrap();
+        assert!(matches!(cli.command,
+            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason, force: true, accept_unknown_exec } })
+                if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")
+                    && accept_unknown_exec.iter().map(|id| id.as_str()).collect::<Vec<_>>() == ["00000000-0000-0000-0000-000000000001"]));
+        assert!(Cli::try_parse_from([
             "lf",
             "task",
             "complete",
             "LOO-42",
             "--summary",
-            "Delivered",
-            "--json",
+            "Delivered"
         ])
-        .unwrap();
-        assert!(
-            matches!(cli.command, Some(Commands::Task { cmd: TaskCommand::Complete { issue, summary, json: true, .. } }) if issue == "LOO-42" && summary == "Delivered")
-        );
+        .is_err());
         assert!(matches!(
             Cli::try_parse_from(["lf", "pm", "task", "done", "--id", "LOO-42"])
                 .unwrap()
                 .command,
             Some(Commands::External(_))
         ));
-    }
-
-    #[test]
-    fn task_complete_accepts_exact_historical_execs() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "task",
-            "complete",
-            "LOO-42",
-            "--summary",
-            "Delivery verified",
-            "--accept-unknown-exec",
-            "00000000-0000-0000-0000-000000000001",
-            "--accept-unknown-exec",
-            "00000000-0000-0000-0000-000000000002",
-        ])
-        .unwrap();
-        assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Complete { accept_unknown_exec, .. } })
-                if accept_unknown_exec.iter().map(|id| id.as_str()).collect::<Vec<_>>() == ["00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"]));
     }
 
     #[test]
@@ -2503,75 +2445,25 @@ mod tests {
     }
 
     #[test]
-    fn task_restart_accepts_optional_advice() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "task",
-            "restart",
-            "LOO-267",
-            "replace the old runtime model",
-            "--json",
-        ])
-        .expect("parse Task restart");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Task {
-                cmd: TaskCommand::Restart {
-                    issue,
-                    advice: Some(advice),
-                    flow: None,
-                    json: true,
-                }
-            }) if issue == "LOO-267" && advice == "replace the old runtime model"
-        ));
-    }
-
-    #[test]
     fn navigation_belongs_to_flow_decisions() {
         for args in [
-            vec![
-                "lf",
-                "--task",
-                "LOO-1",
-                "flow",
-                "start",
-                "--session",
-                "review",
-            ],
-            vec![
-                "lf",
-                "--task",
-                "LOO-1",
-                "flow",
-                "start",
-                "--summary",
-                "approved",
-            ],
+            vec!["lf", "task", "run", "LOO-1", "--session", "review"],
             vec!["lf", "session", "advance", "review", "approved"],
             vec!["lf", "session", "iterate", "review", "revise"],
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
-        assert!(Cli::try_parse_from(["lf", "--task", "LOO-1", "flow", "start"]).is_ok());
-        assert!(Cli::try_parse_from(["lf", "session", "complete", "review"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "session", "complete", "review"]).is_err());
     }
 
     #[test]
-    fn cli_preserves_review_completion_and_rejects_ask() {
+    fn cli_rejects_review_handshake_and_preserves_native_open() {
         assert!(Cli::try_parse_from(["lf", "session", "ask", "Help"]).is_err());
-        let ready = Cli::try_parse_from(["lf", "session", "ready", "Ready for review"])
-            .expect("parse session readiness");
-        assert!(matches!(
-            ready.command,
-            Some(Commands::Session {
-                cmd: SessionCommand::Ready { summary }
-            }) if summary == ["Ready for review"]
-        ));
-
         for args in [
-            vec!["lf", "session", "ready"],
-            vec!["lf", "session", "advance", "task_flow"],
-            vec!["lf", "session", "iterate", "task_flow"],
+            vec!["lf", "session", "ready", "Ready for review"],
+            vec!["lf", "session", "complete", "review"],
+            vec!["lf", "session", "advance", "review"],
+            vec!["lf", "session", "iterate", "review"],
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
@@ -2611,15 +2503,6 @@ mod tests {
             }) if id == "run_123" && name == ["Release", "notes"]
         ));
         assert!(Cli::try_parse_from(["lf", "session", "rename", "run_123"]).is_err());
-
-        let complete = Cli::try_parse_from(["lf", "session", "complete", "run_123"])
-            .expect("parse interactive completion");
-        assert!(matches!(
-            complete.command,
-            Some(Commands::Session {
-                cmd: SessionCommand::Complete { id }
-            }) if id == "run_123"
-        ));
     }
 
     #[test]

@@ -1,8 +1,7 @@
 // RegistryQuery — typed `lf` reads over the machine registry.
 //
 // History and explicit lookups are one-shot queries. What a window shows is kept
-// current by one foreground workspace reader per window; active Sessions use a
-// second so native receipt discovery survives between samples.
+// current by one foreground workspace reader per window.
 //
 // This runs `lf wave list`, `lf wave status`, and the roadmap, ps, and activity
 // readers with `--json` as subprocesses and decodes the wire
@@ -26,6 +25,11 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// wave); the machine-wide reads (`lf wave list`, `lf usage --days 0 --task ID --json`) ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
+/// Starts an `lf` argv that runs as long as its work does and returns once it
+/// is under way, throwing an immediate refusal. A transport without one waits
+/// for the command through its `RegistryRunner`.
+public typealias RegistryStarter = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> Void
+
 /// Entry emitted by `lf list --json`.
 public struct DiscoveryEntry: Codable, Equatable, Sendable, Identifiable {
     public let name: String
@@ -39,30 +43,27 @@ public struct DiscoveryEntry: Codable, Equatable, Sendable, Identifiable {
 public struct RegistryQuery: Sendable {
     private let run: RegistryRunner
     private let runWithInput: @Sendable ([String], String?, String) async throws -> String
-    private let observe: @Sendable () async throws -> ActiveSessionsObservation
+    private let start: RegistryStarter?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
 
     public init(
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
-        watchActiveSessions: @escaping @Sendable () async throws -> ActiveSessionsObservation = {
-            throw RegistryQueryError("Active Session observation is unavailable on this transport")
-        },
         watchWork: (@Sendable () async throws -> WorkObservation)? = nil,
+        start: RegistryStarter? = nil,
         run: @escaping RegistryRunner
     ) {
         self.runWithInput = runWithInput
         self.run = run
-        self.observe = watchActiveSessions
+        self.start = start
         self.observeWork = watchWork
     }
 
     /// A copy that also reports each successful read's wire text, so a caller
     /// can retain exactly what it decoded.
     public func recording(_ record: @escaping @Sendable (_ stdout: String) -> Void) -> RegistryQuery {
-        RegistryQuery(runWithInput: runWithInput, watchActiveSessions: observe,
-                      watchWork: observeWork) { [run] args, cwd in
+        RegistryQuery(runWithInput: runWithInput, watchWork: observeWork, start: start) { [run] args, cwd in
             let stdout = try await run(args, cwd)
             record(stdout)
             return stdout
@@ -139,10 +140,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(String?.self, from: stdout)
     }
 
-    public func watchActiveSessions() async throws -> ActiveSessionsObservation {
-        try await observe()
-    }
-
     /// Whether this transport keeps a workspace current by itself. Without one,
     /// a caller reads once and shows that reading until it asks again.
     public var streamsWork: Bool { observeWork != nil }
@@ -186,11 +183,6 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["task", "automate", issue, enabled ? "on" : "off"], cwd)
     }
 
-    public func taskStatus(issue: String, cwd: String?) async throws -> TaskStatus {
-        let stdout = try await run(["task", "status", issue, "--json"], cwd)
-        return try Self.decode(TaskStatus.self, from: stdout)
-    }
-
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
     public func taskChanges(issue: String, base: String = "parent", cwd: String?) async throws -> TaskChangesSnapshot {
@@ -205,23 +197,39 @@ public struct RegistryQuery: Sendable {
             .sorted { $0.name < $1.name }
     }
 
-    /// Every selectable Flow with the topology it would pin, via the shared loader.
+    /// Every selectable Flow with the topology it would capture, via the shared loader.
     public func flowCatalog(cwd: String?) async throws -> [FlowCatalogEntry] {
         let stdout = try await run(["flow", "list", "--json"], cwd)
         return try Self.decode([FlowCatalogEntry].self, from: stdout)
     }
 
-    /// Start (preparing when needed) the Task's managed Flow.
-    public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {
-        var args = ["--task", issue, "flow", "start"]
-        if let flow { args.append(flow) }
-        _ = try await run(args, cwd)
+    /// The repository file that defines a Flow or workflow, written from the
+    /// builtin when the repository has none.
+    public func customizeDefinition(_ name: String, cwd: String?) async throws -> String {
+        try await run(["flow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Checkpoint, stop, and replace the pinned Flow. Rust validates `flow`
-    /// before any side effect.
-    public func restartTaskFlow(issue: String, flow: String, cwd: String?) async throws {
-        _ = try await run(["task", "restart", issue, "--flow", flow], cwd)
+    /// Change the workflow of the Wave's current chapter, keeping its KRs and targets.
+    public func setWorkflow(_ name: String, wave: String, cwd: String?) async throws {
+        _ = try await run(["wave", "update-plan", "--wave", wave, "--workflow", name], cwd)
+    }
+
+    /// Run a fresh Flow for the Task headless, placing it when needed. Without
+    /// `flow`, Rust takes the Task's edge or its Project's workflow.
+    public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {
+        var args = ["-b", "task", "run", issue]
+        if let flow { args.append(flow) }
+        if let start {
+            try await start(args, cwd)
+        } else {
+            _ = try await run(args, cwd)
+        }
+    }
+
+    /// Put the Task at a node of its Workflow without running anything.
+    /// `force` reaches `end` although Linear already calls the Task complete.
+    public func moveTask(issue: String, node: String, force: Bool = false, cwd: String?) async throws {
+        _ = try await run(["task", "move", issue, node] + (force ? ["--force"] : []), cwd)
     }
 
     /// One planning Task's complete comment thread. Read-only; works before
@@ -229,13 +237,6 @@ public struct RegistryQuery: Sendable {
     public func taskComments(id: String, wave: String, cwd: String) async throws -> TaskComments {
         let stdout = try await run(["task", "comment", id, "--wave", wave, "--json"], cwd)
         return try Self.decode(TaskComments.self, from: stdout)
-    }
-
-    /// All associated Sessions, Flows and Execs, including closed history.
-    public func taskWork(task: String, cwd: String?) async throws -> TaskWork {
-        struct Snapshot: Decodable { let work: TaskWork }
-        let stdout = try await run(["task", "status", task, "--json"], cwd)
-        return try Self.decode(Snapshot.self, from: stdout).work
     }
 
     /// Complete Task-attributed Session input/provider history. Read-only; querying
@@ -315,6 +316,14 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionPage.self, from: stdout)
     }
 
+    /// The Task's one ongoing conversation: the one already chosen, else its
+    /// only or most recently used one, else a new one in its checkout. The
+    /// choice is remembered as the Task's primary.
+    public func ensureTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
+        let stdout = try await run(["session", "ensure", "--task", issue, "--json"], cwd)
+        return try Self.decode(SessionRecord.self, from: stdout)
+    }
+
     /// Open one Session and return its terminal command.
     public func openSession(
         id: String,
@@ -348,13 +357,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Complete an interactive conversation or Flow review.
-    public func completeSession(
-        id: String,
-        cwd: String? = nil
-    ) async throws {
-        _ = try await run(["session", "complete", id], cwd)
-    }
 
     /// A wave's measured bets from the local PM snapshot. Cache-only reads keep
     /// rendering off the network; explicit and scheduled syncs refresh SQLite.
@@ -519,7 +521,7 @@ public struct UnavailableTaskEvidence: Decodable, Sendable, Hashable {
     public let workId: String
     public let taskId: String
     public let taskIdentifier: String
-    public let status: WorkStatus
+    public let status: TaskState
     public let owner: WorkNextMoveOwner
     public let reason: String
     public let recovery: String

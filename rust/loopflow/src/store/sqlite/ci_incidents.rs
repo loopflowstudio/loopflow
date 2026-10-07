@@ -255,7 +255,7 @@ impl super::SqliteStore {
         repo: Option<&str>,
     ) -> StoreResult<Vec<CiIncidentReportRow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
+        let mut statement = conn.prepare(&format!(
             "SELECT
                 ci.identity, ci.landing_id, ci.task_id, ci.pr_id,
                 ci.repo, ci.pr_number, ci.failed_head_sha, ci.failure_set_json,
@@ -264,7 +264,7 @@ impl super::SqliteStore {
                 ci.merged_at, ci.blocked_at, ci.blocked_reason, ci.created_at,
                 ci.updated_at, ci.repaired_head_sha,
                 w.slug, ts.issue_identifier,
-                ts.work_state,
+                CASE WHEN ts.id IS NOT NULL THEN {task_state} END,
                 ts.created_at,
                 EXISTS (
                     SELECT 1 FROM task_events event
@@ -288,7 +288,8 @@ impl super::SqliteStore {
                AND (?3 IS NULL OR ci.repo=?3)
              ORDER BY COALESCE(ci.provider_completed_at, ci.poll_observed_at,
                                ci.webhook_received_at, ci.created_at) DESC",
-        )?;
+            task_state = super::durable::task_state_sql("ts")
+        ))?;
         let rows = statement.query_map(
             params![timestamp(since), wave, repo],
             map_incident_report_row,

@@ -5,15 +5,8 @@ public struct TaskAutomation: Codable, Sendable, Identifiable {
     public let taskId: String
     public let issue: String
     public let enabled: Bool?
-    public let execId: String?
-    public let retryKey: String?
-    public let retries: UInt32
-    public let checkedAt: Int64?
-    public let detail: String?
-
     enum CodingKeys: String, CodingKey {
-        case taskId = "task_id", issue, enabled, execId = "exec_id"
-        case retryKey = "retry_key", retries, checkedAt = "checked_at", detail
+        case taskId = "task_id", issue, enabled
     }
 }
 

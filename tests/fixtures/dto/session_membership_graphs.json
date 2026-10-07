@@ -230,7 +230,7 @@
       {
         "key": 7,
         "id": null,
-        "label": "loop-decide",
+        "label": "loop-or-next",
         "kind": "skill",
         "human": false,
         "returns_to": null,

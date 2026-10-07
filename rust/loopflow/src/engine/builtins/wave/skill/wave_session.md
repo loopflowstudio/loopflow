@@ -27,11 +27,11 @@ watch, check back or follow up later.
 
 - Within a turn, `lf task wait <issue> --until submitted` (or `terminal`, with
   `--timeout`) waits for a state change without polling.
-- Between turns, each Task's own worker keeps running. The periodic Task check
-  and the CI watcher help only where they are installed: read
-  `lf task automation` and `lf ci watch --status`, and say which are active.
-  `lf task reconcile` runs that check once; it resumes only enrolled Tasks with
-  an unfinished Flow, so it never replaces the procedure.
+- Between turns, launched Flows keep running independently. The periodic Task
+  check and CI watcher help only where installed: read `lf task automation`
+  and `lf ci watch --status`, and say which are active. `lf task reconcile`
+  checks deliveries once; it never resumes a stopped Flow. Inspect its history
+  and effects before selecting fresh work through `lf task run`.
 - This conversation keeps the instructions it launched with.
   `lf session replace <id>` gives the Wave a fresh conversation after an install.
 
@@ -39,7 +39,7 @@ watch, check back or follow up later.
 
 At explicit Wave opening or beginning new planning work, run
 `lf wave ensure <wave> --json`. It reuses the shared exact Project binding or
-recovers one reserved creation; ordinary Projects need no chapter or default Flow.
+recovers one reserved creation; ordinary Projects need no chapter or workflow.
 An outage is not absence. Report the cause and retry the same operation. Keep
 status and operator refresh passes observational; do not ensure on each poll.
 Started Tasks in prior Projects retain their execution and follow-through.

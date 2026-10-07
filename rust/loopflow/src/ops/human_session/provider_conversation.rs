@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail, Result};
 use super::{local_capture_dir, lock_session_exec, publish_prepared_input};
 use crate::provider_account::activation::native_home;
 use crate::provider_auth::Provider;
-use crate::session::{AgentSession, SessionKind, TitleSource};
+use crate::session::{AgentSession, TitleSource};
 use crate::store::{ProviderAccountId, SharedStore};
 
 pub(super) async fn human_input_times<'a>(
@@ -222,39 +222,35 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<AgentS
         None => crate::repo::working_directory()?,
     };
     let session = store
-        .create_session(
-            AgentSession {
-                captured: None,
-                id: format!("session_{}", uuid::Uuid::new_v4().simple()),
-                artifact_key: crate::session_record::new_artifact_key(),
-                caller_artifact_key: None,
-                input_published: false,
-                cwd,
-                skill: None,
-                provider: Some(conversation.provider.as_str().to_string()),
-                model: None,
-                node: None,
-                iterations: None,
-                task_id: None,
-                wave_id: None,
-                flow_session_id: None,
-                work_source: None,
-                bound_at: None,
-                kind: SessionKind::Conversation,
-                interactive: true,
-                repo: None,
-                title: format!("{} {}", conversation.provider, &id[..8]),
-                title_source: TitleSource::Generated,
-                request: None,
-                ready_summary: None,
-                completed_at: None,
-                created_at: crate::store::rows::now_unix(),
-            },
-            None,
-        )
+        .create_session(AgentSession {
+            captured: None,
+            id: format!("session_{}", uuid::Uuid::new_v4().simple()),
+            artifact_key: crate::session_record::new_artifact_key(),
+            caller_artifact_key: None,
+            input_published: false,
+            cwd,
+            skill: None,
+            provider: Some(conversation.provider.as_str().to_string()),
+            model: None,
+            node: None,
+            iterations: None,
+            task_id: None,
+            wave_id: None,
+            flow_id: None,
+            work_source: None,
+            bound_at: None,
+            interactive: true,
+            repo: None,
+            title: format!("{} {}", conversation.provider, &id[..8]),
+            title_source: TitleSource::Generated,
+            request: None,
+            ready_summary: None,
+            completed_at: None,
+            created_at: crate::store::rows::now_unix(),
+        })
         .await?;
     let session = publish_prepared_input(
-        store,
+        &store.sqlite,
         &session,
         crate::session_record::SessionFlowMembership::Independent,
     )?;

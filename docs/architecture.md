@@ -5,8 +5,9 @@ title: Architecture
 
 # Architecture
 
-Loopflow records commands, preserves agent conversations, and advances captured
-Flows. Exec, AgentSession and FlowSession own those three lifetimes.
+Loopflow records commands, preserves agent conversations, and drives Flows.
+Exec owns a process and AgentSession a conversation; a Flow is one driver Exec
+and the step Execs it starts.
 
 This guide specifies the accepted model. The reference owns
 [cutover status](architecture-reference.md#cutover-status), the remaining work
@@ -100,22 +101,23 @@ one Skill run
 The source tree makes the planning boundary literal:
 
 ```text
-work/                          controller/
+work/
 wave/{mod,config,context,
       memory,metrics,relocate}
-project                       task/mod
-task                          Task worker
+project
+task
 
 ops/chapter.rs                deterministic chapter rotation
+ops/task.rs                   Task launch: a fresh Flow in the Task checkout
+lf/commands/flow.rs           Flow driver: one process per Flow
 
 execution kernel: engine/ + harness/ + command and conversation history
 composition surfaces: lf/ + bin/
 ```
 
-`work` never imports `controller`. The execution kernel works without either
-layer and never loads Work. CLI and boundary callers resolve Work identity,
-Wave memory, and the Task's managed FlowSession, then pass ordinary launch
-inputs into the kernel.
+`work` never imports the Flow driver. The execution kernel works without either
+layer and never loads Work. CLI callers resolve Work identity and Wave memory,
+then pass ordinary launch inputs into the kernel.
 
 Release delivery also separates proof from authority:
 
@@ -165,7 +167,7 @@ user / agent --> lf CLI --------+----------+-----------+
               discovery / prompt / route / harness
                               |
                               v
-                    Exec / AgentSession / FlowSession
+                        Exec / AgentSession
                               |
                               v
                   status / roadmap / usage / app
@@ -185,25 +187,25 @@ ledger.
 Repository
   `-- Wave                    enduring objective, memory and cadence
         `-- Linear Project    status + shared chapter name + Flow + KRs
-              `-- Task        identity, worktree, PR and managed FlowSession
+              `-- Task        identity, worktree, PR and every Flow exec for it
 
 Exec                          one actual lf process; immutable causal parent
 AgentSession                  one conversation; nullable current driver Exec
   `-- history                 provider starts, outcomes, retries and usage
-FlowSession                   captured graph, cursor, return counts and claim
-  `-- history                 mechanical results or exact agent completion refs
+Flow                          one driver Exec; cursor in its memory, graph in FlowExec
+  `-- step Execs              plain commands; the driver records each one's node
 ```
 
 | Model | Represents | Primary truth |
 | --- | --- | --- |
 | Skill | Reusable instructions and declared context | Repository, builtin or installed Markdown |
-| Flow | Reusable graph of agent, mechanical, routing and review steps | Repository or builtin YAML |
+| Flow | Reusable graph of agent, mechanical and routing steps | Repository or builtin YAML |
 | Exec | One actual lf process, its caller and command completion | `execs` |
 | AgentSession | An interactive or headless conversation across drivers and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
-| FlowSession | One captured Flow's progress, including taskless execution | `flow_sessions` and its subordinate history |
+| Running Flow | One driver process and the steps it starts, including taskless execution | The driver Exec and its child step Execs in `execs` |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and Linear Initiative membership |
 | Chapter | Shared name of each Wave's In Progress Project | Linear Project statuses; no Chapter row or packet |
-| Project | A Wave's plan, KRs, targets and default Flow | Linear Project and its synchronized `projects` row |
+| Project | A Wave's plan, KRs, targets and workflow | Linear Project and its synchronized `projects` row |
 | Task | A concrete change, investigation or document | `tasks`, Linear Issue, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Home | A machine's store, credentials and exact process authority | Home identity and observed route |
@@ -219,8 +221,7 @@ Connect uses the live engine when possible. Passive display acquires no claim.
 Transferring the conversation driver revokes the old client's ability to start
 or steer turns and mutate Session state, including queued writes. It does not
 replace the provider generation or interrupt an existing turn. Client replacement
-leaves the engine alive; Flow retry can recover after confirmed engine exit while
-retaining native history. Neither operation authorizes killing a shared engine
+leaves the engine alive and never authorizes killing a shared engine
 for one thread. Engine PID, client PID and conversation driver are distinct.
 
 Exec ancestry records the actual lf caller. A direct child names its parent's
@@ -229,14 +230,16 @@ The provider's generation resolves to the current driver at child admission.
 A delayed command from a replaced provider retains historical provenance; old
 Exec parents are never rewritten. Causal ancestry grants no control authority.
 
-A Task selects one managed FlowSession and permits other attributed Flows.
-Taskless and Task-owned Flows use the same captured graph and driver. Loop
-passes are positions in that one FlowSession; template composition compiles into
-the graph. Each agent-backed step references the exact successful AgentSession
-history entry that fulfilled it. Mechanical results stay in FlowSession history;
-each step uses a real child Exec, and mechanical work creates no agent conversation.
-Failed or interrupted work remains visible, and stale results cannot advance
-the current boundary. Conversation continuation is separate from Flow retry.
+Every Flow naming a Task, or run in its checkout, is equally its work;
+none is privileged. `task run` always runs a fresh one.
+Taskless and Task-owned Flows use the same driver. It holds the compiled graph
+and cursor in memory; template composition compiles into the graph, and loop
+passes are positions in it. Each step is a real child Exec whose argv carries
+the Flow name, launch sequence and position. A step's result is how its process
+exited; a deciding or routing step also answers through the Session turn its
+Exec captured. Mechanical work creates no agent conversation. A Session reaches
+its Flow through the step Exec that captured its input. A killed driver leaves
+its Execs as history; nothing resumes it, and its caller launches fresh work.
 
 Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
@@ -247,14 +250,14 @@ mid-turn allocation remains unknown.
 
 `tasks.started_at` is set once when actual Task work is reserved or first bound.
 Recording an inspection command's Exec does not start a Task. Chapter retirement
-also checks authored work, PRs and active claims; missing history alone cannot
+also checks authored work, PRs and Flows; missing history alone cannot
 prove untouched backlog. Rotation converges from fresh Linear facts using the
 explicit target name and stable Project identities. A partially rotated repository
 must be retryable; unrelated competing plans remain unresolved.
 
 The [reference](architecture-reference.md#core-models-and-apis) owns the field and
-write contracts and the current-state conversion boundary. Exec, AgentSession
-and FlowSession are the execution owners; Run has no separate lifecycle.
+write contracts and the current-state conversion boundary. Exec and AgentSession
+are the execution owners; Run has no separate lifecycle.
 
 ## Follow the common paths
 
@@ -284,23 +287,25 @@ lf task status INF-123 --json
 serial PR identity. It starts no Task execution. Each `--task` command
 starts an independent AgentSession in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
-Those commands act on delivery facts, not on Flow-driving authority. `submit` and `land` therefore work the same whether the Task was pursued by its
-Task worker, piecemeal helper AgentSessions, or another system.
+Those commands act on delivery facts, not on Flow-driving authority. `submit` and `land` therefore work the same whether the Task was pursued by a
+Task Flow, piecemeal helper AgentSessions, or another system.
 
-### Bounded Task advancement
+### Task Flows
 
 ```bash
 lf --wave product wave/operate        # one finite planning pass
-lf --task INF-123 flow start
+lf task run INF-123
 lf --wave <wave> wave/operate "ship invoices first"
 lf wave status product
 ```
 
-Task commands claim the Task's managed FlowSession. Repository rotation converges
-every Wave on the requested Project name, preserving active Task identity and
-execution. Direct questions and helpers use attributed AgentSessions without
-gaining Flow authority. A review starts its captured Skill in an AgentSession
-and parks until the exact saved feedback is completed and consumed.
+`task run` places the Task, then runs a fresh Flow in its checkout exactly as
+`lf --task ISSUE run FLOW` does, returning when the Flow ends; it never
+continues an earlier one. Repository rotation converges every Wave on the
+requested Project name, preserving active Task identity and execution. Direct
+questions and helpers use attributed AgentSessions without gaining Flow
+authority. Flows hold autonomous steps only; review happens in the Task
+conversation.
 
 ### Another machine
 

@@ -1014,8 +1014,7 @@ fn spawn_cron_target(
         command.args([
             "--wave",
             &spec.wave,
-            "--mode",
-            "batch",
+            "--batch",
             spec.target_kind.as_str(),
             "--",
             &spec.flow,

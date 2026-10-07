@@ -23,13 +23,9 @@ Keep the current account coherent; mark superseded conclusions and preserve
 useful evidence. The note should stand on its own in any later review or work
 step, including when this demo runs outside a Flow.
 
-When this is a `human:true` Flow step, follow its Session readiness/completion
-protocol. Keep the human feedback, revised artifact references, and remaining
-work in the scratch notes; give their exact paths and a short takeaway in the
-ready summary, for example `lf ready "See scratch/search-feedback.md:
-implement the agreed empty state; verify recovery after clearing the query"`.
-The following loop-decide interprets that evidence and chooses the explicit
-edge; this demo supplies no navigation verdict.
+Discuss the feedback, revised artifact paths and remaining work in the ongoing
+conversation. Save their exact paths and a short takeaway with the review evidence.
+The caller chooses further work; this demo closes no Session and restarts no Flow.
 
 On a headless surface, run the same demonstration autonomously. If required
 product judgment or absent-user action prevents the proof, explain the exact

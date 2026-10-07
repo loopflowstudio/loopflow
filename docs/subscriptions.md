@@ -282,14 +282,12 @@ Choose both providers once for a Flow or Task:
 
 ```bash
 lf --only-account claude=personal@ --only-account codex=work@ flow code
-lf --account claude=personal@ --account codex=work@ --task LOO-123 flow start
+lf --account claude=personal@ --account codex=work@ task run LOO-123
 ```
 
-Flow invocations save these choices and restore them for autonomous steps,
-review children and later resumes. `--account` keeps fallback routing;
-`--only-account` restricts the entire invocation. Resuming a saved invocation
-keeps its captured choices; restart it to choose again. Steps have no account
-overrides. Native Session affinity remains authoritative within that selection.
+A Flow carries these choices to its steps. `--account` keeps fallback routing;
+`--only-account` restricts the entire Flow. Run a fresh Flow to choose again.
+Steps have no account overrides. Native Session affinity remains authoritative within that selection.
 Local choices use the Home's catalog directly and survive the initiating CLI's
 exit; a forwarded SSH credential still needs its origin broker.
 
@@ -327,8 +325,8 @@ A shared launch follows the active account while it is eligible and below the
 
 `--isolate` runs the invocation and its children in the selected account's own
 home, unmoved by any switch. `isolate: true` in `.lf/config.yaml` makes that the
-default, and `--shared` overrides it for one invocation. Flow invocations keep
-the mode they were launched with.
+default, and `--shared` overrides it for one invocation. A Flow's steps keep
+the mode it was launched with.
 
 Codex's own conversation ID works wherever a Session ID does:
 
@@ -477,7 +475,7 @@ consumers must migrate; the removed interfaces have no compatibility aliases.
   credential binding.
 - `AccountLeaseBroker` is internal to SSH forwarding; its `start_root` and
   `local_env_value` entry points are removed. Launch local commands with
-  `--account` or `--only-account`; saved Flow invocations own those choices.
+  `--account` or `--only-account`; a Flow carries those choices to its steps.
 
 The forward database migration preserves existing account/profile identities,
 ordered bindings and configured expected logins. Source API compatibility and

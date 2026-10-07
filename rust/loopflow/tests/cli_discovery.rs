@@ -13,7 +13,7 @@ fn fixture() -> TempDir {
     let repo = tempfile::tempdir().unwrap();
     fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
     fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
-    for name in ["solo", "paired", "complete", "land", "release-run"] {
+    for name in ["solo", "paired", "rename", "land", "release-run"] {
         fs::write(
             repo.path().join(format!(".lf/skills/{name}.md")),
             format!("Skill {name} body."),
@@ -219,14 +219,8 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     for args in [
-        &["--interactive"][..],
-        &["--batch"][..],
-        &["--tui"][..],
-        &["--ide"][..],
-        &["-i"][..],
-        &["-b"][..],
         &["--as", "wave:exports"][..],
-        &["task", "run", "EXP-12"][..],
+        &["task", "create", "--run"][..],
         &["--mode", "invalid"][..],
         &["--no-diff"][..],
         &["--diff-files"][..],
@@ -240,7 +234,6 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
         &["wt", "list", "--full"],
         &["wave", "status", "--no-sync"],
         &["wt", "list", "--format", "json"],
-        &["commit", "--push"],
         &["account", "status"],
         &["account", "--verify"],
         &["account", "route", "show"],
@@ -345,23 +338,15 @@ fn skill_catalog_preserves_namespace_discovery() {
 fn ambiguous_commands_never_fall_back_to_installed_definitions() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
-    for args in [
-        &["complete"][..],
-        &["complete", "--help"],
-        &["help", "complete"],
-    ] {
+    for args in [&["rename"][..], &["rename", "--help"], &["help", "rename"]] {
         let result = run(repo.path(), home.path(), args);
         assert_eq!(result.status.code(), Some(2));
         let message = String::from_utf8_lossy(&result.stderr);
-        assert!(message.contains("lf session complete"), "{message}");
-        assert!(message.contains("lf task complete"), "{message}");
+        assert!(message.contains("lf session rename"), "{message}");
+        assert!(message.contains("lf wave rename"), "{message}");
     }
-    let selected = success(run(
-        repo.path(),
-        home.path(),
-        &["run", "complete", "--help"],
-    ));
-    assert!(String::from_utf8_lossy(&selected).contains("Skill complete body."));
+    let selected = success(run(repo.path(), home.path(), &["run", "rename", "--help"]));
+    assert!(String::from_utf8_lossy(&selected).contains("Skill rename body."));
     assert!(!home.path().join(".lf").exists());
 }
 

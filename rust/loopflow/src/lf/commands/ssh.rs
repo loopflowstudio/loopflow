@@ -173,19 +173,10 @@ pub fn run(
         &cmd,
         &extra_env,
     );
-    let outcome = run_ssh(&target.route, forward_agent, broker.as_ref(), &preamble)?;
+    let result = run_ssh(&target.route, forward_agent, broker.as_ref(), &preamble);
     // Release the broker before reporting the remote command's result.
     drop(broker);
-    match outcome {
-        SshOutcome::Success => Ok(()),
-        SshOutcome::CommandFailure(code) => Err(crate::process::CommandExit(
-            u8::try_from(code).expect("SSH command exit status fits a byte"),
-        )
-        .into()),
-        SshOutcome::ConnectionFailure => {
-            unreachable!("run_ssh returns transport failures as errors")
-        }
-    }
+    result
 }
 
 fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
@@ -578,55 +569,20 @@ pub(super) fn sh_quote(value: &str) -> String {
     quoted
 }
 
-/// What the remote process's exit status means for the caller.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SshOutcome {
-    /// Remote command succeeded.
-    Success,
-    /// SSH transport/connection failure (its reserved code `255`, or death by
-    /// signal): unreachable host, unknown key, auth refusal, or a bounded
-    /// timeout firing. Actionable and host-named; never a real remote code.
-    ConnectionFailure,
-    /// The remote command itself exited nonzero — propagate its code verbatim.
-    CommandFailure(i32),
-}
-
-fn ssh_args(
-    dest: &str,
-    forward_agent: bool,
-    broker: Option<&AccountLeaseBroker>,
-) -> anyhow::Result<Vec<String>> {
-    let mut args: Vec<String> = Vec::new();
-    if let Some(broker) = broker {
-        args.push("-R".to_string());
-        args.push(format!(
-            "{}:{}",
-            broker.remote_socket().display(),
-            broker.local_socket().display()
-        ));
-        args.push("-o".to_string());
-        args.push("StreamLocalBindUnlink=yes".to_string());
-        args.push("-o".to_string());
-        args.push("StreamLocalBindMask=0177".to_string());
-        args.push("-o".to_string());
-        args.push("ExitOnForwardFailure=yes".to_string());
-    }
-    args.extend(crate::engine::machine_route::bounded_ssh_args(
-        dest,
-        forward_agent,
-    )?);
-    args.push("bash -s".to_string());
-    Ok(args)
-}
-
 /// Classify an ssh exit code. `255` is ssh's reserved transport-error code;
 /// `None` means death by signal — both are connection-phase failures, distinct
 /// from a real remote command code we must propagate.
-fn classify_exit(code: Option<i32>) -> SshOutcome {
+fn command_result(dest: &str, code: Option<i32>) -> anyhow::Result<()> {
     match code {
-        Some(0) => SshOutcome::Success,
-        Some(255) | None => SshOutcome::ConnectionFailure,
-        Some(other) => SshOutcome::CommandFailure(other),
+        Some(0) => Ok(()),
+        Some(255) | None => Err(super::machine::transport_failure(
+            dest,
+            "SSH transport closed; see the SSH error above",
+        )),
+        Some(code) => Err(crate::process::CommandExit(
+            u8::try_from(code).expect("SSH command exit status fits a byte"),
+        )
+        .into()),
     }
 }
 
@@ -638,9 +594,31 @@ fn run_ssh(
     forward_agent: bool,
     broker: Option<&AccountLeaseBroker>,
     preamble: &str,
-) -> anyhow::Result<SshOutcome> {
-    let mut child = Command::new("ssh")
-        .args(ssh_args(dest, forward_agent, broker)?)
+) -> anyhow::Result<()> {
+    let args = crate::engine::machine_route::bounded_ssh_args(dest, forward_agent)?;
+    let forwarding = broker.map(|broker| {
+        format!(
+            "{}:{}",
+            broker.remote_socket().display(),
+            broker.local_socket().display()
+        )
+    });
+    let mut command = Command::new("ssh");
+    if let Some(route) = &forwarding {
+        command.args([
+            "-R",
+            route,
+            "-o",
+            "StreamLocalBindUnlink=yes",
+            "-o",
+            "StreamLocalBindMask=0177",
+            "-o",
+            "ExitOnForwardFailure=yes",
+        ]);
+    }
+    let mut child = command
+        .args(&args)
+        .arg("bash -s")
         .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -658,18 +636,11 @@ fn run_ssh(
     let status = child.wait().context("ssh did not complete");
     // Multiplexed -R routes belong to the master and otherwise survive this
     // command. Cancel only this broker's route; never close the shared master.
-    if let Some(broker) = broker {
+    if let Some(route) = &forwarding {
         let cancelled = Command::new("ssh")
             .args(["-O", "cancel", "-R"])
-            .arg(format!(
-                "{}:{}",
-                broker.remote_socket().display(),
-                broker.local_socket().display()
-            ))
-            .args(crate::engine::machine_route::bounded_ssh_args(
-                dest,
-                forward_agent,
-            )?)
+            .arg(route)
+            .args(&args)
             .stdin(Stdio::null())
             .output();
         if !cancelled.is_ok_and(|output| output.status.success()) {
@@ -677,18 +648,17 @@ fn run_ssh(
         }
     }
     written.context("failed to write preamble to ssh")?;
-    match classify_exit(status?.code()) {
-        outcome @ (SshOutcome::Success | SshOutcome::CommandFailure(_)) => Ok(outcome),
-        SshOutcome::ConnectionFailure => Err(super::machine::transport_failure(
-            dest,
-            "SSH transport closed; see the SSH error above",
-        )),
-    }
+    command_result(dest, status?.code())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        build_preamble, command_result, is_valid_env_name, reject_detached_account_forwarding, run,
+        sh_quote, Credentials, ProviderAuthority, EXPECTED_MACHINE_ID_ENV,
+    };
+    use crate::provider_account::lease::{self, AccountLeaseHandle, AccountSelection};
+    use std::path::PathBuf;
 
     fn full_credentials() -> Credentials {
         Credentials {
@@ -915,40 +885,47 @@ mod tests {
 
     #[test]
     fn ssh_args_bound_the_connection() {
-        let args = ssh_args("jack@mini-heart", false, None).unwrap();
+        let args =
+            crate::engine::machine_route::bounded_ssh_args("jack@mini-heart", false).unwrap();
         // Primary hang killer: never block on an interactive prompt.
         assert!(args.iter().any(|a| a == "BatchMode=yes"));
         // Connect handshake and stalled-session bounds.
         assert!(args.iter().any(|a| a == "ConnectTimeout=10"));
         assert!(args.iter().any(|a| a == "ServerAliveInterval=10"));
         assert!(args.iter().any(|a| a == "ServerAliveCountMax=3"));
-        // Still targets the destination and runs the piped preamble.
-        assert!(args.iter().any(|a| a == "jack@mini-heart"));
-        assert_eq!(args.last().unwrap(), "bash -s");
-        assert_eq!(
-            args.iter().filter(|arg| arg.as_str() == "bash -s").count(),
-            1
-        );
-        // Agent forwarding stays opt-out; no -p without an explicit port.
+        assert_eq!(args.last().unwrap(), "jack@mini-heart");
+        // Agent forwarding stays opt-in; OpenSSH parses destination ports.
         assert!(!args.iter().any(|a| a == "-A"));
         assert!(!args.iter().any(|a| a == "-p"));
     }
 
     #[test]
     fn ssh_args_opt_in_agent_forwarding() {
-        let args = ssh_args("host", true, None).unwrap();
+        let args = crate::engine::machine_route::bounded_ssh_args("host", true).unwrap();
         assert_eq!(args.first().unwrap(), "-A");
     }
 
     #[test]
-    fn classify_exit_separates_transport_from_command_failure() {
-        assert_eq!(classify_exit(Some(0)), SshOutcome::Success);
-        // ssh's reserved transport code and death-by-signal are connection phase.
-        assert_eq!(classify_exit(Some(255)), SshOutcome::ConnectionFailure);
-        assert_eq!(classify_exit(None), SshOutcome::ConnectionFailure);
-        // A real remote command code is propagated, not swallowed as transport.
-        assert_eq!(classify_exit(Some(1)), SshOutcome::CommandFailure(1));
-        assert_eq!(classify_exit(Some(42)), SshOutcome::CommandFailure(42));
+    fn command_result_preserves_remote_exit_codes_and_reports_transport_failure() {
+        assert!(command_result("mini", Some(0)).is_ok());
+        for code in [Some(255), None] {
+            let error = command_result("mini", code).unwrap_err();
+            assert!(error
+                .downcast_ref::<crate::process::CommandExit>()
+                .is_none());
+            assert!(error.to_string().contains("unreachable"));
+            assert!(error.to_string().contains("mini"));
+        }
+        for code in [1, 42, 254] {
+            let error = command_result("mini", Some(code)).unwrap_err();
+            assert_eq!(
+                error
+                    .downcast_ref::<crate::process::CommandExit>()
+                    .unwrap()
+                    .0,
+                code as u8
+            );
+        }
     }
 
     #[test]

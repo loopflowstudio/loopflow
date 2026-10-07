@@ -54,6 +54,7 @@ exec env -i HOME='{}' PATH=/usr/bin:/bin bash -c "$remote_command"
 case "$1" in
 --version) echo 'lf {version}';;
 machine) echo '{id}';;
+fail) exit 42;;
 *) printf 'remote cwd: %s\n' "$PWD"; printf 'argument: %s\n' "$@";;
 esac
 "#
@@ -189,6 +190,10 @@ fn add_alias_rename_connect_and_remove_preserve_identity() {
     let text = String::from_utf8_lossy(&connected.stdout);
     assert!(text.contains("project's checkout"), "{text}");
     assert!(text.contains("argument: session"), "{text}");
+    assert_eq!(
+        fixture.run(&["ssh", "builder", "fail"]).status.code(),
+        Some(42)
+    );
     assert_success(&fixture.run(&["machine", "remove", "builder"]));
     assert_eq!(
         fixture.json(&["machine", "list", "--json"]),

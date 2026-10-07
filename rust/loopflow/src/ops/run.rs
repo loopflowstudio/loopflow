@@ -393,14 +393,14 @@ mod tests {
         std::fs::write(tmp.path().join("wave/release/GOAL.md"), goal).unwrap();
         let seed = super::render_wave_context(tmp.path(), "release", "");
         for message in [None, Some(seed)] {
-            let prepared = crate::engine::exec::prepare_exec_prompt(
+            let prepared = crate::engine::process_prompt::prepare_process_prompt(
                 &crate::engine::config::Config {
                     diff_files: false,
                     diff: false,
                     paste: false,
                     ..Default::default()
                 },
-                crate::engine::exec::ExecPromptInput {
+                crate::engine::process_prompt::ProcessPromptInput {
                     repo_root: tmp.path().to_path_buf(),
                     wave: Some("release".into()),
                     docs: vec!["wave/release/GOAL.md".into()],

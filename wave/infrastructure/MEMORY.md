@@ -18,6 +18,18 @@ performance/soak acceptance, LOO-375's installed timing and LOO-390's prevention
 measurement. Their merge status alone proves none of those outcomes. Legacy
 keep-open requests without explicit remaining work need scope reconciliation.
 
+## Process vocabulary (LOO-400, 2026-10-07)
+
+Jack Heart approved Process, LFID/PID and PR #1483 landing
+(comment `32c00054-4c60-4b96-bdf4-4d5f142ab881`).
+`process.lfid` is durable identity; optional `pid` is a reusable Unix PID.
+References use `process_lfid`/`parent_process_lfid`. One draft preserves IDs,
+parents, outcomes and unknown PIDs; LOO-397 owns command placement.
+SQL renames preserve JSON, captures, receipts and provider environments
+(boot-witness loss; Release's landing incident). Sequencer receipts retain
+`process_id` for Rust's `process_lfid`; round-trip tested.
+Fixtures prove neither installation nor control authority.
+
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 
 Jack Heart authorized autonomous repair through landing. Installed v0.13.9
@@ -57,18 +69,13 @@ Unknown ownership is not permission to delete. Test `session_record` with `LF_*`
 
 ## Retained capture storage and autonomous cleanup (2026-10-05)
 
-Jack Heart requested that Infrastructure resolve LOO-370 without another
-interactive Session. Infrastructure chose to retain one opaque `~/.lf/runs`
-physical capture root and finish the semantic/runtime cleanup against existing
-paths. This explicitly changes the earlier physical-layout replacement
-requirement; it does not satisfy or prove a migration. The Task brief was updated
-and the decision delivered in comment `3829b49e-2ade-4bee-8850-2ae2297399a8`
-on [LOO-370](https://linear.app/loopflow/issue/LOO-370/finish-removing-the-retired-run-model-from-runtime-and-tooling).
-Preserve populated history and one storage owner, remove unnecessary offline
-conversion machinery, and retain the alias/recovery counterevidence in history.
-PR #1450 (`1af81fe03`) is now integrated here: Session identity controls
-conversations while capture keys select history. Installed migration, live
-interruption and release remain unauthorized by this source-delivery decision.
+Jack Heart delegated LOO-370's autonomous source delivery. Infrastructure selected
+one opaque `~/.lf/runs` root, superseding physical relocation; the Task brief and
+comment `3829b49e-2ade-4bee-8850-2ae2297399a8` record that decision. PR #1450
+(`1af81fe03`) is integrated. Session identity controls conversations; capture keys
+select history. Preservation constraints and contrary evidence remain under
+Capture cutover below. This decision authorizes neither installed conversion nor
+live interruption. Earlier detail: `6448e3c9e:wave/infrastructure/MEMORY.md`.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -80,9 +87,8 @@ implementation and configured acceptance remain unfinished; neither approval
 establishes readiness. Earlier detail remains at
 `c4373492cfc0c77fc27a7887045f74c48b381e72:wave/infrastructure/MEMORY.md`.
 
-The Infrastructure Project recommends `code` after Jack's accepted review and
-v0.13.3 installation; KRs/targets and captured reviews remain. October 5 detail:
-`57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
+The Infrastructure Project recommends `code`; KRs/targets and reviews remain.
+Accepted review and v0.13.3 installation: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
 
 LOO-326 completed on October 6 through installed v0.13.5's exact historical-Exec
 acceptance; its unknown outcome and checkout remain intact. Exact evidence is
@@ -461,10 +467,9 @@ required boundary is headless app/view checks; mounted judgment is optional.
 
 ## One migration draft per Task (LOO-344, 2026-10-01)
 
-Jack Heart selected one editable draft per Task and one client. Released SQL stays
-immutable; custom Homes retain exact-schema validation. Mechanics and branch
-evidence: [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md),
-`986be7988:wave/infrastructure/MEMORY.md`. Not shipped.
+Jack Heart selected one editable draft per Task and immutable released SQL.
+Mechanics: [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md).
+Unshipped branch evidence: `986be7988:wave/infrastructure/MEMORY.md`.
 
 ## One main Home (LOO-342, curated 2026-10-04)
 
@@ -942,13 +947,15 @@ published machine artifacts only; `lf task sync` (which replaced `lf rebase` in
 #1367) owns checkout updates. The schedule is opt-in login plus weekly, Monday
 09:00 local, with positional daily/hourly/5min. The separate daemon is retired.
 
-Installed v0.13.0 acceptance on October 4 covered login catch-up, two 5min firings,
-restored weekly cadence, artifact identity, a Git-free Ubuntu installation and
-checkout sync preserving unpublished/staged/modified/untracked work. Exact
-measurements and unresolved currency-probe timeout, truncated-gate and UI limits:
-`6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`
-under this heading. No Monday 09:00 or sleep-coalesced wake was observed. Interrupted
-installation preserved the prior selection; no causal timeout diagnosis was proved.
+Published 0.13.0's October 4 installation and checkout acceptance, exact hashes,
+cadence receipts and retained limitations remain at
+`6448e3c9e:wave/infrastructure/MEMORY.md`
+under this heading. Installation preserved the Home, repaired a missing entry in
+an isolated Ubuntu container and preserved caller bytes during checkout sync.
+No Monday firing, sleep-coalesced wake or interactive app acceptance was proved.
+Unresolved: a currency probe triggered a redundant download under load; timeout
+is only a hypothesis. Reload killed that download without damaging installation.
+A hand-truncated entry gate is not healed by reinstall.
 
 ## Shipped history
 

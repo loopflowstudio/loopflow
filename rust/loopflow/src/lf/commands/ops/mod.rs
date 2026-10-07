@@ -1,4 +1,4 @@
-use crate::engine::agent::{exec_agent, AgentCapabilities, ProcessConfig};
+use crate::engine::agent::{run_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::{load_config_or_default, Config};
 use crate::engine::git::{current_branch, get_default_branch};
 use crate::engine::identity::WorktreeName;
@@ -10,8 +10,8 @@ use crate::engine::worktrees::{
     WorktreeSegment,
 };
 use crate::engine::{
-    prepare_exec_prompt, sync_skills, ContextSourceOverrides, ExecPromptInput, SkillSyncOptions,
-    Surface,
+    prepare_process_prompt, sync_skills, ContextSourceOverrides, ProcessPromptInput,
+    SkillSyncOptions, Surface,
 };
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{discover_skill, resolve_definition, Target};
@@ -539,7 +539,7 @@ fn resolve_sync_conflict(
     }
     progress.status("Launching sync agent to resolve conflicts...");
     Ok(recover_sync(*recovery, |env| {
-        exec_skill_agent(
+        process_skill_agent(
             repo_root,
             "sync-conflicts",
             Some(&context),
@@ -1659,7 +1659,7 @@ fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
 
     if changes.commits.is_empty() {
         eprintln!("No commits in the target area since the last tag.");
-        return Err(crate::exec::CommandExit(1).into());
+        return Err(crate::process::CommandExit(1).into());
     }
 
     let is_tty = std::io::stdout().is_terminal();
@@ -2523,7 +2523,7 @@ fn write_shell_directive(command: &str) -> Result<bool> {
 ///
 /// Used when mechanical operations hit a situation that requires agent
 /// reasoning — e.g., sync conflicts that need conflict resolution.
-fn exec_skill_agent(
+fn process_skill_agent(
     repo_root: &Path,
     skill_name: &str,
     context: Option<&str>,
@@ -2533,9 +2533,9 @@ fn exec_skill_agent(
     let skill = discover_skill(repo_root, skill_name)?;
 
     let message = context.map(|value| value.to_string());
-    let prepared = prepare_exec_prompt(
+    let prepared = prepare_process_prompt(
         config,
-        ExecPromptInput {
+        ProcessPromptInput {
             repo_root: repo_root.to_path_buf(),
             skill: Some(skill_name.to_string()),
             resolved_skill: Some(skill),
@@ -2553,7 +2553,7 @@ fn exec_skill_agent(
                 diff: Some(false),
                 ..Default::default()
             },
-            ..ExecPromptInput::default()
+            ..ProcessPromptInput::default()
         },
     )?;
 
@@ -2582,7 +2582,7 @@ fn exec_skill_agent(
             work: None,
         },
         &context,
-        Some(crate::session_record::AgentExecRequest::from_prepared(
+        Some(crate::session_record::AgentProcessRequest::from_prepared(
             &prepared.config,
             &AgentCapabilities {
                 chrome: config.chrome,
@@ -2603,7 +2603,7 @@ fn exec_skill_agent(
         chrome: config.chrome,
     };
 
-    let result = exec_agent(&launch, &process, &capabilities);
+    let result = run_agent(&launch, &process, &capabilities);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

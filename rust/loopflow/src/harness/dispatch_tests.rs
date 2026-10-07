@@ -12,7 +12,7 @@ use tokio::sync::oneshot;
 use tokio_tungstenite::{tungstenite::protocol::Role, tungstenite::Message, WebSocketStream};
 
 use super::codex_history::History;
-use crate::id::ExecId;
+use crate::id::ProcessLfid;
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreError;
@@ -61,15 +61,15 @@ async fn stalled_dispatch() {
     let store = SqliteStore::open_ephemeral(&path).unwrap();
     let sql = rusqlite::Connection::open(&path).unwrap();
     sql.busy_timeout(Duration::from_millis(100)).unwrap();
-    let exec = ExecId::new();
+    let process = ProcessLfid::new();
     sql.execute(
-        "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-        [exec.as_str()],
+        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+        [process.as_str()],
     )
     .unwrap();
     store.test_session("conversation", "run_00000000000000000000000000000001");
     let driver = store
-        .claim_session_driver("conversation", None, &exec, false)
+        .claim_session_driver("conversation", None, &process, false)
         .unwrap();
     let (socket, _unread_peer) = UnixStream::pair().unwrap();
     let mut socket = WebSocketStream::from_raw_socket(socket, Role::Client, None).await;
@@ -112,8 +112,8 @@ async fn stalled_dispatch() {
     // A distinct connection proves the Home's WAL writer is also free, not
     // merely this SqliteStore's mutex.
     sql.execute(
-        "UPDATE execs SET command='unrelated write' WHERE id=?1",
-        [exec.as_str()],
+        "UPDATE processes SET command='unrelated write' WHERE lfid=?1",
+        [process.as_str()],
     )
     .unwrap();
     sender.await.unwrap();
@@ -124,9 +124,9 @@ async fn stalled_dispatch() {
         .any(|event| event.kind == SessionEventKind::Started
             && event.provider_turn.as_deref() == Some("turn")));
 
-    let replacement = ExecId::new();
+    let replacement = ProcessLfid::new();
     sql.execute(
-        "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
         [replacement.as_str()],
     )
     .unwrap();

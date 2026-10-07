@@ -3,7 +3,7 @@ mod support;
 use std::fs;
 use std::path::Path;
 
-use loopflow::engine::{load_config, load_config_or_default, ExecTarget};
+use loopflow::engine::{load_config, load_config_or_default, ProcessTarget};
 use support::with_clean_home;
 use tempfile::TempDir;
 
@@ -176,7 +176,7 @@ session:
     let config = with_clean_home(|| load_config(Some(temp.path())))
         .unwrap()
         .unwrap();
-    assert_eq!(config.session.launch, ExecTarget::Tui);
+    assert_eq!(config.session.launch, ProcessTarget::Tui);
 }
 
 #[test]
@@ -193,7 +193,7 @@ session:
     let config = with_clean_home(|| load_config(Some(temp.path())))
         .unwrap()
         .unwrap();
-    assert_eq!(config.session.launch, ExecTarget::Ide);
+    assert_eq!(config.session.launch, ProcessTarget::Ide);
 }
 
 // =============================================================================

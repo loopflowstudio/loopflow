@@ -13,7 +13,7 @@ lf ssh <home-id> --wave product wave/operate
 ## Local by default
 
 ```bash
-lf mon list                                # Execs recorded on this Home
+lf mon list                                # Processes recorded on this Home
 lf ps --json                           # OS-live processes on this Home
 lf wave status product                 # current plan, Task conditions and Session evidence
 
@@ -46,7 +46,7 @@ shell / automation / Loopflow.app
                |
         store + repository
                |
-       Flow driver Exec --> step Exec --> AgentSession <--> native engine
+       Flow driver Process --> step Process --> AgentSession <--> native engine
 ```
 
 Wave operations are finite attributed conversations. Each Task Flow
@@ -54,7 +54,7 @@ runs through the common driver. Cron invokes commands on schedule;
 local PR supervision watches and repairs delivery in the invoking process.
 
 The process that directly spawns a child owns its child handle. Cross-process
-recovery requires exact saved process identity and the applicable lock. A PID, tmux name, parent Exec, Work identity or telemetry row alone grants
+recovery requires exact saved process identity and the applicable lock. A PID, tmux name, parent Process, Work identity or telemetry row alone grants
 no signal authority.
 
 ## Observe processes
@@ -71,8 +71,8 @@ the live view. This is observation, not a durable lifecycle model.
 
 `lf mon prune` removes dead command receipts only after their terminal outcome
 is recorded, and may reap only registered orphan OpenCode process groups whose
-ownership is known. Receipts use Exec IDs, so PID reuse cannot overwrite an
-unfinished Exec’s identity. Failed terminal writes and interrupt cleanup retain
+ownership is known. Receipts use Process IDs, so PID reuse cannot overwrite an
+unfinished Process’s identity. Failed terminal writes and interrupt cleanup retain
 that identity without inventing an outcome. An unclaimed provider PID is
 never killed merely because it resembles a Loopflow child.
 

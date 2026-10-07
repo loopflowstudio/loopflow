@@ -240,7 +240,7 @@ never depends on it: with no watcher, failures are recorded and wait.
 
 A check never transfers green checks from one head to another. A failure is
 confirmed by a second observation before repair. One incident (head, failed check set and provider check URLs) owns one repair
-Session. Admission reserves that Session and launcher Exec atomically before
+Session. Admission reserves that Session and launcher Process atomically before
 starting its detached worker. A dead launch may retry once using the same
 conversation and native history; a completed blocked repair retains its outcome.
 The same incident failing again waits until the head or evidence changes.

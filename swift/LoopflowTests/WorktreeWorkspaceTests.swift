@@ -12,7 +12,7 @@ func fixtureWorkspace(_ path: String) -> WorkspaceIdentity {
 @Suite("Worktree workspaces")
 @MainActor
 struct WorktreeWorkspaceTests {
-    @Test("Files and the Flow exec log open as panes beside a Session and are revealed, not duplicated")
+    @Test("Files and the Flow process log open as panes beside a Session and are revealed, not duplicated")
     func taskPanes() {
         let panes = SessionsWorkspace().multiplexer
         panes.show(.files(taskId: "task"))

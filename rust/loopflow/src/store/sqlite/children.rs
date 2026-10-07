@@ -114,7 +114,7 @@ impl SqliteStore {
         task: &Task,
         skipped_pr: Option<&TaskPr>,
         how: &super::task_work::EndMove,
-        by: Option<&crate::id::ExecId>,
+        by: Option<&crate::id::ProcessLfid>,
         note: Option<&str>,
     ) -> StoreResult<bool> {
         validate_task(task)?;

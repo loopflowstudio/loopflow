@@ -490,7 +490,7 @@ pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsR
 }
 
 fn open_work(store: &SharedStore, task: &Task) -> OpsResult<crate::task_work::TaskWork> {
-    let open = store.sqlite.open_execs().map_err(task_error)?;
+    let open = store.sqlite.open_processes().map_err(task_error)?;
     store
         .sqlite
         .task_open_work(&task.id, &open)
@@ -513,15 +513,15 @@ fn execution_blockers(
     // The caller cannot outlive the processes that launched it, nor wait on
     // the Flow whose step it is. Lineage exempts waiting, not authority.
     let mut lineage = HashSet::new();
-    let mut next = crate::journal::current_exec_id();
+    let mut next = crate::journal::current_process_lfid();
     while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
         next = store
             .sqlite
-            .exec(&id)
+            .process(&id)
             .map_err(task_error)?
-            .and_then(|exec| exec.parent_exec_id);
+            .and_then(|process| process.parent_process_lfid);
     }
-    // A Flow is its driver and step Execs; the loop over Execs below judges
+    // A Flow is its driver and step Processes; the loop over Processes below judges
     // them. Sessions are judged here on their own evidence.
     for session in &work.sessions {
         if let Some(input) = store.sqlite.session(&session.id).map_err(task_error)? {
@@ -545,16 +545,20 @@ fn execution_blockers(
             ));
         }
     }
-    for exec in work.execs.iter().filter(|exec| exec.completed_at.is_none()) {
-        if lineage.contains(&exec.id) {
+    for process in work
+        .processes
+        .iter()
+        .filter(|process| process.completed_at.is_none())
+    {
+        if lineage.contains(&process.lfid) {
             continue;
         }
-        if crate::journal::exec_process_evidence(&store.sqlite, &exec.id)
+        if crate::journal::process_evidence(&store.sqlite, &process.lfid)
             != crate::journal::ProcessIdentityEvidence::Dead
         {
             blockers.push(format!(
-                "Exec {} has live or unresolved execution; inspect `lf monitor show {}`",
-                exec.id, exec.id
+                "Process {} has live or unresolved execution; inspect `lf monitor show {}`",
+                process.lfid, process.lfid
             ));
         }
     }

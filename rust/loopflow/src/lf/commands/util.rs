@@ -9,7 +9,7 @@ use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 use crate::engine::{
     check_cli_available, codex_permission_args, missing_agent_message, workspace_add_dirs,
-    ExecTarget,
+    ProcessTarget,
 };
 use crate::provider_auth::Provider;
 use crate::session_record::{ProviderClientRef, ProviderClientStopReason};
@@ -55,19 +55,19 @@ pub(crate) struct SessionCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct SessionExec {
+struct SessionLaunch {
     command: SessionCommand,
     ide_url: Option<String>,
 }
 
-pub fn exec_session(
-    target: ExecTarget,
+pub fn launch_session(
+    target: ProcessTarget,
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
     prompt: &str,
 ) -> Result<()> {
-    exec_session_with_env(
+    launch_session_with_env(
         target,
         harness,
         model,
@@ -78,8 +78,8 @@ pub fn exec_session(
     )
 }
 
-pub(crate) fn exec_session_with_env(
-    target: ExecTarget,
+pub(crate) fn launch_session_with_env(
+    target: ProcessTarget,
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
@@ -87,7 +87,7 @@ pub(crate) fn exec_session_with_env(
     environment: &BTreeMap<String, String>,
     provider_session_id: Option<&str>,
 ) -> Result<()> {
-    let launch = build_session_exec(
+    let launch = build_session_launch(
         target,
         harness,
         model,
@@ -96,7 +96,7 @@ pub(crate) fn exec_session_with_env(
         provider_session_id,
     )?;
 
-    if target == ExecTarget::Ide {
+    if target == ProcessTarget::Ide {
         if let Some(url) = launch.ide_url.as_deref() {
             match crate::engine::platform::open_url_checked(url) {
                 Ok(()) => return record_interactive_opened(environment),
@@ -116,23 +116,23 @@ pub(crate) fn exec_session_with_env(
     )
 }
 
-fn build_session_exec(
-    target: ExecTarget,
+fn build_session_launch(
+    target: ProcessTarget,
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
     prompt: &str,
     provider_session_id: Option<&str>,
-) -> Result<SessionExec> {
+) -> Result<SessionLaunch> {
     let worktree = absolute_path(worktree);
     let command = build_session_command(harness, model, &worktree, prompt, provider_session_id)?;
-    let ide_url = if target == ExecTarget::Ide {
+    let ide_url = if target == ProcessTarget::Ide {
         build_ide_url(harness, &worktree, prompt)
     } else {
         None
     };
 
-    Ok(SessionExec { command, ide_url })
+    Ok(SessionLaunch { command, ide_url })
 }
 
 fn build_ide_url(harness: &str, worktree: &Path, prompt: &str) -> Option<String> {
@@ -277,15 +277,15 @@ pub(crate) fn resume_session_with_env(
     // A native resume has no CaptureHandle, but still owns an exact driver.
     // Remote connections already claimed their surviving engine's driver.
     let owned = if remote.is_none() {
-        if let Some(exec) = crate::journal::current_exec_id() {
+        if let Some(process) = crate::journal::current_process_lfid() {
             let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
             let session = store
                 .session_for_artifact(artifact_key)?
                 .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
             let driver =
-                crate::session_record::claim_provider_driver(&store, &session.id, &exec, false)?;
+                crate::session_record::claim_provider_driver(&store, &session.id, &process, false)?;
             environment.insert(
-                crate::exec::AGENT_CALLER_ENV.into(),
+                crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&driver.caller(session.id.clone()))?,
             );
             crate::session_record::register_session_driver_interrupt(
@@ -355,9 +355,9 @@ fn lock_provider_clients(dir: &Path) -> Result<File> {
     Ok(file)
 }
 
-pub(crate) fn require_provider_session_exec(dir: &Path) -> Result<()> {
+pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
     let input = crate::session_record::input_id_from_dir(dir)?;
-    let store = SqliteStore::open_execs_read_only(&crate::store::database_path_from_env()?)?;
+    let store = SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
     let session = store
         .session_for_artifact(&input)?
         .ok_or_else(|| anyhow!("Input {input} is not recorded on this Home"))?;
@@ -649,7 +649,7 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
     let Some(input) = environment.get(crate::session_record::CAPTURE_KEY_ENV) else {
         return Ok(());
     };
-    let Some(exec) = crate::journal::current_exec_id() else {
+    let Some(process) = crate::journal::current_process_lfid() else {
         return Ok(());
     };
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
@@ -662,7 +662,7 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
     let now = time::OffsetDateTime::now_utc();
     store.retain_session_observation(&session, &crate::session::SessionObservation {
         artifact_key: crate::session_record::parse_artifact_key(input)?,
-        source: format!("interactive_opened:{exec}:{}", session.id),
+        source: format!("interactive_opened:{process}:{}", session.id),
         observed_at: now.unix_timestamp(),
         task_id: session.task_id.clone(),
         wave_id: session.wave_id.clone(),
@@ -673,23 +673,24 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
 
 fn native_provider_driver(
     environment: &BTreeMap<String, String>,
-) -> Result<Option<(SqliteStore, String, crate::exec::SessionDriver)>> {
-    let Some(caller) = environment.get(crate::exec::AGENT_CALLER_ENV) else {
+) -> Result<Option<(SqliteStore, String, crate::process::SessionDriver)>> {
+    let Some(caller) = environment.get(crate::process::AGENT_CALLER_ENV) else {
         return Ok(None);
     };
-    let caller: crate::exec::AgentCaller = serde_json::from_str(caller)?;
-    let Some(exec) = crate::journal::current_exec_id() else {
+    let caller: crate::process::AgentCaller = serde_json::from_str(caller)?;
+    let Some(process) = crate::journal::current_process_lfid() else {
         return Ok(None);
     };
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let driver = store
         .session_driver(&caller.session_id)?
         .ok_or_else(|| anyhow!("Session has no admitted driver"))?;
-    if driver.exec_id.as_ref() != Some(&exec) || driver.caller(caller.session_id.clone()) != caller
+    if driver.process_lfid.as_ref() != Some(&process)
+        || driver.caller(caller.session_id.clone()) != caller
     {
         bail!("Session driver changed before provider launch");
     }
-    if driver.provider_exec_id != exec {
+    if driver.provider_process_lfid != process {
         return Ok(None);
     }
     Ok(Some((store, caller.session_id, driver)))
@@ -712,7 +713,7 @@ fn session_command_status_with_env(
         .as_deref()
         .map(|dir| -> Result<File> {
             let launch = lock_provider_clients(dir)?;
-            require_provider_session_exec(dir)?;
+            require_provider_session_process(dir)?;
             Ok(launch)
         })
         .transpose()?;
@@ -768,7 +769,7 @@ fn session_command_status_with_env(
             crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
             route.account_id().as_str(),
         );
-        route.record_exec_blocking(provider_session_id.map(str::to_string), None)?;
+        route.record_process_blocking(provider_session_id.map(str::to_string), None)?;
     }
     if let (Some(capture_dir), Some(provider_session_id)) =
         (capture_dir.as_deref(), provider_session_id)
@@ -782,7 +783,7 @@ fn session_command_status_with_env(
         )?;
     }
     // A remote terminal is only a client of the surviving engine. A local
-    // terminal owns the provider generation created by this exact Exec.
+    // terminal owns the provider generation created by this exact Process.
     let owned = native_provider_driver(environment)?;
     if let Some((store, session, driver)) = &owned {
         store.record_session_provider_launch(session, driver, true)?;
@@ -846,7 +847,8 @@ fn session_command_status_with_env(
     // Record which home this conversation lives in, so reopening returns there.
     if let (Some(route), Some(capture_dir)) = (&account_route, capture_dir.as_deref()) {
         if let Ok(Some(session)) = crate::session_record::read_provider_session(capture_dir) {
-            if let Err(error) = route.record_exec_blocking(Some(session.provider_session_id), None)
+            if let Err(error) =
+                route.record_process_blocking(Some(session.provider_session_id), None)
             {
                 tracing::warn!(%error, "failed to record the provider session's account home");
             }
@@ -1546,8 +1548,8 @@ mod tests {
 
     #[test]
     fn session_launch_tui_codex_sets_worktree_model_and_prompt() {
-        let launch = build_session_exec(
-            ExecTarget::Tui,
+        let launch = build_session_launch(
+            ProcessTarget::Tui,
             "codex",
             Some("o3"),
             &path(),
@@ -1580,8 +1582,8 @@ mod tests {
     fn bare_tui_harnesses_do_not_select_a_model() {
         for agent in ["claude", "codex", "opencode"] {
             let (harness, model) = crate::engine::parse_agent(agent);
-            let launch = build_session_exec(
-                ExecTarget::Tui,
+            let launch = build_session_launch(
+                ProcessTarget::Tui,
                 &harness,
                 model.as_deref(),
                 &path(),
@@ -1605,8 +1607,9 @@ mod tests {
     fn session_launch_tui_codex_adds_main_repo_for_worktree_metadata() {
         let (_tmp, main, worktree) = git_worktree_fixture();
 
-        let launch = build_session_exec(ExecTarget::Tui, "codex", None, &worktree, "fix it", None)
-            .expect("build launch");
+        let launch =
+            build_session_launch(ProcessTarget::Tui, "codex", None, &worktree, "fix it", None)
+                .expect("build launch");
 
         let idx = launch
             .command
@@ -1624,8 +1627,8 @@ mod tests {
 
     #[test]
     fn session_launch_tui_claude_runs_in_worktree_with_model_and_prompt() {
-        let launch = build_session_exec(
-            ExecTarget::Tui,
+        let launch = build_session_launch(
+            ProcessTarget::Tui,
             "claude",
             Some("sonnet"),
             &path(),
@@ -1647,8 +1650,8 @@ mod tests {
 
     #[test]
     fn session_launch_tui_claude_assigns_a_resumable_provider_session() {
-        let launch = build_session_exec(
-            ExecTarget::Tui,
+        let launch = build_session_launch(
+            ProcessTarget::Tui,
             "claude",
             None,
             &path(),
@@ -1861,8 +1864,8 @@ mod tests {
     fn session_launch_tui_claude_adds_main_repo_for_worktree_metadata() {
         let (_tmp, main, worktree) = git_worktree_fixture();
 
-        let launch = build_session_exec(
-            ExecTarget::Tui,
+        let launch = build_session_launch(
+            ProcessTarget::Tui,
             "claude",
             Some("sonnet"),
             &worktree,
@@ -1942,7 +1945,7 @@ mod tests {
         crate::provider_account::identity::tests::write_claude_identity(&mut account);
         store.upsert_provider_account(&account).await.unwrap();
 
-        exec_session(ExecTarget::Tui, "claude", None, temp.path(), "review it").unwrap();
+        launch_session(ProcessTarget::Tui, "claude", None, temp.path(), "review it").unwrap();
 
         assert_eq!(
             std::fs::read_to_string(capture).unwrap(),
@@ -2015,7 +2018,14 @@ mod tests {
             .await
             .unwrap();
 
-        exec_session(ExecTarget::Tui, "opencode", None, temp.path(), "review it").unwrap();
+        launch_session(
+            ProcessTarget::Tui,
+            "opencode",
+            None,
+            temp.path(),
+            "review it",
+        )
+        .unwrap();
 
         assert_eq!(std::fs::read_to_string(capture).unwrap(), "stored-key");
 
@@ -2042,13 +2052,13 @@ mod tests {
             })
             .await
             .unwrap();
-        exec_session(ExecTarget::Tui, "codex", None, temp.path(), "review it").unwrap();
+        launch_session(ProcessTarget::Tui, "codex", None, temp.path(), "review it").unwrap();
     }
 
     #[test]
     fn session_launch_tui_opencode_sets_worktree_prompt_and_model() {
-        let launch = build_session_exec(
-            ExecTarget::Tui,
+        let launch = build_session_launch(
+            ProcessTarget::Tui,
             "opencode",
             Some("moonshotai/kimi-k2"),
             &path(),
@@ -2076,8 +2086,8 @@ mod tests {
 
     #[test]
     fn session_launch_ide_codex_builds_scheme_with_encoded_path_and_prompt() {
-        let launch = build_session_exec(
-            ExecTarget::Ide,
+        let launch = build_session_launch(
+            ProcessTarget::Ide,
             "codex",
             None,
             &path(),
@@ -2095,8 +2105,8 @@ mod tests {
 
     #[test]
     fn session_launch_ide_claude_builds_code_scheme_with_encoded_folder_and_prompt() {
-        let launch = build_session_exec(
-            ExecTarget::Ide,
+        let launch = build_session_launch(
+            ProcessTarget::Ide,
             "claude",
             None,
             &path(),
@@ -2114,8 +2124,15 @@ mod tests {
 
     #[test]
     fn session_launch_ide_opencode_falls_back_to_cli_shape() {
-        let launch = build_session_exec(ExecTarget::Ide, "opencode", None, &path(), "fix it", None)
-            .expect("build launch");
+        let launch = build_session_launch(
+            ProcessTarget::Ide,
+            "opencode",
+            None,
+            &path(),
+            "fix it",
+            None,
+        )
+        .expect("build launch");
 
         assert_eq!(launch.command.program, "opencode");
         assert_eq!(launch.ide_url, None);

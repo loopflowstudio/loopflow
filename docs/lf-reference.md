@@ -35,10 +35,10 @@ lf flow show FLOW_ID --sessions --json
 lf task interrupt EXP-12
 ```
 
-Each start is a new Flow: one driver Exec and the step Execs it starts. Its ID
-is the driver Exec's. `--state` selects `current` (the driver has no recorded
+Each start is a new Flow: one lf process and the step processes it starts. Its ID
+is the Flow process's. `--state` selects `current` (the driver has no recorded
 exit), `completed` (it succeeded) or `stopped` (it exited before the last
-step). A stopped Flow's Execs are its history; nothing resumes it. Inspect
+step). A stopped Flow's Processes are its history; nothing resumes it. Inspect
 them, then launch the work that remains.
 
 ## lf
@@ -301,7 +301,7 @@ List a bounded page of recorded commands, newest first
 | `--all` | Include all repositories Default: false. |
 | `--limit` | limit Default: 100. |
 | `--after` | Continue with the previous page's next object, encoded as JSON |
-| `--parent` | Direct children of an exact or unambiguous parent Exec |
+| `--parent` | Direct children of an exact or unambiguous parent Process |
 | `--caller` | Commands issued by this AgentSession |
 | `--search` | Literal command text, ignoring ASCII case |
 | `--outcome` | outcome |
@@ -311,7 +311,7 @@ List a bounded page of recorded commands, newest first
 
 ## lf monitor show
 
-Inspect an Exec or Session by identity
+Inspect a process or Session by identity
 
 | Argument | What it does |
 |---|---|
@@ -952,7 +952,7 @@ Internal command; invoked by the owning operation.
 
 ## lf home doctor
 
-Diagnose installation, storage, Exec integrity and scheduled receipts
+Diagnose installation, storage, Process integrity and scheduled receipts
 
 | Argument | What it does |
 |---|---|
@@ -1578,7 +1578,7 @@ List authored flows, or Flows that ran
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--sessions` | List or show Flows that ran, from their Execs, instead of reusable templates Default: false. |
+| `--sessions` | List or show Flows that ran, from their Processes, instead of reusable templates Default: false. |
 | `--all` | Include every repository and flows with unknown repository evidence Default: false. |
 | `--limit` | Page size (default 100) |
 | `--after` | Previous page's next identity; retain the same filters |

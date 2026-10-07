@@ -224,7 +224,7 @@ impl Cli {
         args
     }
 
-    pub(crate) fn exec_options(&self) -> Self {
+    pub(crate) fn process_options(&self) -> Self {
         Self {
             cron_receipt: self.cron_receipt.clone(),
             cron_lock_fd: self.cron_lock_fd,
@@ -1408,7 +1408,7 @@ pub enum HomeCommand {
         #[arg(long = "no-prune")]
         no_prune: bool,
     },
-    /// Diagnose installation, storage, Exec integrity and scheduled receipts
+    /// Diagnose installation, storage, Process integrity and scheduled receipts
     Doctor {
         /// Diagnose repository planning without changing it
         #[arg(long)]

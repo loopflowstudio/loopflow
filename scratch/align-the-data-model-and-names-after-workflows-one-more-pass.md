@@ -23,7 +23,7 @@ and returning for demo review.
 The outcome is to distinguish a Task's Workflow from the autonomous work it
 invokes, select either definition without name collisions, and inspect execution
 without learning another lifecycle. CLI, code, wire, Swift and documentation
-change together. The next authored edge is pursue, followed by demo review.
+change together. Demo review remains the authored boundary.
 
 ## Accepted constraints and integrated baseline
 
@@ -151,7 +151,7 @@ A Task's Workflow remains at its review node after autonomous work exits; its
 conversation stays available. Failed execution is history. No naming or command
 placement change introduces checkpoint resume or another driver.
 
-## Proposed model
+## Implemented model
 
 | Concept | Owner and representation |
 | --- | --- |
@@ -175,7 +175,7 @@ captures one execution. Neither should be renamed Run merely for symmetry.
 
 ## Discovery and the intended interaction
 
-Proposed owner-scoped shape; these examples are design, not installed commands:
+Owner-scoped command shape implemented in this checkout:
 
 ```sh
 lf project workflow show PROJECT
@@ -224,7 +224,7 @@ command-map pass; it is not a prerequisite for this work.
 
 The replacement for the current Flow-inspection `--sessions` flag also needs
 command-map agreement. `--processes` is a candidate consistent with LOO-400,
-the implementation choice for process inspection. Keep `.lf/workflows/` and `.lf/flows/` as separate
+the implemented flag for process inspection. Keep `.lf/workflows/` and `.lf/flows/` as separate
 definition namespaces; remove obsolete internal aliases at cutover.
 
 A local autonomous definition named feature must coexist with the builtin
@@ -247,63 +247,33 @@ Opening another definition must preserve the Task conversation and native panes.
 Use the existing explicit refresh path for catalogs and the Task part of the
 watch stream for runtime data; add no polling or independent Swift authority.
 
-## Remaining implementation
+## Implementation and remaining acceptance
 
-Retain Workflow and Flow throughout. Restart resets position on the captured
-graph. Implement the model cleanup below with the owner-scoped commands. Resolve
-routine details from existing APIs; bring consequential scope conflicts back to
-Jack rather than reopening the settled names or execution meanings.
+The coordinated cut is implemented locally: independent definition loaders and
+catalogs, owner-scoped CLI commands, FlowDefinition/FlowComposition and
+FlowProcess projections, and separate Task Workflow selection, latest execution,
+execution evidence and run control. Desktop keeps kind in definition navigation
+and customization; Project selectors read only Workflows. Completed execution
+details retain identity and graph. Persisted graph/capture formats and LOO-400's
+migration remain unchanged.
 
-The following stays one coordinated change; do not ship a cosmetic rename that
-leaves mixed lookup, wire or navigation behind.
+Project show/set accepts a durable ID, provider ID or unique name/slug.
+`wave update-plan --workflow` is removed; full-plan replacement still uses
+`wave update-plan --plan`. Workflow restart uses the existing move-to-start
+operation. Empty/missing Project selection reads as absent instead of inventing
+feature. Workflow-only names remain unavailable to independent execution.
 
-1. **Split definition resolution and catalogs.** `engine/workflow.rs` currently
-   suppresses builtins on same-named Flow files; `customize` spans both kinds.
-   `flow_graph.rs::FlowCatalogEntry` has nullable graph/template/workflow payloads.
-   Replace these with kind-specific loaders, `WorkflowCatalogEntry` and the
-   `FlowCatalogEntry`. Keep invalid entries inspectable. General
-   listing can compose them without inventing a catalog store or executable
-   Workflow target. Cut Rust commands and Swift RegistryQuery, WorkModel,
-   WaveWorkflowView, WorkPalette and WorkDestination over together. Delete the
-   name-only `.named` preference, not just the ambiguous row labels.
-2. **Align definitions and projections.** The authored `engine::flow::Flow`
-   becomes `FlowDefinition`. `FlowTemplate` is a resolved disclosure
-   tree, not the source definition: rename to `FlowComposition`, including wire and Swift. Keep its digest/behavior.
-   Runtime `FlowSummary`, Filter, InventoryEntry, Page and Detail become matching
-   `FlowProcess…` projections. TaskFlowMember/State reuse
-   shared execution projections rather than implying another Task Flow identity.
-   Watch `flow_runs`, Task work `flows`, `FlowRunView` and expanded-view state
-   adopt FlowProcess vocabulary. Map Flow references such as `flow_id`
-   and `invocation_id` to `flow_process_lfid` only where
-   they identify that exact process; Workflow move `process_lfid` already names
-   the Task-run process and stays distinct. Review `ops/flow_run.rs` naming too.
-3. **Remove the obsolete TaskFlow bundle.** `TaskFlowSnapshot` still combines
-   recommendation, latest execution and Start controls. Separate optional
-   `workflow_name`, optional `latest_flow_process`, and
-   `run_control` (`TaskRunControl`). The latest reading reuses process detail plus
-   `TaskExecutionSnapshot` to preserve activity/refusal evidence. Delete the
-   special none/latest/finished TaskFlow lifecycle; preserve every legality
-   reason, roadmap indicator, completed identity and captured graph. Rust remains
-   the owner and commands recheck legality. A latest row never selects a primary.
-4. **Apply owner-scoped commands consistently.** Implement the agreed Project
-   and Task operations and remove Workflow handling from Flow-only commands.
-   Keep `.lf/workflows/`, `.lf/flows/`, Workflow, FlowProcess and LOO-400's
-   process tables. Update AGENTS.md, architecture, module and Swift READMEs,
-   website and builtin skills with the same model and command map. Source and
-   installed packaging must agree. No internal aliases or dual writers.
+Review repairs: directory enumeration failures now fail catalog reads instead
+of reporting builtins alone. Desktop retains last-good catalog data with visible
+errors and retry; saved Task data makes execution unknown and run controls
+unavailable. Flow references in historical capture manifests and append-only
+Task events retain their original serialized fields. Monitor suggestions now use
+`--processes`, matching the renamed inspection flag.
 
-LOO-400's migration stays owned by LOO-400. Projection and command alignment
-alone require no second table rename. Any later persisted-format change must
-preserve the released frontier and respect the parent's migration ownership;
-use the repository's one-draft-per-Task operation only if required.
-
-Preserve durable IDs, Process LFIDs/PIDs, process ancestry/outcomes, Workflow
-moves, graph captures, loop coordinates, Session history, usage attribution and
-native resume. Runtime DTOs/fixtures cut over in Rust and Swift together, with
-required fields or explicit Optionals. Durable database/capture formats require
-preservation even though obsolete internal API aliases are removed. Renaming
-runtime graph types does not authorize destroying old serialized graphs. Saved
-Desktop cache decoding can use its existing discard/refetch path.
+Remaining: gate's changed-aware acceptance and packaging/docs checks, followed
+by Jack Heart's demo review. No provider continuity, live Home/Linear mutation,
+rendered/native interaction or chapter KR is established by local fixtures.
+Retry/recovery policy, graph clipping and completion/reopening remain out of scope.
 
 ## Proof and limits
 
@@ -329,8 +299,8 @@ Use existing behavioral harnesses: task_flow_launch_tests, flow_discovery_tests,
 DTO fixtures and documented_commands; affected Swift DTO/TaskFlow/RegistryQuery
 and navigation/view tests. Gate checks the changed-aware suite plan once,
 including CLI/Rust, Desktop build and headless views, packaging/docs and website.
-Rust formatting/Clippy and architecture checks apply to code changes. No tests
-were run for this research and prose-only revision. Real provider continuity and
+Rust formatting/Clippy and architecture checks apply to code changes.
+Focused implementation checks are recorded below. Real provider continuity and
 Jack's judgment of the names are not established by these planned tests.
 
 Review findings retained: splitting catalogs alone leaves the bug if Desktop
@@ -342,3 +312,19 @@ Out of scope: retry policy, killed-process recovery, in-place graph editing, Wai
 in native terminals, completion/reopening, graph clipping, provider transport,
 chapter ownership and live Home/Linear migration. LOO-353's outstanding acceptance
 work remains outstanding.
+
+## Deleted in this cut
+
+- Remove cross-kind builtin suppression and mixed `workflow::customize`; retain
+  local override precedence and errors independently for each definition kind.
+- Remove `CatalogKind` and the nullable mixed catalog payload; retain separate
+  Flow and Workflow entries, including invalid sources.
+- Remove `TaskFlowSnapshot`, `TaskFlowRecord`, and `LatestTaskFlow`; retain
+  optional latest `FlowProcessDetail`, execution evidence and Task run legality
+  as separate Task fields, including completed graph/identity.
+- Replace authored `Flow`, `FlowTemplate` and runtime Flow projection names;
+  preserve persisted graph serialization and LOO-400's schema unchanged.
+- Delete Desktop name-only catalog lookup and destination; retain kind in
+  navigation and customization and keep native Task panes alive.
+
+Checks (October 7): `cargo check`, focused Rust DTO/discovery/Task-launch/Workflow/Project/history tests, `documented_commands`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `uv run python scripts/check_architecture.py`, and Swift DTO/graph/headless/cache/benchmark-fixture tests pass; affected acceptance, packaging/website and native demo remain with gate/demo.

@@ -157,7 +157,7 @@ workflow: feature
 
 A Task with no workflow takes that one up on its first `lf task run <task>`;
 naming another takes that up instead, and the Task keeps it.
-`lf update-plan --wave <wave> --workflow NAME` rewrites only that line; it does not
+`lf project workflow set PROJECT NAME` rewrites only that line; it does not
 check that NAME loads. `lf task run` refuses a name that is not a workflow
 until a Flow or workflow is named. A Project written with the earlier
 `flow:` line reads the same and is rewritten by the next plan update. Existing
@@ -345,8 +345,8 @@ See [Homes and processes](architecture/homes.md) and
 ```bash
 lf wave status infra --json
 lf update-plan --wave infra --plan plan.json
-lf update-plan --wave infra --workflow research    # only the workflow
-lf flow customize research                     # .lf/workflows/research.yaml, written from the builtin
+lf project workflow set PROJECT research    # only the workflow
+lf project workflow customize research                     # .lf/workflows/research.yaml, written from the builtin
 ```
 
 `plan.json` contains the complete current plan:

@@ -41,13 +41,13 @@
     "flow_membership": {
       "kind": "step",
       "flow": "task-design",
-      "invocation_id": "00000000-0000-0000-0000-00000000f10w",
       "step": "review-design",
       "occurrence": "current",
       "node": 1,
       "iterations": [
         []
-      ]
+      ],
+      "flow_process_lfid": "00000000-0000-0000-0000-00000000f10w"
     },
     "workspace": {
       "home_id": "home_00000000000000000000000000000001",

@@ -346,7 +346,7 @@ fn admit_ci_fix(
                 iterations: None,
                 task_id: landing.task_id.clone(),
                 wave_id: None,
-                flow_id: None,
+                flow_process_lfid: None,
                 work_source: landing
                     .task_id
                     .as_ref()

@@ -3,11 +3,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::durable::FlowProcessDetail;
 use crate::durable::TaskId;
 use crate::journal::ProcessIdentityEvidence;
-use crate::ops::flow_run::FlowProcess;
-use crate::ops::task_flow::{LatestTaskFlow, TaskFlowRecord};
-use crate::session::FlowSummaryState;
+use crate::ops::flow_process::FlowProcess;
+use crate::session::FlowProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
 use crate::store::{SharedStore, StoreResult};
 
@@ -43,7 +43,7 @@ pub(crate) async fn task_execution(
 pub(crate) async fn task_execution_and_flow(
     store: &SharedStore,
     task_id: &TaskId,
-) -> StoreResult<(TaskExecutionSnapshot, TaskFlowRecord)> {
+) -> StoreResult<(TaskExecutionSnapshot, Option<FlowProcessDetail>)> {
     let Some(flow) = store.sqlite.task_flows(task_id)?.pop() else {
         return Ok((
             TaskExecutionSnapshot {
@@ -53,7 +53,7 @@ pub(crate) async fn task_execution_and_flow(
                 step: None,
                 captured: None,
             },
-            TaskFlowRecord::None,
+            None,
         ));
     };
     let entry = store.sqlite.flow_entry(&flow)?;
@@ -99,25 +99,18 @@ pub(crate) async fn task_execution_and_flow(
         snapshot.step = None;
         snapshot.captured = None;
     }
-    let record = if entry.summary.state == FlowSummaryState::Completed {
-        TaskFlowRecord::Finished {
-            flow: entry.summary.name,
-        }
-    } else {
-        TaskFlowRecord::Latest(LatestTaskFlow::new(flow.detail(entry), &snapshot))
-    };
-    Ok((snapshot, record))
+    Ok((snapshot, Some(flow.detail(entry))))
 }
 
 /// A Flow runs while a process of its own does; with both gone, how its
 /// latest step ended says why it stopped.
 fn project_execution(
     flow: &FlowProcess,
-    state: FlowSummaryState,
+    state: FlowProcessSummaryState,
     driver: ProcessIdentityEvidence,
     step: ProcessIdentityEvidence,
 ) -> TaskExecutionSnapshot {
-    if state == FlowSummaryState::Completed {
+    if state == FlowProcessSummaryState::Completed {
         return TaskExecutionSnapshot {
             state: TaskExecutionState::Idle,
             reason: format!("Flow {} finished; nothing further is launched", flow.name),
@@ -175,7 +168,7 @@ fn project_execution(
 mod tests {
     use super::{project_execution, TaskExecutionState};
     use crate::journal::ProcessIdentityEvidence::{Dead, Live, Unknown};
-    use crate::session::FlowSummaryState;
+    use crate::session::FlowProcessSummaryState;
     use crate::store::sqlite::SqliteStore;
 
     #[test]
@@ -186,8 +179,9 @@ mod tests {
             let driver = store.test_flow("feature", "/repo", &[("implement", outcome)], None);
             store.flow_process(driver.as_str()).unwrap().unwrap().0
         };
-        let state =
-            |flow, driver, step| project_execution(flow, FlowSummaryState::Current, driver, step);
+        let state = |flow, driver, step| {
+            project_execution(flow, FlowProcessSummaryState::Current, driver, step)
+        };
         let running = flow(None);
         assert_eq!(
             state(&running, Live, Live).state,
@@ -214,7 +208,8 @@ mod tests {
             "{}",
             failed.reason
         );
-        let finished = project_execution(&succeeded, FlowSummaryState::Completed, Dead, Dead);
+        let finished =
+            project_execution(&succeeded, FlowProcessSummaryState::Completed, Dead, Dead);
         assert!(finished.step.is_none());
     }
 }

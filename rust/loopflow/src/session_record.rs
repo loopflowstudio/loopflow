@@ -2569,7 +2569,7 @@ impl SessionCapture {
                 task_id: work.as_ref().and_then(|work| work.task_id.clone()),
                 wave_id: work.as_ref().and_then(|work| work.wave_id.clone()),
                 work_source: work.as_ref().map(|work| work.source),
-                flow_id: None,
+                flow_process_lfid: None,
                 bound_at: None,
                 interactive: manifest.surface != "headless",
                 repo: None,

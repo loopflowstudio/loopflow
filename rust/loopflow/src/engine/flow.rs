@@ -172,7 +172,7 @@ pub struct XorPath {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Flow {
+pub struct FlowDefinition {
     pub name: String,
     pub items: Vec<Step>,
 }
@@ -276,31 +276,44 @@ pub(crate) fn flatten_resolved(items: &[ResolvedFlowItem]) -> Vec<ConcreteStep> 
         .collect()
 }
 
-pub fn load_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
+pub fn load_flow(name: &str, repo: &Path) -> Result<FlowDefinition, LoadError> {
     resolve_definition(repo, name, None).map(Target::into_flow)
 }
 
-pub fn available_flow_names(repo: &Path) -> Vec<String> {
+/// Copy a builtin Flow only when the repository has no local definition.
+pub fn customize(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
+    if let Some(path) = find_flow_source_path(name, repo) {
+        return Ok(path);
+    }
+    let content = crate::engine::builtins::get_builtin_flow(name)
+        .ok_or_else(|| LoadError::FlowNotFound(name.to_string()))?;
+    let path = repo.join(format!(".lf/flows/{name}.yaml"));
+    std::fs::create_dir_all(path.parent().expect("definition has a parent"))?;
+    std::fs::write(&path, content)?;
+    Ok(path)
+}
+
+pub fn available_flow_names(repo: &Path) -> Result<Vec<String>, LoadError> {
     let mut names: Vec<String> = crate::engine::builtins::builtin_flow_names()
         .into_iter()
         .map(ToOwned::to_owned)
         .collect();
-    names.extend(repo_flow_names(repo));
+    names.extend(repo_flow_names(repo)?);
     names.sort();
     names.dedup();
-    names
+    Ok(names)
 }
 
-pub(crate) fn repo_flow_names(repo: &Path) -> Vec<String> {
+pub(crate) fn repo_flow_names(repo: &Path) -> Result<Vec<String>, LoadError> {
     let mut names = Vec::new();
-    collect_flow_names(&repo.join(".lf/flows"), None, &mut names);
+    collect_flow_names(&repo.join(".lf/flows"), None, &mut names)?;
     names.sort();
     names.dedup();
-    names
+    Ok(names)
 }
 
 /// Load an authored flow without adapting a skill into a flow.
-pub fn load_authored_flow(name: &str, repo: &Path) -> Result<Flow, LoadError> {
+pub fn load_authored_flow(name: &str, repo: &Path) -> Result<FlowDefinition, LoadError> {
     DefinitionLoader::new(repo).load_flow(name)
 }
 
@@ -349,7 +362,7 @@ impl<'a> DefinitionLoader<'a> {
         }
     }
 
-    fn load_flow(&mut self, name: &str) -> Result<Flow, LoadError> {
+    fn load_flow(&mut self, name: &str) -> Result<FlowDefinition, LoadError> {
         let (resolved_name, content) = match find_flow_path(name, self.repo) {
             Ok(path) => (name.to_string(), fs::read_to_string(path)?),
             Err(LoadError::FlowNotFound(_)) => {
@@ -380,18 +393,21 @@ impl<'a> DefinitionLoader<'a> {
         // top-level fallback to a same-named local or cached skill.
         let items =
             items.map_err(|error| LoadError::InvalidFlow(format!("{resolved_name}: {error}")))?;
-        Ok(Flow {
+        Ok(FlowDefinition {
             name: resolved_name,
             items,
         })
     }
 }
 
-pub fn compile_flow(flow: &Flow, repo: &Path) -> Result<Vec<ConcreteStep>, LoadError> {
+pub fn compile_flow(flow: &FlowDefinition, repo: &Path) -> Result<Vec<ConcreteStep>, LoadError> {
     Ok(flatten_resolved(&resolve_flow(flow, repo)?))
 }
 
-pub(crate) fn resolve_flow(flow: &Flow, repo: &Path) -> Result<Vec<ResolvedFlowItem>, LoadError> {
+pub(crate) fn resolve_flow(
+    flow: &FlowDefinition,
+    repo: &Path,
+) -> Result<Vec<ResolvedFlowItem>, LoadError> {
     let resolved = compile_with_sources(flow, repo, &[])?;
     let items = flatten_resolved(&resolved);
     let mut ids = HashSet::new();
@@ -467,7 +483,7 @@ fn validate_occurrence_ids(
     Ok(())
 }
 
-pub fn human_occurrence_ids(flow: &Flow, repo: &Path) -> Result<Vec<String>, LoadError> {
+pub fn human_occurrence_ids(flow: &FlowDefinition, repo: &Path) -> Result<Vec<String>, LoadError> {
     fn collect(items: &[ConcreteStep]) -> Vec<String> {
         let mut human = Vec::new();
         for item in items {
@@ -609,18 +625,24 @@ fn markdown_path(dir: &Path, name: &str) -> PathBuf {
     dir.join(format!("{name}.md"))
 }
 
-fn collect_flow_names(dir: &Path, prefix: Option<&str>, names: &mut Vec<String>) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
+fn collect_flow_names(
+    dir: &Path,
+    prefix: Option<&str>,
+    names: &mut Vec<String>,
+) -> Result<(), LoadError> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
     };
 
-    for entry in entries.flatten() {
-        let path = entry.path();
+    for entry in entries {
+        let path = entry?.path();
         if path.is_dir() && prefix.is_none() {
             let Some(child_prefix) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            collect_flow_names(&path, Some(child_prefix), names);
+            collect_flow_names(&path, Some(child_prefix), names)?;
             continue;
         }
 
@@ -638,6 +660,7 @@ fn collect_flow_names(dir: &Path, prefix: Option<&str>, names: &mut Vec<String>)
             None => names.push(stem.to_string()),
         }
     }
+    Ok(())
 }
 
 pub fn find_flow_source_path(name: &str, repo: &Path) -> Option<PathBuf> {
@@ -1082,7 +1105,7 @@ fn validate_flow_nesting(sources: &[String], name: &str) -> Result<(), LoadError
 }
 
 fn compile_with_sources(
-    flow: &Flow,
+    flow: &FlowDefinition,
     repo: &Path,
     sources: &[String],
 ) -> Result<Vec<ResolvedFlowItem>, LoadError> {
@@ -1148,8 +1171,8 @@ mod tests {
 
     use super::{
         build_xor_routing_suffix, compile_branch, compile_flow, find_skill_source_path,
-        human_occurrence_ids, load_flow, load_skill, ConcreteStep, DefinitionLoader, Flow, Skill,
-        Step, XorDef, XorPath,
+        human_occurrence_ids, load_flow, load_skill, ConcreteStep, DefinitionLoader,
+        FlowDefinition, Skill, Step, XorDef, XorPath,
     };
     use crate::engine::error::LoadError;
     use crate::engine::target::Target;
@@ -1895,7 +1918,7 @@ Design the feature.
     #[test]
     fn compile_xor_keeps_concrete_xor() {
         let tmp = TempDir::new().unwrap();
-        let flow = Flow {
+        let flow = FlowDefinition {
             name: "test-or".to_string(),
             items: vec![
                 Step::new(Target::Skill(Skill::named("gate"))),
@@ -2080,7 +2103,7 @@ Design the feature.
         let deepest = load_flow("deep-2", tmp.path()).unwrap();
         compile_flow(&deepest, tmp.path()).unwrap();
         for (name, expected) in [("deep-1", "max depth"), ("deep-2", "cycle detected")] {
-            let composed = Flow {
+            let composed = FlowDefinition {
                 name: name.into(),
                 items: vec![Step::new(Target::Flow(deepest.clone()))],
             };
@@ -2121,7 +2144,7 @@ Design the feature.
             let result = super::parse_flow_items(&value, &mut DefinitionLoader::new(tmp.path()))
                 .and_then(|items| {
                     compile_flow(
-                        &Flow {
+                        &FlowDefinition {
                             name: "pin-missing".into(),
                             items,
                         },

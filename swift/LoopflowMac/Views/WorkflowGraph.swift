@@ -236,7 +236,7 @@ struct WorkflowGraph: View {
                     .disabled(unavailable != nil)
                     .help(unavailable ?? hint(arrow.edge))
                     .accessibilityValue(state)
-                    .accessibilityIdentifier("task-workflow-run-\(arrow.index)")
+                    .accessibilityIdentifier("task-workflow-process-\(arrow.index)")
             } else {
                 Text(arrow.text)
                     .font(Typography.code(11))

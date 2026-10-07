@@ -3,10 +3,15 @@ import Foundation
 /// Rust owns checkout association; membership grants no execution authority.
 public struct TaskWork: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
-    public let flows: [TaskFlowMember]
+    public let flowProcesses: [FlowProcessInventoryEntry]
     public let processes: [Process]
     /// The Task's Workflow; `nil` when it runs only ad hoc Flows.
     public let workflow: Workflow?
+
+    enum CodingKeys: String, CodingKey {
+        case sessions, processes, workflow
+        case flowProcesses = "flow_processes"
+    }
 }
 
 /// A Task's Workflow: the definition it took up, where the Task stands on it,
@@ -114,21 +119,21 @@ public struct TaskSession: Codable, Sendable, Equatable, Identifiable {
     public let title: String
     public let interactive: Bool
     /// Driver Process of the Flow whose step opened the current input.
-    public let flowId: String?
+    public let flowProcessLfid: String?
     public let completedAt: Int64?
 
     enum CodingKeys: String, CodingKey {
         case id, title, interactive
-        case flowId = "flow_id"
+        case flowProcessLfid = "flow_process_lfid"
         case completedAt = "completed_at"
     }
 }
 
 /// One Flow as its driver Process records it; `id` is that Process.
-public struct TaskFlowMember: Codable, Sendable, Hashable, Identifiable {
+public struct FlowProcessInventoryEntry: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String
-    public let state: TaskFlowState
+    public let state: FlowProcessSummaryState
     public let taskId: String?
     public let waveId: String?
     public let updatedAt: Int64
@@ -145,6 +150,6 @@ public struct TaskFlowMember: Codable, Sendable, Hashable, Identifiable {
 }
 
 /// `current` says nothing about a live process; `stopped` exited before the last step.
-public enum TaskFlowState: String, Codable, Sendable, Equatable {
+public enum FlowProcessSummaryState: String, Codable, Sendable, Equatable {
     case current, completed, stopped
 }

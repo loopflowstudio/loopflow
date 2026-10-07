@@ -49,6 +49,26 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
 - The outline lists started Tasks only (2026-09-25). LOO-382 asked that a
   new Task appear there; Jack kept the rule for now (2026-10-05).
 
+## Workflow and Flow alignment (LOO-386, 2026-10-07)
+
+Jack Heart retained Workflow and Flow, scoped Workflow commands to Project and
+Task, and specified that restart resets position. He authorized implementation
+through pursue, returning for demo review; no landing approval follows.
+
+The local cut keeps FlowDefinition and WorkflowDefinition in independent
+namespaces. Project workflow selection affects future take-up; Task restart
+moves the captured graph to start without reloading, execution or history loss.
+Definition navigation carries kind and name. Task projections separate Workflow
+selection, latest FlowProcessDetail, execution evidence and TaskRunControl.
+Completed execution retains its graph; latest grants no primary authority.
+LOO-400 owns Process/LFID and the migration. Historical captures stay readable.
+
+Implementation choices: definition list/customize under `project workflow`,
+Project addressing by IDs or unique name/slug, and Flow inspection `--processes`.
+Catalog read failure must not look like a builtin-only inventory. Headless
+fixtures cover the local cut; configured provider, live planning and Jack's
+finished-demo judgment remain unshown. No chapter KR is claimed.
+
 ## Task conversation and Workflows (LOO-353, PR #1439; 2026-10-04 to 10-06)
 
 Jack Heart approved landing on October 6 after three Desktop looks at a fixture
@@ -110,8 +130,8 @@ flow -b) apis."
   Execs. Edges stay named by their Flow/skill, unique from one node; decision
   labels are not being introduced. Jack: "Flow is too deeply engrained to
   explore really changing it right now." Pipeline, Step flow and Compute flow
-  remain suggestions. The October 7 LOO-386 draft proposes retaining Flow and
-  separating definition catalogs; no rename is approved or implemented here.
+  remain historical suggestions. Jack accepted Workflow and Flow on October 7;
+  the owner-scoped implementation below supersedes the naming draft.
 - Dropping per-node steer acknowledgement was "potentially bad": it had
   stopped runaway token counts. Restored as `--steers-after`.
 - The first Task sheet was "kinda yucky." Wanted and built: the Workflow graph
@@ -775,42 +795,28 @@ caps, and keep missing ownership evidence explicit.
 
 ## Chapter decisions and review lessons (2026-09-23)
 
-- **The sealed chapter records the accepted starting plan**, not the provisional
-  summer drafts: [.lf/chapters/20260923T000959Z-502f011b/start.md](../../.lf/chapters/20260923T000959Z-502f011b/start.md).
-  The interval is 23 September–21 October, starting at 00:09:59 UTC. Gate 2
-  accepted the plan; it did not authorize publication. The 24 September human
-  amendments above govern current hierarchy and ownership. The summer review judged
-  39 KRs (2 hold, 16 do not, 21 unknown); the start freeze contains 42 because
-  List adds three previously unreviewed claims. Those are different populations.
-- **Product value is explicitly chosen external progress.** Current Work
-  direction plus material Task progress in any three of Cube, Etude, Kata, and
-  Hootro makes a successful week. An open Session, refreshed plan, settled Run,
-  or Loopflow self-hosting repair is insufficient. Small/Medium/Big are company
-  review heuristics, never runtime limits. Preserve capacity outside Loopflow.
-- **The summer reset clarified ownership through real use.** Product dogfood
-  built much of the execution foundation; that was useful discovery, not simply
-  work in the wrong Wave. Infrastructure now owns execution and self-hosting
-  repair, Intelligence owns evidence, and Product owns the external experience.
-  The validated Sessions design is a foundation to finish, not restart.
-- **Review rows before telling the story.** Freeze the exact Project/KR union,
-  including retired or rewritten claims; keep each report's Run id and recompute
-  totals from rows. A definition verdict is not another KR. A complete current
-  roster cannot establish complete historical lineage. Missing duration proof is
-  unknown unless a dated in-scope counterexample disproves the claim.
-- **Keep evidence and user consequences together.** Each Project report needs
-  both exact observations and a concise account of who benefited, what changed,
-  and why the KRs prove it. Carry, learned, not actually prioritized, and misplaced
-  work are separate judgments; review proposes, accepted start applies.
-- **Chapter review now aggregates one report per Wave.** The former direct
-  Project-review shortcut belongs to the multi-Project chapter. Preserve exact
-  historical KR membership and dated reports; current operations must not recreate
-  a Project operator. Run settlement and the report together establish completion;
-  unknown liveness remains unknown. Archive authority follows explicit Task binding.
-- **The baseline cannot recover missing KR history.** PM retains current text
-  and `holds` with one overwritten snapshot timestamp. The new start ledger
-  establishes a forward boundary; retain later wording changes as dated evidence.
-  Append-only PM revisions or provider KR identities remain an instrumentation
-  option when a real review needs lineage the archive cannot supply.
+The accepted start, not the summer draft, is frozen at
+[the chapter start](../../.lf/chapters/20260923T000959Z-502f011b/start.md)
+(23 September–21 October). Gate 2 accepted planning, not publication. The later
+September 24 hierarchy decisions govern. Historical KR counts and dated review
+mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
+
+- Product value is human-selected external progress in any three of Cube,
+  Etude, Kata and Hootro. Sessions, planning churn and Loopflow self-hosting
+  alone earn no credit. Preserve external capacity; Small/Medium/Big are review
+  heuristics, never runtime limits.
+- Product's dogfood revealed execution work: Infrastructure now owns execution,
+  Intelligence evidence, and Product the external experience. Finish validated
+  foundations instead of restarting them.
+- Freeze the exact Project/KR union before review; recompute totals from rows.
+  Definitions and KRs are separate verdicts, and current rosters cannot prove
+  historical completeness. Missing duration evidence stays unknown.
+- Keep observations beside beneficiary and consequence. Carry, learned, not
+  prioritized and misplaced are different findings. Review proposes; accepted
+  start applies. A report plus execution settlement establishes completion.
+- PM's overwritten snapshot cannot recover KR history. The start ledger is a
+  forward boundary; retain later wording as dated evidence. Append-only provider
+  revisions remain an option when a real review needs unavailable lineage.
 
 ## Work and continuity (reconciled 2026-09-23)
 
@@ -892,8 +898,8 @@ lfd and resident-cron contracts remain in
 Wave → Task is public planning; Chapter/Project identity stays internal and
 historical. Shared status, roadmap, cached plan and Rust/Swift fixtures change
 together. AgentSession owns interactive Session/headless Run continuity and
-history; Exec owns an lf invocation; FlowExec records one Flow driver's graph
-and steps. A Task run may start several Flow execs. No separate Run owner is
+history; Process owns an lf invocation; FlowProcess records one Flow driver's graph
+and steps. A Task run may start several Flow processes. No separate Run owner is
 restored because identifiers happen to coincide.
 
 ## Swift data path — RegistryQuery is the single reader

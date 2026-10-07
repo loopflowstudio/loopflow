@@ -1,4 +1,4 @@
-// Flow diagrams: a definition's template and one Flow process's launched graph
+// Flow diagrams: a definition's composition and one Flow process's launched graph
 // with where it stands. Topology, occurrence keys and return counts come
 // from Rust; these views draw them.
 
@@ -20,7 +20,7 @@ enum FlowNodeState: Equatable {
 }
 
 /// Classify every drawn occurrence from the shared projection.
-func flowNodeStates(_ graph: FlowGraph, latest: LatestTaskFlow?) -> [UInt32: FlowNodeState] {
+func flowNodeStates(_ graph: FlowGraph, latest: FlowProcessProgress?) -> [UInt32: FlowNodeState] {
     var states: [UInt32: FlowNodeState] = [:]
     func visit(_ nodes: [FlowNode]) {
         for node in nodes {
@@ -32,7 +32,7 @@ func flowNodeStates(_ graph: FlowGraph, latest: LatestTaskFlow?) -> [UInt32: Flo
     return states
 }
 
-private func state(of node: FlowNode, latest: LatestTaskFlow?) -> FlowNodeState {
+private func state(of node: FlowNode, latest: FlowProcessProgress?) -> FlowNodeState {
     guard let latest else { return node.human ? .pendingHuman : .pending }
     let isCurrent = latest.current.map { node.contains($0) } ?? false
     if isCurrent {
@@ -50,17 +50,17 @@ private func state(of node: FlowNode, latest: LatestTaskFlow?) -> FlowNodeState 
 
 // MARK: - Diagram
 
-struct FlowTemplateView: View {
+struct FlowCompositionView: View {
     let graph: FlowGraph
-    let template: FlowTemplate
+    let composition: FlowComposition
     @Bindable var navigation: WorkNavigation
 
     private var expanded: Binding<Set<String>> {
-        Binding(get: { navigation.expandedTemplateGroups[template.revision] ?? [] },
-                set: { navigation.expandedTemplateGroups[template.revision] = $0 })
+        Binding(get: { navigation.expandedCompositionGroups[composition.revision] ?? [] },
+                set: { navigation.expandedCompositionGroups[composition.revision] = $0 })
     }
 
-    static func spans(_ original: FlowGraph, projection: FlowTemplateProjection) -> [LoopSpan] {
+    static func spans(_ original: FlowGraph, projection: FlowCompositionProjection) -> [LoopSpan] {
         FlowDiagram.spans(original, latest: nil).compactMap { edge in
             guard let fromKey = projection.visibleKeys[original.steps[edge.from].key],
                   let toKey = projection.visibleKeys[original.steps[edge.to].key],
@@ -72,17 +72,17 @@ struct FlowTemplateView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            TemplateDisclosures(items: template.items, graph: graph, expanded: expanded)
-            TemplateDiagram(graph: graph, items: template.items, expanded: expanded)
+            CompositionDisclosures(items: composition.items, graph: graph, expanded: expanded)
+            CompositionDiagram(graph: graph, items: composition.items, expanded: expanded)
         }
-        .id(template.revision)
-        .accessibilityIdentifier("flow-template-\(graph.name)")
+        .id(composition.revision)
+        .accessibilityIdentifier("flow-composition-\(graph.name)")
     }
 }
 
 /// Disclosure controls keep composition identity even for an empty body.
-private struct TemplateDisclosures: View {
-    let items: [FlowTemplateItem]
+private struct CompositionDisclosures: View {
+    let items: [FlowCompositionItem]
     let graph: FlowGraph
     @Binding var expanded: Set<String>
 
@@ -95,20 +95,20 @@ private struct TemplateDisclosures: View {
                     set: { if $0 { expanded.insert(id) } else { expanded.remove(id) } }
                 )) {
                     if children.isEmpty { Text("No steps").font(Typography.caption()) }
-                    AnyView(TemplateDisclosures(items: children, graph: graph, expanded: $expanded))
+                    AnyView(CompositionDisclosures(items: children, graph: graph, expanded: $expanded))
                 } label: {
                     Text("\(name) · \(item.nodeKeys.count) steps").font(Typography.mono)
                 }
                 .disclosureGroupStyle(TemplateDisclosureStyle())
-                .accessibilityIdentifier("template-group-\(id)")
+                .accessibilityIdentifier("composition-group-\(id)")
             case .node(let key, let paths):
                 if !paths.isEmpty {
                     ForEach(paths.keys.sorted(), id: \.self) { name in
                         DisclosureGroup("\(graph.node(key)?.label ?? String(key)) · \(name)") {
-                            AnyView(TemplateDisclosures(items: paths[name]!, graph: graph, expanded: $expanded))
+                            AnyView(CompositionDisclosures(items: paths[name]!, graph: graph, expanded: $expanded))
                             if let node = graph.node(key), let path = node.paths.first(where: { $0.name == name }) {
                                 let branch = FlowGraph(name: name, steps: path.steps, interactions: graph.interactions)
-                                TemplateDiagram(graph: branch, items: paths[name]!, expanded: $expanded)
+                                CompositionDiagram(graph: branch, items: paths[name]!, expanded: $expanded)
                             }
                         }
                         .disclosureGroupStyle(TemplateDisclosureStyle())
@@ -151,13 +151,13 @@ private struct TemplateDisclosureStyle: DisclosureGroupStyle {
     }
 }
 
-private struct TemplateDiagram: View {
+private struct CompositionDiagram: View {
     let graph: FlowGraph
-    let items: [FlowTemplateItem]
+    let items: [FlowCompositionItem]
     @Binding var expanded: Set<String>
     @State private var inspected: UInt32?
     var body: some View {
-        let projection = FlowTemplateProjection(graph: graph, items: items, expanded: expanded)
+        let projection = FlowCompositionProjection(graph: graph, items: items, expanded: expanded)
         FlowDiagram(graph: projection.graph, latest: nil, inspected: Binding(
             get: { inspected },
             set: { key in
@@ -166,7 +166,7 @@ private struct TemplateDiagram: View {
                     inspected = nil
                 } else { inspected = key }
             }
-        ), templateSpans: FlowTemplateView.spans(graph, projection: projection), detailGraph: graph)
+        ), compositionSpans: FlowCompositionView.spans(graph, projection: projection), detailGraph: graph)
     }
 }
 
@@ -177,9 +177,9 @@ private struct TemplateDiagram: View {
 /// gets its own labelled row. Only an overwide loop row scrolls.
 struct FlowDiagram: View {
     let graph: FlowGraph
-    let latest: LatestTaskFlow?
+    let latest: FlowProcessProgress?
     @Binding var inspected: UInt32?
-    var templateSpans: [LoopSpan]? = nil
+    var compositionSpans: [LoopSpan]? = nil
     /// Layout may fold nodes; detail reads the complete definition.
     var detailGraph: FlowGraph? = nil
 
@@ -199,7 +199,7 @@ struct FlowDiagram: View {
 
     /// Top-level authored returns in authored order, numbered from 1. A launched
     /// Flow adds each edge's saved counts. Nested XOR returns appear in node detail.
-    static func spans(_ graph: FlowGraph, latest: LatestTaskFlow?) -> [LoopSpan] {
+    static func spans(_ graph: FlowGraph, latest: FlowProcessProgress?) -> [LoopSpan] {
         let steps = graph.steps
         return steps.enumerated().compactMap { to, node -> (Int, Int, FlowNode)? in
             guard let target = node.returnsTo,
@@ -304,7 +304,7 @@ struct FlowDiagram: View {
 
     private func layout(width available: CGFloat, gap: CGFloat) -> [Row] {
         let count = graph.steps.count
-        let spans = templateSpans ?? Self.spans(graph, latest: latest)
+        let spans = compositionSpans ?? Self.spans(graph, latest: latest)
         guard let first = spans.map(\.from).min(), let last = spans.map(\.to).max() else {
             // No loops: wrap the sequence greedily.
             var rows: [Row] = []
@@ -552,7 +552,7 @@ struct LoopSpan {
 private struct FlowNodeDetail: View {
     let node: FlowNode
     let state: FlowNodeState
-    let latest: LatestTaskFlow?
+    let latest: FlowProcessProgress?
     let graph: FlowGraph
 
     @Environment(\.palette) private var palette

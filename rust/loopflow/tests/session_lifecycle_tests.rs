@@ -340,7 +340,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             caller_artifact_key: None,
             task_id: (index >= 110).then(|| task.task.id.clone()),
             wave_id: None,
-            flow_id: None,
+            flow_process_lfid: None,
             work_source: (index >= 110).then_some(loopflow::session::WorkSource::Declared),
             bound_at: None,
             id: id.clone(),

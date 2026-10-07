@@ -13,7 +13,7 @@ Settled constraints:
 - LOO-400 supplies Process/FlowProcess and LFID/PID. Its `e530eb780` head is
   integrated at Jack's request. No competing Exec rename remains.
 - Jack accepted `customize` copying a builtin only if needed and printing its
-  local path. Its placement under the revised command shape remains open.
+  local path. Its placement follows the implementation choice below.
 - Projects select a definition; Tasks retain their captured Workflow and position.
   A Project setting change does not silently reset existing Tasks.
 - Jack specified that `restart` resets position. It moves the captured Workflow
@@ -33,3 +33,10 @@ Jack Heart requested “ok. cool. move it forward.” on October 7 after settlin
 restart. Implement through pursue and return at demo review. Earlier synonyms
 are research evidence, not targets; this grants no approval of the finished demo
 or permission to skip it and land.
+
+Implementation review, October 7: Project show/set accepts stable IDs and unique
+names/slugs; catalog commands occupy Project's Workflow group. The obsolete
+`wave update-plan --workflow` shortcut is removed. A full plan still replaces
+its Workflow through `wave update-plan --plan`. Directory read failures remain
+errors, and saved Task projections disable run controls until refreshed.
+These are implementation choices, not additional approvals from Jack Heart.

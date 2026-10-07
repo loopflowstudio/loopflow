@@ -162,12 +162,12 @@ The toolbar's **+** changes what the multiplexer shows: **New shell**,
 Task's checkout, newest first, whether an edge or a person started it; it is
 not the Workflow's history. One line each: Flow, state, when it started and
 how long it ran. A row opens to its id, graph and steps (the shape of
-`lf flow show ID --sessions --json`). An process whose driver exited early reads
+`lf flow show ID --processes --json`). A process whose driver exited early reads
 **stopped**. One whose driver was killed has no exit record and keeps reading
 as running. **Task details → Debug** lists the Task's raw Sessions and Processes.
 Sessions list **Waiting** first and working ones in a compact group.
 The Wave page's **Workflow** sets the Project's workflow from the catalogue
-(`lf flow list`); **Customize** or **Edit** opens its source in
+(`lf project workflow list`); **Customize** or **Edit** opens its source in
 your editor, writing a builtin to `.lf/` first.
 **Session history** under the Flow reads nothing until expanded; it then lists that
 Task's complete recorded input history (`lf usage --days 0 --task ID --json`) with each recorded
@@ -233,7 +233,7 @@ missing or unrelated Session leaves the current workspace intact and offers Retr
 Opening a conversation does not complete a review or start a Task Flow.
 
 Wave details show the objective, current chapter plan/KRs, the current Project's
-Flow template, current Tasks and chapter history. Completed Tasks start hidden.
+Workflow, current Tasks and chapter history. Completed Tasks start hidden.
 **Completed** adds the last 7 days. Click **7 Days** to edit the number inline;
 Enter or clicking away applies it, Escape cancels. Enter **0** for **All Tasks**
 (successful completions of any age); click that label to edit again. The checkbox
@@ -528,3 +528,9 @@ associated Sessions and Processes; they introduce no additional Work kinds.
 `SessionWorkspace` retain their names because primary Sessions can use a non-Git
 directory. Terminal workspaces own pane layouts. Saved cache paths, selection keys
 and placement JSON fields retain their existing bytes across these source renames.
+
+Definition search keeps Flow and Workflow destinations separate, even for the
+same name. Project selectors list only Workflows. Task reads expose
+`workflow_name`, `latest_flow_process`, `execution`, and `run_control` separately;
+completed Flow processes retain their graph and identity. The Task watch part
+supplies `flow_processes`, using the same execution details as CLI inspection.

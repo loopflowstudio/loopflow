@@ -34,11 +34,11 @@
   "flow_membership": {
     "kind": "step",
     "flow": "task-design",
-    "invocation_id": "00000000-0000-0000-0000-00000000f10w",
     "step": "review-design",
     "occurrence": "unknown",
     "node": null,
-    "iterations": null
+    "iterations": null,
+    "flow_process_lfid": "00000000-0000-0000-0000-00000000f10w"
   },
   "interactive": true,
   "workspace": null,

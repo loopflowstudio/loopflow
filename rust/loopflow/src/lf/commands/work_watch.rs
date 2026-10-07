@@ -21,7 +21,7 @@ use sha2::{Digest, Sha256};
 use super::activity::WorkActivitySnapshot;
 use super::top::ActivitySnapshot;
 use super::waves::{RoadmapSnapshot, WaveDetailSnapshot, WaveSnapshot};
-use crate::durable::FlowDetail;
+use crate::durable::FlowProcessDetail;
 use crate::ops::human_session::SessionRecord;
 use crate::repository::CanonicalRepo;
 use crate::store::changes::StoreChanges;
@@ -94,13 +94,13 @@ pub struct SessionsPart {
     pub entries: Vec<SessionRecord>,
 }
 
-/// `lf task status` work and `lf flow show --sessions` for each of its Flows,
+/// `lf task status` work and `lf flow show --processes` for each of its Flows,
 /// in the same order.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskPart {
     pub task: String,
     pub work: TaskWork,
-    pub flow_runs: Vec<FlowDetail>,
+    pub flow_processes: Vec<FlowProcessDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -571,19 +571,19 @@ impl Reader {
                         .resolve_task_id(&selector, None)?
                         .ok_or_else(|| anyhow!("Task {selector} is not registered"))?;
                     let work = store.sqlite.task_work(&task)?;
-                    let mut flow_runs = Vec::with_capacity(work.flows.len());
-                    for flow in &work.flows {
+                    let mut flow_processes = Vec::with_capacity(work.flow_processes.len());
+                    for flow in &work.flow_processes {
                         let id = flow.summary.id.as_str();
                         let (process, entry) = store
                             .sqlite
                             .flow_process(id)?
                             .ok_or_else(|| anyhow!("Flow {id} has no driver record"))?;
-                        flow_runs.push(process.detail(entry));
+                        flow_processes.push(process.detail(entry));
                     }
                     WorkContent::Task(Some(TaskPart {
                         task: selector,
                         work,
-                        flow_runs,
+                        flow_processes,
                     }))
                 }
                 Part::Wave => {

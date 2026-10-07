@@ -555,7 +555,7 @@ async fn traverse_workflow(
             None => {
                 let Some(flow) = requested else {
                     return Err(task_error(format!(
-                        "Task {}'s Project names {project_workflow:?}, which is not a workflow. `lf wave update-plan --workflow <name>` sets one; `lf task run {} <workflow>` takes one up for this Task",
+                        "Task {}'s Project names {project_workflow:?}, which is not a workflow. `lf project workflow set <project> <name>` sets one; `lf task run {} <workflow>` takes one up for this Task",
                         task.plan.identifier, task.plan.identifier
                     )));
                 };
@@ -678,6 +678,21 @@ pub fn workflow_arrive(task: &Task, end: &EndOptions) -> OpsResult<()> {
 /// on an edge is left alone and no longer moves the Task when it ends.
 /// `end` completes the Task, with or without a Workflow; for a Task `lf` holds
 /// no record of, it completes the planning item.
+pub fn workflow_show(
+    _repo: &Path,
+    issue: &str,
+) -> OpsResult<Option<crate::ops::workflow::Workflow>> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let task = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        store.sqlite.workflow(&task.id).map_err(task_error)
+    })
+}
+
 pub fn workflow_set(
     repo: &Path,
     issue: &str,

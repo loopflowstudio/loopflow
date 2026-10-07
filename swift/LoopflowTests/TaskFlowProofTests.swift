@@ -45,75 +45,42 @@ private func captureIfRequested(_ window: NSWindow, name: String) throws {
 
 @Suite("Task Flow")
 struct TaskFlowTests {
-    @Test("Flow snapshots and the catalogue decode every record without defaults")
+    @Test("Separate catalogs retain invalid entries and graph composition")
     func flowFixtures() throws {
-        let snapshots = try JSONDecoder().decode([TaskFlowSnapshot].self, from: fixture("task_flow.json"))
-        #expect(snapshots.map(\.recommended) == ["feature", "feature", "feature", "build", "feature"])
-        guard case .latest(let running) = snapshots[1].record else {
-            Issue.record("second snapshot has a latest Flow"); return
-        }
-        #expect(running.returns.map(\.traversals) == [2, 0])
-        #expect(running.returns.map(\.decider) == [3, 5])
-        #expect(running.graph.steps.filter { $0.returnsTo == 1 }.map(\.key) == [3, 5])
-        // Start stays legal beside an earlier Flow; it launches a fresh one.
-        #expect(snapshots.allSatisfy { $0.controls == [TaskFlowControl(kind: .start, unavailable: nil)] })
-        #expect(snapshots[4].record == .finished(flow: "build"))
-
-        var missing = try #require(JSONSerialization.jsonObject(with: fixture("task_flow.json")) as? [[String: Any]])
-        let record = try #require(missing[1]["record"] as? [String: Any])
-        var stringNode = record
-        stringNode["current"] = "2"
-        missing[1]["record"] = stringNode
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode([TaskFlowSnapshot].self, from: JSONSerialization.data(withJSONObject: missing))
-        }
-        for field in ["returns", "iterations"] {
-            var incomplete = record
-            incomplete.removeValue(forKey: field)
-            missing[1]["record"] = incomplete
-            #expect(throws: DecodingError.self) {
-                try JSONDecoder().decode([TaskFlowSnapshot].self, from: JSONSerialization.data(withJSONObject: missing))
-            }
-        }
-
         let catalog = try JSONDecoder().decode([FlowCatalogEntry].self, from: fixture("flow_catalog.json"))
-        #expect(catalog.map(\.id) == ["flow/feature", "flow/broken", "workflow/code", "workflow/proof", "workflow/research"])
-        // A workflow carries nodes and edges instead of a Flow graph; an invalid file keeps its source.
-        #expect(catalog[2].workflow?.edges.map(\.launchName) == ["pursue", "pursue", "ship"])
-        #expect(catalog[2].source == nil && catalog[2].graph == nil)
-        #expect(catalog[3].source == ".lf/workflows/proof.yaml" && catalog[3].unavailable != nil)
-        #expect(catalog.named("code")?.kind == .workflow)
+        let workflows = try JSONDecoder().decode([WorkflowCatalogEntry].self, from: fixture("workflow_catalog.json"))
+        #expect(catalog.map(\.id) == ["feature", "broken"])
+        #expect(workflows[0].workflow?.edges.map(\.launchName) == ["pursue", "pursue", "ship"])
+        #expect(workflows[1].source == ".lf/workflows/proof.yaml" && workflows[1].unavailable != nil)
         #expect(catalog[0].graph?.steps.count == 8 && catalog[1].unavailable != nil)
-        #expect(catalog[0].graph?.steps[0].sources == ["feature"])
         let graph = try #require(catalog[0].graph)
-        let template = try #require(catalog[0].template)
-        #expect(FlowTemplateProjection(graph: graph, items: template.items,
-                                       expanded: ["group-0"]).graph == graph)
+        let composition = try #require(catalog[0].composition)
+        #expect(FlowCompositionProjection(graph: graph, items: composition.items, expanded: ["group-0"]).graph == graph)
     }
 
     @Test("Template disclosure keeps repeated and empty groups, XOR paths and both returns")
     @MainActor
     func templateDisclosure() throws {
-        let entry = try JSONDecoder().decode(FlowCatalogEntry.self, from: fixture("flow_template.json"))
-        let template = try #require(entry.template)
+        let entry = try JSONDecoder().decode(FlowCatalogEntry.self, from: fixture("flow_composition.json"))
+        let template = try #require(entry.composition)
         let graph = try #require(entry.graph)
-        let folded = FlowTemplateProjection(graph: graph, items: template.items, expanded: [])
+        let folded = FlowCompositionProjection(graph: graph, items: template.items, expanded: [])
         #expect(folded.graph.steps.map(\.key) == [8, 9, 10, 2, 12])
         #expect(folded.graph.steps[0].label == folded.graph.steps[1].label)
         #expect(folded.graph.steps[2].label.contains("0"))
-        let returns = FlowTemplateView.spans(graph, projection: folded)
+        let returns = FlowCompositionView.spans(graph, projection: folded)
         #expect(returns.map(\.decider) == [5, 7])
         #expect(returns.allSatisfy { $0.from == 4 && $0.to == 4 })
-        let partial = FlowTemplateProjection(graph: graph, items: template.items, expanded: ["group-0", "group-4"])
+        let partial = FlowCompositionProjection(graph: graph, items: template.items, expanded: ["group-0", "group-4"])
         #expect(partial.graph.steps.map(\.key) == [0, 8, 9, 2, 4, 5, 6, 7])
-        let all = FlowTemplateProjection(graph: graph, items: template.items, expanded: Set((0...4).map { "group-\($0)" }))
+        let all = FlowCompositionProjection(graph: graph, items: template.items, expanded: Set((0...4).map { "group-\($0)" }))
         #expect(all.graph == graph)
         #expect(all.graph.node(3)?.label == "implement")
 
-        var missing = try #require(JSONSerialization.jsonObject(with: fixture("flow_template.json")) as? [String: Any])
-        var body = try #require(missing["template"] as? [String: Any])
+        var missing = try #require(JSONSerialization.jsonObject(with: fixture("flow_composition.json")) as? [String: Any])
+        var body = try #require(missing["composition"] as? [String: Any])
         body.removeValue(forKey: "items")
-        missing["template"] = body
+        missing["composition"] = body
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(FlowCatalogEntry.self, from: JSONSerialization.data(withJSONObject: missing))
         }
@@ -121,8 +88,8 @@ struct TaskFlowTests {
 
     @Test("Occurrence state keeps pass completions while iteration keeps each edge count")
     func occurrenceStates() throws {
-        let snapshots = try JSONDecoder().decode([TaskFlowSnapshot].self, from: fixture("task_flow.json"))
-        guard case .latest(let review) = snapshots[2].record else { Issue.record("latest"); return }
+        let snapshots = try JSONDecoder().decode([FlowProcessDetail].self, from: fixture("flow_process_progress.json"))
+        let review = snapshots[1].progress
         let states = flowNodeStates(review.graph, latest: review)
         #expect(states[1] == .completed && states[3] == .completed)
         #expect(states[4] == .stopped)
@@ -131,20 +98,21 @@ struct TaskFlowTests {
         #expect(states[7] == .pending)
         #expect(review.iterations == [[1, 1]])
         #expect(review.returns[1].traversals == 1)
-        guard case .latest(let running) = snapshots[1].record else { Issue.record("latest"); return }
+        let running = snapshots[0].progress
         #expect(running.iterations == [[2, 0]])
         #expect(flowIterationLabel([[2, 1], [3]]) == "loop 1 pass 3, loop 2 pass 2, loop 3 pass 4")
         #expect(flowIterationLabel([[], [2]]) == "pass 3")
         #expect(flowIterationLabel([[0, 0]]) == nil)
         #expect(running.returns.map(\.traversals) == [2, 0])
 
-        guard case .latest(let blocked) = snapshots[3].record else { Issue.record("latest"); return }
+        let blocked = snapshots[2].progress
         #expect(flowNodeStates(blocked.graph, latest: blocked)[3] == .blocked)
-        let stalledSnapshot = try JSONDecoder().decode(TaskFlowSnapshot.self, from: fixture("task_flow_stalled.json"))
-        guard case .latest(let stalled) = stalledSnapshot.record else { Issue.record("latest"); return }
-        #expect(stalled.execution == .stalled)
-        #expect(flowNodeStates(stalled.graph, latest: stalled)[0] == .stalled)
-        #expect(stalled.reason.contains("Session event 12"))
+        let evidence = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_stalled.json"))
+        #expect(evidence.state == .stalled)
+        let stalled = FlowProcessProgress(flowProcessLfid: review.flowProcessLfid, graph: review.graph,
+            current: review.current, completed: review.completed, returns: review.returns,
+            iterations: review.iterations, execution: evidence.state, reason: evidence.reason)
+        #expect(flowNodeStates(stalled.graph, latest: stalled)[4] == .stalled)
         // A preview only marks human boundaries.
         let preview = flowNodeStates(review.graph, latest: nil)
         #expect(preview[4] == .pendingHuman && preview[1] == .pending)
@@ -152,8 +120,8 @@ struct TaskFlowTests {
 
     @Test("Captured numeric IDs preserve nested containment and independent return counts")
     func nestedNumericIdentity() throws {
-        let snapshot = try JSONDecoder().decode(TaskFlowSnapshot.self, from: fixture("flow_numeric_nested.json"))
-        guard case .latest(let latest) = snapshot.record else { Issue.record("latest"); return }
+        let snapshot = try JSONDecoder().decode(FlowProcessDetail.self, from: fixture("flow_numeric_nested.json"))
+        let latest = snapshot.progress
         let graph = latest.graph
         #expect(graph.steps.map(\.key) == [0, 1, 9])
         #expect(graph.node(5)?.label == "check")
@@ -177,11 +145,11 @@ struct TaskFlowTests {
     @Test("A Flow process's length and the two return ports")
     @MainActor
     func durationAndPorts() {
-        #expect(FlowRunView.duration(0) == "0s")
-        #expect(FlowRunView.duration(42) == "42s")
-        #expect(FlowRunView.duration(725) == "12m 5s")
-        #expect(FlowRunView.duration(11_100) == "3h 5m")
-        #expect(FlowRunView.duration(-3) == "0s")
+        #expect(FlowProcessView.duration(0) == "0s")
+        #expect(FlowProcessView.duration(42) == "42s")
+        #expect(FlowProcessView.duration(725) == "12m 5s")
+        #expect(FlowProcessView.duration(11_100) == "3h 5m")
+        #expect(FlowProcessView.duration(-3) == "0s")
         // Loop 1 lands from above, Loop 2 from below, both at the target's left edge.
         #expect(FlowLoopGeometry.returnsAbove(0) && !FlowLoopGeometry.returnsAbove(1))
         #expect(FlowLoopGeometry.landing(0) == FlowLoopGeometry.landing(1))
@@ -207,14 +175,14 @@ struct TaskFlowTests {
         workflow["outgoing"] = [3, 4]
         work["workflow"] = workflow
         let run = try object("flow_detail.json")
-        let running = try #require((work["flows"] as? [[String: Any]])?.first)
+        let running = try #require((work["flow_processes"] as? [[String: Any]])?.first)
         let runId = try #require(running["id"] as? String)
         let started = try #require((run["steps"] as? [[String: Any]])?.first?["started_at"] as? Int)
         func process(_ id: String, _ name: String, _ state: String, seconds: Int) -> [String: Any] {
             running.merging(["id": id, "name": name, "state": state, "updated_at": started - 7_200,
                              "ended_at": started - 7_200 + seconds]) { $1 }
         }
-        work["flows"] = [
+        work["flow_processes"] = [
             process("22222222-2222-4222-8222-222222222222", "task-design", "completed", seconds: 725),
             process("44444444-4444-4444-8444-444444444444", "pursue", "stopped", seconds: 42),
             running,
@@ -278,14 +246,14 @@ struct TaskFlowTests {
         try await eventually("the Task part arrives") { model.taskWork[task.id].value != nil }
         try await settle()
         #expect(try find("task-workflow-node-demo").accessibilityValue().string() == "Current")
-        #expect(try find("task-workflow-run-4").button().labelView().text().string() == "ship")
+        #expect(try find("task-workflow-process-4").button().labelView().text().string() == "ship")
         _ = try find("task-workflow-move")
         let header = drawn()
         #expect(header.contains("task-workflow-node-demo"), "the accessibility tree is readable")
         #expect(header.isDisjoint(with: [
             "work-materials", "work-toggle-materials", "work-toggle-files",
             "work-current-stage", "task-show-monitor-\(task.id)", "task-workflow-position",
-            "task-flow-runs", "task-work", "task-flow-start",
+            "task-flow-processes", "task-work", "task-flow-start",
         ]))
 
         // One menu adds the Flow process log as a pane beside the Session.
@@ -299,10 +267,10 @@ struct TaskFlowTests {
         #expect(try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(stopped)")
             .find(text: "42s").string() == "42s")
         #expect(throws: (any Error).self) { try log.inspect().find(text: stopped) }
-        model.navigation.expandedFlowRuns.insert(runId)
+        model.navigation.expandedFlowProcesses.insert(runId)
         try await settle()
-        #expect(try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-id-\(runId)").text().string() == runId)
-        #expect(drawn().isSuperset(of: ["task-flow-runs", "flow-run-status-\(runId)"]))
+        #expect(try log.inspect().find(viewWithAccessibilityIdentifier: "flow-process-id-\(runId)").text().string() == runId)
+        #expect(drawn().isSuperset(of: ["task-flow-processes", "flow-process-status-\(runId)"]))
 
         // The same menu adds the Task's files as a pane.
         try find("work-add-files").button().tap()
@@ -369,7 +337,7 @@ private final class ScriptedReader {
         }
         send("planning", answers: id, body: planning)
         send("sessions", answers: id, body: ["repo": repo, "includes_headless": false, "entries": sessions])
-        if let task { send("task", answers: id, body: ["task": task, "work": work, "flow_runs": runs]) }
+        if let task { send("task", answers: id, body: ["task": task, "work": work, "flow_processes": runs]) }
     }
 
     private func send(_ part: String, answers: Int, body: [String: Any]) {
@@ -442,22 +410,22 @@ struct TaskFlowProofTests {
         }
         func text(_ id: String) throws -> String { try find(id).text().string() }
 
-        // The Wave draws its Project's template; composition starts folded.
-        model.select(.wave(id: "wave-1"))
-        model.navigation.content = .details
+        // Flow inspection keeps native Task panes retained; composition starts folded.
+        await model.loadFlowCatalog()
+        model.navigation.palette = .flow("feature")
         for _ in 0..<20 where model.flowCatalog.value == nil { try await settle(window) }
         try await settle(window)
-        _ = try find("flow-template-feature")
+        _ = try find("flow-composition-feature")
         #expect((try? find("flow-node-4")) == nil, "composition starts folded")
-        try find("template-group-group-0").disclosureGroup().expand()
+        try find("composition-group-group-0").disclosureGroup().expand()
         try await settle(window)
         #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, human review, pending")
 
-        let oldRevision = try #require(model.flowCatalog.value?.first?.template?.revision)
+        let oldRevision = try #require(model.flowCatalog.value?.first?.composition?.revision)
         try await source.reviseTemplate()
         await model.loadFlowCatalog(force: true)
         try await settle(window)
-        #expect(model.flowCatalog.value?.first?.template?.revision != oldRevision)
+        #expect(model.flowCatalog.value?.first?.composition?.revision != oldRevision)
         #expect((try? find("flow-node-4")) == nil, "a new source revision starts folded")
         #expect(await source.controls.isEmpty)
 
@@ -487,7 +455,7 @@ struct TaskFlowProofTests {
             }
             #expect(focusedLabel(in: window) == "build · 1 steps")
             func expanded(_ suffix: String) -> Bool {
-                model.navigation.expandedTemplateGroups["crossing-returns"]?.contains(prefix + suffix) == true
+                model.navigation.expandedCompositionGroups["crossing-returns"]?.contains(prefix + suffix) == true
             }
             try press("\u{f703}", keyCode: 124, in: window)
             try await settle(window)
@@ -504,7 +472,7 @@ struct TaskFlowProofTests {
             try press("\r", keyCode: 36, in: window)
             try await settle(window)
             #expect(expanded("empty"))
-            #expect(try find("template-group-\(prefix)empty").find(text: "No steps").string() == "No steps")
+            #expect(try find("composition-group-\(prefix)empty").find(text: "No steps").string() == "No steps")
             try press("\u{f702}", keyCode: 123, in: window)
             try await settle(window)
             #expect(!expanded("empty"))
@@ -523,11 +491,11 @@ struct TaskFlowProofTests {
         }
         for prefix in ["", "3/fix/"] {
             for expanded in [false, true, false] {
-                let group = try find("template-group-\(prefix)outer").disclosureGroup()
+                let group = try find("composition-group-\(prefix)outer").disclosureGroup()
                 if expanded {
                     try group.expand()
                     try await settle(window)
-                    try find("template-group-\(prefix)inner").disclosureGroup().expand()
+                    try find("composition-group-\(prefix)inner").disclosureGroup().expand()
                 } else { try group.collapse() }
                 try await settle(window)
                 for (number, offset) in [1, 2].enumerated() {
@@ -672,15 +640,15 @@ private actor FlowSource {
         var tree = items("")
         tree.append(["kind": "node", "key": 3, "paths": ["fix": items("3/fix/")]])
         entries[0]["graph"] = ["name": "feature", "steps": nodes]
-        entries[0]["template"] = ["revision": "crossing-returns", "items": tree]
+        entries[0]["composition"] = ["revision": "crossing-returns", "items": tree]
         catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
     }
 
     func reviseTemplate() throws {
         var entries = try #require(JSONSerialization.jsonObject(with: Data(catalog.utf8)) as? [[String: Any]])
-        var template = try #require(entries[0]["template"] as? [String: Any])
+        var template = try #require(entries[0]["composition"] as? [String: Any])
         template["revision"] = "changed-feature-definition"
-        entries[0]["template"] = template
+        entries[0]["composition"] = template
         catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
     }
 

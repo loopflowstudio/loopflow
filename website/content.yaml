@@ -80,7 +80,9 @@ homepage:
       The default workflow, step by step: kickoff, review plan, implement,
       compress, review, decide, review demo, decide, done. Review plan and
       review demo are nodes where a person takes part; the steps between
-      them are flows. Each decide step can return to implement.
+      them are flows. Each decide step can return to implement. Projects select
+      Workflow definitions; Tasks keep their captured graph and position. Flow
+      definitions have a separate catalog, so the two can share a name.
     paragraphs:
       - >-
         A flow is a directed graph of steps. Each step gives an agent one

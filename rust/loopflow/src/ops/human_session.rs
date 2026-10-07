@@ -229,7 +229,7 @@ fn session_attention(session: &crate::session::SessionSummary) -> Option<Session
 pub enum SessionFlowMembership {
     Step {
         flow: String,
-        invocation_id: String,
+        flow_process_lfid: String,
         step: String,
         /// Exact graph occurrence, unavailable for older capture manifests.
         node: Option<u32>,
@@ -377,12 +377,12 @@ pub(crate) async fn list(
 /// Where a Session's step stands in its Flow: the last one a still-open driver
 /// launched, an earlier one, or part of a Flow whose driver has exited.
 fn flow_occurrence(
-    state: crate::session::FlowSummaryState,
+    state: crate::session::FlowProcessSummaryState,
     latest_step: bool,
 ) -> SessionFlowOccurrence {
     match (state, latest_step) {
-        (crate::session::FlowSummaryState::Current, true) => SessionFlowOccurrence::Current,
-        (crate::session::FlowSummaryState::Current, false) => SessionFlowOccurrence::Earlier,
+        (crate::session::FlowProcessSummaryState::Current, true) => SessionFlowOccurrence::Current,
+        (crate::session::FlowProcessSummaryState::Current, false) => SessionFlowOccurrence::Earlier,
         _ => SessionFlowOccurrence::Past,
     }
 }
@@ -408,14 +408,14 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             },
         }
     });
-    let flow_membership = match (&session.flow_id, &session.flow) {
+    let flow_membership = match (&session.flow_process_lfid, &session.flow) {
         (None, _) if session.independent => SessionFlowMembership::Independent,
         (None, _) => SessionFlowMembership::Unknown {
             reason: "Flow membership was not recorded".into(),
         },
         (Some(id), Some(flow)) => SessionFlowMembership::Step {
             flow: flow.name.clone(),
-            invocation_id: id.clone(),
+            flow_process_lfid: id.clone(),
             step: session.skill.clone().unwrap_or_default(),
             node: session.node,
             iterations: session.iterations.clone(),
@@ -904,14 +904,14 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata, !clients.is_empty());
     let actions = session_actions(state);
-    let flow_membership = match (&session.flow_id, &metadata.flow) {
+    let flow_membership = match (&session.flow_process_lfid, &metadata.flow) {
         (None, _) if metadata.independent => SessionFlowMembership::Independent,
         (None, _) => SessionFlowMembership::Unknown {
             reason: "Flow membership was not recorded".into(),
         },
         (Some(id), Some(flow)) => SessionFlowMembership::Step {
             flow: flow.name.clone(),
-            invocation_id: id.clone(),
+            flow_process_lfid: id.clone(),
             step: session.skill.clone().unwrap_or_default(),
             node: session.node,
             iterations: session.iterations.clone(),
@@ -1348,7 +1348,7 @@ mod tests {
             interactive: true,
             task_id: Some(task.clone()),
             wave_id: Some(wave.clone()),
-            flow_id: Some("flow".into()),
+            flow_process_lfid: Some("flow".into()),
             cwd: "/unavailable".into(),
             skill: Some("review".into()),
             provider: None,
@@ -1356,10 +1356,10 @@ mod tests {
             node: Some(2),
             iterations: None,
             flow_step_latest: false,
-            flow: Some(crate::session::FlowSummary {
+            flow: Some(crate::session::FlowProcessSummary {
                 id: "flow".into(),
                 name: "retained".into(),
-                state: crate::session::FlowSummaryState::Current,
+                state: crate::session::FlowProcessSummaryState::Current,
                 task_id: Some(task.clone()),
                 wave_id: Some(wave.clone()),
                 updated_at: 1,
@@ -1390,7 +1390,7 @@ mod tests {
                 ..
             }
         ));
-        summary.flow.as_mut().unwrap().state = crate::session::FlowSummaryState::Stopped;
+        summary.flow.as_mut().unwrap().state = crate::session::FlowProcessSummaryState::Stopped;
         let row = super::summary_surface(&summary);
         assert!(matches!(
             row.flow_membership,
@@ -1404,7 +1404,7 @@ mod tests {
             super::SessionState::Unknown,
             "Flow completion is not Session/process completion"
         );
-        summary.flow_id = None;
+        summary.flow_process_lfid = None;
         assert!(matches!(
             super::summary_surface(&summary).flow_membership,
             super::SessionFlowMembership::Unknown { .. }
@@ -1643,7 +1643,7 @@ mod tests {
             iterations: None,
             task_id,
             wave_id: Some(wave.id().clone()),
-            flow_id: None,
+            flow_process_lfid: None,
             work_source: None,
             bound_at: None,
             interactive: true,
@@ -1815,13 +1815,16 @@ mod tests {
         .unwrap();
         for session in sessions {
             if let super::SessionFlowMembership::Step {
-                invocation_id,
+                flow_process_lfid,
                 step,
                 node: Some(node),
                 ..
             } = session.flow_membership
             {
-                assert_eq!(graphs[&invocation_id].node_at(node).unwrap().label, step);
+                assert_eq!(
+                    graphs[&flow_process_lfid].node_at(node).unwrap().label,
+                    step
+                );
             }
         }
     }

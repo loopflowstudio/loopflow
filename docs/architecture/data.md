@@ -3,7 +3,7 @@
 ```bash
 lf session list --interactive false --json
 lf session history SESSION --json
-lf flow show DRIVER_PROCESS --sessions --json
+lf flow show DRIVER_PROCESS --processes --json
 lf ps --json
 ```
 

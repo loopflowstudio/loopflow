@@ -46,19 +46,19 @@ fn lf_json(repo: &Path, home: &Path, args: &[&str]) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
-/// Every Flow on this Home as `lf flow show --sessions --json` reads it back.
+/// Every Flow on this Home as `lf flow show --processes --json` reads it back.
 fn flow_details(repo: &Path, home: &Path) -> Vec<serde_json::Value> {
     lf_json(
         repo,
         home,
-        &["flow", "list", "--sessions", "--all", "--json"],
+        &["flow", "list", "--processes", "--all", "--json"],
     )["entries"]
         .as_array()
         .unwrap()
         .iter()
         .map(|entry| {
             let id = entry["id"].as_str().unwrap();
-            lf_json(repo, home, &["flow", "show", id, "--sessions", "--json"])
+            lf_json(repo, home, &["flow", "show", id, "--processes", "--json"])
         })
         .collect()
 }
@@ -182,7 +182,7 @@ PYTHON
         let inspection = run_lf(
             repo.path(),
             home.path(),
-            &["flow", "show", &driver, "--sessions", "--json"],
+            &["flow", "show", &driver, "--processes", "--json"],
             None,
         );
         assert!(
@@ -691,7 +691,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
                 home.path(),
                 &["task", "status", issue, "--json"],
             );
-            status["execution"]["work"]["flows"]
+            status["execution"]["work"]["flow_processes"]
                 .as_array()
                 .unwrap()
                 .len()
@@ -1399,7 +1399,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
         lf_json(
             repo.path(),
             home.path(),
-            &["flow", "show", &earlier, "--sessions", "--json"],
+            &["flow", "show", &earlier, "--processes", "--json"],
         )
     };
     let stopped = earlier_flow();
@@ -1742,19 +1742,8 @@ fn builtin_deploy_uses_ops_land_item() {
     assert!(matches!(&items[1], ConcreteStep::Command(_)));
 }
 
-fn roadmap_flow(repo: &Path, home: &Path) -> serde_json::Value {
-    lf_json(repo, home, &["roadmap", "--json"])["waves"][0]["tasks"]["items"][0]["flow"].clone()
-}
-
-fn unavailable(flow: &serde_json::Value, kind: &str) -> Option<String> {
-    flow["controls"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|control| control["kind"] == kind)
-        .unwrap_or_else(|| panic!("{kind} control is projected"))["unavailable"]
-        .as_str()
-        .map(str::to_string)
+fn roadmap_task(repo: &Path, home: &Path) -> serde_json::Value {
+    lf_json(repo, home, &["roadmap", "--json"])["waves"][0]["tasks"]["items"][0].clone()
 }
 
 fn labels(graph: &serde_json::Value) -> Vec<&str> {
@@ -1839,11 +1828,11 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     };
 
     // Before any Flow: the recommendation, Start, and no invented history.
-    let flow = roadmap_flow(repo.path(), home.path());
-    assert_eq!(flow["recommended"], "feature");
-    assert_eq!(flow["record"]["kind"], "none");
-    assert_eq!(unavailable(&flow, "start"), None);
-    assert_eq!(task_flow()["work"]["flows"], serde_json::json!([]));
+    let flow = roadmap_task(repo.path(), home.path());
+    assert_eq!(flow["workflow_name"], "feature");
+    assert!(flow["latest_flow_process"].is_null());
+    assert!(flow["run_control"]["unavailable"].is_null());
+    assert_eq!(task_flow()["work"]["flow_processes"], serde_json::json!([]));
 
     // The catalogue previews the authored topology through the shared loader.
     let catalog = lf_json(repo.path(), home.path(), &["flow", "list", "--json"]);
@@ -1888,26 +1877,27 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
 
     // Read back from Processes alone: where it stopped and each edge's returns.
     let execution = task_flow();
-    let flows = execution["work"]["flows"].as_array().unwrap();
+    let flows = execution["work"]["flow_processes"].as_array().unwrap();
     assert_eq!(flows.len(), 1, "{execution}");
     let id = flows[0]["id"].as_str().unwrap();
     assert_eq!(flows[0]["name"], "two-loops");
     assert_eq!(flows[0]["state"], "stopped");
     let sessions = execution["work"]["sessions"].as_array().unwrap();
     assert_eq!(sessions.len(), answers.len(), "one conversation per turn");
-    assert!(sessions.iter().all(|session| session["flow_id"] == id));
+    assert!(sessions
+        .iter()
+        .all(|session| session["flow_process_lfid"] == id));
     // The failed step is red and stays with the Flow for its caller.
     assert_eq!(execution["execution"]["state"], "blocked");
     assert_eq!(execution["execution"]["step"], "__telemetry-scorecard");
-    let flow = roadmap_flow(repo.path(), home.path());
-    let record = &flow["record"];
-    assert_eq!(record["kind"], "latest", "{flow}");
-    assert_eq!(record["invocation_id"], id);
-    assert_eq!(record["execution"], "blocked");
+    let flow = roadmap_task(repo.path(), home.path());
+    let record = &flow["latest_flow_process"];
+    assert_eq!(record["entry"]["id"], id);
+    assert_eq!(flow["execution"]["state"], "blocked");
     let shown = lf_json(
         repo.path(),
         home.path(),
-        &["flow", "show", id, "--sessions", "--json"],
+        &["flow", "show", id, "--processes", "--json"],
     );
     for read in [record, &shown] {
         assert_eq!(
@@ -1948,7 +1938,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
 
     // A stopped Flow is history: a fresh launch stays legal, and no command
     // restarts or resumes this one.
-    assert_eq!(unavailable(&flow, "start"), None);
+    assert!(flow["run_control"]["unavailable"].is_null());
     for removed in [
         vec!["task", "restart", "INF-123", "--flow", "two-loops"],
         vec!["--task", "INF-123", "flow", "start", "two-loops"],
@@ -1957,7 +1947,13 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
         let rejected = run_lf(repo.path(), home.path(), &removed, Some(&path));
         assert!(!rejected.status.success(), "{removed:?}");
     }
-    assert_eq!(task_flow()["work"]["flows"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        task_flow()["work"]["flow_processes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     let status = run_lf(
         repo.path(),
         home.path(),
@@ -1979,7 +1975,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     let redrawn = lf_json(
         repo.path(),
         home.path(),
-        &["flow", "show", id, "--sessions", "--json"],
+        &["flow", "show", id, "--processes", "--json"],
     );
     assert_eq!(redrawn["graph"], shown["graph"]);
     assert_eq!(redrawn["current"], shown["current"]);
@@ -1989,7 +1985,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
         "nothing ran or was rewritten"
     );
     assert_eq!(
-        roadmap_flow(repo.path(), home.path())["record"]["current"],
+        roadmap_task(repo.path(), home.path())["latest_flow_process"]["current"],
         7
     );
 }
@@ -2064,7 +2060,9 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
         home.path(),
         &["task", "status", "INF-123", "--json"],
     );
-    let flows = status["execution"]["work"]["flows"].as_array().unwrap();
+    let flows = status["execution"]["work"]["flow_processes"]
+        .as_array()
+        .unwrap();
     assert_eq!(flows.len(), 1, "{status}");
     assert_eq!(flows[0]["state"], "completed");
     let shown = lf_json(
@@ -2074,7 +2072,7 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
             "flow",
             "show",
             flows[0]["id"].as_str().unwrap(),
-            "--sessions",
+            "--processes",
             "--json",
         ],
     );

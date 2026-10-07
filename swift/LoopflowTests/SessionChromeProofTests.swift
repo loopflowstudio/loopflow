@@ -53,7 +53,7 @@ struct SessionChromeProofTests {
         value["actions"] = sessionActionFixture(state: "active")
         value["terminal_ids"] = [panes[0]]
         value["open_argv"] = ["must-not-launch"]
-        value["flow_membership"] = ["kind": "step", "flow": "feature", "invocation_id": invocation,
+        value["flow_membership"] = ["kind": "step", "flow": "feature", "flow_process_lfid": invocation,
                                     "step": "realign", "occurrence": "current", "node": 5, "iterations": [[2, 1]]]
         let sessions = String(decoding: try JSONSerialization.data(withJSONObject: [value]), as: UTF8.self)
         let query = RegistryQuery { args, _ in
@@ -498,9 +498,10 @@ struct SessionChromeProofTests {
     private func latestRoadmap() throws -> (roadmap: String, invocation: String) {
         let fixtures = repoRoot.appendingPathComponent("tests/fixtures/dto")
         let flows = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
-            fixtures.appendingPathComponent("task_flow.json"))) as? [[String: Any]])
-        let latest = try #require(flows[1]["record"] as? [String: Any])
-        let invocation = try #require(latest["invocation_id"] as? String)
+            fixtures.appendingPathComponent("flow_process_progress.json"))) as? [[String: Any]])
+        let latest = flows[0]
+        let entry = try #require(latest["entry"] as? [String: Any])
+        let invocation = try #require(entry["id"] as? String)
         var plan = try #require(JSONSerialization.jsonObject(with: placingTaskWorktrees(in: Data(contentsOf:
             fixtures.appendingPathComponent("roadmap_snapshot.json")), at: "/src/loopflow")) as? [String: Any])
         var waves = try #require(plan["waves"] as? [[String: Any]])
@@ -511,7 +512,8 @@ struct SessionChromeProofTests {
         var tasks = try #require(waves[waveIndex]["tasks"] as? [String: Any])
         var items = try #require(tasks["items"] as? [[String: Any]])
         let taskIndex = try #require(items.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" })
-        items[taskIndex]["flow"] = flows[1]
+        items[taskIndex]["latest_flow_process"] = latest
+        items[taskIndex]["execution"] = ["state": "running", "reason": "Running", "step": NSNull(), "captured": NSNull()]
         tasks["items"] = items; waves[waveIndex]["tasks"] = tasks; plan["waves"] = waves
         return (String(decoding: try JSONSerialization.data(withJSONObject: plan), as: UTF8.self), invocation)
     }

@@ -551,8 +551,10 @@ struct SessionsContentView: View {
             set: { if !$0 { navigation.palette = nil } }
         )) {
             switch navigation.palette {
+            case .workflow(let name):
+                WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == name }, model: model)
             case .flow(let name):
-                FlowCatalogInspector(entry: model.flowCatalog.value?.named(name), navigation: navigation)
+                FlowCatalogInspector(entry: model.flowCatalog.value?.first { $0.name == name }, navigation: navigation, model: model)
             case .search:
                 WorkPalette(model: model, activate: navigate)
             case nil:
@@ -698,6 +700,7 @@ struct SessionsContentView: View {
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             openSession(record)
         case .flow(let name): navigation.palette = .flow(name)
+        case .workflow(let name): navigation.palette = .workflow(name)
         case .rename(let id):
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             openSession(record)

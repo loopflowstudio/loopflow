@@ -169,9 +169,10 @@ final class WorkCache: @unchecked Sendable {
         func quiet(_ value: Any) -> Any {
             if let array = value as? [Any] { return array.map(quiet) }
             guard var object = value as? [String: Any] else { return value }
-            if object["kind"] as? String == "latest", object["execution"] != nil {
-                object["execution"] = TaskFlowExecution.unknown.rawValue
-                object["reason"] = savedReason
+            if var execution = object["execution"] as? [String: Any] {
+                execution["state"] = TaskExecutionState.unknown.rawValue
+                execution["reason"] = savedReason
+                object["execution"] = execution
             }
             // A Task's condition describes what its worker was doing at the last read.
             if var condition = object["condition"] as? [String: Any], condition["state"] != nil {
@@ -179,13 +180,10 @@ final class WorkCache: @unchecked Sendable {
                 condition["reason"] = savedReason
                 object["condition"] = condition
             }
-            if let controls = object["controls"] as? [[String: Any]] {
-                object["controls"] = controls.map { control in
-                    var control = control
-                    control["unavailable"] = savedReason
-                    return control
-                }
+            if object["run_control"] != nil {
+                object["run_control"] = ["unavailable": savedReason]
             }
+
             return object.mapValues(quiet)
         }
         return rewrite(text, quiet)

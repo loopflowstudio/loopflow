@@ -13,7 +13,7 @@ use loopflow::lf::{
     Cli, Commands, FlowCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
 };
 
-use loopflow::ops::project::{update_plan, PlanChange};
+use loopflow::ops::project::update_plan;
 
 #[derive(Clone, Default)]
 struct FlagTables {
@@ -738,7 +738,7 @@ fn print_task_snapshot(
                 },
             );
         }
-        for flow in &snapshot.work.flows {
+        for flow in &snapshot.work.flow_processes {
             println!(
                 "  Flow: {}  {}  {:?}",
                 flow.summary.id, flow.summary.name, flow.summary.state,
@@ -868,20 +868,12 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         WaveCommand::Place { .. } | WaveCommand::Rename { .. } => {
             loopflow::lf::commands::placement::wave(repo, command)
         }
-        WaveCommand::UpdatePlan {
-            wave,
-            plan,
-            workflow,
-        } => {
-            let change = match plan {
-                Some(plan) => PlanChange::Replace(serde_json::from_slice(&std::fs::read(plan)?)?),
-                None => PlanChange::Workflow(
-                    workflow
-                        .clone()
-                        .expect("clap requires --plan or --workflow"),
-                ),
-            };
-            update_plan(repo, wave.as_deref(), change)?;
+        WaveCommand::UpdatePlan { wave, plan } => {
+            update_plan(
+                repo,
+                wave.as_deref(),
+                serde_json::from_slice(&std::fs::read(plan)?)?,
+            )?;
             Ok(())
         }
     }
@@ -957,6 +949,26 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             )?;
             print_task(&task, *json)
         }
+        TaskCommand::Workflow { cmd } => match cmd {
+            loopflow::lf::TaskWorkflowCommand::Show { issue, json: _ } => {
+                let workflow = loopflow::ops::task::workflow_show(repo, issue)?;
+                println!("{}", serde_json::to_string_pretty(&workflow)?);
+                Ok(())
+            }
+            loopflow::lf::TaskWorkflowCommand::Restart { issue } => {
+                println!(
+                    "{}",
+                    loopflow::ops::task::workflow_set(
+                        repo,
+                        issue,
+                        "start",
+                        Some("Restart Workflow"),
+                        &loopflow::ops::task::EndOptions::default()
+                    )?
+                );
+                Ok(())
+            }
+        },
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
         TaskCommand::Move {
             issue,
@@ -1800,6 +1812,58 @@ fn execute_command(
                 | TaskCommand::Files { .. }
                 | TaskCommand::Save { .. }),
         }) => run_task_command(&std::env::current_dir()?, cmd),
+        Some(Commands::Project {
+            cmd: loopflow::lf::ProjectCommand::Workflow { cmd },
+        }) => {
+            let cwd = std::env::current_dir()?;
+            let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
+            match cmd {
+                loopflow::lf::ProjectWorkflowCommand::List { json } => {
+                    let entries = loopflow::engine::workflow::workflow_catalog(&repo)?;
+                    if *json {
+                        println!("{}", serde_json::to_string(&entries)?);
+                    } else {
+                        for entry in entries {
+                            println!(
+                                "{}{}",
+                                entry.name,
+                                entry
+                                    .unavailable
+                                    .map(|e| format!(" (unavailable: {e})"))
+                                    .unwrap_or_default()
+                            );
+                        }
+                    }
+                    Ok(())
+                }
+                loopflow::lf::ProjectWorkflowCommand::Customize { name } => {
+                    println!(
+                        "{}",
+                        loopflow::engine::workflow::customize(name, &repo)?.display()
+                    );
+                    Ok(())
+                }
+                loopflow::lf::ProjectWorkflowCommand::Show { project, json } => {
+                    let selected = tokio::runtime::Runtime::new()?
+                        .block_on(loopflow::ops::project::workflow(&repo, project, None))?;
+                    if *json {
+                        println!("{}", serde_json::to_string_pretty(&selected)?);
+                    } else {
+                        println!("{} · Workflow {}", selected.name, selected.workflow);
+                    }
+                    Ok(())
+                }
+                loopflow::lf::ProjectWorkflowCommand::Set { project, name } => {
+                    with_runtime(&repo, args, || {
+                        tokio::runtime::Runtime::new()?.block_on(
+                            loopflow::ops::project::workflow(&repo, project, Some(name)),
+                        )?;
+                        println!("Project {project}: Workflow {name}");
+                        Ok(())
+                    })
+                }
+            }
+        }
         Some(Commands::Task { cmd }) => {
             let directory = loopflow::repo::working_directory()?;
             let repo = loopflow::ops::task::task_repository(&directory, cmd.selector())?;
@@ -1876,13 +1940,13 @@ fn execute_command(
             lf_args,
         ),
         Some(Commands::Flow { cmd }) => match cmd {
-            FlowCommand::List { json, inventory } if inventory.sessions => {
+            FlowCommand::List { json, inventory } if inventory.processes => {
                 loopflow::lf::commands::flow_inventory::list(inventory, *json)
             }
             FlowCommand::Show {
                 name,
                 json,
-                sessions: true,
+                processes: true,
             } => loopflow::lf::commands::flow_inventory::inspect(name, *json),
             _ => anyhow::bail!("not a Flow inspection command: {cmd:?}"),
         },

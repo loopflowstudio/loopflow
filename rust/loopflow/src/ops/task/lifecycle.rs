@@ -557,9 +557,9 @@ fn historical_unknown_process(
         }
     }
     for flow in work
-        .flows
+        .flow_processes
         .iter()
-        .filter(|flow| flow.summary.state == crate::session::FlowSummaryState::Current)
+        .filter(|flow| flow.summary.state == crate::session::FlowProcessSummaryState::Current)
     {
         if store
             .sqlite

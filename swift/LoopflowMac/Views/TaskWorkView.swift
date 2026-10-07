@@ -13,7 +13,7 @@ struct TaskWorkflowHeader: View {
     let work: WorkReading<TaskWork>
     @Environment(\.palette) private var palette
 
-    private var draft: TaskFlowDraft? { model.navigation.flowDrafts[task.id] }
+    private var draft: TaskRunDraft? { model.navigation.taskRunDrafts[task.id] }
     private var acting: Bool { draft?.acting == true }
 
     var body: some View {
@@ -24,7 +24,7 @@ struct TaskWorkflowHeader: View {
                         nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
                         choices: workflow.outgoing, unavailable: unavailable, fits: true,
                         hint: { "lf task run \(task.task.identifier) \($0.launchName) · to \($0.to)" },
-                        choose: { edge in Task { await model.startFlow(edge.launchName, task: task, wave: wave) } })
+                        choose: { edge in Task { await model.startTask(edge.launchName, task: task, wave: wave) } })
                         .frame(maxWidth: .infinity, alignment: .leading)
                     // Put the Task at a node without running anything.
                     Menu("Move to") {
@@ -40,7 +40,7 @@ struct TaskWorkflowHeader: View {
                 } else if work.value != nil {
                     // A Task takes up its Project's workflow on its first run.
                     Text("No workflow yet").foregroundStyle(palette.textSecondary)
-                    Button("Start") { Task { await model.startFlow(nil, task: task, wave: wave) } }
+                    Button("Start") { Task { await model.startTask(nil, task: task, wave: wave) } }
                         .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(unavailable != nil)
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
@@ -90,7 +90,7 @@ struct TaskWorkflowHeader: View {
     /// Why no edge can be started now.
     private var unavailable: String? {
         if acting { return "Starting" }
-        return task.flow.control(.start)?.unavailable
+        return task.runControl.unavailable
     }
 }
 
@@ -108,14 +108,14 @@ struct FlowProcessLog: View {
         let reading = task.map { model.taskWork[$0.id] }
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if let flows = reading?.value?.flows {
+                if let flows = reading?.value?.flowProcesses {
                     ForEach(Array(flows.reversed().enumerated()), id: \.element.id) { index, flow in
                         if index > 0 { Divider().overlay(palette.border.opacity(0.6)) }
-                        FlowRunView(model: model, flow: flow)
+                        FlowProcessView(model: model, flow: flow)
                     }
                     if flows.isEmpty {
                         Text("No Flow has run.").padding(.vertical, 6)
-                            .accessibilityIdentifier("task-flow-runs-empty")
+                            .accessibilityIdentifier("task-flow-processes-empty")
                     }
                 } else if let error = reading?.errorMessage {
                     Text("Flow processes could not be read: \(error)").padding(.vertical, 6)
@@ -132,7 +132,7 @@ struct FlowProcessLog: View {
         .textSelection(.enabled)
         .background(palette.background)
         .environment(\.colorScheme, .light)
-        .accessibilityIdentifier("task-flow-runs")
+        .accessibilityIdentifier("task-flow-processes")
     }
 }
 
@@ -188,14 +188,14 @@ struct TaskWorkView: View {
 /// One Flow process of the Task: its Flow, state, when it started and how long
 /// it ran, opening to its id, launched graph, where it stands and each step
 /// it started. Every process reads the same way, whoever started it.
-struct FlowRunView: View {
+struct FlowProcessView: View {
     let model: WorkModel
-    let flow: TaskFlowMember
+    let flow: FlowProcessInventoryEntry
     @State private var inspected: UInt32?
     @Environment(\.palette) private var palette
 
-    private var expanded: Bool { model.navigation.expandedFlowRuns.contains(flow.id) }
-    private var run: FlowDetail? { model.flowRuns[flow.id] }
+    private var expanded: Bool { model.navigation.expandedFlowProcesses.contains(flow.id) }
+    private var run: FlowProcessDetail? { model.flowProcesses[flow.id] }
     private var started: Int64 { run?.steps.first?.startedAt ?? flow.updatedAt }
 
     /// How long the process ran; a running one has no length yet.
@@ -210,9 +210,9 @@ struct FlowRunView: View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Button {
                 if expanded {
-                    model.navigation.expandedFlowRuns.remove(flow.id)
+                    model.navigation.expandedFlowProcesses.remove(flow.id)
                 } else {
-                    model.navigation.expandedFlowRuns.insert(flow.id)
+                    model.navigation.expandedFlowProcesses.insert(flow.id)
                 }
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
@@ -253,13 +253,13 @@ struct FlowRunView: View {
     @ViewBuilder
     private var detail: some View {
         Text(flow.id).font(Typography.code(10)).foregroundStyle(palette.textTertiary)
-            .accessibilityIdentifier("flow-run-id-\(flow.id)")
+            .accessibilityIdentifier("flow-process-id-\(flow.id)")
         if let run {
             let progress = run.progress
             FlowDiagram(graph: run.graph, latest: progress, inspected: $inspected)
             Text([progress.reason, flowIterationLabel(run.iterations)]
                 .compactMap { $0 }.joined(separator: " · "))
-                .accessibilityIdentifier("flow-run-status-\(flow.id)")
+                .accessibilityIdentifier("flow-process-status-\(flow.id)")
             ForEach(run.steps) { step in
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Text(step.label).font(Typography.code(11))
@@ -272,7 +272,7 @@ struct FlowRunView: View {
                     }
                 }
                 .help(step.processLfid)
-                .accessibilityIdentifier("flow-run-step-\(step.processLfid)")
+                .accessibilityIdentifier("flow-process-step-\(step.processLfid)")
             }
         } else {
             Text("Reading Flow…")

@@ -208,11 +208,14 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
 pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     let command = cli.command.as_ref()?;
     if matches!(command,
-        Commands::Flow { cmd: FlowCommand::List { inventory, .. } } if inventory.sessions
+        Commands::Flow { cmd: FlowCommand::List { inventory, .. } } if inventory.processes
     ) || matches!(
         command,
         Commands::Flow {
-            cmd: FlowCommand::Show { sessions: true, .. }
+            cmd: FlowCommand::Show {
+                processes: true,
+                ..
+            }
         }
     ) {
         return None;
@@ -240,22 +243,26 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
             } => {
                 anyhow::ensure!(
                     inventory.is_empty(),
-                    "filters over Flows that ran require --sessions"
+                    "filters over Flows that ran require --processes"
                 );
                 crate::lf::commands::flow::list(&repo, *json)?;
             }
             Commands::Flow {
                 cmd: FlowCommand::Show { name, json, .. },
             } => {
-                anyhow::ensure!(!json, "--json requires --sessions for flow show");
-                crate::lf::commands::flow::show(name, &repo)?;
+                if *json {
+                    let entry = crate::engine::flow_graph::flow_catalog(&repo)?
+                        .into_iter()
+                        .find(|entry| entry.name == *name)
+                        .ok_or_else(|| anyhow::anyhow!("Flow {name:?} not found"))?;
+                    println!("{}", serde_json::to_string(&entry)?);
+                } else {
+                    crate::lf::commands::flow::show(name, &repo)?;
+                }
             }
             Commands::Flow {
                 cmd: FlowCommand::Customize { name },
-            } => println!(
-                "{}",
-                crate::engine::workflow::customize(name, &repo)?.display()
-            ),
+            } => println!("{}", crate::engine::flow::customize(name, &repo)?.display()),
             _ => unreachable!("inspection command selected above"),
         }
         Ok(())

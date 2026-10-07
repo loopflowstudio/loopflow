@@ -30,7 +30,7 @@ separate Session engine-restart operation. A Flow whose driver died leaves its
 Processes as history; nothing resumes it. `session list` supports
 `--interactive false`, `--history`, `--task` and `--search`; `--all` means all
 repositories. `--page --json` uses stable ID pages; Desktop retains earlier
-observations until enumeration succeeds. `lf flow list/show --sessions` reads
+observations until enumeration succeeds. `lf flow list/show --processes` reads
 Flows from their driver and step processes. Historical `lf mon show` and `lf replay` remain command spellings.
 History exposes Session event and provider evidence; `RunSnapshot` and Session
 `run_id` are removed across Rust, Swift and fixtures. Retaining these names in a command or
@@ -171,6 +171,25 @@ driver Process --< step Process     FlowProcess: the driver's graph and each ste
 | Home | Store, payloads, credentials and exact local process authority |
 | Placement | Where Work executes; no authority over merely observed processes |
 | Steer | Ordered authored correction to Work |
+
+## Definition and execution projections
+
+`WorkflowDefinition` and `FlowDefinition` resolve independently; same-name local
+files override only their own kind. `WorkflowCatalogEntry` carries a Workflow,
+while `FlowCatalogEntry` carries its compiled graph and `FlowComposition`
+disclosure tree. Invalid sources remain visible with their error.
+
+`lf project workflow list/customize` handles reusable definitions; `show/set`
+addresses a Project by durable ID, provider ID or unique name/slug. Task
+`workflow show/restart` handles its captured instance. Restart is the existing
+move to `start`, preserving graph, moves and execution history.
+
+Task status and roadmap separate `workflow_name`, `latest_flow_process`,
+`execution` and `run_control`. The latest `FlowProcessDetail` is ordinary
+execution evidence, including completed graphs, not a second Task lifecycle.
+Task work and watch carry `flow_processes`. Session membership references the
+exact `flow_process_lfid`; Workflow moves retain their Task-run `process_lfid`.
+Persisted graphs and historical capture formats remain unchanged.
 
 ## Core models and APIs
 
@@ -353,7 +372,7 @@ A conversation driver handoff grants no Flow authority.
 A Flow is `current` while its driver has no recorded exit, `completed` when the
 driver succeeded and `stopped` when it exited before the last step. A killed
 driver leaves dead Processes as history. Nothing restarts or resumes it. The caller,
-normally the Task conversation, inspects `lf flow show ID --sessions --json` or
+normally the Task conversation, inspects `lf flow show ID --processes --json` or
 `lf task status`, then launches fresh work. Unknown liveness stays unknown.
 
 ### Attribution, binding and Started
@@ -444,10 +463,10 @@ provider, and literal subprocess edge must appear exactly once.
 | --- | --- | --- | --- | --- | --- | --- |
 | **User** — a person or external harness originating work | User-attributed actions author root input and decide effects that require user intervention. User is actor provenance, not a control credential. | [`Author`](../rust/loopflow/src/durable.rs) | Git supplies `user.name` unless personal Loopflow config overrides it; input records retain source author names. No User row; authored effects persist on the concept they change. | `lf` | `lf :`, `lf desktop`, `lf user` | `process:open`, `process:osascript`, `process:pbpaste`, `process:id` |
 | **Skill** — one reusable prompt with assembled context | Repository/builtin Skill Markdown is authoritative; discovery selects one source. | [`Skill`](../rust/loopflow/src/engine/flow.rs), [`SkillSource`](../rust/loopflow/src/lf/discovery.rs) | `.lf/skills/`, builtin Skill files, installed vendor Skill directories | `lf-prompt` | `lf skill`, `lf home sync-skills`, `lf list`, `lf help` (local command/definition discovery) | `process:python3` |
-| **Flow** — template and one execution | The driver process compiles the template, including Xor paths, and holds the graph and cursor in memory. It records the graph and each step's node in FlowProcess; a step's result is its process exit. | `Flow`, `FlowProcess`, typed node ID | `.lf/flows/`; `flow_processes`, `flow_process_steps` beside the driver and step Process rows | One CLI driver Process per Flow; each step is its own child process running the plain command | `lf flow`, `lf run` (flow-first definition execution), `lf task run` | — |
-| **Workflow** — a Task's nodes, the Flows between them, and where the Task stands | A workflow definition is authored YAML: nodes, where a person takes part in the Task conversation, and edges, each running one Flow. A Task's Workflow is the definition it took up, fixed from then on, and its stored position: at a node, or on an edge with the Process carrying it. Choosing an edge and setting a node are the two writes; the `lf task run` process carrying an edge starts its Flow as a child, again when a Flow process fails, writes the arrival when one succeeds, and otherwise leaves the Task on its edge. Every move is appended with its Process and note. It executes nothing itself. | [`WorkflowDefinition`](../rust/loopflow/src/engine/workflow.rs), [`Workflow`](../rust/loopflow/src/ops/workflow.rs) | `.lf/workflows/`, builtin workflow files; `task_workflows` (one row per Task), `task_workflow_moves` (append-only) | `lf task run` chooses an edge, then starts its Flow as the plain `lf --task ISSUE run FLOW`; `lf task move` sets a node | Task status JSON (`execution.work.workflow`), the Flow catalog, node guidance in a bound Task launch | — |
+| **Flow** — definition and one execution | The driver process compiles the FlowDefinition, including Xor paths, and holds the graph and cursor in memory. It records the graph and each step's node in FlowProcess; a step's result is its process exit. | `FlowDefinition`, `FlowComposition`, `FlowProcess`, typed node ID | `.lf/flows/`; `flow_processes`, `flow_process_steps` beside the driver and step Process rows | One CLI driver Process per Flow; each step is its own child process running the plain command | `lf flow`, `lf run` (flow-first definition execution), `lf task run` | — |
+| **Workflow** — a Task's nodes, the Flows between them, and where the Task stands | A workflow definition is authored YAML: nodes, where a person takes part in the Task conversation, and edges, each running one Flow. A Task's Workflow is the definition it took up, fixed from then on, and its stored position: at a node, or on an edge with the Process carrying it. Choosing an edge and setting a node are the two writes; the `lf task run` process carrying an edge starts its Flow as a child, again when a Flow process fails, writes the arrival when one succeeds, and otherwise leaves the Task on its edge. Every move is appended with its Process and note. It executes nothing itself. | [`WorkflowDefinition`](../rust/loopflow/src/engine/workflow.rs), [`Workflow`](../rust/loopflow/src/ops/workflow.rs) | `.lf/workflows/`, builtin workflow files; `task_workflows` (one row per Task), `task_workflow_moves` (append-only) | `lf task run` chooses an edge, then starts its Flow as the plain `lf --task ISSUE run FLOW`; `lf task move` sets a node | Task status JSON (`execution.work.workflow`), the Workflow catalog, node guidance in a bound Task launch | — |
 | **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | The Wave UUID is durable identity, carried in authored `GOAL.md` frontmatter. SQLite stores a one-segment name and optional parent Wave ID; the readable address is derived through parents within the canonical repository. Directory discovery reconciles names and parents without replacing IDs. `wave/<name>/GOAL.md` and `MEMORY.md` own repository intent; the Linear Initiative owns shared planning membership. | [`Wave`](../rust/loopflow/src/work/wave/mod.rs), [`WaveLocator`](../rust/loopflow/src/work/wave/mod.rs), [`CanonicalRepo`](../rust/loopflow/src/repository.rs), [`WaveConfig`](../rust/loopflow/src/work/wave/config.rs) | `waves`; `wave/<name>/`; an in-flight relocation receipt under `.lf/tmp/wave-relocations/` | Finite Wave-attributed conversations; relocation owns the repository locator lock | `lf wave`, `lf wave list`, `lf wave status`, `lf roadmap`, `lf cron`, `lf discord` | Discord when configured |
-| **Chapter / Project** — shared current plan name and one Linear Project per Wave | Linear Project status owns planned/current/completed plans; the repository chapter name is derived from its Waves' In Progress Projects. | `Project`, `ProjectStatus` | `projects`, `project_events`; Linear Project status/content | deterministic convergent rotation from fresh provider facts | `lf repo new-chapter`, `lf repo reteam` | Linear |
+| **Chapter / Project** — shared current plan name and one Linear Project per Wave | Linear Project status owns planned/current/completed plans; the repository chapter name is derived from its Waves' In Progress Projects. | `Project`, `ProjectStatus` | `projects`, `project_events`; Linear Project status/content | deterministic convergent rotation from fresh provider facts | `lf project`, `lf project workflow`, `lf repo new-chapter`, `lf repo reteam` | Linear |
 | **Live metric** — one reviewed measurement contract owned by exactly one Wave, plus revision-bound current evidence | `wave/<name>/metrics/*.md` owns meaning and Wave ownership; an accepted instrument observation owns its source-time fact; [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) is the sole derived reading shared across surfaces. Metrics inform KRs but never complete them. | [`MetricContract`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricObservation`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) | `wave/<name>/metrics/`, `metric_instruments`, `metric_observations` | Metric instruments write observations; foreground Rust readers derive bounded portfolios. | Status/roadmap JSON, Wave and Task prompts, the shared Swift DTO, and Mac Wave detail expose the same `metric_portfolio`. | — |
 | **Task** — concrete work inside exactly one Project | The Linear Issue owns directive/status. The checked-out branch identifies the Task through its active PR; the stored worktree path is placement. Git upstream tracking does not select Task identity. Every Flow process for the Task is equally its work; helpers and delivery commands may mutate the worktree without driving a Flow. Git owns commits/branch state; GitHub owns PR/check/merge truth. | [`Task`](../rust/loopflow/src/work/task/mod.rs), [`TaskPr`](../rust/loopflow/src/work/task/mod.rs) | `tasks`, `task_issue_identities`, `task_deletions`, `task_events`, `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments`; Linear Issue; Git worktree | `lf task run` places the worktree, then drives a fresh Flow in the foreground; foreground operations record delivery evidence | `lf task`, `lf pr`, `lf wt`, `lf sync`, `lf commit` | Linear |
 | **PR landing** — one recorded intent to merge an exact PR head | GitHub is authoritative for the PR head, required checks, and merge. One landing generation admits one check at a time; an incident without a recorded response admits one repair. | [`PrLanding`](../rust/loopflow/src/pr_landing.rs), [`CiIncident`](../rust/loopflow/src/work/task/mod.rs) | `pr_landings`, `ci_incidents` | The process holding the claim: `lf pr reconcile` to observe and settle, `lf ci watch` to repair | `lf arm`, `lf land`, `lf pr reconcile`, `lf ci watch`, `lf pr checks` | `provider:github`, model provider for `ci-fix`, `process:git`, `process:gh` |
@@ -1002,7 +1021,7 @@ their deletion is finished.
 | Historical or transitional representation | Target owner |
 | --- | --- |
 | Wave-scoped Chapter / `wave_chapters` | Linear Project status; Chapter is the shared In Progress name, with no stored object |
-| Recommended Flow / `flows.recommended` | Project's `flow` template selection |
+| Recommended Flow / `flows.recommended` | Project's Workflow definition selection |
 | `FlowPosition`, `PinnedTaskFlow`, `task_flow_positions` | The Flow driver's in-memory cursor; FlowProcess records the graph and each step's node |
 | `FlowRun`, `flows/<id>/position.json` | The Flow's driver Process and step processes |
 | Subject selector list on a Run | Typed AgentSession/Process ancestry and immutable event attribution |

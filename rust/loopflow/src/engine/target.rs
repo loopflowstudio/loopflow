@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::engine::flow::DefinitionLoader;
-use crate::engine::{Command, Flow, LoadError, Skill, Step, XorDef};
+use crate::engine::{Command, FlowDefinition, LoadError, Skill, Step, XorDef};
 use serde::{Deserialize, Serialize};
 
 /// Kind restriction for named-definition lookup; commands are selected by the CLI tree.
@@ -25,13 +25,13 @@ impl DefinitionKind {
 pub enum Target {
     Command(Command),
     Skill(Skill),
-    Flow(Flow),
+    Flow(FlowDefinition),
     Xor(XorDef),
 }
 
 impl Target {
     /// Adapt a selected executable only when the caller needs Flow execution.
-    pub fn into_flow(self) -> Flow {
+    pub fn into_flow(self) -> FlowDefinition {
         let name = match &self {
             Self::Flow(flow) => flow.name.clone(),
             Self::Command(command) => command.display_name(),
@@ -40,7 +40,7 @@ impl Target {
         };
         match self {
             Self::Flow(flow) => flow,
-            target => Flow {
+            target => FlowDefinition {
                 name,
                 items: vec![Step::new(target)],
             },

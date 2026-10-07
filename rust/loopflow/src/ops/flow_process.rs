@@ -51,9 +51,9 @@ impl FlowProcess {
     /// How far the Flow got on the graph it launched with.
     pub(crate) fn detail(
         &self,
-        entry: crate::durable::FlowInventoryEntry,
-    ) -> crate::durable::FlowDetail {
-        let finished = entry.summary.state == crate::session::FlowSummaryState::Completed;
+        entry: crate::durable::FlowProcessInventoryEntry,
+    ) -> crate::durable::FlowProcessDetail {
+        let finished = entry.summary.state == crate::session::FlowProcessSummaryState::Completed;
         let latest = self.latest();
         let projection = crate::engine::flow_graph::project_position(
             &self.graph,
@@ -61,7 +61,7 @@ impl FlowProcess {
             latest.map_or(&[], |step| &step.iterations),
             finished,
         );
-        crate::durable::FlowDetail {
+        crate::durable::FlowProcessDetail {
             entry,
             graph: self.graph.clone(),
             current: projection.current,

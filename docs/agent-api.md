@@ -125,7 +125,7 @@ process to interrupt, resume, wait for, or attach to.
 
 Work survives its provider process. A Flow whose driver died leaves its Processes
 as history; nothing resumes it. Inspect
-`lf task status ISSUE` and `lf flow show ID --sessions --json`, then launch
+`lf task status ISSUE` and `lf flow show ID --processes --json`, then launch
 fresh work with `lf task run INF-123`. The Task keeps its durable
 direction, worktree and PR. `task run` never reopens terminal Work; create a
 new Task for new work.

@@ -1,8 +1,10 @@
 # Work on another machine
 
 Status: rename slice authorized for implementation and publication by Jack Heart,
-2026-10-07 (comment 43c8a308-9009-42ab-9c35-0955902c6480). Publish PR 1 and stop.
-Later slices remain intent, with their own plans when started.
+2026-10-07 (comment 43c8a308-9009-42ab-9c35-0955902c6480), superseding the Task
+brief's earlier unreviewed-draft status. Source rename and preservation repairs
+are implemented; affected gate, isolated installation proof and PR 1 publication
+remain. Publication is the authorized stopping point. Later slices remain intent.
 
 Do not lift code, tests, help text or config from herdr or cmux (Jack Heart,
 2026-10-07). Their behaviour is described here from docs and reading; write
@@ -88,7 +90,9 @@ same panes.
   or Flow; the caller owns recovery; `-b` prints and blocks and the caller
   backgrounds; no hidden arguments; "do not restore that service".
 
-## Current system (v0.13.9, read from source)
+## Baseline before the rename (v0.13.9 source)
+
+PR 1 changes the Home names below to machine. The remote-work limitations remain.
 
 - Home: random id minted with the store, plus a route. No name, no list, no
   remove. `lf home observe <id> <route>` records one unverified; routes must be
@@ -118,20 +122,7 @@ same panes.
 - Mac app: a pane runs `lf session connect <id>`; the app owns the terminal;
   quitting ends the clients. Pane layout is in memory only.
 
-## Design
-
-### 1. Machine record
-
-`lf machine add <ssh-target> [--label NAME] [--repo PATH]`, `list`, `status`,
-`rename`, `remove`. Stored: label (default: the ssh host), target (anything
-OpenSSH accepts, aliases included), the remote identity fetched during add, the
-repository path. No credentials. Every command accepts the label. `remove`
-never touches remote work. `status` never prompts. `lf ssh <label>` stays the
-one way to run a command there and requires an added machine before any
-credential crosses.
-
-First connect: probe, find `lf`, check capability, offer install (default yes).
-Replacing a running remote `lf` asks first and says what would stop.
+## PR 1: rename — implemented, verification and publication remain
 
 Rename slice: commands, help, errors, docs, builtin skills, Rust/Swift types and
 DTO fixtures use machine. One migration renames the identity table and placement
@@ -148,6 +139,28 @@ columns without rewriting IDs, routes, timestamps or historical payloads.
 - Installation code is `installation.rs`; its existing promotion lock stays at
   the same path. Installation command ownership is LOO-401's separate work.
 - A machine is one OS user and data directory, documented in the glossary.
+
+PR 1 acceptance: CLI/help/docs and Rust/Swift DTOs agree on machine; the released
+schema reaches the single draft with IDs, routes, timestamps and foreign keys
+intact; cron ownership, saved Desktop selections and retained installer recovery
+survive the rename. Existing focused checks cover these source boundaries.
+The affected gate and isolated installer proof remain with gate/CI. Publication
+does not establish installed migration or any remote-work acceptance below.
+
+## Later design — not started
+
+### 1. Machine record
+
+`lf machine add <ssh-target> [--label NAME] [--repo PATH]`, `list`, `status`,
+`rename`, `remove`. Stored: label (default: the ssh host), target (anything
+OpenSSH accepts, aliases included), the remote identity fetched during add, the
+repository path. No credentials. Every command accepts the label. `remove`
+never touches remote work. `status` never prompts. `lf ssh <label>` stays the
+one way to run a command there and requires an added machine before any
+credential crosses.
+
+First connect: probe, find `lf`, check capability, offer install (default yes).
+Replacing a running remote `lf` asks first and says what would stop.
 
 ### 2. The Task on a machine that has never seen it
 
@@ -176,7 +189,7 @@ No residue store. A custom workspace slug, agent preference, an unpublished
 stack parent and Workflow position stay on the machine that has them. The Git
 ref namespace considered earlier is not needed.
 
-Set aside pending Jack's decision: Linear attachments as the store (LOO-393's
+Set aside from this approach: Linear attachments as the store (LOO-393's
 draft). No compare-and-swap, one query per Task for catch-up, visible clutter
 on the issue, and it needs a conflict-resolution command.
 
@@ -285,7 +298,11 @@ silently merged. Phone use is LOO-396.
 
 ## Open choices
 
-None from the 2026-10-07 conversation remain. Review may raise more.
+No decision is needed for PR 1. Later plans must resolve the retained draft's
+Codex contradiction: the relay design exempts its existing engine socket, while
+the deletion inventory lists it for replacement. Shell-pane restoration also
+remains undecided. Neither changes the accepted per-Session holder or authorizes
+later implementation.
 
 ## Sequence
 
@@ -293,9 +310,10 @@ Decided by Jack Heart, 2026-10-07: "Fine to break things up into multiple
 PRs." Each one deletes what it replaces. Follow-ups are intent only; each gets
 its own plan when started.
 
-1. Rename Home to machine. No behaviour change. `This slice`.
+1. Rename Home to machine. No behaviour change. `This slice`: source implemented;
+   affected gate, isolated installer proof and publication remain.
 2. Machine record: `lf machine add`, `list`, `status`, `rename`, `remove`;
-   ssh aliases; identity fetched at add; repository path. Deletes `lf home
+   ssh aliases; identity fetched at add; repository path. Deletes `lf machine
    observe`, the hard-coded repository path and the `user@host` rule.
 3. A Task on a machine that has never seen it: one resolver, fetch whenever
    the remote decides, deterministic ids for new Tasks. Deletes the local-only
@@ -319,8 +337,8 @@ Jack Heart, 2026-10-07: a redesign cleans up in the same diff. Where several
 building blocks exist for one job and none quite works, delete them and keep
 the code minimal; do not add another beside them.
 
-Earlier attempts at this job found in source. The relay and the detached
-headless launch replace them, so they go in the same change:
+Earlier attempts found in source. Each later slice removes what it replaces;
+Codex's disposition remains unresolved as noted above:
 - Three ways to start something detached, none of which is a reattachable
   Session: `start_tmux_session` with the hidden `serve-conversation` command;
   `start_lf_session_inheriting` (setsid, used for landing repair); the Codex
@@ -331,11 +349,14 @@ headless launch replace them, so they go in the same change:
 - The lease broker's detached-form string check
   (`reject_detached_account_forwarding`) and the ambient fallback that exports
   the laptop's raw provider tokens over ssh.
-- `lf home observe`; the hard-coded `~/src/loopflow`; the `user@host` rule.
+- `lf machine observe` (renamed in PR 1); the hard-coded `~/src/loopflow`; the `user@host` rule.
 - Random Task id minting for new Tasks.
 - Rename slice removes `capture_home_command`, its unused capture subprocess and
-  error type. The `home:` GOAL key is already ignored by config parsing; its
-  rejection fixture stays. `/detach` remains with the later relay slice.
+  error type, plus the cache migration's duplicate JSON serialization. Installer
+  subprocesses use `install` without a command-group prefix so retained binaries
+  remain callable across the rename. The `home:` GOAL key is already ignored by
+  config parsing; its rejection fixture stays. `/detach` remains with the later
+  relay slice.
 
 ## Forbidden outcomes
 
@@ -343,7 +364,8 @@ headless launch replace them, so they go in the same change:
 - tmux as the holder, or a terminal emulator of our own inside the holder.
 - Hidden arguments.
 - A secret on a command line, or credentials sent to a host that was not added.
-- Two Tasks for one issue.
+- Duplicate Tasks for one issue on one machine; existing per-machine IDs remain
+  as Jack Heart accepted above.
 - Task records as files in the working tree.
 - A memory-only credential owner that needs the laptop after every restart.
 
@@ -354,13 +376,15 @@ headless launch replace them, so they go in the same change:
 - One schema migration, written against the last released schema.
 - Wire types get no defaults; fixtures updated in Rust and Swift.
 
-## Done when
+## Full remote-work acceptance — later slices
 
-- Two isolated Homes over a real ssh transport: add, status, `--task` on a
+- Two isolated machines over a real ssh transport: add, status, `--task` on a
   machine that lacks the Task, repeat without a duplicate Task or checkout.
 - Disconnect before reservation, after reservation, after spawn, and mid-turn:
   one Session, work continues, reattach shows its output.
 - No secret value in argv, logs, records or artifacts.
+- Quitting and reopening Desktop restores the same conversations in the same
+  panes; detaching leaves the agent running and explicit stop ends it.
 - Deferred to hand verification on Jack's mini (needs real accounts):
   1. A second Claude login and a second Codex login for the same account, made
      in a private directory: the laptop's own login still works after both
@@ -383,6 +407,18 @@ headless launch replace them, so they go in the same change:
 Review: preserve stored identities and historical bytes; one schema owner and no
 new runtime. Version-1 Desktop wire caches needed an explicit key migration.
 The telemetry Flow uses the existing `doctor` shorthand so its authored definition
-works across the command-group rename. No later slice was started.
+works across the command-group rename. Installer calls likewise use the existing
+`install` shorthand: receipt-pinned recovery may execute a pre-rename binary.
+Installed v0.13.9 resolves preflight, recovery and advancement help through it;
+this is parser evidence, not installation. The exact-store test now seeds the
+canonical schema directly: the experiment initializer had added drafts, making
+its claimed exact release frontier false. No later slice was started.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, focused `cargo nextest run` groups (migration/storage/DTO 133, CLI/doctor/prompt 122, earlier route/cron checks), headless `scripts/test_desktop.sh` groups (52 and 47), four affected Python suites (66), and disposable CLI identity/route/refusal smoke pass. Installed migration and later-slice acceptance remain unproved; full affected gate and isolated installation proof belong to CI/gate.
+Rename source is checkpointed at `d7a345896`; installer/cache repairs at
+`327e6e11e`. Prior rename checks remain at
+`d7a345896:scratch/work-on-another-machine-name.md`; unchanged migration, DTO,
+routing and Python evidence still applies. October 7 reconciliation changed
+only notes and memory; Release was the sole child Wave and its top-level goal
+and memory were read. No new implementation mismatch was found.
+
+Checks: `git diff --check` passes; unchanged-code passes reused for `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo nextest run -p loopflow --lib --test cli_discovery -E 'test(lf::commands::install::) | test(inspection_is_identical_across_spellings)'` (16), and `scripts/test_desktop.sh -Xswiftc -gnone --filter WorkCacheTests` (15); full affected gate and isolated installation proof remain with CI/gate, and installed migration and later-slice acceptance remain unproved.

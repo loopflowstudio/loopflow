@@ -29,7 +29,8 @@ settled the holder and the credential rules. Jack authorized only the rename sli
 read released cron JSON via an explicit field alias. These are persisted-data
 contracts, not alternate commands or runtime owners. No installed store is touched.
 
-Context: authored memory is 15,983/16,000 tokens and scratch is within budget.
-The generated launch goal exceeds 16,000 tokens because it includes this broad
-rename diff; that generated input is not an authored source to compress. Limits
-remain unchanged; the archived LOO-393 patch is retained in Git.
+Context: authored memory is 15,994/16,000 tokens and scratch is within budget.
+`lf context --skill realign --json` reports the generated launch goal at about
+23,200/16,000 tokens (about 7,200 over) because of the broad rename's file inventory. Editing authored
+notes cannot reduce that generated inventory; limits remain unchanged. Total
+submitted input fits. The archived LOO-393 patch is retained in Git.

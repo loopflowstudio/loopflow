@@ -1,4 +1,4 @@
-//! FlowExec: what a Flow's driver recorded, read back with its Execs. Only a
+//! FlowProcess: what a Flow's driver recorded, read back with its Processes. Only a
 //! driver writes it, and only by appending. Reading selects nothing and grants
 //! neither driver nor process authority.
 
@@ -8,44 +8,44 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::durable::{FlowFilter, FlowInventoryEntry, FlowPage, TaskId};
 use crate::engine::flow_graph::FlowGraph;
-use crate::id::{ExecId, WaveId};
-use crate::ops::flow_run::{FlowExec, FlowExecStep};
+use crate::id::{ProcessId, WaveId};
+use crate::ops::flow_run::{FlowProcess, FlowProcessStep};
 use crate::session::{FlowSummary, FlowSummaryState};
 use crate::store::{StoreError, StoreResult};
 
-use super::execs::{read_exec, EXEC_SELECT};
+use super::processes::{read_process, PROCESS_SELECT};
 use super::SqliteStore;
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }
 
-/// Flows whose driver Exec `e` matches `scope`, oldest first, each with the
+/// Flows whose driver Process `e` matches `scope`, oldest first, each with the
 /// steps its driver recorded in launch order.
 pub(super) fn flows_in(
     conn: &Connection,
     scope: &str,
     values: &[&dyn rusqlite::ToSql],
-) -> StoreResult<Vec<FlowExec>> {
-    let columns = EXEC_SELECT
-        .strip_suffix(" FROM execs e")
-        .expect("Exec select ends with its table");
+) -> StoreResult<Vec<FlowProcess>> {
+    let columns = PROCESS_SELECT
+        .strip_suffix(" FROM processes e")
+        .expect("Process select ends with its table");
     let drivers = conn
         .prepare(&format!(
-            "{columns},f.flow,f.graph FROM flow_execs f JOIN execs e ON e.id=f.exec_id
+            "{columns},f.flow,f.graph FROM flow_processes f JOIN processes e ON e.id=f.process_id
              WHERE ({scope}) ORDER BY e.rowid"
         ))?
         .query_map(values, |row| {
             Ok((
-                read_exec(row)?,
+                read_process(row)?,
                 row.get::<_, String>(15)?,
                 row.get::<_, String>(16)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut steps = conn.prepare(&format!(
-        "{columns},fs.node,fs.iterations FROM flow_exec_steps fs JOIN execs e ON e.id=fs.exec_id
-         WHERE fs.flow_exec_id=?1 ORDER BY fs.seq"
+        "{columns},fs.node,fs.iterations FROM flow_process_steps fs JOIN processes e ON e.id=fs.process_id
+         WHERE fs.flow_process_id=?1 ORDER BY fs.seq"
     ))?;
     drivers
         .into_iter()
@@ -53,21 +53,21 @@ pub(super) fn flows_in(
             let steps = steps
                 .query_map([&driver.id], |row| {
                     Ok((
-                        read_exec(row)?,
+                        read_process(row)?,
                         row.get::<_, u32>(15)?,
                         row.get::<_, String>(16)?,
                     ))
                 })?
                 .map(|row| {
-                    let (exec, key, iterations) = row?;
-                    Ok(FlowExecStep {
-                        exec,
+                    let (process, key, iterations) = row?;
+                    Ok(FlowProcessStep {
+                        process,
                         key,
                         iterations: serde_json::from_str(&iterations)?,
                     })
                 })
                 .collect::<StoreResult<Vec<_>>>()?;
-            Ok(FlowExec {
+            Ok(FlowProcess {
                 graph: serde_json::from_str::<FlowGraph>(&graph)?,
                 driver,
                 name,
@@ -77,8 +77,8 @@ pub(super) fn flows_in(
         .collect()
 }
 
-/// What the driver's Exec says of the Flow, and the Work its checkout names.
-pub(super) fn entry_in(conn: &Connection, flow: &FlowExec) -> StoreResult<FlowInventoryEntry> {
+/// What the driver's Process says of the Flow, and the Work its checkout names.
+pub(super) fn entry_in(conn: &Connection, flow: &FlowProcess) -> StoreResult<FlowInventoryEntry> {
     let driver = &flow.driver;
     let state = FlowSummaryState::of_driver(driver.outcome.as_deref(), driver.completed_at);
     let task: Option<String> = match &driver.cwd {
@@ -103,8 +103,8 @@ pub(super) fn entry_in(conn: &Connection, flow: &FlowExec) -> StoreResult<FlowIn
             .optional()?,
         None => conn
             .query_row(
-                "SELECT c.wave_id FROM session_events c JOIN execs e ON e.id=c.exec_id
-                 WHERE c.kind='captured' AND e.parent_exec_id=?1 AND c.wave_id IS NOT NULL
+                "SELECT c.wave_id FROM session_events c JOIN processes e ON e.id=c.process_id
+                 WHERE c.kind='captured' AND e.parent_process_id=?1 AND c.wave_id IS NOT NULL
                  ORDER BY c.seq DESC LIMIT 1",
                 [&driver.id],
                 |row| row.get(0),
@@ -126,7 +126,7 @@ pub(super) fn entry_in(conn: &Connection, flow: &FlowExec) -> StoreResult<FlowIn
                 .map_err(invalid)?,
             updated_at: driver
                 .completed_at
-                .or(flow.latest().map(|step| step.exec.started_at))
+                .or(flow.latest().map(|step| step.process.started_at))
                 .unwrap_or(driver.started_at),
         },
         repo: driver.repo.clone(),
@@ -178,12 +178,12 @@ impl SqliteStore {
         Ok(FlowPage { entries, next })
     }
 
-    /// One Flow by its driver Exec id or a unique prefix of it.
-    pub(crate) fn flow_exec(
+    /// One Flow by its driver Process id or a unique prefix of it.
+    pub(crate) fn flow_process(
         &self,
         selector: &str,
-    ) -> StoreResult<Option<(FlowExec, FlowInventoryEntry)>> {
-        let Some(driver) = self.resolve_exec(selector)? else {
+    ) -> StoreResult<Option<(FlowProcess, FlowInventoryEntry)>> {
+        let Some(driver) = self.resolve_process(selector)? else {
             return Ok(None);
         };
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -194,7 +194,7 @@ impl SqliteStore {
         Ok(Some((flow, entry)))
     }
 
-    /// A Flow exec from a Task's checkout is work begun for that Task.
+    /// A Flow process from a Task's checkout is work begun for that Task.
     pub(crate) fn mark_task_started(&self, task: &TaskId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -205,81 +205,84 @@ impl SqliteStore {
     }
 
     /// Flows run from `cwd`, oldest first.
-    pub(crate) fn flows_at(&self, cwd: &std::path::Path) -> StoreResult<Vec<FlowExec>> {
+    pub(crate) fn flows_at(&self, cwd: &std::path::Path) -> StoreResult<Vec<FlowProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         flows_in(&conn, "e.cwd=?1", &[&cwd.to_string_lossy()])
     }
 
     /// A driver's one write about its Flow: the name and graph it launched with.
-    pub(crate) fn record_flow_exec(
+    pub(crate) fn record_flow_process(
         &self,
-        driver: &ExecId,
+        driver: &ProcessId,
         flow: &str,
         graph: &FlowGraph,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO flow_execs(exec_id,flow,graph) VALUES(?1,?2,?3)",
+            "INSERT INTO flow_processes(process_id,flow,graph) VALUES(?1,?2,?3)",
             params![driver, flow, serde_json::to_string(graph)?],
         )?;
         Ok(())
     }
 
-    /// A driver's record of one step it started, as that step's Exec.
+    /// A driver's record of one step it started, as that step's Process.
     pub(crate) fn record_flow_step(
         &self,
-        driver: &ExecId,
-        step: &ExecId,
+        driver: &ProcessId,
+        step: &ProcessId,
         key: u32,
         iterations: &[Vec<u32>],
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO flow_exec_steps(flow_exec_id,exec_id,node,iterations) VALUES(?1,?2,?3,?4)",
+            "INSERT INTO flow_process_steps(flow_process_id,process_id,node,iterations) VALUES(?1,?2,?3,?4)",
             params![driver, step, key, serde_json::to_string(iterations)?],
         )?;
         Ok(())
     }
 
-    /// Where the Exec table ends now; a child started later lies beyond it.
-    pub(crate) fn exec_mark(&self) -> StoreResult<i64> {
+    /// Where the Process table ends now; a child started later lies beyond it.
+    pub(crate) fn process_mark(&self) -> StoreResult<i64> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(
-            conn.query_row("SELECT COALESCE(MAX(rowid),0) FROM execs", [], |row| {
+            conn.query_row("SELECT COALESCE(MAX(rowid),0) FROM processes", [], |row| {
                 row.get(0)
             })?,
         )
     }
 
-    /// The first Exec `parent` started after `mark`.
-    pub(crate) fn child_exec_after(
+    /// The first Process `parent` started after `mark`.
+    pub(crate) fn child_process_after(
         &self,
-        parent: &ExecId,
+        parent: &ProcessId,
         mark: i64,
-    ) -> StoreResult<Option<ExecId>> {
+    ) -> StoreResult<Option<ProcessId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT id FROM execs WHERE parent_exec_id=?1 AND rowid>?2 ORDER BY rowid LIMIT 1",
+                "SELECT id FROM processes WHERE parent_process_id=?1 AND rowid>?2 ORDER BY rowid LIMIT 1",
                 params![parent, mark],
                 |row| row.get(0),
             )
             .optional()?)
     }
 
-    pub(crate) fn flow_entry(&self, flow: &FlowExec) -> StoreResult<FlowInventoryEntry> {
+    pub(crate) fn flow_entry(&self, flow: &FlowProcess) -> StoreResult<FlowInventoryEntry> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         entry_in(&conn, flow)
     }
 
-    /// The conversation, captured input and its event an Exec opened last.
-    pub(crate) fn exec_input(&self, exec: &ExecId) -> StoreResult<Option<(String, String, i64)>> {
+    /// The conversation, captured input and its event a process opened last.
+    pub(crate) fn process_input(
+        &self,
+        process: &ProcessId,
+    ) -> StoreResult<Option<(String, String, i64)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
                 "SELECT session_id,receipt_key,seq FROM session_events
-                 WHERE kind='captured' AND exec_id=?1 ORDER BY seq DESC LIMIT 1",
-                params![exec],
+                 WHERE kind='captured' AND process_id=?1 ORDER BY seq DESC LIMIT 1",
+                params![process],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?)
@@ -288,7 +291,7 @@ impl SqliteStore {
 
 #[cfg(test)]
 impl SqliteStore {
-    /// Record a driver and one step Exec per `(label, outcome)`, as a Flow
+    /// Record a driver and one step Process per `(label, outcome)`, as a Flow
     /// run from `cwd` leaves them.
     pub(crate) fn test_flow(
         &self,
@@ -296,16 +299,16 @@ impl SqliteStore {
         cwd: &str,
         steps: &[(&str, Option<&str>)],
         driver_outcome: Option<&str>,
-    ) -> ExecId {
+    ) -> ProcessId {
         use crate::engine::{ConcreteSkill, ConcreteStep, Skill};
-        let driver = ExecId::new();
-        let insert = |id: &ExecId,
-                      parent: Option<&ExecId>,
+        let driver = ProcessId::new();
+        let insert = |id: &ProcessId,
+                      parent: Option<&ProcessId>,
                       argv: Vec<String>,
                       outcome: Option<&str>| {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.execute(
-                "INSERT INTO execs(id,trace_id,parent_exec_id,command,repo,cwd,started_at,completed_at,outcome)
+                "INSERT INTO processes(id,trace_id,parent_process_id,command,repo,cwd,started_at,completed_at,outcome)
                  VALUES(?1,?8,?2,?3,?4,?4,?5,?6,?7)",
                 params![
                     id,
@@ -338,10 +341,10 @@ impl SqliteStore {
                 })
             })
             .collect();
-        self.record_flow_exec(&driver, name, &FlowGraph::new(name, &compiled))
+        self.record_flow_process(&driver, name, &FlowGraph::new(name, &compiled))
             .unwrap();
         for (index, (label, outcome)) in steps.iter().enumerate() {
-            let step = ExecId::new();
+            let step = ProcessId::new();
             let mut argv = vec!["lf".to_string()];
             argv.extend(label.split(' ').map(str::to_string));
             insert(&step, Some(&driver), argv, *outcome);
@@ -361,7 +364,7 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
 
     #[test]
-    fn flows_are_their_driver_and_step_execs() {
+    fn flows_are_their_driver_and_step_processes() {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();
         let running = store.test_flow(
@@ -383,7 +386,7 @@ mod tests {
             .flow_inventory(&FlowFilter::default(), None, all)
             .unwrap();
         assert_eq!(page.entries.len(), 3);
-        let state = |id: &crate::id::ExecId| {
+        let state = |id: &crate::id::ProcessId| {
             page.entries
                 .iter()
                 .find(|entry| entry.summary.id == id.as_str())
@@ -395,7 +398,7 @@ mod tests {
         assert_eq!(state(&failed), FlowSummaryState::Stopped);
         assert_eq!(state(&done), FlowSummaryState::Completed);
 
-        let (flow, entry) = store.flow_exec(running.as_str()).unwrap().unwrap();
+        let (flow, entry) = store.flow_process(running.as_str()).unwrap().unwrap();
         assert_eq!(entry.summary.name, "feature");
         assert_eq!(
             flow.steps
@@ -404,17 +407,17 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["design", "implement"]
         );
-        // The record is append-only, and a step is an Exec its driver started.
+        // The record is append-only, and a step is a process its driver started.
         let conn = store.conn.lock().unwrap();
         assert!(conn
-            .execute("UPDATE flow_execs SET flow='other'", [])
+            .execute("UPDATE flow_processes SET flow='other'", [])
             .is_err());
         assert!(conn
-            .execute("UPDATE flow_exec_steps SET node=9", [])
+            .execute("UPDATE flow_process_steps SET node=9", [])
             .is_err());
         assert!(conn
             .execute(
-                "INSERT INTO flow_exec_steps(flow_exec_id,exec_id,node,iterations) VALUES(?1,?2,0,'[]')",
+                "INSERT INTO flow_process_steps(flow_process_id,process_id,node,iterations) VALUES(?1,?2,0,'[]')",
                 rusqlite::params![running, done],
             )
             .is_err());

@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Value};
 
-use crate::exec::SessionDriver;
+use crate::process::SessionDriver;
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
@@ -152,13 +152,13 @@ impl History {
             .collect();
         for turn in correlated {
             let driver = &self.replies[&turn];
-            if let Some(exec) = &driver.exec_id {
+            if let Some(process) = &driver.process_id {
                 store.record_session_turn_origin(
                     session,
                     thread,
                     &turn,
                     driver.provider_generation,
-                    exec,
+                    process,
                 )?;
             }
             self.attributed.insert(turn.clone());
@@ -214,8 +214,8 @@ fn completion(store: &SqliteStore, session: &str, thread: &str, turn: &Value) ->
 #[cfg(test)]
 mod tests {
     use super::History;
-    use crate::exec::SessionDriver;
-    use crate::id::ExecId;
+    use crate::id::ProcessId;
+    use crate::process::SessionDriver;
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
@@ -225,25 +225,25 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("history.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let first = ExecId::new();
-        let second = ExecId::new();
+        let first = ProcessId::new();
+        let second = ProcessId::new();
         let conn = rusqlite::Connection::open(&path).unwrap();
         store.test_session("conversation", "run_00000000000000000000000000000001");
-        for exec in [&first, &second] {
+        for process in [&first, &second] {
             conn.execute(
-                "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [exec.as_str()],
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [process.as_str()],
             )
             .unwrap();
         }
         let original = SessionDriver {
-            exec_id: Some(first.clone()),
+            process_id: Some(first.clone()),
             generation: 1,
             provider_generation: 1,
-            provider_exec_id: first.clone(),
+            provider_process_id: first.clone(),
         };
         let replacement = SessionDriver {
-            exec_id: Some(second.clone()),
+            process_id: Some(second.clone()),
             generation: 2,
             ..original.clone()
         };
@@ -271,7 +271,7 @@ mod tests {
             }
             let before = store.session_history("conversation", 0, 0).unwrap();
             assert_eq!(
-                before.last().unwrap().exec_id.as_deref(),
+                before.last().unwrap().process_id.as_deref(),
                 Some(first.as_str())
             );
             // A reconnect discovers the existing turn; another input receives
@@ -312,7 +312,7 @@ mod tests {
             .find(|event| event.provider_turn.as_deref() == Some("unknown"))
             .unwrap();
         assert_eq!(unknown.kind, SessionEventKind::Started);
-        assert_eq!(unknown.exec_id, None);
+        assert_eq!(unknown.process_id, None);
         assert_eq!(unknown.provider_generation, None);
         assert!(
             store

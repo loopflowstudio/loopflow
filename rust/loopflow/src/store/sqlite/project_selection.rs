@@ -89,15 +89,15 @@ impl SqliteStore {
     pub(crate) fn record_project_activation(
         &self,
         wave: &WaveId,
-        exec: Option<&crate::id::ExecId>,
+        process: Option<&crate::id::ProcessId>,
     ) -> StoreResult<()> {
-        let Some(exec) = exec else {
+        let Some(process) = process else {
             return Ok(());
         };
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE waves SET project_activation_exec_id=?2 WHERE id=?1",
-            params![wave, exec],
+            "UPDATE waves SET project_activation_process_id=?2 WHERE id=?1",
+            params![wave, process],
         )?;
         Ok(())
     }
@@ -164,7 +164,7 @@ pub struct ProjectReadiness {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProjectActivation {
-    pub exec_id: String,
+    pub process_id: String,
     pub completed_at: Option<i64>,
     pub outcome: Option<String>,
     pub error: Option<String>,
@@ -206,10 +206,10 @@ impl SqliteStore {
              FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id
              LEFT JOIN pm_wave_sync s ON s.wave_id=w.id
              LEFT JOIN pm_projects f ON f.repo=w.repo AND f.provider=COALESCE(s.provider,'linear') AND f.id=p.external_project_id
-             LEFT JOIN execs e ON e.id=w.project_activation_exec_id WHERE w.id=?1",
+             LEFT JOIN processes e ON e.id=w.project_activation_process_id WHERE w.id=?1",
             [wave], |row| {
                 let state: String = row.get(2)?;
-                let exec: Option<String> = row.get(4)?;
+                let process: Option<String> = row.get(4)?;
                 Ok(ProjectReadiness {
                     project_id: row.get(0)?, observed_at: row.get(1)?,
                     state: match state.as_str() {
@@ -220,8 +220,8 @@ impl SqliteStore {
                         _ => ProjectReadinessState::Inactive,
                     },
                     pending_successor: row.get(3)?,
-                    activation: exec.map(|exec_id| Ok::<_,rusqlite::Error>(ProjectActivation {
-                        exec_id, completed_at: row.get(5)?, outcome: row.get(6)?, error: row.get(7)?,
+                    activation: process.map(|process_id| Ok::<_,rusqlite::Error>(ProjectActivation {
+                        process_id, completed_at: row.get(5)?, outcome: row.get(6)?, error: row.get(7)?,
                     })).transpose()?,
                 })
             },
@@ -297,7 +297,7 @@ mod tests {
 
 #[cfg(test)]
 mod activation_tests {
-    use crate::id::{ExecId, TraceId, WaveId};
+    use crate::id::{ProcessId, TraceId, WaveId};
     use crate::store::sqlite::SqliteStore;
     use crate::work::wave::Wave;
 
@@ -307,34 +307,34 @@ mod activation_tests {
         let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "a".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
-        let exec = ExecId::new();
+        let process = ProcessId::new();
         store
             .conn
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
-                rusqlite::params![exec, TraceId::new()],
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
+                rusqlite::params![process, TraceId::new()],
             )
             .unwrap();
         store
-            .record_project_activation(wave.id(), Some(&exec))
+            .record_project_activation(wave.id(), Some(&process))
             .unwrap();
         let pending = store
             .project_readiness(wave.id())
             .unwrap()
             .activation
             .unwrap();
-        assert_eq!(pending.exec_id, exec.as_str());
+        assert_eq!(pending.process_id, process.as_str());
         assert!(pending.completed_at.is_none());
         assert!(pending.outcome.is_none());
-        store.conn.lock().unwrap().execute("UPDATE execs SET completed_at=2,outcome='failed',error='provider unavailable' WHERE id=?1", [&exec]).unwrap();
+        store.conn.lock().unwrap().execute("UPDATE processes SET completed_at=2,outcome='failed',error='provider unavailable' WHERE id=?1", [&process]).unwrap();
         let failed = store
             .project_readiness(wave.id())
             .unwrap()
             .activation
             .unwrap();
-        assert_eq!(failed.exec_id, exec.as_str());
+        assert_eq!(failed.process_id, process.as_str());
         assert_eq!(failed.outcome.as_deref(), Some("failed"));
         assert_eq!(failed.error.as_deref(), Some("provider unavailable"));
     }

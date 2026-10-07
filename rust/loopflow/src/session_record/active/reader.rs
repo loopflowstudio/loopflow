@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use tokio_util::sync::CancellationToken;
 
 use crate::harness::opencode_runtime::{registered_opencode_servers_at, OpenCodeServerEntry};
-use crate::journal::{ExecProcessReceipt, EXEC_PROCESS_ROOT};
+use crate::journal::{ProcessReceipt, PROCESS_RECEIPT_ROOT};
 use crate::lf::commands::top::{sample_processes, OsProcess, ProcessSnapshot};
 use crate::session_record::ProviderClientRef;
 
@@ -24,7 +24,7 @@ type Observation = (
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Receipt {
     Native(ProviderClientRef),
-    Exec(ExecProcessReceipt),
+    Process(ProcessReceipt),
 }
 
 #[cfg(all(test, target_os = "macos"))]
@@ -34,7 +34,7 @@ impl Receipt {
     fn live(&self, processes: &HashMap<u32, &OsProcess>) -> bool {
         let (pid, start, tolerance) = match self {
             Self::Native(client) => (client.pid, client.started_at.unix_timestamp(), 5),
-            Self::Exec(exec) => (exec.pid, exec.started_at, 3),
+            Self::Process(process) => (process.pid, process.started_at, 3),
         };
         processes
             .get(&pid)
@@ -164,15 +164,15 @@ impl ActiveSessionReader {
             return Ok(());
         }
         let read = (|| -> Result<Option<Receipt>> {
-            if relative.parent() == Some(Path::new(EXEC_PROCESS_ROOT)) {
-                let value: Option<ExecProcessReceipt> = self.read(path)?;
+            if relative.parent() == Some(Path::new(PROCESS_RECEIPT_ROOT)) {
+                let value: Option<ProcessReceipt> = self.read(path)?;
                 if let Some(value) = &value {
                     anyhow::ensure!(
                         value.schema_version == 1 && value.pid > 1,
-                        "invalid Exec receipt"
+                        "invalid Process receipt"
                     );
                 }
-                return Ok(value.map(Receipt::Exec));
+                return Ok(value.map(Receipt::Process));
             }
             if parts.len() == 5 && parts[0] == "runs" && parts[3] == "provider-clients" {
                 let value: Option<ProviderClientRef> = self.read(path)?;
@@ -212,7 +212,7 @@ impl ActiveSessionReader {
         };
         let parts: Vec<_> = relative.iter().collect();
         path.extension().is_some_and(|ext| ext == "json")
-            && (relative.parent() == Some(Path::new(EXEC_PROCESS_ROOT))
+            && (relative.parent() == Some(Path::new(PROCESS_RECEIPT_ROOT))
                 || (parts.len() == 5 && parts[0] == "runs" && parts[3] == "provider-clients"))
     }
 
@@ -349,27 +349,28 @@ impl ActiveSessionReader {
                     .iter()
                     .map(|(input, _)| input.clone())
                     .collect::<Vec<_>>();
-                let execs = processes
+                let process_ids = processes
                     .receipts
                     .iter()
-                    .map(|receipt| receipt.exec_id.clone())
+                    .map(|receipt| receipt.process_id.clone())
                     .collect::<Vec<_>>();
                 let pids = processes
                     .processes
                     .iter()
                     .map(|process| process.pid())
                     .collect::<Vec<_>>();
-                let ownership = match store
-                    .sqlite
-                    .session_process_ownership(&inputs, &execs, &pids)
-                {
-                    Ok(ownership) => ownership,
-                    Err(error) => {
-                        result.discovery = DiscoveryState::Unavailable;
-                        result.gaps.push(error.to_string());
-                        return result;
-                    }
-                };
+                let ownership =
+                    match store
+                        .sqlite
+                        .session_process_ownership(&inputs, &process_ids, &pids)
+                    {
+                        Ok(ownership) => ownership,
+                        Err(error) => {
+                            result.discovery = DiscoveryState::Unavailable;
+                            result.gaps.push(error.to_string());
+                            return result;
+                        }
+                    };
                 super::project(&ownership, &processes, &clients, &mut result);
                 // Revalidate known ownership after the join as well. This protects
                 // one-shot reads, which have no notification subscription.
@@ -388,7 +389,7 @@ impl ActiveSessionReader {
                 // outside Home. Filesystem notifications are not its invalidation.
                 match store
                     .sqlite
-                    .session_process_ownership(&inputs, &execs, &pids)
+                    .session_process_ownership(&inputs, &process_ids, &pids)
                 {
                     Ok(after) => changed |= ownership != after,
                     Err(error) => {
@@ -458,7 +459,7 @@ impl ActiveSessionReader {
             self.candidates.clear();
             self.errors.clear();
             self.pending = Changes::default();
-            for root in ["runs", EXEC_PROCESS_ROOT] {
+            for root in ["runs", PROCESS_RECEIPT_ROOT] {
                 self.scan(&self.home.join(root), &by_pid)?;
             }
             self.read_servers(&by_pid)?;
@@ -489,7 +490,7 @@ impl ActiveSessionReader {
         let mut gaps = Vec::new();
         for (path, candidate) in &self.candidates {
             match candidate {
-                Receipt::Exec(receipt) => receipts.push(receipt.clone()),
+                Receipt::Process(receipt) => receipts.push(receipt.clone()),
                 Receipt::Native(client) => {
                     let dir = path
                         .parent()

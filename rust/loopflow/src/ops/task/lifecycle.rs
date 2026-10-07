@@ -9,7 +9,7 @@ use crate::engine::worktrees::main_repo_root;
 use crate::ops::pm::PmResolvedTask;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
-use crate::store::sqlite::OpenExecs;
+use crate::store::sqlite::OpenProcesses;
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
 use crate::work::task::{PrPhase, Task, TaskPr};
 
@@ -466,30 +466,30 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
         .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
 }
 
-/// A Task decision, never an Exec outcome or process-control receipt.
+/// A Task decision, never a process outcome or process-control receipt.
 pub(super) fn accept_historical_uncertainty(
     store: &SharedStore,
     task: &Task,
-    exec_ids: &[crate::id::ExecId],
+    process_ids: &[crate::id::ProcessId],
     reason: &str,
 ) -> OpsResult<()> {
-    if exec_ids.is_empty() {
+    if process_ids.is_empty() {
         return Ok(());
     }
     let work = store.sqlite.task_work(&task.id).map_err(task_error)?;
-    for id in exec_ids {
-        if !historical_unknown_exec(store, &work, id)? {
+    for id in process_ids {
+        if !historical_unknown_process(store, &work, id)? {
             return Err(task_error(format!(
-                "Exec {id} is not an unowned historical unknown in Task {}; retained all execution protection",
+                "Process {id} is not an unowned historical unknown in Task {}; retained all execution protection",
                 task.plan.identifier
             )));
         }
     }
     let accepted = store
         .sqlite
-        .task_accepted_unknown_execs(&task.id)
+        .task_accepted_unknown_processes(&task.id)
         .map_err(task_error)?;
-    let mut new_ids: Vec<_> = exec_ids
+    let mut new_ids: Vec<_> = process_ids
         .iter()
         .filter(|id| !accepted.contains(*id))
         .cloned()
@@ -502,7 +502,7 @@ pub(super) fn accept_historical_uncertainty(
             .append_task_event(
                 &task.id,
                 &crate::work::task::TaskEventKind::HistoricalUncertaintyAccepted {
-                    exec_ids: new_ids,
+                    process_ids: new_ids,
                     reason: reason.to_string(),
                 },
             )
@@ -511,27 +511,27 @@ pub(super) fn accept_historical_uncertainty(
     Ok(())
 }
 
-fn historical_unknown_exec(
+fn historical_unknown_process(
     store: &SharedStore,
     work: &crate::task_work::TaskWork,
-    id: &crate::id::ExecId,
+    id: &crate::id::ProcessId,
 ) -> OpsResult<bool> {
-    let Some(exec) = work.execs.iter().find(|exec| &exec.id == id) else {
+    let Some(process) = work.processes.iter().find(|process| &process.id == id) else {
         return Ok(false);
     };
     // Any process receipt disqualifies acceptance, regardless of liveness.
     // Without a receipt, completion or a previous boot already proves exit.
-    if crate::journal::current_exec_id().as_ref() == Some(id)
-        || exec.completed_at.is_some()
-        || crate::journal::began_before_boot(exec.started_at)
-        || crate::journal::read_exec_process_receipts_at(&crate::store::lf_home_dir())
+    if crate::journal::current_process_id().as_ref() == Some(id)
+        || process.completed_at.is_some()
+        || crate::journal::began_before_boot(process.started_at)
+        || crate::journal::read_process_receipts_at(&crate::store::lf_home_dir())
             .map_err(task_error)?
             .iter()
-            .any(|receipt| receipt.exec_id == id.as_str())
+            .any(|receipt| receipt.process_id == id.as_str())
     {
         return Ok(false);
     }
-    if let Some(caller) = &exec.caller_session_id {
+    if let Some(caller) = &process.caller_session_id {
         if !store
             .sqlite
             .session(caller)
@@ -551,7 +551,7 @@ fn historical_unknown_exec(
             .session_driver(&session.id)
             .map_err(task_error)?
         {
-            if driver.exec_id.as_ref() == Some(id) || &driver.provider_exec_id == id {
+            if driver.process_id.as_ref() == Some(id) || &driver.provider_process_id == id {
                 return Ok(false);
             }
         }
@@ -563,10 +563,10 @@ fn historical_unknown_exec(
     {
         if store
             .sqlite
-            .flow_exec(&flow.summary.id)
+            .flow_process(&flow.summary.id)
             .map_err(task_error)?
             .is_some_and(|(flow, _)| {
-                &flow.driver.id == id || flow.steps.iter().any(|step| &step.exec.id == id)
+                &flow.driver.id == id || flow.steps.iter().any(|step| &step.process.id == id)
             })
         {
             return Ok(false);
@@ -578,7 +578,7 @@ fn historical_unknown_exec(
 pub(super) fn completion_work_blockers(
     store: &SharedStore,
     task: &Task,
-    open: &OpenExecs,
+    open: &OpenProcesses,
 ) -> OpsResult<Vec<String>> {
     let mut work = store
         .sqlite
@@ -587,15 +587,16 @@ pub(super) fn completion_work_blockers(
     let mut accepted = HashSet::new();
     for id in store
         .sqlite
-        .task_accepted_unknown_execs(&task.id)
+        .task_accepted_unknown_processes(&task.id)
         .map_err(task_error)?
     {
         // Acceptance cannot hide a newly observed process or current owner.
-        if historical_unknown_exec(store, &work, &id)? {
+        if historical_unknown_process(store, &work, &id)? {
             accepted.insert(id);
         }
     }
-    work.execs.retain(|exec| !accepted.contains(&exec.id));
+    work.processes
+        .retain(|process| !accepted.contains(&process.id));
     execution_blockers(store, &work)
 }
 
@@ -605,7 +606,7 @@ pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsR
 }
 
 fn open_work(store: &SharedStore, task: &Task) -> OpsResult<crate::task_work::TaskWork> {
-    let open = store.sqlite.open_execs().map_err(task_error)?;
+    let open = store.sqlite.open_processes().map_err(task_error)?;
     store
         .sqlite
         .task_open_work(&task.id, &open)
@@ -628,15 +629,15 @@ fn execution_blockers(
     // The caller cannot outlive the processes that launched it, nor wait on
     // the Flow whose step it is. Lineage exempts waiting, not authority.
     let mut lineage = HashSet::new();
-    let mut next = crate::journal::current_exec_id();
+    let mut next = crate::journal::current_process_id();
     while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
         next = store
             .sqlite
-            .exec(&id)
+            .process(&id)
             .map_err(task_error)?
-            .and_then(|exec| exec.parent_exec_id);
+            .and_then(|process| process.parent_process_id);
     }
-    // A Flow is its driver and step Execs; the loop over Execs below judges
+    // A Flow is its driver and step Processes; the loop over Processes below judges
     // them. Sessions are judged here on their own evidence.
     for session in &work.sessions {
         if let Some(input) = store.sqlite.session(&session.id).map_err(task_error)? {
@@ -660,16 +661,20 @@ fn execution_blockers(
             ));
         }
     }
-    for exec in work.execs.iter().filter(|exec| exec.completed_at.is_none()) {
-        if lineage.contains(&exec.id) {
+    for process in work
+        .processes
+        .iter()
+        .filter(|process| process.completed_at.is_none())
+    {
+        if lineage.contains(&process.id) {
             continue;
         }
-        if crate::journal::exec_process_evidence(&store.sqlite, &exec.id)
+        if crate::journal::process_evidence(&store.sqlite, &process.id)
             != crate::journal::ProcessIdentityEvidence::Dead
         {
             blockers.push(format!(
-                "Exec {} has live or unresolved execution; inspect `lf monitor show {}`",
-                exec.id, exec.id
+                "Process {} has live or unresolved execution; inspect `lf monitor show {}`",
+                process.id, process.id
             ));
         }
     }

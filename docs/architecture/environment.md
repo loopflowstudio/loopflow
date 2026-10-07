@@ -1,7 +1,7 @@
 # Environment
 
 Environment configures a process; it never decides what the process is. A
-variable that names a Home or an Exec is checked against the store or
+variable that names a Home or a process is checked against the store or
 the filesystem before it grants anything, and a new session starts without it.
 
 ```bash
@@ -20,7 +20,7 @@ tmux show-environment -g | grep -E '^(LF|LOOPFLOW)_'       # what new tmux sessi
 A source build with no explicit `LF_HOME` forwards to the installed CLI and
 main Home before opening a store. Development builds refuse the main database.
 
-## Exec context
+## Process context
 
 Set by lf for its own children. A session shell unsets all of it before
 applying its launch's values, and the tmux client that may start the server
@@ -30,9 +30,9 @@ drops it too, so sessions a person opens by hand inherit none of it.
 |---|---|---|---|
 | `LF_CAPTURE_KEY` | Session capture and native resume | Capture lookup, provider callbacks, Task comments | Selects subordinate captured history in the resolved Home. SQLite must record its owning Session; a present manifest must agree. It grants neither Task nor Flow authority. |
 | `LF_TRACE_ID`, `LF_PROCESS_ID` | Journal, agent and session launch | Journal, git operations | Joins a child's events to its caller's trace. |
-| `LF_AGENT_CALLER` | Session capture and native resume | Journal, once, then resolved process context | Carries Session identity, provider generation and origin Exec for nested command ancestry and checkpoint composition. |
+| `LF_AGENT_CALLER` | Session capture and native resume | Journal, once, then resolved process context | Carries Session identity, provider generation and origin Process for nested command ancestry and checkpoint composition. |
 | `LF_AS` | `--as` | Run and Task commands | Declares the Work a command contributes to; resolved against the registry. |
-| `LF_FLOW_ID` | Flow driver, for each agent step | The step's agent and skills | Names the Flow a step serves: its driver Exec's id. Steps of one Flow share notes under it; `lf` reads nothing from it. |
+| `LF_FLOW_ID` | Flow driver, for each agent step | The step's agent and skills | Names the Flow a step serves: its Flow process's id. Steps of one Flow share notes under it; `lf` reads nothing from it. |
 | `LF_WAVE_ID` | Wave and Task launches | Wave resolution | Default Wave for a child command. |
 | `LF_HUMAN_SESSION`, `LF_PREPARED_CAPTURE` | Conversation launch | `ops::human_session`, removed on use | Identify the prepared conversation a new terminal opens. |
 | `LF_GIT_OPERATION_ID` | `ops::git_operation` | Nested lf commands inside an owned git operation | Lets recovery continue its own operation; checked against the worktree's record. |

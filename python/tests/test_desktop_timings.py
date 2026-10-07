@@ -8,7 +8,7 @@ REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts/benchmarks/desktop-performance/timings.py"
 spec = importlib.util.spec_from_file_location("timings", SCRIPT)
 timings = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(timings)
+spec.loader.process_module(timings)
 
 
 def _write(path: Path, records: list[dict], junk: str = "") -> None:

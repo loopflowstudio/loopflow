@@ -1041,7 +1041,7 @@ fn spawn_cron_target(
         use std::os::unix::process::CommandExt;
         let fd = file.as_raw_fd();
         // SAFETY: the parent keeps the file alive until spawn returns. The child
-        // only changes an fd flag with an async-signal-safe syscall before exec.
+        // only changes an fd flag with an async-signal-safe syscall before process.
         unsafe {
             command.pre_exec(move || {
                 if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {

@@ -4,7 +4,7 @@
     "sequence": 1,
     "answers": null,
     "home": "/Users/fixture/.lf",
-    "revisions": {"planning": 911, "sessions": 402, "flows": 88, "execs": 5120, "usage": 77},
+    "revisions": {"planning": 911, "sessions": 402, "flows": 88, "processes": 5120, "usage": 77},
     "unavailable": null,
     "body": {"roadmap": {"generated_at": "2026-10-05T00:00:00Z", "waves": []}, "waves": []}
   },
@@ -13,7 +13,7 @@
     "sequence": 2,
     "answers": 7,
     "home": "/Users/fixture/.lf",
-    "revisions": {"planning": 911, "sessions": 403, "flows": 88, "execs": 5120, "usage": 77},
+    "revisions": {"planning": 911, "sessions": 403, "flows": 88, "processes": 5120, "usage": 77},
     "unavailable": null,
     "body": {"repo": "/src/loopflow", "includes_headless": false, "entries": []}
   },
@@ -22,7 +22,7 @@
     "sequence": 3,
     "answers": 7,
     "home": "/Users/fixture/.lf",
-    "revisions": {"planning": 911, "sessions": 403, "flows": 88, "execs": 5120, "usage": 77},
+    "revisions": {"planning": 911, "sessions": 403, "flows": 88, "processes": 5120, "usage": 77},
     "unavailable": "Task LOO-1 is not registered",
     "body": null
   },
@@ -31,7 +31,7 @@
     "sequence": 4,
     "answers": 7,
     "home": "/Users/fixture/.lf",
-    "revisions": {"planning": 911, "sessions": 403, "flows": 88, "execs": 5120, "usage": 77},
+    "revisions": {"planning": 911, "sessions": 403, "flows": 88, "processes": 5120, "usage": 77},
     "unavailable": null,
     "body": {
       "scope": {"wave": "product", "project": null, "task": "LOO-1"},
@@ -52,7 +52,7 @@
     "sequence": 6,
     "answers": 7,
     "home": "/Users/fixture/.lf",
-    "revisions": {"planning": 911, "sessions": 403, "flows": 88, "execs": 5120, "usage": 77},
+    "revisions": {"planning": 911, "sessions": 403, "flows": 88, "processes": 5120, "usage": 77},
     "unavailable": null,
     "body": {"projections": {"planning": 3, "sessions": 2}}
   },
@@ -61,11 +61,11 @@
     "sequence": 7,
     "answers": 8,
     "home": "/Users/fixture/.lf",
-    "revisions": {"planning": 912, "sessions": 403, "flows": 89, "execs": 5121, "usage": 77},
+    "revisions": {"planning": 912, "sessions": 403, "flows": 89, "processes": 5121, "usage": 77},
     "unavailable": null,
     "body": {
       "task": "LOO-1",
-      "work": {"sessions": [], "flows": [], "execs": [], "workflow": null},
+      "work": {"sessions": [], "flows": [], "processes": [], "workflow": null},
       "flow_runs": []
     }
   }

@@ -4,7 +4,7 @@ import Foundation
 public struct TaskWork: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
     public let flows: [TaskFlowMember]
-    public let execs: [Exec]
+    public let processes: [Process]
     /// The Task's Workflow; `nil` when it runs only ad hoc Flows.
     public let workflow: Workflow?
 }
@@ -45,7 +45,7 @@ public struct Workflow: Codable, Sendable, Equatable {
         public let to: String
         public let edge: Int?
         /// The `lf` process that made the move; `nil` when none was registered.
-        public let execId: String?
+        public let processId: String?
         public let actor: Actor
         public let sessionId: String?
         public let note: String?
@@ -53,20 +53,20 @@ public struct Workflow: Codable, Sendable, Equatable {
 
         enum CodingKeys: String, CodingKey {
             case workflow, kind, from, to, edge, actor, note, at
-            case execId = "exec_id"
+            case processId = "process_id"
             case sessionId = "session_id"
         }
     }
 
     /// At a node the Task waits on a person. On an edge its Flow's driver
-    /// Exec carries it; one that no longer runs has stopped and holds the Task.
+    /// Process carries it; one that no longer runs has stopped and holds the Task.
     public enum Position: Codable, Sendable, Equatable {
         case node(String)
-        case edge(index: Int, execId: String, running: Bool)
+        case edge(index: Int, processId: String, running: Bool)
 
         enum CodingKeys: String, CodingKey {
             case kind, node, edge, running
-            case execId = "exec_id"
+            case processId = "process_id"
         }
 
         public init(from decoder: Decoder) throws {
@@ -77,7 +77,7 @@ public struct Workflow: Codable, Sendable, Equatable {
             case "edge":
                 self = .edge(
                     index: try container.decode(Int.self, forKey: .edge),
-                    execId: try container.decode(String.self, forKey: .execId),
+                    processId: try container.decode(String.self, forKey: .processId),
                     running: try container.decode(Bool.self, forKey: .running))
             case let kind:
                 throw DecodingError.dataCorruptedError(
@@ -91,10 +91,10 @@ public struct Workflow: Codable, Sendable, Equatable {
             case .node(let node):
                 try container.encode("node", forKey: .kind)
                 try container.encode(node, forKey: .node)
-            case .edge(let index, let execId, let running):
+            case .edge(let index, let processId, let running):
                 try container.encode("edge", forKey: .kind)
                 try container.encode(index, forKey: .edge)
-                try container.encode(execId, forKey: .execId)
+                try container.encode(processId, forKey: .processId)
                 try container.encode(running, forKey: .running)
             }
         }
@@ -113,7 +113,7 @@ public struct TaskSession: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let title: String
     public let interactive: Bool
-    /// Driver Exec of the Flow whose step opened the current input.
+    /// Driver Process of the Flow whose step opened the current input.
     public let flowId: String?
     public let completedAt: Int64?
 
@@ -124,7 +124,7 @@ public struct TaskSession: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
-/// One Flow as its driver Exec records it; `id` is that Exec.
+/// One Flow as its driver Process records it; `id` is that Process.
 public struct TaskFlowMember: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String

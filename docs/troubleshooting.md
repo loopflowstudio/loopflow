@@ -12,7 +12,7 @@ lf cron history --wave infrastructure --flow telemetry-daily --days 2
 lf cron sync --wave infrastructure
 ```
 
-Doctor checks installation selection, store compatibility, Exec integrity and
+Doctor checks installation selection, store compatibility, Process integrity and
 scheduled receipts separately. Machine commands can have no repository; a
 recorded repository must be an absolute path. Missing scheduled receipts remain
 failures even when ordinary commands work. A receipt proves invocation, not
@@ -27,7 +27,7 @@ follow the selected machine installation across promotions. Existing Sessions
 retain their runtime ownership.
 
 Doctor reads storage without initializing it or applying migrations. An incompatible
-store still reports readable Exec evidence, scheduler obligations and installation
+store still reports readable Process evidence, scheduler obligations and installation
 selection.
 
 Binary freshness compares against locally cached `origin/main`, without fetching.
@@ -91,7 +91,7 @@ lf task run INF-123 --reason "provider credentials repaired"
 
 `task run` runs a fresh Flow in the Task checkout with its Steers and
 active PR. It never continues an earlier Flow; a stopped one leaves its
-Execs as history. Unknown liveness stays
+Processes as history. Unknown liveness stays
 unknown. A Task Steer is a Linear Task comment; the running Flow receives new
 comments when possible and the next Skill seed always reads them. `task interrupt` ends the
 active boundary so the next one re-reads direction. Neither command's receipt
@@ -148,7 +148,7 @@ lf wt timing --json
 
 Every `lf wt list` appends its durations to `~/.lf/perf/wt-list.jsonl`: total,
 startup (launch through the start receipt), local Git, the remote call, and the
-time spent writing Exec receipts to SQLite. Local Git and the remote overlap.
+time spent writing Process receipts to SQLite. Local Git and the remote overlap.
 Interrupted runs are recorded; a run killed outright is not. The file holds
 durations, counts, the repository root and the `lf` version, and never more
 than 1,000 samples.

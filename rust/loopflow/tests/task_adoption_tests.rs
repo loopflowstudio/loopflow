@@ -252,7 +252,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         }
         let saved = support::recorded_flows(home.path());
         assert_eq!(saved.len(), 1);
-        // Neither a catalog change nor another checkout touches a Flow's Execs.
+        // Neither a catalog change nor another checkout touches a Flow's Processes.
         fs::write(
             checkout.join(".lf/flows/adoption.yaml"),
             "- cmd: sync --plan\n",

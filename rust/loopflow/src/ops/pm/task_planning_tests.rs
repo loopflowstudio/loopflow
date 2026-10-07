@@ -1565,7 +1565,7 @@ esac
             .is_empty());
             assert!(git(&repo, &["branch", "--list", "cancel-me"]).is_empty());
             assert!(repo.join(".git/pr-closed").exists());
-            // The Flow's Execs remain as history; abandonment retires nothing.
+            // The Flow's Processes remain as history; abandonment retires nothing.
             assert_eq!(fixture.store.sqlite.task_flows(&task.id).unwrap().len(), 1);
             assert_eq!(
                 runtime

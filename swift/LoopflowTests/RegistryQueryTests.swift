@@ -474,7 +474,7 @@ struct RegistryQueryTests {
 
     @Test("Activity requires Session and input identity instead of unrelated process fallbacks")
     func invocationActivityIsNotSessionHistory() async throws {
-        let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[{"id":"event","recorded_at":1784606300,"summary":"Input completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"input_completion_recorded","invocation_id":"invocation-1","trace_id":"trace-1","exec_id":"exec-1","status":"ok"}}]}"#
+        let json = #"{"generated_at":1784606400,"since":1784001600,"limit":50,"truncated":false,"items":[{"id":"event","recorded_at":1784606300,"summary":"Input completed","work":{"kind":"task","id":"task-1"},"subject":"LOO-1","fact":{"kind":"input_completion_recorded","invocation_id":"invocation-1","trace_id":"trace-1","process_id":"process-1","status":"ok"}}]}"#
         let query = RegistryQuery { _, _ in json }
         await #expect(throws: (any Error).self) { try await query.workActivity() }
     }

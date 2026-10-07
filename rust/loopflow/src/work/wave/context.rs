@@ -24,8 +24,8 @@ pub fn resolve_ambient_wave_name() -> Option<String> {
         .map(|wave| wave.slug().to_string())
 }
 
-/// The Exec attribution decision for the current process: the wave name to
-/// attribute an Exec to (if any), plus a classified failure to record when a
+/// The Process attribution decision for the current process: the wave name to
+/// attribute a process to (if any), plus a classified failure to record when a
 /// supplied managed identity failed validation.
 ///
 /// - valid UUID or registered repository-local name → `wave: Some(name)`, `failure: None`
@@ -38,25 +38,25 @@ pub fn resolve_ambient_wave_name() -> Option<String> {
 /// a wave inferred from the worktree. The command journal records `None` and the failure so
 /// the stale source stays visible and actionable; see W2-239.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExecAttribution {
+pub struct ProcessAttribution {
     pub wave: Option<String>,
     pub failure: Option<String>,
 }
 
-/// The Exec attribution decision for the current process environment inside
-/// `repo`. One classification shared by every trace/Exec attribution site
-/// ([`crate::journal::ensure_exec_context`] and the `lf` Exec wrapper).
-pub fn exec_attribution(repo: Option<&Path>) -> ExecAttribution {
+/// The Process attribution decision for the current process environment inside
+/// `repo`. One classification shared by every trace/Process attribution site
+/// ([`crate::journal::ensure_process_context`] and the `lf` Process wrapper).
+pub fn process_attribution(repo: Option<&Path>) -> ProcessAttribution {
     match resolve_managed_wave_sync(repo, None) {
-        Ok(wave) => ExecAttribution {
+        Ok(wave) => ProcessAttribution {
             wave: Some(wave.slug().to_string()),
             failure: None,
         },
-        Err(WaveResolveError::NoContext) => ExecAttribution {
+        Err(WaveResolveError::NoContext) => ProcessAttribution {
             wave: None,
             failure: None,
         },
-        Err(error) => ExecAttribution {
+        Err(error) => ProcessAttribution {
             wave: None,
             failure: Some(attribution_failure_text(&error)),
         },
@@ -348,7 +348,7 @@ pub fn wave_origin(repo_root: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
-    /// `exec_attribution` keeps the classified failure instead of swallowing it.
+    /// `process_attribution` keeps the classified failure instead of swallowing it.
     /// Absent context is `(None, None)` — worktree inference stays a legitimate
     /// fallback for it alone. A hand-set name resolves through the same scoped
     /// registry as every interactive command; an unregistered name is stale context,
@@ -376,17 +376,17 @@ mod tests {
         });
 
         std::env::remove_var(WAVE_ID_ENV);
-        let absent = exec_attribution(Some(&repo));
+        let absent = process_attribution(Some(&repo));
         assert_eq!(absent.wave, None);
         assert_eq!(absent.failure, None);
 
         std::env::set_var(WAVE_ID_ENV, "product");
-        let named = exec_attribution(Some(&repo));
+        let named = process_attribution(Some(&repo));
         assert_eq!(named.wave.as_deref(), Some("product"));
         assert_eq!(named.failure, None);
 
         std::env::set_var(WAVE_ID_ENV, "ghost");
-        let unregistered = exec_attribution(Some(&repo));
+        let unregistered = process_attribution(Some(&repo));
         assert_eq!(unregistered.wave, None);
         assert!(unregistered
             .failure

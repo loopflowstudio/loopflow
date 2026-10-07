@@ -172,7 +172,7 @@ stages, commits and pushes with both locks retained by Git children, then shared
 PR finalization creates the review surface
 with the release title and notes. Re-arming a dropped request retains the target
 lock while waiting for merge.
-CI repair keeps the same landing and reserved Session/Exec. Release-owned
+CI repair keeps the same landing and reserved Session/Process. Release-owned
 repairs inherit both locks through a direct child launch, so a surviving repair
 continues to exclude publication and checkout removal after controller death.
 The release waits for that repair’s process evidence before continuing.

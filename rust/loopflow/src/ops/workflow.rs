@@ -2,7 +2,7 @@
 //! on, and where the Task stands on it. Position is live state a person or a
 //! conversation moves: at a node, or on an edge with the Task run carrying
 //! it. `lf task run` chooses an edge, starts the edge's Flow, again when a
-//! Flow exec fails, and writes the arrival when one succeeds; `lf task move`
+//! Flow process fails, and writes the arrival when one succeeds; `lf task move`
 //! sets a node outright. Every
 //! change is appended to the Task's history. Nothing here launches or
 //! controls a Flow.
@@ -29,13 +29,13 @@ pub struct Workflow {
 pub enum WorkflowPosition {
     /// The Task waits on a person at this node, or stands at `start` or `end`.
     Node { node: String },
-    /// The Task is on this edge. `exec_id` is the `lf task run` carrying it;
-    /// each Flow exec it starts is that Exec's child. `running` is read from
-    /// that Exec: an edge whose Task run has ended has stopped and holds the
+    /// The Task is on this edge. `process_id` is the `lf task run` carrying it;
+    /// each Flow process it starts is that Process's child. `running` is read from
+    /// that Process: an edge whose Task run has ended has stopped and holds the
     /// Task until it is chosen again or the Task is moved.
     Edge {
         edge: u32,
-        exec_id: String,
+        process_id: String,
         running: bool,
     },
 }
@@ -93,7 +93,7 @@ pub struct WorkflowMove {
     pub edge: Option<u32>,
     /// The `lf` process that made the move; for an edge, its Task run.
     /// `None` when no registered process made it.
-    pub exec_id: Option<String>,
+    pub process_id: Option<String>,
     pub actor: WorkflowActor,
     /// The conversation that asked, when `actor` is one.
     pub session_id: Option<String>,
@@ -240,7 +240,7 @@ mod tests {
         let on_edge = |running| {
             at(WorkflowPosition::Edge {
                 edge: 2,
-                exec_id: "exec".into(),
+                process_id: "process".into(),
                 running,
             })
         };

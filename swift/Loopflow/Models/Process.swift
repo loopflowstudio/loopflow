@@ -1,10 +1,10 @@
 import Foundation
 
 /// One actual lf process. Missing outcomes do not establish current liveness.
-public struct Exec: Codable, Sendable, Equatable, Identifiable {
+public struct Process: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let traceID: String
-    public let parentExecID: String?
+    public let parentProcessID: String?
     public let viaAgent: Bool?
     public let callerSessionID: String?
     public let callerProviderGeneration: Int64?
@@ -21,7 +21,7 @@ public struct Exec: Codable, Sendable, Equatable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, command, repo, cwd, outcome, signal, error
         case traceID = "trace_id"
-        case parentExecID = "parent_exec_id"
+        case parentProcessID = "parent_process_id"
         case viaAgent = "via_agent"
         case callerSessionID = "caller_session_id"
         case callerProviderGeneration = "caller_provider_generation"
@@ -32,7 +32,7 @@ public struct Exec: Codable, Sendable, Equatable, Identifiable {
 }
 
 /// Continue with the same filters; refresh from page one to observe new writes.
-public struct ExecCursor: Codable, Sendable, Equatable {
+public struct ProcessCursor: Codable, Sendable, Equatable {
     public let startedAt: Int64
     public let id: String
 
@@ -42,7 +42,7 @@ public struct ExecCursor: Codable, Sendable, Equatable {
     }
 }
 
-public struct ExecPage: Codable, Sendable, Equatable {
-    public let entries: [Exec]
-    public let next: ExecCursor?
+public struct ProcessPage: Codable, Sendable, Equatable {
+    public let entries: [Process]
+    public let next: ProcessCursor?
 }

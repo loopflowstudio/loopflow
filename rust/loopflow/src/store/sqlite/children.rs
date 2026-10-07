@@ -114,7 +114,7 @@ impl SqliteStore {
         task: &Task,
         skipped_pr: Option<&TaskPr>,
         how: &super::task_work::EndMove,
-        by: Option<&crate::id::ExecId>,
+        by: Option<&crate::id::ProcessId>,
         note: Option<&str>,
     ) -> StoreResult<bool> {
         validate_task(task)?;
@@ -590,14 +590,15 @@ impl SqliteStore {
         task_events_after_in(&conn, task_id, cursor)
     }
 
-    pub(crate) fn task_accepted_unknown_execs(
+    pub(crate) fn task_accepted_unknown_processes(
         &self,
         task_id: &TaskId,
-    ) -> StoreResult<Vec<crate::id::ExecId>> {
+    ) -> StoreResult<Vec<crate::id::ProcessId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT DISTINCT accepted.value FROM task_events,
-             json_each(task_events.kind_json, '$.exec_ids') AS accepted
+             json_each(COALESCE(json_extract(task_events.kind_json, '$.process_ids'),
+                                json_extract(task_events.kind_json, '$.exec_ids'))) AS accepted
              WHERE task_id=?1 AND json_extract(kind_json, '$.kind')='historical_uncertainty_accepted'",
         )?;
         let rows = statement.query_map([task_id.as_str()], |row| row.get(0))?;

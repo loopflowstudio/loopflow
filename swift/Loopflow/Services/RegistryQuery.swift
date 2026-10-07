@@ -4,7 +4,7 @@
 // current by one foreground workspace reader per window.
 //
 // Reads run `lf` subprocesses and decode shared wire types into app models.
-// The injected runner on macOS execs the `lf` shipped inside the app. There is no
+// The injected runner on macOS processes the `lf` shipped inside the app. There is no
 // HTTP fallback for reads; remote reads need to become proxied `lf` queries.
 
 import Foundation
@@ -616,7 +616,7 @@ public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
 
 public struct ProviderHistory: Decodable, Sendable, Hashable {
     public let reference: ProviderHistoryReference
-    public let execId: String?
+    public let processId: String?
     public let taskId: String?
     public let waveId: String?
     public let startedAt: Int?
@@ -625,7 +625,7 @@ public struct ProviderHistory: Decodable, Sendable, Hashable {
     public let usage: SessionUsage
     enum CodingKeys: String, CodingKey {
         case reference, outcome, usage
-        case execId = "exec_id", taskId = "task_id", waveId = "wave_id"
+        case processId = "process_id", taskId = "task_id", waveId = "wave_id"
         case startedAt = "started_at", completedAt = "completed_at"
     }
 }
@@ -818,12 +818,12 @@ public struct ProjectReadiness: Decodable, Sendable, Hashable {
     public let activation: Activation?
 
     public struct Activation: Decodable, Sendable, Hashable {
-        public let execId: String
+        public let processId: String
         public let completedAt: Int64?
         public let outcome: String?
         public let error: String?
         enum CodingKeys: String, CodingKey {
-            case execId = "exec_id", completedAt = "completed_at", outcome, error
+            case processId = "process_id", completedAt = "completed_at", outcome, error
         }
     }
     enum CodingKeys: String, CodingKey {

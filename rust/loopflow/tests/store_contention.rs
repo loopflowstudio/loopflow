@@ -8,7 +8,7 @@
 //! file locks and the WAL's shared memory, not per process, so threads here
 //! contend exactly as separate processes do.
 
-use loopflow::exec::Exec;
+use loopflow::process::Process;
 use loopflow::store::sqlite::SqliteStore;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -18,12 +18,12 @@ use std::sync::{Arc, Barrier};
 const FLEET: usize = 51;
 const EVENTS_PER_WRITER: usize = 20;
 
-fn exec() -> Exec {
+fn process() -> Process {
     let ts = 1_700_000_000;
-    Exec {
-        id: loopflow::id::ExecId::new(),
+    Process {
+        id: loopflow::id::ProcessId::new(),
         trace_id: loopflow::id::TraceId::new(),
-        parent_exec_id: None,
+        parent_process_id: None,
         via_agent: Some(false),
         caller_session_id: None,
         caller_provider_generation: None,
@@ -65,8 +65,8 @@ fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
             barrier.wait();
             for seq in 0..EVENTS_PER_WRITER {
                 // Open per event, exactly as `journal::open_ledger()` does.
-                let recorded =
-                    SqliteStore::new(Path::new(&path)).and_then(|store| store.record_exec(&exec()));
+                let recorded = SqliteStore::new(Path::new(&path))
+                    .and_then(|store| store.record_process(&process()));
                 if let Err(error) = recorded {
                     lost.fetch_add(1, Ordering::Relaxed);
                     eprintln!("writer {writer} seq {seq}: {error}");
@@ -85,12 +85,12 @@ fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
         "writes failed under contention; each one is a lost execution receipt"
     );
     assert_eq!(
-        count(&path, "SELECT COUNT(*) FROM execs"),
+        count(&path, "SELECT COUNT(*) FROM processes"),
         expected,
         "the ledger must hold exactly the receipts the fleet requested"
     );
     assert_eq!(
-        count(&path, "SELECT COUNT(DISTINCT id) FROM execs"),
+        count(&path, "SELECT COUNT(DISTINCT id) FROM processes"),
         expected,
         "no receipt may be recorded twice"
     );

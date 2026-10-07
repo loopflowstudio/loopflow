@@ -492,15 +492,15 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
     }
 }
 
-/// Record a Flow the way `lf run` leaves one: a driver Exec, its FlowExec row
-/// and one step Exec in `cwd`, both exited. Returns the driver's id, which
+/// Record a Flow the way `lf run` leaves one: a driver Process, its FlowProcess row
+/// and one step Process in `cwd`, both exited. Returns the driver's id, which
 /// names the Flow.
 #[allow(dead_code)] // Shared helper compiled into integration tests that record no Flow.
 pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &str) -> String {
     use loopflow::engine::flow::{ConcreteSkill, ConcreteStep, Skill};
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
-    let driver = loopflow::id::ExecId::new();
-    let step = loopflow::id::ExecId::new();
+    let driver = loopflow::id::ProcessId::new();
+    let step = loopflow::id::ProcessId::new();
     for (id, parent, argv) in [
         (driver.clone(), None, vec!["lf", "run", flow]),
         (
@@ -510,7 +510,7 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
         ),
     ] {
         db.execute(
-            "INSERT INTO execs(id,trace_id,parent_exec_id,command,repo,cwd,started_at,completed_at,outcome)
+            "INSERT INTO processes(id,trace_id,parent_process_id,command,repo,cwd,started_at,completed_at,outcome)
              VALUES(?1,?2,?3,?4,?5,?5,1,2,?6)",
             rusqlite::params![
                 id.as_str(),
@@ -521,7 +521,7 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
                 outcome
             ],
         )
-        .expect("record Flow Exec");
+        .expect("record Flow Process");
     }
     let graph = loopflow::engine::flow_graph::FlowGraph::new(
         flow,
@@ -534,16 +534,16 @@ pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &s
         })],
     );
     db.execute(
-        "INSERT INTO flow_execs(exec_id,flow,graph) VALUES(?1,?2,?3)",
+        "INSERT INTO flow_processes(process_id,flow,graph) VALUES(?1,?2,?3)",
         rusqlite::params![
             driver.as_str(),
             flow,
             serde_json::to_string(&graph).expect("graph serializes")
         ],
     )
-    .expect("record FlowExec");
+    .expect("record FlowProcess");
     db.execute(
-        "INSERT INTO flow_exec_steps(flow_exec_id,exec_id,node,iterations) VALUES(?1,?2,0,'[[]]')",
+        "INSERT INTO flow_process_steps(flow_process_id,process_id,node,iterations) VALUES(?1,?2,0,'[[]]')",
         rusqlite::params![driver.as_str(), step.as_str()],
     )
     .expect("record Flow step");
@@ -557,7 +557,7 @@ pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
     let mut drivers = db
         .prepare(
-            "SELECT d.id,d.outcome,f.flow,f.graph FROM flow_execs f JOIN execs d ON d.id=f.exec_id
+            "SELECT d.id,d.outcome,f.flow,f.graph FROM flow_processes f JOIN processes d ON d.id=f.process_id
              ORDER BY d.rowid",
         )
         .expect("select Flow drivers");
@@ -582,8 +582,8 @@ pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value
             }
             let mut steps = db
                 .prepare(
-                    "SELECT e.command,s.node,s.iterations FROM flow_exec_steps s
-                     JOIN execs e ON e.id=s.exec_id WHERE s.flow_exec_id=?1 ORDER BY s.seq",
+                    "SELECT e.command,s.node,s.iterations FROM flow_process_steps s
+                     JOIN processes e ON e.id=s.process_id WHERE s.flow_process_id=?1 ORDER BY s.seq",
                 )
                 .expect("select Flow steps");
             let steps = steps

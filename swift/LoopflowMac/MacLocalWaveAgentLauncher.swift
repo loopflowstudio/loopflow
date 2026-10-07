@@ -170,8 +170,8 @@ enum LocalWaveAgentLauncher {
 
     // MARK: - Process plumbing
 
-    static func queryProcess(_ args: [String], cwd: String? = nil) -> Process {
-        let process = Process()
+    static func queryProcess(_ args: [String], cwd: String? = nil) -> Foundation.Process {
+        let process = Foundation.Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
         process.environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)

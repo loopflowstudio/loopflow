@@ -12,7 +12,7 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "scripts/benchmarks/desktop-perf
 sys.path.insert(0, str(SCRIPTS))
 spec = importlib.util.spec_from_file_location("launch", SCRIPTS / "launch.py")
 launch = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(launch)
+spec.loader.process_module(launch)
 
 
 def _rows(path: Path) -> list[tuple]:

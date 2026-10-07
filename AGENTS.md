@@ -8,7 +8,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - Wave = durable objective, responsibility, memory, cadence, budget, chat, and metric instruments
 - Chapter = shared name of every Wave's In Progress Linear Project; no Chapter table
 - Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the workflow its Tasks take up
-- A Task's work is every Session, Flow and Exec in its checkout, plus explicit binds; no Flow is selected over another
+- A Task's work is every Session, Flow and Process in its checkout, plus explicit binds; no Flow is selected over another
 - Workflow = a Task's nodes (a person, in its conversation) joined by edges (Flows), with its stored position; `lf task run` chooses an edge, `lf task move` sets a node
 - A Task's state is its Workflow position: ready at `start`, active between, done at `end`; reaching `end` is completion, abandoned is its own mark
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
@@ -157,7 +157,7 @@ When editing `*.rs` files:
 - Conversion methods: `as_` (cheap/borrowed), `to_` (allocates), `into_` (consumes self)
 - No `get_` prefix on getters: `fn name(&self)` not `fn get_name(&self)`
 - Return `Option<T>` for "not found", `Result<T, E>` for "something went wrong"
-- Newtypes for domain concepts: `struct ExecId(String)` not `type ExecId = String`
+- Newtypes for domain concepts: `struct ProcessId(String)` not `type ProcessId = String`
 - Every `unsafe` block requires a `// SAFETY:` comment explaining invariants
 - When a name conflicts with a keyword: use `r#type` or `type_`, not `typ`
 - Use `#[non_exhaustive]` on public enums that may grow
@@ -204,7 +204,7 @@ Project. Linear Project status owns current/planned/completed history; there is
 no Chapter table or plan packet. Project owns Tasks, KRs, targets and its
 `workflow:`, not another objective, memory or operator.
 
-A Task's work includes every Session, Flow and Exec associated with
+A Task's work includes every Session, Flow and Process associated with
 its checkout, plus explicit binds. Rust owns this shared association for status,
 Desktop navigation, recovery and completion. Membership grants no process or
 Flow authority and never rewrites historical usage. Every Flow naming the Task
@@ -215,17 +215,17 @@ A Workflow is the Task's outer shape: the workflow definition it took up,
 whose nodes are where a person takes part in the Task conversation and whose
 edges each run one Flow, plus the Task's stored position on it. The graph is
 fixed when taken up. `lf task run` chooses an edge, starts its Flow as a child
-`lf run`, again when a Flow exec fails, and writes the arrival when one
+`lf run`, again when a Flow process fails, and writes the arrival when one
 succeeds; a stopped Flow leaves the Task on its edge;
 `lf task move` sets a node. Each move is appended to the Task's history. It
 executes nothing, and no command approves or completes a node.
-Taskless execution uses the same driver. A Flow is one driver Exec and the step
-Execs it starts; its id is the driver Exec id. The driver holds the cursor and
-return counts in memory and writes FlowExec, append-only: the Flow's name and
-compiled graph at launch, then each step's Exec, node and iteration counts.
-Every Flow exec gets one; none is primary for a Task. A step is the plain command
+Taskless execution uses the same driver. A Flow is one lf process and the step
+Processes it starts; its id is the Flow process ID. The driver holds the cursor and
+return counts in memory and writes FlowProcess, append-only: the Flow's name and
+compiled graph at launch, then each step's Process, node and iteration counts.
+Every Flow process gets one; none is primary for a Task. A step is the plain command
 (`lf -b skill <name> [message]` or the operation's own) and neither reads nor
-writes it. Running, finished and results are read from Execs, never stored
+writes it. Running, finished and results are read from Processes, never stored
 twice. Template composition expands the graph; loop passes are node/iteration
 positions on step rows, not child Flows.
 
@@ -235,22 +235,22 @@ competing plans remain unresolved. Preserve active Task identity, worktree, PR
 and execution. Preserve unreviewed backlog until explicit disposition; missing evidence is unknown.
 Current navigation stays Wave → Task and Linear retains past Projects.
 
-Exec is one actual lf process, including direct and agent-issued nested commands.
+Process is one actual lf process, including direct and agent-issued nested commands.
 AgentSession is one durable agent conversation, interactive or headless; identity,
 name, feedback and native history survive driver replacement. Product text says
 Session for interactive and Run for headless work. Waiting is the one attention
 state, judged in Rust from a provider stream `lf` owns. A step's result
 is how its process exited; a deciding or routing step also answers through the
-Session turn its Exec captured. Agent outcomes and retries belong in Session
-history; mechanical results are step Exec exits. A Session reaches its Flow
-through the step Exec that captured its input. Do not replace Run with another
+Session turn its Process captured. Agent outcomes and retries belong in Session
+history; mechanical results are step Process exits. A Session reaches its Flow
+through the step Process that captured its input. Do not replace Run with another
 generic attempt object.
 
 Main records have one SQLite owner. Task implies Wave; constructors fill omitted
 ancestors and reject mismatches. Bind assigns an unassigned conversation once,
 including to done/landed Tasks. Prospective attribution preserves earlier usage owners; the history reader
 owns that single choice. Actual work
-reservation sets Started once; logging an inspection Exec does not. Every
+reservation sets Started once; logging an inspection Process does not. Every
 denormalization is removed or validated on writes. Causal ancestry grants neither
 process control nor Flow settlement. Current driver and provider generations
 are separate: an unchanged engine survives driver handoff while old clients lose

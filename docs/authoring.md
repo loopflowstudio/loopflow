@@ -190,7 +190,7 @@ Existing logs and outcomes provide the evidence. The Wave operator resolves
 impediments or discusses missing judgment in its ongoing chat. A stopped Flow
 is never retried or resumed; its caller launches fresh work explicitly.
 
-Inspect a Flow's Execs and effects before launching further work.
+Inspect a Flow's Processes and effects before launching further work.
 Edits to the source apply to new Flows.
 Finishing a Flow grants no implicit merge or Task-completion authority and
 does not choose another Flow; author delivery explicitly.

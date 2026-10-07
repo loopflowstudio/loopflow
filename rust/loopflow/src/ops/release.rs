@@ -2773,7 +2773,7 @@ fn wait_for_release_repair(landing: &crate::pr_landing::PrLanding) -> OpsResult<
                     landing.pr_number
                 ),
                 continuation: format!(
-                    "observe landing {} and retry after its repair Exec exits",
+                    "observe landing {} and retry after its repair Process exits",
                     landing.id
                 ),
             });

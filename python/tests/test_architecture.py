@@ -12,7 +12,7 @@ SPEC = importlib.util.spec_from_file_location("architecture_check", SCRIPT)
 assert SPEC and SPEC.loader
 architecture = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = architecture
-SPEC.loader.exec_module(architecture)
+SPEC.loader.process_module(architecture)
 
 
 def _write(root: Path, path: str, text: str) -> None:
@@ -36,7 +36,7 @@ def repo(tmp_path: Path) -> Path:
             "| --- | --- | --- | --- | --- | --- | --- |\n"
             "| **Wave** | Goal | [`Wave`](../rust/loopflow/src/wave/types.rs) | "
             "`schema_migrations`, `waves` | `lf` | `lf wave` | "
-            "`provider:linear`, `exec:git` |\n"
+            "`provider:linear`, `process:git` |\n"
             """<!-- architecture-map:end -->
 
 <!-- architecture-projections:start -->

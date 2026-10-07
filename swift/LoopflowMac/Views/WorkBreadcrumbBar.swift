@@ -232,7 +232,7 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
         case .step(_, _, _, _, _, .earlier):
             "This conversation belonged to an earlier step of the Flow's current run."
         case .step(_, _, _, _, _, .past):
-            "This conversation belonged to a Flow exec that has since finished or been followed by a newer one."
+            "This conversation belonged to a Flow process that has since finished or been followed by a newer one."
         case .independent:
             "This conversation is not part of a Flow."
         case .unknown(let reason):

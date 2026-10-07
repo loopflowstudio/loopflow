@@ -1,9 +1,9 @@
 //! Unknown engines may be replaced after an observed restart of their host.
-//! A failed Exec or a missing PID does not establish this boundary.
+//! A failed Process or a missing PID does not establish this boundary.
 
 use serde::{Deserialize, Serialize};
 
-use crate::exec::SessionDriver;
+use crate::process::SessionDriver;
 use crate::store::sqlite::SqliteStore;
 use crate::store::StoreResult;
 
@@ -19,7 +19,7 @@ pub(super) fn prepare_after_restart(
     session: &str,
     expected: Option<&SessionDriver>,
 ) -> StoreResult<bool> {
-    let Some(expected) = expected.filter(|driver| driver.exec_id.is_none()) else {
+    let Some(expected) = expected.filter(|driver| driver.process_id.is_none()) else {
         return Ok(false);
     };
     let Some(boot) = host_boot() else {
@@ -85,7 +85,7 @@ fn host_boot() -> Option<HostBoot> {
 #[cfg(test)]
 mod tests {
     use super::HostBoot;
-    use crate::id::ExecId;
+    use crate::id::ProcessId;
     use crate::store::sqlite::SqliteStore;
 
     #[test]
@@ -188,16 +188,16 @@ mod tests {
         let input = crate::session_record::new_artifact_key();
         store.test_session("stranded", &input);
         let sql = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let exec = ExecId::new();
+        let process = ProcessId::new();
         sql.execute(
-            "INSERT INTO execs(id,trace_id,started_at,completed_at,outcome,error)
+            "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome,error)
              VALUES(?1,'00000000-0000-0000-0000-000000000001',1,2,'failed','Saved conversation thread differs; reconnect with its recorded provider')",
-            [exec.as_str()],
+            [process.as_str()],
         ).unwrap();
         sql.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,exec_id,payload)
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,process_id,payload)
             VALUES('stranded','captured','legacy-input',1,?1,'{}')",
-            [exec.as_str()],
+            [process.as_str()],
         )
         .unwrap();
         sql.execute(
@@ -211,7 +211,7 @@ mod tests {
                 json_object('schema_version',1,'artifact_key','legacy-input','host','fixture-host')),current_capture
             FROM agent_sessions WHERE id='stranded'", []).unwrap();
         let initial = store
-            .claim_session_driver("stranded", None, &exec, true)
+            .claim_session_driver("stranded", None, &process, true)
             .unwrap();
         store
             .record_session_connection("stranded", &initial, "/absent.sock", "saved-native-thread")
@@ -219,7 +219,7 @@ mod tests {
         // Reproduce the legacy admission: replacement lost process evidence,
         // then a failed attempt released its driver without a spawn receipt.
         let driver = store
-            .claim_session_driver("stranded", Some(&initial), &exec, true)
+            .claim_session_driver("stranded", Some(&initial), &process, true)
             .unwrap();
         let boot = HostBoot {
             host: "fixture-host".into(),
@@ -253,7 +253,7 @@ mod tests {
             .observe_session_recovery_boot("stranded", &released, &restarted)
             .unwrap());
         let replacement = store
-            .claim_session_driver("stranded", Some(&released), &exec, true)
+            .claim_session_driver("stranded", Some(&released), &process, true)
             .unwrap();
         assert_eq!(
             replacement.provider_generation,
@@ -270,7 +270,7 @@ mod tests {
             Some("saved-native-thread")
         );
         assert_eq!(
-            store.exec(&exec).unwrap().unwrap().outcome.as_deref(),
+            store.process(&process).unwrap().unwrap().outcome.as_deref(),
             Some("failed")
         );
         assert!(store
@@ -293,14 +293,14 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
         store.test_session("engine", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let exec = ExecId::new();
+        let process = ProcessId::new();
         sql.execute(
-            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'00000000-0000-0000-0000-000000000001',1)",
-            [exec.as_str()],
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'00000000-0000-0000-0000-000000000001',1)",
+            [process.as_str()],
         )
         .unwrap();
         let driver = store
-            .claim_session_driver("engine", None, &exec, true)
+            .claim_session_driver("engine", None, &process, true)
             .unwrap();
         store
             .record_session_provider_process(

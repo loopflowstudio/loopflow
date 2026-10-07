@@ -232,15 +232,15 @@ impl super::SqliteStore {
         )?)
     }
 
-    /// Execs holding an unfinished repair for this landing, newest first.
-    pub(crate) fn landing_repair_execs(
+    /// Processes holding an unfinished repair for this landing, newest first.
+    pub(crate) fn landing_repair_processes(
         &self,
         landing_id: &PrLandingId,
-    ) -> StoreResult<Vec<crate::id::ExecId>> {
+    ) -> StoreResult<Vec<crate::id::ProcessId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT repair_exec_id FROM ci_incidents
-             WHERE landing_id=?1 AND repair_exec_id IS NOT NULL AND repair_finished_at IS NULL
+            "SELECT repair_process_id FROM ci_incidents
+             WHERE landing_id=?1 AND repair_process_id IS NOT NULL AND repair_finished_at IS NULL
              ORDER BY updated_at DESC",
         )?;
         let rows = statement.query_map([landing_id.as_str()], |row| row.get(0))?;

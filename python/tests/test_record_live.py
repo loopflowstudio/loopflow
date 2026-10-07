@@ -14,7 +14,7 @@ REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts/benchmarks/desktop-performance/record_live.py"
 spec = importlib.util.spec_from_file_location("record_live", SCRIPT)
 record_live = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(record_live)
+spec.loader.process_module(record_live)
 
 
 def _signpost(kind: str, name: str, ident: int, at: str, message: str) -> str:

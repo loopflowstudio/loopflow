@@ -8,9 +8,9 @@ use anyhow::{anyhow, Result};
 use chrono::{Local, Utc};
 use time::{Duration, OffsetDateTime};
 
-use crate::exec::Exec;
 use crate::lf::output::Colors;
 use crate::ops::{CronObligation, CronSource};
+use crate::process::Process;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -80,14 +80,14 @@ pub fn run(json: bool) -> Result<()> {
         Some(error) => Check::fail("store", error.clone()),
         None => Check::ok("store", "selected database is compatible with this build"),
     }];
-    let events = match crate::store::sqlite::SqliteStore::open_execs_read_only(&database_path)
-        .and_then(|store| store.execs_since(0))
+    let events = match crate::store::sqlite::SqliteStore::open_processes_read_only(&database_path)
+        .and_then(|store| store.processes_since(0))
     {
         Ok(events) => Some(events),
         Err(error) => {
             checks.push(Check::fail(
-                "execs",
-                format!("cannot read Exec evidence: {error}"),
+                "processes",
+                format!("cannot read Process evidence: {error}"),
             ));
             None
         }
@@ -366,12 +366,12 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
     }
 }
 
-pub fn audit(events: &[Exec]) -> Vec<Check> {
+pub fn audit(events: &[Process]) -> Vec<Check> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     audit_at(events, &[], now)
 }
 
-fn audit_at(events: &[Exec], obligations: &[CronObligation], now: i64) -> Vec<Check> {
+fn audit_at(events: &[Process], obligations: &[CronObligation], now: i64) -> Vec<Check> {
     if events.is_empty() && obligations.is_empty() {
         return vec![Check::warn("continuity", "ledger is empty")];
     }
@@ -392,7 +392,7 @@ struct ExpectedInterval {
     end: i64,
 }
 
-fn check_continuity(events: &[Exec], obligations: &[CronObligation], now: i64) -> Check {
+fn check_continuity(events: &[Process], obligations: &[CronObligation], now: i64) -> Check {
     let gaps = ledger_gap_days(events, now);
     if obligations.is_empty() {
         return Check::ok(
@@ -468,7 +468,7 @@ fn check_continuity(events: &[Exec], obligations: &[CronObligation], now: i64) -
     )
 }
 
-fn ledger_gap_days(events: &[Exec], now: i64) -> Vec<time::Date> {
+fn ledger_gap_days(events: &[Process], now: i64) -> Vec<time::Date> {
     let days: BTreeSet<_> = events.iter().filter_map(|e| day_of(e.started_at)).collect();
     let (Some(first), Some(last_event_day)) = (days.first(), days.last()) else {
         return Vec::new();
@@ -571,23 +571,23 @@ fn format_local_timestamp(timestamp: i64) -> String {
 }
 
 /// A process may name only one command, and its terminal row names that work.
-fn check_attribution(events: &[Exec]) -> Check {
+fn check_attribution(events: &[Process]) -> Check {
     let unnamed = events
         .iter()
-        .filter(|exec| exec.completed_at.is_some() && exec.command.is_none())
+        .filter(|process| process.completed_at.is_some() && process.command.is_none())
         .count();
     if unnamed == 0 {
-        Check::ok("attribution", "every completed Exec names its command")
+        Check::ok("attribution", "every completed Process names its command")
     } else {
         Check::fail(
             "attribution",
-            format!("{unnamed} completed Execs name no command"),
+            format!("{unnamed} completed Processes name no command"),
         )
     }
 }
 
-/// Execs may be machine-scoped; recorded repositories must be absolute.
-fn check_identity(events: &[Exec]) -> Check {
+/// Processes may be machine-scoped; recorded repositories must be absolute.
+fn check_identity(events: &[Process]) -> Check {
     let repos: HashSet<&str> = events
         .iter()
         .filter_map(|event| event.repo.as_deref())
@@ -601,7 +601,7 @@ fn check_identity(events: &[Exec]) -> Check {
         return Check::ok(
             "identity",
             format!(
-                "{} repo value(s), all absolute; {unscoped} Exec(s) without repository scope",
+                "{} repo value(s), all absolute; {unscoped} Process(s) without repository scope",
                 repos.len()
             ),
         );
@@ -612,7 +612,7 @@ fn check_identity(events: &[Exec]) -> Check {
     )
 }
 
-fn check_lineage(events: &[Exec]) -> Check {
+fn check_lineage(events: &[Process]) -> Check {
     let processes: HashMap<&str, &str> = events
         .iter()
         .map(|event| (event.id.as_str(), event.trace_id.as_str()))
@@ -620,7 +620,7 @@ fn check_lineage(events: &[Exec]) -> Check {
     let dangling: HashSet<&str> = events
         .iter()
         .filter_map(|event| {
-            let parent = event.parent_exec_id.as_ref()?.as_str();
+            let parent = event.parent_process_id.as_ref()?.as_str();
             (processes.get(parent).copied() != Some(event.trace_id.as_str())).then_some(parent)
         })
         .collect();
@@ -661,7 +661,7 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
     if let Some(error) = &store.migration_error {
         println!("migration error: {error}");
     }
-    println!("ledger: {rows} Execs\n");
+    println!("ledger: {rows} Processes\n");
     for check in checks {
         let (mark, color) = match check.status {
             Status::Ok => ("ok  ", colors.green),
@@ -686,10 +686,10 @@ mod tests {
 
     use super::{audit, check_continuity, inspect_store, latest_due_interval, Status};
     use crate::durable::{CronReceiptId, HomeId};
-    use crate::exec::Exec;
     use crate::ops::{
         parse_schedule, CronObligation, CronOutcome, CronReceipt, CronSource, CronTargetKind,
     };
+    use crate::process::Process;
 
     const DAY: i64 = 86_400;
 
@@ -719,11 +719,11 @@ mod tests {
         assert!(error.contains("latest known"), "{error}");
     }
 
-    fn row(ts: i64, event: &str) -> Exec {
-        Exec {
-            id: crate::id::ExecId::new(),
+    fn row(ts: i64, event: &str) -> Process {
+        Process {
+            id: crate::id::ProcessId::new(),
             trace_id: crate::id::TraceId::new(),
-            parent_exec_id: None,
+            parent_process_id: None,
             via_agent: Some(false),
             caller_session_id: None,
             caller_provider_generation: None,
@@ -739,12 +739,12 @@ mod tests {
         }
     }
 
-    fn named(mut row: Exec, command: &str) -> Exec {
+    fn named(mut row: Process, command: &str) -> Process {
         row.command = Some(command.to_string());
         row
     }
 
-    fn status_of(rows: &[Exec], name: &str) -> Status {
+    fn status_of(rows: &[Process], name: &str) -> Status {
         audit(rows)
             .into_iter()
             .find(|check| check.name == name)
@@ -957,7 +957,7 @@ mod tests {
     }
 
     #[test]
-    fn machine_scoped_execs_have_valid_identity() {
+    fn machine_scoped_processes_have_valid_identity() {
         let mut event = named(row(DAY, "completed"), "lf help");
         event.repo = None;
         assert_eq!(status_of(&[event], "identity"), Status::Ok);

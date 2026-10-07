@@ -8,7 +8,7 @@ public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
     public let providerTurn: String?
     public let kind: Kind
     public let providerGeneration: Int64?
-    public let execID: String?
+    public let processID: String?
     public let taskID: String?
     public let waveID: String?
     public let observedAt: Int64
@@ -26,7 +26,7 @@ public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
         case providerThread = "provider_thread"
         case providerTurn = "provider_turn"
         case providerGeneration = "provider_generation"
-        case execID = "exec_id"
+        case processID = "process_id"
         case taskID = "task_id"
         case waveID = "wave_id"
         case observedAt = "observed_at"

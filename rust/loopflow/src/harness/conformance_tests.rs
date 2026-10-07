@@ -370,17 +370,17 @@ fn codex_rpc_error_response_maps_to_error_event() {
 // Status/SSE alone supplies neither a native completion nor measured usage.
 #[test]
 fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
-    use crate::id::ExecId;
+    use crate::id::ProcessId;
     use crate::store::sqlite::SqliteStore;
 
     let home = tempfile::tempdir().unwrap();
     let path = home.path().join("store.db");
     let store = SqliteStore::open_ephemeral(&path).unwrap();
     let sql = rusqlite::Connection::open(&path).unwrap();
-    let exec = ExecId::new();
+    let process = ProcessId::new();
     sql.execute(
-        "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-        [exec.as_str()],
+        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+        [process.as_str()],
     )
     .unwrap();
     for measured in [None, Some(0), Some(40)] {
@@ -388,7 +388,7 @@ fn opencode_native_history_preserves_output_tools_and_usage_missingness() {
         let session = format!("session-{measured:?}");
         store.test_session(&session, &input);
         let driver = store
-            .claim_session_driver(&session, None, &exec, false)
+            .claim_session_driver(&session, None, &process, false)
             .unwrap();
         let mut history = History::new(Some((store.clone(), session.clone(), driver)));
         let request = history.request();

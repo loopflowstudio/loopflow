@@ -3,14 +3,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::TaskId;
-use crate::id::{ExecId, TraceId, WaveId};
+use crate::id::{ProcessId, TraceId, WaveId};
 
 /// One recorded lf process. Unknown historical caller and exit evidence stays absent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Exec {
-    pub id: ExecId,
+pub struct Process {
+    pub id: ProcessId,
     pub trace_id: TraceId,
-    pub parent_exec_id: Option<ExecId>,
+    pub parent_process_id: Option<ProcessId>,
     pub via_agent: Option<bool>,
     pub caller_session_id: Option<String>,
     pub caller_provider_generation: Option<i64>,
@@ -28,21 +28,21 @@ pub struct Exec {
 /// Command discovery filters. Work means recorded work, never today's caller binding.
 /// Contains searches are literal; command case folding follows SQLite lower().
 #[derive(Debug, Clone, Default)]
-pub struct ExecFilter {
-    pub id: Option<ExecId>,
+pub struct ProcessFilter {
+    pub id: Option<ProcessId>,
     pub repo: Option<String>,
-    pub parent_exec_id: Option<ExecId>,
+    pub parent_process_id: Option<ProcessId>,
     pub caller_session_id: Option<String>,
     pub command_contains: Option<String>,
     pub identity_contains: Option<String>,
-    pub outcome: Option<ExecOutcomeFilter>,
-    pub performed_work: Option<ExecWorkFilter>,
+    pub outcome: Option<ProcessOutcomeFilter>,
+    pub performed_work: Option<ProcessWorkFilter>,
 }
 
 /// Unknown means no terminal observation, not an OS liveness judgment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ExecOutcomeFilter {
+pub enum ProcessOutcomeFilter {
     Succeeded,
     Failed,
     Interrupted,
@@ -52,7 +52,7 @@ pub enum ExecOutcomeFilter {
 /// IDs are already resolved by the caller, independently of launch eligibility.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ExecWorkFilter {
+pub enum ProcessWorkFilter {
     Task(TaskId),
     Wave(WaveId),
 }
@@ -61,16 +61,16 @@ pub enum ExecWorkFilter {
 /// A cursor is not a cross-request snapshot: late observations or changed outcomes may
 /// change membership. Refresh from the first page to observe those changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecCursor {
+pub struct ProcessCursor {
     pub started_at: i64,
-    pub id: ExecId,
+    pub id: ProcessId,
 }
 
 /// At most the requested number of command rows; no Session or Flow payloads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecPage {
-    pub entries: Vec<Exec>,
-    pub next: Option<ExecCursor>,
+pub struct ProcessPage {
+    pub entries: Vec<Process>,
+    pub next: Option<ProcessCursor>,
 }
 
 pub const AGENT_CALLER_ENV: &str = "LF_AGENT_CALLER";
@@ -96,16 +96,17 @@ impl FlowHeld {
 pub struct AgentCaller {
     pub session_id: String,
     pub provider_generation: i64,
-    pub origin_exec_id: ExecId,
+    #[serde(rename = "origin_exec_id")] // Retained provider environments use this format.
+    pub origin_process_id: ProcessId,
 }
 
 /// Separate fences: reconnecting a driver does not replace its live provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionDriver {
-    pub exec_id: Option<ExecId>,
+    pub process_id: Option<ProcessId>,
     pub generation: i64,
     pub provider_generation: i64,
-    pub provider_exec_id: ExecId,
+    pub provider_process_id: ProcessId,
 }
 
 impl SessionDriver {
@@ -113,7 +114,7 @@ impl SessionDriver {
         AgentCaller {
             session_id,
             provider_generation: self.provider_generation,
-            origin_exec_id: self.provider_exec_id.clone(),
+            origin_process_id: self.provider_process_id.clone(),
         }
     }
 }
@@ -124,10 +125,10 @@ pub(crate) struct SessionProcessObservation {
     pub id: String,
     pub title: String,
     pub work: Option<crate::durable::WorkRef>,
-    pub driver_exec_id: Option<ExecId>,
+    pub driver_process_id: Option<ProcessId>,
     pub driver_trace_id: Option<String>,
     pub driver_generation: i64,
-    pub provider_exec_id: Option<ExecId>,
+    pub provider_process_id: Option<ProcessId>,
     pub provider_pid: Option<u32>,
     pub provider_started_at: Option<i64>,
 }

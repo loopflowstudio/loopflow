@@ -53,8 +53,8 @@ a suggestion to check against the rules below, not an instruction. No action is
 a valid result only when every started Task already holds a disposition above.
 
 - **Look for a live driver first.** Read `lf task status <issue> --json` and
-  check every Flow in `execution.work.flows` and every unfinished Exec in
-  `execution.work.execs` against `lf ps --json`. A live process makes the Task
+  check every Flow in `execution.work.flows` and every unfinished Process in
+  `execution.work.processes` against `lf ps --json`. A live process makes the Task
   moving, whoever launched it. Unknown liveness is not idle.
 - **Recover before reporting a blocker.** Read the failed step's log and
   inspect its effects. Repair a supported cause, then launch only the remaining

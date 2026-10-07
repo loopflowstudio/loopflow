@@ -15,7 +15,7 @@ pub struct StoreRevisions {
     pub planning: i64,
     pub sessions: i64,
     pub flows: i64,
-    pub execs: i64,
+    pub processes: i64,
     /// Token counts. Moves every few seconds while agents work.
     pub usage: i64,
 }
@@ -27,7 +27,7 @@ impl SqliteStore {
             planning: 0,
             sessions: 0,
             flows: 0,
-            execs: 0,
+            processes: 0,
             usage: 0,
         };
         let mut query = conn.prepare("SELECT domain,revision FROM store_revisions")?;
@@ -38,7 +38,7 @@ impl SqliteStore {
                 "planning" => revisions.planning = revision,
                 "sessions" => revisions.sessions = revision,
                 "flows" => revisions.flows = revision,
-                "execs" => revisions.execs = revision,
+                "processes" => revisions.processes = revision,
                 "usage" => revisions.usage = revision,
                 _ => {}
             }
@@ -52,7 +52,7 @@ mod tests {
     use rusqlite::params;
 
     use super::{SqliteStore, StoreRevisions};
-    use crate::id::{ExecId, TraceId, WaveId};
+    use crate::id::{ProcessId, TraceId, WaveId};
 
     /// Tables no workspace surface reads. A new table belongs here or in a
     /// domain; `session_events` is covered except for transcript and usage rows.
@@ -137,12 +137,12 @@ mod tests {
     /// The tables the Task conversation work adds, each with the one domain
     /// its three triggers move.
     #[test]
-    fn workflow_flow_exec_and_activity_tables_move_their_domains() {
+    fn workflow_flow_process_and_activity_tables_move_their_domains() {
         let (_dir, store) = store();
         let conn = store.conn.lock().unwrap();
         for (table, domain) in [
-            ("flow_execs", "flows"),
-            ("flow_exec_steps", "flows"),
+            ("flow_processes", "flows"),
+            ("flow_process_steps", "flows"),
             ("task_workflows", "planning"),
             ("task_workflow_moves", "planning"),
             ("session_activity", "sessions"),
@@ -171,11 +171,11 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        let driver = crate::exec::SessionDriver {
-            exec_id: None,
+        let driver = crate::process::SessionDriver {
+            process_id: None,
             generation,
             provider_generation: 0,
-            provider_exec_id: ExecId::new(),
+            provider_process_id: ProcessId::new(),
         };
         let record = |observed_at, open_tools, pending_input, yielded| {
             let before = store.revisions().unwrap();
@@ -245,8 +245,8 @@ mod tests {
             )
             .unwrap();
             conn.execute(
-                "INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
-                params![ExecId::new(), TraceId::new()],
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
+                params![ProcessId::new(), TraceId::new()],
             )
             .unwrap();
         }
@@ -254,7 +254,7 @@ mod tests {
             store.revisions().unwrap(),
             StoreRevisions {
                 planning: before.planning + 1,
-                execs: before.execs + 1,
+                processes: before.processes + 1,
                 ..before
             }
         );

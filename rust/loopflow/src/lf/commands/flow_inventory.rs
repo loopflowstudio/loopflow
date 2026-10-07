@@ -10,7 +10,7 @@ use crate::store::{open_store, storage_config_from_env};
 
 #[derive(Debug, Default, Args)]
 pub struct FlowInventoryArgs {
-    /// List or show Flows that ran, from their Execs, instead of reusable templates
+    /// List or show Flows that ran, from their Processes, instead of reusable templates
     #[arg(long)]
     pub sessions: bool,
     /// Include every repository and flows with unknown repository evidence
@@ -122,7 +122,7 @@ pub fn inspect(selector: &str, json: bool) -> Result<()> {
         let detail = store
             .flow_detail(selector)
             .await?
-            .context("no Flow has that driver Exec")?;
+            .context("no Flow has that driver Process")?;
         if json {
             println!("{}", serde_json::to_string_pretty(&detail)?);
             return Ok(());
@@ -132,7 +132,7 @@ pub fn inspect(selector: &str, json: bool) -> Result<()> {
         for step in &detail.steps {
             println!(
                 "  {}  {}  {}",
-                step.exec_id,
+                step.process_id,
                 step.position(),
                 step.outcome.as_deref().unwrap_or("no recorded exit"),
             );

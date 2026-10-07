@@ -45,6 +45,7 @@ fn transient(stderr: &str) -> bool {
         "client.timeout exceeded",
         "context deadline exceeded",
         "i/o timeout",
+        "operation timed out",
         "connection reset",
         "unexpected eof",
         "http 502",
@@ -147,21 +148,26 @@ mod tests {
 
     #[test]
     fn retries_only_transient_reads() {
-        let mut attempts = 0;
-        let result = retry_read("checks", || {
-            attempts += 1;
-            if attempts == 1 {
-                Err(OpsError::CommandFailed {
-                    command: "gh".into(),
-                    stderr: "HTTP 502: Bad Gateway".into(),
-                })
-            } else {
-                Ok("same head")
-            }
-        })
-        .unwrap();
-        assert_eq!(result, "same head");
-        assert_eq!(attempts, 2);
+        for failure in [
+            "HTTP 502: Bad Gateway",
+            "error downloading artifact: error writing zip archive: read tcp: read: operation timed out",
+        ] {
+            let mut attempts = 0;
+            let result = retry_read("checks", || {
+                attempts += 1;
+                if attempts == 1 {
+                    Err(OpsError::CommandFailed {
+                        command: "gh".into(),
+                        stderr: failure.into(),
+                    })
+                } else {
+                    Ok("same head")
+                }
+            })
+            .unwrap();
+            assert_eq!(result, "same head");
+            assert_eq!(attempts, 2);
+        }
         for text in [
             "HTTP 401",
             "HTTP 403",

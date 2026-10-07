@@ -1125,6 +1125,15 @@ pub(crate) async fn spawn_session_exec(
             Err(error) => return Err(error.into()),
         }
         if let Some(status) = child.try_wait().context("probe human Session input")? {
+            // A finite terminal can publish native history and exit between
+            // probes. Its successful exit does not make that history unusable.
+            if status.success() {
+                if let Ok((dir, _)) = crate::session_record::resolve_manifest(&home, artifact_key) {
+                    if crate::session_record::read_provider_session(&dir)?.is_some() {
+                        return Ok(child);
+                    }
+                }
+            }
             bail!("{launch}: exited with {status} before becoming resumable");
         }
         if tokio::time::Instant::now() >= deadline {

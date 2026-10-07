@@ -625,7 +625,10 @@ fn exec_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         };
         let mut environment = built.agent_config.env.clone();
         environment.extend(capture.environment());
-        capture.begin_provider_spawn()?;
+        if target == ExecTarget::Ide {
+            // An external application launch has no child process receipt.
+            capture.begin_provider_spawn()?;
+        }
         let result = exec_session_with_env(
             target,
             &built.harness,

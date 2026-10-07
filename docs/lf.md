@@ -163,7 +163,12 @@ A Task's primary is one of its own conversations: the one named with
 most recently used. A Task with none gets a new one in its checkout. The others
 stay open, and listing Sessions never picks or starts one.
 
-Session connect, rename, bind and complete take the durable Session ID shown by
+Use `lf session resume` in the Task checkout, or `lf session connect SESSION`,
+to reopen the same conversation after a failed terminal launch. Retained native
+history survives retries. An active owner or a legacy provider without process
+evidence still needs its supported connection or recovery path.
+
+Session connect, rename and bind take the durable Session ID shown by
 `lf session list`. Capture keys and history prefixes select retained inputs for
 inspection and replay; they do not select these Session actions.
 

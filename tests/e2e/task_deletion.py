@@ -117,11 +117,14 @@ def _abandon_retains_execution(
         (process, process, str(repo), int(time.time())),
     )
     db.execute(
-        "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,interactive,task_id,wave_id,cwd) VALUES('retained-session','retained','generated',1,0,0,?,?,?)",
+        "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,"
+        "interactive,task_id,wave_id,cwd) "
+        "VALUES('retained-session','retained','generated',1,0,0,?,?,?)",
         (fixture["task"], fixture["wave"], str(repo)),
     )
     capture = db.execute(
-        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('retained-session','captured',?,1,'{}')",
+        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) "
+        "VALUES('retained-session','captured',?,1,'{}')",
         (uuid.uuid4().hex,),
     ).lastrowid
     db.execute(
@@ -331,6 +334,7 @@ def main() -> None:
             )
             history_query = f"SELECT {history_columns} FROM tasks"
             before = db.execute(history_query).fetchall()
+            prs = db.execute("SELECT * FROM task_prs").fetchall()
             for selector in ["INF-123", fixture["task"]]:
                 result = subprocess.run(
                     [fixture["lf"], "task", "delete", selector],

@@ -180,7 +180,7 @@ fn check_binary_freshness() -> Check {
                 FRESHNESS,
                 format!(
                     "running lf is built from {} and is {} merged commit(s) behind cached {UPSTREAM} (not refreshed); \
-                     latest merged changes: {commits}. Run `lf machine install` to install the latest published release",
+                     latest merged changes: {commits}. Run `lf install` to install the latest published release",
                     crate::build_info::short_revision(&revision),
                     missing.len(),
                 ),
@@ -235,7 +235,7 @@ fn inspect_store(path: &Path) -> StoreReport {
                     crate::store::migrations::validate_sqlite(&connection).and_then(|()| {
                         if let Some(pending) = crate::store::migrations::pending_shared_migration(&connection)? {
                             return Err(crate::store::StoreError::InvalidData(format!(
-                                "selected database is missing {pending}; run `lf machine install` to install a published release"
+                                "selected database is missing {pending}; run `lf install` to install a published release"
                             )));
                         }
                         Ok(())
@@ -249,7 +249,7 @@ fn inspect_store(path: &Path) -> StoreReport {
         }
     }
     if !path.exists() {
-        migration_error = Some(format!("selected database {} does not exist; run `lf machine install` to initialize a published installation", path.display()));
+        migration_error = Some(format!("selected database {} does not exist; run `lf install` to initialize a published installation", path.display()));
     }
     StoreReport {
         build_provenance: crate::build_info::provenance(),
@@ -274,7 +274,7 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
         Err(error) => {
             return vec![Check::fail(
                 "install-selection",
-                format!("cannot resolve machine install authority: {error}"),
+                format!("cannot resolve installation authority: {error}"),
             )]
         }
     };
@@ -282,11 +282,11 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
         Ok(crate::installation::InstallationState::Legacy) => vec![
             Check::warn(
                 "install-selection",
-                "no versioned machine install receipt; the next promotion will initialize it",
+                "no versioned installation receipt; the next promotion will initialize it",
             ),
             Check::warn(
                 "install-fallback",
-                "published fallback has not been retained by the machine install path yet",
+                "published fallback has not been retained by the installation path yet",
             ),
         ],
         Ok(crate::installation::InstallationState::Switching(receipt)) => vec![Check::fail(
@@ -310,7 +310,7 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
                 ),
                 Ok(None) => Check::ok(
                     "install-selection",
-                    "running source artifact is outside the pinned machine installation",
+                    "running source artifact is outside the pinned installation",
                 ),
                 Err(error) => Check::fail("install-selection", error.to_string()),
             };

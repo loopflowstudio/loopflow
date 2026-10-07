@@ -94,7 +94,7 @@ one Skill run
 | Execution | Skill discovery, prompt assembly, provider routing, harnesses, command and conversation history | [Execution](architecture/execution.md) |
 | Planning | Flow composition, Wave/Task Work, Steer, questions, review FlowSteps | [Planning](architecture/planning.md) |
 | Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
-| Machines | Placement, SSH routing, machine install | [Machines and processes](architecture/machines.md) |
+| Machines | Placement, SSH routing, installation | [Machines and processes](architecture/machines.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](architecture/data.md) |
 | Codebase | Source territories, public surfaces, processes, extension points | [Codebase map](architecture/codebase.md) |
 

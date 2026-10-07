@@ -1322,17 +1322,18 @@ fn run() -> anyhow::Result<()> {
     }
     // Installation owns its promotion/recovery authority. In particular,
     // read-only candidate preflight must work before a first install settles.
-    let bypasses_machine_startup_gate = matches!(
+    let bypasses_installation_startup_gate = matches!(
         &cli.command,
-        Some(Commands::Machine {
-            cmd: loopflow::lf::MachineCommand::Install { .. }
-                | loopflow::lf::MachineCommand::Doctor {
-                    planning: false,
-                    ..
-                }
+        Some(Commands::Installation {
+            cmd: loopflow::lf::InstallationCommand::Install { .. }
+        }) | Some(Commands::Machine {
+            cmd: loopflow::lf::MachineCommand::Doctor {
+                planning: false,
+                ..
+            }
         })
     );
-    if !bypasses_machine_startup_gate
+    if !bypasses_installation_startup_gate
         && !matches!(
             &cli.command,
             Some(
@@ -1350,12 +1351,13 @@ fn run() -> anyhow::Result<()> {
     if matches!(
         &cli.command,
         Some(
-            Commands::Machine {
-                cmd: loopflow::lf::MachineCommand::Install { .. }
-                    | loopflow::lf::MachineCommand::Doctor {
-                        planning: false,
-                        ..
-                    }
+            Commands::Installation {
+                cmd: loopflow::lf::InstallationCommand::Install { .. }
+            } | Commands::Machine {
+                cmd: loopflow::lf::MachineCommand::Doctor {
+                    planning: false,
+                    ..
+                }
             } | Commands::Machine {
                 cmd: loopflow::lf::MachineCommand::Screenshot { .. }
             } | Commands::ScreenshotSupervisor { .. }
@@ -1395,10 +1397,10 @@ fn run() -> anyhow::Result<()> {
     // Global-promotion commands dispatch before home routing, journal emission,
     // and any ordinary store open: a candidate that does not know the live
     // migration frontier must reach the preflight refusal, not fail in
-    // trace/store capture. `lf machine install` opens the store only read-only, inside
+    // trace/store capture. `lf install` opens the store only read-only, inside
     // its own preflight.
-    if let Some(Commands::Machine {
-        cmd: loopflow::lf::MachineCommand::Install { cmd },
+    if let Some(Commands::Installation {
+        cmd: loopflow::lf::InstallationCommand::Install { cmd },
     }) = &cli.command
     {
         return match cmd.as_ref() {
@@ -1719,8 +1721,8 @@ fn execute_command(
                 | loopflow::lf::MachineCommand::Id { .. }
                 | loopflow::lf::MachineCommand::Observe { .. }),
         }) => loopflow::lf::commands::machine::run(cmd),
-        Some(Commands::Machine {
-            cmd: loopflow::lf::MachineCommand::SyncSkills { yes, no_prune },
+        Some(Commands::Installation {
+            cmd: loopflow::lf::InstallationCommand::SyncSkills { yes, no_prune },
         }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune),
         Some(Commands::Wave {
             cmd:
@@ -1838,8 +1840,8 @@ fn execute_command(
         }) => in_repo_runtime(args, |repo| {
             loopflow::lf::commands::discord::serve(repo, wave)
         }),
-        Some(Commands::Machine {
-            cmd: loopflow::lf::MachineCommand::Install { .. },
+        Some(Commands::Installation {
+            cmd: loopflow::lf::InstallationCommand::Install { .. },
         }) => {
             unreachable!("install dispatches before home routing")
         }

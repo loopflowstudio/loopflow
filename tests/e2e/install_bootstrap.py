@@ -7,7 +7,7 @@ Optionally put a checksum-verified older release pair in /fixture/prior.
 
 The HTTPS release transport is local; binaries, checksum checks, promotion,
 store initialization, activation and recovery are real. Each case owns a fresh
-OS account because HOME overrides cannot isolate machine installation state.
+OS account because HOME overrides cannot isolate installation state.
 """
 
 from __future__ import annotations

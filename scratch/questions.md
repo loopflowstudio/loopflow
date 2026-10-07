@@ -26,11 +26,15 @@ settled the holder and the credential rules. Jack authorized only the rename sli
   saved as a patch here. LOO-395 was cancelled as merged the same day.
 
 2026-10-07 rename preservation: keep opaque IDs and installed plist/cache keys;
-read released cron JSON via an explicit field alias. These are persisted-data
+read released cron JSON via an explicit field alias; discard version-1 Desktop
+caches per Jack Heart’s review. Retain `~/.lf-machine/install` and the existing
+promotion lock because released gates, receipts and jobs pin those paths and
+no installed relocation proof exists. These are persisted-data
 contracts, not alternate commands or runtime owners. No installed store is touched.
 
-Context: authored memory is 15,994/16,000 tokens and scratch is within budget.
-`lf context --skill realign --json` reports the generated launch goal at about
-23,200/16,000 tokens (about 7,200 over) because of the broad rename's file inventory. Editing authored
-notes cannot reduce that generated inventory; limits remain unchanged. Total
-submitted input fits. The archived LOO-393 patch is retained in Git.
+Context: `lf context --skill implement --json` reports authored memory at
+15,986/16,000 tokens and scratch at 6,325/12,000. The generated launch goal is
+23,644/16,000 (7,644 over), from the broad committed file inventory and stored
+steers. Authored-note edits cannot reduce that generated source; limits remain
+unchanged and submitted input fits. The complete launch source was inspected;
+the archived LOO-393 patch and superseded PR walkthrough remain in Git.

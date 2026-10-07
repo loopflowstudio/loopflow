@@ -53,7 +53,7 @@ subprocess edge to one concept.
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
 | Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave/) | goals, metrics, memory, relocation |
 | store abstraction | [`store/`](../../rust/loopflow/src/store/) | domain rows and transactions |
-| machine install | [`installation.rs`](../../rust/loopflow/src/installation.rs) | artifact set and switch receipt |
+| installation | [`installation.rs`](../../rust/loopflow/src/installation.rs) | artifact set and switch receipt |
 | Mac read surfaces | [`swift/Loopflow/`](../../swift/Loopflow/) | required-field DTOs from `lf --json` |
 
 ## Public process surfaces

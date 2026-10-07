@@ -1,4 +1,4 @@
-//! Machine-global lock serializing `lf` promotion.
+//! Installation lock serializing `lf` promotion.
 
 use std::fs::{self, File, OpenOptions};
 use std::io;

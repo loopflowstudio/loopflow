@@ -832,6 +832,104 @@ Reconcile linked Waves to the repository's Linear Team
 | `--apply` | apply Default: false. |
 | `--help / -h` | Print help |
 
+## lf installation
+
+Manage the installed Loopflow release and exported skills
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf installation install
+
+Install the latest published Loopflow release from any directory
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf installation install schedule
+
+Install the latest Loopflow at login and weekly by default (macOS launchd)
+
+| Argument | What it does |
+|---|---|
+| `<frequency>` | Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time) Default: weekly. |
+| `--help / -h` | Print help |
+
+## lf installation install recover-switch
+
+Continue one interrupted installation switch from its pinned candidate
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--switch` | The fixed installation switch receipt to continue |
+| `--help / -h` | Print help |
+
+## lf installation install preflight
+
+Preview whether this build may replace the global lf (read-only). Reads the shared store's migration frontier and validates executable planning references against this binary without changing that frontier. Exits non-zero on refusal so a caller can gate on it
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit the structured PromotionPreview as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf installation install advance-switch
+
+Advance the receipt-selected store with this exact candidate's registry
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--switch` | switch |
+| `--help / -h` | Print help |
+
+## lf installation install promote
+
+Promote this build to the global CLI: content-address it into ~/.lf/bin and atomically repoint the target symlink, under the exclusive promotion lock. Refuses — leaving every target unchanged — on incompatible schema or persisted executable evidence
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--cli-target` | The global CLI symlink to replace (e.g. ~/.local/bin/lf) |
+| `--app-source` | A staged Loopflow.app bundle to install alongside the CLI |
+| `--app-target` | The global Loopflow.app path to replace atomically |
+| `--legacy-app-target` | A retired app bundle to remove after the new app commits |
+| `--sync-skills` | Regenerate global skills after the promotion commits Default: false. |
+| `--preview` | Validate and print the preview but change nothing Default: false. |
+| `--help / -h` | Print help |
+
+## lf installation install rollback
+
+Repoint the global CLI at retained prior bytes only after that binary's own preflight proves it recognizes the current store frontier
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--cli-target` | The global CLI symlink to replace (e.g. ~/.local/bin/lf) |
+| `--candidate` | The immutable content-addressed prior executable to activate |
+| `--help / -h` | Print help |
+
+## lf installation sync-skills
+
+Compile loopflow skills into your home vendor Skills directories
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `--yes / -y` | Confirm writes under ~/ without prompting Default: false. |
+| `--no-prune` | Keep stale loopflow-generated skills Default: false. |
+| `--help / -h` | Print help |
+
 ## lf machine
 
 Inspect this Machine and observe routes to other Machines
@@ -858,96 +956,6 @@ Capture a URL or local HTML file without claiming the user's browser
 | `--output / -o` | PNG destination |
 | `--width` | Viewport width in pixels Default: 1440. |
 | `--height` | Viewport height in pixels Default: 900. |
-| `--help / -h` | Print help |
-
-## lf machine install
-
-Install the latest published Loopflow release from any directory
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf machine install schedule
-
-Install the latest Loopflow at login and weekly by default (macOS launchd)
-
-| Argument | What it does |
-|---|---|
-| `<frequency>` | Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time) Default: weekly. |
-| `--help / -h` | Print help |
-
-## lf machine install recover-switch
-
-Continue one interrupted machine install switch from its pinned candidate
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--switch` | The fixed machine switch receipt to continue |
-| `--help / -h` | Print help |
-
-## lf machine install preflight
-
-Preview whether this build may replace the global lf (read-only). Reads the shared store's migration frontier and validates executable planning references against this binary without changing that frontier. Exits non-zero on refusal so a caller can gate on it
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--json` | Emit the structured PromotionPreview as JSON Default: false. |
-| `--help / -h` | Print help |
-
-## lf machine install advance-switch
-
-Advance the receipt-selected store with this exact candidate's registry
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--switch` | switch |
-| `--help / -h` | Print help |
-
-## lf machine install promote
-
-Promote this build to the global CLI: content-address it into ~/.lf/bin and atomically repoint the target symlink, under the exclusive promotion lock. Refuses — leaving every target unchanged — on incompatible schema or persisted executable evidence
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--cli-target` | The global CLI symlink to replace (e.g. ~/.local/bin/lf) |
-| `--app-source` | A staged Loopflow.app bundle to install alongside the CLI |
-| `--app-target` | The global Loopflow.app path to replace atomically |
-| `--legacy-app-target` | A retired app bundle to remove after the new app commits |
-| `--sync-skills` | Regenerate global skills after the promotion commits Default: false. |
-| `--preview` | Validate and print the preview but change nothing Default: false. |
-| `--help / -h` | Print help |
-
-## lf machine install rollback
-
-Repoint the global CLI at retained prior bytes only after that binary's own preflight proves it recognizes the current store frontier
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--cli-target` | The global CLI symlink to replace (e.g. ~/.local/bin/lf) |
-| `--candidate` | The immutable content-addressed prior executable to activate |
-| `--help / -h` | Print help |
-
-## lf machine sync-skills
-
-Compile loopflow skills into your home vendor Skills directories
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `--yes / -y` | Confirm writes under ~/ without prompting Default: false. |
-| `--no-prune` | Keep stale loopflow-generated skills Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine doctor

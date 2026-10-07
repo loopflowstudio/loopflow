@@ -761,7 +761,7 @@ The disposable OS account authors fixture installation records for routing proof
 Task adoption uses an explicit experimental Machine. No host Machine, credentials or installation
 is mounted. Default executable routing uses two real source CLI processes and
 a simulated installed executable. It runs in this disposable account because
-`HOME` and `LF_HOME` cannot isolate machine installation records. The ordinary
+`HOME` and `LF_HOME` cannot isolate installation records. The ordinary
 `pr_tests` suite covers Task continuation's auto-merge revocation and review
 continuity in an explicit experimental Machine.
 
@@ -1012,7 +1012,7 @@ installation harness for default-runtime proofs; never replace the machine's
 selection to make tests pass. Flow/Session tests with an explicit experimental
 `LF_HOME` and source `LF_BIN` stay within that experiment.
 
-`lf machine install preflight` and `promote` read the OS account's store and take
+`lf install preflight` and `promote` read the OS account's store and take
 its promotion lock; `HOME` and `LF_HOME` do not redirect them. Tests that run
 either command are installation proofs: ignored in the regular suite and listed
 in `scripts/test_task_installation.py`. On a developer machine they would copy

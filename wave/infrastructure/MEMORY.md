@@ -2,18 +2,17 @@
 
 ## Machine terminology (LOO-394, 2026-10-07)
 
-Jack Heart authorized only the Home-to-machine rename, PR 1 publication and then
-stop. A machine means one OS user and Loopflow data directory. `LF_HOME` and
-provider/account homes retain filesystem meanings. Commands, Rust/Swift DTOs and
-one SQLite draft rename the authority without relocating data. Opaque `home_…`
-IDs, cron plist keys, Desktop selection keys and historical payloads survive.
-Cron accepts released JSON keys; Desktop translates version-1 cached DTO keys
-on read without rewriting the file. Installation keeps its separate owner and
-lock path. Retained binaries may predate a command rename: installer recovery
-uses the shared `install` shorthand. Exact-frontier fixtures must seed released
-SQL, not the experiment initializer that adds drafts. Local checks prove no
-installed migration or remote continuity. Release's schedule evidence requires
-preserving original ownership and activation through a naming change.
+Jack Heart authorized the rename, then two changes to PR #1484 and republication
+only: discard old Desktop caches and name the installation scope `installation`.
+A machine is one OS user and data directory; `LF_HOME` retains its filesystem
+meaning. Opaque `home_…` IDs, cron plist keys and historical payloads survive.
+Cron reads released JSON keys. Desktop discards version-1 caches; this supersedes
+the earlier translation decision. Installation owns artifact updates and skill
+exports; short commands stay. Retain `~/.lf-machine/install` and the promotion
+lock path because released gates, receipts and jobs pin them; no relocation is
+proved. Retained binaries use the shared `install` shorthand. Exact-frontier
+fixtures seed released SQL without drafts. Local checks prove neither installed
+migration nor remote continuity. Schedule ownership and activation stay intact.
 
 ## Storage footprint (LOO-390, 2026-10-06)
 

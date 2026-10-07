@@ -7,8 +7,6 @@ pub fn run(cmd: &MachineCommand) -> anyhow::Result<()> {
     match cmd {
         MachineCommand::Desktop
         | MachineCommand::Screenshot { .. }
-        | MachineCommand::Install { .. }
-        | MachineCommand::SyncSkills { .. }
         | MachineCommand::Doctor { .. }
         | MachineCommand::Ssh { .. } => {
             unreachable!("startup and operation commands dispatch separately")

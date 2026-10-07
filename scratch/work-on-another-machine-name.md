@@ -1,10 +1,11 @@
 # Work on another machine
 
-Status: rename slice authorized for implementation and publication by Jack Heart,
-2026-10-07 (comment 43c8a308-9009-42ab-9c35-0955902c6480), superseding the Task
-brief's earlier unreviewed-draft status. Source rename and preservation repairs
-are implemented; affected gate, isolated installation proof and PR 1 publication
-remain. Publication is the authorized stopping point. Later slices remain intent.
+Status: PR #1484 is published. Jack Heart requested only two review changes on
+2026-10-07 (comment 55a0096b-1a36-4690-bb2e-a1a3a1763989): discard old Desktop
+caches and rename the installation scope. Both are implemented and focused checks pass;
+republication remains. Stop after republication; no landing or later slice
+is authorized. The full affected gate and isolated installation proof remain
+with gate/CI.
 
 Do not lift code, tests, help text or config from herdr or cmux (Jack Heart,
 2026-10-07). Their behaviour is described here from docs and reading; write
@@ -122,7 +123,7 @@ PR 1 changes the Home names below to machine. The remote-work limitations remain
 - Mac app: a pane runs `lf session connect <id>`; the app owns the terminal;
   quitting ends the clients. Pane layout is in memory only.
 
-## PR 1: rename — implemented, verification and publication remain
+## PR 1: rename — review changes implemented
 
 Rename slice: commands, help, errors, docs, builtin skills, Rust/Swift types and
 DTO fixtures use machine. One migration renames the identity table and placement
@@ -133,17 +134,22 @@ columns without rewriting IDs, routes, timestamps or historical payloads.
 - Saved cron JSON accepts its released `home_id` key and writes `machine_id`.
   The installed `LoopflowHomeId` plist key and Desktop selection's `homeId` key
   remain stable; changing them would drop existing schedules or selections.
-  Desktop upgrades version-1 cached DTO keys on read, preserving the source file.
+  Desktop discards version-1 cache files and reloads current data. Jack Heart
+  explicitly accepted losing those saved views instead of translating them.
 - The retired landing discriminator and JSON retain their historical spelling
   and fence. Released SQL and historical benchmark captures are immutable.
-- Installation code is `installation.rs`; its existing promotion lock stays at
-  the same path. Installation command ownership is LOO-401's separate work.
+- Installation code is `installation.rs`; `InstallationCommand` owns install
+  and skill exports. The existing `lf install` shorthand survives; the hidden
+  skill exporter uses its full `lf installation sync-skills` path.
+  Keep `~/.lf-machine/install` and `~/.lf/promotion.lock`: released entry gates,
+  receipts and jobs pin them. No installed relocation proof exists, so neither
+  path moves. Jack Heart explicitly authorized this expanded rename.
 - A machine is one OS user and data directory, documented in the glossary.
 
 PR 1 acceptance: CLI/help/docs and Rust/Swift DTOs agree on machine; the released
 schema reaches the single draft with IDs, routes, timestamps and foreign keys
-intact; cron ownership, saved Desktop selections and retained installer recovery
-survive the rename. Existing focused checks cover these source boundaries.
+intact; cron ownership and retained installer recovery survive the rename.
+Current-version Desktop caches retain selections; old caches are discarded. Existing focused checks cover these source boundaries.
 The affected gate and isolated installer proof remain with gate/CI. Publication
 does not establish installed migration or any remote-work acceptance below.
 
@@ -177,9 +183,7 @@ answer. Proposed instead: detect skew and make it one step to fix.
 - Each machine's own scheduled update keeps running; this covers the window
   between them.
 
-Review decisions on PR 1 (Jack Heart, 2026-10-07): drop the Desktop cache
-translation and discard old cache files; rename the install scope so "machine"
-has one meaning; accept that machines reached by id upgrade together for now;
+Jack Heart accepted that machines reached by id upgrade together for now;
 nothing outside the repository needs changing.
 
 ### 2. The Task on a machine that has never seen it
@@ -330,8 +334,9 @@ Decided by Jack Heart, 2026-10-07: "Fine to break things up into multiple
 PRs." Each one deletes what it replaces. Follow-ups are intent only; each gets
 its own plan when started.
 
-1. Rename Home to machine. No behaviour change. `This slice`: source implemented;
-   affected gate, isolated installer proof and publication remain.
+1. Rename Home to machine. `This slice`: PR #1484 published; two review changes
+   implemented and focused checks pass; republication remains. Old display caches are
+   discarded by explicit decision. Gate and isolated installer proof remain.
 2. Machine record: `lf machine add`, `list`, `status`, `rename`, `remove`;
    ssh aliases; identity fetched at add; repository path. Deletes `lf machine
    observe`, the hard-coded repository path and the `user@host` rule.
@@ -372,7 +377,8 @@ Codex's disposition remains unresolved as noted above:
 - `lf machine observe` (renamed in PR 1); the hard-coded `~/src/loopflow`; the `user@host` rule.
 - Random Task id minting for new Tasks.
 - Rename slice removes `capture_home_command`, its unused capture subprocess and
-  error type, plus the cache migration's duplicate JSON serialization. Installer
+  error type. Review removes `renameMachineFields`, the version-1 cache translation
+  and its tests; the existing discard and current-cache tests cover the survivor. Installer
   subprocesses use `install` without a command-group prefix so retained binaries
   remain callable across the rename. The `home:` GOAL key is already ignored by
   config parsing; its rejection fixture stays. `/detach` remains with the later
@@ -424,21 +430,25 @@ Codex's disposition remains unresolved as noted above:
 - Comparison guides: https://claude.ai/artifact/1xpMiizmX3od7pYpqBTdcQ and
   https://claude.ai/artifact/MsYW6XqaKpJoUzcx5oRxfS
 
-Review: preserve stored identities and historical bytes; one schema owner and no
-new runtime. Version-1 Desktop wire caches needed an explicit key migration.
-The telemetry Flow uses the existing `doctor` shorthand so its authored definition
-works across the command-group rename. Installer calls likewise use the existing
-`install` shorthand: receipt-pinned recovery may execute a pre-rename binary.
-Installed v0.13.9 resolves preflight, recovery and advancement help through it;
-this is parser evidence, not installation. The exact-store test now seeds the
-canonical schema directly: the experiment initializer had added drafts, making
-its claimed exact release frontier false. No later slice was started.
+Review: the publication range retains identities and stored paths. The cache
+translation is deleted; current-version saved data and incompatible-file removal
+keep their existing coverage. Install and sync-skills move to `installation`,
+while machine diagnosis still inspects the machine's storage and execution.
+Retained binaries are called through the existing `install` shorthand. The
+promotion lock keeps the same inode path, preventing split exclusion across
+versions. No schema or installation-path migration was added.
 
-Rename source is checkpointed at `d7a345896`; installer/cache repairs at
-`327e6e11e`. Prior rename checks remain at
-`d7a345896:scratch/work-on-another-machine-name.md`; unchanged migration, DTO,
-routing and Python evidence still applies. October 7 reconciliation changed
-only notes and memory; Release was the sole child Wave and its top-level goal
-and memory were read. No new implementation mismatch was found.
+The prior review walkthrough is historical at
+`56a2677c4:scratch/pr-review.html`. It led to Jack Heart's two accepted changes.
+The command discovery test exposed a pre-existing half-renamed fixture: its
+synthetic tree still named `home` while expecting `machine`; the fixture now
+matches the expected command. The scheduled installer also still emitted
+`home install`; its generated job now uses `install`. The schedule fixture
+checks retained cadence and repeatability; no live job was rewritten. Hidden
+commands require their full owner path; they have no transitive shorthand.
+Earlier migration/DTO/cron/Python evidence remains
+at `d7a345896:scratch/work-on-another-machine-name.md`; retained installer repairs
+are at `327e6e11e`. Release's child memory still requires preserving original job
+ownership and activation; no installed or remote acceptance is inferred here.
 
-Checks: `git diff --check` passes; unchanged-code passes reused for `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo nextest run -p loopflow --lib --test cli_discovery -E 'test(lf::commands::install::) | test(inspection_is_identical_across_spellings)'` (16), and `scripts/test_desktop.sh -Xswiftc -gnone --filter WorkCacheTests` (15); full affected gate and isolated installation proof remain with CI/gate, and installed migration and later-slice acceptance remain unproved.
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; focused `cargo nextest run -p loopflow --lib --bin lf --test cli_discovery --test documented_commands --test global_commands -E 'test(installation::tests::) | test(lf::commands::install::) | test(install_exposes_refresh) | binary(cli_discovery) | binary(documented_commands) | test(scheduled_install) | test(schedule_rejects)'` covers 62 checks (61 passed together, corrected help/discovery and documentation rerun: 4/4); `scripts/test_desktop.sh -Xswiftc -gnone --filter WorkCacheTests` passes (14). Full affected gate and isolated installer proof remain with gate/CI; no installed upgrade or remote continuity is claimed.

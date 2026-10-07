@@ -79,40 +79,13 @@ final class WorkCache: @unchecked Sendable {
             loaded = true
             guard let data = try? Data(contentsOf: url) else { return nil }
             guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
-                  (1...Self.version).contains(envelope.version) else {
+                  envelope.version == Self.version else {
                 try? FileManager.default.removeItem(at: url)
                 return nil
             }
             snapshot = envelope.snapshot
-            if envelope.version == 1 {
-                snapshot.roadmap = snapshot.roadmap.map(Self.renameMachineFields)
-                snapshot.waves = snapshot.waves.map(Self.renameMachineFields)
-                snapshot.repositories = snapshot.repositories.mapValues { entry in
-                    var entry = entry
-                    entry.sessionPages = entry.sessionPages?.map(Self.renameMachineFields)
-                    return entry
-                }
-            }
             return snapshot
         }
-    }
-
-    // Version 1 cached wire documents predate the machine rename. Migrate only
-    // structured keys, preserving titles, paths, IDs and the original file bytes.
-    private static func renameMachineFields(_ text: String) -> String {
-        func renamed(_ value: Any) -> Any {
-            if let items = value as? [Any] { return items.map(renamed) }
-            guard let object = value as? [String: Any] else { return value }
-            var result: [String: Any] = [:]
-            for (key, value) in object {
-                let identity = value as? [String: Any]
-                let machineKey = key == "home_id" ? "machine_id"
-                    : (key == "home" && identity?["route"] != nil && identity?["id"] != nil ? "machine" : key)
-                result[machineKey] = renamed(value)
-            }
-            return result
-        }
-        return rewrite(text, renamed) ?? text
     }
 
     func saveRoadmap(_ text: String) {

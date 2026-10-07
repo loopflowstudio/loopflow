@@ -375,6 +375,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: RepoCommand,
     },
+    /// Manage the installed Loopflow release and exported skills
+    Installation {
+        #[command(subcommand)]
+        cmd: InstallationCommand,
+    },
     /// Inspect this Machine and observe routes to other Machines
     Machine {
         #[command(subcommand)]
@@ -987,10 +992,10 @@ pub enum InstallCommand {
         #[arg(value_enum, default_value = "weekly")]
         frequency: InstallFrequency,
     },
-    /// Continue one interrupted machine install switch from its pinned candidate.
+    /// Continue one interrupted installation switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {
-        /// The fixed machine switch receipt to continue.
+        /// The fixed installation switch receipt to continue.
         #[arg(long)]
         switch: String,
     },
@@ -1360,16 +1365,9 @@ pub enum RepoCommand {
     },
 }
 
-/// Inspect and observe durable Machines.
+/// Manage the installed artifacts and exported skills.
 #[derive(Debug, Subcommand)]
-pub enum MachineCommand {
-    /// Open or focus Loopflow.app
-    Desktop,
-    /// Capture a URL or local HTML file without claiming the user's browser
-    Screenshot {
-        #[command(flatten)]
-        screenshot: ScreenshotArgs,
-    },
+pub enum InstallationCommand {
     /// Install the latest published Loopflow release from any directory
     Install {
         #[command(subcommand)]
@@ -1384,6 +1382,18 @@ pub enum MachineCommand {
         /// Keep stale loopflow-generated skills
         #[arg(long = "no-prune")]
         no_prune: bool,
+    },
+}
+
+/// Inspect and observe durable Machines.
+#[derive(Debug, Subcommand)]
+pub enum MachineCommand {
+    /// Open or focus Loopflow.app
+    Desktop,
+    /// Capture a URL or local HTML file without claiming the user's browser
+    Screenshot {
+        #[command(flatten)]
+        screenshot: ScreenshotArgs,
     },
     /// Diagnose installation, storage, Exec integrity and scheduled receipts
     Doctor {
@@ -1807,9 +1817,12 @@ mod tests {
     #[test]
     fn install_exposes_refresh_and_schedule_but_hides_transaction_commands() {
         let mut command = Cli::command();
-        let home = command.find_subcommand_mut("machine").unwrap();
-        assert!(home.render_long_help().to_string().contains("install"));
-        let help = home
+        let installation = command.find_subcommand_mut("installation").unwrap();
+        assert!(installation
+            .render_long_help()
+            .to_string()
+            .contains("install"));
+        let help = installation
             .find_subcommand_mut("install")
             .unwrap()
             .render_long_help()
@@ -1817,16 +1830,17 @@ mod tests {
         assert!(help.contains("schedule"));
         assert!(!help.contains("preflight"));
         assert!(matches!(
-            Cli::try_parse_from(["lf", "machine", "install"])
+            Cli::try_parse_from(["lf", "installation", "install"])
                 .unwrap()
                 .command,
-            Some(Commands::Machine {
-                cmd: crate::lf::MachineCommand::Install { cmd: None }
+            Some(Commands::Installation {
+                cmd: crate::lf::InstallationCommand::Install { cmd: None }
             })
         ));
-        assert!(Cli::try_parse_from(["lf", "machine", "install", "schedule"]).is_ok());
-        assert!(Cli::try_parse_from(["lf", "machine", "install", "status"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "machine", "install", "preflight"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "machine", "install"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "installation", "install", "schedule"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "installation", "install", "status"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "installation", "install", "preflight"]).is_ok());
     }
 
     #[test]

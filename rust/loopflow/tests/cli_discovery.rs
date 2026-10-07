@@ -72,15 +72,23 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
         vec![vec!["sync", "--help"], vec!["help", "sync"]],
         vec![vec!["help", "pr", "land"], vec!["pr", "land", "--help"]],
         vec![
-            vec!["machine", "install", "preflight", "--help"],
+            vec!["installation", "install", "--help"],
+            vec!["install", "--help"],
+        ],
+        vec![
+            vec!["installation", "sync-skills", "--help"],
+            vec!["help", "installation", "sync-skills"],
+        ],
+        vec![
+            vec!["installation", "install", "preflight", "--help"],
             vec!["install", "preflight", "--help"],
         ],
         vec![
-            vec!["machine", "install", "recover-switch", "--help"],
+            vec!["installation", "install", "recover-switch", "--help"],
             vec!["install", "recover-switch", "--help"],
         ],
         vec![
-            vec!["machine", "install", "advance-switch", "--help"],
+            vec!["installation", "install", "advance-switch", "--help"],
             vec!["install", "advance-switch", "--help"],
         ],
         vec![
@@ -515,7 +523,7 @@ fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
         .subcommand(clap::Command::new("monitor"))
         .subcommand(clap::Command::new("landing"))
         .subcommand(clap::Command::new("__internal").hide(true))
-        .subcommand(clap::Command::new("home").subcommand(clap::Command::new("id")));
+        .subcommand(clap::Command::new("machine").subcommand(clap::Command::new("id")));
     let resolve = |name| loopflow::lf::navigation::resolve_child(&tree, name, &[]);
     assert_eq!(resolve("land").unwrap().unwrap(), ["task", "pr", "land"]);
     assert!(resolve("pr").is_err());

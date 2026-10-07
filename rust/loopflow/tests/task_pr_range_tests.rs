@@ -337,6 +337,144 @@ fn failed_sync_push_does_not_advance_the_recorded_task_base() {
     );
 }
 
+fn recorded_base(task: &support::RegisteredTask) -> String {
+    let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
+    runtime
+        .block_on(task.store.active_task_pr(&task.task.id))
+        .expect("read active PR")
+        .expect("active PR")
+        .base_commit
+}
+
+fn sync_onto(repo: &TestRepo, onto: &str) {
+    sync_with_recovery(
+        repo.path(),
+        &SyncOptions {
+            onto: onto.to_string(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    )
+    .unwrap_or_else(|error| panic!("sync onto {onto} failed: {error}"));
+}
+
+/// A Task branch whose remote holds a commit the checkout lacks, with the
+/// base recorded at the fork point from main.
+fn task_behind_its_own_remote(repo: &TestRepo, branch: &str) -> String {
+    let base = repo.head_sha();
+    repo.create_branch(branch);
+    repo.create_file("task.txt", "task work\n");
+    repo.stage_all();
+    repo.commit("task commit");
+    repo.create_file("remote.txt", "pushed from elsewhere\n");
+    repo.stage_all();
+    repo.commit("remote-only commit");
+    repo.push_new_branch(branch);
+    git_out(repo, &["reset", "--hard", "HEAD~1"]);
+    repo.create_file("local.txt", "local follow-up\n");
+    repo.stage_all();
+    repo.commit("local commit");
+    base
+}
+
+/// Integrating the PR's own remote branch brings its commits in and leaves the
+/// range measured from main: those commits are the PR's work, not its base.
+#[test]
+fn sync_onto_the_prs_own_remote_branch_keeps_the_recorded_base() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let branch = "jack/own-remote-sync";
+    let base = task_behind_its_own_remote(&repo, branch);
+    let task = register_task(home.path(), repo.path(), branch, &base);
+
+    sync_onto(&repo, &format!("origin/{branch}"));
+
+    assert!(repo.path().join("remote.txt").exists());
+    assert_eq!(recorded_base(&task), base);
+    let files = git_out(&repo, &["diff", "--name-only", &format!("{base}..HEAD")]);
+    assert_eq!(files, "local.txt\nremote.txt\ntask.txt");
+}
+
+/// The incident's stored shape: an earlier sync onto the PR's own remote branch
+/// recorded that branch's tip as the base. Syncing onto main returns the base
+/// to the fork point without rewriting or dropping any commit.
+#[test]
+fn sync_onto_main_recovers_a_base_recorded_at_the_prs_own_remote_tip() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let branch = "jack/own-tip-base";
+    task_behind_its_own_remote(&repo, branch);
+    let own_tip = git_out(&repo, &["rev-parse", &format!("origin/{branch}")]);
+    git_out(&repo, &["merge", "--no-edit", &own_tip]);
+    let head_before = repo.head_sha();
+
+    repo.checkout("main");
+    repo.create_file("upstream.txt", "landed upstream\n");
+    repo.stage_all();
+    repo.commit("upstream advance");
+    repo.push();
+    let advanced = repo.head_sha();
+    repo.checkout(branch);
+    let task = register_task(home.path(), repo.path(), branch, &own_tip);
+
+    sync_onto(&repo, "origin/main");
+
+    assert_eq!(recorded_base(&task), advanced);
+    assert!(
+        loopflow::engine::git::is_ancestor(repo.path(), &head_before, &repo.head_sha()).unwrap(),
+        "recovery must keep every commit the branch had"
+    );
+    let files = git_out(
+        &repo,
+        &["diff", "--name-only", &format!("{advanced}..HEAD")],
+    );
+    assert_eq!(files, "local.txt\nremote.txt\ntask.txt");
+}
+
+/// A base carrying another branch's commits was never this PR's own remote
+/// tip, so syncing onto main still refuses it and leaves the record alone.
+#[test]
+fn sync_onto_main_refuses_a_base_carrying_another_branchs_commits() {
+    let home = tempfile::TempDir::new().expect("temp home");
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+
+    repo.create_branch("jack/sibling");
+    repo.create_file("sibling.txt", "sibling work\n");
+    repo.stage_all();
+    repo.commit("sibling commit");
+    repo.push_new_branch("jack/sibling");
+    let foreign = repo.head_sha();
+
+    let branch = "jack/cut-from-sibling";
+    repo.create_branch(branch);
+    repo.create_file("task.txt", "task work\n");
+    repo.stage_all();
+    repo.commit("task commit");
+    repo.push_new_branch(branch);
+    let task = register_task(home.path(), repo.path(), branch, &foreign);
+
+    let error = sync_with_recovery(
+        repo.path(),
+        &SyncOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    )
+    .expect_err("a foreign base must refuse");
+    let message = error.to_string();
+    assert!(
+        message.contains("contaminated") && message.contains("sibling commit"),
+        "expected the foreign commit named, got: {message}"
+    );
+    assert_eq!(recorded_base(&task), foreign);
+}
+
 #[test]
 fn sync_revokes_auto_before_force_pushing_a_new_task_head() {
     let home = tempfile::TempDir::new().expect("temp home");
@@ -462,7 +600,7 @@ fn publish_uses_managed_worktree_even_with_unknown_ambient_run() {
     let before_publish = repo.head_sha();
 
     let task = register_task(home.path(), repo.path(), branch, &stale_base);
-    std::env::set_var("LF_RUN_ID", "run_00000000000000000000000000000000");
+    std::env::set_var("LF_CAPTURE_KEY", "run_00000000000000000000000000000000");
 
     create_or_update_pr(
         repo.path(),

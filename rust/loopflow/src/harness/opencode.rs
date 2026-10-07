@@ -104,10 +104,7 @@ impl OpenCodeHarness {
                 ))
             })
             .transpose()?;
-        self.history = Arc::new(Mutex::new(opencode_history::History::new(
-            owner,
-            config.flow_selection.clone(),
-        )));
+        self.history = Arc::new(Mutex::new(opencode_history::History::new(owner)));
         let port = allocate_port()?;
         let mut command = Command::new("opencode");
         command
@@ -135,6 +132,12 @@ impl OpenCodeHarness {
         #[cfg(unix)]
         command.process_group(0);
         super::configure_vendor_std_env(command.as_std_mut())?;
+        {
+            let history = self.history.lock().expect("OpenCode history lock poisoned");
+            if let Some((store, session, driver)) = &history.owner {
+                store.record_session_provider_launch(session, driver, true)?;
+            }
+        }
         let mut child = command
             .spawn()
             .map_err(|err| anyhow!("failed to spawn opencode serve: {err}"))?;
@@ -309,6 +312,10 @@ impl OpenCodeHarness {
                         }
                     };
 
+                    history
+                        .lock()
+                        .expect("OpenCode history lock poisoned")
+                        .attend(&reader_session_id, &raw);
                     let mapped = opencode_mapping::map_event(&raw, &mut state);
                     // SSE is a wake edge; native messages own request identity,
                     // completion and usage. Busy/idle cannot supply those facts.
@@ -877,9 +884,6 @@ fn build_turn_payload(content: &str, config: &AgentConfig, first_turn: bool) -> 
             { "type": "text", "text": content }
         ]
     });
-    if let Some(schema) = config.output_schema() {
-        payload["format"] = json!({"type":"json_schema", "schema":schema, "retryCount":2});
-    }
 
     if first_turn && !config.system_prompt.trim().is_empty() {
         payload["system"] = Value::String(config.system_prompt.trim().to_string());
@@ -1205,7 +1209,6 @@ mod tests {
         AgentConfig {
             chrome: false,
             session_driver: None,
-            flow_selection: None,
             system_prompt: String::new(),
             task_prompt: String::new(),
             agent: Some("opencode".to_string()),

@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use crate::durable::FlowTurnSelection;
 use crate::exec::SessionDriver;
 use crate::session::SessionEventKind;
 use crate::store::sqlite::SqliteStore;
@@ -13,9 +12,9 @@ use crate::store::sqlite::SqliteStore;
 #[derive(Debug)]
 pub(super) struct History {
     pub owner: Option<(SqliteStore, String, SessionDriver)>,
-    pub selection: Option<FlowTurnSelection>,
     pub requests: Arc<Mutex<HashSet<String>>>,
     pub pending: VecDeque<(String, String)>,
+    pub attention: super::attention::Attention,
 }
 
 impl History {
@@ -26,6 +25,8 @@ impl History {
         let Some((store, session, driver)) = &self.owner else {
             return Ok(());
         };
+        self.attention
+            .record(store, session, driver, super::attention::claude(&value));
         if value["type"] == "user" {
             let (Some(thread), Some(turn)) = (value["session_id"].as_str(), value["uuid"].as_str())
             else {
@@ -43,17 +44,13 @@ impl History {
                 .exec_id
                 .as_ref()
                 .context("Claude request has no driving Exec")?;
-            let start = store.record_session_turn_origin(
+            store.record_session_turn_origin(
                 session,
                 thread,
                 turn,
                 driver.provider_generation,
                 exec,
             )?;
-            if let Some(selection) = &self.selection {
-                store.select_flow_turn(selection, session, driver, start)?;
-                self.selection = None;
-            }
             self.pending.push_back((thread.to_owned(), turn.to_owned()));
         } else if value["type"] == "result" {
             let Some((thread, turn)) = self.pending.front() else {
@@ -134,9 +131,9 @@ mod tests {
             .unwrap();
         let mut history = History {
             owner: Some((store.clone(), "conversation".into(), driver)),
-            selection: None,
             requests: std::sync::Arc::new(std::sync::Mutex::new(["request".to_string()].into())),
             pending: Default::default(),
+            attention: Default::default(),
         };
         history
             .record(&json!({"type":"user","uuid":"old","session_id":"thread"}).to_string())

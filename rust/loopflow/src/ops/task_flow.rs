@@ -1,12 +1,12 @@
 //! A Task's Flow as surfaces draw it: the recommended definition before any
-//! launch, the most recently launched invocation and where its cursor stands,
-//! and whether a fresh launch is legal now. Every other Flow naming the Task is
+//! launch, the most recently launched Flow and how far its steps got, and
+//! whether a fresh launch is legal now. Every other Flow naming the Task is
 //! equally its work and is listed with the Task's work.
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{FlowSession, WorkStatus};
-use crate::engine::flow_graph::{flow_iterations, project_cursor, FlowGraph, FlowReturn};
+use crate::durable::WorkStatus;
+use crate::engine::flow_graph::{FlowGraph, FlowReturn};
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,7 +24,7 @@ pub enum TaskFlowRecord {
     /// No Flow has been launched for this Task. Runtime `started` separately
     /// reports whether any other execution is recorded.
     None,
-    /// The most recently launched invocation and where its cursor stands.
+    /// The most recently launched Flow and how far its steps got.
     Latest(LatestTaskFlow),
     /// The most recently launched Flow finished.
     Finished { flow: String },
@@ -44,16 +44,14 @@ pub struct LatestTaskFlow {
 }
 
 impl LatestTaskFlow {
-    pub(crate) fn new(flow: &FlowSession, execution: &TaskExecutionSnapshot) -> Self {
-        let graph = FlowGraph::new(&flow.invocation.flow, &flow.invocation.steps);
-        let projection = project_cursor(&graph, &flow.cursor);
+    pub(crate) fn new(flow: crate::durable::FlowDetail, execution: &TaskExecutionSnapshot) -> Self {
         Self {
-            invocation_id: flow.invocation.id.clone(),
-            graph,
-            current: projection.current,
-            completed: projection.completed,
-            returns: projection.returns,
-            iterations: flow_iterations(&flow.invocation.steps, &flow.cursor),
+            invocation_id: flow.entry.summary.id,
+            graph: flow.graph,
+            current: flow.current,
+            completed: flow.completed,
+            returns: flow.returns,
+            iterations: flow.iterations,
             execution: execution.state,
             reason: execution.reason.clone(),
         }
@@ -63,7 +61,7 @@ impl LatestTaskFlow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskFlowControlKind {
-    /// `lf --task ISSUE flow start [FLOW]`
+    /// `lf task run ISSUE [FLOW]`
     Start,
 }
 
@@ -88,8 +86,7 @@ pub(crate) fn task_flow_controls(gate: &TaskFlowGate) -> Vec<TaskFlowControl> {
     let terminal = match gate.status {
         Some(WorkStatus::Done) => Some("Task is complete"),
         Some(WorkStatus::Abandoned) => Some("Task is abandoned; recover it before running a Flow"),
-        None => gate.plan_terminal_reason,
-        _ => None,
+        _ => gate.plan_terminal_reason,
     };
     vec![TaskFlowControl {
         kind: TaskFlowControlKind::Start,

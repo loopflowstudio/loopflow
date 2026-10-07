@@ -1,4 +1,4 @@
-use crate::durable::{FlowSession, TaskId};
+use crate::durable::TaskId;
 use crate::session::{AgentSession, TitleSource};
 
 use super::{run_sqlite, Store, StoreResult};
@@ -10,9 +10,13 @@ impl Store {
     pub(crate) async fn session_summaries(
         &self,
         filter: &crate::session::SessionFilter,
+        now: i64,
     ) -> StoreResult<Vec<crate::session::SessionSummary>> {
         let filter = filter.clone();
-        run_sqlite(&self.sqlite, move |store| store.session_summaries(&filter)).await
+        run_sqlite(&self.sqlite, move |store| {
+            store.session_summaries(&filter, now)
+        })
+        .await
     }
 
     pub async fn session(&self, id: &str) -> StoreResult<Option<AgentSession>> {
@@ -20,22 +24,49 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.session(&id)).await
     }
 
-    pub async fn session_for_artifact(&self, run_id: &str) -> StoreResult<Option<AgentSession>> {
-        let run_id = run_id.to_owned();
+    pub async fn session_for_artifact(
+        &self,
+        artifact_key: &str,
+    ) -> StoreResult<Option<AgentSession>> {
+        let artifact_key = artifact_key.to_owned();
         run_sqlite(&self.sqlite, move |store| {
-            store.session_for_artifact(&run_id)
+            store.session_for_artifact(&artifact_key)
         })
         .await
     }
 
-    pub async fn create_session(
-        &self,
-        session: AgentSession,
-        review: Option<FlowSession>,
-    ) -> StoreResult<AgentSession> {
+    pub async fn create_session(&self, session: AgentSession) -> StoreResult<AgentSession> {
         let caller = crate::journal::current_exec_id();
         run_sqlite(&self.sqlite, move |store| {
-            store.create_session(session, review.as_ref(), caller.as_ref())
+            store.create_session(session, caller.as_ref())
+        })
+        .await
+    }
+
+    pub(crate) async fn task_conversations(
+        &self,
+        task: &crate::durable::TaskId,
+    ) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
+        let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_conversations(&task)).await
+    }
+
+    pub(crate) async fn task_primary(
+        &self,
+        task: &crate::durable::TaskId,
+    ) -> StoreResult<Option<AgentSession>> {
+        let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_primary(&task)).await
+    }
+
+    pub(crate) async fn choose_task_primary(
+        &self,
+        task: &crate::durable::TaskId,
+        session: &str,
+    ) -> StoreResult<AgentSession> {
+        let (task, session) = (task.clone(), session.to_string());
+        run_sqlite(&self.sqlite, move |store| {
+            store.choose_task_primary(&task, &session)
         })
         .await
     }
@@ -66,32 +97,17 @@ impl Store {
         .await
     }
 
-    pub async fn fill_run_provider(
+    pub async fn retarget_unpublished_capture(
         &self,
-        run: &str,
+        artifact_key: &str,
         provider: &str,
         model: Option<&str>,
     ) -> StoreResult<()> {
-        let run = run.to_owned();
+        let artifact_key = artifact_key.to_owned();
         let provider = provider.to_string();
         let model = model.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
-            store.fill_run_provider(&run, &provider, model.as_deref())
-        })
-        .await
-    }
-
-    pub async fn retarget_unpublished_run(
-        &self,
-        run: &str,
-        provider: &str,
-        model: Option<&str>,
-    ) -> StoreResult<()> {
-        let run = run.to_owned();
-        let provider = provider.to_string();
-        let model = model.map(str::to_string);
-        run_sqlite(&self.sqlite, move |store| {
-            store.retarget_unpublished_run(&run, &provider, model.as_deref())
+            store.retarget_unpublished_capture(&artifact_key, &provider, model.as_deref())
         })
         .await
     }
@@ -126,14 +142,43 @@ impl Store {
     pub async fn rename_session(
         &self,
         id: &str,
-        expected_capture: Option<i64>,
         title: &str,
         source: TitleSource,
     ) -> StoreResult<()> {
         let id = id.to_string();
         let title = title.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.rename_session(&id, expected_capture, &title, source)
+            store.rename_session(&id, &title, source)
+        })
+        .await
+    }
+}
+
+impl Store {
+    pub async fn flow_inventory(
+        &self,
+        filter: &crate::durable::FlowFilter,
+        after: Option<&str>,
+        limit: std::num::NonZeroU32,
+    ) -> StoreResult<crate::durable::FlowPage> {
+        let filter = filter.clone();
+        let after = after.map(str::to_owned);
+        run_sqlite(&self.sqlite, move |store| {
+            store.flow_inventory(&filter, after.as_deref(), limit)
+        })
+        .await
+    }
+
+    /// One Flow by driver Exec id or unique prefix, drawn from its Execs.
+    pub async fn flow_detail(
+        &self,
+        selector: &str,
+    ) -> StoreResult<Option<crate::durable::FlowDetail>> {
+        let selector = selector.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            Ok(store
+                .flow_exec(&selector)?
+                .map(|(flow, entry)| flow.detail(entry)))
         })
         .await
     }

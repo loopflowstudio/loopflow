@@ -49,6 +49,15 @@ pub async fn latest_interactive_session(
                 == Some(&current)
         })
         .collect::<Vec<_>>();
+    most_recent(store, candidates).await
+}
+
+/// Rank by native human input, then each conversation's last interactive
+/// opening, then its creation. Assistant output never changes the choice.
+async fn most_recent(
+    store: &SharedStore,
+    candidates: Vec<(AgentSession, Option<i64>)>,
+) -> Result<Option<AgentSession>> {
     let human = provider_conversation::human_input_times(
         store,
         candidates.iter().map(|(session, _)| session),
@@ -70,7 +79,7 @@ pub async fn latest_interactive_session(
 }
 
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
-pub(crate) const PREPARED_CAPTURE_ENV: &str = "LF_HUMAN_SESSION_RUN";
+pub(crate) const PREPARED_CAPTURE_ENV: &str = "LF_PREPARED_CAPTURE";
 /// Launch exclusion is process state beside the Home, not a Session record.
 const LAUNCH_LOCK_DIRECTORY: &str = "human-sessions";
 const SESSION_START_TIMEOUT: Duration = Duration::from_secs(30);
@@ -94,17 +103,9 @@ pub(crate) enum OpenMode {
 pub enum SessionState {
     /// Passive metadata has no trustworthy live/closed observation.
     Unknown,
-    Waiting,
     Active,
     Closed,
     Interrupted,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionKind {
-    Flow,
-    Conversation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,9 +123,9 @@ pub struct SessionAction {
     pub unavailable_reason: Option<String>,
 }
 
-pub(crate) fn session_actions(kind: SessionKind, state: SessionState) -> Vec<SessionAction> {
+pub(crate) fn session_actions(state: SessionState) -> Vec<SessionAction> {
     use SessionActionKind::{MoveHere, Open};
-    let active_client = kind == SessionKind::Conversation && state == SessionState::Active;
+    let active_client = state == SessionState::Active;
     let mut actions = vec![(
         Open,
         "Open here",
@@ -151,12 +152,8 @@ pub(crate) fn session_actions(kind: SessionKind, state: SessionState) -> Vec<Ses
         .collect()
 }
 
-fn require_session_action(
-    kind: SessionKind,
-    state: SessionState,
-    action: SessionActionKind,
-) -> Result<()> {
-    let projected = session_actions(kind, state)
+fn require_session_action(state: SessionState, action: SessionActionKind) -> Result<()> {
+    let projected = session_actions(state)
         .into_iter()
         .find(|item| item.kind == action)
         .ok_or_else(|| anyhow!("This action does not apply to this Session"))?;
@@ -175,12 +172,14 @@ pub struct SessionPage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub primary_scope: Option<String>,
-    /// A current obligation, independent of process liveness.
+    /// Waiting on a person, read from its provider's stream; absent when it is
+    /// working or nothing current says.
     pub attention: Option<SessionAttention>,
+    /// Its Task names it as the Task's primary conversation.
+    pub task_primary: bool,
     pub task_ids: Vec<crate::durable::TaskId>,
     pub id: String,
     pub workspace: Option<SessionWorkspace>,
-    pub kind: SessionKind,
     pub interactive: bool,
     pub work: Option<WorkRef>,
     pub wave_id: Option<crate::id::WaveId>,
@@ -190,7 +189,7 @@ pub struct SessionRecord {
     pub title_source: SessionTitleSource,
     pub flow_membership: SessionFlowMembership,
     pub detail: String,
-    /// The provider its current Run launched with; absent until a review's
+    /// The provider its current input launched with; absent until a review's
     /// first launch records one.
     pub provider: Option<String>,
     pub cwd: String,
@@ -203,8 +202,7 @@ pub struct SessionRecord {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionAttention {
-    Review,
-    Reply,
+    Waiting,
 }
 
 fn session_state(session: &crate::session::SessionSummary, has_clients: bool) -> SessionState {
@@ -214,37 +212,17 @@ fn session_state(session: &crate::session::SessionSummary, has_clients: bool) ->
         SessionState::Active
     } else if session.driver_outcome.as_deref() == Some("interrupted") {
         SessionState::Interrupted
-    } else if session.kind != crate::session::SessionKind::Conversation {
-        SessionState::Waiting
     } else {
         SessionState::Unknown
     }
 }
 
 fn session_attention(session: &crate::session::SessionSummary) -> Option<SessionAttention> {
-    if session.completed_at.is_some() {
-        return None;
-    }
-    let current_review = session.kind == crate::session::SessionKind::FlowReview
-        && !session.task_terminal
-        && session.flow.as_ref().is_some_and(|flow| {
-            flow.state == crate::session::FlowSummaryState::Current
-                && flow.pending_session.as_deref() == Some(&session.id)
-        });
-    if current_review {
-        Some(SessionAttention::Review)
-    } else if session.interactive
-        && session.latest_turn.as_deref() == Some("completed")
-        && session.driver_outcome.is_none()
-    {
-        Some(SessionAttention::Reply)
-    } else {
-        None
-    }
+    session.waiting.then_some(SessionAttention::Waiting)
 }
 
 /// Whether a Session's conversation is an occurrence of a Flow. Membership
-/// comes only from its Run's invocation, never from matching Task, checkout,
+/// comes only from its recorded Flow invocation, never from matching Task, checkout,
 /// provider, or skill.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -278,8 +256,25 @@ pub enum SessionFlowOccurrence {
     Past,
 }
 
+/// Add one headless input to an open conversation and return it prepared; the
+/// launch that takes it resumes the conversation's native history.
+pub(crate) fn continue_conversation(id: &str) -> Result<String> {
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let mut next = store.session(id)?.ok_or_else(|| session_not_found(id))?;
+    anyhow::ensure!(
+        next.completed_at.is_none(),
+        "session {id:?} is already complete"
+    );
+    let replaced = next.captured;
+    next.artifact_key = crate::session_record::new_artifact_key();
+    next.input_published = false;
+    let next = store.replace_session_input(replaced, next)?;
+    let flow = crate::session_record::SessionFlowMembership::Independent;
+    Ok(publish_prepared_input(&store, &next, flow)?.artifact_key)
+}
+
 pub(crate) fn publish_prepared_input(
-    store: &SharedStore,
+    store: &crate::store::sqlite::SqliteStore,
     session: &AgentSession,
     flow: crate::session_record::SessionFlowMembership,
 ) -> Result<AgentSession> {
@@ -313,11 +308,8 @@ pub(crate) fn publish_prepared_input(
         session.caller_artifact_key.clone(),
         session.artifact_key.clone(),
     )?;
+    store.publish_capture(&session.id, session.captured)?;
     store
-        .sqlite
-        .publish_capture(&session.id, session.captured)?;
-    store
-        .sqlite
         .session(&session.id)?
         .ok_or_else(|| session_not_found(&session.id))
 }
@@ -337,7 +329,8 @@ pub(crate) async fn list(
         selection.offset = 0;
     }
     let mut sessions = Vec::new();
-    for session in store.session_summaries(&selection).await? {
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    for session in store.session_summaries(&selection, now).await? {
         sessions.push(summary_surface(&session));
     }
     workspace::associate(store, &mut sessions).await?;
@@ -381,46 +374,22 @@ pub(crate) async fn list(
     Ok(sessions)
 }
 
-/// Filter before applying the caller's page size, using the same attention
-/// metadata reading. Scan bounded metadata pages, never provider transcripts.
-pub(crate) async fn list_attention(
-    store: &SharedStore,
-    filter: &crate::session::SessionFilter,
-) -> Result<Vec<SessionRecord>> {
-    let mut page = filter.clone();
-    page.after = Some(filter.after.clone().unwrap_or_default());
-    page.offset = 0;
-    page.limit = 100;
-    let mut skip = filter.offset;
-    let mut matches = Vec::new();
-    loop {
-        let rows = list(store, &page).await?;
-        let exhausted = rows.len() < page.limit;
-        page.after = rows.last().map(|row| row.id.clone());
-        for row in rows.into_iter().filter(|row| row.attention.is_some()) {
-            if skip > 0 {
-                skip -= 1;
-                continue;
-            }
-            matches.push(row);
-            if filter.limit > 0 && matches.len() == filter.limit {
-                return Ok(matches);
-            }
-        }
-        if exhausted {
-            return Ok(matches);
-        }
+/// Where a Session's step stands in its Flow: the last one a still-open driver
+/// launched, an earlier one, or part of a Flow whose driver has exited.
+fn flow_occurrence(
+    state: crate::session::FlowSummaryState,
+    latest_step: bool,
+) -> SessionFlowOccurrence {
+    match (state, latest_step) {
+        (crate::session::FlowSummaryState::Current, true) => SessionFlowOccurrence::Current,
+        (crate::session::FlowSummaryState::Current, false) => SessionFlowOccurrence::Earlier,
+        _ => SessionFlowOccurrence::Past,
     }
 }
 
 /// Passive listing reads record metadata and exact local client receipts only.
-/// Connect/complete still enter owned_target and surface, with full validation.
+/// Connect/complete still enter find_session and surface, with full validation.
 fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
-    use crate::session::FlowSummaryState;
-    let kind = match session.kind {
-        crate::session::SessionKind::Conversation => SessionKind::Conversation,
-        crate::session::SessionKind::FlowReview => SessionKind::Flow,
-    };
     let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
@@ -439,30 +408,18 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             },
         }
     });
-    let flow_membership = match (&session.flow_session_id, &session.flow) {
+    let flow_membership = match (&session.flow_id, &session.flow) {
         (None, _) if session.independent => SessionFlowMembership::Independent,
         (None, _) => SessionFlowMembership::Unknown {
             reason: "Flow membership was not recorded".into(),
         },
-        (Some(id), Some(flow)) if flow.name.is_some() => SessionFlowMembership::Step {
-            flow: flow.name.clone().expect("matched a recorded Flow name"),
+        (Some(id), Some(flow)) => SessionFlowMembership::Step {
+            flow: flow.name.clone(),
             invocation_id: id.clone(),
             step: session.skill.clone().unwrap_or_default(),
-            // Recorded membership is not revalidated by opening the capture.
-            // Detail/actions validate that exact occurrence before using it.
             node: session.node,
             iterations: session.iterations.clone(),
-            occurrence: if flow.state != FlowSummaryState::Current {
-                SessionFlowOccurrence::Past
-            } else if flow.current_capture == session.captured {
-                SessionFlowOccurrence::Current
-            } else if flow.current_capture.is_some() {
-                SessionFlowOccurrence::Earlier
-            } else if flow.pending_session.as_deref() == Some(session.id.as_str()) {
-                SessionFlowOccurrence::Current
-            } else {
-                SessionFlowOccurrence::Unknown
-            },
+            occurrence: flow_occurrence(flow.state, session.flow_step_latest),
         },
         (Some(id), _) => SessionFlowMembership::Unknown {
             reason: format!("Flow {id} metadata is unavailable"),
@@ -472,10 +429,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     // Sessions run where this registry recorded them; no read places one elsewhere.
     let remote: Option<&crate::durable::HomeId> = None;
     let clients = if remote.is_none() && unavailable.is_none() {
-        match (
-            &session.provider,
-            local_session_run_dir(&session.artifact_key),
-        ) {
+        match (&session.provider, local_capture_dir(&session.artifact_key)) {
             (Some(provider), Some(dir)) => {
                 match crate::lf::commands::util::active_provider_clients(&dir, provider) {
                     Ok(clients) => clients,
@@ -492,7 +446,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         Vec::new()
     };
     let state = session_state(session, !clients.is_empty());
-    let mut actions = session_actions(kind, state);
+    let mut actions = session_actions(state);
     let open_argv = if unavailable.is_none() {
         match human_open_argv(remote, Some(&session.cwd), &session.id) {
             Ok(argv) => argv,
@@ -513,6 +467,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     SessionRecord {
         primary_scope: session.primary_scope.clone(),
         attention: session_attention(session),
+        task_primary: session.task_primary,
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
         workspace: remote.map(|home| SessionWorkspace {
@@ -521,7 +476,6 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             task_id: session.task_id.clone(),
             unavailable: Some("Checkout resolution is unavailable on this remote Home".into()),
         }),
-        kind,
         interactive: session.interactive,
         work,
         wave_id: session.wave_id.clone(),
@@ -533,14 +487,10 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             crate::session::TitleSource::Generated => SessionTitleSource::Generated,
         },
         flow_membership,
-        detail: match (kind, &session.skill) {
-            (SessionKind::Conversation, _) => session
-                .model
-                .as_ref()
-                .map_or(provider.clone(), |model| format!("{provider}:{model}")),
-            (_, Some(skill)) => skill.clone(),
-            (_, None) => "Request for input".into(),
-        },
+        detail: session
+            .model
+            .as_ref()
+            .map_or(provider.clone(), |model| format!("{provider}:{model}")),
         provider: session.provider.clone(),
         cwd: session.cwd.display().to_string(),
         state,
@@ -553,59 +503,19 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     }
 }
 
-/// Resolve a Session id, the Run id linked to it, or the provider's own id for
-/// its conversation. A conversation or Flow Run names its waiting boundary, so
-/// `$LF_RUN_ID` inside a review targets it.
+/// Resolve a durable Session or recorded native conversation, never a capture selector.
 async fn find_session(
     store: &SharedStore,
     session_id: &str,
     open_completed: bool,
 ) -> Result<Option<AgentSession>> {
-    // Membership outlives a pending boundary. Never reinterpret a retained
-    // attempt's manifest as an independent conversation or current actor.
-    let owned = match crate::session_record::parse_artifact_key(session_id) {
-        Ok(run_id) => store.session_for_artifact(&run_id).await?,
-        Err(_) => store.session(session_id).await?,
+    let Some(session) = session_by_id(store, session_id).await? else {
+        return Ok(None);
     };
-    if let Some(session) = owned {
-        return owned_target(session_id, session, open_completed).map(Some);
-    }
-    let selected = match store.sqlite.resolve_history_input(session_id) {
-        Ok(selected) => selected,
-        Err(crate::store::StoreError::NotFound) => {
-            let Some(session) = provider_conversation::recorded(store, session_id).await? else {
-                return Ok(None);
-            };
-            let id = session.id.clone();
-            return owned_target(&id, session, open_completed).map(Some);
-        }
-        Err(error) => return Err(error.into()),
-    };
-    let input = crate::session_record::parse_artifact_key(&selected)?;
-    let Some(session) = store.session_for_artifact(&input).await? else {
-        bail!("Input {input} does not belong to a Session");
-    };
-    owned_target(input.as_str(), session, open_completed).map(Some)
-}
-
-fn owned_target(
-    selector: &str,
-    session: crate::session::AgentSession,
-    open_completed: bool,
-) -> Result<AgentSession> {
-    if selector != session.id && selector != session.artifact_key.as_str() {
-        bail!(
-            "Run {selector} is a historical attempt of Session {}; current Run is {}",
-            session.id,
-            session.artifact_key
-        );
-    }
-    if session.completed_at.is_some()
-        && !(open_completed && session.kind == crate::session::SessionKind::Conversation)
-    {
+    if session.completed_at.is_some() && !open_completed {
         bail!("Session {} is already complete", session.id);
     }
-    Ok(session)
+    Ok(Some(session))
 }
 
 /// The provider and local client receipts for a conversation's current input.
@@ -617,12 +527,13 @@ struct NativeSession<'a> {
 impl<'a> NativeSession<'a> {
     fn of(session: &'a AgentSession) -> Result<Self> {
         Ok(Self {
-            dir: local_session_run_dir(&session.artifact_key)
-                .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?,
+            dir: local_capture_dir(&session.artifact_key).ok_or_else(|| {
+                anyhow!("Session {} has an invalid capture reference", session.id)
+            })?,
             provider: session
                 .provider
                 .as_deref()
-                .ok_or_else(|| anyhow!("Session {} Run has no recorded provider", session.id))?,
+                .ok_or_else(|| anyhow!("Session {} input has no recorded provider", session.id))?,
         })
     }
 
@@ -640,20 +551,20 @@ impl<'a> NativeSession<'a> {
     }
 }
 
-pub(crate) async fn serve_conversation(store: &SharedStore, run_id: &String) -> Result<()> {
+pub(crate) async fn serve_conversation(store: &SharedStore, artifact_key: &String) -> Result<()> {
     let session = store
-        .session_for_artifact(run_id)
+        .session_for_artifact(artifact_key)
         .await?
-        .ok_or_else(|| anyhow!("Conversation Run {run_id} no longer exists"))?;
+        .ok_or_else(|| anyhow!("Conversation input {artifact_key} no longer exists"))?;
     let launch_lock = lock_session_exec(&session.id)?;
     let session = store
         .session(&session.id)
         .await?
-        .ok_or_else(|| anyhow!("Conversation Run {run_id} no longer exists"))?;
+        .ok_or_else(|| anyhow!("Conversation input {artifact_key} no longer exists"))?;
     if session.completed_at.is_some() {
         bail!("session {:?} is already resolved", session.id);
     }
-    if session.artifact_key != *run_id || !capture_is_prepared(&session.artifact_key)? {
+    if session.artifact_key != *artifact_key || !capture_is_prepared(&session.artifact_key)? {
         // Another launcher already published this Session. Do not replace or
         // infer death of its native client; explicit open owns native resume.
         return Ok(());
@@ -667,7 +578,7 @@ fn session_token(session: &AgentSession) -> HumanSessionToken {
     }
 }
 
-/// Launch the prepared Run of a conversation or of a saved Flow's review.
+/// Launch the prepared input of a conversation or of a saved Flow's review.
 async fn serve_locked(
     store: &SharedStore,
     session: &AgentSession,
@@ -693,15 +604,14 @@ async fn serve_locked(
 
 async fn conversation_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<String> {
     let mut args = vec![
-        "--mode".to_string(),
-        "tui".to_string(),
+        "--tui".to_string(),
         "--model".to_string(),
         launch_model(session),
         "--__cwd".to_string(),
         session.cwd.display().to_string(),
     ];
     // The conversation's prompt carries its Work only while launch can resolve
-    // it; the Run row keeps the attribution either way.
+    // it; the Session row keeps the attribution either way.
     if let Some(selector) = work_selector(session) {
         if crate::ops::resolve_work_binding(store, &session.cwd, &selector)
             .await
@@ -741,7 +651,7 @@ pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
     Ok(Some(crate::session_record::parse_artifact_key(
         &value
             .into_string()
-            .map_err(|_| anyhow!("prepared Run id is not UTF-8"))?,
+            .map_err(|_| anyhow!("prepared input id is not UTF-8"))?,
     )?))
 }
 
@@ -759,96 +669,66 @@ pub(crate) async fn open(
             .ok_or_else(|| session_not_found(session_id))?,
     };
     let session = &target;
-    match session.kind {
-        crate::session::SessionKind::Conversation => {
-            let admitted;
-            let session = if resume {
-                let id = session.id.clone();
-                let _launch = tokio::task::spawn_blocking(move || lock_session_exec(&id)).await??;
-                admitted = primary::admit_workspace(store, session.clone()).await?;
-                &admitted
-            } else {
-                session
-            };
-            let native = NativeSession::of(session)?;
-            let Some(provider_session) =
-                store.sqlite.input_provider_session(&session.artifact_key)?
-            else {
-                let surface = surface(store, session).await?;
-                if resume {
-                    open_waiting(store, &session.id).await?;
-                }
-                return Ok(surface);
-            };
-            if resume {
-                crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
-            }
-            if resume
-                && native.provider == "codex"
-                && connect_live_codex(
-                    store,
-                    session,
-                    &native.dir,
-                    &provider_session,
-                    mode == OpenMode::Replace,
-                )
-                .await?
-            {
-                let session = store
-                    .sqlite
-                    .session(&session.id)?
-                    .ok_or_else(|| session_not_found(&session.id))?;
-                return surface(store, &session).await;
-            }
-            if resume && mode == OpenMode::Replace {
-                native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
-            }
-            if mode == OpenMode::Refuse && !native.clients()?.is_empty() {
-                require_session_action(
-                    SessionKind::Conversation,
-                    SessionState::Active,
-                    SessionActionKind::Open,
-                )?;
-            }
-            let mut result = surface(store, session).await?;
-            if resume {
-                crate::lf::commands::util::resume_session(
-                    native.provider,
-                    session.model.as_deref(),
-                    &session.cwd,
-                    &session.artifact_key,
-                    &native.dir,
-                    &provider_session,
-                )?;
-            } else {
-                match mode {
-                    OpenMode::Replace => result.open_argv.push("--replace".to_string()),
-                    OpenMode::Try => result.open_argv.push("--try".to_string()),
-                    OpenMode::Refuse => {}
-                }
-            }
-            Ok(result)
+    let admitted;
+    let session = if resume {
+        let id = session.id.clone();
+        let _launch = tokio::task::spawn_blocking(move || lock_session_exec(&id)).await??;
+        admitted = primary::admit_workspace(store, session.clone()).await?;
+        &admitted
+    } else {
+        session
+    };
+    let native = NativeSession::of(session)?;
+    let Some(provider_session) = store.sqlite.input_provider_session(&session.artifact_key)? else {
+        let surface = surface(store, session).await?;
+        if resume {
+            open_waiting(store, &session.id).await?;
         }
-        crate::session::SessionKind::FlowReview => {
-            if mode != OpenMode::Refuse {
-                bail!("--replace and --try apply only to interactive provider sessions");
-            }
-            let surface = surface(store, session).await?;
-            if resume {
-                open_waiting(store, &session.id).await?;
-            }
-            Ok(surface)
+        return Ok(surface);
+    };
+    if resume {
+        crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
+    }
+    if resume
+        && native.provider == "codex"
+        && connect_live_codex(store, session, &provider_session, mode == OpenMode::Replace).await?
+    {
+        let session = store
+            .sqlite
+            .session(&session.id)?
+            .ok_or_else(|| session_not_found(&session.id))?;
+        return surface(store, &session).await;
+    }
+    if resume && mode == OpenMode::Replace {
+        native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
+    }
+    if mode == OpenMode::Refuse && !native.clients()?.is_empty() {
+        require_session_action(SessionState::Active, SessionActionKind::Open)?;
+    }
+    let mut result = surface(store, session).await?;
+    if resume {
+        crate::lf::commands::util::resume_session(
+            native.provider,
+            session.model.as_deref(),
+            &session.cwd,
+            &session.artifact_key,
+            &provider_session,
+        )?;
+    } else {
+        match mode {
+            OpenMode::Replace => result.open_argv.push("--replace".to_string()),
+            OpenMode::Try => result.open_argv.push("--try".to_string()),
+            OpenMode::Refuse => {}
         }
     }
+    Ok(result)
 }
-
 /// Connect to one existing provider thread. Native UI traffic crosses the same
 /// driver fence as the headless writer; closing the current UI closes the runtime.
 #[cfg(unix)]
 async fn connect_live_codex(
     store: &SharedStore,
     session: &AgentSession,
-    dir: &Path,
     provider: &crate::session_record::ProviderSessionRef,
     replace_clients: bool,
 ) -> Result<bool> {
@@ -921,11 +801,10 @@ async fn connect_live_codex(
             }
         });
         let session = session.clone();
-        let dir = dir.to_path_buf();
         let provider = provider.clone();
         let result = tokio::task::spawn_blocking(move || {
             crate::lf::commands::util::resume_session_with_env(
-                "codex", session.model.as_deref(), &session.cwd, &session.artifact_key, &dir, &provider,
+                "codex", session.model.as_deref(), &session.cwd, &session.artifact_key, &provider,
                 &BTreeMap::new(), None, Some(&remote),
             )
         }).await;
@@ -946,8 +825,8 @@ async fn connect_live_codex(
     connected
 }
 
-/// Open a conversation or a saved Flow's review: resume its native history, else
-/// launch its prepared Run, else append another attempt to the Session.
+/// Open a conversation: resume its native history, else
+/// launch its prepared input, else append another attempt to the Session.
 async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     let lock_id = id.to_string();
     let launch_lock = tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
@@ -979,7 +858,7 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
             next = store.replace_session_input(replaced, next).await?;
         }
         publish_prepared_input(
-            store,
+            &store.sqlite,
             &next,
             crate::session_record::SessionFlowMembership::Independent,
         )?
@@ -996,23 +875,19 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
     match crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), run_id) {
         Ok((dir, _)) => Ok(dir.join("prepared").is_file()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error).context("resolve prepared Session Run"),
+        Err(error) => Err(error).context("resolve prepared Session input"),
     }
 }
 
-/// A Session as its row and its current Run describe it.
+/// A Session as its row and its current input describe it.
 async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionRecord> {
-    let kind = match session.kind {
-        crate::session::SessionKind::Conversation => SessionKind::Conversation,
-        crate::session::SessionKind::FlowReview => SessionKind::Flow,
-    };
     let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         (None, None) => None,
     };
     let remote: Option<crate::durable::HomeId> = None;
-    let dir = local_session_run_dir(&session.artifact_key)
+    let dir = local_capture_dir(&session.artifact_key)
         .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?;
     let clients = match &session.provider {
         Some(provider) if remote.is_none() => {
@@ -1022,72 +897,34 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
     };
     let metadata = store
         .sqlite
-        .session_summary(&session.id)?
+        .session_summary(
+            &session.id,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata, !clients.is_empty());
-    let mut actions = session_actions(kind, state);
-    let flow_membership = match &session.flow_session_id {
-        None => match store.sqlite.session_summary(&session.id)? {
-            Some(metadata) if metadata.independent => SessionFlowMembership::Independent,
-            _ => SessionFlowMembership::Unknown {
-                reason: "Flow membership was not recorded".into(),
-            },
+    let actions = session_actions(state);
+    let flow_membership = match (&session.flow_id, &metadata.flow) {
+        (None, _) if metadata.independent => SessionFlowMembership::Independent,
+        (None, _) => SessionFlowMembership::Unknown {
+            reason: "Flow membership was not recorded".into(),
         },
-        Some(id) => match store.flow(id).await {
-            Ok(Some(flow)) => {
-                let graph = crate::engine::flow_graph::FlowGraph::new(
-                    &flow.invocation.flow,
-                    &flow.invocation.steps,
-                );
-                let node = session
-                    .node
-                    .map(|id| {
-                        graph.node_at(id).map(|node| node.key).ok_or_else(|| {
-                            anyhow!(
-                                "Session {} names an absent captured Flow node {id}",
-                                session.id
-                            )
-                        })
-                    })
-                    .transpose()?;
-                SessionFlowMembership::Step {
-                    flow: flow.invocation.flow.clone(),
-                    invocation_id: id.clone(),
-                    step: session.skill.clone().unwrap_or_default(),
-                    node,
-                    iterations: session.iterations.clone(),
-                    occurrence: if flow.finished {
-                        SessionFlowOccurrence::Past
-                    } else if flow
-                        .current_attempt
-                        .as_ref()
-                        .is_some_and(|attempt| attempt.run_id == session.artifact_key)
-                    {
-                        SessionFlowOccurrence::Current
-                    } else if flow.current_attempt.is_some() {
-                        SessionFlowOccurrence::Earlier
-                    } else if flow.pending_session_id.as_deref() == Some(session.id.as_str()) {
-                        SessionFlowOccurrence::Current
-                    } else {
-                        SessionFlowOccurrence::Unknown
-                    },
-                }
-            }
-            Ok(None) => SessionFlowMembership::Unknown {
-                reason: format!("Flow {id} is unavailable"),
-            },
-            Err(crate::store::StoreError::InvalidData(reason)) => {
-                for action in &mut actions {
-                    action.unavailable_reason = Some(reason.clone());
-                }
-                SessionFlowMembership::Unknown { reason }
-            }
-            Err(error) => return Err(error.into()),
+        (Some(id), Some(flow)) => SessionFlowMembership::Step {
+            flow: flow.name.clone(),
+            invocation_id: id.clone(),
+            step: session.skill.clone().unwrap_or_default(),
+            node: session.node,
+            iterations: session.iterations.clone(),
+            occurrence: flow_occurrence(flow.state, metadata.flow_step_latest),
+        },
+        (Some(id), None) => SessionFlowMembership::Unknown {
+            reason: format!("Flow {id} is unavailable"),
         },
     };
     let mut reading = SessionRecord {
         primary_scope: metadata.primary_scope.clone(),
         attention: session_attention(&metadata),
+        task_primary: metadata.task_primary,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
         workspace: remote.as_ref().map(|home| SessionWorkspace {
@@ -1096,7 +933,6 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
             task_id: session.task_id.clone(),
             unavailable: Some("Checkout resolution is unavailable on this remote Home".into()),
         }),
-        kind,
         interactive: session.interactive,
         wave_id: session.wave_id.clone(),
         work_path: session_work_path(store, session).await?,
@@ -1108,11 +944,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
             crate::session::TitleSource::Generated => SessionTitleSource::Generated,
         },
         flow_membership,
-        detail: match (kind, &session.skill) {
-            (SessionKind::Conversation, _) => launch_model(session),
-            (_, Some(skill)) => skill.clone(),
-            (_, None) => "Request for input".to_string(),
-        },
+        detail: launch_model(session),
         provider: session.provider.clone(),
         cwd: session.cwd.display().to_string(),
         state,
@@ -1127,7 +959,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
     Ok(reading)
 }
 
-/// The `provider[:model]` a Run launched with.
+/// The `provider[:model]` a captured input launched with.
 fn launch_model(session: &AgentSession) -> String {
     let provider = session.provider.clone().unwrap_or_default();
     match &session.model {
@@ -1153,14 +985,12 @@ async fn session_work_path(store: &SharedStore, session: &AgentSession) -> Resul
     }))
 }
 
-pub(crate) fn local_session_run_dir(run_id: &str) -> Option<PathBuf> {
-    crate::session_record::record_dir(&crate::store::lf_home_dir(), run_id)
+pub(crate) fn local_capture_dir(artifact_key: &str) -> Option<PathBuf> {
+    crate::session_record::record_dir(&crate::store::lf_home_dir(), artifact_key)
 }
 
-/// Rename a Session through its Run and return the authoritative record.
+/// Rename a Session and return the authoritative record.
 /// `Generated` is an agent suggestion; it never replaces a human-assigned name.
-/// The id may be the Session's own `$LF_RUN_ID`: a conversation or Flow Run names its
-/// boundary, and naming needs no provider history.
 pub(crate) async fn rename(
     store: &SharedStore,
     session_id: &str,
@@ -1177,12 +1007,8 @@ pub(crate) async fn rename(
         SessionTitleSource::Generated => crate::session::TitleSource::Generated,
         SessionTitleSource::Unavailable => bail!("unavailable is not a title source"),
     };
-    // A Run selector names that attempt; the Session id names the conversation.
-    let expected_run = (session_id != session.id)
-        .then_some(session.captured)
-        .flatten();
     store
-        .rename_session(&session.id, expected_run, title, title_source)
+        .rename_session(&session.id, title, title_source)
         .await?;
     let session = store
         .session(&session.id)
@@ -1191,8 +1017,7 @@ pub(crate) async fn rename(
     surface(store, &session).await
 }
 
-/// Assign a Task to future Session work. The id is the Session's
-/// or any of its Runs'; a closed Session binds like an open one.
+/// Assign a Task to future Session work by its durable ID, including closed Sessions.
 pub(crate) async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<SessionRecord> {
     let (session, task) = binding_target(store, id, task).await?;
     let session = store
@@ -1244,13 +1069,9 @@ async fn binding_target(store: &SharedStore, id: &str, task: &str) -> Result<(Ag
     Ok((session, task))
 }
 
-/// The Session an id names whatever its state: its own id, any of its Runs',
-/// or the provider's id for its conversation.
+/// Resolve a Session in any state by its durable or native conversation id.
 pub(crate) async fn session_by_id(store: &SharedStore, id: &str) -> Result<Option<AgentSession>> {
     if let Some(session) = store.session(id).await? {
-        return Ok(Some(session));
-    }
-    if let Some(session) = store.session_for_artifact(id).await? {
         return Ok(Some(session));
     }
     provider_conversation::recorded(store, id).await
@@ -1262,7 +1083,7 @@ fn session_not_found(id: &str) -> anyhow::Error {
 
 pub(crate) async fn spawn_session_exec(
     command: &mut tokio::process::Command,
-    run_id: &String,
+    artifact_key: &String,
 ) -> Result<tokio::process::Child> {
     let home = crate::store::lf_home_dir();
     let executable = Path::new(command.as_std().get_program());
@@ -1276,17 +1097,17 @@ pub(crate) async fn spawn_session_exec(
     };
     let database = crate::store::database_path_from_env()?;
     // Capture the child before it parses arguments. Its own Session recorder may
-    // never start; the opening Run must retain enough evidence to diagnose it.
+    // never start; the opening Exec must retain enough evidence to diagnose it.
     // Arguments and environment values can contain prompts or credentials.
     let launch = format!(
-        "Session Run {run_id}: executable {} (sha256 {digest}), cwd {}, Home {}, database {}",
+        "Session input {artifact_key}: executable {} (sha256 {digest}), cwd {}, Home {}, database {}",
         executable.display(),
         cwd.display(),
         home.display(),
         database.display()
     );
-    if capture_is_prepared(run_id)? {
-        command.env(PREPARED_CAPTURE_ENV, run_id.as_str());
+    if capture_is_prepared(artifact_key)? {
+        command.env(PREPARED_CAPTURE_ENV, artifact_key.as_str());
     }
     let mut child = command
         .kill_on_drop(true)
@@ -1294,7 +1115,7 @@ pub(crate) async fn spawn_session_exec(
         .with_context(|| format!("could not start {launch}"))?;
     let deadline = tokio::time::Instant::now() + SESSION_START_TIMEOUT;
     loop {
-        match crate::session_record::resolve_manifest(&home, run_id.as_str()) {
+        match crate::session_record::resolve_manifest(&home, artifact_key.as_str()) {
             Ok((dir, manifest)) => {
                 if session_is_resumable(&dir, &manifest)? {
                     return Ok(child);
@@ -1303,7 +1124,7 @@ pub(crate) async fn spawn_session_exec(
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
-        if let Some(status) = child.try_wait().context("probe human Session Run")? {
+        if let Some(status) = child.try_wait().context("probe human Session input")? {
             bail!("{launch}: exited with {status} before becoming resumable");
         }
         if tokio::time::Instant::now() >= deadline {
@@ -1322,22 +1143,22 @@ fn session_is_resumable(dir: &Path, manifest: &SessionCaptureManifest) -> Result
 
 pub(crate) fn resume_native_session(
     store: &SharedStore,
-    run_id: &String,
+    artifact_key: &String,
     token: &HumanSessionToken,
     launch_lock: &mut Option<File>,
 ) -> Result<bool> {
     #[cfg(test)]
-    if let Some(result) = action_test::resume(run_id, launch_lock) {
+    if let Some(result) = action_test::resume(artifact_key, launch_lock) {
         return result;
     }
-    let Some(session) = store.sqlite.session_for_artifact(run_id)? else {
+    let Some(session) = store.sqlite.session_for_artifact(artifact_key)? else {
         return Ok(false);
     };
-    if session.artifact_key != *run_id {
+    if session.artifact_key != *artifact_key {
         bail!("Session {} changed its input before resume", session.id);
     }
     let native = NativeSession::of(&session)?;
-    let Some(provider_session) = store.sqlite.input_provider_session(run_id)? else {
+    let Some(provider_session) = store.sqlite.input_provider_session(artifact_key)? else {
         return Ok(false);
     };
     crate::lf::commands::util::require_provider_session_exec(&native.dir)?;
@@ -1349,7 +1170,6 @@ pub(crate) fn resume_native_session(
         session.model.as_deref(),
         &session.cwd,
         &session.artifact_key,
-        &native.dir,
         &provider_session,
         &environment,
         launch_lock.take(),
@@ -1386,7 +1206,7 @@ pub(crate) fn human_open_argv(
     Ok(argv)
 }
 
-const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository or Wave. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
+const PRIMARY_MESSAGE: &str = "<lf:primary-session>\nThis is the one ongoing primary conversation of its repository, Wave or Task. Reconcile current evidence, then work with the user.\n</lf:primary-session>";
 
 #[cfg(not(test))]
 async fn conversation_exec_is_running(id: &str) -> Result<bool> {
@@ -1514,8 +1334,9 @@ mod tests {
         let mut summary = crate::session::SessionSummary {
             primary_scope: None,
             driver_outcome: None,
-            latest_turn: None,
+            waiting: false,
             task_terminal: false,
+            task_primary: false,
             task_ids: vec![task.clone()],
             captured: Some(1),
             id: "metadata".into(),
@@ -1524,23 +1345,21 @@ mod tests {
             title_source: crate::session::TitleSource::Human,
             ready_summary: None,
             completed_at: None,
-            kind: crate::session::SessionKind::Conversation,
             interactive: true,
             task_id: Some(task.clone()),
             wave_id: Some(wave.clone()),
-            flow_session_id: Some("flow".into()),
+            flow_id: Some("flow".into()),
             cwd: "/unavailable".into(),
             skill: Some("review".into()),
             provider: None,
             model: None,
             node: Some(2),
             iterations: None,
+            flow_step_latest: false,
             flow: Some(crate::session::FlowSummary {
                 id: "flow".into(),
-                name: Some("retained".into()),
+                name: "retained".into(),
                 state: crate::session::FlowSummaryState::Current,
-                current_capture: None,
-                pending_session: None,
                 task_id: Some(task.clone()),
                 wave_id: Some(wave.clone()),
                 updated_at: 1,
@@ -1559,11 +1378,19 @@ mod tests {
             row.flow_membership,
             super::SessionFlowMembership::Step {
                 node: Some(2),
-                occurrence: super::SessionFlowOccurrence::Unknown,
+                occurrence: super::SessionFlowOccurrence::Earlier,
                 ..
             }
         ));
-        summary.flow.as_mut().unwrap().state = crate::session::FlowSummaryState::Completed;
+        summary.flow_step_latest = true;
+        assert!(matches!(
+            super::summary_surface(&summary).flow_membership,
+            super::SessionFlowMembership::Step {
+                occurrence: super::SessionFlowOccurrence::Current,
+                ..
+            }
+        ));
+        summary.flow.as_mut().unwrap().state = crate::session::FlowSummaryState::Stopped;
         let row = super::summary_surface(&summary);
         assert!(matches!(
             row.flow_membership,
@@ -1577,7 +1404,7 @@ mod tests {
             super::SessionState::Unknown,
             "Flow completion is not Session/process completion"
         );
-        summary.flow_session_id = None;
+        summary.flow_id = None;
         assert!(matches!(
             super::summary_surface(&summary).flow_membership,
             super::SessionFlowMembership::Unknown { .. }
@@ -1598,18 +1425,6 @@ mod tests {
             super::summary_surface(&summary).state,
             super::SessionState::Interrupted
         );
-        summary.kind = crate::session::SessionKind::FlowReview;
-        summary.flow.as_mut().unwrap().state = crate::session::FlowSummaryState::Current;
-        summary.flow.as_mut().unwrap().pending_session = Some(summary.id.clone());
-        assert_eq!(
-            super::summary_surface(&summary).attention,
-            Some(super::SessionAttention::Review)
-        );
-        summary.task_terminal = true;
-        assert_eq!(super::summary_surface(&summary).attention, None);
-        summary.task_terminal = false;
-        summary.completed_at = Some(1);
-        assert_eq!(super::summary_surface(&summary).attention, None);
     }
 
     use std::collections::HashSet;
@@ -1617,7 +1432,6 @@ mod tests {
     use std::sync::{LazyLock, Mutex};
 
     use super::{human_open_argv, session_is_resumable};
-    use crate::durable::FlowSession;
     use crate::session::AgentSession;
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
     use crate::work::task::TaskId;
@@ -1682,7 +1496,6 @@ mod tests {
     fn session_action_fixtures_match_the_shared_boundary() {
         #[derive(serde::Deserialize)]
         struct Case {
-            kind: super::SessionKind,
             state: super::SessionState,
             actions: Vec<super::SessionAction>,
         }
@@ -1691,9 +1504,9 @@ mod tests {
         ))
         .unwrap();
         for case in cases {
-            assert_eq!(super::session_actions(case.kind, case.state), case.actions);
+            assert_eq!(super::session_actions(case.state), case.actions);
             for action in case.actions {
-                let outcome = super::require_session_action(case.kind, case.state, action.kind);
+                let outcome = super::require_session_action(case.state, action.kind);
                 assert_eq!(
                     outcome.err().map(|error| error.to_string()),
                     action.unavailable_reason
@@ -1709,10 +1522,7 @@ mod tests {
                 .to_string(),
         ] {
             let session: super::SessionRecord = serde_json::from_str(fixture).unwrap();
-            assert_eq!(
-                session.actions,
-                super::session_actions(session.kind, session.state)
-            );
+            assert_eq!(session.actions, super::session_actions(session.state));
             assert_eq!(session.work_path.as_deref(), Some("product / LOO-291"));
             let mut untitled = serde_json::to_value(&session).unwrap();
             untitled.as_object_mut().unwrap().remove("title_source");
@@ -1735,10 +1545,7 @@ mod tests {
         .unwrap();
         let mut kinds = Vec::new();
         for session in &sessions {
-            assert_eq!(
-                session.actions,
-                super::session_actions(session.kind, session.state)
-            );
+            assert_eq!(session.actions, super::session_actions(session.state));
             kinds.push(match &session.flow_membership {
                 super::SessionFlowMembership::Step { occurrence, .. } => match occurrence {
                     super::SessionFlowOccurrence::Unknown => "unknown_occurrence",
@@ -1836,10 +1643,9 @@ mod tests {
             iterations: None,
             task_id,
             wave_id: Some(wave.id().clone()),
-            flow_session_id: None,
+            flow_id: None,
             work_source: None,
             bound_at: None,
-            kind: crate::session::SessionKind::Conversation,
             interactive: true,
             repo: None,
             title: "Conversation".into(),
@@ -1873,203 +1679,17 @@ mod tests {
         );
     }
 
-    fn position() -> FlowSession {
-        FlowSession {
-            invocation: crate::durable::test_flow_invocation(
-                "review",
-                1,
-                "review-design",
-                Some("review_kickoff"),
-                true,
-            ),
-            cursor: crate::engine::ExecutionCursor {
-                index: 1,
-                iteration: 3,
-                ..Default::default()
-            },
-            version: 0,
-            task_id: Some(TaskId::new()),
-            wave_id: None,
-            cwd: "/repo".into(),
-            message: None,
-            model: None,
-            current_attempt: None,
-            pending_session_id: None,
-            failure: None,
-            finished: false,
-            updated_at: time::OffsetDateTime::now_utc(),
-        }
-    }
-
-    fn nested_position() -> FlowSession {
-        use crate::engine::flow::{ConcretePath, ConcreteStep, ConcreteXor, RepeatPolicy, Skill};
-        use crate::engine::{ExecutionCursor, NestedCursor};
-
-        let mut position = position();
-        let mut review = position.invocation.steps[1].clone();
-        let ConcreteStep::Skill(start) = &mut review else {
-            panic!("skill")
-        };
-        start.id = Some("begin".into());
-        start.human = false;
-        let mut decide = review.clone();
-        let ConcreteStep::Skill(end) = &mut decide else {
-            panic!("skill")
-        };
-        end.id = Some("decide".into());
-        end.repeat = Some(RepeatPolicy {
-            from: "begin".into(),
-        });
-        position.invocation.steps = vec![
-            review.clone(),
-            ConcreteStep::Xor(ConcreteXor {
-                router: Skill::named("route"),
-                paths: std::collections::HashMap::from([(
-                    "fix".into(),
-                    ConcretePath {
-                        description: "Revision".into(),
-                        steps: vec![review.clone(), decide.clone()],
-                    },
-                )]),
-                sources: Vec::new(),
-            }),
-            decide,
-        ];
-        position.cursor.progress.repeats.insert("decide".into(), 5);
-        position.cursor.child = Some(Box::new(NestedCursor::Xor {
-            selected: "fix".into(),
-            cursor: ExecutionCursor {
-                index: 1,
-                iteration: 99,
-                progress: crate::engine::transitions::FlowProgress {
-                    repeats: std::collections::BTreeMap::from([("decide".into(), 2)]),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        }));
-        position
-    }
-
     #[test]
-    fn captured_nested_membership_retains_its_exact_graph_occurrence() {
-        use crate::engine::flow_graph::FlowGraph;
+    fn old_captured_membership_keeps_its_provenance_without_a_fabricated_node() {
         use crate::session_record::SessionFlowStep;
-
-        let position = nested_position();
-        let graph = FlowGraph::new("review", &position.invocation.steps);
-        let expected = &graph.steps[1].paths[0].steps[1].key;
-        assert_eq!(*expected, 3);
-        let captured = SessionFlowStep::of(&position).unwrap();
-        // Immutable legacy input retains its runtime path; the public wire uses its captured ID.
-        assert_eq!(captured.node.as_deref(), Some("1/fix/1"));
-        assert_eq!(
-            position.invocation.node_id(&position.cursor).unwrap(),
-            *expected
-        );
-        assert_eq!(captured.iterations, Some(vec![vec![5], vec![2]]));
-
-        // Old captures keep their known Flow provenance without fabricating a
-        // structural node from the former leaf index.
-        let mut old = serde_json::to_value(&captured).unwrap();
-        old.as_object_mut().unwrap().remove("node");
-        old.as_object_mut().unwrap().remove("iterations");
-        old["iteration"] = serde_json::json!(3);
-        old["step_index"] = serde_json::json!(1);
-        let old: SessionFlowStep = serde_json::from_value(old).unwrap();
-        assert_eq!(old.node, None);
-        assert_eq!(old.iterations, None);
-        assert_eq!(old.invocation_id, captured.invocation_id);
-    }
-
-    #[test]
-    fn stored_session_membership_resolves_nested_and_post_xor_graph_nodes() {
-        let _lock = crate::journal::test_env_lock();
-        let home = SessionHome::new();
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let store = home.store().await;
-                let mut flow = nested_position();
-                flow.task_id = None;
-                flow.cwd = home.home.path().into();
-                let nested = flow.cursor.clone();
-                let graph =
-                    crate::engine::flow_graph::FlowGraph::new("review", &flow.invocation.steps);
-                let expected = [
-                    graph.steps[1].paths[0].steps[1].clone(),
-                    graph.steps[2].clone(),
-                    graph.steps[0].clone(),
-                ];
-                let mut flow = store.create_flow(flow).await.unwrap();
-                let mut sessions = Vec::new();
-                for (index, cursor) in [
-                    nested,
-                    crate::engine::ExecutionCursor {
-                        index: 2,
-                        ..Default::default()
-                    },
-                    crate::engine::ExecutionCursor::default(),
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    if index != 0 {
-                        store.publish_attempt(
-                            flow.id(), flow.version,
-                flow.current_attempt.as_ref().unwrap().captured, "codex", None,
-                        ).await.unwrap();
-                        let actor = store.sqlite.test_flow_turn(
-                            &flow.current_attempt.as_ref().unwrap().run_id,
-                        );
-                        store.sqlite.test_output(
-                            &actor,
-                            &serde_json::json!({"decision":"advance","summary":"Membership fixture completed"}),
-                        ).unwrap();
-                        store.sqlite.test_finish_flow_turn(&actor, "completed");
-                        flow = store
-                            .record_flow_cursor(flow.id(), flow.version, &cursor, None)
-                            .await
-                            .unwrap();
-                    }
-                    flow = store
-                        .reserve_attempt(flow.id(), flow.version, None)
-                        .await
-                        .unwrap();
-                    let run_id = &flow.current_attempt.as_ref().unwrap().run_id;
-                    let session = store.session_for_artifact(run_id).await.unwrap().unwrap();
-                    let run = session.clone();
-                    assert_eq!(run.node, Some([3, 4, 0][index]));
-                    sessions.push((session.id, run.iterations.clone()));
-                    for (previous, (id, iterations)) in sessions.iter().enumerate() {
-                        let session = store.session(id).await.unwrap().unwrap();
-                        let projected = super::surface(&store, &session).await.unwrap();
-                        let super::SessionFlowMembership::Step {
-                            node,
-                            step,
-                            iterations: actual_iterations,
-                            occurrence,
-                            ..
-                        } = projected.flow_membership
-                        else {
-                            panic!("stored Session must name its captured node")
-                        };
-                        assert_eq!(node, Some(expected[previous].key));
-                        assert_eq!(step, expected[previous].label);
-                        assert_eq!(&actual_iterations, iterations);
-                        assert_eq!(
-                            occurrence,
-                            if previous == index {
-                                super::SessionFlowOccurrence::Current
-                            } else {
-                                super::SessionFlowOccurrence::Earlier
-                            }
-                        );
-                    }
-                }
-            });
+        // Captures from before node keys carried a leaf index and scalar visit.
+        let old: SessionFlowStep = serde_json::from_value(serde_json::json!({
+            "task_id": null, "task_pr_id": null, "invocation_id": "exec_old",
+            "flow": "review", "step": "review-design", "iteration": 3, "step_index": 1
+        }))
+        .unwrap();
+        assert_eq!((old.node, old.key, old.iterations), (None, None, None));
+        assert_eq!(old.invocation_id, "exec_old");
     }
 
     #[test]
@@ -2136,7 +1756,7 @@ mod tests {
 
                 human,
                 id: None,
-                repeat: None,
+                returns: None,
                 sources: Vec::new(),
             })
         }
@@ -2166,7 +1786,7 @@ mod tests {
             ]),
         }));
         current.extend([
-            skill("loop-decide", false),
+            skill("loop-or-next", false),
             skill("pr-publish", false),
             skill("demo", true),
         ]);

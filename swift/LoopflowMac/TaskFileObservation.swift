@@ -8,13 +8,25 @@ import Foundation
 @MainActor
 final class TaskFileObservation {
     private let root: String
+    /// A linked worktree keeps its index and HEAD outside the checkout.
+    private let metadata: String?
     private var watched: Set<String> = []
     private let resources = Resources()
     private let changed: @MainActor ([String]) -> Void
 
     init(path: String, changed: @escaping @MainActor ([String]) -> Void) throws {
         self.changed = changed
-        root = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        let root = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        self.root = root
+        metadata = (try? String(contentsOfFile: root + "/.git", encoding: .utf8)).flatMap { pointer in
+            guard pointer.hasPrefix("gitdir:") else { return nil }
+            let target = pointer.dropFirst("gitdir:".count).trimmingCharacters(in: .whitespacesAndNewlines)
+            // Events name the real path; `resolvingSymlinksInPath` drops `/private`.
+            guard let real = realpath(URL(fileURLWithPath: target, relativeTo: URL(fileURLWithPath: root)).path, nil)
+            else { return nil }
+            defer { free(real) }
+            return String(cString: real)
+        }
         let callback = Callback(observation: self)
         defer { withExtendedLifetime(callback) {} }
         var context = FSEventStreamContext(
@@ -41,7 +53,7 @@ final class TaskFileObservation {
                 guard let observation = callback.observation else { return }
                 observation.notify(rescan ? [observation.root] : names)
             }
-        }, &context, [root] as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.1, flags) else {
+        }, &context, ([root] + (metadata.map { [$0] } ?? [])) as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.1, flags) else {
             throw CocoaError(.fileReadUnknown)
         }
         resources.stream = stream
@@ -58,6 +70,10 @@ final class TaskFileObservation {
         let prefix = root + "/"
         changed(paths.compactMap { path in
             if path == root { return "" }
+            // Reported as if the metadata sat inside the checkout, as a main checkout's does.
+            if let metadata, path == metadata || path.hasPrefix(metadata + "/") {
+                return ".git" + path.dropFirst(metadata.count)
+            }
             return path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : nil
         })
     }

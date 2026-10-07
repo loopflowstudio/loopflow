@@ -116,8 +116,15 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
     );
     fixture.task.worktree = target.path().join("checkout");
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    runtime
-        .block_on(fixture.store.update_task(&fixture.task))
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET worktree=?2 WHERE id=?1",
+            rusqlite::params![
+                fixture.task.id.as_str(),
+                fixture.task.worktree.display().to_string()
+            ],
+        )
         .unwrap();
     fixture.pr = runtime
         .block_on(fixture.store.active_task_pr(&fixture.task.id))
@@ -233,9 +240,16 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     let missing_worktree = home.path().join("not-yet-created-worktree");
     task.task.worktree = missing_worktree.clone();
     let runtime = tokio::runtime::Runtime::new().expect("initialization fixture runtime");
-    runtime
-        .block_on(task.store.update_task(&task.task))
-        .expect("publish declared Task worktree");
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET worktree=?2 WHERE id=?1",
+            rusqlite::params![
+                task.task.id.as_str(),
+                missing_worktree.display().to_string()
+            ],
+        )
+        .expect("seed declared Task worktree");
     runtime
         .block_on(task.store.append_task_event(
             &task.task.id,
@@ -377,10 +391,7 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         .reason
         .contains(&missing_path.display().to_string()));
     assert!(snapshot.actions.reason.contains(&branch));
-    assert!(snapshot
-        .actions
-        .reason
-        .contains("lf --task INF-123 flow start"));
+    assert!(snapshot.actions.reason.contains("lf task run INF-123"));
     assert!(snapshot
         .actions
         .reason

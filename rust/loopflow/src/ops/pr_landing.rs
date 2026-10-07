@@ -224,7 +224,7 @@ fn admit_ci_fix(
         let store = landing_store().await?;
         let lock = store
             .sqlite
-            .lock_checkout(&landing.worktree)
+            .lock_task_checkouts(&[&landing.worktree], landing.task_id.as_ref())
             .map_err(repair_error)?;
         let reservation = store
             .sqlite
@@ -300,11 +300,10 @@ fn admit_ci_fix(
                 if Some(&session.id) != reservation.session.as_ref()
                     && session.cwd == landing.worktree
                     && session.completed_at.is_none()
-                    && (session.kind != crate::session::SessionKind::Conversation
-                        || store
-                            .sqlite
-                            .session_has_pending_turn(&session.id)
-                            .map_err(repair_error)?)
+                    && store
+                        .sqlite
+                        .session_has_pending_turn(&session.id)
+                        .map_err(repair_error)?
                 {
                     return Err(repair_error(format!(
                         "Session {} has unresolved work",
@@ -345,13 +344,12 @@ fn admit_ci_fix(
                 iterations: None,
                 task_id: landing.task_id.clone(),
                 wave_id: None,
-                flow_session_id: None,
+                flow_id: None,
                 work_source: landing
                     .task_id
                     .as_ref()
                     .map(|_| crate::session::WorkSource::Declared),
                 bound_at: None,
-                kind: crate::session::SessionKind::Conversation,
                 interactive: false,
                 repo: None,
                 title: format!("Repair PR #{}", landing.pr_number),
@@ -1288,16 +1286,20 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         {
             return crate::ops::task::cleanup_completed_task(store, &task).await;
         }
-        eprintln!("Task {} remains open; retained its checkout for further work and the next PR. Use `lf task complete {} --summary TEXT` when delivery is finished.", task.plan.identifier, task.plan.identifier);
+        eprintln!("Task {} remains open; retained its checkout for further work and the next PR. Use `lf task move {} end` when delivery is finished.", task.plan.identifier, task.plan.identifier);
         return Ok(());
     }
     // Only a Flow still being driven needs the checkout; a stopped one is history.
     if store
         .sqlite
-        .landing_unfinished_flows(&landing.id)
+        .flows_at(&landing.worktree)
         .map_err(|error| OpsError::Message(error.to_string()))?
         .iter()
-        .any(|flow| crate::ops::flow_run::driver_live(flow))
+        .any(|flow| {
+            flow.driver.completed_at.is_none()
+                && crate::journal::exec_process_evidence(&store.sqlite, flow.id())
+                    != crate::journal::ProcessIdentityEvidence::Dead
+        })
     {
         eprintln!("PR merged; retained its checkout for the Flow that landed it.");
         return Ok(());

@@ -50,11 +50,6 @@ pub(crate) fn admission_blocker(
         if Some(session.id.as_str()) == repair_session {
             continue;
         }
-        if session.completed_at.is_none()
-            && session.kind != crate::session::SessionKind::Conversation
-        {
-            return Ok(Some(format!("Session {} awaits completion", session.id)));
-        }
         if let Some(input) = store.session(&session.id).map_err(error)? {
             if !input.interactive && !input.input_published {
                 return Ok(Some(format!("Session {} has a reserved input", session.id)));
@@ -75,16 +70,6 @@ pub(crate) fn admission_blocker(
         }
         if exec_process_evidence(store, &exec.id) != ProcessIdentityEvidence::Dead {
             return Ok(Some(format!("Exec {} is live or unresolved", exec.id)));
-        }
-    }
-    for flow in &work.flows {
-        if let Some(flow) = store.flow(&flow.summary.id).map_err(error)? {
-            if !flow.finished && crate::ops::flow_run::driver_live(flow.id()) {
-                return Ok(Some(format!(
-                    "Flow {} has a live driver",
-                    flow.invocation.id
-                )));
-            }
         }
     }
     Ok(None)

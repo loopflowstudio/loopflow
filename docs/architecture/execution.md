@@ -10,8 +10,9 @@ These commands use the current parser. This guide specifies the accepted
 lifecycle; [cutover status](../architecture-reference.md#cutover-status) records
 which owners and proofs remain unfinished.
 
-The command has an Exec. The agent has an AgentSession. A captured Flow has a
-FlowSession. Their completion and authority are different facts.
+The command has an Exec. The agent has an AgentSession. A Flow is one driver
+Exec and the step Execs it starts. Their completion and authority are different
+facts.
 
 ## Request flow
 
@@ -43,10 +44,10 @@ assembly captures the selected instructions, exact provider strings, attribution
 explicit documents and launch options. Definitions are not reconstructed from
 current files when continuing historical work.
 
-A Flow captures its compiled graph, all routing alternatives and every Skill
-before execution. A direct conversation captures its selected Skill or inline
-prompt. Reconnect retains that conversation; a new Flow invocation captures new
-source. Current credentials and checkout contents remain live inputs to execution,
+A Flow's driver compiles its graph and all routing alternatives before the
+first step and holds them in memory. A direct conversation captures its selected
+Skill or inline prompt. Reconnect retains that conversation; a new Flow compiles
+current source. Current credentials and checkout contents remain live inputs to execution,
 not evidence that old captured intent changed.
 
 ## Record actual processes
@@ -61,7 +62,7 @@ The provider and shell do not become fake Execs. After driver handoff, new
 commands from the continuing provider name the new driver; delayed commands from
 a replaced provider retain their historical origin. A parent exiting never
 rewrites existing descendants. These causal links grant neither signaling nor
-Flow-settlement authority.
+Flow authority.
 
 Exec completion records the observed command result, end time and known exit
 code or signal. Missing terminal evidence stays unknown. Installation/bootstrap
@@ -76,8 +77,8 @@ Exec does not reserve agent work or mark a Task Started.
 3. Publish immutable launch input and record publication before spawning.
 4. Start or connect the native provider and retain exact engine/thread/client
    evidence, distinct from the conversation driver.
-5. Append correlated provider outcomes and usage; settle selected Flow work under
-   its position version, and command completion under its Exec lifetime.
+5. Append correlated provider outcomes and usage; settle command completion
+   under its Exec lifetime.
 
 Prepared rows without publication are recoverable preparation failures. A missing
 spawn receipt is uncertainty, not permission to duplicate a possibly live engine.
@@ -113,15 +114,20 @@ provider can succeed before the command fails later, and a stopped Flow's histor
 outlives its command. Failed or interrupted conversation work remains history;
 continuation appends a new result to the same conversation.
 
-A Flow step consumes one exact successful AgentSession completion under its
-boundary and position-version fence. Later conversation continuation does not rewrite
-that consumed result. A mechanical step records its own start/result in Flow
-history under its own child `lf` Exec, without inventing an AgentSession. The
-driver holds the per-invocation driver lock, retains navigation authority and
-consumes the saved result. If it dies, the row keeps its last cursor, failure,
-events and effect receipts; nothing resumes it. The caller inspects them before
-launching fresh work. Unknown liveness stays unknown. Cursor movement cannot
-prove exactly-once external effects.
+The driver holds the cursor and starts each step as a child `lf` process: the
+plain command, `lf -b skill <name> [message]` or the operation's own. A step
+knows nothing of its Flow. The driver appends the step's Exec, graph node and
+iteration counts to FlowExec, beside the Flow's name and launched graph. A
+step's result is how its process exited. A deciding or routing step gets its
+answer contract in its message and the driver reads the final answer of the
+Session turn that step Exec captured; an invalid answer is corrected by
+resuming the same conversation (`lf -b session resume ID MESSAGE`), at most
+twice, then the Flow fails. A mechanical step is its own child Exec and invents
+no AgentSession. After an operation the driver stops the Flow when a landing of
+its checkout is still being watched; neither failed. A killed driver leaves its Execs
+as history; nothing resumes it. The caller inspects them before launching fresh
+work. Unknown liveness stays unknown. Cursor movement cannot prove exactly-once
+external effects.
 
 Blocked records the reason and stops at the current Flow position. Existing logs
 and outcomes provide the evidence. The Wave operator resolves
@@ -171,5 +177,5 @@ Current-state conversion and its preservation boundary belong in
 [Data and persistence](data.md#reads-and-cutover). Runtime reads use the SQLite
 owners, with no legacy import or file fallback.
 
-[Planning](planning.md) owns captured Flow progression and planning ancestry.
+[Planning](planning.md) owns Flow progression and planning ancestry.
 [Data and persistence](data.md) distinguishes record ownership from payload storage.

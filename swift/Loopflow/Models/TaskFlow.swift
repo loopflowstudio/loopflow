@@ -120,6 +120,63 @@ public struct LatestTaskFlow: Decodable, Sendable, Hashable {
     }
 }
 
+/// One launched step and how its process ended.
+public struct FlowStepExec: Decodable, Sendable, Hashable, Identifiable {
+    public let execId: String
+    public let label: String
+    public let key: UInt32
+    public let iterations: [[UInt32]]
+    public let startedAt: Int64
+    public let completedAt: Int64?
+    public let outcome: String?
+    public let exitCode: Int32?
+
+    public var id: String { execId }
+
+    enum CodingKeys: String, CodingKey {
+        case label, key, iterations, outcome
+        case execId = "exec_id"
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+        case exitCode = "exit_code"
+    }
+}
+
+/// One Flow exec as its driver recorded it: the graph captured at launch and
+/// every step it started. Any Flow reads the same way, ad hoc or a Task's edge.
+public struct FlowDetail: Decodable, Sendable, Hashable {
+    public let entry: TaskFlowMember
+    public let graph: FlowGraph
+    public let current: UInt32?
+    public let completed: [UInt32]
+    public let returns: [FlowReturn]
+    public let iterations: [[UInt32]]
+    public let cwd: String?
+    public let steps: [FlowStepExec]
+
+    /// The run in the shape the diagram draws. `current` records no driver
+    /// exit, which is not proof of a live process.
+    public var progress: LatestTaskFlow {
+        let last = steps.last
+        let execution: TaskFlowExecution
+        let reason: String
+        switch entry.state {
+        case .current:
+            execution = .running
+            reason = last.map { "Running \($0.label)" } ?? "Starting"
+        case .completed:
+            execution = .idle
+            reason = "Completed"
+        case .stopped:
+            let failed = last.flatMap { step in step.outcome.flatMap { $0 == "ok" ? nil : "\(step.label) · \($0)" } }
+            execution = failed == nil ? .idle : .blocked
+            reason = failed ?? "Stopped before its last step"
+        }
+        return LatestTaskFlow(invocationId: entry.id, graph: graph, current: current, completed: completed,
+                              returns: returns, iterations: iterations, execution: execution, reason: reason)
+    }
+}
+
 public enum TaskFlowRecord: Decodable, Sendable, Hashable {
     /// No Flow has been launched for this Task.
     case none
@@ -169,21 +226,44 @@ public struct TaskFlowSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-/// One selectable Flow and the topology it would capture if started now.
+/// One Flow or workflow a Task can run, as it would be captured if started now.
 public struct FlowCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
+    public enum Kind: String, Decodable, Sendable { case flow, workflow }
+
     public let name: String
+    public let kind: Kind
+    /// The repository file that defines it; `nil` for a builtin.
+    public let source: String?
     public let graph: FlowGraph?
     public let template: FlowTemplate?
+    public let workflow: WorkflowDefinition?
+    /// Why the definition cannot be used. Its file stays listed.
     public let unavailable: String?
 
-    public var id: String { name }
+    public var id: String { "\(kind.rawValue)/\(name)" }
+}
+
+/// An authored workflow before any Task has taken it up.
+public struct WorkflowDefinition: Decodable, Sendable, Hashable {
+    public let name: String
+    public let nodes: [Workflow.Node]
+    public let edges: [Workflow.Edge]
+}
+
+extension Array where Element == FlowCatalogEntry {
+    /// What `lf task run ISSUE <name>` would take up: a workflow wins over a Flow.
+    public func named(_ name: String) -> FlowCatalogEntry? {
+        first { $0.name == name && $0.kind == .workflow } ?? first { $0.name == name }
+    }
 }
 
 /// Formatting only: order and nesting are supplied by Rust's captured definition.
 public func flowIterationLabel(_ levels: [[UInt32]]) -> String? {
-    guard levels.contains(where: { !$0.isEmpty }) else { return nil }
-    return levels.map { "(" + $0.map(String.init).joined(separator: ", ") + ")" }
-        .joined(separator: " / ")
+    let counts = levels.flatMap { $0 }
+    let passes = counts.enumerated().filter { $0.element > 0 }.map { index, count in
+        counts.count == 1 ? "pass \(UInt64(count) + 1)" : "loop \(index + 1) pass \(UInt64(count) + 1)"
+    }
+    return passes.isEmpty ? nil : passes.joined(separator: ", ")
 }
 
 /// Template-local disclosure IDs never identify execution or an invocation.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the lifecycle scorecard and typed Project metric inputs."""
+"""Generate the lifecycle scorecard from retained execution evidence."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="read this Rust-resolved Loopflow Home database",
     )
     parser.add_argument(
-        "--runs",
+        "--history",
         type=Path,
         required=True,
         help="SessionHistory JSON supplied by the shared history reader",
@@ -98,9 +98,13 @@ def belongs_to_repo(value: str, repo: Path) -> bool:
     return candidate.parent == repo.parent and candidate.name.startswith(f"{repo.name}.")
 
 
-def load_runs(path: Path, repo: Path) -> list[dict[str, Any]]:
-    runs = json.loads(path.read_text(encoding="utf-8"))
-    return [run for run in runs if run["repo"] is not None and belongs_to_repo(run["repo"], repo)]
+def load_history(path: Path, repo: Path) -> list[dict[str, Any]]:
+    history = json.loads(path.read_text(encoding="utf-8"))
+    return [
+        session
+        for session in history
+        if session["repo"] is not None and belongs_to_repo(session["repo"], repo)
+    ]
 
 
 def fresh_github_observation(value: str | None) -> bool:
@@ -150,17 +154,6 @@ def load_lifecycle(
         )
         prs.append(value)
     return prs
-
-
-def task_loop_trust_observation(window_ended_at: datetime) -> dict[str, Any]:
-    return {
-        "wave": "product",
-        "metric_id": "task-loop-trust",
-        "instrument": "lifecycle-scorecard",
-        "kind": "unavailable",
-        "source_as_of": window_ended_at.isoformat().replace("+00:00", "Z"),
-        "reason": "Current Work records do not identify complete Task-loop intervals",
-    }
 
 
 def parse_time(value: str) -> datetime:
@@ -335,24 +328,24 @@ def resource_row(
 
 
 def usage_rows(
-    policy: Mapping[str, Any], runs: Sequence[Mapping[str, Any]], provider: str | None
+    policy: Mapping[str, Any], history: Sequence[Mapping[str, Any]], provider: str | None
 ) -> list[dict[str, Any]]:
-    samples = [run for run in runs if provider is None or run["harness"] == provider]
+    samples = [session for session in history if provider is None or session["harness"] == provider]
     suffix = f".{provider}" if provider else ""
     fields = [
-        ("run_total_input_tokens", "Total input / Run", "total_input_tokens"),
-        ("run_output_tokens", "Output / Run", "output_tokens"),
-        ("run_cost_usd", "Reported cost / Run", "cost_usd"),
+        ("session_total_input_tokens", "Total input / Session", "total_input_tokens"),
+        ("session_output_tokens", "Output / Session", "output_tokens"),
+        ("session_cost_usd", "Reported cost / Session", "cost_usd"),
     ]
     rows = []
     for metric, label, field in fields:
         values = [
-            run["usage"][field]
-            for run in samples
-            if run["usage"][field] is not None
-            and run["usage"]["gaps"] == 0
-            and run["evidence_gaps"] == 0
-            and run["usage"]["streams"] == run["usage"]["final_streams"]
+            session["usage"][field]
+            for session in samples
+            if session["usage"][field] is not None
+            and session["usage"]["gaps"] == 0
+            and session["evidence_gaps"] == 0
+            and session["usage"]["streams"] == session["usage"]["final_streams"]
         ]
         rows.append(
             measured_row(
@@ -367,12 +360,16 @@ def usage_rows(
         )
     rows.append(
         measured_row(
-            f"run_elapsed_seconds{suffix}",
+            f"session_elapsed_seconds{suffix}",
             "Recorded input elapsed",
             provider,
-            [run["recorded_at"] - run["observed_at"] for run in samples if run["recorded_at"] >= run["observed_at"]],
+            [
+                session["recorded_at"] - session["observed_at"]
+                for session in samples
+                if session["recorded_at"] >= session["observed_at"]
+            ],
             len(samples),
-            metric_budget(policy, "run_elapsed_seconds"),
+            metric_budget(policy, "session_elapsed_seconds"),
             policy["minimum_p95_samples"],
         )
     )
@@ -383,18 +380,18 @@ def build_report(
     policy: Mapping[str, Any],
     repo: Path,
     generated_at: datetime,
-    runs: Sequence[Mapping[str, Any]],
+    history: Sequence[Mapping[str, Any]],
     gates: Sequence[Mapping[str, Any]],
     prs: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     since_time = generated_at - timedelta(days=int(policy["window_days"]))
     minimum = int(policy["minimum_p95_samples"])
-    window_runs = [
-        run
-        for run in runs
-        if run["recorded_outcome"] is not None
-        and run["recorded_at"] is not None
-        and int(since_time.timestamp()) <= run["recorded_at"] <= int(generated_at.timestamp())
+    window_history = [
+        session
+        for session in history
+        if session["recorded_outcome"] is not None
+        and session["recorded_at"] is not None
+        and int(since_time.timestamp()) <= session["recorded_at"] <= int(generated_at.timestamp())
     ]
     rows = [
         unknown_row(
@@ -435,9 +432,9 @@ def build_report(
             )
         )
     first_attempts: dict[str, int] = {}
-    for run in runs:
-        pr_id = run["task_pr_id"]
-        started = run["first_provider_attempt_at"]
+    for session in history:
+        pr_id = session["task_pr_id"]
+        started = session["first_provider_attempt_at"]
         if pr_id is not None and started is not None:
             first_attempts[pr_id] = min(first_attempts.get(pr_id, started), started)
     attempt_row = measured_row(
@@ -510,11 +507,11 @@ def build_report(
                 "cpu_seconds",
                 since_time,
             ),
-            *usage_rows(policy, window_runs, None),
+            *usage_rows(policy, window_history, None),
         ]
     )
-    for provider in sorted({str(run["harness"]) for run in window_runs}):
-        rows.extend(usage_rows(policy, window_runs, provider))
+    for provider in sorted({str(session["harness"]) for session in window_history}):
+        rows.extend(usage_rows(policy, window_history, provider))
     return {
         "schema_version": SCHEMA_VERSION,
         "repo": repo.name,
@@ -590,11 +587,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         generated_at = datetime.now(timezone.utc)
         since = int((generated_at - timedelta(days=policy["window_days"])).timestamp())
         until = int(generated_at.timestamp())
-        runs = load_runs(args.runs, repo)
+        history = load_history(args.history, repo)
         with open_read_only(database) as connection:
             prs = load_lifecycle(connection, repo, since, until)
-        metric_observation = task_loop_trust_observation(generated_at)
-        report = build_report(policy, repo, generated_at, runs, load_gates(repo), prs)
+        report = build_report(policy, repo, generated_at, history, load_gates(repo), prs)
     except (FileNotFoundError, OSError, ValueError, sqlite3.Error) as error:
         print(f"lifecycle-scorecard: {error}", file=sys.stderr)
         return 1
@@ -603,7 +599,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             json.dumps(
                 {
                     "report": report,
-                    "metric_observations": [metric_observation],
+                    "metric_observations": [],
                     "text": format_report(report),
                 },
                 sort_keys=True,

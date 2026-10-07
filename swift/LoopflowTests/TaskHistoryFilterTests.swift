@@ -29,6 +29,9 @@ struct TaskHistoryFilterTests {
         var rows = try historyRows()
         if let index = rows.firstIndex(where: { ($0["task"] as? [String: Any])?["id"] as? String == "unresolved" }) {
             rows[index]["runtime"] = ["work_id": "task-unresolved", "status": "ready", "reason": "Running", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "started": true] as [String: Any]
+            var condition = try #require(rows[index]["condition"] as? [String: Any])
+            condition["unresolved_execution"] = true
+            rows[index]["condition"] = condition
         }
         evidence["items"] = rows
         waves[0]["tasks"] = evidence
@@ -36,7 +39,7 @@ struct TaskHistoryFilterTests {
         return root
     }
 
-    private func task(_ state: String, date: String?, runtime: String? = nil, missing: Bool = false) throws -> RoadmapTask {
+    private func task(_ state: String, date: String?, runtime: String? = nil, missing: Bool = false, review: Bool = false) throws -> RoadmapTask {
         var row = try #require(historyRows().first)
         var plan = try #require(row["task"] as? [String: Any])
         plan["state"] = state
@@ -47,12 +50,13 @@ struct TaskHistoryFilterTests {
             row["runtime"] = ["work_id": "task", "status": runtime, "reason": "settled", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "started": true] as [String: Any]
         }
         row["condition"] = ["state": missing ? "blocked" : "clear", "reason": "historical checkout", "observed_at": "2026-10-02T12:00:00Z", "evidence_age_secs": 0,
-            "local_progress": ["state": missing ? "missing" : "not_applicable", "unsettled": missing, "dirty": NSNull(), "authored_commits": NSNull(), "recovery_required": missing, "reason": "checkout removed"]] as [String: Any]
+            "local_progress": ["state": missing ? "missing" : "not_applicable", "unsettled": missing, "dirty": NSNull(), "authored_commits": NSNull(), "recovery_required": missing, "reason": "checkout removed"],
+            "unresolved_execution": runtime == "ready" || review] as [String: Any]
         return try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
     }
 
     private func visible(_ row: RoadmapTask, _ filter: TaskHistoryFilter) -> Bool {
-        filter.includes(row.task, runtime: row.runtime, condition: row.condition, flow: row.flow, now: now)
+        filter.includes(row.task, condition: row.condition, now: now)
     }
 
     @Test func rollingBoundariesAndValidation() throws {
@@ -94,7 +98,7 @@ struct TaskHistoryFilterTests {
 
     @Test func locallySettledWorkLeavesTheSidebarBeforePlanningCatchesUp() throws {
         func sidebar(_ row: RoadmapTask) -> Bool {
-            WorkspaceTask(id: WorkspaceNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: []).inWorkingSet
+            TaskProjection(id: WorkNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: []).inWorkingSet
         }
         for runtime in ["done", "abandoned"] {
             let row = try task("unstarted", date: nil, runtime: runtime, missing: true)
@@ -107,11 +111,9 @@ struct TaskHistoryFilterTests {
 
     @Test func unresolvedFlowAndRetainedSessionSurviveHiddenHistory() throws {
         let row = try task("canceled", date: nil, runtime: "done", missing: true)
-        let latest = LatestTaskFlow(invocationId: "review", graph: FlowGraph(name: "feature", steps: [], interactions: InteractionGraph(stages: [], transitions: [])), current: nil, completed: [], returns: [], iterations: [], execution: .blocked, reason: "Release target is unavailable")
-        let flow = TaskFlowSnapshot(recommended: "feature", record: .latest(latest), controls: [])
-        #expect(TaskHistoryFilter().includes(row.task, runtime: row.runtime, condition: row.condition, flow: flow, now: now))
+        #expect(visible(try task("canceled", date: nil, runtime: "done", missing: true, review: true), TaskHistoryFilter()))
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: Data(contentsOf: fixtures.appendingPathComponent("sessions.json")))
-        let retained = WorkspaceTask(id: WorkspaceNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: [try #require(sessions.first)])
+        let retained = TaskProjection(id: WorkNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: [try #require(sessions.first)])
         #expect(!visible(row, TaskHistoryFilter()))
         #expect(retained.inWorkingSet)
         #expect(retained.sessions.first?.id == sessions.first?.id)
@@ -123,8 +125,8 @@ struct TaskHistoryFilterTests {
         let boundary = try task("completed", date: "2026-03-05T07:00:00-08:00")
         let before = try task("completed", date: "2026-03-05T06:59:59.9999-08:00")
         let springNow = ISO8601DateFormatter().date(from: "2026-03-12T08:00:00-07:00")!
-        #expect(filter.includes(boundary.task, runtime: nil, condition: boundary.condition, flow: boundary.flow, now: springNow))
-        #expect(!filter.includes(before.task, runtime: nil, condition: before.condition, flow: before.flow, now: springNow))
+        #expect(filter.includes(boundary.task, condition: boundary.condition, now: springNow))
+        #expect(!filter.includes(before.task, condition: before.condition, now: springNow))
     }
 
     @Test func inlineEditingAppliesCancelsAndRemembersRange() throws {
@@ -240,7 +242,7 @@ struct TaskHistoryFilterTests {
         let query = RegistryQuery { args, _ in args == ["flow", "list", "--json"] ? catalog : payload }
         let roadmap = try await query.roadmap()
         let wave = try #require(roadmap.waves.first)
-        let model = PodiumModel(query: query)
+        let model = WorkModel(query: query)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.wave.toWave()]), processActivity: .loading, workActivity: .loading, repos: [])
         await model.loadFlowCatalog()
         model.select(.wave(id: wave.wave.id))
@@ -249,8 +251,8 @@ struct TaskHistoryFilterTests {
         let view = WorkSurfaceView(model: model, onOpenTask: { opened = $0 })
         func rows() throws -> [String] {
             try view.inspect().findAll(ViewType.Button.self).compactMap { button in
-                guard let id = try? button.accessibilityIdentifier(), id.hasPrefix("podium-task-") else { return nil }
-                return String(id.dropFirst("podium-task-".count))
+                guard let id = try? button.accessibilityIdentifier(), id.hasPrefix("loopflow-task-") else { return nil }
+                return String(id.dropFirst("loopflow-task-".count))
             }
         }
         func checkCount() throws {
@@ -260,7 +262,7 @@ struct TaskHistoryFilterTests {
             }
             #expect(visibleRows.contains("unresolved"))
             for id in visibleRows {
-                let button = try view.inspect().find(viewWithAccessibilityIdentifier: "podium-task-\(id)").button()
+                let button = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-task-\(id)").button()
                 #expect(button.isDisabled() == false)
                 try button.tap()
                 #expect(opened == .task(id: id))
@@ -298,11 +300,16 @@ struct TaskHistoryFilterTests {
         try checkCount()
         _ = try view.inspect().find(text: "Completed · date unavailable")
         #expect(model.taskHistoryFilters[wave.wave.id]?.showCompleted == true)
-        // Inspection remains available even for hidden terminal inventory;
-        // Rust's admission decision still governs the production Start button.
+        // A hidden Task can still be inspected; Rust's admission decision
+        // governs Start in its workspace header.
+        var work = try #require(JSONSerialization.jsonObject(
+            with: Data(contentsOf: fixtures.appendingPathComponent("task_work.json"))) as? [String: Any])
+        work["workflow"] = NSNull()
+        let unstarted = try JSONDecoder().decode(TaskWork.self, from: JSONSerialization.data(withJSONObject: work))
         for id in ["LOO-318", "recent", "LOO-309"] {
-            model.select(.task(id: id))
-            let start = try view.inspect().find(viewWithAccessibilityIdentifier: "task-flow-start").button()
+            let task = try #require(model.task(id: id)?.task)
+            let header = TaskWorkflowHeader(model: model, task: task, wave: wave.wave, work: .available(unstarted))
+            let start = try header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start").button()
             #expect(start.isDisabled() == (id != "LOO-309"))
         }
     }

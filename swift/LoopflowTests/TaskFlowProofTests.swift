@@ -18,40 +18,33 @@ private func fixture(_ name: String) throws -> Data {
     try Data(contentsOf: fixtureRoot.appendingPathComponent(name))
 }
 
+@MainActor
+private func ax(_ element: NSObject, _ property: String) -> Any? {
+    let key = property == "Focused" ? "isAccessibilityFocused" : "accessibility" + property
+    guard element.responds(to: NSSelectorFromString(key)) else { return nil }
+    return element.value(forKey: key)
+}
+
+/// Every element AppKit exposes under `root`, panes included.
+@MainActor
+private func accessible(_ root: Any) -> [NSObject] {
+    guard let element = root as? NSObject else { return [] }
+    return [element] + ((ax(element, "Children") as? [Any]) ?? []).flatMap { accessible($0) }
+}
+
+/// Set LOOPFLOW_FLOW_CAPTURE_DIR to write what a window drew as `name`.png.
+@MainActor
+private func captureIfRequested(_ window: NSWindow, name: String) throws {
+    guard let directory = ProcessInfo.processInfo.environment["LOOPFLOW_FLOW_CAPTURE_DIR"],
+          let content = window.contentView,
+          let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
+    content.cacheDisplay(in: content.bounds, to: bitmap)
+    let png = try #require(bitmap.representation(using: .png, properties: [:]))
+    try png.write(to: URL(fileURLWithPath: directory).appendingPathComponent("\(name).png"))
+}
+
 @Suite("Task Flow")
 struct TaskFlowTests {
-    @Test("Participation opens only the captured occurrence in the current pass")
-    func exactParticipationSession() throws {
-        let snapshots = try JSONDecoder().decode([TaskFlowSnapshot].self, from: fixture("task_flow.json"))
-        guard case .latest(let latest) = snapshots[2].record else { Issue.record("latest"); return }
-        var value = try #require(JSONSerialization.jsonObject(with: fixture("session.json")) as? [String: Any])
-        value["kind"] = "flow"
-        value["id"] = "exact"
-        value["state"] = "waiting"
-        value["flow_membership"] = ["kind": "step", "flow": "feature", "invocation_id": latest.invocationId,
-            "step": "demo", "node": 4, "iterations": latest.iterations, "occurrence": "current"]
-        let exact = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
-        var wrong = value
-        wrong["id"] = "previous"
-        var membership = try #require(wrong["flow_membership"] as? [String: Any])
-        membership["iterations"] = [[0, 0]]
-        wrong["flow_membership"] = membership
-        let previous = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wrong))
-        #expect(participationSession(node: "4", latest: latest, sessions: [previous, exact])?.id == "exact")
-        #expect(participationSession(node: "4", latest: latest, sessions: [previous]) == nil)
-        #expect(participationSession(node: "7", latest: latest, sessions: [exact]) == nil)
-        #expect(exact.offersParticipation)
-        #expect(exact.participationLabel == "Available · preparing")
-        value["kind"] = "conversation"
-        let independent = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
-        #expect(!independent.offersParticipation)
-        value["kind"] = "flow"
-        value["actions"] = []
-        let failed = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
-        #expect(!failed.offersParticipation)
-        #expect(failed.participationLabel == "Needs recovery")
-    }
-
     @Test("Flow snapshots and the catalogue decode every record without defaults")
     func flowFixtures() throws {
         let snapshots = try JSONDecoder().decode([TaskFlowSnapshot].self, from: fixture("task_flow.json"))
@@ -84,7 +77,12 @@ struct TaskFlowTests {
         }
 
         let catalog = try JSONDecoder().decode([FlowCatalogEntry].self, from: fixture("flow_catalog.json"))
-        #expect(catalog.map(\.name) == ["feature", "broken"])
+        #expect(catalog.map(\.id) == ["flow/feature", "flow/broken", "workflow/code", "workflow/proof", "workflow/research"])
+        // A workflow carries nodes and edges instead of a Flow graph; an invalid file keeps its source.
+        #expect(catalog[2].workflow?.edges.map(\.launchName) == ["pursue", "pursue", "ship"])
+        #expect(catalog[2].source == nil && catalog[2].graph == nil)
+        #expect(catalog[3].source == ".lf/workflows/proof.yaml" && catalog[3].unavailable != nil)
+        #expect(catalog.named("code")?.kind == .workflow)
         #expect(catalog[0].graph?.steps.count == 8 && catalog[1].unavailable != nil)
         #expect(catalog[0].graph?.steps[0].sources == ["feature"])
         let graph = try #require(catalog[0].graph)
@@ -135,8 +133,9 @@ struct TaskFlowTests {
         #expect(review.returns[1].traversals == 1)
         guard case .latest(let running) = snapshots[1].record else { Issue.record("latest"); return }
         #expect(running.iterations == [[2, 0]])
-        #expect(flowIterationLabel([[2, 1], [3]]) == "(2, 1) / (3)")
-        #expect(flowIterationLabel([[]]) == nil)
+        #expect(flowIterationLabel([[2, 1], [3]]) == "loop 1 pass 3, loop 2 pass 2, loop 3 pass 4")
+        #expect(flowIterationLabel([[], [2]]) == "pass 3")
+        #expect(flowIterationLabel([[0, 0]]) == nil)
         #expect(running.returns.map(\.traversals) == [2, 0])
 
         guard case .latest(let blocked) = snapshots[3].record else { Issue.record("latest"); return }
@@ -175,21 +174,211 @@ struct TaskFlowTests {
         #expect(latest.iterations == [[3], [0], [2]])
     }
 
-    @Test("Running status elapsed time and the two return ports")
+    @Test("A Flow exec's length and the two return ports")
     @MainActor
-    func statusLineAndPorts() {
-        let now = Date(timeIntervalSince1970: 1_800_000_000)
-        #expect(TaskFlowView.elapsed(since: "2027-01-15T08:00:00Z", now: now) == "0s")
-        #expect(TaskFlowView.elapsed(since: "2027-01-15T07:59:18Z", now: now) == "42s")
-        #expect(TaskFlowView.elapsed(since: "2027-01-15T07:48:00Z", now: now) == "12m")
-        #expect(TaskFlowView.elapsed(since: "2027-01-15T04:55:00Z", now: now) == "3h 05m")
-        #expect(TaskFlowView.elapsed(since: "2027-01-13T05:00:00.000Z", now: now) == "2d 03h")
-        #expect(TaskFlowView.elapsed(since: "yesterday", now: now) == nil)
+    func durationAndPorts() {
+        #expect(FlowRunView.duration(0) == "0s")
+        #expect(FlowRunView.duration(42) == "42s")
+        #expect(FlowRunView.duration(725) == "12m 5s")
+        #expect(FlowRunView.duration(11_100) == "3h 5m")
+        #expect(FlowRunView.duration(-3) == "0s")
         // Loop 1 lands from above, Loop 2 from below, both at the target's left edge.
         #expect(FlowLoopGeometry.returnsAbove(0) && !FlowLoopGeometry.returnsAbove(1))
         #expect(FlowLoopGeometry.landing(0) == FlowLoopGeometry.landing(1))
         #expect(FlowLoopGeometry.above(1) > FlowLoopGeometry.above(0))
         #expect(FlowLoopGeometry.below(1) > FlowLoopGeometry.below(0))
+    }
+
+    @Test("The Task workspace opens on the ensured Session, with the Workflow in its header and the Flow exec log as a pane")
+    @MainActor
+    func taskWorkspace() async throws {
+        _ = NSApplication.shared
+        NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+        func object(_ name: String) throws -> [String: Any] {
+            try #require(JSONSerialization.jsonObject(with: fixture(name)) as? [String: Any])
+        }
+        let repo = "/src/loopflow"
+        let roadmap = try object("roadmap_snapshot.json")
+        let waves = try #require(roadmap["waves"] as? [[String: Any]]).map { try #require($0["wave"]) }
+        // The Task waits at `demo` after three Flow execs: one finished, one stopped, one running.
+        var work = try object("task_work.json")
+        var workflow = try #require(work["workflow"] as? [String: Any])
+        workflow["position"] = ["kind": "node", "node": "demo"]
+        workflow["outgoing"] = [3, 4]
+        work["workflow"] = workflow
+        let run = try object("flow_detail.json")
+        let running = try #require((work["flows"] as? [[String: Any]])?.first)
+        let runId = try #require(running["id"] as? String)
+        let started = try #require((run["steps"] as? [[String: Any]])?.first?["started_at"] as? Int)
+        func exec(_ id: String, _ name: String, _ state: String, seconds: Int) -> [String: Any] {
+            running.merging(["id": id, "name": name, "state": state, "updated_at": started - 7_200,
+                             "ended_at": started - 7_200 + seconds]) { $1 }
+        }
+        work["flows"] = [
+            exec("22222222-2222-4222-8222-222222222222", "task-design", "completed", seconds: 725),
+            exec("44444444-4444-4444-8444-444444444444", "pursue", "stopped", seconds: 42),
+            running,
+        ]
+
+        let reader = ScriptedReader(repo: repo, planning: ["roadmap": roadmap, "waves": waves],
+                                    work: work, runs: [run])
+        let calls = CallLog()
+        let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
+            await calls.add(args)
+            switch (args.first, args.dropFirst().first) {
+            case ("session", "ensure"):
+                return try await reader.ensure(issue: args[3])
+            case ("home", "id"): return #"{"id":"\#(fixtureHomeId)"}"#
+            default: throw RegistryQueryError("The fixture has no \(args.prefix(2).joined(separator: " "))")
+            }
+        }
+        let model = WorkModel(query: query, repoPath: repo)
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 720),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = NSHostingView(rootView: view)
+        defer { window.contentView = nil }
+        func settle() async throws {
+            window.contentView?.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        func eventually(_ what: String, _ condition: @MainActor () async -> Bool) async throws {
+            for _ in 0..<200 where !(await condition()) {
+                model.syncWorkScope()
+                try await settle()
+            }
+            #expect(await condition(), "\(what)")
+        }
+        // ViewInspector reads the toolbar and header; panes take the model from
+        // the environment, so what they draw is read from AppKit's tree.
+        func find(_ id: String) throws -> InspectableView<ViewType.ClassifiedView> {
+            try view.inspect().find(viewWithAccessibilityIdentifier: id)
+        }
+        func drawn() -> Set<String> {
+            Set(accessible(window.contentView!).compactMap { ax($0, "Identifier") as? String })
+        }
+
+        // Opening a Task asks `lf` for its one Session and opens what it answers.
+        try await eventually("planning arrives") { model.task(id: "issue-now") != nil }
+        let task = try #require(model.task(id: "issue-now")?.task)
+        let identity = try #require(task.reference.workspace?.identity)
+        let panes = registry.workspace(for: identity).multiplexer
+        model.select(.task(id: task.id))
+        model.navigation.content = .terminals
+        try await eventually("the Task's Session is ensured and opened") {
+            panes.focusedPane.content == .session(id: "ensured-\(task.task.identifier)")
+        }
+        #expect(await calls.calls.filter { $0.first == "session" && $0[1] == "ensure" }
+            == [["session", "ensure", "--task", task.task.identifier, "--json"]])
+
+        // The header is the Workflow: the current node, its edges as buttons, Move to.
+        try await eventually("the Task part arrives") { model.taskWork[task.id].value != nil }
+        try await settle()
+        #expect(try find("task-workflow-node-demo").accessibilityValue().string() == "Current")
+        #expect(try find("task-workflow-run-4").button().labelView().text().string() == "ship")
+        _ = try find("task-workflow-move")
+        let header = drawn()
+        #expect(header.contains("task-workflow-node-demo"), "the accessibility tree is readable")
+        #expect(header.isDisjoint(with: [
+            "work-materials", "work-toggle-materials", "work-toggle-files",
+            "work-current-stage", "task-show-monitor-\(task.id)", "task-workflow-position",
+            "task-flow-runs", "task-work", "task-flow-start",
+        ]))
+
+        // One menu adds the Flow exec log as a pane beside the Session.
+        try find("work-add-flow-log").button().tap()
+        try await settle()
+        #expect(panes.focusedPane.content == .flowLog(taskId: task.id))
+        #expect(panes.layout.allPanes.count == 2)
+        // A line per exec; its id, graph and steps only when opened.
+        let log = FlowExecLog(model: model, taskId: task.id)
+        let stopped = "44444444-4444-4444-8444-444444444444"
+        #expect(try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(stopped)")
+            .find(text: "42s").string() == "42s")
+        #expect(throws: (any Error).self) { try log.inspect().find(text: stopped) }
+        model.navigation.expandedFlowRuns.insert(runId)
+        try await settle()
+        #expect(try log.inspect().find(viewWithAccessibilityIdentifier: "flow-run-id-\(runId)").text().string() == runId)
+        #expect(drawn().isSuperset(of: ["task-flow-runs", "flow-run-status-\(runId)"]))
+
+        // The same menu adds the Task's files as a pane.
+        try find("work-add-files").button().tap()
+        try await settle()
+        #expect(panes.focusedPane.content == .files(taskId: task.id))
+        panes.close(panes.focusedPaneId)
+        try await settle()
+
+        try captureIfRequested(window, name: "task-workspace")
+    }
+}
+
+private actor CallLog {
+    private(set) var calls: [[String]] = []
+    func add(_ args: [String]) { calls.append(args) }
+}
+
+/// A scripted workspace reader: every request is answered with the planning,
+/// Sessions and Task parts as they stand, the way `lf monitor work` does.
+@MainActor
+private final class ScriptedReader {
+    private let repo: String
+    private let planning: [String: Any]
+    private let work: [String: Any]
+    private let runs: [[String: Any]]
+    private var sessions: [[String: Any]] = []
+    private var continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation?
+    private var sequence = 0
+    private var task: String?
+
+    init(repo: String, planning: [String: Any], work: [String: Any], runs: [[String: Any]]) {
+        (self.repo, self.planning, self.work, self.runs) = (repo, planning, work, runs)
+    }
+
+    func open() -> WorkObservation {
+        let (stream, continuation) = AsyncThrowingStream<WorkFrame, any Error>.makeStream()
+        self.continuation = continuation
+        return WorkObservation(frames: stream, request: { request in
+            Task { @MainActor in self.answer(request) }
+        }, cancel: { continuation.finish() })
+    }
+
+    /// `lf session ensure --task`: the Task gets one conversation, its primary.
+    func ensure(issue: String) throws -> String {
+        let roadmap = try JSONDecoder().decode(
+            RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: try #require(planning["roadmap"])))
+        let task = try #require(roadmap.waves.flatMap(\.tasks.items).first { $0.task.identifier == issue })
+        let workspace = try #require(task.reference.workspace)
+        let work = WorkReference.task(id: try #require(task.runtime?.workId))
+        var session = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(
+            renameFixtureRecord("ensured-\(issue)", title: "task-conversation", work: work))) as? [String: Any])
+        session["task_primary"] = true
+        session["workspace"] = ["home_id": workspace.homeId, "worktree": workspace.worktree,
+                                "task_id": task.id, "unavailable": NSNull()]
+        sessions = [session]
+        return String(decoding: try JSONSerialization.data(withJSONObject: session), as: UTF8.self)
+    }
+
+    private func answer(_ request: WorkRequest) {
+        let id: Int
+        switch request {
+        case .scope(let request, let scope): (id, task) = (request, scope.task)
+        case .refresh(let request): id = request
+        }
+        send("planning", answers: id, body: planning)
+        send("sessions", answers: id, body: ["repo": repo, "includes_headless": false, "entries": sessions])
+        if let task { send("task", answers: id, body: ["task": task, "work": work, "flow_runs": runs]) }
+    }
+
+    private func send(_ part: String, answers: Int, body: [String: Any]) {
+        sequence += 1
+        let line: [String: Any] = ["part": part, "sequence": sequence, "answers": answers, "home": "/home",
+                                   "revisions": NSNull(), "unavailable": NSNull(), "body": body]
+        guard let data = try? JSONSerialization.data(withJSONObject: line),
+              let frame = try? WorkFrame.decode(line: data) else { return }
+        continuation?.yield(frame)
     }
 }
 
@@ -197,7 +386,7 @@ struct TaskFlowTests {
 @Suite("Task Flow native proof", .requiresDisplay, .serialized)
 @MainActor
 struct TaskFlowProofTests {
-    @Test("Flow preview, Start and execution updates keep the Session's terminal, draft and companion")
+    @Test("Template disclosure and the Task workspace keep the Session's terminal, draft and companion")
     func flowControlsRetainTerminals() async throws {
         _ = NSApplication.shared
         NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
@@ -226,12 +415,12 @@ struct TaskFlowProofTests {
             renameFixtureRecord("design", title: "review-design", work: reviewed)
         )) as? [String: Any])
         session["state"] = "active"
-        session["actions"] = sessionActionFixture(kind: "conversation", state: "active")
+        session["actions"] = sessionActionFixture(state: "active")
         session["terminal_ids"] = [shells[0]]
         session["open_argv"] = ["must-not-launch"]
         let source = try FlowSource(session: JSONSerialization.data(withJSONObject: [session]))
         let query = RegistryQuery { args, _ in try await source.respond(args) }
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
@@ -253,35 +442,16 @@ struct TaskFlowProofTests {
         }
         func text(_ id: String) throws -> String { try find(id).text().string() }
 
-        // Unstarted: the recommendation is previewed with both return edges.
-        model.select(.task(id: "issue-available"))
+        // The Wave draws its Project's template; composition starts folded.
+        model.select(.wave(id: "wave-1"))
         model.navigation.content = .details
         for _ in 0..<20 where model.flowCatalog.value == nil { try await settle(window) }
         try await settle(window)
-        #expect(try text("task-flow-status") == "Not started · No runs yet.")
-        #expect(try find("task-flow-loop-3").text().string() == "Loop 1")
-        #expect(try find("task-flow-loop-5").text().string() == "Loop 2")
-        #expect((try? find("task-flow-iteration")) == nil, "a preview has no iteration")
-        #expect((try? find("flow-node-4")) == nil, "composition starts folded")
-        try find("flow-node-9").button().tap()
-        try await settle(window)
-        #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, human review, pending")
-        try find("template-group-group-0").disclosureGroup().collapse()
-        try await settle(window)
-        #expect((try? find("flow-node-4")) == nil)
-        #expect(await source.controls.isEmpty, "disclosure never starts work")
-
-        // The Wave uses the current Project's template and shares disclosure state.
-        model.select(.wave(id: "wave-1"))
-        try await settle(window)
         _ = try find("flow-template-feature")
-        #expect((try? find("task-flow-start")) == nil)
+        #expect((try? find("flow-node-4")) == nil, "composition starts folded")
         try find("template-group-group-0").disclosureGroup().expand()
         try await settle(window)
-        model.select(.task(id: "issue-available"))
-        try await settle(window)
         #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, human review, pending")
-
 
         let oldRevision = try #require(model.flowCatalog.value?.first?.template?.revision)
         try await source.reviseTemplate()
@@ -376,82 +546,13 @@ struct TaskFlowProofTests {
         #expect(await source.controls.isEmpty, "template inspection never starts work")
         #expect(surfaces.map(terminalText) == inputBeforeInspection, "disclosure keys never reach a PTY")
 
-        // Started alone does not establish historical Run membership.
-        model.select(.task(id: "issue-later"))
-        try await settle(window)
-        #expect(try text("task-flow-status") == "No Flow recorded")
-        _ = try find("flow-template-feature")
-        #expect((try? find("task-flow-iteration")) == nil)
-        #expect(await source.controls.isEmpty)
-        model.select(.task(id: "issue-available"))
-        try await settle(window)
-
-        // Typeahead: Cancel keeps the recommendation; choosing previews only.
-        try find("task-flow-name").button().tap()
-        try await settle(window)
-        try find("task-flow-search").textField().setInput("bu")
-        try await settle(window)
-        #expect(throws: (any Error).self) { try find("task-flow-option-feature") }
-        try find("task-flow-search-cancel").button().tap()
-        try await settle(window)
-        #expect(throws: (any Error).self) { try find("task-flow-search") }
-        #expect(try find("task-flow-name").accessibilityLabel().string() == "Flow feature, choose another")
-        try find("task-flow-name").button().tap()
-        try await settle(window)
-        #expect(try find("task-flow-option-broken").button().isDisabled())
-        try find("task-flow-option-build").button().tap()
-        try await settle(window)
-        #expect(try find("task-flow-name").accessibilityLabel().string() == "Flow build, choose another")
-        #expect(await source.controls.isEmpty, "choosing a preview mutates nothing")
-        try find("task-flow-start").button().tap()
-        for _ in 0..<20 where await source.controls.isEmpty { try await settle(window) }
-        #expect(await source.controls == [["--task", "W2-156", "flow", "start", "build"]])
-
-        // A launched Flow stopped at review: the saved position, not the catalogue.
+        // The Session's Task: its Workflow is the header, with no Flow card or Sessions list.
         model.select(.task(id: "issue-review"))
         try await settle(window)
-        #expect(try text("task-flow-status") == "Stopped · Waiting for your review at demo")
-        #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, stopped here")
-        #expect(try find("flow-node-1").accessibilityLabel().string() == "implement, completed this pass")
-        // Each loop labels its own returns; the header carries the tuple.
-        #expect(try find("task-flow-loop-3").text().string() == "Loop 1 · 1 return")
-        #expect(try find("task-flow-loop-5").text().string() == "Loop 2 · 1 return")
-        #expect(try text("task-flow-iteration") == "Iteration (1, 1)")
-        #expect(try !find("task-flow-start").button().isDisabled(), "Start stays offered beside the latest Flow")
-        for key in ["3", "5"] {
-            try pressElement("flow-node-\(key)", in: window)
-            try await settle(window)
-            let details = accessible(window.contentView!).compactMap { ax($0, "Value") as? String }
-            #expect(details.contains { $0.contains("Iterate returns to implement · taken 1×") })
-        }
-        try captureIfRequested(window, name: "task-flow-latest")
-
-        // Choosing another Flow beside the latest one mutates nothing; a refused
-        // Start keeps the latest Flow drawn and names the failure.
-        try find("task-flow-name").button().tap()
-        try await settle(window)
-        try find("task-flow-option-build").button().tap()
-        try await settle(window)
-        #expect(try find("task-flow-name").accessibilityLabel().string() == "Flow build, choose another")
-        #expect(try text("task-flow-latest-name") == "Latest: feature")
-        #expect(await source.controls.count == 1)
-        try find("task-flow-start").button().tap()
-        for _ in 0..<20 where (try? find("task-flow-error")) == nil { try await settle(window) }
-        #expect(try text("task-flow-error") == "Task flow \"build\" was refused by the fixture")
-        #expect(await source.controls.last == ["--task", "W2-131", "flow", "start", "build"])
-        #expect(try find("flow-node-4").accessibilityLabel().string() == "demo, stopped here")
-
-        // Execution advances through the shared read; the graph follows it.
-        await source.advanceReview()
-        await model.refresh()
-        try await settle(window)
-        // Running reads `● step · elapsed · provider`; the fixture's runtime record
-        // dates from July, so only the fixed parts are pinned here.
-        let running = try text("task-flow-status")
-        #expect(running.hasPrefix("realign · ") && running.hasSuffix(" · claude"), "was \(running)")
-        #expect(try find("flow-node-2").accessibilityLabel().string() == "realign, running")
-        #expect((try? find("task-flow-pause")) == nil)
-        try captureIfRequested(window, name: "task-flow-running")
+        _ = try find("task-workflow")
+        #expect((try? find("task-flow-start")) == nil)
+        #expect((try? find("work-materials")) == nil)
+        try captureIfRequested(window, name: "task-workspace-native")
 
         // The Session and its companion survived every Flow interaction.
         let record = try #require(model.sessions.value?.first { $0.id == "design" })
@@ -482,17 +583,6 @@ struct TaskFlowProofTests {
         }
     }
 
-    private func ax(_ element: NSObject, _ property: String) -> Any? {
-        let key = property == "Focused" ? "isAccessibilityFocused" : "accessibility" + property
-        guard element.responds(to: NSSelectorFromString(key)) else { return nil }
-        return element.value(forKey: key)
-    }
-
-    private func accessible(_ root: Any) -> [NSObject] {
-        guard let element = root as? NSObject else { return [] }
-        return [element] + ((ax(element, "Children") as? [Any]) ?? []).flatMap { accessible($0) }
-    }
-
     private func focusedLabel(in window: NSWindow) -> String? {
         accessible(window.contentView!).first { ax($0, "Focused") as? Bool == true }
             .flatMap { ax($0, "Label") as? String }
@@ -517,15 +607,6 @@ struct TaskFlowProofTests {
         try await Task.sleep(for: .milliseconds(100))
     }
 
-    private func captureIfRequested(_ window: NSWindow, name: String) throws {
-        guard let directory = ProcessInfo.processInfo.environment["LOOPFLOW_FLOW_CAPTURE_DIR"],
-              let content = window.contentView,
-              let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) else { return }
-        content.cacheDisplay(in: content.bounds, to: bitmap)
-        let png = try #require(bitmap.representation(using: .png, properties: [:]))
-        try png.write(to: URL(fileURLWithPath: directory).appendingPathComponent("\(name).png"))
-    }
-
     private func terminalText(_ surface: ghostty_surface_t) -> String {
         var text = ghostty_text_s()
         let selection = ghostty_selection_s(
@@ -540,7 +621,7 @@ struct TaskFlowProofTests {
     }
 }
 
-/// Shared reads plus recorded controls. Only `flow start` counts as a control;
+/// Shared reads plus recorded controls. Only `task run` counts as a control;
 /// anything else unexpected fails loudly.
 private actor FlowSource {
     private var roadmap: [String: Any]
@@ -569,7 +650,7 @@ private actor FlowSource {
             (0...2).map { index -> [String: Any] in
                 let target = prefix.isEmpty ? "implement" : "fix-implement"
                 return ["key": (prefix.isEmpty ? 0 : 4) + index, "id": NSNull(),
-                 "label": index == 0 ? target : "loop-decide", "kind": "skill",
+                 "label": index == 0 ? target : "loop-or-next", "kind": "skill",
                  "human": false, "returns_to": index == 0 ? NSNull() : (prefix.isEmpty ? 0 : 4) as Any,
                  "sources": ["feature"], "paths": []]
             }
@@ -611,29 +692,14 @@ private actor FlowSource {
         case ("activity", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
         case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
         case ("flow", "list"): return catalog
-        case ("--task", _) where args.dropFirst(2).starts(with: ["flow", "start"]):
+        case ("-b", "task") where args.dropFirst(2).first == "run":
             controls.append(args)
-            // W2-131 already has a Flow; the fixture refuses a second launch.
-            if args[1] == "W2-131" { throw RegistryQueryError("Task flow \"build\" was refused by the fixture") }
+            // The fixture refuses W2-131's launch.
+            if args[3] == "W2-131" { throw RegistryQueryError("Task flow \"build\" was refused by the fixture") }
             return ""
         default:
             throw RegistryQueryError("Unexpected Flow proof operation: \(args)")
         }
-    }
-
-    /// Replace W2-131's Flow with the fixture's running position.
-    func advanceReview() {
-        let snapshots = (try? JSONSerialization.jsonObject(with: fixture("task_flow.json"))) as? [[String: Any]]
-        guard let running = snapshots?[1],
-              var waves = roadmap["waves"] as? [[String: Any]],
-              var tasks = waves[0]["tasks"] as? [String: Any],
-              var items = tasks["items"] as? [[String: Any]],
-              let index = items.firstIndex(where: { ($0["task"] as? [String: Any])?["identifier"] as? String == "W2-131" })
-        else { return }
-        items[index]["flow"] = running
-        tasks["items"] = items
-        waves[0]["tasks"] = tasks
-        roadmap["waves"] = waves
     }
 }
 #endif

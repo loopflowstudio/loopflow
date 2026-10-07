@@ -128,7 +128,7 @@ fn missing_registry_and_ambient_input_leave_checkout_unmanaged() {
     let home = tempfile::TempDir::new().unwrap();
     let repo = TestRepo::new();
     let _env = EnvGuard::with_lf_home(&[], home.path());
-    let _ambient = AmbientVarGuard::set(loopflow::durable::RUN_ID_ENV, "unrelated-input");
+    let _ambient = AmbientVarGuard::set("LF_CAPTURE_KEY", "unrelated-input");
     assert!(task_stack(repo.path()).unwrap().is_none());
 }
 
@@ -158,9 +158,9 @@ fn publish_refuses_when_registry_inaccessible_before_any_push() {
     repo.stage_all();
     repo.commit("task commit");
 
-    let _task = register_task(home.path(), repo.path(), branch, &base);
+    drop(register_task(home.path(), repo.path(), branch, &base));
 
-    // The registry exists with this Task but is now unreadable.
+    // Close the fixture connection before making the registry unreadable.
     make_registry_inaccessible(&home.path().join("loopflow.db"));
 
     let err = create_or_update_pr(
@@ -213,7 +213,7 @@ fn land_refuses_when_registry_inaccessible_before_any_push() {
     repo.stage_all();
     repo.commit("task commit");
 
-    let _task = register_task(home.path(), repo.path(), branch, &base);
+    drop(register_task(home.path(), repo.path(), branch, &base));
 
     make_registry_inaccessible(&home.path().join("loopflow.db"));
 
@@ -254,7 +254,7 @@ fn task_stack_refuses_when_registry_inaccessible() {
     repo.stage_all();
     repo.commit("task commit");
 
-    let _task = register_task(home.path(), repo.path(), branch, &base);
+    drop(register_task(home.path(), repo.path(), branch, &base));
 
     make_registry_inaccessible(&home.path().join("loopflow.db"));
 

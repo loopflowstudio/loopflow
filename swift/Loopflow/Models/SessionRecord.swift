@@ -3,27 +3,19 @@ import Foundation
 public enum SessionState: String, Codable, Sendable, Hashable {
     /// Metadata has no trustworthy live/closed observation.
     case unknown
-    case waiting
     case active
     case closed
     case interrupted
 }
 
 public enum SessionAttention: String, Codable, Sendable, Hashable {
-    case review
-    case reply
+    case waiting
 
     public var label: String {
         switch self {
-        case .review: "Needs review"
-        case .reply: "Needs reply"
+        case .waiting: "Waiting"
         }
     }
-}
-
-public enum SessionKind: String, Codable, Sendable, Hashable {
-    case flow
-    case conversation
 }
 
 public enum SessionActionKind: String, Codable, Sendable, Hashable {
@@ -41,7 +33,7 @@ public enum SessionTitleSource: String, Codable, Sendable, Hashable {
 }
 
 /// Whether a Session is an occurrence of a Flow. Rust owns
-/// this from the Flow position or the Run's recorded capture; Swift never
+/// this from the Flow position or the Session's recorded capture; Swift never
 /// infers it from Task, checkout, provider, or skill.
 public enum SessionFlowMembership: Codable, Sendable, Hashable {
     case step(flow: String, invocationId: String, step: String, node: UInt32?, iterations: [[UInt32]]?,
@@ -95,16 +87,16 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
         }
     }
 
-    /// Short human label: "feature / implement · iteration (2, 1)", "Independent".
+    /// Short human label: "pursue / implement · pass 3", "Independent".
     public var label: String {
         switch self {
         case let .step(flow, _, step, _, iterations, occurrence):
             let base = "\(flow) / \(step)"
             let label: String
             if let iterations {
-                label = flowIterationLabel(iterations).map { "\(base) · iteration \($0)" } ?? base
+                label = flowIterationLabel(iterations).map { "\(base) · \($0)" } ?? base
             } else {
-                label = "\(base) · iteration unavailable"
+                label = "\(base) · pass unavailable"
             }
             switch occurrence {
             case .unknown: return "\(label) · position unavailable"
@@ -163,9 +155,10 @@ public struct SessionWorkspace: Codable, Sendable, Hashable {
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let primaryScope: String?
     public let attention: SessionAttention?
+    /// Its Task names it as the Task's primary conversation.
+    public let taskPrimary: Bool
     public let taskIds: [String]
     public let id: String
-    public let kind: SessionKind
     public let interactive: Bool
     public let work: WorkReference?
     public var workspace: SessionWorkspace?
@@ -176,8 +169,8 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let titleSource: SessionTitleSource
     public let flowMembership: SessionFlowMembership
     public let detail: String
-    /// Provider harness recorded on the Session's Run manifest; nil when the
-    /// Run is on another Home or its manifest is unreadable.
+    /// Provider harness recorded on the Session's capture manifest; nil when the
+    /// capture is on another Home or its manifest is unreadable.
     public let provider: String?
     public let cwd: String
     public let state: SessionState
@@ -185,16 +178,15 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let openArgv: [String]
     public let terminalIds: [String]
 
-    public var offersParticipation: Bool {
-        guard state != .closed, kind == .flow,
-              case .step(_, _, _, _, _, .current) = flowMembership else { return false }
-        return actions.contains { ($0.kind == .open || $0.kind == .moveHere) && $0.unavailableReason == nil }
-    }
-
-    public var participationLabel: String {
-        if offersParticipation { return state == .active ? "Available · discussing" : "Available · preparing" }
-        if kind == .flow { return "Needs recovery" }
-        return state == .active ? "Active" : "Conversation"
+    /// One word for a row: Waiting on a person wins over what its client is doing.
+    public var statusLabel: String {
+        if state != .closed, let attention { return attention.label }
+        switch state {
+        case .active: return "Active"
+        case .closed: return "Closed"
+        case .interrupted: return "Interrupted"
+        case .unknown: return interactive ? "Session" : "Run"
+        }
     }
 
     public func action(_ kind: SessionActionKind) -> SessionAction? {
@@ -202,8 +194,9 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, interactive, work, workspace, title, detail, provider, cwd, state, attention
+        case id, interactive, work, workspace, title, detail, provider, cwd, state, attention
         case primaryScope = "primary_scope"
+        case taskPrimary = "task_primary"
         case waveId = "wave_id"
         case taskIds = "task_ids"
         case actions
@@ -213,6 +206,20 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case readySummary = "ready_summary"
         case openArgv = "open_argv"
         case terminalIds = "terminal_ids"
+    }
+}
+
+/// A Task's open conversations as its page orders them: the ones waiting on a
+/// person first, its primary leading either group. Closed ones are not listed.
+public struct TaskSessionGroups: Sendable, Equatable {
+    public let waiting: [SessionRecord]
+    public let working: [SessionRecord]
+
+    public init(_ sessions: [SessionRecord]) {
+        let open = sessions.filter { $0.state != .closed }
+        let primaryFirst = open.filter(\.taskPrimary) + open.filter { !$0.taskPrimary }
+        waiting = primaryFirst.filter { $0.attention == .waiting }
+        working = primaryFirst.filter { $0.attention != .waiting }
     }
 }
 

@@ -11,21 +11,17 @@ from pathlib import Path
 import pytest
 from botocore.exceptions import ClientError
 
-from scripts import deploy_website, publish_release
+from scripts import deploy_website, publish_release, release_install_smoke
 
 
 def _native_artifacts(directory: Path) -> None:
-    binaries = []
-    for name in ("lf",):
-        binary = directory / name
-        binary.write_bytes(f"loopflow release {name}".encode())
-        binaries.append(binary)
+    binary = directory / "lf"
+    binary.write_bytes(b"loopflow release lf")
     for target in publish_release.TARGETS:
         package_dir = directory / target
         package_dir.mkdir()
         with tarfile.open(package_dir / f"lf-{target}.tar.gz", "w:gz") as package:
-            for binary in binaries:
-                package.add(binary, arcname=binary.name)
+            package.add(binary, arcname="lf")
 
 
 def test_publisher_requires_the_complete_native_matrix(tmp_path: Path):
@@ -43,7 +39,7 @@ def test_publisher_rejects_unexpected_archive_contents(tmp_path: Path):
         package.addfile(member, io.BytesIO(b"nope"))
 
     with pytest.raises(RuntimeError, match="unexpected archive contents"):
-        publish_release._extract_arm_binary((archive,), tmp_path)
+        publish_release._extract_binary((archive,), tmp_path, "aarch64-apple-darwin")
 
 
 def test_publisher_extracts_the_arm_cli(tmp_path: Path):
@@ -54,47 +50,45 @@ def test_publisher_extracts_the_arm_cli(tmp_path: Path):
     output = tmp_path / "extracted"
     output.mkdir()
 
-    cli = publish_release._extract_arm_binary(archives, output)
+    cli = publish_release._extract_binary(archives, output, "aarch64-apple-darwin")
 
     assert cli.read_bytes() == b"loopflow release lf"
     assert cli.stat().st_mode & 0o111
 
 
-def test_publisher_rejects_validation_only_control_plane(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("code", "output", "error"),
+    [
+        (0, '{"candidate":{"authority":"validation_only"}}', "validation-only"),
+        (
+            1,
+            '{"candidate":{"authority":"published"},"verdict":{"kind":"reject"}}',
+            "cannot install into a fresh Home",
+        ),
+        (0, "not JSON", "did not emit a promotion identity"),
+        (
+            1,
+            '{"candidate":{"authority":"published"},"verdict":{"kind":"promote"}}',
+            "cannot install into a fresh Home",
+        ),
+    ],
+)
+def test_publisher_rejects_invalid_candidate_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, output: str, error: str
 ):
-    binary = tmp_path / "lf"
-    binary.touch()
+    _native_artifacts(tmp_path)
     monkeypatch.setattr(
         publish_release,
-        "_run",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            [], 0, '{"candidate":{"authority":"validation_only"}}', ""
-        ),
+        "_run_release_container",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], code, output, "refused"),
     )
-
-    with pytest.raises(RuntimeError, match="validation-only"):
-        publish_release._validate_release_candidate(binary, tmp_path)
-
-
-def test_publisher_rejects_published_identity_when_home_preflight_refuses(tmp_path: Path):
-    binary = tmp_path / "lf"
-    binary.write_text(
-        "#!/bin/sh\n"
-        'echo \'{"candidate":{"authority":"published"},'
-        '"verdict":{"kind":"reject"}}\'\n'
-        "echo 'Error: promotion preflight refused' >&2\n"
-        "exit 1\n"
-    )
-    binary.chmod(0o755)
-
-    with pytest.raises(RuntimeError, match="cannot install into a fresh Home"):
-        publish_release._validate_release_candidate(binary, tmp_path)
+    with pytest.raises(RuntimeError, match=error):
+        publish_release._validate_release_candidate(publish_release._find_native_archives(tmp_path))
 
 
-@pytest.mark.parametrize("rejected_on_retry", [False, True])
+@pytest.mark.parametrize("rejection", [None, "prepare", "reuse", "cleanup", "unavailable"])
 def test_publisher_prepares_exact_artifacts_before_marking_release_published(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rejected_on_retry: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rejection: str | None
 ):
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
@@ -105,7 +99,7 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
     (tmp_path / "RELEASE_NOTES.md").write_text("# v1.2.3\n")
     (tmp_path / "swift/dist").mkdir(parents=True)
     commands: list[list[str]] = []
-    reject_candidate = False
+    reject_candidate = rejection == "prepare"
 
     def fake_run(
         command: list[str],
@@ -114,13 +108,29 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         capture: bool = False,
         env: dict[str, str] | None = None,
         check: bool = True,
+        timeout: int | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        if "--ui-host" in command:
+            raise RuntimeError("UI host unavailable")
         commands.append(command)
         if command[:3] == ["git", "tag", "--points-at"]:
             return subprocess.CompletedProcess(command, 0, "v1.2.3\n", "")
         if command[:3] == ["git", "rev-parse", "HEAD"]:
             return subprocess.CompletedProcess(command, 0, "abc123\n", "")
-        if command[1:] == ["install", "preflight", "--json"]:
+        if command[0] != "docker" and "preflight" in command:
+            pytest.fail("candidate preflight escaped OS-account isolation")
+        if command[:2] == ["docker", "info"] and rejection == "unavailable":
+            raise RuntimeError("Docker unavailable")
+        if command[:2] == ["docker", "rm"] and rejection == "cleanup":
+            raise RuntimeError("container cleanup failed")
+        if command[:2] == ["docker", "create"]:
+            assert "--network" in command and "none" in command
+            assert "--volume" not in command and "--mount" not in command
+            assert "--env" not in command and env is None
+            return subprocess.CompletedProcess(command, 0, "candidate-container", "")
+        if command[:2] == ["docker", "cp"]:
+            assert (Path(command[2]) / "lf").read_bytes() == b"loopflow release lf"
+        if command[:2] == ["docker", "start"]:
             if reject_candidate:
                 return subprocess.CompletedProcess(
                     command,
@@ -147,10 +157,19 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
     monkeypatch.setenv("LF_RELEASE_WORKFLOW_RUN_ID", "42")
 
     prepared_dir = tmp_path / "prepared"
+    if rejection in {"prepare", "cleanup", "unavailable"}:
+        with pytest.raises(
+            RuntimeError, match="pending migration draft|cleanup failed|Docker unavailable"
+        ):
+            publish_release.prepare_release("v1.2.3", artifact_dir, prepared_dir)
+        assert not prepared_dir.exists()
+        assert not (tmp_path / ".lf/logs/release.v1.2.3.candidate.json").exists()
+        assert not (tmp_path / ".lf/logs/release.v1.2.3.json").exists()
+        return
     candidate = publish_release.prepare_release("v1.2.3", artifact_dir, prepared_dir)
     (prepared_dir / "Loopflow.dmg").write_bytes(b"corrupt")
     candidate = publish_release.prepare_release("v1.2.3", artifact_dir, prepared_dir)
-    if rejected_on_retry:
+    if rejection == "reuse":
         reject_candidate = True
         with pytest.raises(RuntimeError, match="pending migration draft"):
             publish_release.prepare_release("v1.2.3", artifact_dir, prepared_dir)
@@ -158,6 +177,7 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
             publish_release.publish_release("v1.2.3", prepared_dir)
         assert not (tmp_path / ".lf/logs/release.v1.2.3.json").exists()
         return
+    assert publish_release.prepare_release("v1.2.3", artifact_dir, prepared_dir) == candidate
     prepare_commands = len(commands)
     receipt = publish_release.publish_release("v1.2.3", prepared_dir)
 
@@ -167,7 +187,6 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         "installer_verified",
         "dmg_notarized",
         "website_candidate_verified",
-        "ui_host_verified",
     )
     assert receipt.workflow_run_id == "42"
     assert receipt.source_commit == "abc123"
@@ -176,7 +195,6 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         "installer_verified",
         "dmg_notarized",
         "website_candidate_verified",
-        "ui_host_verified",
         "github_draft_staged",
         "crate_published",
         "versioned_dmg_uploaded",
@@ -231,18 +249,22 @@ def test_public_artifact_hashes_reject_modified_and_missing_assets(tmp_path: Pat
 def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
+    body = (
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        "  --version) echo 'lf 1.2.3' ;;\n"
+        "  --help) echo 'Usage: lf' ;;\n"
+        "  *) echo 'unknown command' >&2; exit 2 ;;\n"
+        "esac\n"
+    ).encode()
     for target in publish_release.TARGETS:
         with tarfile.open(artifacts / f"lf-{target}.tar.gz", "w:gz") as package:
-            for name in ("lf",):
-                body = f"#!/bin/sh\necho '{name} 1.2.3'\n".encode()
-                info = tarfile.TarInfo(name)
-                info.mode = 0o755
-                info.size = len(body)
-                package.addfile(info, io.BytesIO(body))
+            info = tarfile.TarInfo("lf")
+            info.mode = 0o755
+            info.size = len(body)
+            package.addfile(info, io.BytesIO(body))
     (artifacts / "Loopflow.dmg").write_bytes(b"notarized artifact")
-    (artifacts / "install.sh").write_text(
-        '#!/bin/sh\nmkdir -p "$LF_INSTALL_DIR"\ncp native/lf "$LF_INSTALL_DIR/"\n'
-    )
+    (artifacts / "install.sh").write_text("#!/bin/sh\nexit 1\n")
     publish_release._write_checksums(tuple(artifacts.iterdir()), artifacts / "SHA256SUMS")
     hashes = {p.name: publish_release._sha256(p) for p in artifacts.iterdir()}
     monkeypatch.setenv("LF_RELEASE_MAIN_REPO", str(tmp_path))
@@ -267,6 +289,8 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     run = publish_release._run
 
     def external_command(command, **kwargs):
+        if "--ui-host" in command:
+            raise RuntimeError("UI host unavailable")
         if command[:3] == ["git", "rev-parse", "HEAD"]:
             return subprocess.CompletedProcess(command, 0, "exact-commit\n", "")
         if command == ["gh", "release", "view", "--json", "tagName"]:
@@ -307,6 +331,11 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         remote["https://crates.io/api/v1/crates/loopflow/1.2.3"] = b'{"version":{"num":"1.2.3"}}'
 
     monkeypatch.setattr(publish_release, "_run", external_command)
+    monkeypatch.setattr(
+        publish_release,
+        "_verify_public_installer",
+        lambda artifacts, tag: {"lf-linux": "lf 1.2.3"},
+    )
     monkeypatch.setattr(publish_release, "_download", download)
     monkeypatch.setattr(publish_release, "_upload_dmg", upload)
     monkeypatch.setattr(publish_release, "_deploy_website", deploy)
@@ -362,7 +391,7 @@ def test_reconcile_repairs_missing_publication_stages_from_exact_artifacts(
     result = publish_release.verify_release("v1.2.3", repair=True)
     assert remote == expected
     assert result.artifact_sha256 == hashes
-    assert result.smoke_versions == {"lf": "lf 1.2.3"}
+    assert result.smoke_versions == {"lf": "lf 1.2.3", "lf-linux": "lf 1.2.3"}
     assert {
         "crate_published",
         "versioned_dmg_uploaded",
@@ -419,14 +448,11 @@ def test_smoke_failure_retains_repaired_external_publication_without_success_rec
     remote, _ = public_release
     expected = dict(remote)
     del remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"]
-    run = publish_release._run
 
-    def failing_installer(command, **kwargs):
-        if command[0] == "sh":
-            return run(["sh", "-c", "exit 19"], **kwargs)
-        return run(command, **kwargs)
+    def failing_installer(artifacts, tag):
+        raise subprocess.CalledProcessError(19, ["docker", "start", "--attach", "fixture"])
 
-    monkeypatch.setattr(publish_release, "_run", failing_installer)
+    monkeypatch.setattr(publish_release, "_verify_public_installer", failing_installer)
     with pytest.raises(subprocess.CalledProcessError) as error:
         publish_release.verify_release("v1.2.3", repair=True)
     assert error.value.returncode == 19
@@ -438,26 +464,21 @@ def test_smoke_failure_retains_repaired_external_publication_without_success_rec
     assert "exact_tag_smoke_passed" not in repaired["completed_stages"]
 
 
-def test_public_proof_requires_ui_gate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, public_release
+@pytest.mark.parametrize("missing_stage", publish_release.CANDIDATE_STAGES)
+def test_public_proof_requires_candidate_preparation(
+    tmp_path: Path, public_release, missing_stage: str
 ):
     _, hashes = public_release
-    # Historic preparation without the required host gate cannot gain a pass
-    # simply because assets are already public.
     candidate = publish_release.ArtifactReceipt(
         "v1.2.3",
         "exact-commit",
         "42",
         hashes,
-        tuple(s for s in publish_release.CANDIDATE_STAGES if s != "ui_host_verified"),
+        tuple(s for s in publish_release.CANDIDATE_STAGES if s != missing_stage),
     )
     publish_release._write_receipt(candidate, ".candidate")
 
-    def missing_ui(*_args):
-        raise RuntimeError("required verification unavailable: ui-host")
-
-    monkeypatch.setattr(publish_release, "_verify_ui_host", missing_ui)
-    with pytest.raises(RuntimeError, match="required verification"):
+    with pytest.raises(RuntimeError, match="required preparation verification"):
         publish_release.verify_release("v1.2.3")
 
 
@@ -609,3 +630,57 @@ def test_source_inspection_uses_the_commit_not_the_working_tree(
         "rust/loopflow/src/store/migrations/drafts/incoming.sql"
     ]
     assert observed["publications"] is None
+
+
+@pytest.mark.parametrize("damage", [None, "bytes", "version", "manifest"])
+def test_installer_smoke_checks_selected_binary_behind_entry_gate(tmp_path: Path, damage):
+    home = tmp_path / "home"
+    entry = home / ".local/bin/lf"
+    entry.parent.mkdir(parents=True)
+    selected = home / "selected-lf"
+    selected.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        "  --version) echo 'lf 1.2.3' ;;\n"
+        "  --help) echo 'Usage: lf' ;;\n"
+        "  'list --json') echo '[]' ;;\n"
+        "  *) exit 2 ;;\n"
+        "esac\n"
+    )
+    selected.chmod(0o755)
+    with tarfile.open(tmp_path / "lf-aarch64-unknown-linux-gnu.tar.gz", "w:gz") as archive:
+        archive.add(selected, arcname="lf")
+    entry.write_text(f'#!/bin/sh\nexec "{selected}" "$@"\n')
+    entry.chmod(0o755)
+    manifest = home / ".lf-machine/install/active.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "selection": {
+                    "artifact_set": {
+                        "artifacts": [
+                            {
+                                "role": {"kind": "cli"},
+                                "path": str(selected),
+                                "sha256": publish_release._sha256(selected)
+                                if damage != "manifest"
+                                else "0" * 64,
+                            }
+                        ]
+                    }
+                }
+            }
+        )
+    )
+    if damage == "bytes":
+        selected.write_text("changed bytes")
+    elif damage == "version":
+        entry.write_text("#!/bin/sh\necho 'lf 9.9.9'\n")
+    if damage:
+        with pytest.raises(RuntimeError, match="differs|reported"):
+            release_install_smoke.verify_installation(tmp_path, home, "v1.2.3")
+    else:
+        assert release_install_smoke.verify_installation(tmp_path, home, "v1.2.3") == {
+            "lf-linux": "lf 1.2.3"
+        }

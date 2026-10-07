@@ -5,7 +5,6 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use loopflow::engine::flow::Command as FlowCommand;
-use loopflow::ops::{execute_flow_command, NullProgress};
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 use support::EnvGuard;
@@ -126,9 +125,10 @@ fn release_bump_uses_the_same_operation_from_cli_and_captured_flow() {
             command: command.into(),
             args: args.into_iter().map(str::to_string).collect(),
         };
-        let retained = captured.clone();
-        execute_flow_command(repo.path(), &captured, &NullProgress).unwrap();
-        assert_eq!(captured, retained);
+        // A Flow runs the operation as its own command.
+        let argv = captured.argv();
+        let argv: Vec<&str> = argv[1..].iter().map(String::as_str).collect();
+        success(run(repo.path(), home.path(), &argv));
         assert!(fs::read_to_string(repo.path().join("Cargo.toml"))
             .unwrap()
             .contains(&format!("version = \"{version}\"")));

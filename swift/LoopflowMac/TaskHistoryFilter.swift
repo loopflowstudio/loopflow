@@ -21,17 +21,8 @@ struct TaskHistoryFilter: Equatable {
 
     mutating func clearValidation() { validationMessage = nil }
 
-    static func hasUnresolvedExecution(runtime: TaskRuntimeSnapshot?, condition: TaskConditionSnapshot, flow: TaskFlowSnapshot) -> Bool {
-        guard let runtime else { return false }
-        if runtime.status == .ready { return true }
-        if case .latest(let latest) = flow.record, latest.execution != .idle { return true }
-        // Removed historical checkouts do not reopen settled work. Only an
-        // observation of existing unsettled files/commits keeps it current.
-        return condition.localProgress.state == .observed && condition.localProgress.unsettled == true
-    }
-
-    func includes(_ task: TaskPlanningSnapshot, runtime: TaskRuntimeSnapshot?, condition: TaskConditionSnapshot, flow: TaskFlowSnapshot, now: Date) -> Bool {
-        if !task.isTerminal || Self.hasUnresolvedExecution(runtime: runtime, condition: condition, flow: flow) { return true }
+    func includes(_ task: TaskPlanningSnapshot, condition: TaskConditionSnapshot, now: Date) -> Bool {
+        if !task.isTerminal || condition.unresolvedExecution { return true }
         guard task.isSuccessful, showCompleted else { return false }
         if days == 0 { return true }
         guard let timestamp = task.completedAt, let date = Self.completionDate(timestamp) else { return false }

@@ -166,22 +166,16 @@ impl Fixture {
             .unwrap()
     }
 
-    /// (session id, kind, title, title_source, completed) of the captured input’s Session.
-    fn session_row(&self, run_id: &str) -> (String, String, String, String, bool) {
+    /// (session id, title, title_source, completed) of the captured input’s Session.
+    fn session_row(&self, run_id: &str) -> (String, String, String, bool) {
         self.db()
             .query_row(
-                "SELECT s.id, s.kind, s.title, s.title_source, s.completed_at IS NOT NULL
+                "SELECT s.id, s.title, s.title_source, s.completed_at IS NOT NULL
                  FROM agent_sessions s JOIN session_events i ON i.session_id=s.id AND i.kind='captured'
                  WHERE i.receipt_key=?1",
                 [run_id],
                 |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
+Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
                 },
             )
             .unwrap_or_else(|error| panic!("Capture {run_id} has no Session: {error}"))
@@ -221,14 +215,7 @@ impl Fixture {
 /// An upper bound only: a debug `lf` on a busy machine takes tens of seconds to launch.
 const PATIENCE: Duration = Duration::from_secs(180);
 
-const LAUNCH: [&str; 6] = [
-    "--mode",
-    "tui",
-    "--model",
-    "opencode",
-    ":",
-    "Review the parser",
-];
+const LAUNCH: [&str; 5] = ["--tui", "--model", "opencode", ":", "Review the parser"];
 
 #[test]
 fn conversation_keeps_its_name_and_identity_until_completed() {
@@ -236,15 +223,12 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
 
     let (first, first_run) = fixture.attach(&LAUNCH);
     assert_eq!(fixture.sessions().len(), 1);
-    let (id, kind, title, source, completed) = fixture.session_row(&first_run);
+    let (id, title, source, completed) = fixture.session_row(&first_run);
     assert_ne!(
         id, first_run,
         "conversation identity differs from its captured input"
     );
-    assert_eq!(
-        (kind.as_str(), source.as_str(), completed),
-        ("conversation", "generated", false)
-    );
+    assert_eq!((source.as_str(), completed), ("generated", false));
     let (magical, musical) = title.split_once('-').expect("magical-musical pair");
     assert!(!magical.is_empty() && !musical.is_empty() && !musical.contains('-'));
     assert_eq!(fixture.run_parents(&first_run), (None, None, None));
@@ -252,22 +236,14 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
     let listed = fixture.sessions();
     assert_eq!(listed.len(), 1, "{listed:?}");
     assert_eq!(listed[0]["id"], id.as_str());
-    assert_eq!(listed[0]["kind"], "conversation");
     assert_eq!(listed[0]["title"], title.as_str());
     assert_eq!(listed[0]["title_source"], "generated");
     assert_eq!(listed[0]["state"], "active");
     assert_eq!(listed[0]["provider"], "opencode");
     assert_eq!(listed[0]["work"], Value::Null);
 
-    // The agent names its own Session by `$LF_RUN_ID`; a person then renames it.
-    let suggested = fixture.json(&[
-        "session",
-        "rename",
-        &first_run,
-        "Parser",
-        "--suggest",
-        "--json",
-    ]);
+    // The agent and person name the same durable Session.
+    let suggested = fixture.json(&["session", "rename", &id, "Parser", "--suggest", "--json"]);
     assert_eq!(suggested["id"], id.as_str());
     assert_eq!(suggested["title"], "Parser");
     assert_eq!(suggested["title_source"], "generated");
@@ -282,7 +258,7 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
         "--suggest",
         "--json",
     ]);
-    let (_, _, title, source, _) = fixture.session_row(&first_run);
+    let (_, title, source, _) = fixture.session_row(&first_run);
     assert_eq!(
         (title.as_str(), source.as_str()),
         ("Parser review", "human")
@@ -295,7 +271,7 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
         fixture.sessions().is_empty(),
         "exited orphans leave the working set"
     );
-    let (_, _, saved_title, saved_source, completed) = fixture.session_row(&first_run);
+    let (_, saved_title, saved_source, completed) = fixture.session_row(&first_run);
     assert!(completed);
     assert_eq!(
         (saved_title.as_str(), saved_source.as_str()),
@@ -334,7 +310,7 @@ fn sigint_records_session_interruption_and_retires_the_orphan() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(fixture.sessions().is_empty());
-    assert!(fixture.session_row(&input).4);
+    assert!(fixture.session_row(&input).3);
     let history = fixture.json(&["session", "history", &id, "--json"]);
     assert!(history
         .as_array()
@@ -364,7 +340,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             caller_artifact_key: None,
             task_id: (index >= 110).then(|| task.task.id.clone()),
             wave_id: None,
-            flow_session_id: None,
+            flow_id: None,
             work_source: (index >= 110).then_some(loopflow::session::WorkSource::Declared),
             bound_at: None,
             id: id.clone(),
@@ -380,7 +356,6 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             model: None,
             node: None,
             iterations: None,
-            kind: loopflow::session::SessionKind::Conversation,
             interactive: true,
             repo: None,
             title: format!(
@@ -407,7 +382,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             .unwrap();
         }
         runtime
-            .block_on(task.store.create_session(session, None))
+            .block_on(task.store.create_session(session))
             .unwrap();
     }
     let list = ["session", "list", "--json", "--limit", "2"];
@@ -630,6 +605,10 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     assert_eq!(started(task.task.id.as_str()), None);
     assert!(task_runs("INF-123").is_empty());
 
+    let wrong_identity = fixture.run(&["session", "bind", &orphan, "--task", "INF-123", "--json"]);
+    assert!(!wrong_identity.status.success(), "{wrong_identity:?}");
+    assert!(String::from_utf8_lossy(&wrong_identity.stderr).contains("was not found"));
+
     let preview = fixture.json(&[
         "session",
         "bind",
@@ -717,8 +696,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     let later = launch(&[
         "--task",
         "INF-123",
-        "--mode",
-        "tui",
+        "--tui",
         "--model",
         "opencode",
         ":",
@@ -728,6 +706,143 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     assert_eq!(started_at, bound_at);
     assert_eq!(task_runs("INF-123"), vec![later]);
     assert_eq!(fixture.run_parents(&orphan), (None, None, None));
+}
+
+#[test]
+fn a_task_primary_is_one_of_its_own_conversations() {
+    let fixture = Fixture::new(false);
+    let sole_path = fixture.repo.create_named_worktree("task-sole");
+    let task = support::register_unrun_task(
+        fixture.home.path(),
+        &sole_path,
+        "task-sole",
+        &fixture.repo.head_sha(),
+    );
+    let several_path = fixture.repo.create_named_worktree("task-several");
+    support::register_sibling_task(&task, "INF-124", "task-several", &several_path);
+    let empty_path = fixture.repo.create_named_worktree("task-empty");
+    support::register_sibling_task(&task, "INF-125", "task-empty", &empty_path);
+    let converse = |checkout: &Path| -> String {
+        let before = fixture.launches().len();
+        let output = fixture
+            .command(&LAUNCH)
+            .current_dir(checkout)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        fixture.session_row(&fixture.launches()[before]).0
+    };
+    let primary = |args: &[&str]| -> Value {
+        fixture.json(&[&["session", "ensure", "--json", "--task"], args].concat())
+    };
+    let members = |issue: &str| -> Vec<String> {
+        fixture
+            .json(&["session", "list", "--all", "--task", issue, "--json"])
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|session| session["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // The Task's only unfinished interactive conversation is its primary.
+    let sole = converse(&sole_path);
+    let chosen = primary(&["INF-123"]);
+    assert_eq!(chosen["id"], sole.as_str());
+    // It stays an ordinary member of its Task.
+    assert_eq!(chosen["primary_scope"], Value::Null);
+    assert_eq!(chosen["task_primary"], true);
+    assert_eq!(members("INF-123"), std::slice::from_ref(&sole));
+
+    // Among several, the most recently used one; the others stay open.
+    let earlier = converse(&several_path);
+    let later = converse(&several_path);
+    fixture
+        .db()
+        .execute(
+            "UPDATE agent_sessions SET created_at=created_at-60 WHERE id=?1",
+            [&earlier],
+        )
+        .unwrap();
+    assert_eq!(primary(&["INF-124"])["id"], later.as_str());
+    assert_eq!(members("INF-124").len(), 2);
+
+    // An explicit choice wins, and keeps winning over later use.
+    assert_eq!(
+        primary(&["INF-124", "--choose", &earlier])["id"],
+        earlier.as_str()
+    );
+    let newest = converse(&several_path);
+    assert_eq!(primary(&["INF-124"])["id"], earlier.as_str());
+    assert_eq!(members("INF-124").len(), 3);
+    // The listing marks it, so a reader finds it without choosing one.
+    let marked: Vec<String> = fixture
+        .json(&["session", "list", "--all", "--task", "INF-124", "--json"])
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|session| session["task_primary"] == true)
+        .map(|session| session["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(marked, std::slice::from_ref(&earlier));
+    assert!(members("INF-124").contains(&newest));
+
+    // Another Task's conversation cannot be chosen.
+    let foreign = fixture.run(&[
+        "session", "ensure", "--task", "INF-124", "--choose", &sole, "--json",
+    ]);
+    assert!(!foreign.status.success(), "{foreign:?}");
+    assert_eq!(primary(&["INF-124"])["id"], earlier.as_str());
+
+    // A finished primary gives way to the Task's most recent conversation.
+    fixture
+        .db()
+        .execute(
+            "UPDATE agent_sessions SET completed_at=1 WHERE id=?1",
+            [&earlier],
+        )
+        .unwrap();
+    assert_eq!(primary(&["INF-124"])["id"], newest.as_str());
+
+    // Reading inventory creates nothing; asking for the primary of a Task
+    // with no conversation starts one in its checkout.
+    let before = fixture.count("agent_sessions");
+    assert!(members("INF-125").is_empty());
+    assert_eq!(fixture.count("agent_sessions"), before);
+    let created = primary(&["INF-125"]);
+    assert_eq!(fixture.count("agent_sessions"), before + 1);
+    let (skill, cwd): (String, String) = fixture
+        .db()
+        .query_row(
+            "SELECT skill,cwd FROM agent_sessions WHERE id=?1",
+            [created["id"].as_str().unwrap()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(skill, "task/session");
+    assert_eq!(
+        Path::new(&cwd).canonicalize().unwrap(),
+        empty_path.canonicalize().unwrap()
+    );
+    assert_eq!(primary(&["INF-125"])["id"], created["id"]);
+    assert_eq!(
+        members("INF-125"),
+        [created["id"].as_str().unwrap().to_string()]
+    );
+
+    // Replacing it finishes that conversation and names a fresh one.
+    let successor = fixture.json(&[
+        "session",
+        "replace",
+        created["id"].as_str().unwrap(),
+        "--json",
+    ]);
+    assert_ne!(successor["id"], created["id"]);
+    assert_eq!(primary(&["INF-125"])["id"], successor["id"]);
+    assert_eq!(
+        members("INF-125"),
+        [successor["id"].as_str().unwrap().to_string()]
+    );
 }
 
 #[test]
@@ -840,13 +955,12 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_exec_parent() {
     let y = fixture.repo.create_named_worktree("task-y");
     let sibling = support::register_sibling_task(&task, "INF-124", "task-y", &y);
     std::fs::write(fixture.home.path().join("tool-command.json"), serde_json::to_vec(&serde_json::json!({
-        "argv": [env!("CARGO_BIN_EXE_lf"), "--mode", "tui", "--model", "opencode", ":", "Work in Y"], "cwd": y,
+        "argv": [env!("CARGO_BIN_EXE_lf"), "--tui", "--model", "opencode", ":", "Work in Y"], "cwd": y,
     })).unwrap()).unwrap();
     let output = fixture.run(&[
         "--task",
         "INF-123",
-        "--mode",
-        "tui",
+        "--tui",
         "--model",
         "opencode",
         ":",
@@ -898,16 +1012,18 @@ fn declared_agent_can_start_another_tasks_flow() {
         "- cmd: sync --plan\n",
     )
     .unwrap();
+    std::fs::create_dir_all(y.join(".lf/workflows")).unwrap();
+    std::fs::write(
+        y.join(".lf/workflows/switch-proof.yaml"),
+        "nodes:\n  demo: demo\nedges:\n  - { from: start, to: demo, flow: switch-proof }\n  - { from: demo, to: end }\n",
+    )
+    .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
         .unwrap();
     // Y needs a harness that supports the checkout boundary. Its mechanical
     // Flow never starts a provider; X's interactive OpenCode only issues the command.
     store.set_task_agent(&target.task.id, "claude").unwrap();
     let bin = fixture.home.path().join("bin");
-    // A local process stands in for tmux; the actual Flow driver and op execute.
-    std::fs::write(bin.join("tmux"), format!(
-        "#!/bin/sh\ncase \"$1\" in new-session) cd \"$6\"; shift 8; /bin/sh -c \"$1\" >'{}' 2>&1 & ;; has-session) exit 1 ;; esac\n",
-        fixture.home.path().join("worker.log").display())).unwrap();
     std::fs::remove_file(bin.join("lf")).unwrap();
     std::fs::write(
         bin.join("lf"),
@@ -922,14 +1038,14 @@ fn declared_agent_can_start_another_tasks_flow() {
     std::fs::write(
         fixture.home.path().join("tool-command.json"),
         serde_json::to_vec(&serde_json::json!({
-            "argv": [env!("CARGO_BIN_EXE_lf"), "--task", "INF-123", "flow", "start", "switch-proof", "--json"], "cwd": x,
+            "argv": [env!("CARGO_BIN_EXE_lf"), "-b", "task", "run", "INF-123", "switch-proof"], "cwd": x,
         }))
         .unwrap(),
     )
     .unwrap();
     let output = fixture
         .command(&[
-            "--task", "INF-124", "--mode", "tui", "--model", "opencode", ":", "Start Y",
+            "--task", "INF-124", "--tui", "--model", "opencode", ":", "Start Y",
         ])
         .env("LF_BIN", bin.join("lf"))
         .output()
@@ -940,47 +1056,30 @@ fn declared_agent_can_start_another_tasks_flow() {
     )
     .unwrap();
     assert_eq!(result["code"], 0, "{result}");
-    let flow = store
-        .latest_task_flow(&target.task.id)
-        .unwrap()
-        .expect("flow start records its launched Flow");
-    wait_for("Y Flow completion", || {
-        let current = store.flow(flow.id()).unwrap().unwrap();
-        assert!(
-            current.failure.is_none(),
-            "{:?}; {}",
-            current.failure,
-            std::fs::read_to_string(fixture.home.path().join("worker.log")).unwrap_or_default()
-        );
-        current.finished.then_some(())
-    });
+    // The run blocked until Y's Flow finished.
+    let flows = support::recorded_flows(fixture.home.path());
+    assert_eq!(flows.len(), 1);
+    assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
     assert_eq!(
         std::fs::read_to_string(fixture.home.path().join("step-declaration")).unwrap(),
         format!("task:{}", target.task.id)
     );
-    let observed: (String,String) = fixture.db().query_row("SELECT f.task_id,s.task_id FROM flow_events h JOIN flow_sessions f ON f.id=h.flow_id JOIN execs child ON child.id=h.exec_id JOIN execs worker ON worker.id=child.parent_exec_id JOIN execs command ON command.id=worker.parent_exec_id JOIN agent_sessions s ON s.id=command.caller_session_id WHERE f.id=?1 AND h.kind='operation_started'", [flow.id()], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
-    assert_eq!(
-        observed,
-        (target.task.id.to_string(), caller.id.to_string())
-    );
+    // The step ran in Y's checkout under a driver X's conversation started.
+    let observed: (String, String) = fixture.db().query_row(
+        "SELECT step.cwd,s.task_id FROM execs step JOIN execs driver ON driver.id=step.parent_exec_id
+         JOIN execs launch ON launch.id=driver.parent_exec_id
+         JOIN agent_sessions s ON s.id=launch.caller_session_id
+         JOIN flow_exec_steps recorded ON recorded.exec_id=step.id",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+    assert_eq!(observed, (y.display().to_string(), caller.id.to_string()));
 }
 
-fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
-    let deadline = Instant::now() + PATIENCE;
-    loop {
-        if let Some(found) = probe() {
-            return found;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
-const BOUND_LAUNCH: [&str; 8] = [
+const BOUND_LAUNCH: [&str; 7] = [
     "--task",
     "INF-123",
-    "--mode",
-    "tui",
+    "--tui",
     "--model",
     "opencode",
     ":",
@@ -1025,14 +1124,7 @@ fn failed_exec_observation_cannot_admit_a_provider() {
         .unwrap();
     for args in [
         LAUNCH.as_slice(),
-        &[
-            "--mode",
-            "batch",
-            "--model",
-            "opencode",
-            ":",
-            "Tidy the parser",
-        ],
+        &["--batch", "--model", "opencode", ":", "Tidy the parser"],
     ] {
         let output = fixture.run(args);
         assert_eq!(output.status.code(), Some(1), "{output:?}");
@@ -1053,14 +1145,7 @@ fn malformed_caller_cannot_use_library_agent_admission() {
     let fixture = Fixture::new(false);
     for args in [
         LAUNCH.as_slice(),
-        &[
-            "--mode",
-            "batch",
-            "--model",
-            "opencode",
-            ":",
-            "Tidy the parser",
-        ],
+        &["--batch", "--model", "opencode", ":", "Tidy the parser"],
     ] {
         let output = fixture
             .command(args)
@@ -1096,21 +1181,13 @@ fn unavailable_store_starts_no_provider() {
     let store = LockedStore::new(&fixture);
     for args in [
         LAUNCH.as_slice(),
-        &[
-            "--mode",
-            "batch",
-            "--model",
-            "opencode",
-            ":",
-            "Tidy the parser",
-        ],
+        &["--batch", "--model", "opencode", ":", "Tidy the parser"],
         &[
             "--model",
             "opencode",
             "flow",
             "work-then-decide",
-            "--mode",
-            "batch",
+            "--batch",
             "--no-loopflow",
         ],
     ] {
@@ -1150,8 +1227,7 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     let output = fixture.run(&[
         "--wave",
         "task-pr-tests",
-        "--mode",
-        "batch",
+        "--batch",
         "--model",
         "opencode",
         ":",
@@ -1190,7 +1266,7 @@ fn saved_flow_stand_in(fixture: &Fixture) {
     std::fs::write(lf.join("skills/decide-proof.md"), "Decide the fixture.").unwrap();
     std::fs::write(
         lf.join("flows/work-then-decide.yaml"),
-        "- step:\n    id: work\n    name: work-proof\n- step:\n    id: decide\n    name: decide-proof\n    repeat:\n      from: work\n",
+        "- work-proof\n- loop: work-proof\n  step: decide-proof\n",
     )
     .unwrap();
 }
@@ -1216,8 +1292,7 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             "opencode",
             "flow",
             "work-then-decide",
-            "--mode",
-            "batch",
+            "--batch",
             "--no-loopflow",
         ]);
         assert_eq!(
@@ -1235,10 +1310,57 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             std::fs::read_to_string(fixture.home.path().join("decide.log")).unwrap_or_default(),
             String::from_utf8_lossy(&output.stderr)
         );
-        let (starts, consumed): (i64,i64) = fixture.db().query_row(
-            "SELECT (SELECT count(*) FROM session_events WHERE kind='started'),(SELECT count(*) FROM flow_events WHERE kind='consumed')", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+        let starts: i64 = fixture
+            .db()
+            .query_row(
+                "SELECT count(*) FROM session_events WHERE kind='started'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(starts, if exhausted { 4 } else { 3 });
-        assert_eq!(consumed, if exhausted { 1 } else { 2 });
+        // One Flow: its work step, then the decision and each correction of it.
+        let flows = support::recorded_flows(fixture.home.path());
+        assert_eq!(flows.len(), 1);
+        let (outcome, steps) = &flows[0];
+        assert_eq!(
+            outcome.as_deref(),
+            Some(if exhausted { "failed" } else { "succeeded" })
+        );
+        assert_eq!(steps.len(), if exhausted { 4 } else { 3 });
+        // The decision is the plain skill command; its contract is in the message.
+        let decision = &steps[1];
+        assert_eq!(decision["argv"][0], "--batch");
+        assert!(decision["argv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|arg| arg == "decide-proof"));
+        assert!(decision["argv"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .contains("Return the final answer as the declared JSON value"));
+        // Every correction resumes the conversation that gave the answer.
+        let conversation: String = fixture
+            .db()
+            .query_row(
+                "SELECT id FROM agent_sessions WHERE skill='decide-proof'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        for correction in &steps[2..] {
+            assert_eq!(
+                correction["argv"].as_array().unwrap()[..4],
+                ["--batch", "session", "resume", conversation.as_str()]
+            );
+            assert_eq!(correction["key"], decision["key"]);
+            assert_eq!(correction["iterations"], decision["iterations"]);
+        }
         if exhausted {
             assert!(String::from_utf8_lossy(&output.stderr).contains("exhausted after 3"));
         }
@@ -1255,8 +1377,7 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
         "opencode",
         "flow",
         "work-then-decide",
-        "--mode",
-        "batch",
+        "--batch",
         "--no-loopflow",
     ]);
     command
@@ -1277,27 +1398,36 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
         std::thread::sleep(Duration::from_millis(20));
     };
     assert!(!status.success());
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
-    let id: String = fixture
+    // The Flow stopped at its decision; its driver's Exec says why.
+    let flows = support::recorded_flows(fixture.home.path());
+    assert_eq!(flows.len(), 1);
+    let (outcome, steps) = &flows[0];
+    assert_eq!(outcome.as_deref(), Some("failed"));
+    assert_eq!(steps.len(), 2);
+    let stopped = &steps[1];
+    assert_eq!(stopped["label"], "decide-proof");
+    assert_eq!(stopped["key"], 1);
+    assert_eq!(stopped["iterations"], serde_json::json!([[0]]));
+    let error: String = fixture
         .db()
-        .query_row("SELECT id FROM flow_sessions", [], |row| row.get(0))
+        .query_row(
+            "SELECT d.error FROM execs d JOIN flow_execs f ON f.exec_id=d.id",
+            [],
+            |row| row.get(0),
+        )
         .unwrap();
-    let failed = store.flow(&id).unwrap().unwrap();
-    assert!(failed
-        .failure
-        .as_ref()
-        .unwrap()
-        .reason
-        .contains("Release target is missing"));
-    assert_eq!(failed.cursor.index, 1);
-    assert_eq!(failed.cursor.iteration, 0);
+    assert!(error.contains("Release target is missing"), "{error}");
     assert!(fixture.sessions().is_empty());
-    let launches = fixture.launches();
-    assert_eq!(launches.len(), 2);
-    let input = failed.current_attempt.as_ref().unwrap();
-    let session = store.session_for_artifact(&input.run_id).unwrap().unwrap();
-    let history = fixture.json(&["session", "history", &session.id, "--json"]);
+    assert_eq!(fixture.launches().len(), 2);
+    let session: String = fixture
+        .db()
+        .query_row(
+            "SELECT id FROM agent_sessions WHERE skill='decide-proof'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let history = fixture.json(&["session", "history", &session, "--json"]);
     assert!(
         history.to_string().contains("Release target is missing"),
         "{history}"
@@ -1315,8 +1445,7 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
         "opencode",
         "flow",
         "choose",
-        "--mode",
-        "batch",
+        "--batch",
         "--no-loopflow",
     ]);
     assert!(
@@ -1334,10 +1463,16 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
         2,
         "router and selected path once each"
     );
-    let (state, consumed): (String, i64) = fixture.db().query_row(
-        "SELECT state,(SELECT count(*) FROM flow_events WHERE kind='consumed') FROM flow_sessions", [],
-        |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
-    assert_eq!((state.as_str(), consumed), ("completed", 2));
+    let flows = support::recorded_flows(fixture.home.path());
+    assert_eq!(flows.len(), 1);
+    let (outcome, steps) = &flows[0];
+    assert_eq!(outcome.as_deref(), Some("succeeded"));
+    assert_eq!(steps.len(), 2);
+    // The router is the XOR's own node; the selected path's step lies inside it.
+    assert_eq!(steps[0]["label"], "decide-proof");
+    assert_eq!(steps[0]["key"], 0);
+    assert_eq!(steps[1]["label"], "work-proof");
+    assert_eq!(steps[1]["key"], 1);
 }
 
 #[test]
@@ -1350,8 +1485,7 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
         "opencode",
         "flow",
         "work-then-decide",
-        "--mode",
-        "batch",
+        "--batch",
         "--no-loopflow",
     ]);
     assert!(
@@ -1359,27 +1493,31 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let conn = fixture.db();
-    let (root, state, iteration, count): (String, String, i64, i64) = conn
-        .query_row(
-            "SELECT id,state,iteration,(SELECT count(*) FROM flow_sessions) FROM flow_sessions",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .unwrap();
-    assert_eq!((state.as_str(), iteration, count), ("completed", 2, 1));
-    let positions: i64 = conn.query_row(
-        "SELECT count(DISTINCT iterations) FROM flow_events WHERE kind='consumed' AND flow_id=?1",
-        [&root], |row| row.get(0)).unwrap();
-    assert_eq!(positions, 3);
+    // One driver ran all three passes; each decision names its own pass.
+    let flows = support::recorded_flows(fixture.home.path());
+    assert_eq!(flows.len(), 1);
+    let (outcome, steps) = &flows[0];
+    assert_eq!(outcome.as_deref(), Some("succeeded"));
+    let passes: Vec<(String, serde_json::Value)> = steps
+        .iter()
+        .map(|step| {
+            (
+                step["label"].as_str().unwrap().to_owned(),
+                step["iterations"].clone(),
+            )
+        })
+        .collect();
+    let pass = |label: &str, returns: u32| (label.to_owned(), serde_json::json!([[returns]]));
     assert_eq!(
-        conn.query_row(
-            "SELECT count(*) FROM flow_events WHERE kind='consumed'",
-            [],
-            |row| row.get::<_, i64>(0)
-        )
-        .unwrap(),
-        6
+        passes,
+        [
+            pass("work-proof", 0),
+            pass("decide-proof", 0),
+            pass("work-proof", 1),
+            pass("decide-proof", 1),
+            pass("work-proof", 2),
+            pass("decide-proof", 2),
+        ]
     );
     assert_eq!(fixture.launches().len(), 6);
 }
@@ -1394,37 +1532,31 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
         "opencode",
         "flow",
         "work-then-decide",
-        "--mode",
-        "batch",
+        "--batch",
         "--no-loopflow",
     ]);
     assert!(!output.status.success(), "{output:?}");
     assert!(fixture.home.path().join("tool-effect").exists());
-    let rows: (i64, i64, i64) = fixture
+    let rows: (i64, i64) = fixture
         .db()
         .query_row(
             "SELECT (SELECT count(*) FROM session_events WHERE kind='started'),
-                (SELECT count(*) FROM session_events WHERE kind='completed'),
-                (SELECT count(*) FROM flow_events WHERE kind='consumed')",
+                (SELECT count(*) FROM session_events WHERE kind='completed')",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!(rows, (1, 0, 0));
+    assert_eq!(rows, (1, 0));
+    // The Flow stopped at its first step and launched nothing after it.
+    let flows = support::recorded_flows(fixture.home.path());
+    assert_eq!(flows.len(), 1);
+    assert_eq!(flows[0].1.len(), 1);
     assert_eq!(
         fixture.launches().len(),
         1,
         "uncertain effect is not silently retried"
     );
-    let outcome: Option<String> = fixture
-        .db()
-        .query_row(
-            "SELECT outcome FROM execs WHERE caller_session_id IS NULL",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(outcome.as_deref(), Some("failed"));
+    assert_eq!(flows[0].0.as_deref(), Some("failed"));
 }
 
 #[test]
@@ -1437,8 +1569,7 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
         "opencode",
         "flow",
         "work-then-decide",
-        "--mode",
-        "batch",
+        "--batch",
         "--no-loopflow",
     ]);
     assert!(
@@ -1446,23 +1577,22 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let failed_consumed: i64 = fixture
-        .db()
-        .query_row(
-            "SELECT count(*) FROM flow_events f JOIN session_events e ON e.seq=f.session_event
-         WHERE f.kind='consumed' AND json_extract(e.payload,'$.status')!='completed'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(failed_consumed, 0);
+    // The failed turn's output decided nothing: each step ran once and succeeded.
+    let flows = support::recorded_flows(fixture.home.path());
+    assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
+    assert_eq!(flows[0].1.len(), 2);
     assert_eq!(fixture.count("agent_sessions"), 2);
     assert_eq!(fixture.captures(), 2);
-    let (threads,starts,done,consumed): (i64,i64,i64,i64) = fixture.db().query_row(
-        "SELECT count(DISTINCT provider_thread),sum(kind='started'),sum(kind='completed'),
-           (SELECT count(*) FROM flow_events WHERE kind='consumed') FROM session_events WHERE kind!='observed'", [],
-        |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap();
-    assert_eq!((threads, starts, done, consumed), (2, 3, 3, 2));
+    let (threads, starts, done): (i64, i64, i64) = fixture
+        .db()
+        .query_row(
+            "SELECT count(DISTINCT provider_thread),sum(kind='started'),sum(kind='completed')
+             FROM session_events WHERE kind!='observed'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!((threads, starts, done), (2, 3, 3));
     let usage = fixture.json(&["monitor", "usage", "--json"]);
     assert_eq!(usage.as_array().unwrap().len(), 2);
     let launches = fixture.launches();
@@ -1487,8 +1617,9 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
         &launches[1],
         "--final",
     ]);
-    assert_eq!(
-        serde_json::from_slice::<Value>(&answer.stdout).unwrap()["decision"],
-        "advance"
+    // The answer is the provider's own text; the driver read the value in it.
+    assert!(
+        String::from_utf8_lossy(&answer.stdout).contains(r#""decision": "advance""#),
+        "{answer:?}"
     );
 }

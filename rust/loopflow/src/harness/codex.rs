@@ -858,10 +858,7 @@ impl Harness for CodexHarness {
             .ok_or_else(|| anyhow!("codex thread not started"))?;
         let input = json!([{ "type": "text", "text": turn_text }]);
 
-        let mut params = json!({ "threadId": thread_id, "input": input });
-        if let Some(schema) = self.launch.as_ref().and_then(AgentConfig::output_schema) {
-            params["outputSchema"] = schema;
-        }
+        let params = json!({ "threadId": thread_id, "input": input });
         self.send_request("turn/start", params).await?;
         Ok(())
     }
@@ -1098,7 +1095,7 @@ impl CodexHarness {
         command.process_group(0);
         super::configure_vendor_std_env(command.as_std_mut())?;
         // A login shell/snapshot can replace the launcher's PATH with the
-        // machine installation, losing a development Run's executable/Home.
+        // machine installation, losing a development Session's executable/Home.
         command.args([
             "-c",
             "allow_login_shell=false",
@@ -1111,7 +1108,6 @@ impl CodexHarness {
         // conversation later shares its engine. Pass only explicit launch and
         // freshly resolved lf executable/Home values as thread configuration.
         let tool_environment = super::conversation_environment(command.as_std(), launch);
-        let flow_selection = launch.flow_selection.clone();
         // The engine can host another conversation. Only this thread receives
         // its caller/capture provenance; engine defaults must not lend it to a
         // newly admitted sibling.
@@ -1119,6 +1115,11 @@ impl CodexHarness {
             command.env_remove(name);
         }
 
+        if connection.is_none() {
+            if let Some((store, session, driver)) = &self.session_driver {
+                store.record_session_provider_launch(session, driver, true)?;
+            }
+        }
         let mut child = if connection.is_none() {
             Some(
                 command
@@ -1190,9 +1191,7 @@ impl CodexHarness {
         let (outbound_tx, mut outbound_rx) = mpsc::channel::<OutboundRpc>(128);
         let authority = self.session_driver.clone();
         let writer_events = self.events.clone();
-        let native_history = Arc::new(Mutex::new(super::codex_history::History::for_flow(
-            flow_selection,
-        )));
+        let native_history = Arc::new(Mutex::new(super::codex_history::History::default()));
         let writer_history = native_history.clone();
         let writer_task = tokio::spawn(async move {
             while let Some(message) = outbound_rx.recv().await {
@@ -1578,6 +1577,84 @@ impl CodexHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_thread_rejection_retains_pre_spawn_retry_evidence() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _binary = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&ledger.home().join("loopflow.db"))
+                .unwrap();
+        store.test_session("saved", &crate::session_record::new_artifact_key());
+        let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
+        let exec = crate::id::ExecId::new();
+        sql.execute(
+            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [exec.as_str()],
+        )
+        .unwrap();
+        let old = store
+            .claim_session_driver("saved", None, &exec, true)
+            .unwrap();
+        store
+            .record_session_connection("saved", &old, "/missing.sock", "saved-thread")
+            .unwrap();
+        let driver = store
+            .claim_session_driver("saved", Some(&old), &exec, true)
+            .unwrap();
+        store
+            .record_session_provider_launch("saved", &driver, false)
+            .unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
+        let config = AgentConfig {
+            session_driver: Some(("saved".into(), driver.clone())),
+            // Even a mistakenly reached spawn cannot launch a real provider.
+            cwd: Some(ledger.home().join("absent")),
+            ..Default::default()
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let error = runtime.block_on(harness.start_inner(&config)).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Saved conversation thread differs"));
+        assert!(store.session_provider_unstarted("saved").unwrap());
+        assert!(!crate::session_record::conversation_engine_exited(&store, "saved").unwrap());
+        let released = store.release_session_driver("saved", &driver).unwrap();
+        let retry = store
+            .claim_session_driver("saved", Some(&released), &exec, true)
+            .unwrap();
+        store
+            .record_session_provider_launch("saved", &retry, false)
+            .unwrap();
+        harness.resume_provider_session_id = Some("saved-thread".into());
+        let config = AgentConfig {
+            session_driver: Some(("saved".into(), retry)),
+            ..config
+        };
+        let error = runtime.block_on(harness.start_inner(&config)).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("failed to spawn codex app-server"),
+            "{error}"
+        );
+        assert!(!store.session_provider_unstarted("saved").unwrap());
+        assert_eq!(
+            store.session_thread("saved").unwrap().as_deref(),
+            Some("saved-thread")
+        );
+        assert!(store
+            .session_history("saved", 0, 100)
+            .unwrap()
+            .iter()
+            .all(|event| event.kind != crate::session::SessionEventKind::Completed));
+    }
 
     fn replay_state() -> (NotificationState, Arc<Mutex<Option<String>>>) {
         let slot = Arc::new(Mutex::new(None));

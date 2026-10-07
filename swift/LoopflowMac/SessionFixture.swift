@@ -8,7 +8,8 @@ private enum SessionFixtureKind: String {
     var id: String { "ui-\(rawValue)" }
 
     var record: String {
-        let state = self == .interactive ? "active" : "waiting"
+        let state = self == .interactive ? "active" : "unknown"
+        let attention = self == .interactive ? "null" : #""waiting""#
         let summary = self == .interactive ? "null" : #""Ready for review""#
         let work = self == .flow
             ? #"{"kind":"task","id":"task_00000000000000000000000000000001"}"#
@@ -24,12 +25,11 @@ private enum SessionFixtureKind: String {
         return """
         {
           "id": "\(id)", "interactive": true,
-          "kind": "\(self == .interactive ? "conversation" : rawValue)",
           "work": \(work),
           "title": "\(rawValue.capitalized) fixture",
           "detail": "fixture-provider",
           "cwd": "/tmp",
-          "state": "\(state)",
+          "state": "\(state)", "attention": \(attention), "primary_scope": null, "task_primary": false,
           "ready_summary": \(summary),
           "work_path": null,
           "actions": \(actions),

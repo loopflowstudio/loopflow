@@ -1,102 +1,90 @@
-//! The driver's kernel lock and the step identity a child Exec carries in its
-//! environment. Captured progression lives on `flow_sessions`.
-use std::fs::{self, File, OpenOptions};
+//! A Flow exec is one driver Exec and the step Execs it starts. Its driver
+//! writes a FlowExec: the Flow's name and graph as compiled at launch, then one
+//! row per step it starts. The record is append-only and only the driver writes
+//! it. Each step is an ordinary command that knows nothing of its Flow; whether
+//! the Flow or a step is running, finished or failed is read from their Execs.
+use crate::engine::flow_graph::FlowGraph;
+use crate::exec::Exec;
+use crate::id::ExecId;
 
-use anyhow::{Context, Result};
-use fs2::FileExt;
-use serde::{Deserialize, Serialize};
+/// A step's agent sees which Flow started it: the driver Exec's id. Steps of
+/// one Flow can share notes under it. It configures nothing in lf.
+pub(crate) const FLOW_ID_ENV: &str = "LF_FLOW_ID";
 
-use crate::session_record::{SessionFlowMembership, SessionFlowStep};
-
-pub(crate) const FLOW_STEP_ENV: &str = "LF_FLOW_STEP";
-
-/// The Flow and cursor version a step's Exec was launched for. A write
-/// from the step is refused once the cursor moved on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ActiveStep {
-    pub invocation: String,
-    pub version: u64,
+/// One step its driver started.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FlowExecStep {
+    pub exec: Exec,
+    /// The step's node in the Flow's graph, counted in preorder.
+    pub key: u32,
+    /// Returns taken on each loop edge, per nesting level, outermost first.
+    pub iterations: Vec<Vec<u32>>,
 }
 
-impl ActiveStep {
-    pub(crate) fn of(flow: &crate::durable::FlowSession) -> Self {
-        Self {
-            invocation: flow.id().to_owned(),
-            version: flow.version,
-        }
+/// One Flow exec as its driver recorded it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FlowExec {
+    pub driver: Exec,
+    pub name: String,
+    pub graph: FlowGraph,
+    /// Steps in launch order. A repeated or corrected step is another entry.
+    pub steps: Vec<FlowExecStep>,
+}
+
+impl FlowExec {
+    pub(crate) fn id(&self) -> &ExecId {
+        &self.driver.id
     }
 
-    pub(crate) fn env_value(&self) -> Result<String> {
-        Ok(serde_json::to_string(self)?)
+    pub(crate) fn latest(&self) -> Option<&FlowExecStep> {
+        self.steps.last()
     }
-}
 
-pub(crate) fn driver_lock(id: &str) -> Result<File> {
-    uuid::Uuid::parse_str(id).context("invalid Flow invocation id")?;
-    let dir = crate::store::lf_home_dir().join("flows").join(id);
-    fs::create_dir_all(&dir)?;
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(dir.join("driver.lock"))?;
-    FileExt::lock_exclusive(&file)?;
-    Ok(file)
-}
+    /// The graph label of a recorded step.
+    pub(crate) fn label(&self, step: &FlowExecStep) -> String {
+        self.graph
+            .node_at(step.key)
+            .map(|node| node.label.clone())
+            .unwrap_or_default()
+    }
 
-/// Whether a driver process holds this Flow now. Observation only: a free
-/// lock grants the reader nothing.
-pub(crate) fn driver_live(id: &str) -> bool {
-    let path = crate::store::lf_home_dir()
-        .join("flows")
-        .join(id)
-        .join("driver.lock");
-    let Ok(file) = OpenOptions::new().read(true).write(true).open(path) else {
-        return false;
-    };
-    FileExt::try_lock_exclusive(&file).is_err()
-}
-
-pub(crate) fn token() -> Result<Option<ActiveStep>> {
-    std::env::var(FLOW_STEP_ENV)
-        .ok()
-        .map(|s| serde_json::from_str(&s).context("invalid active Flow step identity"))
-        .transpose()
-}
-
-/// The captured Flow position selected for this Exec and its reserved input.
-/// Helpers and prepared reviews retain their independent admission paths.
-#[derive(Debug)]
-pub(crate) struct StepExec {
-    pub membership: SessionFlowMembership,
-    pub reserved: Option<(ActiveStep, i64, String)>,
-}
-
-pub(crate) fn capture_membership() -> Result<StepExec> {
-    let independent = StepExec {
-        membership: SessionFlowMembership::Independent,
-        reserved: None,
-    };
-    let Some(token) = token()? else {
-        return Ok(independent);
-    };
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    let flow = store
-        .flow(&token.invocation)?
-        .with_context(|| format!("Flow {} has no invocation row", token.invocation))?;
-    anyhow::ensure!(
-        flow.version == token.version && !flow.finished,
-        "stale Flow step launch"
-    );
-    let reserved = match &flow.current_attempt {
-        Some(attempt) if !attempt.published && flow.pending_session_id.is_none() => {
-            (attempt.captured, attempt.run_id.clone())
+    /// How far the Flow got on the graph it launched with.
+    pub(crate) fn detail(
+        &self,
+        entry: crate::durable::FlowInventoryEntry,
+    ) -> crate::durable::FlowDetail {
+        let finished = entry.summary.state == crate::session::FlowSummaryState::Completed;
+        let latest = self.latest();
+        let projection = crate::engine::flow_graph::project_position(
+            &self.graph,
+            latest.map_or(0, |step| step.key),
+            latest.map_or(&[], |step| &step.iterations),
+            finished,
+        );
+        crate::durable::FlowDetail {
+            entry,
+            graph: self.graph.clone(),
+            current: projection.current,
+            completed: projection.completed,
+            returns: projection.returns,
+            iterations: latest
+                .map(|step| step.iterations.clone())
+                .unwrap_or_default(),
+            cwd: self.driver.cwd.as_ref().map(std::path::PathBuf::from),
+            steps: self
+                .steps
+                .iter()
+                .map(|step| crate::durable::FlowStepExec {
+                    exec_id: step.exec.id.clone(),
+                    label: self.label(step),
+                    key: step.key,
+                    iterations: step.iterations.clone(),
+                    started_at: step.exec.started_at,
+                    completed_at: step.exec.completed_at,
+                    outcome: step.exec.outcome.clone(),
+                    exit_code: step.exec.exit_code,
+                })
+                .collect(),
         }
-        _ => return Ok(independent),
-    };
-    Ok(StepExec {
-        membership: SessionFlowMembership::Step(SessionFlowStep::of(&flow)?),
-        reserved: Some((token, reserved.0, reserved.1)),
-    })
+    }
 }

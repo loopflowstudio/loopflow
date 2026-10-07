@@ -121,7 +121,7 @@ Prefer editing the artifact that owns the current truth: code, tests, a plan,
 usage docs, or existing findings. Delete obsolete instructions and reconcile
 changed assumptions there. Leave a minimal review when it helps the next reader:
 where the work stands against the plan, what worked, what implementation taught
-us, and what remains unresolved. A step such as `loop-decide` needs these facts
+us, and what remains unresolved. A step such as `loop-or-next` needs these facts
 to judge well; the review should supply them without choosing the navigation
 outcome. Avoid duplicating the plan or accumulating reports by default.
 
@@ -438,7 +438,7 @@ branch convention, Task binding, or report filename is usually incidental.
 For example, realign needs intent and work to reconcile. It edits the plan,
 code, and identified Wave's memory after implementation, upstream integration,
 or during a conversation. Work without a Wave still has useful inputs. A caller
-can compose sync → realign or implement → compress → realign → loop-decide.
+can compose sync → realign or implement → compress → realign → loop-or-next.
 Synchronization, publication, and navigation stay explicit in that composition.
 
 Keep real domain constraints and authority boundaries. A release skill still

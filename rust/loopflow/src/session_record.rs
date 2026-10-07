@@ -2,6 +2,7 @@
 
 pub mod active;
 pub(crate) mod activity;
+pub(crate) mod recovery;
 mod runtime;
 
 pub(crate) use runtime::finish_session_driver;
@@ -22,8 +23,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::chat::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
-use crate::durable::RUN_ID_ENV;
+use crate::chat::types::{ConversationEvent, ConversationItem, ItemDelta, Lifecycle, TurnUsage};
 use crate::engine::stream::{ResultSubtype, StreamEvent};
 use crate::store::{StoreError, StoreResult};
 
@@ -39,7 +39,7 @@ pub(crate) fn parse_artifact_key(value: &str) -> Result<String, crate::durable::
     Ok(value.to_owned())
 }
 
-pub const RUN_DIR_ENV: &str = "LF_RUN_DIR";
+pub const CAPTURE_KEY_ENV: &str = "LF_CAPTURE_KEY";
 pub(crate) const PROVIDER_ACCOUNT_ID_ENV: &str = "LF_PROVIDER_ACCOUNT_ID";
 const SCHEMA_VERSION: u32 = 1;
 
@@ -57,7 +57,8 @@ pub(crate) struct SessionCaptureSpec {
     pub work: Option<crate::session::SessionWork>,
 }
 
-/// The managed Task or standalone Flow position captured for a conversation.
+/// A Flow position older manifests captured. New captures record none: a step
+/// is an ordinary command, and its Flow is read from the driver's record.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionFlowStep {
     pub task_id: Option<crate::work::task::TaskId>,
@@ -67,29 +68,11 @@ pub struct SessionFlowStep {
     pub step: String,
     /// Older manifests omitted the structural path; never infer it from a leaf index.
     pub node: Option<String>,
+    /// The step's node in its driver's graph; absent in older manifests.
+    #[serde(default)]
+    pub key: Option<u32>,
     /// Older captures have no tuple; never derive it from their scalar visit token.
     pub iterations: Option<Vec<Vec<u32>>>,
-}
-
-impl SessionFlowStep {
-    /// The step an invocation's cursor selects; its Task is the invocation's.
-    pub(crate) fn of(flow: &crate::durable::FlowSession) -> anyhow::Result<Self> {
-        let step = flow
-            .step_name()
-            .ok_or_else(|| anyhow::anyhow!("Flow position has no current step"))?;
-        Ok(Self {
-            task_id: flow.task_id.clone(),
-            task_pr_id: None,
-            invocation_id: flow.invocation.id.clone(),
-            flow: flow.invocation.flow.clone(),
-            step,
-            node: Some(flow.cursor.node_key()),
-            iterations: Some(crate::engine::flow_graph::flow_iterations(
-                &flow.invocation.steps,
-                &flow.cursor,
-            )),
-        })
-    }
 }
 
 /// Membership at capture time; absence in historical manifests remains unknown.
@@ -471,6 +454,139 @@ impl SessionHistory {
     }
 }
 
+/// The part of one capture's event stream that SQLite history has yet to keep.
+///
+/// `events.jsonl` holds every provider increment verbatim. History keeps what
+/// the increments add up to: a run of deltas becomes one event at the first
+/// delta's position, a Turn's cumulative diff is kept once, and the raw
+/// notification behind each increment stays in the file alone. Storing one row
+/// per streamed token made increments two thirds of all history rows.
+/// A process that dies mid-run leaves that run in the file only.
+#[derive(Debug, Default)]
+struct StreamedHistory {
+    run: Option<EventEnvelope>,
+    diff: Option<EventEnvelope>,
+}
+
+impl StreamedHistory {
+    /// The events history keeps now that `event` has arrived. Readers order
+    /// history by capture position, so a held event may be kept late.
+    fn admit(&mut self, event: EventEnvelope) -> Vec<EventEnvelope> {
+        let conversation = match &event.event {
+            CaptureEvent::ProviderOutput { stream, line }
+                if stream == "notification" && is_provider_increment(line) =>
+            {
+                return Vec::new();
+            }
+            CaptureEvent::Conversation { event } => Some(&**event),
+            _ => None,
+        };
+        match conversation {
+            Some(ConversationEvent::DiffUpdated { turn_id, .. }) => {
+                let earlier_turn = self
+                    .diff
+                    .take()
+                    .filter(|held| diff_turn(held) != Some(turn_id));
+                self.diff = Some(event);
+                earlier_turn.into_iter().collect()
+            }
+            Some(
+                increment @ (ConversationEvent::TextDelta { .. }
+                | ConversationEvent::ReasoningDelta { .. }
+                | ConversationEvent::ItemUpdated { .. }),
+            ) => {
+                if self
+                    .run
+                    .as_mut()
+                    .is_some_and(|run| extend_run(run, increment))
+                {
+                    return Vec::new();
+                }
+                self.run.replace(event).into_iter().collect()
+            }
+            Some(ConversationEvent::TurnCompleted { .. }) => {
+                let mut kept = self.settle();
+                kept.push(event);
+                kept
+            }
+            _ => self.run.take().into_iter().chain([event]).collect(),
+        }
+    }
+
+    /// Everything still held.
+    fn settle(&mut self) -> Vec<EventEnvelope> {
+        self.run
+            .take()
+            .into_iter()
+            .chain(self.diff.take())
+            .collect()
+    }
+}
+
+fn diff_turn(held: &EventEnvelope) -> Option<&String> {
+    match &held.event {
+        CaptureEvent::Conversation { event } => match &**event {
+            ConversationEvent::DiffUpdated { turn_id, .. } => Some(turn_id),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn extend_run(run: &mut EventEnvelope, increment: &ConversationEvent) -> bool {
+    let CaptureEvent::Conversation { event } = &mut run.event else {
+        return false;
+    };
+    match (&mut **event, increment) {
+        (
+            ConversationEvent::TextDelta { turn_id, content },
+            ConversationEvent::TextDelta {
+                turn_id: turn,
+                content: more,
+            },
+        )
+        | (
+            ConversationEvent::ReasoningDelta { turn_id, content },
+            ConversationEvent::ReasoningDelta {
+                turn_id: turn,
+                content: more,
+            },
+        ) if turn_id == turn => content.push_str(more),
+        (
+            ConversationEvent::ItemUpdated {
+                turn_id,
+                item_id,
+                data,
+            },
+            ConversationEvent::ItemUpdated {
+                turn_id: turn,
+                item_id: item,
+                data: more,
+            },
+        ) if turn_id == turn && item_id == item => match (data, more) {
+            (ItemDelta::Output { content }, ItemDelta::Output { content: more })
+            | (ItemDelta::PlanText { content }, ItemDelta::PlanText { content: more }) => {
+                content.push_str(more)
+            }
+            _ => return false,
+        },
+        _ => return false,
+    }
+    true
+}
+
+/// A provider notification that only adds to, or restates, a later complete one:
+/// `…/delta`, `…Delta`, `…_delta` and the cumulative Turn diff.
+fn is_provider_increment(line: &str) -> bool {
+    #[derive(Deserialize)]
+    struct Notification {
+        method: String,
+    }
+    serde_json::from_str::<Notification>(line).is_ok_and(|notification| {
+        notification.method.ends_with("elta") || notification.method == "turn/diff/updated"
+    })
+}
+
 #[derive(Debug)]
 enum RecorderMessage {
     Event(EventEnvelope),
@@ -520,14 +636,20 @@ impl SessionRecorder {
                 if let Err(error) = observe("manifest.json".into(), manifest.created_at, serde_json::json!(manifest)) {
                     tracing::warn!(%error, "Session capture observation unavailable");
                 }
+                let retain = |events: Vec<EventEnvelope>| {
+                    events.into_iter().try_for_each(|event| {
+                        observe(format!("events.jsonl:{}", event.seq), event.observed_at, serde_json::json!(event))
+                    })
+                };
+                let mut streamed = StreamedHistory::default();
                 while let Ok(message) = receiver.recv() {
                     let result = match message {
                         RecorderMessage::Event(event) => {
                             let result = append_json_line(&writer_dir.join("events.jsonl"), &event);
-                            result.and(observe(format!("events.jsonl:{}", event.seq), event.observed_at, serde_json::json!(event)))
+                            result.and(retain(streamed.admit(event)))
                         }
                         RecorderMessage::Drain(acknowledge) => {
-                            let result = sync_telemetry(&writer_dir);
+                            let result = retain(streamed.settle()).and(sync_telemetry(&writer_dir));
                             let _ = acknowledge.send(());
                             result
                         }
@@ -544,6 +666,9 @@ impl SessionRecorder {
                             tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
                         }
                     }
+                }
+                if let Err(error) = retain(streamed.settle()) {
+                    tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
                 }
             });
         match thread {
@@ -1973,14 +2098,7 @@ impl CaptureHandle {
     ) -> StoreResult<Self> {
         let context =
             crate::trace::PreparedTurnContext::from_prompts(&exec.system_prompt, &exec.task_prompt);
-        Self::begin_with_key_and_caller(
-            spec,
-            new_artifact_key(),
-            None,
-            true,
-            Some(exec),
-            Some(&context),
-        )
+        Self::begin_with_context(spec, &context, Some(exec))
     }
 
     pub(crate) fn begin_with_context(
@@ -1988,7 +2106,22 @@ impl CaptureHandle {
         context: &crate::trace::PreparedTurnContext,
         exec: Option<AgentExecRequest>,
     ) -> StoreResult<Self> {
-        Self::begin_with_key_and_caller(spec, new_artifact_key(), None, true, exec, Some(context))
+        #[cfg(test)]
+        let home = std::env::var_os("LF_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::temp_dir().join(format!("loopflow-test-run-home-{}", std::process::id()))
+            });
+        #[cfg(not(test))]
+        let home = crate::store::lf_home_dir();
+        Self::begin_at_with_id(
+            &home,
+            spec,
+            new_artifact_key(),
+            inherited_capture_key()?,
+            exec,
+            Some(context),
+        )
     }
 
     pub(crate) fn begin_reserved_with_context(
@@ -1999,7 +2132,7 @@ impl CaptureHandle {
         publish: impl FnOnce(&String) -> StoreResult<()>,
     ) -> StoreResult<Self> {
         let home = crate::store::lf_home_dir();
-        let caller = inherited_caller().and_then(|id| verified_caller(&home, id));
+        let caller = inherited_capture_key()?;
         Self::begin_reserved_at(&home, spec, artifact_key, caller, exec, context, publish)
     }
 
@@ -2024,53 +2157,22 @@ impl CaptureHandle {
         )))))
     }
 
+    /// Retain the source key already resolved by the replay reader.
     pub(crate) fn begin_replay_at(
         lf_home: &Path,
         spec: SessionCaptureSpec,
         exec: AgentExecRequest,
         caller_artifact_key: String,
     ) -> StoreResult<Self> {
-        let caller_artifact_key = verified_caller(lf_home, caller_artifact_key);
         let context =
             crate::trace::PreparedTurnContext::from_prompts(&exec.system_prompt, &exec.task_prompt);
         Self::begin_at_with_id(
             lf_home,
             spec,
             new_artifact_key(),
-            caller_artifact_key,
+            Some(caller_artifact_key),
             Some(exec),
             Some(&context),
-        )
-    }
-
-    fn begin_with_key_and_caller(
-        spec: SessionCaptureSpec,
-        artifact_key: String,
-        caller_artifact_key: Option<String>,
-        inherit_caller: bool,
-        exec: Option<AgentExecRequest>,
-        context: Option<&crate::trace::PreparedTurnContext>,
-    ) -> StoreResult<Self> {
-        #[cfg(test)]
-        let home = std::env::var_os("LF_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                std::env::temp_dir().join(format!("loopflow-test-run-home-{}", std::process::id()))
-            });
-        #[cfg(not(test))]
-        let home = crate::store::lf_home_dir();
-        let caller_artifact_key = if inherit_caller {
-            inherited_caller()
-        } else {
-            caller_artifact_key.and_then(|candidate| verified_caller(&home, candidate))
-        };
-        Self::begin_at_with_id(
-            &home,
-            spec,
-            artifact_key,
-            caller_artifact_key,
-            exec,
-            context,
         )
     }
 
@@ -2080,7 +2182,7 @@ impl CaptureHandle {
             lf_home,
             spec,
             new_artifact_key(),
-            inherited_caller(),
+            inherited_capture_key()?,
             None,
             None,
         )
@@ -2098,7 +2200,7 @@ impl CaptureHandle {
             lf_home,
             spec,
             new_artifact_key(),
-            inherited_caller(),
+            inherited_capture_key()?,
             Some(exec),
             Some(&context),
         )
@@ -2192,13 +2294,18 @@ impl CaptureHandle {
                 ));
             }
         }
-        let replace_provider =
-            expected.is_none() || conversation_engine_exited(&store, &session.id)?;
+        let mut replace_provider = expected.is_none()
+            || store.session_provider_unstarted(&session.id)?
+            || conversation_engine_exited(&store, &session.id)?;
         let connection = store.session_connection(&session.id)?;
         if !replace_provider && connection.is_none() {
-            return Err(StoreError::InvalidAuthority(
-                "Conversation has no connection and no confirmed engine exit".into(),
-            ));
+            replace_provider =
+                recovery::prepare_after_restart(&store, &session.id, expected.as_ref())?;
+            if !replace_provider {
+                return Err(StoreError::InvalidAuthority(
+                    "Conversation has no connection and no confirmed engine exit; retry requires exact process evidence or an observed restart of the same host".into(),
+                ));
+            }
         }
         let driver = store.claim_session_driver(
             &session.id,
@@ -2206,6 +2313,9 @@ impl CaptureHandle {
             &exec_id,
             replace_provider,
         )?;
+        if replace_provider {
+            store.record_session_provider_launch(&session.id, &driver, false)?;
+        }
         capture.driver = Some((session.id, driver));
         drop(capture);
         let capture = Arc::downgrade(&self.0);
@@ -2224,10 +2334,19 @@ impl CaptureHandle {
 
     pub(crate) fn conversation_resume_token(&self) -> StoreResult<Option<String>> {
         let capture = self.0.lock().expect("Session capture mutex poisoned");
-        let Some((session, _)) = &capture.driver else {
+        let store = row_store(&capture.dir)?;
+        let Some(session) = store.session_for_artifact(&capture.manifest.artifact_key)? else {
             return Ok(None);
         };
-        row_store(&capture.dir)?.session_thread(session)
+        store.session_thread(&session.id)
+    }
+
+    pub(crate) fn begin_provider_spawn(&self) -> StoreResult<()> {
+        let capture = self.0.lock().expect("Session capture mutex poisoned");
+        if let Some((session, driver)) = &capture.driver {
+            row_store(&capture.dir)?.record_session_provider_launch(session, driver, true)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn record_provider_process(&self, pid: u32) -> StoreResult<()> {
@@ -2241,13 +2360,6 @@ impl CaptureHandle {
         Ok(())
     }
 
-    pub(crate) fn flow_turn_selection(
-        &self,
-    ) -> StoreResult<Option<crate::durable::FlowTurnSelection>> {
-        let capture = self.0.lock().expect("Session capture mutex poisoned");
-        row_store(&capture.dir)?.flow_turn_selection(&capture.manifest.artifact_key)
-    }
-
     pub(crate) fn session_driver(&self) -> Option<(String, crate::exec::SessionDriver)> {
         self.0
             .lock()
@@ -2258,13 +2370,10 @@ impl CaptureHandle {
 
     pub(crate) fn environment(&self) -> BTreeMap<String, String> {
         let capture = self.0.lock().expect("Session capture mutex poisoned");
-        let mut environment = BTreeMap::from([
-            (
-                RUN_ID_ENV.to_string(),
-                capture.manifest.artifact_key.to_string(),
-            ),
-            (RUN_DIR_ENV.to_string(), capture.dir.display().to_string()),
-        ]);
+        let mut environment = BTreeMap::from([(
+            CAPTURE_KEY_ENV.to_string(),
+            capture.manifest.artifact_key.to_string(),
+        )]);
         if let Ok(declaration) = std::env::var(crate::lf::WORK_DECLARATION_ENV) {
             environment.insert(crate::lf::WORK_DECLARATION_ENV.to_string(), declaration);
         }
@@ -2424,8 +2533,8 @@ impl SessionCapture {
         dir: &Path,
         work: Option<crate::session::SessionWork>,
     ) -> StoreResult<Option<crate::session::AgentSession>> {
-        let invocation_id = match &manifest.flow {
-            Some(SessionFlowMembership::Step(step)) => Some(step.invocation_id.clone()),
+        let step = match &manifest.flow {
+            Some(SessionFlowMembership::Step(step)) => Some(step),
             Some(SessionFlowMembership::Independent) | None => None,
         };
         // Mechanical commands have an Exec and, in a Flow, operation history.
@@ -2434,11 +2543,6 @@ impl SessionCapture {
             return Ok(None);
         }
         let store = row_store(dir)?;
-        if invocation_id.is_some() {
-            return Err(crate::store::StoreError::InvalidAuthority(
-                "Flow agent input must be published through its reservation".into(),
-            ));
-        }
         let session = store.create_session(
             crate::session::AgentSession {
                 captured: None,
@@ -2450,14 +2554,13 @@ impl SessionCapture {
                 skill: manifest.skill.clone(),
                 provider: Some(manifest.harness.clone()),
                 model: manifest.model.clone(),
-                node: None,
-                iterations: None,
+                node: step.and_then(|step| step.key),
+                iterations: step.and_then(|step| step.iterations.clone()),
                 task_id: work.as_ref().and_then(|work| work.task_id.clone()),
                 wave_id: work.as_ref().and_then(|work| work.wave_id.clone()),
                 work_source: work.as_ref().map(|work| work.source),
-                flow_session_id: None,
+                flow_id: None,
                 bound_at: None,
-                kind: crate::session::SessionKind::Conversation,
                 interactive: manifest.surface != "headless",
                 repo: None,
                 title: manifest.skill.clone().unwrap_or_else(|| {
@@ -2469,7 +2572,6 @@ impl SessionCapture {
                 completed_at: None,
                 created_at: manifest.created_at.unix_timestamp(),
             },
-            None,
             crate::journal::current_exec_id().as_ref(),
         )?;
         Ok(Some(session))
@@ -2806,19 +2908,50 @@ fn database_in(home: &Path) -> StoreResult<PathBuf> {
     }
 }
 
-pub(crate) fn inherited_caller() -> Option<String> {
-    let artifact_key = std::env::var(RUN_ID_ENV).ok()?;
-    let run_dir = PathBuf::from(std::env::var_os(RUN_DIR_ENV)?);
-    let manifest = fs::read(run_dir.join("manifest.json")).ok()?;
-    let manifest = serde_json::from_slice::<SessionCaptureManifest>(&manifest).ok()?;
-    (manifest.artifact_key.as_str() == artifact_key).then_some(manifest.artifact_key)
+pub(crate) fn inherited_capture_key() -> StoreResult<Option<String>> {
+    let Some(value) = std::env::var_os(CAPTURE_KEY_ENV) else {
+        return Ok(None);
+    };
+    let key = value
+        .into_string()
+        .map_err(|_| record_error(std::io::Error::other("capture key is not valid UTF-8")))?;
+    let (_, owner) = resolve_capture(&key)?;
+    if let Some(caller) = crate::journal::agent_caller() {
+        if owner.id != caller.session_id {
+            return Err(record_error(std::io::Error::other(
+                "capture belongs to another Session",
+            )));
+        }
+    }
+    Ok(Some(key))
 }
 
-fn verified_caller(lf_home: &Path, artifact_key: String) -> Option<String> {
-    let dir = record_dir(lf_home, &artifact_key)?;
-    let manifest = fs::read(dir.join("manifest.json")).ok()?;
-    let manifest = serde_json::from_slice::<SessionCaptureManifest>(&manifest).ok()?;
-    (manifest.artifact_key == artifact_key).then_some(artifact_key)
+/// A capture is subordinate to its recorded Session in the selected Home.
+pub(crate) fn capture_dir(key: &str) -> StoreResult<PathBuf> {
+    resolve_capture(key).map(|(dir, _)| dir)
+}
+
+fn resolve_capture(key: &str) -> StoreResult<(PathBuf, crate::session::AgentSession)> {
+    let home = crate::store::lf_home_dir();
+    let dir = record_dir(&home, key)
+        .ok_or_else(|| record_error(std::io::Error::other("invalid capture key")))?;
+    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database_in(&home)?)?;
+    let owner = store.session_for_artifact(key)?.ok_or_else(|| {
+        record_error(std::io::Error::other(
+            "capture does not belong to a recorded Session in this Home",
+        ))
+    })?;
+    match read_manifest(&dir) {
+        Ok(manifest) if manifest.artifact_key != key => {
+            return Err(record_error(std::io::Error::other(
+                "capture manifest key does not match",
+            )));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(record_error(error)),
+    }
+    Ok((dir, owner))
 }
 
 // Session captures retain their published on-disk layout; the directory name
@@ -3210,6 +3343,33 @@ mod tests {
     }
 
     #[test]
+    fn inherited_capture_requires_a_recorded_owner_and_matching_payload() {
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _home = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        std::env::set_var("LF_HOME", home.path());
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let key = capture.artifact_key();
+        std::env::set_var(super::CAPTURE_KEY_ENV, &key);
+        assert_eq!(super::inherited_capture_key().unwrap(), Some(key.clone()));
+        std::env::set_var(super::CAPTURE_KEY_ENV, super::new_artifact_key());
+        assert!(super::inherited_capture_key().is_err());
+        std::env::set_var(super::CAPTURE_KEY_ENV, "../another-home");
+        assert!(super::inherited_capture_key().is_err());
+        std::env::set_var(super::CAPTURE_KEY_ENV, &key);
+        let path = capture.artifact_dir().join("manifest.json");
+        let mut manifest = super::read_manifest(&capture.artifact_dir()).unwrap();
+        manifest.artifact_key = super::new_artifact_key();
+        fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        assert!(super::inherited_capture_key().is_err());
+        fs::write(&path, b"invalid manifest").unwrap();
+        assert!(super::inherited_capture_key().is_err());
+        fs::remove_file(path).unwrap();
+        assert_eq!(super::inherited_capture_key().unwrap(), Some(key));
+    }
+
+    #[test]
     fn prepared_run_projects_its_first_provider_attempt_separately_from_creation() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
@@ -3282,6 +3442,7 @@ mod tests {
             flow: "feature".into(),
             step: "review".into(),
             node: Some("1".into()),
+            key: Some(1),
             iterations: Some(Vec::new()),
         };
         let mut prepared = spec(home.path());
@@ -3322,7 +3483,6 @@ mod tests {
             .unwrap();
         let run = session.clone();
         assert!(!session.interactive);
-        assert_eq!(session.kind, crate::session::SessionKind::Conversation);
         assert_eq!(session.title, "implement");
         assert_eq!(run.provider.as_deref(), Some("proof"));
         assert_eq!(
@@ -3383,7 +3543,7 @@ mod tests {
                 super::publish_manifest(home.path(), &manifest, bytes.as_deref()).unwrap();
             }
             // Interrupt after artifacts, before SQL publication. There must be
-            // no capture Drop receipt falsely settling the prepared Run.
+            // no capture Drop receipt falsely settling the prepared capture.
             let denied = || {
                 Err(crate::store::StoreError::InvalidAuthority(
                     "interrupted publication".into(),
@@ -3680,7 +3840,7 @@ mod tests {
             },
             final_receipt: false,
         });
-        capture.finish("completed").expect("settle Run");
+        capture.finish("completed").expect("settle capture");
 
         let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
         assert!(events.contains("\"type\":\"usage\""));
@@ -3751,6 +3911,78 @@ mod tests {
     }
 
     #[test]
+    fn history_keeps_what_streamed_increments_add_up_to() {
+        let home = tempfile::tempdir().unwrap();
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let turn = || "turn-1".to_string();
+        capture.record_conversation(ConversationEvent::TurnStarted { turn_id: turn() });
+        for word in ["streamed ", "one ", "token ", "at a time"] {
+            capture.record_raw(
+                "notification",
+                &serde_json::json!({"method": "item/agentMessage/delta", "params": {"delta": word}})
+                    .to_string(),
+            );
+            capture.record_conversation(ConversationEvent::TextDelta {
+                turn_id: turn(),
+                content: word.to_string(),
+            });
+        }
+        for diff in ["first", "first\nsecond"] {
+            capture.record_conversation(ConversationEvent::DiffUpdated {
+                turn_id: turn(),
+                diff: diff.to_string(),
+            });
+        }
+        capture.record_raw(
+            "notification",
+            &serde_json::json!({"method": "item/completed", "params": {}}).to_string(),
+        );
+        capture.record_conversation(ConversationEvent::TurnCompleted {
+            turn_id: turn(),
+            status: crate::chat::types::Lifecycle::Completed,
+        });
+        capture.finish("completed").unwrap();
+
+        let file = fs::read_to_string(capture.artifact_dir().join("events.jsonl")).unwrap();
+        assert_eq!(file.matches("item/agentMessage/delta").count(), 4);
+        assert_eq!(file.matches("\"type\":\"text_delta\"").count(), 4);
+        assert_eq!(file.matches("\"type\":\"diff_updated\"").count(), 2);
+
+        let history = super::row_store(&capture.artifact_dir())
+            .unwrap()
+            .input_events(&capture.artifact_key())
+            .unwrap();
+        let kept: Vec<_> = history
+            .iter()
+            .filter(|event| event["type"] == "conversation" || event["type"] == "provider_output")
+            .map(|event| {
+                let detail = &event["event"];
+                match event["type"].as_str().unwrap() {
+                    "provider_output" => event["line"].as_str().unwrap().to_string(),
+                    _ => format!(
+                        "{}:{}",
+                        detail["type"].as_str().unwrap(),
+                        detail["content"]
+                            .as_str()
+                            .or(detail["diff"].as_str())
+                            .unwrap_or_default()
+                    ),
+                }
+            })
+            .collect();
+        assert_eq!(
+            kept,
+            [
+                "turn_started:",
+                "text_delta:streamed one token at a time",
+                "diff_updated:first\nsecond",
+                r#"{"method":"item/completed","params":{}}"#,
+                "turn_completed:",
+            ]
+        );
+    }
+
+    #[test]
     fn final_answer_reader_recovers_legacy_streamed_prose_honestly() {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
@@ -3779,6 +4011,88 @@ mod tests {
                 exact: false,
             })
         );
+    }
+
+    #[test]
+    fn pre_spawn_failure_can_reclaim_conversation_without_inventing_engine_exit() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let capture = CaptureHandle::begin_at_with_request(
+            ledger.home(),
+            spec(ledger.home()),
+            AgentExecRequest::from_prepared(&AgentConfig::default(), &AgentCapabilities::default()),
+        )
+        .unwrap();
+        let store = super::row_store(&capture.artifact_dir()).unwrap();
+        let session = store
+            .session_for_artifact(&capture.artifact_key())
+            .unwrap()
+            .unwrap();
+        let command = vec!["lf".into(), "skill".into()];
+        crate::journal::with_runtime(ledger.home(), &command, || {
+            capture.claim_conversation_driver()?;
+            let (_, driver) = capture.session_driver().unwrap();
+            store.record_session_connection(
+                &session.id,
+                &driver,
+                "/missing.sock",
+                "saved-thread",
+            )?;
+            // The previous engine exited; the next admission replaces it.
+            store.record_session_provider_process(&session.id, &driver, std::process::id(), 1)?;
+            capture.finish("failed")?;
+            Ok(())
+        })
+        .unwrap();
+        for _ in 0..2 {
+            let manifest = super::read_manifest(&capture.artifact_dir()).unwrap();
+            let retry = CaptureHandle(std::sync::Arc::new(std::sync::Mutex::new(
+                super::SessionCapture::from_manifest(manifest, capture.artifact_dir()),
+            )));
+            crate::journal::with_runtime(ledger.home(), &command, || {
+                assert_eq!(
+                    retry.conversation_resume_token()?.as_deref(),
+                    Some("saved-thread")
+                );
+                retry.claim_conversation_driver()?;
+                assert!(store.session_provider_unstarted(&session.id)?);
+                assert!(!super::conversation_engine_exited(&store, &session.id)?);
+                retry.finish("failed")?;
+                Ok(())
+            })
+            .unwrap();
+        }
+        let expected = store.session_driver(&session.id).unwrap().unwrap();
+        crate::journal::with_runtime(ledger.home(), &command, || {
+            let exec = crate::journal::current_exec_id().unwrap();
+            let driver = store.claim_session_driver(&session.id, Some(&expected), &exec, true)?;
+            store.record_session_provider_launch(&session.id, &driver, false)?;
+            store.record_session_provider_launch(&session.id, &driver, true)?;
+            assert!(!store.session_provider_unstarted(&session.id)?);
+            assert!(!super::conversation_engine_exited(&store, &session.id)?);
+            assert!(store
+                .record_session_provider_launch(&session.id, &expected, false)
+                .is_err());
+            store.record_session_provider_process(
+                &session.id,
+                &driver,
+                std::process::id(),
+                crate::journal::process_started_at(std::process::id())?.unwrap(),
+            )?;
+            assert!(!super::conversation_engine_exited(&store, &session.id)?);
+            store.release_session_driver(&session.id, &driver)?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            store.session_thread(&session.id).unwrap().as_deref(),
+            Some("saved-thread")
+        );
+        assert!(store
+            .session_history(&session.id, 0, 100)
+            .unwrap()
+            .iter()
+            .all(|event| event.kind != crate::session::SessionEventKind::Completed));
     }
 
     #[test]
@@ -4017,7 +4331,7 @@ mod tests {
             output_tokens: Some(5),
             cache_read_tokens: None,
         });
-        capture.finish("completed").expect("settle Run");
+        capture.finish("completed").expect("settle capture");
 
         let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
         assert!(events.contains("\"account_id\":\"fallback-account\""));

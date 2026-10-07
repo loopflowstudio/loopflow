@@ -27,14 +27,14 @@ import Testing
     @Test("Headless visibility does not change inventory, selected identity or rename draft")
     func visibilityRetainsInventory() async throws {
         let source = try ControlsSource()
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         model.navigation.showsHeadlessSessions = true
         await model.refreshSessions()
         #expect(model.sessions.value?.count == 2)
         model.navigation.showsHeadlessSessions = false
-        #expect(model.visibleWorkspace.orphanSessions(search: "").map(\.id) == ["interactive"])
+        #expect(model.visibleWork.orphanSessions(search: "").map(\.id) == ["interactive"])
         model.navigation.showsHeadlessSessions = true
-        #expect(Set(model.visibleWorkspace.orphanSessions(search: "").map(\.id)) == ["interactive", "headless"])
+        #expect(Set(model.visibleWork.orphanSessions(search: "").map(\.id)) == ["interactive", "headless"])
         model.navigation.selectedSessionId = "headless"
         model.beginSessionRename(try #require(model.sessions.value?.first { $0.id == "headless" }))
         model.navigation.renaming?.text = "Retained draft"
@@ -43,14 +43,14 @@ import Testing
         #expect(model.navigation.selectedSessionId == "headless")
         #expect(model.navigation.renaming?.text == "Retained draft")
         #expect(model.sessions.value?.map(\.id) == ["interactive"])
-        #expect(model.visibleWorkspace.orphanSessions(search: "").map(\.id) == ["interactive"])
+        #expect(model.visibleWork.orphanSessions(search: "").map(\.id) == ["interactive"])
     }
 
 
     @Test("Preview is inert; confirmation uses exact Task and fences an older poll")
     func bindAfterPreview() async throws {
         let source = try ControlsSource()
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         model.navigation.showsHeadlessSessions = true
         await model.refreshSessions()
         model.navigation.selectedSessionId = "headless"
@@ -68,7 +68,7 @@ import Testing
         await poll.value
         #expect(model.navigation.binding == nil)
         #expect(model.navigation.selectedSessionId == "headless")
-        let crumb = try #require(model.workspace.breadcrumb(selection: model.selection, sessionId: "headless"))
+        let crumb = try #require(model.projection.breadcrumb(selection: model.selection, sessionId: "headless"))
         #expect(crumb.task == nil) // No roadmap entry is needed.
         #expect(crumb.taskWork == .task(id: "task-exact"))
         #expect(crumb.waveWork == .wave(id: "wave-exact"))
@@ -78,7 +78,7 @@ import Testing
     @Test("A refused bind keeps its exact confirmation for safe same-target retry")
     func bindRefusalAndRetry() async throws {
         let source = try ControlsSource()
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         model.navigation.showsHeadlessSessions = true
         await model.refreshSessions()
         model.navigation.selectedSessionId = "headless"

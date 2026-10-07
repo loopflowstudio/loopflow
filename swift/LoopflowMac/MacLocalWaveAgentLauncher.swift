@@ -8,49 +8,19 @@ struct LocalLfError: LocalizedError {
     let errorDescription: String?
 }
 
-struct TaskCreateReceipt: Decodable, Sendable, Equatable {
-    let issueIdentifier: String
-    let project: String
-    let wave: String
-}
-
 private struct DevelopmentControlConfig: Decodable {
     let lfPath: String
 }
 
 enum LocalWaveAgentLauncher {
-    /// Start a filed Task through the same bounded worker command as the CLI.
-    /// `lf task run` owns Project lookup, worktree placement, Flow selection,
-    /// and the Task worker; the app does not reproduce those decisions.
+    /// Run a filed Task on its workflow. `lf task run` owns Project lookup,
+    /// worktree placement and Flow selection; the app does not reproduce them.
     static func runTask(repoPath: String, issue: String) throws {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        try runChecked(taskRunCommand(lfPath: lfPath, issue: issue), cwd: origin)
+        try startLf(taskRunArguments(issue: issue), cwd: WaveOrigin.resolve(repoPath))
     }
 
-    /// Create one Task, then start its normal bounded worker path.
-    static func startTask(
-        repoPath: String,
-        title: String,
-        wave: String,
-        directive: String
-    ) throws -> TaskCreateReceipt {
-        let origin = WaveOrigin.resolve(repoPath)
-        let lfPath = try controlLfPath()
-        let stdout = try runCheckedOutput(
-            taskCreateCommand(
-                lfPath: lfPath,
-                title: title,
-                wave: wave,
-                directive: directive
-            ),
-            cwd: origin
-        )
-        return try taskCreateReceipt(stdout)
-    }
-
-    /// Queue the audited Task interrupt. The Task worker decides how the live
-    /// provider turn is stopped and records the receipt in the shared store.
+    /// Queue the audited Task interrupt. The live run observes it, stops its
+    /// provider turn and records the receipt in the shared store.
     static func interruptTask(repoPath: String, issue: String) throws {
         let origin = WaveOrigin.resolve(repoPath)
         let lfPath = try controlLfPath()
@@ -71,7 +41,7 @@ enum LocalWaveAgentLauncher {
         [lfPath, "pr", "open"]
     }
 
-    /// Ensure Task Work and its checkout without starting a worker; returns
+    /// Ensure Task Work and its checkout without running a Flow; returns
     /// the authoritative worktree.
     static func checkoutTask(repoPath: String, issue: String) throws -> WorkspaceIdentity {
         let stdout = try runCheckedOutput(taskCheckoutCommand(lfPath: try controlLfPath(), issue: issue), cwd: repoPath)
@@ -92,33 +62,8 @@ enum LocalWaveAgentLauncher {
         }
     }
 
-    static func taskRunCommand(lfPath: String, issue: String) -> [String] {
-        [lfPath, "--task", issue, "flow", "start"]
-    }
-
-    static func taskCreateCommand(
-        lfPath: String,
-        title: String,
-        wave: String,
-        directive: String
-    ) -> [String] {
-        [
-            lfPath, "task", "create", "--run", "--wave", wave, "--title", title,
-            "--notes", directive,
-            "--json",
-        ]
-    }
-
-    static func taskCreateReceipt(_ stdout: String) throws -> TaskCreateReceipt {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        do {
-            return try decoder.decode(TaskCreateReceipt.self, from: Data(stdout.utf8))
-        } catch {
-            throw LocalLfError(
-                errorDescription: "lf task create --run returned an invalid receipt: \(error.localizedDescription)"
-            )
-        }
+    static func taskRunArguments(issue: String) -> [String] {
+        ["-b", "task", "run", issue]
     }
 
     static func taskInterruptCommand(lfPath: String, issue: String) -> [String] {
@@ -166,7 +111,7 @@ enum LocalWaveAgentLauncher {
         return bundled.path
     }
 
-    /// Run an `lf` query verb (`ls`, `status`, `runs`, …) and return its
+    /// Run an `lf` query verb (`list`, `status`, `monitor`, …) and return its
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
     /// facts by shelling the daemonless Home `lf` over the local store, not
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.
@@ -192,6 +137,36 @@ enum LocalWaveAgentLauncher {
         }
         return result.stdout
     }
+
+    /// Start an `lf` command that runs for as long as its work does, such as
+    /// `lf -b task run`, and leave it running as this app's child. A refusal
+    /// exits within moments and is thrown; later output stays in lf's own logs.
+    static func startLf(_ subargs: [String], cwd: String?) throws {
+        let process = queryProcess([try controlLfPath()] + subargs, cwd: cwd)
+        let log = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-start-\(UUID().uuidString).log")
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        let output = try FileHandle(forWritingTo: log)
+        defer { try? output.close() }
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = output
+        process.standardError = output
+        do { try process.run() } catch {
+            throw LocalLfError(errorDescription: "Failed to spawn: lf \(subargs.joined(separator: " "))")
+        }
+        let deadline = Date().addingTimeInterval(startRefusalWindow)
+        while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        guard !process.isRunning, process.terminationStatus != 0 else { return }
+        let detail = (try? String(contentsOf: log, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        try? FileManager.default.removeItem(at: log)
+        throw LocalLfError(errorDescription: detail.isEmpty
+            ? "lf \(subargs.joined(separator: " ")) failed (\(process.terminationStatus))"
+            : detail)
+    }
+
+    /// How long a started command is watched for an immediate refusal.
+    private static let startRefusalWindow: TimeInterval = 3
 
     // MARK: - Process plumbing
 
@@ -251,7 +226,7 @@ enum LocalWaveAgentLauncher {
 
         // Drain both pipes while the child is still writing. A pipe holds 64KB;
         // waiting for exit first deadlocks the moment a command says more than
-        // that, and `lf repo tokens --json` says about 120KB. `lf runs`/`lf doctor`
+        // that, and `lf repo tokens --json` says about 120KB. `lf usage --days 0 --task ID --json`/`lf doctor`
         // are small, which is why this only ever bit the largest reader.
         let collector = OutputCollector()
         let group = DispatchGroup()

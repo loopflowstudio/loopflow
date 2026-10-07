@@ -291,8 +291,9 @@ fn run_scenarios(scenarios: &[&str]) {
     for &scenario in scenarios {
         let recovering = scenario.starts_with("candidate-");
         let valid_candidate = scenario.starts_with("candidate-valid");
-        let expected_tag = if recovering && !valid_candidate {
-            "v0.9.2"
+        let expected_tag = "v0.9.1";
+        let baseline_tag = if recovering && !valid_candidate {
+            "v0.9.0"
         } else {
             "v0.9.1"
         };
@@ -307,10 +308,10 @@ fn run_scenarios(scenarios: &[&str]) {
 [ "$1" != --version ] || exit 0
 case "$1 $2" in
   'run list')
-    commit=$(git rev-parse v0.9.1)
+    commit=$(git rev-parse {baseline_tag})
     if [ '{recovering}' = true ]; then
       successor=$(git rev-parse origin/main)
-      printf '[{{"databaseId":43,"headBranch":"v0.9.2","headSha":"%s","status":"completed","conclusion":"success","url":"https://example.test/run/43"}},' "$successor"
+      printf '[{{"databaseId":43,"headBranch":"release-candidate/default/v0-9-1/%s","headSha":"%s","status":"completed","conclusion":"success","url":"https://example.test/run/43"}},' "$successor" "$successor"
     else printf '['; fi
     printf '{{"databaseId":42,"headBranch":"v0.9.1","headSha":"%s","status":"completed","conclusion":"success","url":"https://example.test/run/42"}}]\n' "$commit" ;;
   'release view')
@@ -347,7 +348,7 @@ set -eu
 case "$1" in
   check) exit 0 ;;
   inspect)
-    if [ '{recovering}' = true ] && [ "$5" = v0.9.1 ] && [ '{valid_candidate}' != true ]; then
+    if [ '{recovering}' = true ] && [ "$3" = "$(git rev-parse {baseline_tag})" ] && [ '{valid_candidate}' != true ]; then
       [ '{scenario}' != candidate-unknown ] || {{ echo 'cannot establish publication state' >&2; exit 74; }}
       publications='[]'
       [ '{scenario}' != candidate-partial ] || publications='["versioned DMG"]'
@@ -403,7 +404,7 @@ esac
         repo.stage_all();
         repo.commit("Release fixture");
         repo.push();
-        for args in [["tag", "v0.9.1"], ["push", "--tags"]] {
+        for args in [["tag", baseline_tag], ["push", "--tags"]] {
             git(repo.path(), &args);
         }
         let rejected_commit = repo.head_sha();
@@ -415,7 +416,6 @@ esac
         }
         let successor_commit = repo.head_sha();
         let stages: Vec<_> = [
-            "ui_host_verified",
             "public_artifacts_verified",
             "versioned_dmg_verified",
             "latest_dmg_verified",
@@ -1171,7 +1171,10 @@ exit 0
             } else {
                 assert_eq!(attempt.covered, attempts[0].covered);
             }
-            assert_eq!(git(&repo_path, &["rev-parse", "v0.9.1"]), rejected_commit);
+            assert_eq!(
+                git(&repo_path, &["rev-parse", baseline_tag]),
+                rejected_commit
+            );
         }
         match scenario {
             "candidate-unknown" | "candidate-partial" => {
@@ -1183,7 +1186,7 @@ exit 0
                 assert_eq!(attempt.selection.as_ref().unwrap().commit, rejected_commit);
                 assert!(attempt.replacement.is_none());
                 assert!(!published.exists());
-                assert_eq!(git(&repo_path, &["tag", "--list"]), "v0.9.1");
+                assert_eq!(git(&repo_path, &["tag", "--list"]), baseline_tag);
                 assert_eq!(history.summary.published + history.summary.no_change, 0);
             }
             "release-overlap" => {
@@ -1325,7 +1328,7 @@ exit 0
             let cli: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
             assert_eq!(cli["summary"]["published"], 0);
             assert!(String::from_utf8_lossy(&output.stdout).contains("next configured release due"));
-            assert_eq!(git(&repo_path, &["tag", "--list"]), "v0.9.1");
+            assert_eq!(git(&repo_path, &["tag", "--list"]), baseline_tag);
             assert_eq!(
                 fs::read_to_string(&telemetry_calls)
                     .unwrap()

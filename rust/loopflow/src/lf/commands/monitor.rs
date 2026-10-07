@@ -67,6 +67,14 @@ pub enum MonitorCommand {
         #[arg(long)]
         task: Option<String>,
     },
+    /// Stream planning and activity for the selected Work, each part again only when it changes
+    Work {
+        #[arg(long, required = true)]
+        json: bool,
+        /// Stream NDJSON until stdin closes
+        #[arg(long)]
+        watch: bool,
+    },
     /// Show direct provider-authored usage from recorded Session inputs
     Usage {
         /// Emit Session usage evidence as JSON
@@ -148,8 +156,9 @@ fn parse_cursor(value: &str) -> Result<ExecCursor, String> {
 pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
     match command {
         MonitorCommand::Active { json, watch, task } => {
-            super::runs::list_active(*json, *watch, task.as_deref())
+            super::session_history::list_active(*json, *watch, task.as_deref())
         }
+        MonitorCommand::Work { watch, .. } => super::work_watch::run(*watch),
         MonitorCommand::Ps { json } => super::top::run_ps(*json),
         MonitorCommand::Top { json } => super::top::run_top(*json),
         MonitorCommand::Prune { dry_run, json } => super::top::run_prune(*json, *dry_run),
@@ -353,7 +362,13 @@ fn show(
             }
             Ok(())
         }
-        None => super::runs::inspect(input.unwrap_or(id), events, final_answer, context, json),
+        None => super::session_history::inspect(
+            input.unwrap_or(id),
+            events,
+            final_answer,
+            context,
+            json,
+        ),
     }
 }
 
@@ -425,9 +440,9 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                     "Matching provider process observed".into(),
                     "lf monitor active --json".to_string(),
                 ),
-                SessionState::Waiting => (
+                _ if session.attention.is_some() => (
                     "waiting",
-                    session.detail.clone(),
+                    "Its provider is waiting on a person".into(),
                     format!("lf session connect {}", session.id),
                 ),
                 _ => (
@@ -460,46 +475,45 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
             let detail = match store.flow_detail(&summary.id).await {
                 Ok(detail) => detail,
                 Err(error) => {
-                    gaps.push(format!(
-                        "FlowSession {} detail unavailable: {error}",
-                        summary.id
-                    ));
+                    gaps.push(format!("Flow {} detail unavailable: {error}", summary.id));
                     None
                 }
             };
-            let (state, reason, next) =
-                if let Some(failure) = detail.as_ref().and_then(|detail| detail.failure.as_ref()) {
-                    (
-                        "blocked",
-                        failure.reason.clone(),
-                        format!("lf flow show {} --sessions", summary.id),
-                    )
-                } else if summary.state != crate::session::FlowSummaryState::Current {
-                    (
-                        "finished",
-                        format!("Recorded {:?}", summary.state),
-                        format!("lf flow show {} --sessions", summary.id),
-                    )
-                } else if let Some(session) = &summary.pending_session {
-                    (
-                        "waiting",
-                        "Flow waits for a review or decision".into(),
-                        format!("lf session connect {session}"),
-                    )
-                } else {
-                    (
-                        "unknown",
-                        "Saved progress does not establish a live driver".into(),
-                        format!("lf flow show {} --sessions", summary.id),
-                    )
-                };
+            let at = detail
+                .as_ref()
+                .and_then(|detail| detail.steps.last())
+                .map(crate::durable::FlowStepExec::position)
+                .unwrap_or_else(|| "an unreadable step".into());
+            let (state, reason) = match summary.state {
+                crate::session::FlowSummaryState::Completed => {
+                    ("finished", "Flow completed".to_string())
+                }
+                crate::session::FlowSummaryState::Stopped => {
+                    ("stopped", format!("Driver exited at {at}"))
+                }
+                crate::session::FlowSummaryState::Current => {
+                    match crate::id::ExecId::parse(&summary.id)
+                        .map(|driver| crate::journal::exec_process_evidence(&store.sqlite, &driver))
+                    {
+                        Ok(crate::journal::ProcessIdentityEvidence::Live) => {
+                            ("running", format!("Driver is at {at}"))
+                        }
+                        Ok(crate::journal::ProcessIdentityEvidence::Dead) => (
+                            "stopped",
+                            format!("Driver left no exit record; it stopped at {at}"),
+                        ),
+                        _ => (
+                            "unknown",
+                            format!("Driver process identity is unknown at {at}"),
+                        ),
+                    }
+                }
+            };
+            let next = format!("lf flow show {} --sessions", summary.id);
             items.push(MonitorItem {
-                kind: "flow_session",
+                kind: "flow",
                 id: summary.id.clone(),
-                title: summary
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| "Unnamed Flow".into()),
+                title: summary.name.clone(),
                 state,
                 reason,
                 next_action: next,

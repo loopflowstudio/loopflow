@@ -88,6 +88,24 @@ const LANDING_COLUMNS: &str = "
     blocked_reason, created_at, updated_at";
 
 impl super::SqliteStore {
+    /// A landing of `worktree` touched since `since` that still awaits its merge.
+    pub(crate) fn watched_landing_at(
+        &self,
+        worktree: &std::path::Path,
+        since: i64,
+    ) -> StoreResult<Option<String>> {
+        let worktree = std::fs::canonicalize(worktree).unwrap_or_else(|_| worktree.to_path_buf());
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT id FROM pr_landings WHERE worktree=?1 AND updated_at>=?2
+                 AND state NOT IN ('merged','closed') ORDER BY updated_at DESC LIMIT 1",
+                rusqlite::params![worktree.to_string_lossy(), since],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     pub fn pending_pr_landings(&self, repo: &str) -> StoreResult<Vec<PrLanding>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(&format!(
@@ -109,46 +127,6 @@ impl super::SqliteStore {
             params![landing.id.as_str(), landing.generation as i64],
         )?;
         Ok(())
-    }
-
-    pub fn bind_operation_landing(
-        &self,
-        operation_start: i64,
-        landing: &PrLandingId,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        if conn.execute(
-            "UPDATE flow_events SET landing_id=?2 WHERE seq=?1 AND kind='operation_started' AND (landing_id IS NULL OR landing_id=?2)",
-            params![operation_start, landing.as_str()],
-        )? != 1
-        {
-            return Err(StoreError::InvalidData(
-                "operation landing identity changed".into(),
-            ));
-        }
-        Ok(())
-    }
-
-    /// Unfinished Flows whose operation requested this landing.
-    pub(crate) fn landing_unfinished_flows(
-        &self,
-        landing: &PrLandingId,
-    ) -> StoreResult<Vec<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT DISTINCT flow.id FROM flow_events event JOIN flow_sessions flow ON flow.id=event.flow_id
-             WHERE event.landing_id=?1 AND flow.state='current'",
-        )?;
-        let rows = query.query_map([landing.as_str()], |row| row.get(0))?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-    }
-
-    pub fn operation_landing(&self, flow_id: &str) -> StoreResult<Option<PrLanding>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            &format!("SELECT {LANDING_COLUMNS} FROM pr_landings WHERE id=(SELECT event.landing_id FROM flow_sessions flow JOIN flow_events event ON event.seq=flow.operation_start WHERE flow.id=?1)"),
-            [flow_id], map_landing,
-        ).optional().map_err(StoreError::from)
     }
 
     pub fn start_or_join_pr_landing(&self, landing: &PrLanding) -> StoreResult<PrLanding> {

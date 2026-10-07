@@ -122,6 +122,13 @@ enum MockWaveFixture {
 
     static let detailJSON = #"""
         {
+          "project_readiness": {
+            "state": "ready",
+            "project_id": "project-1",
+            "observed_at": null,
+            "pending_successor": null,
+            "activation": null
+          },
           "wave": {
             "id": "wave-1",
             "name": "infrastructure",
@@ -242,7 +249,7 @@ enum MockWaveFixture {
               }
             ]
           },
-          "runs": {
+          "history": {
             "state": "ok",
             "truncated": false,
             "items": [
@@ -294,8 +301,8 @@ enum MockWaveFixture {
                 "work_id": null,
                 "slug": "release-feedback",
                 "name": "current",
-                "flow": "incident",
-                "status": "started",
+                "workflow": "incident",
+                "status": "started", "current": true,
                 "metric_targets": [],
                 "krs": [
                   {
@@ -361,7 +368,8 @@ enum MockWaveFixture {
                     "authored_commits": true,
                     "recovery_required": false,
                     "reason": null
-                  }
+                  },
+                  "unresolved_execution": true
                 },
                 "actions": {
                   "recommended": "open_pr",
@@ -434,7 +442,8 @@ enum MockWaveFixture {
                     "authored_commits": null,
                     "recovery_required": null,
                     "reason": null
-                  }
+                  },
+                  "unresolved_execution": false
                 },
                 "actions": {
                   "recommended": null,

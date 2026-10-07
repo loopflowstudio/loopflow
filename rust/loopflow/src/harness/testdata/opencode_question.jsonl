@@ -1,0 +1,13 @@
+{"type":"session.status","properties":{"sessionID":"ses_trace","status":{"type":"busy"}}}
+{"type":"message.part.updated","properties":{"part":{"id":"prt_text","sessionID":"ses_trace","messageID":"msg_assistant","type":"text","text":"Checking the config."}}}
+{"type":"message.part.updated","properties":{"part":{"id":"prt_tool","sessionID":"ses_trace","messageID":"msg_assistant","type":"tool","callID":"call_read","tool":"read","state":{"status":"pending"}}}}
+{"type":"message.part.updated","properties":{"part":{"id":"prt_tool","sessionID":"ses_trace","messageID":"msg_assistant","type":"tool","callID":"call_read","tool":"read","state":{"status":"running","input":{"filePath":"config.yaml"}}}}}
+{"type":"permission.asked","properties":{"id":"per_1","sessionID":"ses_trace","tool":{"messageID":"msg_assistant","callID":"call_read"}}}
+{"type":"message.part.updated","properties":{"part":{"id":"prt_tool","sessionID":"ses_trace","messageID":"msg_assistant","type":"tool","callID":"call_read","tool":"read","state":{"status":"completed","output":"flow: feature"}}}}
+{"type":"message.part.updated","properties":{"part":{"id":"prt_ask","sessionID":"ses_trace","messageID":"msg_assistant","type":"tool","callID":"call_question","tool":"question","state":{"status":"running"}}}}
+{"type":"question.asked","properties":{"id":"que_1","sessionID":"ses_trace","questions":[{"question":"Keep the default Flow?","header":"Default","options":[{"label":"Keep"},{"label":"Change"}]}],"tool":{"messageID":"msg_assistant","callID":"call_question"}}}
+{"type":"session.idle","properties":{"sessionID":"ses_other"}}
+{"type":"question.replied","properties":{"sessionID":"ses_trace","requestID":"que_1","answers":[["Keep"]]}}
+{"type":"message.part.updated","properties":{"part":{"id":"prt_ask","sessionID":"ses_trace","messageID":"msg_assistant","type":"tool","callID":"call_question","tool":"question","state":{"status":"completed","output":"Keep"}}}}
+{"type":"session.status","properties":{"sessionID":"ses_trace","status":{"type":"idle"}}}
+{"type":"session.idle","properties":{"sessionID":"ses_trace"}}

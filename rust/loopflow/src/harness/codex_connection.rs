@@ -52,7 +52,16 @@ pub(crate) fn close_engine(endpoint: &str, thread: &str, pid: u32, started: i64)
     let group = i32::try_from(pid)?;
     // SAFETY: getpgid reads process metadata. Only the exact recorded process
     // leading the group that Loopflow created may authorize a group signal.
-    if unsafe { libc::getpgid(group) } != group {
+    let owner = unsafe { libc::getpgid(group) };
+    if owner == -1 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+        // It exited on its own since the check above; reap it if it is ours.
+        // SAFETY: WNOHANG only reaps our own exited child.
+        unsafe {
+            libc::waitpid(group, std::ptr::null_mut(), libc::WNOHANG);
+        }
+        return Ok(());
+    }
+    if owner != group {
         return Err(anyhow!(
             "recorded Codex process does not own its process group"
         ));

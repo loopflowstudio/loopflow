@@ -33,7 +33,7 @@ A Wave directing a task is the internal case:
 ```bash
 lf checkout INF-123                              # tracked Work, no execution
 lf --task INF-123 research "write scratch/api.md"    # independent conversation
-lf --task INF-123 flow start                                  # start built-in Task automation
+lf task run INF-123                                  # start built-in Task automation
 lf comment INF-123 "take the smaller approach"    # post a Linear Task comment
 lf task status INF-123 --json                        # inspect durable state
 lf wait INF-123 --until terminal                # block until it settles
@@ -42,13 +42,13 @@ lf wait INF-123 --until terminal                # block until it settles
 ## The owners
 
 Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
-memory; its current Linear Project owns Tasks, KRs, targets and default Flow.
+memory; its current Linear Project owns Tasks, KRs, targets and workflow.
 Task owns the checkout and serial PRs. Every conversation and Flow attributed
 to it is equally its work; none is privileged.
 
 Exec records an actual lf command process. AgentSession keeps a continuable
-conversation, whether interactive or headless. FlowSession captures one Flow
-and consumes exact boundary results. Provider turns and retries remain history
+conversation, whether interactive or headless. A Flow is one driver Exec and
+the step Execs it starts. Provider turns and retries remain history
 inside the conversation; they do not create another generic execution object.
 
 A child command records its causal parent and, when issued by an agent, its
@@ -62,10 +62,10 @@ for the remaining reader, wire and lifecycle conversion.
 
 ```bash
 lf checkout INF-123                    # ensure Work and worktree only
-lf --task INF-123 flow start                    # run an existing Linear issue
-lf task create --run --wave <wave> --title "add passkeys" # create the issue, then run it
-pbpaste | lf task create --run --wave <wave>         # report from stdin; first line is the title
-lf --task INF-124 flow start --stack-on INF-123 # dependent work before the parent PR merges
+lf -b task run INF-123                 # place an existing Linear issue, run its Flow, return when it ends
+lf task create --wave <wave> --title "add passkeys"  # file the issue; run it with `lf task run`
+pbpaste | lf task create --wave <wave>               # report from stdin; first line is the title
+lf task run INF-124 --stack-on INF-123 # dependent work before the parent PR merges
 ```
 
 The contract every agent runs under: **delegation must make the problem
@@ -102,14 +102,14 @@ in the starting prompt from input accepted by the live provider transport;
 neither proves the model followed it. Provider scheduling determines when a
 live correction is consumed.
 
-On a repeated captured Flow step, Task Flows seed only steer IDs newer than that
-step's last successful Run inputs. Failed or interrupted attempts acknowledge
-nothing. Each structural step and each new invocation has its own history;
+On a repeated Flow step, Task Flows seed only steer IDs newer than those an
+earlier successful run of that step, under the same driver, already received. Failed or interrupted attempts acknowledge
+nothing. Each structural step and each new Flow has its own history;
 unreceived late comments remain eligible. This records delivery, not proof that
 the model followed the instruction.
 
-Keep routine agent progress in working notes and the Run response. `task comment`
-inside a Run marks its publication as progress, excluded from steers. Use
+Keep routine agent progress in working notes and the Session response. `task comment`
+from an agent Session marks its publication as progress, excluded from steers. Use
 `--steer` only to deliver deliberate new direction. Direct
 participant comments and explicit `--steer` remain direction, even through
 the same account. Other integrations should mark progress with
@@ -123,11 +123,11 @@ Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
 tmux name. Project operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.
 
-Work survives its provider process. A Flow whose driver died keeps its last
-position, failure and effect receipts as history; nothing resumes it. Inspect
+Work survives its provider process. A Flow whose driver died leaves its Execs
+as history; nothing resumes it. Inspect
 `lf task status ISSUE` and `lf flow show ID --sessions --json`, then launch
-fresh work with `lf --task INF-123 flow start`. The Task keeps its durable
-direction, worktree and PR. `flow start` never reopens terminal Work; create a
+fresh work with `lf task run INF-123`. The Task keeps its durable
+direction, worktree and PR. `task run` never reopens terminal Work; create a
 new Task for new work.
 
 Automated Task commit, PR, and completion commands also re-check current PM

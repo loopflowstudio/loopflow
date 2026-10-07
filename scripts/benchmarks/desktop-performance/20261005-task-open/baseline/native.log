@@ -1,0 +1,7 @@
+Build complete! (27.50s)
+◇ Suite "Desktop experience measurements" started.
+◇ Test measureSnapshotTaskOpening() started.
+◇ Test run started.
+✔ Suite "Desktop experience measurements" passed after 208.544 seconds.
+✔ Test measureSnapshotTaskOpening() passed after 208.540 seconds.
+✔ Test run with 1 test in 1 suite passed after 208.544 seconds.

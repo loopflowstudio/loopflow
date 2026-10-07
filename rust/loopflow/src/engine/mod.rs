@@ -5,12 +5,13 @@ pub mod command;
 pub mod config;
 pub mod context_budget;
 pub mod error;
-pub mod event;
 pub mod exec;
 pub mod execution;
 pub mod flow;
 pub mod flow_graph;
 pub mod flow_output;
+#[cfg(target_os = "macos")]
+pub(crate) mod fs_events;
 pub mod git;
 pub mod identity;
 pub mod naming;
@@ -23,6 +24,7 @@ pub mod structured_reply;
 pub mod target;
 pub mod transitions;
 pub mod wave_home;
+pub mod workflow;
 pub mod worktree;
 pub mod worktrees;
 
@@ -39,7 +41,7 @@ pub use config::{
     default_agent, load_config, load_config_or_default, parse_agent, Config, ExecTarget,
     SessionConfig,
 };
-pub use error::{CoreError, GitError, LoadError, StoreError};
+pub use error::{CoreError, GitError, LoadError};
 pub use exec::{prepare_exec_prompt, ContextSourceOverrides, ExecPromptInput, PreparedExecPrompt};
 pub use execution::{
     current_skill, ExecutionContext, ExecutionCursor, FlowEngine, FlowOutcome, NestedCursor,
@@ -64,5 +66,3 @@ pub use structured_reply::{
     render_structured_reply_guidance, structured_replies_for_context, ClientContext,
     StructuredReply,
 };
-
-pub mod invocation;

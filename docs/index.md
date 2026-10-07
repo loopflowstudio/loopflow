@@ -19,16 +19,16 @@ or [Codex](https://github.com/openai/codex), which have their own cost.
 lf -b implement
 lf session list --interactive false --json
 lf session connect SESSION
-lf --task INF-123 flow start
+lf task run INF-123
 ```
 
 A Skill supplies instructions; a Flow composes skills and mechanical operations.
 A Task owns one change, its checkout and PRs. A Wave keeps the objective
-and memory; its current Linear Project holds the plan and default Flow.
+and memory; its current Linear Project holds the plan and its Tasks' workflow.
 
 Exec records an actual lf command process. AgentSession keeps the conversation,
-including headless work. FlowSession preserves a captured Flow and consumes its
-exact boundary results. A conversation can outlive its command. A Flow whose
+including headless work. A running Flow is one driver Exec and the step Execs
+it starts. A conversation can outlive its command. A Flow whose
 command stopped stays as history; fresh work is launched explicitly.
 
 Read the [contract and cutover status](architecture-reference.md#cutover-status)

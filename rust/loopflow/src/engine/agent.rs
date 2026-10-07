@@ -154,37 +154,13 @@ pub(crate) fn checkout_execution_boundary(
     Ok(AgentExecutionBoundary { writable_roots })
 }
 
-pub(crate) fn probe_execution_boundary(boundary: &AgentExecutionBoundary) -> anyhow::Result<()> {
-    for root in &boundary.writable_roots {
-        let probe = root.join(format!(
-            ".loopflow-write-probe-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
-        let result = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&probe)
-            .and_then(|file| {
-                file.sync_data()?;
-                std::fs::remove_file(&probe)
-            });
-        if let Err(error) = result {
-            let _ = std::fs::remove_file(&probe);
-            return Err(anyhow::anyhow!(format!(
-                "Agent execution unavailable: required writable authority for {} is unavailable: {error}. Use an execution profile with access to linked Git metadata and the Loopflow control store",
-                root.display()
-            )));
-        }
-    }
-    Ok(())
-}
-
-pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 5] = [
+pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 6] = [
     crate::exec::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
-    crate::durable::RUN_ID_ENV,
-    crate::session_record::RUN_DIR_ENV,
+    crate::session_record::CAPTURE_KEY_ENV,
+    "LF_RUN_ID",
+    "LF_RUN_DIR",
 ];
 
 #[derive(Clone, Default)]
@@ -226,18 +202,9 @@ pub struct AgentConfig {
     /// Exact conversational driver selected before provider launch. Never
     /// inherited by provider tools or serialized into replay input.
     pub session_driver: Option<(String, crate::exec::SessionDriver)>,
-    /// Only this launch may select the native turn for its Flow boundary.
-    pub flow_selection: Option<crate::durable::FlowTurnSelection>,
 }
 
 impl AgentConfig {
-    pub fn output_schema(&self) -> Option<serde_json::Value> {
-        self.flow_selection
-            .as_ref()?
-            .output
-            .as_ref()
-            .map(|output| output.schema())
-    }
     /// Return the selected agent or Loopflow's compiled default.
     pub fn agent(&self) -> &str {
         match self.agent.as_deref() {
@@ -277,7 +244,7 @@ impl std::fmt::Debug for AgentConfig {
     }
 }
 
-/// Select and pin a managed Claude/Codex account before publishing a Run.
+/// Select and pin a managed Claude/Codex account before publishing a capture.
 pub(crate) fn pin_provider_account_id_blocking(launch: &mut AgentConfig) -> Result<(), CoreError> {
     let (harness, _) = parse_agent(launch.agent());
     let provider = match harness.as_str() {
@@ -671,7 +638,6 @@ pub struct ClaudeArgs {
     pub chrome: bool,
     /// Resume an existing Claude Code session.
     pub resume_id: Option<String>,
-    pub output_schema: Option<serde_json::Value>,
 }
 
 impl ClaudeArgs {
@@ -757,11 +723,6 @@ impl ClaudeArgs {
             args.push(id.clone());
         }
 
-        if let Some(schema) = &self.output_schema {
-            args.push("--json-schema".into());
-            args.push(schema.to_string());
-        }
-
         args
     }
 }
@@ -785,7 +746,6 @@ fn claude_args_for(config: &AgentConfig, resume_id: Option<&str>) -> ClaudeArgs 
         stream: true,
         chrome: false,
         resume_id: resume_id.map(str::to_string),
-        output_schema: config.output_schema(),
     }
 }
 
@@ -1002,7 +962,6 @@ pub fn build_claude_command(
         stream: process.auto && process.stream,
         chrome: capabilities.chrome,
         resume_id: launch.resume_token.clone(),
-        output_schema: launch.output_schema(),
     };
     cmd.extend(claude_args.to_args());
 
@@ -1211,6 +1170,13 @@ pub fn exec_agent(
 ) -> Result<AgentExecResult, CoreError> {
     let mut launch = launch.clone();
     launch.chrome = capabilities.chrome;
+    if launch.resume_token.is_none() {
+        if let Some(capture) = &process.capture {
+            launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
+                CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))
+            })?;
+        }
+    }
     pin_provider_account_id_blocking(&mut launch)?;
     let (harness, model) = parse_agent(launch.agent());
     let implicit_capture = if process.capture.is_none() {
@@ -1236,9 +1202,6 @@ pub fn exec_agent(
             CoreError::ExecutionFailed(format!("conversation admission failed: {error}"))
         })?;
         launch.session_driver = capture.0.session_driver();
-        launch.flow_selection = capture.0.flow_turn_selection().map_err(|error| {
-            CoreError::ExecutionFailed(format!("Flow admission failed: {error}"))
-        })?;
         if launch.resume_token.is_none() {
             launch.resume_token = capture.0.conversation_resume_token().map_err(|error| {
                 CoreError::ExecutionFailed(format!("conversation recovery failed: {error}"))
@@ -1832,10 +1795,7 @@ fn _exec_agent_once(
 ) -> Result<AgentAttempt, CoreError> {
     let start = Instant::now();
     let (harness, model) = parse_agent(launch.agent());
-    if (matches!(harness.as_str(), "codex" | "opencode")
-        || (harness == "claude" && launch.flow_selection.is_some()))
-        && process.auto
-    {
+    if matches!(harness.as_str(), "codex" | "opencode") && process.auto {
         return _exec_harness_once(launch, process, model, retry);
     }
     let cmd_args = build_model_command(launch, process, capabilities);
@@ -2021,6 +1981,11 @@ fn spawn_agent_child(
     capture: Option<&CaptureHandle>,
     activation: Option<std::fs::File>,
 ) -> Result<Child, CoreError> {
+    if let Some(capture) = capture {
+        capture
+            .begin_provider_spawn()
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    }
     let mut child = cmd.spawn()?;
     drop(activation);
     if let Some(capture) = capture {
@@ -2986,7 +2951,6 @@ trust_level = "trusted"
             stream: true,
             chrome: true,
             resume_id: Some("sess_abc".to_string()),
-            output_schema: None,
         }
         .to_args();
         assert!(args.contains(&"--chrome".to_string()));
@@ -3093,7 +3057,6 @@ trust_level = "trusted"
         let config = AgentConfig {
             chrome: false,
             session_driver: None,
-            flow_selection: None,
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
             agent: None,
@@ -3126,7 +3089,6 @@ trust_level = "trusted"
         let config = AgentConfig {
             chrome: false,
             session_driver: None,
-            flow_selection: None,
             system_prompt: "Be concise".to_string(),
             task_prompt: "task".to_string(),
             agent: Some("claude-sonnet-4-5-20250514".to_string()),
@@ -3159,7 +3121,6 @@ trust_level = "trusted"
         let config = AgentConfig {
             chrome: false,
             session_driver: None,
-            flow_selection: None,
             system_prompt: "Base prompt".to_string(),
             task_prompt: "task".to_string(),
             agent: None,

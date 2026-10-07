@@ -3,14 +3,14 @@
 
 use std::path::Path;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 
 use super::{
     capture_is_prepared, conversation_background_name, conversation_exec_is_running,
     lock_session_exec, publish_prepared_input, session_not_found, start_durable_session, surface,
     NativeSession, SessionRecord,
 };
-use crate::session::{AgentSession, PrimaryScope, SessionKind, TitleSource, WorkSource};
+use crate::session::{AgentSession, PrimaryScope, TitleSource, WorkSource};
 use crate::store::SharedStore;
 
 /// Find or admit the primary conversation of a Wave, or of the repository
@@ -42,6 +42,47 @@ pub(crate) async fn ensure(
     start(store, session).await
 }
 
+/// A Task's primary is one of its own conversations: the one already chosen,
+/// else its sole unfinished interactive one, else the most recently used.
+/// Only a Task with none gets a new one, in its checkout. `choose` names the
+/// conversation outright; the others stay open.
+pub(crate) async fn ensure_task(
+    store: &SharedStore,
+    repo: &Path,
+    task: &str,
+    choose: Option<&str>,
+) -> Result<SessionRecord> {
+    let binding = crate::ops::resolve_work_binding(store, repo, &format!("task:{task}")).await?;
+    let crate::durable::WorkRef::Task(id) = &binding.work else {
+        unreachable!("a task selector binds a Task");
+    };
+    let scope = PrimaryScope::Task(id.clone());
+    let _lock = lock_scope(&scope).await?;
+    let chosen = match choose {
+        Some(session) => Some(session.to_string()),
+        None => {
+            if let Some(primary) = store.task_primary(id).await? {
+                return surface(store, &primary).await;
+            }
+            super::most_recent(store, store.task_conversations(id).await?)
+                .await?
+                .map(|session| session.id)
+        }
+    };
+    if let Some(session) = chosen {
+        let primary = store.choose_task_primary(id, &session).await?;
+        return surface(store, &primary).await;
+    }
+    anyhow::ensure!(
+        binding.cwd.is_dir(),
+        "Task {task} has no checkout to hold a conversation"
+    );
+    let session = store
+        .ensure_primary_session(&scope, None, task_session(&binding, id))
+        .await?;
+    start(store, session).await
+}
+
 /// Give the scope a fresh conversation. The predecessor's provider stops
 /// first; if it cannot be stopped, the predecessor stays primary.
 pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionRecord> {
@@ -66,8 +107,15 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
             &crate::ops::resolve_work_binding(store, &previous.cwd, &format!("wave:{wave}"))
                 .await?,
         ),
+        PrimaryScope::Task(task) => task_session(
+            &crate::ops::resolve_work_binding(store, &previous.cwd, &format!("task:{task}"))
+                .await?,
+            task,
+        ),
     };
-    successor.cwd = ensure_scope_worktree(&successor.cwd, &scope)?.path;
+    if !matches!(scope, PrimaryScope::Task(_)) {
+        successor.cwd = ensure_scope_worktree(&successor.cwd, &scope)?.path;
+    }
     let session = store
         .ensure_primary_session(&scope, Some(id), successor)
         .await?;
@@ -82,6 +130,7 @@ pub(crate) fn ensure_scope_worktree(
     let segment = match scope {
         PrimaryScope::Repository(_) => WorktreeSegment::parse("repo")?,
         PrimaryScope::Wave(id) => wave_agent_segment(id.as_str())?,
+        PrimaryScope::Task(id) => bail!("Task {id}'s conversations live in its own checkout"),
     };
     Ok(ensure_agent_worktree(repo, segment)?)
 }
@@ -109,6 +158,8 @@ pub(super) async fn admit_workspace(
                 .ok_or_else(|| anyhow!("primary Wave {id} is unavailable"))?;
             std::path::PathBuf::from(wave.repo())
         }
+        // A Task's primary stays in the Task's checkout.
+        PrimaryScope::Task(_) => return Ok(session),
     };
     let workspace = ensure_scope_worktree(&repo, &scope)?;
     if session.cwd != workspace.path {
@@ -129,6 +180,26 @@ fn wave_session(binding: &crate::ops::WorkBinding) -> AgentSession {
             binding.agent.as_deref(),
             "wave/session",
             binding.wave_name.clone(),
+        )
+    }
+}
+
+fn task_session(binding: &crate::ops::WorkBinding, task: &crate::durable::TaskId) -> AgentSession {
+    let title = binding
+        .subjects
+        .iter()
+        .find_map(|subject| subject.strip_prefix("task:"))
+        .unwrap_or(task.as_str())
+        .to_string();
+    AgentSession {
+        task_id: Some(task.clone()),
+        wave_id: Some(binding.wave_id.clone()),
+        work_source: Some(WorkSource::Declared),
+        ..conversation(
+            &binding.cwd,
+            binding.agent.as_deref(),
+            "task/session",
+            title,
         )
     }
 }
@@ -162,10 +233,9 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
         iterations: None,
         task_id: None,
         wave_id: None,
-        flow_session_id: None,
+        flow_id: None,
         work_source: None,
         bound_at: None,
-        kind: SessionKind::Conversation,
         interactive: true,
         repo: None,
         title,
@@ -191,7 +261,7 @@ async fn start(store: &SharedStore, session: AgentSession) -> Result<SessionReco
         session
     } else {
         publish_prepared_input(
-            store,
+            &store.sqlite,
             &session,
             crate::session_record::SessionFlowMembership::Independent,
         )?
@@ -239,6 +309,7 @@ async fn lock_scope(scope: &PrimaryScope) -> Result<std::fs::File> {
     let key = match scope {
         PrimaryScope::Repository(repo) => format!("primary:repository:{repo}"),
         PrimaryScope::Wave(wave) => format!("primary:wave:{wave}"),
+        PrimaryScope::Task(task) => format!("primary:task:{task}"),
     };
     tokio::task::spawn_blocking(move || lock_session_exec(&key))
         .await
@@ -252,7 +323,6 @@ mod tests {
         SessionHome, CONVERSATION_LAUNCHERS, FAILED_CONVERSATION_LAUNCHERS,
     };
     use crate::ops::human_session::{action_test::NativeClients, conversation_background_name};
-    use crate::session::SessionKind;
 
     async fn wave(
         store: &crate::store::SharedStore,
@@ -287,7 +357,6 @@ mod tests {
                 .unwrap()
                 .contains(&conversation_background_name(&first.id)));
             let session = store.session(&first.id).await.unwrap().unwrap();
-            assert_eq!(session.kind, SessionKind::Conversation);
             assert!(session.interactive && session.input_published);
             assert_eq!(session.skill.as_deref(), Some("wave/session"));
             assert_eq!(session.wave_id.as_ref(), Some(wave.id()));

@@ -24,7 +24,11 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
-        SessionCommand::Resume { id } => {
+        SessionCommand::Resume { id, message } => {
+            anyhow::ensure!(
+                message.is_none(),
+                "a resume message is a headless turn: lf -b session resume ID MESSAGE"
+            );
             let id = match id {
                 Some(id) => id.clone(),
                 None => {
@@ -71,7 +75,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             all,
             interactive,
             history,
-            needs_me,
+            waiting,
             limit,
             offset,
             page,
@@ -84,8 +88,8 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             list(
                 &store,
                 *json,
-                *needs_me,
                 &crate::session::SessionFilter {
+                    waiting: *waiting,
                     repo: if *all {
                         None
                     } else {
@@ -118,11 +122,19 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             };
             open(id, *json, mode).await
         }
-        SessionCommand::Ensure { wave, json } => {
+        SessionCommand::Ensure {
+            wave,
+            task,
+            choose,
+            json,
+        } => {
+            use crate::ops::human_session::primary;
             let store = open_shared_store().await?;
             let repo = crate::repo::find_repo_root()?;
-            let session =
-                crate::ops::human_session::primary::ensure(&store, &repo, wave.as_deref()).await?;
+            let session = match task {
+                Some(task) => primary::ensure_task(&store, &repo, task, choose.as_deref()).await?,
+                None => primary::ensure(&store, &repo, wave.as_deref()).await?,
+            };
             report_primary(&session, *json)
         }
         SessionCommand::Replace { id, json } => {
@@ -177,7 +189,6 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
 async fn list(
     store: &Arc<Store>,
     json: bool,
-    needs_me: bool,
     filter: &crate::session::SessionFilter,
 ) -> anyhow::Result<()> {
     if filter.after.is_some() {
@@ -190,11 +201,7 @@ async fn list(
             .limit
             .checked_add(1)
             .context("Session page limit is too large")?;
-        let mut entries = if needs_me {
-            crate::ops::human_session::list_attention(store, &selection).await?
-        } else {
-            crate::ops::human_session::list(store, &selection).await?
-        };
+        let mut entries = crate::ops::human_session::list(store, &selection).await?;
         let next = if entries.len() > filter.limit {
             entries.pop();
             entries.last().map(|session| session.id.clone())
@@ -210,11 +217,7 @@ async fn list(
         );
         return Ok(());
     }
-    let sessions = if needs_me {
-        crate::ops::human_session::list_attention(store, filter).await?
-    } else {
-        crate::ops::human_session::list(store, filter).await?
-    };
+    let sessions = crate::ops::human_session::list(store, filter).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else if sessions.is_empty() {
@@ -225,8 +228,8 @@ async fn list(
                 "{}  {:<7} {}  {}",
                 session.id,
                 match session.state {
+                    _ if session.attention.is_some() => "waiting",
                     SessionState::Unknown => "unknown",
-                    SessionState::Waiting => "waiting",
                     SessionState::Active => "active",
                     SessionState::Closed => "closed",
                     SessionState::Interrupted => "interrupted",

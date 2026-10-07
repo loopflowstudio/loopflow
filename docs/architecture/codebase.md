@@ -49,7 +49,7 @@ subprocess edge to one concept.
 | Session capture evidence | [`session_record.rs`](../../rust/loopflow/src/session_record.rs) | manifest, append events, terminal receipt |
 | shared Work types | [`durable.rs`](../../rust/loopflow/src/durable.rs) and [`work/`](../../rust/loopflow/src/work/) | `WorkRef`, status, inputs, placement, Wave/Task facts |
 | Project operation | [`ops/project.rs`](../../rust/loopflow/src/ops/project.rs) | finite attributed `wave/operate` conversation |
-| Flow driver | [`lf/commands/flow.rs`](../../rust/loopflow/src/lf/commands/flow.rs) | one FlowSession under its per-invocation driver lock |
+| Flow driver | [`lf/commands/flow.rs`](../../rust/loopflow/src/lf/commands/flow.rs) | one driver Exec holding the graph and cursor, starting each step as a child Exec |
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
 | Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave/) | goals, metrics, memory, relocation |
 | store abstraction | [`store/`](../../rust/loopflow/src/store/) | domain rows and transactions |
@@ -61,7 +61,7 @@ subprocess edge to one concept.
 ```text
 lf                         foreground command and Skill/Flow launches
 lf-prompt                  prompt-oriented executable surface
-lf __provider-session      provider hook that binds native session identity to a Run
+lf __provider-session      provider hook that binds native conversation identity to an AgentSession
 lf __screenshot-supervisor bounded browser-capture owner
 Loopflow.app               pure client over CLI/HTTP DTOs
 ```
@@ -86,8 +86,8 @@ have required fields unless their type is explicitly optional. Rust and Swift
 round-trip the same fixtures under `tests/fixtures/dto/`.
 
 `lf checkout` belongs to tracked Work and delivery: it starts no execution.
-`lf --task ISSUE flow start` launches a fresh detached `lf --task ISSUE run FLOW`
-in that checkout. `lf --task ... <skill>` goes directly through execution with
+`lf task run ISSUE` places the Task and fills its defaults, then is
+`lf --task ISSUE run FLOW` in that checkout. `lf --task ... <skill>` goes directly through execution with
 Task attribution and never moves a Flow's position.
 
 ## Dependency direction

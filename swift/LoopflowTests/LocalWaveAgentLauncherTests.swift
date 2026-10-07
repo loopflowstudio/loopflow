@@ -17,14 +17,41 @@ struct LocalWaveAgentLauncherTests {
             "PATH": "/usr/bin:/bin",
             "LF_HOME": "/tmp/loopflow-development-home",
             "LF_WAVE_ID": "launching-wave",
-            "LF_FLOW_STEP": "launching-step",
+            "LF_FLOW_ID": "launching-step",
             "LF_RUN_ID": "launching-run",
         ])
 
         #expect(environment["LF_HOME"] == "/tmp/loopflow-development-home")
         #expect(environment["LF_WAVE_ID"] == nil)
-        #expect(environment["LF_FLOW_STEP"] == nil)
+        #expect(environment["LF_FLOW_ID"] == nil)
         #expect(environment["LF_RUN_ID"] == nil)
+    }
+
+    @Test("the launcher's terminal and agent output policy are dropped; account authority stays")
+    func launchEnvironmentDropsLauncherTerminal() throws {
+        let kept = [
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/Users/someone",
+            "LF_HOME": "/tmp/loopflow-development-home",
+            "LF_ACCOUNT": "work",
+            "CODEX_HOME": "/tmp/codex-home",
+            "CODEX_ACCESS_TOKEN": "codex-token",
+            "CODEX_API_KEY": "codex-key",
+            "CLAUDE_CODE_OAUTH_TOKEN": "claude-token",
+        ]
+        let leaked = [
+            "NO_COLOR": "1", "FORCE_COLOR": "0", "CLICOLOR": "0", "CLICOLOR_FORCE": "0",
+            "COLORTERM": "24bit", "TERM": "dumb", "TERM_PROGRAM": "WarpTerminal",
+            "TERM_PROGRAM_VERSION": "v0", "TMUX": "/tmp/tmux", "TMUX_PANE": "%1",
+            "CI": "1", "PAGER": "cat", "GIT_PAGER": "cat", "GH_PAGER": "cat",
+            "AI_AGENT": "codex", "CLAUDECODE": "1", "WARP_IS_LOCAL_SHELL_SESSION": "1",
+            "CLAUDE_CODE_ENTRYPOINT": "cli", "CODEX_CI": "1", "CODEX_THREAD_ID": "t",
+        ]
+        let environment = GUIProcessEnvironment.enriched(kept.merging(leaked) { first, _ in first })
+
+        for (key, value) in kept where key != "PATH" { #expect(environment[key] == value) }
+        #expect(environment["PATH"]?.hasSuffix("/usr/bin:/bin") == true)
+        for key in leaked.keys { #expect(environment[key] == nil, "\(key) leaked") }
     }
 
 
@@ -32,19 +59,7 @@ struct LocalWaveAgentLauncherTests {
     func taskControlCommandShapes() {
         let lf = "/Applications/Loopflow.app/Contents/MacOS/lf"
 
-        #expect(LocalWaveAgentLauncher.taskRunCommand(lfPath: lf, issue: "W2-131") == [
-            lf, "--task", "W2-131", "flow", "start",
-        ])
-        #expect(LocalWaveAgentLauncher.taskCreateCommand(
-            lfPath: lf,
-            title: "Refine LOOPFLOW.md 5e41e69b",
-            wave: "context-lab",
-            directive: "Refine text for LOOPFLOW.md."
-        ) == [
-            lf, "task", "create", "--run", "--wave", "context-lab", "--title", "Refine LOOPFLOW.md 5e41e69b",
-            "--notes", "Refine text for LOOPFLOW.md.",
-            "--json",
-        ])
+        #expect(LocalWaveAgentLauncher.taskRunArguments(issue: "W2-131") == ["-b", "task", "run", "W2-131"])
         #expect(LocalWaveAgentLauncher.taskInterruptCommand(lfPath: lf, issue: "W2-131") == [
             lf, "task", "interrupt", "W2-131",
         ])
@@ -60,23 +75,6 @@ struct LocalWaveAgentLauncherTests {
         #expect(command == [lf, "pr", "open"])
         #expect(!command.contains { $0.contains("github.com") })
         #expect(!command.contains { $0.hasPrefix("http") })
-    }
-
-    @Test("Task start uses the exact CLI receipt as workspace identity")
-    func taskCreateReceiptDecodes() throws {
-        let receipt = try LocalWaveAgentLauncher.taskCreateReceipt("""
-        {
-          "issue_identifier": "W2-201",
-          "project": "auditability",
-          "wave": "product"
-        }
-        """)
-
-        #expect(receipt == TaskCreateReceipt(
-            issueIdentifier: "W2-201",
-            project: "auditability",
-            wave: "product"
-        ))
     }
 
     @Test("Prepared checkout receipts retain the owning Home and require its evidence")

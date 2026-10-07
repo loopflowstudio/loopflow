@@ -1,24 +1,41 @@
 //! Session transactions share the invocation's SQLite transaction and fences.
 
+use std::fs::File;
+
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-use crate::durable::{FlowSession, TaskId};
-use crate::session::{AgentSession, PrimaryScope, SessionKind, TitleSource, WorkSource};
+use crate::durable::TaskId;
+use crate::session::{AgentSession, PrimaryScope, TitleSource};
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
-const SESSION_SELECT: &str = "SELECT s.id,COALESCE(c.receipt_key,'') AS artifact_key,s.title,s.title_source,
-    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.created_at,s.kind,s.request,s.interactive,s.repo,
-    s.task_id,s.wave_id,s.flow_session_id,s.work_source,s.bound_at,
-    s.input_published,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,json_extract(c.payload,'$.caller_key'),s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture";
+/// The Flow whose driver recorded, as a step, the Exec that captured session
+/// `s`'s current input. Sessions carry no Flow column of their own.
+macro_rules! session_flow {
+    () => {
+        "(SELECT fs.flow_exec_id FROM session_events captured JOIN flow_exec_steps fs ON fs.exec_id=captured.exec_id WHERE captured.seq=s.current_capture)"
+    };
+}
+/// That step's node and loop counts, as its driver recorded them.
+macro_rules! session_step {
+    ($column:literal) => {
+        concat!("(SELECT fs.", $column, " FROM session_events captured JOIN flow_exec_steps fs ON fs.exec_id=captured.exec_id WHERE captured.seq=s.current_capture)")
+    };
+}
+pub(super) const SESSION_FLOW: &str = session_flow!();
+
+const SESSION_SELECT: &str = concat!("SELECT s.id,COALESCE(c.receipt_key,'') AS artifact_key,s.title,s.title_source,
+    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.created_at,s.request,s.interactive,s.repo,
+    s.task_id,s.wave_id,", session_flow!(), ",s.work_source,s.bound_at,
+    s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), ",", session_step!("iterations"), ",json_extract(c.payload,'$.caller_key'),s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<AgentSession>> {
     Ok((|| {
         Ok(AgentSession {
-            captured: row.get(24)?,
+            captured: row.get(23)?,
             caller_artifact_key: row
-                .get::<_, Option<String>>(23)?
+                .get::<_, Option<String>>(22)?
                 .map(|id| crate::session_record::parse_artifact_key(&id))
                 .transpose()
                 .map_err(invalid)?,
@@ -30,34 +47,33 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<AgentSe
             ready_summary: row.get(4)?,
             completed_at: row.get(5)?,
             created_at: row.get(6)?,
-            kind: serde_json::from_value(serde_json::Value::String(row.get(7)?))?,
-            request: row.get(8)?,
-            interactive: row.get(9)?,
-            repo: row.get(10)?,
+            request: row.get(7)?,
+            interactive: row.get(8)?,
+            repo: row.get(9)?,
             task_id: row
-                .get::<_, Option<String>>(11)?
+                .get::<_, Option<String>>(10)?
                 .map(|id| TaskId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
             wave_id: row
-                .get::<_, Option<String>>(12)?
+                .get::<_, Option<String>>(11)?
                 .map(|id| crate::id::WaveId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
-            flow_session_id: row.get(13)?,
+            flow_id: row.get(12)?,
             work_source: row
-                .get::<_, Option<String>>(14)?
+                .get::<_, Option<String>>(13)?
                 .map(|source| serde_json::from_value(serde_json::Value::String(source)))
                 .transpose()?,
-            bound_at: row.get(15)?,
-            input_published: row.get(16)?,
-            cwd: row.get::<_, String>(17)?.into(),
-            skill: row.get(18)?,
-            provider: row.get(19)?,
-            model: row.get(20)?,
-            node: row.get(21)?,
+            bound_at: row.get(14)?,
+            input_published: row.get(15)?,
+            cwd: row.get::<_, String>(16)?.into(),
+            skill: row.get(17)?,
+            provider: row.get(18)?,
+            model: row.get(19)?,
+            node: row.get(20)?,
             iterations: row
-                .get::<_, Option<String>>(22)?
+                .get::<_, Option<String>>(21)?
                 .map(|value| serde_json::from_str(&value))
                 .transpose()?,
         })
@@ -85,9 +101,24 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<Agen
     .transpose()
 }
 
+/// Whether agent_sessions row `session` waits on a person at `now`: its
+/// current driver's reading shows an unanswered question, or no unresolved
+/// tool call and either an interactive turn handed back or a quiet stream.
+/// No reading, or one from a driver that has let go, is not Waiting.
+fn waiting_sql(session: &str, now: i64) -> String {
+    format!(
+        "EXISTS(SELECT 1 FROM session_activity act WHERE act.session_id={session}.id
+            AND {session}.completed_at IS NULL AND act.driver_generation={session}.driver_generation
+            AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
+                OR {now}-act.observed_at>={quiet}))))",
+        quiet = crate::session::WAITING_QUIET_SECONDS
+    )
+}
+
 fn inventory_query(
     filter: &crate::session::SessionFilter,
     select: &str,
+    now: i64,
 ) -> StoreResult<(String, Vec<rusqlite::types::Value>)> {
     use rusqlite::types::Value;
     let mut sql = format!("{select} WHERE 1");
@@ -103,10 +134,10 @@ fn inventory_query(
         ));
     }
     if !filter.history {
-        sql.push_str(
-            " AND s.completed_at IS NULL AND (s.kind!='flow_review' OR EXISTS(
-            SELECT 1 FROM flow_sessions f WHERE f.pending_session_id=s.id AND f.state='current' AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.id=s.task_id AND t.work_state IN ('done','abandoned'))))",
-        );
+        sql.push_str(" AND s.completed_at IS NULL");
+    }
+    if filter.waiting {
+        sql.push_str(&format!(" AND {}", waiting_sql("s", now)));
     }
     if let Some(repo) = &filter.repo {
         sql.push_str(&format!(
@@ -155,19 +186,20 @@ fn inventory_query(
 
 // Preserve the existing filters/order. Materialize only the selected metadata
 // before joining Flow/Work labels; no request or historical payload is selected.
-const SUMMARY_SELECT: &str = "SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
-    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.kind,s.interactive,s.task_id,s.wave_id,
-    s.flow_session_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture
-    FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture";
+const SUMMARY_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
+    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback'),s.completed_at,s.interactive,s.task_id,s.wave_id,
+    ", session_flow!(), ",s.cwd,s.skill,s.provider,s.model,", session_step!("node"), ",", session_step!("iterations"), ",s.current_capture
+    FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
 const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.artifact_key')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END";
 
-fn summary_query(page: &str, by_id: bool) -> String {
+fn summary_query(page: &str, by_id: bool, now: i64) -> String {
+    let waiting = waiting_sql("a", now);
     let order = if by_id { "s.id" } else { "s.title,s.id" };
-    format!("WITH page AS MATERIALIZED ({page}),
-        flows AS MATERIALIZED (SELECT {} FROM flow_sessions f INDEXED BY flow_metadata
-            WHERE f.id IN (SELECT flow_session_id FROM page))
-        SELECT s.*,f.id,f.name,f.state,f.current_capture,f.pending_session_id,f.task_id,f.wave_id,f.updated_at,
+    // A Flow is the driver Exec above the step that captured the current input.
+    format!("WITH page AS MATERIALIZED ({page})
+        SELECT s.*,driver.id,flow.flow,driver.outcome,driver.completed_at,step.started_at,
+        (fs.seq=(SELECT MAX(later.seq) FROM flow_exec_steps later WHERE later.flow_exec_id=fs.flow_exec_id)),
         w.slug,t.issue_identifier,
         ((SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
          WHERE session_id=s.id AND captured_event=s.current_capture
@@ -176,30 +208,64 @@ fn summary_query(page: &str, by_id: bool) -> String {
         a.primary_scope,
         (SELECT CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.outcome') END FROM session_events e INDEXED BY session_driver_exit
             WHERE e.session_id=s.id AND e.receipt_key='driver:'||(a.driver_generation-1)||':exit' AND e.kind='observed'),
-        (SELECT COALESCE(CASE WHEN json_valid(done.payload) THEN json_extract(done.payload,'$.status') END,'running') FROM session_events start
-            LEFT JOIN session_events done INDEXED BY session_turn_attention ON done.session_id=start.session_id
-                AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn AND done.kind='completed'
-            WHERE start.session_id=s.id AND start.captured_event=s.current_capture AND start.kind='started'
-            ORDER BY start.seq DESC LIMIT 1),
-        COALESCE(t.work_state IN ('done','abandoned'),0)
+        {waiting},
+        COALESCE(({task_state}) IN ('done','abandoned'),0),
+        EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id)
         FROM page s JOIN agent_sessions a ON a.id=s.id
-        LEFT JOIN flows f ON f.id=s.flow_session_id
+        LEFT JOIN session_events captured ON captured.seq=s.current_capture
+        LEFT JOIN flow_exec_steps fs ON fs.exec_id=captured.exec_id
+        LEFT JOIN flow_execs flow ON flow.exec_id=fs.flow_exec_id
+        LEFT JOIN execs step ON step.id=fs.exec_id
+        LEFT JOIN execs driver ON driver.id=fs.flow_exec_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
-        ORDER BY {order}", super::flows::FLOW_METADATA_COLUMNS, super::task_work::session_tasks("s"))
+        ORDER BY {order}", super::task_work::session_tasks("a"),
+        task_state = super::durable::task_state_sql("t"))
 }
 
 fn read_summary(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
     Ok((|| {
+        let task_id = row
+            .get::<_, Option<String>>(7)?
+            .map(|id| TaskId::parse(&id))
+            .transpose()
+            .map_err(invalid)?;
+        let wave_id = row
+            .get::<_, Option<String>>(8)?
+            .map(|id| crate::id::WaveId::parse(&id))
+            .transpose()
+            .map_err(invalid)?;
+        let flow = match row.get::<_, Option<String>>(17)? {
+            Some(driver) => {
+                let completed: Option<i64> = row.get(20)?;
+                let name: String = row.get(18)?;
+                Some(crate::session::FlowSummary {
+                    id: driver,
+                    name,
+                    state: crate::session::FlowSummaryState::of_driver(
+                        row.get::<_, Option<String>>(19)?.as_deref(),
+                        completed,
+                    ),
+                    task_id: task_id.clone(),
+                    wave_id: wave_id.clone(),
+                    updated_at: match completed {
+                        Some(completed) => completed,
+                        None => row.get(21)?,
+                    },
+                })
+            }
+            None => None,
+        };
         Ok(crate::session::SessionSummary {
-            task_ids: serde_json::from_str(&row.get::<_, String>(29)?)?,
-            primary_scope: row.get(30)?,
-            driver_outcome: row.get(31)?,
-            latest_turn: row.get(32)?,
-            task_terminal: row.get(33)?,
-            captured: row.get(17)?,
+            task_ids: serde_json::from_str(&row.get::<_, String>(26)?)?,
+            primary_scope: row.get(27)?,
+            driver_outcome: row.get(28)?,
+            waiting: row.get(29)?,
+            task_terminal: row.get(30)?,
+            task_primary: row.get(31)?,
+            captured: row.get(16)?,
             id: row.get(0)?,
             artifact_key: crate::session_record::parse_artifact_key(&row.get::<_, String>(1)?)
                 .map_err(invalid)?,
@@ -207,66 +273,127 @@ fn read_summary(
             title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
             ready_summary: row.get(4)?,
             completed_at: row.get(5)?,
-            kind: serde_json::from_value(serde_json::Value::String(row.get(6)?))?,
-            interactive: row.get(7)?,
-            task_id: row
-                .get::<_, Option<String>>(8)?
-                .map(|id| TaskId::parse(&id))
-                .transpose()
-                .map_err(invalid)?,
-            wave_id: row
-                .get::<_, Option<String>>(9)?
-                .map(|id| crate::id::WaveId::parse(&id))
-                .transpose()
-                .map_err(invalid)?,
-            flow_session_id: row.get(10)?,
-            cwd: row.get::<_, String>(11)?.into(),
-            skill: row.get(12)?,
-            provider: row.get(13)?,
-            model: row.get(14)?,
-            node: row.get(15)?,
+            interactive: row.get(6)?,
+            task_id,
+            wave_id,
+            flow_id: row.get(9)?,
+            cwd: row.get::<_, String>(10)?.into(),
+            skill: row.get(11)?,
+            provider: row.get(12)?,
+            model: row.get(13)?,
+            node: row.get(14)?,
             iterations: row
-                .get::<_, Option<String>>(16)?
+                .get::<_, Option<String>>(15)?
                 .map(|raw| serde_json::from_str(&raw))
                 .transpose()?,
-            flow: super::flows::read_flow_summary(row, 18)?,
-            wave_name: row.get(26)?,
-            task_identifier: row.get(27)?,
-            independent: row.get::<_, Option<bool>>(28)?.unwrap_or(false),
+            flow,
+            flow_step_latest: row.get::<_, Option<bool>>(22)?.unwrap_or(false),
+            wave_name: row.get(23)?,
+            task_identifier: row.get(24)?,
+            independent: row.get::<_, Option<bool>>(25)?.unwrap_or(false),
         })
     })())
+}
+
+fn interactive_sessions_in<P: rusqlite::Params>(
+    conn: &Connection,
+    selection: &str,
+    params: P,
+) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
+    let mut query = conn.prepare(&format!(
+        "SELECT candidates.*, (
+            SELECT MAX(json_extract(payload,'$.opened_at_ms'))
+            FROM session_events WHERE session_id=candidates.id AND kind='observed'
+            AND json_extract(payload,'$.type')='interactive_opened'
+        ) AS opened_at FROM ({SESSION_SELECT}
+        WHERE s.interactive=1 {selection}) AS candidates"
+    ))?;
+    let rows = query.query_map(params, |row| {
+        Ok((read_session(row)?, row.get("opened_at")?))
+    })?;
+    rows.map(|row| {
+        let (session, opened) = row?;
+        Ok((session?, opened))
+    })
+    .collect()
+}
+
+fn task_primary_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<AgentSession>> {
+    conn.query_row(
+        &format!(
+            "{SESSION_SELECT} WHERE s.id=(SELECT primary_session_id FROM tasks WHERE id=?1)
+             AND s.completed_at IS NULL"
+        ),
+        [task.as_str()],
+        read_session,
+    )
+    .optional()?
+    .transpose()
 }
 
 impl SqliteStore {
     pub(crate) fn resume_candidates(&self) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!(
-            "SELECT candidates.*, (
-                SELECT MAX(json_extract(payload,'$.opened_at_ms'))
-                FROM session_events WHERE session_id=candidates.id AND kind='observed'
-                AND json_extract(payload,'$.type')='interactive_opened'
-            ) AS opened_at FROM ({SESSION_SELECT}
-            WHERE s.interactive=1 AND (s.kind!='flow_review' OR
-                (s.completed_at IS NULL AND EXISTS(SELECT 1 FROM flow_sessions f
-                 WHERE f.pending_session_id=s.id AND f.state='current'
-                 AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.id=s.task_id
-                    AND t.work_state IN ('done','abandoned')))))) AS candidates"
-        ))?;
-        let rows = query.query_map([], |row| Ok((read_session(row)?, row.get("opened_at")?)))?;
-        rows.map(|row| {
-            let (session, opened) = row?;
-            Ok((session?, opened))
-        })
-        .collect()
+        interactive_sessions_in(&conn, "", [])
     }
 
+    /// A Task's unfinished interactive conversations, each with its last opening.
+    pub(crate) fn task_conversations(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        interactive_sessions_in(
+            &conn,
+            &format!(
+                "AND s.completed_at IS NULL AND s.id IN ({})",
+                super::task_work::session_ids("?1")
+            ),
+            [task.as_str()],
+        )
+    }
+
+    /// The conversation a Task's primary pointer names, while it is unfinished.
+    pub(crate) fn task_primary(&self, task: &TaskId) -> StoreResult<Option<AgentSession>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        task_primary_in(&conn, task)
+    }
+
+    /// Name one of the Task's own unfinished interactive conversations its
+    /// primary. The earlier choice stays an ordinary conversation of the Task.
+    pub(crate) fn choose_task_primary(
+        &self,
+        task: &TaskId,
+        session: &str,
+    ) -> StoreResult<AgentSession> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let chosen = conn.execute(
+            &format!(
+                "UPDATE tasks SET primary_session_id=?2 WHERE id=?1 AND ?2 IN (
+                    SELECT s.id FROM agent_sessions s WHERE s.interactive=1
+                    AND s.completed_at IS NULL AND s.id IN ({}))",
+                super::task_work::session_ids("?1")
+            ),
+            params![task.as_str(), session],
+        )?;
+        if chosen != 1 {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Session {session} is not an unfinished interactive conversation of this Task"
+            )));
+        }
+        task_primary_in(&conn, task)?
+            .ok_or_else(|| invalid(format!("Session {session} disappeared while being chosen")))
+    }
+
+    /// Each row's Waiting is judged at `now`.
     pub(crate) fn session_summaries(
         &self,
         filter: &crate::session::SessionFilter,
+        now: i64,
     ) -> StoreResult<Vec<crate::session::SessionSummary>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let (page, values) = inventory_query(filter, SUMMARY_SELECT)?;
-        let mut query = conn.prepare(&summary_query(&page, filter.after.is_some()))?;
+        let (page, values) = inventory_query(filter, SUMMARY_SELECT, now)?;
+        let mut query = conn.prepare(&summary_query(&page, filter.after.is_some(), now))?;
         let rows = query.query_map(rusqlite::params_from_iter(values), read_summary)?;
         rows.map(|row| row?).collect()
     }
@@ -274,10 +401,11 @@ impl SqliteStore {
     pub(crate) fn session_summary(
         &self,
         id: &str,
+        now: i64,
     ) -> StoreResult<Option<crate::session::SessionSummary>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1"), false),
+            &summary_query(&format!("{SUMMARY_SELECT} WHERE s.id=?1"), false, now),
             [id],
             read_summary,
         )
@@ -610,40 +738,34 @@ impl SqliteStore {
             .optional()?)
     }
 
-    pub fn session_for_artifact(&self, run_id: &str) -> StoreResult<Option<AgentSession>> {
+    pub fn session_for_artifact(&self, artifact_key: &str) -> StoreResult<Option<AgentSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             &format!("{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1)"),
-            [run_id],
+            [artifact_key],
             read_session,
         )
         .optional()?
         .transpose()
     }
 
+    fn lock_session_checkouts(&self, session: &AgentSession) -> StoreResult<Vec<File>> {
+        self.lock_task_checkouts(&[session.cwd.as_path()], session.task_id.as_ref())
+    }
+
     /// Admit the conversation and its captured input before provider effects.
     pub fn create_session(
         &self,
         session: AgentSession,
-        review: Option<&FlowSession>,
         caller_exec: Option<&crate::id::ExecId>,
     ) -> StoreResult<AgentSession> {
-        let _admission = self.lock_checkout(&session.cwd)?;
+        let _admission = self.lock_session_checkouts(&session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some(existing) = session_in(&tx, &session.id)? {
             return Ok(existing);
         }
-        if let Some(flow) = review {
-            super::flows::insert_flow_in(&tx, flow, None)?;
-        }
         let session = reserve_session_in(&tx, session, caller_exec)?;
-        if session.kind == SessionKind::FlowReview {
-            tx.execute(
-                "UPDATE flow_sessions SET pending_session_id=?2,current_capture=?3 WHERE id=?1",
-                params![session.flow_session_id, session.id, session.captured],
-            )?;
-        }
         tx.commit()?;
         Ok(session)
     }
@@ -659,14 +781,10 @@ impl SqliteStore {
         session: AgentSession,
         caller_exec: Option<&crate::id::ExecId>,
     ) -> StoreResult<AgentSession> {
-        let (kind, column, id) = match scope {
-            PrimaryScope::Repository(repo) => ("repository", "repo", repo.to_string()),
-            PrimaryScope::Wave(wave) => ("wave", "wave_id", wave.to_string()),
-        };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = tx
-            .query_row(
+        let marked = |kind: &str, column: &str, id: String| {
+            tx.query_row(
                 &format!(
                     "{SESSION_SELECT} WHERE s.primary_scope=?1 AND s.{column}=?2 \
                      AND s.completed_at IS NULL"
@@ -675,7 +793,13 @@ impl SqliteStore {
                 read_session,
             )
             .optional()?
-            .transpose()?;
+            .transpose()
+        };
+        let current = match scope {
+            PrimaryScope::Repository(repo) => marked("repository", "repo", repo.to_string())?,
+            PrimaryScope::Wave(wave) => marked("wave", "wave_id", wave.to_string())?,
+            PrimaryScope::Task(task) => task_primary_in(&tx, task)?,
+        };
         match current {
             Some(current) if Some(current.id.as_str()) == replacing => {
                 tx.execute(
@@ -687,10 +811,22 @@ impl SqliteStore {
             None => {}
         }
         let session = reserve_session_in(&tx, session, caller_exec)?;
-        tx.execute(
-            "UPDATE agent_sessions SET primary_scope=?2 WHERE id=?1",
-            params![session.id, kind],
-        )?;
+        // A Task's primary stays an ordinary member conversation; its Task
+        // names it. A repository's or Wave's is marked on its own row.
+        match scope {
+            PrimaryScope::Repository(_) => tx.execute(
+                "UPDATE agent_sessions SET primary_scope='repository' WHERE id=?1",
+                [&session.id],
+            )?,
+            PrimaryScope::Wave(_) => tx.execute(
+                "UPDATE agent_sessions SET primary_scope='wave' WHERE id=?1",
+                [&session.id],
+            )?,
+            PrimaryScope::Task(task) => tx.execute(
+                "UPDATE tasks SET primary_session_id=?2 WHERE id=?1",
+                params![task.as_str(), session.id],
+            )?,
+        };
         tx.commit()?;
         Ok(session)
     }
@@ -714,9 +850,22 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The scope a Session is or was primary for.
+    /// The Task a Session is primary for, else the repository or Wave it is or
+    /// was primary for.
     pub fn primary_scope(&self, id: &str) -> StoreResult<Option<PrimaryScope>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let task: Option<String> = conn
+            .query_row(
+                "SELECT id FROM tasks WHERE primary_session_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(task) = task {
+            return Ok(Some(PrimaryScope::Task(
+                TaskId::parse(&task).map_err(invalid)?,
+            )));
+        }
         let row: Option<(Option<String>, Option<String>, Option<String>)> = conn
             .query_row(
                 "SELECT primary_scope,wave_id,repo FROM agent_sessions WHERE id=?1",
@@ -745,7 +894,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if conn.execute(
             "UPDATE agent_sessions SET input_published=1 WHERE id=?1 AND current_capture=?2
-             AND input_published=0 AND completed_at IS NULL AND (flow_session_id IS NULL OR kind='flow_review')",
+             AND input_published=0 AND completed_at IS NULL",
             params![id, captured],
         )? != 1
         {
@@ -756,14 +905,15 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Replace captured input under the existing conversation. Native history,
-    /// title, feedback and assignment remain on their owners.
+    /// Replace captured input, retaining the conversation's workspace, native
+    /// history, title, feedback and assignment.
     pub fn replace_session_input(
         &self,
         expected_input: Option<i64>,
         mut session: AgentSession,
     ) -> StoreResult<AgentSession> {
-        let _admission = self.lock_checkout(&session.cwd)?;
+        let stored = self.session(&session.id)?.ok_or(StoreError::NotFound)?;
+        let _admission = self.lock_session_checkouts(&stored)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let previous = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
@@ -771,7 +921,6 @@ impl SqliteStore {
             || previous.completed_at.is_some()
             || previous.task_id != session.task_id
             || previous.wave_id != session.wave_id
-            || previous.flow_session_id != session.flow_session_id
         {
             return Err(StoreError::InvalidAuthority(
                 "conversation changed before input replacement".into(),
@@ -782,40 +931,23 @@ impl SqliteStore {
             &mut session,
             crate::journal::current_exec_id().as_ref(),
         )?;
-        tx.execute("UPDATE flow_sessions SET current_capture=?2 WHERE current_capture=?1 AND state='current'",
-            params![previous.captured,session.captured])?;
         let session = session_in(&tx, &session.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(session)
     }
 
-    /// A review Run stored before providers were: take it from launch evidence.
-    pub fn fill_run_provider(
-        &self,
-        run: &str,
-        provider: &str,
-        model: Option<&str>,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE agent_sessions SET provider=?2, model=?3 WHERE current_capture=?1 AND provider IS NULL",
-            params![capture_seq_in(&conn,run)?, provider, model],
-        )?;
-        Ok(())
-    }
-
-    /// Choose the agent of a Run that has not launched. A published Run keeps
+    /// Choose the agent of an unpublished capture. A published capture keeps
     /// the provider it launched with.
-    pub fn retarget_unpublished_run(
+    pub fn retarget_unpublished_capture(
         &self,
-        run: &str,
+        artifact_key: &str,
         provider: &str,
         model: Option<&str>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "UPDATE agent_sessions SET provider=?2, model=?3 WHERE current_capture=?1 AND input_published=0",
-            params![capture_seq_in(&conn,run)?, provider, model],
+            params![capture_seq_in(&conn,artifact_key)?, provider, model],
         )?;
         Ok(())
     }
@@ -827,9 +959,16 @@ impl SqliteStore {
         expected_capture: Option<i64>,
         task: &TaskId,
     ) -> StoreResult<AgentSession> {
+        let before = self.session(id)?.ok_or(StoreError::NotFound)?;
+        let _admission = self.lock_task_checkouts(&[&before.cwd], Some(task))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if session.cwd != before.cwd {
+            return Err(StoreError::InvalidAuthority(
+                "Session workspace changed before binding".into(),
+            ));
+        }
         if session.captured != expected_capture {
             return Err(StoreError::InvalidAuthority(
                 "Session changed before binding".into(),
@@ -856,18 +995,6 @@ impl SqliteStore {
                 return Err(StoreError::InvalidAuthority(format!(
                     "Session {id} belongs to another Wave"
                 )));
-            }
-            if let Some(flow) = &session.flow_session_id {
-                let compatible: bool = tx.query_row(
-                    "SELECT task_id IS ?2 FROM flow_sessions WHERE id=?1",
-                    params![flow, task.as_str()],
-                    |row| row.get(0),
-                )?;
-                if !compatible {
-                    return Err(StoreError::InvalidAuthority(
-                        "AgentSession and FlowSession nullable Tasks disagree".into(),
-                    ));
-                }
             }
             tx.execute(
                 "UPDATE agent_sessions SET task_id=?2,wave_id=?3,work_source='bound',bound_at=?4 WHERE id=?1",
@@ -898,13 +1025,14 @@ impl SqliteStore {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    /// Every open Session. A review is open while its invocation waits on it.
+    /// Every open Session.
     pub fn sessions(
         &self,
         filter: &crate::session::SessionFilter,
     ) -> StoreResult<Vec<AgentSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let (sql, values) = inventory_query(filter, SESSION_SELECT)?;
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let (sql, values) = inventory_query(filter, SESSION_SELECT, now)?;
         let mut query = conn.prepare(&sql)?;
         let rows = query.query_map(rusqlite::params_from_iter(values), read_session)?;
         rows.map(|row| row?).collect()
@@ -920,24 +1048,14 @@ impl SqliteStore {
             .collect()
     }
 
-    pub fn rename_session(
-        &self,
-        id: &str,
-        expected_capture: Option<i64>,
-        title: &str,
-        source: TitleSource,
-    ) -> StoreResult<()> {
+    pub fn rename_session(&self, id: &str, title: &str, source: TitleSource) -> StoreResult<()> {
         if title.trim().is_empty() {
             return Err(invalid("Session title cannot be empty"));
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
-        if expected_capture.is_some_and(|event| Some(event) != session.captured) {
-            return Err(StoreError::InvalidAuthority(
-                "Session changed before rename".into(),
-            ));
-        }
+        require_current_actor_in(&tx, id)?;
+        session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.execute(
             "UPDATE agent_sessions SET title=?2, title_source=?3
              WHERE id=?1 AND (title_source='generated' OR ?3='human')",
@@ -985,79 +1103,12 @@ pub(super) fn retain_history_in(
     Ok(changed)
 }
 
-pub(super) fn reserve_flow_conversation_in(
-    conn: &Transaction<'_>,
-    flow: &FlowSession,
-    id: String,
-    kind: SessionKind,
-    title: String,
-    exec: Option<&crate::id::ExecId>,
-) -> StoreResult<AgentSession> {
-    reserve_session_in(
-        conn,
-        AgentSession {
-            captured: None,
-            caller_artifact_key: None,
-            id,
-            artifact_key: crate::session_record::new_artifact_key(),
-            input_published: false,
-            cwd: flow.cwd.clone(),
-            skill: Some(flow.current().step),
-            provider: None,
-            model: None,
-            node: None,
-            iterations: None,
-            task_id: flow.task_id.clone(),
-            wave_id: flow.wave_id.clone(),
-            flow_session_id: Some(flow.id().to_owned()),
-            work_source: flow.declared_work().map(|_| WorkSource::Inherited),
-            bound_at: None,
-            kind,
-            interactive: kind != SessionKind::Conversation,
-            repo: None,
-            title,
-            title_source: TitleSource::Generated,
-            request: None,
-            ready_summary: None,
-            completed_at: None,
-            created_at: crate::store::rows::now_unix(),
-        },
-        exec,
-    )
-}
-
 /// Resolve ancestry and captured location on the conversation's admission transaction.
 pub(super) fn reserve_session_in(
     conn: &Transaction<'_>,
     mut session: AgentSession,
     caller: Option<&crate::id::ExecId>,
 ) -> StoreResult<AgentSession> {
-    if let Some(id) = &session.flow_session_id {
-        let flow = super::flows::flow_in(conn, id)?.ok_or(StoreError::NotFound)?;
-        if session.task_id.is_some() && session.task_id != flow.task_id {
-            return Err(invalid("AgentSession and FlowSession Tasks disagree"));
-        }
-        session.task_id = flow.task_id;
-        if let Some(wave) = flow.wave_id {
-            if session.wave_id.as_ref().is_some_and(|given| given != &wave) {
-                return Err(invalid("AgentSession and FlowSession Waves disagree"));
-            }
-            session.wave_id = Some(wave);
-        }
-        let (node, iterations) = flow.invocation.location(&flow.cursor).map_err(invalid)?;
-        if session.node.is_some_and(|given| given != node)
-            || session
-                .iterations
-                .as_ref()
-                .is_some_and(|given| given != &iterations)
-        {
-            return Err(invalid(
-                "AgentSession location differs from captured Flow cursor",
-            ));
-        }
-        session.node = Some(node);
-        session.iterations = Some(iterations);
-    }
     resolve_ancestry_in(conn, &mut session)?;
     insert_session_in(conn, &mut session, caller)?;
     Ok(session)
@@ -1079,6 +1130,50 @@ fn resolve_ancestry_in(conn: &Connection, session: &mut AgentSession) -> StoreRe
             })
             .transpose()
             .map_err(invalid)?;
+    }
+    Ok(())
+}
+
+/// A replaced provider keeps causal history, but cannot mutate its conversation.
+fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
+    if let Some(caller) = crate::journal::agent_caller().filter(|caller| caller.session_id == id) {
+        let current: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1
+                AND provider_generation=?2 AND provider_exec_id=?3
+                AND driver_exec_id IS NOT NULL)",
+            params![id, caller.provider_generation, caller.origin_exec_id],
+            |row| row.get(0),
+        )?;
+        if !current {
+            return Err(StoreError::InvalidAuthority(
+                "Session provider was replaced".into(),
+            ));
+        }
+    }
+    if let Some(key) = std::env::var_os(crate::session_record::CAPTURE_KEY_ENV) {
+        let key = key
+            .into_string()
+            .map_err(|_| invalid("capture key is not valid UTF-8"))?;
+        crate::session_record::parse_artifact_key(&key).map_err(invalid)?;
+        let (owner, current): (String, bool) = conn
+            .query_row(
+                "SELECT s.id,e.seq IS s.current_capture FROM session_events e
+                JOIN agent_sessions s ON s.id=e.session_id
+                WHERE e.kind='captured' AND e.receipt_key=?1",
+                [&key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| invalid("capture does not belong to a recorded Session in this Home"))?;
+        if crate::journal::agent_caller().is_some_and(|caller| caller.session_id != owner) {
+            return Err(invalid("capture belongs to another Session"));
+        }
+        let stale = owner == id && !current;
+        if stale {
+            return Err(StoreError::InvalidAuthority(
+                "Session input was replaced".into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -1119,8 +1214,7 @@ fn capture_in(
     }
     let payload = serde_json::json!({"artifact_key":session.artifact_key,
         "caller_key":session.caller_artifact_key,"cwd":session.cwd,"skill":session.skill,
-        "provider":session.provider,"model":session.model,"flow_session_id":session.flow_session_id,
-        "node":session.node,"iterations":session.iterations,"work_source":session.work_source});
+        "provider":session.provider,"model":session.model,"work_source":session.work_source});
     conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,task_id,wave_id,observed_at,payload)
         VALUES(?1,'captured',?2,?3,?4,?5,?6,?7)",
         params![session.id,session.artifact_key,exec,session.task_id.as_ref().map(TaskId::as_str),
@@ -1133,17 +1227,36 @@ fn insert_session_in(
     session: &mut AgentSession,
     exec: Option<&crate::id::ExecId>,
 ) -> StoreResult<()> {
-    conn.execute("INSERT INTO agent_sessions(id,title,title_source,completed_at,
-        created_at,kind,request,interactive,repo,task_id,wave_id,flow_session_id,work_source,bound_at,
-        input_published,cwd,skill,provider,model,node,iterations)
-        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
-        params![session.id,session.title,title_source(session.title_source),
-            session.completed_at,session.created_at,serde_json::to_value(session.kind)?.as_str(),
-            session.request,session.interactive,session.repo,session.task_id.as_ref().map(TaskId::as_str),
-            session.wave_id.as_ref().map(crate::id::WaveId::as_str),session.flow_session_id,
-            session.work_source.map(serde_json::to_value).transpose()?.as_ref().and_then(serde_json::Value::as_str),
-            session.bound_at,session.input_published,session.cwd.to_string_lossy(),session.skill,
-            session.provider,session.model,session.node,session.iterations.as_ref().map(serde_json::to_string).transpose()?])?;
+    conn.execute(
+        "INSERT INTO agent_sessions(id,title,title_source,completed_at,
+        created_at,request,interactive,repo,task_id,wave_id,work_source,bound_at,
+        input_published,cwd,skill,provider,model)
+        VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+        params![
+            session.id,
+            session.title,
+            title_source(session.title_source),
+            session.completed_at,
+            session.created_at,
+            session.request,
+            session.interactive,
+            session.repo,
+            session.task_id.as_ref().map(TaskId::as_str),
+            session.wave_id.as_ref().map(crate::id::WaveId::as_str),
+            session
+                .work_source
+                .map(serde_json::to_value)
+                .transpose()?
+                .as_ref()
+                .and_then(serde_json::Value::as_str),
+            session.bound_at,
+            session.input_published,
+            session.cwd.to_string_lossy(),
+            session.skill,
+            session.provider,
+            session.model
+        ],
+    )?;
     session.captured = Some(capture_in(conn, session, session.created_at, exec)?);
     conn.execute(
         "UPDATE agent_sessions SET current_capture=?2 WHERE id=?1",
@@ -1165,6 +1278,14 @@ pub(super) fn replace_input_in(
     session: &mut AgentSession,
     exec: Option<&crate::id::ExecId>,
 ) -> StoreResult<()> {
+    // Workspace admission owns location; replacing input cannot move Task membership.
+    session.cwd = conn
+        .query_row(
+            "SELECT cwd FROM agent_sessions WHERE id=?1",
+            [&session.id],
+            |row| row.get::<_, String>(0),
+        )?
+        .into();
     if conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM session_events WHERE kind='captured' AND receipt_key=?1)",
         [&session.artifact_key],
@@ -1180,32 +1301,10 @@ pub(super) fn replace_input_in(
         crate::store::rows::now_unix(),
         exec,
     )?);
-    conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,cwd=?4,skill=?5,provider=?6,model=?7
+    conn.execute("UPDATE agent_sessions SET current_capture=?2,input_published=?3,skill=?4,provider=?5,model=?6
         WHERE id=?1 AND completed_at IS NULL",
-        params![session.id,session.captured,session.input_published,session.cwd.to_string_lossy(),
+        params![session.id,session.captured,session.input_published,
             session.skill,session.provider,session.model])?;
-    Ok(())
-}
-
-pub(super) fn select_input_in(
-    conn: &Transaction<'_>,
-    flow: &FlowSession,
-    session: &AgentSession,
-) -> StoreResult<()> {
-    let (node, iterations) = flow.invocation.location(&flow.cursor).map_err(invalid)?;
-    if session.flow_session_id.as_deref() != Some(flow.id())
-        || session.node != Some(node)
-        || session.iterations.as_ref() != Some(&iterations)
-    {
-        return Err(StoreError::InvalidAuthority(
-            "conversation does not belong to this captured Flow boundary".into(),
-        ));
-    }
-    if conn.execute("UPDATE flow_sessions SET current_capture=?3 WHERE id=?1 AND position_version=?2 AND state='current'",
-        params![flow.id(),i64::try_from(flow.version).map_err(invalid)?,session.captured])? != 1
-    {
-        return Err(StoreError::InvalidAuthority("Flow changed before conversation selection".into()));
-    }
     Ok(())
 }
 
@@ -1242,10 +1341,9 @@ impl SqliteStore {
                 iterations: None,
                 task_id: None,
                 wave_id: None,
-                flow_session_id: None,
+                flow_id: None,
                 work_source: None,
                 bound_at: None,
-                kind: SessionKind::Conversation,
                 interactive: true,
                 repo: None,
                 title: "Retained".into(),
@@ -1255,7 +1353,6 @@ impl SqliteStore {
                 completed_at: None,
                 created_at: 1,
             },
-            None,
             None,
         )
         .unwrap()
@@ -1272,6 +1369,46 @@ mod metadata_tests {
     use crate::session::{FlowSummaryState, SessionFilter};
 
     #[test]
+    fn input_replacement_retains_workspace_and_task_membership() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let session = store.test_session("moving", &crate::session_record::new_artifact_key());
+        let wave = crate::id::WaveId::new();
+        let project = crate::work::project::ProjectId::new();
+        let task = crate::durable::TaskId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1',?3,1)", params![task.as_str(), project.as_str(), session.cwd.to_str().unwrap()]).unwrap();
+        }
+        assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
+        let exclusion = store.lock_checkout(&session.cwd).unwrap();
+        let mut next = session.clone();
+        next.cwd = home.path().join("destination");
+        next.artifact_key = crate::session_record::new_artifact_key();
+        assert!(store
+            .replace_session_input(session.captured, next.clone())
+            .is_err());
+        let retained = store.task_work(&task).unwrap().sessions;
+        drop(exclusion);
+        assert_eq!(
+            retained.len(),
+            1,
+            "input replacement removed Task work while its source checkout was excluded"
+        );
+        let replacement = store.replace_session_input(session.captured, next).unwrap();
+        assert_eq!(replacement.cwd, session.cwd);
+        assert_eq!(replacement.task_id, None);
+        assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
+        assert_ne!(replacement.captured, session.captured);
+    }
+
+    #[test]
     fn resume_candidates_keep_completed_conversations_and_original_opening_times() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
@@ -1279,7 +1416,6 @@ mod metadata_tests {
             store.test_session("conversation", &crate::session_record::new_artifact_key());
         let background =
             store.test_session("background", &crate::session_record::new_artifact_key());
-        let review = store.test_session("review", &crate::session_record::new_artifact_key());
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -1290,11 +1426,6 @@ mod metadata_tests {
             conn.execute(
                 "UPDATE agent_sessions SET interactive=0 WHERE id=?1",
                 [&background.id],
-            )
-            .unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET kind='flow_review' WHERE id=?1",
-                [&review.id],
             )
             .unwrap();
         }
@@ -1342,7 +1473,10 @@ mod metadata_tests {
             repo: Some("/repo".into()),
             ..SessionFilter::default()
         };
-        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "retained");
+        assert_eq!(
+            store.session_summaries(&filter, 0).unwrap()[0].id,
+            "retained"
+        );
         store
             .conn
             .lock()
@@ -1352,7 +1486,7 @@ mod metadata_tests {
                 [],
             )
             .unwrap();
-        assert!(store.session_summaries(&filter).unwrap().is_empty());
+        assert!(store.session_summaries(&filter, 0).unwrap().is_empty());
     }
 
     #[test]
@@ -1407,138 +1541,33 @@ mod metadata_tests {
     }
 
     #[test]
-    fn session_metadata_dense_review_pages_use_indexed_membership() {
-        let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let conn = store.conn.lock().unwrap();
-        let indexes: Vec<String> = conn
-            .prepare(
-                "SELECT sql FROM sqlite_master WHERE name IN
-            ('flow_metadata','flow_pending_review','session_input_membership') ORDER BY name",
-            )
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .map(Result::unwrap)
-            .collect();
-        assert_eq!(indexes.len(), 3);
-        conn.execute_batch(
-            "DROP INDEX flow_metadata; DROP INDEX flow_pending_review;
-            DROP INDEX session_input_membership;",
-        )
-        .unwrap();
-        conn.execute_batch("BEGIN;
-            WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<5000)
-            INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,
-                position_version,updated_at,state,pending_session_id)
-            SELECT printf('f%05d',i),json_object('id',printf('f%05d',i),'flow','review','steps',hex(zeroblob(1024))),
-                '/repo',0,0,1,1,'current',NULL FROM n;
-            WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<20000)
-            INSERT INTO agent_sessions(id,title,title_source,created_at,kind,
-                interactive,input_published,cwd,repo,flow_session_id)
-            SELECT printf('s%05d',i),printf('Review %05d',i),
-                'human',1,'flow_review',1,1,'/repo','/repo',printf('f%05d',(i-1)%5000+1) FROM n;
-            INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-            SELECT id,'captured',printf('run_%032x',cast(substr(id,2) AS integer)),1,'{}' FROM agent_sessions;
-            UPDATE agent_sessions SET current_capture=(SELECT seq FROM session_events WHERE session_id=agent_sessions.id);
-            UPDATE flow_sessions SET pending_session_id='s'||substr(id,2);
-            COMMIT;").unwrap();
-        for sql in indexes {
-            conn.execute_batch(&sql).unwrap();
-        }
-        let mut cases = Vec::new();
-        for (offset, search) in [(0, None), (4500, None), (5100, None), (0, Some("absent"))] {
-            let filter = SessionFilter {
-                offset,
-                limit: 100,
-                search: search.map(str::to_owned),
-                ..SessionFilter::default()
-            };
-            let (page, values) = super::inventory_query(&filter, super::SUMMARY_SELECT).unwrap();
-            let sql = super::summary_query(&page, filter.after.is_some());
-            let plan: Vec<String> = conn
-                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-                .unwrap()
-                .query_map(rusqlite::params_from_iter(&values), |row| row.get(3))
-                .unwrap()
-                .map(Result::unwrap)
-                .collect();
-            assert!(
-                plan.iter()
-                    .any(|line| line.contains("SEARCH f USING COVERING INDEX flow_pending_review")),
-                "{plan:?}"
-            );
-            for index in ["session_driver_exit", "session_turn_attention"] {
-                assert!(plan.iter().any(|line| line.contains(index)), "{plan:?}");
-            }
-            let started = std::time::Instant::now();
-            let ids: Vec<String> = conn
-                .prepare(&sql)
-                .unwrap()
-                .query_map(rusqlite::params_from_iter(&values), |row| row.get(0))
-                .unwrap()
-                .map(Result::unwrap)
-                .collect();
-            assert_eq!(
-                ids.len(),
-                if search.is_some() || offset > 5000 {
-                    0
-                } else {
-                    100
-                }
-            );
-            println!("bundled SQLite {} offset={offset} search={search:?} indexed_ms={} rows={} plan={plan:?}",
-                rusqlite::version(), started.elapsed().as_secs_f64()*1000.0, ids.len());
-            cases.push((sql, values, ids));
-        }
-        conn.execute_batch("DROP INDEX flow_pending_review")
-            .unwrap();
-        for (sql, values, expected) in cases {
-            let started = std::time::Instant::now();
-            let ids: Vec<String> = conn
-                .prepare(&sql)
-                .unwrap()
-                .query_map(rusqlite::params_from_iter(values), |row| row.get(0))
-                .unwrap()
-                .map(Result::unwrap)
-                .collect();
-            assert_eq!(
-                ids, expected,
-                "Index must preserve historical/review row selection"
-            );
-            println!(
-                "unindexed_ms={} rows={}",
-                started.elapsed().as_secs_f64() * 1000.0,
-                ids.len()
-            );
-        }
-    }
-
-    #[test]
-    fn session_metadata_survives_unreadable_detail_without_weakening_exact_reads() {
+    fn session_metadata_reads_its_flow_from_the_exec_that_captured_its_input() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let input = crate::session_record::new_artifact_key();
+        let driver = store.test_flow("retained", "/unavailable", &[("implement", None)], None);
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,
-                position_version,updated_at,state,current_capture)
-                VALUES('flow',?1,'/unavailable',0,0,1,1,'current',NULL)",
-                params![
-                    json!({"id":"flow","flow":"retained","steps":"invalid capture"}).to_string()
-                ],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO agent_sessions(id,title,title_source,created_at,kind,
-                interactive,input_published,cwd,flow_session_id,request)
-                VALUES('session','Session','human',1,'conversation',1,1,'/unavailable','flow',?1)",
+                "INSERT INTO agent_sessions(id,title,title_source,created_at,
+                interactive,input_published,cwd,request)
+                VALUES('session','Session','human',1,1,1,'/unavailable',?1)",
                 params!["large request".repeat(1000)],
             )
             .unwrap();
-            super::test_capture(&conn, "session", &input);
-            conn.execute("UPDATE flow_sessions SET current_capture=(SELECT current_capture FROM agent_sessions WHERE id='session') WHERE id='flow'", []).unwrap();
+            // The step Exec captured this conversation's input.
+            conn.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload)
+                 VALUES('session','captured',?1,(SELECT id FROM execs WHERE parent_exec_id=?2),1,
+                    json_object('artifact_key',?1))",
+                params![input, driver],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET current_capture=?1 WHERE id='session'",
+                [conn.last_insert_rowid()],
+            )
+            .unwrap();
             conn.execute(
                 "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
                 VALUES('session','observed',?1,1,'not JSON',(SELECT current_capture FROM agent_sessions WHERE id='session'))",
@@ -1546,33 +1575,46 @@ mod metadata_tests {
             )
             .unwrap();
         }
-        let rows = store.session_summaries(&SessionFilter::default()).unwrap();
+        // Listing reads the Flow from Execs and survives unreadable detail.
+        let rows = store
+            .session_summaries(&SessionFilter::default(), 0)
+            .unwrap();
         assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].flow_id.as_deref(), Some(driver.as_str()));
+        let flow = rows[0].flow.as_ref().unwrap();
         assert_eq!(
-            rows[0].flow.as_ref().unwrap().name.as_deref(),
-            Some("retained")
+            (flow.name.as_str(), flow.state),
+            ("retained", FlowSummaryState::Current)
         );
-        assert_eq!(rows[0].node, None);
-        assert!(
-            store.flow("flow").is_err(),
-            "An exact action still validates the capture"
+        assert!(rows[0].flow_step_latest);
+        assert_eq!(
+            store
+                .session("session")
+                .unwrap()
+                .unwrap()
+                .flow_id
+                .as_deref(),
+            Some(driver.as_str())
         );
         assert!(
             store.input_events(&input).is_err(),
             "Exact history still reports corrupt payload"
         );
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute("UPDATE flow_sessions SET invocation_json=?1,state='completed',ended_at=2 WHERE id='flow'",
-                [json!({"id":"flow","flow":"renamed","steps":"invalid capture"}).to_string()]).unwrap();
-        }
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE execs SET outcome='succeeded',completed_at=2 WHERE id=?1",
+                params![driver],
+            )
+            .unwrap();
         let flow = store
-            .session_summary("session")
+            .session_summary("session", 0)
             .unwrap()
             .unwrap()
             .flow
             .unwrap();
-        assert_eq!(flow.name.as_deref(), Some("renamed"));
         assert_eq!(flow.state, FlowSummaryState::Completed);
     }
 
@@ -1594,7 +1636,7 @@ mod metadata_tests {
         };
         assert!(
             !store
-                .session_summary("imported")
+                .session_summary("imported", 0)
                 .unwrap()
                 .unwrap()
                 .independent
@@ -1606,7 +1648,7 @@ mod metadata_tests {
         }
         assert!(
             store
-                .session_summary("imported")
+                .session_summary("imported", 0)
                 .unwrap()
                 .unwrap()
                 .independent
@@ -1618,7 +1660,7 @@ mod metadata_tests {
             .is_err());
         assert!(
             store
-                .session_summary("imported")
+                .session_summary("imported", 0)
                 .unwrap()
                 .unwrap()
                 .independent
@@ -1626,31 +1668,24 @@ mod metadata_tests {
     }
 
     #[test]
-    fn session_metadata_filters_before_decoding_and_preserves_explicit_membership() {
+    fn session_metadata_filters_and_preserves_explicit_membership() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            for (id, title, interactive, repo, iterations, membership) in [
-                ("a", "Alpha%", true, "/repo", None, Some("independent")),
-                ("b", "Beta", true, "/repo", None, None),
-                ("headless", "Headless", false, "/repo", None, None),
-                (
-                    "foreign",
-                    "Foreign",
-                    true,
-                    "/other",
-                    Some("bad metadata"),
-                    None,
-                ),
-                ("later", "Zulu", true, "/repo", Some("bad metadata"), None),
+            for (id, title, interactive, repo, membership) in [
+                ("a", "Alpha%", true, "/repo", Some("independent")),
+                ("b", "Beta", true, "/repo", None),
+                ("headless", "Headless", false, "/repo", None),
+                ("foreign", "Foreign", true, "/other", None),
+                ("later", "Zulu", true, "/repo", None),
             ] {
                 let input = crate::session_record::new_artifact_key();
                 conn.execute(
-                    "INSERT INTO agent_sessions(id,title,title_source,created_at,kind,
-                    interactive,input_published,cwd,repo,iterations)
-                    VALUES(?1,?2,'human',1,'conversation',?3,1,'/unavailable',?4,?5)",
-                    params![id, title, interactive, repo, iterations],
+                    "INSERT INTO agent_sessions(id,title,title_source,created_at,
+                    interactive,input_published,cwd,repo)
+                    VALUES(?1,?2,'human',1,?3,1,'/unavailable',?4)",
+                    params![id, title, interactive, repo],
                 )
                 .unwrap();
                 super::test_capture(&conn, id, &input);
@@ -1668,7 +1703,7 @@ mod metadata_tests {
             limit: 2,
             ..SessionFilter::default()
         };
-        let rows = store.session_summaries(&filter).unwrap();
+        let rows = store.session_summaries(&filter, 0).unwrap();
         assert_eq!(
             rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
             ["a", "b"]
@@ -1677,21 +1712,24 @@ mod metadata_tests {
         assert!(!rows[1].independent);
         filter.search = Some("%".into());
         assert_eq!(
-            store.session_summaries(&filter).unwrap().len(),
+            store.session_summaries(&filter, 0).unwrap().len(),
             1,
             "Contains search is literal"
         );
         filter.search = Some("ALPHA".into());
-        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "a");
+        assert_eq!(store.session_summaries(&filter, 0).unwrap()[0].id, "a");
         filter.search = None;
         filter.interactive = Some(false);
-        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "headless");
+        assert_eq!(
+            store.session_summaries(&filter, 0).unwrap()[0].id,
+            "headless"
+        );
         filter.interactive = Some(true);
         filter.offset = 1;
         filter.limit = 1;
-        assert_eq!(store.session_summaries(&filter).unwrap()[0].id, "b");
+        assert_eq!(store.session_summaries(&filter, 0).unwrap()[0].id, "b");
         filter.after = Some(String::new());
-        let first = store.session_summaries(&filter).unwrap();
+        let first = store.session_summaries(&filter, 0).unwrap();
         assert_eq!(first[0].id, "a");
         store
             .conn
@@ -1703,14 +1741,14 @@ mod metadata_tests {
             )
             .unwrap();
         filter.after = Some(first[0].id.clone());
-        let second = store.session_summaries(&filter).unwrap();
+        let second = store.session_summaries(&filter, 0).unwrap();
         assert_eq!(second[0].id, "b");
         assert_eq!(second[0].title, "000 renamed");
         filter.after = Some(String::new());
         filter.limit = 2;
         assert_eq!(
             store
-                .session_summaries(&filter)
+                .session_summaries(&filter, 0)
                 .unwrap()
                 .iter()
                 .map(|row| row.id.as_str())

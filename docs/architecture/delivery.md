@@ -47,8 +47,8 @@ The exact landing fence is modeled in
 
 `lf checkout` resolves one existing Linear Issue inside one Project and
 creates or reuses its managed worktree and first serial PR record. It starts no
-execution. `lf --task ISSUE flow start` uses the same substrate and additionally
-launches a fresh Flow there. The repository identity—not the caller's
+execution. `lf task run ISSUE` uses the same substrate and additionally
+runs a fresh Flow there. The repository identity—not the caller's
 current directory spelling—selects the Git directory and sibling worktree
 namespace.
 
@@ -58,7 +58,7 @@ they do not edit product files in substitute worktrees.
 A dependent change that must begin before its parent merges uses another Task:
 
 ```bash
-lf --task INF-124 flow start --stack-on INF-123
+lf task run INF-124 --stack-on INF-123
 ```
 
 The child records its fork point and targets the parent's active PR branch.

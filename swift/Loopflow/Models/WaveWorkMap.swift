@@ -18,17 +18,18 @@ public enum ProjectStatus: String, Decodable, Sendable, Hashable {
 }
 
 public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
+    public let current: Bool
     public let id: String
     public let workId: String?
     public let slug: String
     public let name: String
-    public let flow: String
+    public let workflow: String
     public let status: ProjectStatus
     public let metricTargets: [ChapterMetricTarget]
     public let krs: [PlanningKeyResult]
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, flow, status, krs
+        case id, slug, name, workflow, status, krs, current
         case workId = "work_id"
         case metricTargets = "metric_targets"
     }
@@ -36,7 +37,7 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
 
 extension WorkEvidence where Item == ProjectPlanningSnapshot {
     public var currentProject: ProjectPlanningSnapshot? {
-        let current = items.filter { $0.status == .started }
+        let current = items.filter { $0.current }
         return current.count == 1 ? current[0] : nil
     }
 }
@@ -103,7 +104,9 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
 
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let workId: String
-    public let status: WorkStatus
+    public let status: TaskState
+    /// Linear calls the Task complete while it is active here.
+    public let planningConflict: String?
     public let reason: String
     public let updatedAt: String
     public let provider: String
@@ -113,6 +116,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case status, reason, provider, started
         case workId = "work_id"
+        case planningConflict = "planning_conflict"
         case updatedAt = "updated_at"
     }
 }
@@ -122,7 +126,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
 /// Task Work and remains after execution finishes.
 public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
     public let issueUrl: URL?
-    public let workspace: TaskWorkspaceSnapshot?
+    public let workspace: TaskWorktreeSnapshot?
 
     enum CodingKeys: String, CodingKey {
         case workspace
@@ -130,7 +134,7 @@ public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-public struct TaskWorkspaceSnapshot: Decodable, Sendable, Hashable {
+public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
     public let homeId: String?
     public var identity: WorkspaceIdentity? { homeId.map { WorkspaceIdentity(homeId: $0, worktree: worktree) } }
     public let slug: String
@@ -255,12 +259,15 @@ public struct TaskConditionSnapshot: Decodable, Sendable, Hashable {
     public let observedAt: String
     public let evidenceAgeSeconds: Int?
     public let localProgress: LocalProgressEvidence
+    /// Started work a finished plan has not settled; keeps a terminal Task current.
+    public let unresolvedExecution: Bool
 
     enum CodingKeys: String, CodingKey {
         case state, reason
         case observedAt = "observed_at"
         case evidenceAgeSeconds = "evidence_age_secs"
         case localProgress = "local_progress"
+        case unresolvedExecution = "unresolved_execution"
     }
 }
 

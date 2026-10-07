@@ -52,7 +52,7 @@ impl Fixture {
                 items: vec![],
             },
         };
-        self.store.put_pm_snapshot(row.clone()).await.unwrap();
+        self.store.put_pm_snapshot(row.clone(), None).await.unwrap();
         row
     }
 }
@@ -114,7 +114,7 @@ async fn pm_read_linear_oauth_recovers() {
     let project = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
-            flow: "feature".into(),
+            workflow: "feature".into(),
             status: crate::pm::ProjectStatus::Started,
             id: LinearProjectId::new("project-1").unwrap(),
             slug: "reliability".into(),
@@ -159,7 +159,7 @@ async fn pm_read_linear_oauth_recovers() {
         }]}}})),
         json_response(StatusCode::OK, json!({"data":{"initiative":{"projects":{
             "nodes":[{"id":"project-1", "name":"Product — Reliability", "description":"", "status":{"type":"started"},
-            "content":"flow: feature\n\n## Definition\n\nFresh definition.\n\n## KRs\n\n- [ ] Fresh proof",
+            "content":"workflow: feature\n\n## Definition\n\nFresh definition.\n\n## KRs\n\n- [ ] Fresh proof",
             "initiatives":{"nodes":[{"id":"initiative-1"}]}, "teams":{"nodes":[{"id":"team-1"}]}}],
             "pageInfo":{"hasNextPage":false,"endCursor":null}
         }}}})),
@@ -193,7 +193,7 @@ async fn pm_read_linear_oauth_recovers() {
     assert!(refreshed.updated_at >= project.updated_at);
     assert_eq!(refreshed.plan.id, project.plan.id);
     assert_eq!(refreshed.plan.status, crate::pm::ProjectStatus::Started);
-    assert_eq!(refreshed.plan.flow, "feature");
+    assert_eq!(refreshed.plan.workflow, "feature");
     assert!(refreshed.plan.prompt_context.contains("Fresh proof"));
     assert!(refreshed.plan.pm_snapshot_synced_at > project.plan.pm_snapshot_synced_at);
     assert_eq!(

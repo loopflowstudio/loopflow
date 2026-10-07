@@ -12,49 +12,21 @@ func fixtureWorkspace(_ path: String) -> WorkspaceIdentity {
 @Suite("Worktree workspaces")
 @MainActor
 struct WorktreeWorkspaceTests {
-    @Test("Single-Session entry hides the sidebar without reacting to later arrivals")
-    func initialSessionSidebar() {
-        let single = SessionsWorkspace()
-        single.initializeMaterials(sessionCount: 0)
-        single.initializeMaterials(sessionCount: 1)
-        #expect(!single.showsMaterials)
-        single.initializeMaterials(sessionCount: 3)
-        #expect(!single.showsMaterials)
-        single.showsMaterials = true
-        single.initializeMaterials(sessionCount: 1)
-        #expect(single.showsMaterials)
-
-        let multiple = SessionsWorkspace()
-        multiple.initializeMaterials(sessionCount: 2)
-        #expect(multiple.showsMaterials)
-        multiple.showsMaterials = false
-        multiple.initializeMaterials(sessionCount: 3)
-        #expect(!multiple.showsMaterials)
-    }
-
-    @Test("Files follow focus while the workspace view is absent")
-    func focusRetainsFilePreference() {
-        let workspace = SessionsWorkspace()
-        let panes = workspace.multiplexer
-        workspace.showsFiles = true
-        workspace.fileWidth = 620
-        panes.reveal(sessionId: "design")
-        let design = panes.focusedPaneId
-        panes.toggleZoom(design)
-        #expect(!workspace.showsFiles)
-        panes.setCollapsed(paneId: design, collapsed: true)
-        #expect(workspace.showsFiles)
-        panes.toggleZoom(design)
-        panes.removeSessions(["design"])
-        #expect(workspace.showsFiles)
-        #expect(workspace.fileWidth == 620)
-        #expect(panes.zoomedPaneId == nil)
-        #expect(panes.focusedPane.content == .empty)
-
-        workspace.showsFiles = false
-        workspace.toggleFocus(panes.focusedPaneId)
-        workspace.toggleFocus(panes.focusedPaneId)
-        #expect(!workspace.showsFiles)
+    @Test("Files and the Flow exec log open as panes beside a Session and are revealed, not duplicated")
+    func taskPanes() {
+        let panes = SessionsWorkspace().multiplexer
+        panes.show(.files(taskId: "task"))
+        #expect(panes.layout.allPanes.map(\.content) == [.files(taskId: "task")])
+        panes.load(sessionId: "design")
+        panes.show(.flowLog(taskId: "task"))
+        #expect(panes.layout.allPanes.map(\.content)
+            == [.files(taskId: "task"), .session(id: "design"), .flowLog(taskId: "task")])
+        let log = panes.focusedPaneId
+        panes.setCollapsed(paneId: log, collapsed: true)
+        panes.show(.flowLog(taskId: "task"))
+        #expect(panes.layout.allPanes.count == 3)
+        #expect(panes.focusedPaneId == log)
+        #expect(!panes.collapsedPaneIds.contains(log))
     }
 
     @Test("Equal paths on different Homes retain separate layouts and documents")
@@ -65,7 +37,6 @@ struct WorktreeWorkspaceTests {
         let first = registry.workspace(for: local)
         let other = registry.workspace(for: remote)
         first.multiplexer.newShell(command: ["server"])
-        first.showsFiles = true
         let files = first.files(taskId: "task", issue: "TASK", cwd: "/repo")
         let document = files.document("note.txt")
         document.editor.string = "draft"
@@ -75,11 +46,7 @@ struct WorktreeWorkspaceTests {
         #expect(outer.layout.slots.compactMap(\.path) == [local, remote])
         #expect(other.multiplexer.focusedPane.content == .empty)
         #expect(other.files(taskId: "task", issue: "TASK", cwd: "/repo") !== files)
-        first.toggleFocus(first.multiplexer.focusedPaneId)
-        #expect(!first.showsFiles)
         outer.select(local)
-        first.toggleFocus(first.multiplexer.focusedPaneId)
-        #expect(first.showsFiles)
         #expect(first.files(taskId: "task", issue: "TASK", cwd: "/repo").document("note.txt") === document)
         #expect(document.editor.string == "draft")
     }
@@ -204,7 +171,7 @@ struct WorktreeWorkspaceTests {
         let store = MultiplexerStore()
         store.newShell()
         let shell = store.focusedPaneId
-        store.newShell(command: ["lf", "--mode", "interactive", ":", "hello"])
+        store.newShell(command: ["lf", "--interactive", ":", "hello"])
         #expect(store.layout.allPanes.count == 2)
         #expect(store.layout.pane(for: shell)?.content == .shell)
         #expect(store.shellCommands[shell] == [])
@@ -227,9 +194,9 @@ struct ConversationLaunchTests {
         for (scope, binding, subject) in cases {
             let launch = ConversationLaunch(scope: scope)
             let command = launch.arguments(lf: "/App/lf")
-            #expect(Array(command.dropFirst(3).dropLast(2)) == binding)
+            #expect(Array(command.dropFirst(2).dropLast(2)) == binding)
             #expect(command.last?.contains(subject) == true)
-            #expect(command.contains("interactive"))
+            #expect(command.contains("--interactive"))
             #expect(!command.contains("tui"))
             #expect(!command.contains("ide"))
             #expect(!command.contains("wave/operate"))

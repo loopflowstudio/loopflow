@@ -1,7 +1,6 @@
 [
   {
-    "kind": "conversation",
-    "state": "waiting",
+    "state": "unknown",
     "actions": [
       {
         "kind": "open",
@@ -12,7 +11,6 @@
     ]
   },
   {
-    "kind": "conversation",
     "state": "active",
     "actions": [
       {
@@ -30,43 +28,6 @@
     ]
   },
   {
-    "kind": "conversation",
-    "state": "closed",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      }
-    ]
-  },
-  {
-    "kind": "flow",
-    "state": "waiting",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      }
-    ]
-  },
-  {
-    "kind": "flow",
-    "state": "active",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      }
-    ]
-  },
-  {
-    "kind": "flow",
     "state": "closed",
     "actions": [
       {

@@ -34,7 +34,9 @@ struct MockWaveFixtureTests {
 
     @Test("the selected Wave decodes into the populated detail hierarchy with verbatim lenses")
     func selectedDetailHierarchy() throws {
-        let detail = try #require(MockWaveFixture.selectedWaveDetail())
+        let detail = try JSONDecoder().decode(
+            WaveDetailSnapshot.self, from: Data(MockWaveFixture.detailJSON.utf8)
+        )
         let workMap = detail.workMap
 
         #expect(workMap.objective == "Make releases boring.")

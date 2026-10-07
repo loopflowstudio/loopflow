@@ -3,12 +3,8 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::engine::invocation::{QueuedInvocation, StepKind, StepRef};
-use crate::engine::ConcreteStep;
 use crate::id::WaveId;
 
-/// The exact active Run named by an in-Run process.
-pub const RUN_ID_ENV: &str = "LF_RUN_ID";
 macro_rules! durable_id {
     ($name:ident, $prefix:literal) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -124,203 +120,6 @@ pub struct Placement {
     pub placed_at: OffsetDateTime,
 }
 
-#[cfg(test)]
-pub(crate) fn test_flow_invocation(
-    flow: &str,
-    step_index: u32,
-    step: &str,
-    node_id: Option<&str>,
-    human: bool,
-) -> QueuedInvocation {
-    let steps = (0..=step_index)
-        .map(|index| {
-            let target = index == step_index;
-            let name = if target {
-                step.to_string()
-            } else {
-                format!("before-{index}")
-            };
-            crate::engine::ConcreteStep::Skill(crate::engine::ConcreteSkill {
-                skill: crate::engine::Skill::named(&name),
-                id: target.then(|| node_id.map(str::to_string)).flatten(),
-                human: target && human,
-                repeat: None,
-                sources: Vec::new(),
-            })
-        })
-        .collect();
-    QueuedInvocation::new(flow, steps).expect("test Flow invocation has a step")
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskFlowBlocker {
-    pub captured: Option<i64>,
-    pub reason: String,
-    #[serde(with = "time::serde::rfc3339")]
-    pub observed_at: OffsetDateTime,
-}
-
-impl TaskFlowBlocker {
-    pub fn now(reason: impl Into<String>) -> Self {
-        Self {
-            captured: None,
-            reason: reason.into(),
-            observed_at: OffsetDateTime::now_utc(),
-        }
-    }
-}
-
-/// Read projection of the Flow's selected capture and its Session publication.
-/// The recorder outcome is historical evidence, not native turn settlement.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FlowAttempt {
-    pub captured: i64,
-    pub run_id: String,
-    pub published: bool,
-    pub outcome: Option<String>,
-}
-
-impl FlowAttempt {
-    pub fn completed(&self) -> bool {
-        self.outcome.as_deref() == Some("completed")
-    }
-}
-
-/// Launch authority captured before starting a native turn. Observers and
-/// conversation continuations do not receive this Flow capability.
-#[derive(Debug, Clone)]
-pub struct FlowTurnSelection {
-    pub output: Option<crate::engine::flow_output::FlowOutput>,
-    pub flow_id: String,
-    pub version: u64,
-    pub session_id: String,
-    pub after: i64,
-}
-
-/// One Flow invocation as its row holds it: the captured graph, the cursor,
-/// the launch facts, the current attempt and the failure. Its driving process
-/// owns the live cursor; the row is evidence, never a restart instruction.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FlowSession {
-    pub invocation: QueuedInvocation,
-    pub cursor: crate::engine::ExecutionCursor,
-    pub version: u64,
-    pub task_id: Option<TaskId>,
-    pub wave_id: Option<WaveId>,
-    pub cwd: std::path::PathBuf,
-    pub message: Option<String>,
-    pub model: Option<String>,
-    pub current_attempt: Option<FlowAttempt>,
-    pub pending_session_id: Option<String>,
-    pub failure: Option<TaskFlowBlocker>,
-    pub finished: bool,
-    pub updated_at: OffsetDateTime,
-}
-
-impl FlowSession {
-    pub fn id(&self) -> &str {
-        &self.invocation.id
-    }
-
-    pub fn current_step(&self) -> Option<&ConcreteStep> {
-        let (steps, cursor) = self.cursor.current_body(&self.invocation.steps);
-        steps.get(cursor.index)
-    }
-
-    pub fn current_plan(&self) -> &ConcreteStep {
-        self.current_step()
-            .expect("a persisted Flow position always selects a validated step")
-    }
-
-    pub fn current_checked(&self) -> Option<StepRef> {
-        let (step, kind, id, human, repeat) = match self.current_step()? {
-            ConcreteStep::Skill(skill) => (
-                skill.skill.name.clone(),
-                StepKind::Skill,
-                skill.id.clone(),
-                skill.human,
-                skill.repeat.clone(),
-            ),
-            ConcreteStep::Command(command) => {
-                (command.item.display_name(), StepKind::Op, None, false, None)
-            }
-            ConcreteStep::Xor(branch) => {
-                (branch.router.name.clone(), StepKind::Xor, None, false, None)
-            }
-        };
-        Some(StepRef {
-            invocation_id: self.invocation.id.clone(),
-            flow: self.invocation.flow.clone(),
-            step,
-            kind,
-            id,
-            human,
-            repeat,
-            index: u32::try_from(self.cursor.index).ok()?,
-            total: u32::try_from(self.invocation.steps.len()).ok()?,
-            iteration: self.cursor.iteration,
-        })
-    }
-
-    pub fn current(&self) -> StepRef {
-        self.current_checked()
-            .expect("a persisted Flow position always selects a validated step")
-    }
-
-    pub fn is_human(&self) -> bool {
-        matches!(self.current_step(), Some(ConcreteStep::Skill(skill)) if skill.human)
-    }
-
-    pub fn is_decision(&self) -> bool {
-        match self.current_step() {
-            Some(ConcreteStep::Xor(_)) => true,
-            Some(ConcreteStep::Skill(skill)) => skill.repeat.is_some(),
-            _ => false,
-        }
-    }
-
-    /// A decision or route its Run recorded that the driver has not settled.
-    pub fn has_pending_decision(&self) -> bool {
-        let leaf = self.cursor.leaf();
-        match self.current_step() {
-            Some(ConcreteStep::Skill(skill)) => {
-                skill.repeat.is_some() && leaf.progress.verdict.is_some()
-            }
-            Some(ConcreteStep::Xor(_)) => leaf.route.is_some(),
-            _ => false,
-        }
-    }
-
-    /// The name a step is reported by.
-    pub fn step_name(&self) -> Option<String> {
-        Some(match self.current_step()? {
-            ConcreteStep::Skill(skill) => skill.skill.name.clone(),
-            ConcreteStep::Command(op) => format!("op: {}", op.item.display_name()),
-            ConcreteStep::Xor(branch) => branch.router.name.clone(),
-        })
-    }
-
-    /// The Run a pending review's agent is running in, once launched.
-    pub fn review_artifact_key(&self) -> Option<&String> {
-        self.current_attempt
-            .as_ref()
-            .filter(|attempt| attempt.published)
-            .map(|attempt| &attempt.run_id)
-    }
-
-    /// The Work the Flow was launched with, as its Runs declare it.
-    pub fn declared_work(&self) -> Option<crate::session::SessionWork> {
-        if self.task_id.is_none() && self.wave_id.is_none() {
-            return None;
-        }
-        Some(crate::session::SessionWork {
-            task_id: self.task_id.clone(),
-            wave_id: self.wave_id.clone(),
-            source: crate::session::WorkSource::Declared,
-        })
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum Author {
@@ -416,6 +215,65 @@ impl std::fmt::Display for WorkStatus {
     }
 }
 
+/// A Task's state, read from where it stands on its Workflow. Abandoned is
+/// the Task's own mark and outranks its position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskState {
+    /// The Task has taken up no Workflow.
+    NotReady,
+    /// At `start`.
+    Ready,
+    /// At a node or on an edge between `start` and `end`.
+    Active,
+    /// At `end`.
+    Done,
+    Abandoned,
+}
+
+impl TaskState {
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            Self::NotReady => "not_ready",
+            Self::Ready => "ready",
+            Self::Active => "active",
+            Self::Done => "done",
+            Self::Abandoned => "abandoned",
+        }
+    }
+
+    pub(crate) fn parse(label: &str) -> Option<Self> {
+        [
+            Self::NotReady,
+            Self::Ready,
+            Self::Active,
+            Self::Done,
+            Self::Abandoned,
+        ]
+        .into_iter()
+        .find(|state| state.label() == label)
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Done | Self::Abandoned)
+    }
+
+    /// The Task as Work: open until it is done or abandoned.
+    pub(crate) fn work_status(&self) -> WorkStatus {
+        match self {
+            Self::NotReady | Self::Ready | Self::Active => WorkStatus::Ready,
+            Self::Done => WorkStatus::Done,
+            Self::Abandoned => WorkStatus::Abandoned,
+        }
+    }
+}
+
+impl std::fmt::Display for TaskState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.label().replace('_', " "))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbandonReceipt {
     pub work: WorkRef,
@@ -424,7 +282,7 @@ pub struct AbandonReceipt {
     pub abandoned_at: OffsetDateTime,
 }
 
-/// Query values for retained FlowSession discovery; none carries driver authority.
+/// Query values for Flow discovery; none carries driver authority.
 #[derive(Debug, Clone, Default)]
 pub struct FlowFilter {
     pub repo: Option<String>,
@@ -449,7 +307,8 @@ pub struct FlowPage {
     pub next: Option<String>,
 }
 
-/// One exact saved capture. History and provider outcomes retain their own APIs.
+/// One Flow drawn from its Execs: the authored graph while its steps still fit
+/// it, else the sequence the steps recorded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowDetail {
     pub entry: FlowInventoryEntry,
@@ -457,9 +316,34 @@ pub struct FlowDetail {
     pub current: Option<u32>,
     pub completed: Vec<u32>,
     pub returns: Vec<crate::engine::flow_graph::FlowReturn>,
-    pub version: u64,
-    pub cwd: std::path::PathBuf,
-    pub failure: Option<TaskFlowBlocker>,
+    /// Per-edge counts at each active nesting level, outermost first.
+    pub iterations: Vec<Vec<u32>>,
+    pub cwd: Option<std::path::PathBuf>,
+    /// Every step the driver launched, in order.
+    pub steps: Vec<FlowStepExec>,
+}
+
+/// One launched step and how its process ended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowStepExec {
+    pub exec_id: crate::id::ExecId,
+    pub label: String,
+    pub key: u32,
+    pub iterations: Vec<Vec<u32>>,
+    pub started_at: i64,
+    pub completed_at: Option<i64>,
+    pub outcome: Option<String>,
+    pub exit_code: Option<i32>,
+}
+
+impl FlowStepExec {
+    /// The step's label with the pass any returned loop is on: "implement · pass 2".
+    pub fn position(&self) -> String {
+        match crate::engine::flow_graph::loop_passes(&self.iterations) {
+            Some(passes) => format!("{} · {passes}", self.label),
+            None => self.label.clone(),
+        }
+    }
 }
 
 #[cfg(test)]

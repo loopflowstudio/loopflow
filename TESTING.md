@@ -355,7 +355,8 @@ actor. A newer local compiler's pass does not establish older-toolchain support.
 SwiftPM links GhosttyKit; the Xcode project builds the terminal fallback.
 Keep tests that reference Ghostty-only types or helpers inside
 `#if canImport(GhosttyKit)`. Keep file-local helpers inside the enclosing
-whole-file platform gate. When changing terminal code or its tests, gate both
+whole-file platform gate. App code outside `#if GHOSTTY_ENABLED` compiles in
+the fallback too: a type it names must also live outside that block. When changing terminal code or its tests, gate both
 build configurations: run the headless Swift suite and
 `uv run python scripts/test.py --loopflow`. A SwiftPM pass alone does not prove
 the Xcode test target compiles.
@@ -518,19 +519,18 @@ The fixture asserts that this scheduling point was reached. This is controlled
 ordering evidence, not a claim about how long a hosted signal handler paused.
 Other Unix platforms exercise the ordinary interruption path.
 
-Exercise native Flow recovery with real Codex and a local Responses fixture:
+Exercise a deciding step's structured output with real Codex and a local
+Responses fixture:
 
 ```bash
 uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
-  --lf target/debug/lf --launch --flow-driver-loss completed \
-  --output .lf/tmp/native-flow-completed
+  --lf target/debug/lf --launch --flow-decision-retry replace \
+  --output .lf/tmp/native-flow-decision
 ```
 
-Use `--flow-driver-loss running` for a surviving turn during public resume,
-`--flow-driver-loss both` for explicit retry after both driver and engine die,
-`--flow-decision-retry missing|replace` for native structured-output exhaustion
-or successful retry, `--flow-blocked` for keyed feedback continuation, and
-`--public-connect` for a live headless-to-terminal handoff.
+`--flow-decision-retry missing` exhausts the corrections of an invalid answer;
+`replace` proves a failed turn decides nothing. `--public-connect` covers a
+live headless-to-terminal handoff.
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
 in as one stored account at a time: switching, saved-back logins, isolation,
 and provider conversation IDs in `lf session`.
@@ -565,7 +565,7 @@ main Home. Children use the same Home and executable; PATH cannot choose a
 second store. A Home's database is always `$LF_HOME/loopflow.db`.
 
 When editing the repeated Task body, exercise every step on two passes and
-saved-decision recovery. Keep loop-decide after work and review so navigation
+saved-decision recovery. Keep loop-or-next after work and review so navigation
 cannot skip a later review.
 
 Include the CLI/desktop unblock projection when changing builtin Flow composition:
@@ -575,7 +575,7 @@ cargo test -p loopflow --test task_initialization_tests task_live_unblock
 ```
 
 Fixtures targeting a named boundary should resolve its node ID in the expanded
-invocation. A hard-coded step index can silently select a different skill when
+graph. A hard-coded step index can silently select a different skill when
 a nested Flow gains a step.
 
 For worktree creation or checkout-refresh changes, build the current CLI before
@@ -628,6 +628,8 @@ After editing embedded skills, directions, surfaces, or prompt assembly, run
 the Rust golden prompt check even for Markdown-only changes. If the mismatch
 reflects the intended prompt change, regenerate the snapshots, review their
 diff, and rerun the check before gate.
+Terminology-only replacements count as prompt changes; include the golden
+check in their focused verification even when no prompt assembly code changed.
 
 ```bash
 cargo test -p loopflow --test golden_prompt
@@ -730,9 +732,9 @@ toolchain explicitly.
 CLI owner-tree changes must include `cargo test -p loopflow --lib engine::flow_graph::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.
-Task status and automation must also handle the saved cursor past the last step
-while completion is still pending. Run `cargo test -p loopflow --lib ops::task_execution::tests`
-for that boundary; a fast mechanical Flow can finish while its start command reads status.
+Task status reads a Flow from its Execs and their processes. Run
+`cargo test -p loopflow --lib ops::task_execution::tests` for running, between
+steps, stopped and failed.
 Managed Task fixtures must bind the checkout's Team and Initiative before
 creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
 
@@ -752,7 +754,7 @@ product contract; its two cross-store promotion/continuation cases were removed.
 
 The adoption case starts with planning and no Task row. Public checkout/run
 reuse a dirty existing Git worktree or fetch an open PR's unseen remote branch,
-retain the PR identity, and preserve a saved later Flow cursor after source
+retain the PR identity, and leave an earlier Flow's Execs untouched after source
 changes. Linear planning and GitHub reads are fixtures; Git and CLI paths are real.
 
 The disposable OS account authors fixture installation records for routing proofs;
@@ -870,6 +872,29 @@ installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
 
+### Released capture-history preservation
+
+```bash
+uv run python tests/e2e/capture_history.py \
+  --released-archive /tmp/lf-aarch64-apple-darwin.tar.gz \
+  --candidate target/debug/lf
+```
+
+Supply the matching v0.13.3 CLI archive from its published release. The fixture
+checks its pinned SHA256 before extraction, creates a temporary Home with stub
+providers, and exercises ordinary public commands with both binaries. It preserves
+capture paths/bytes, native identity, usage and released review feedback through
+candidate reads, replay, resume, review settlement and nested Exec ancestry.
+`runs/` remains the one opaque capture root; no migration or installation runs.
+Provider and terminal transport are simulated, so this is not installed acceptance.
+
+Pair this with `session_lifecycle_tests`' interruption, nested Task attribution and
+review replacement cases and `session_cli_tests`' stale actor/identity cases.
+Full affected verification belongs to gate. Do not run installation preflight or
+promotion fixtures on a host account merely by overriding HOME/LF_HOME: installation
+uses getpwuid. The three tests named in LOO-370's current isolation steer remain
+isolated-CI owned until PR #1444's disposable-account runner is integrated.
+
 ## Nightly Package Tests
 
 `.github/workflows/nightly-packages.yml` builds the same native `lf` tarballs as the release workflow. Each runner extracts its tarball and runs:
@@ -909,20 +934,16 @@ They check retained review identity/capture and the current Project's custom Flo
 default. Synthetic migration success does not authorize conversion of an installed
 Home or prove configured-provider resumption.
 
-When changing Flow step or prepared-input ownership, include the FlowSession
-store tests and the public Session lifecycle proofs. Review boundaries reserve a
-captured Session event before provider launch; fixtures must start that retained
-input instead of binding a fresh capture. A successful provider completion is
-selected by its exact Session event; an Exec exit alone cannot settle agent work.
+When changing how a Flow step is described or read back, include the step
+argument and Exec inventory tests and the public Session lifecycle proofs. A
+Flow is its driver Exec and step Execs; assert on those Execs and on the Session
+turn a step Exec captured.
 
 ```bash
-cargo test -p loopflow --lib store::sqlite::flows
+cargo test -p loopflow --lib ops::flow_run
+cargo test -p loopflow --lib store::sqlite::flow_inventory
 cargo nextest run -p loopflow --test session_lifecycle_tests --no-fail-fast
 ```
-
-Include `cargo test -p loopflow --test pr_tests` for Task resume changes. Resuming
-a human review preserves its invocation and cursor while preparing its captured input;
-assert those facts instead of equality of the entire versioned Flow record.
 
 When changing Task controls, include the GitHub-cache integration tests as well
 as controller tests. Bare interrupts prove local control during GitHub outages;
@@ -991,10 +1012,19 @@ installation harness for default-runtime proofs; never replace the machine's
 selection to make tests pass. Flow/Session tests with an explicit experimental
 `LF_HOME` and source `LF_BIN` stay within that experiment.
 
+`lf home install preflight` and `promote` read the OS account's store and take
+its promotion lock; `HOME` and `LF_HOME` do not redirect them. Tests that run
+either command are installation proofs: ignored in the regular suite and listed
+in `scripts/test_task_installation.py`. On a developer machine they would copy
+the live database, without bound while other workers write to it.
+
 For executable-resolution failures, reproduce with the compiled test binary:
 unset `LF_BIN` and `CARGO_BIN_EXE_lf`, and use a PATH containing Git but no `lf`.
 Verify the repair in that same environment. A pass under a developer's installed
 Loopflow can hide the CI failure.
+Include direct provider-harness startup tests in this check: even an expected
+spawn failure first resolves the conversation's `lf`. Pin a fixture executable
+under the environment lock and restore the pin afterward.
 
 Release repair checks must cover completion before inherited checkout locks close.
 Use the public release path with a delayed repair launcher; a terminal Exec receipt
@@ -1003,6 +1033,18 @@ does not prove that its process or descendants released their descriptors.
 When a subprocess fixture signals readiness with file contents, write a sibling
 temporary file and rename it into place after closing it. File existence alone
 can expose an empty file between creation and the first write.
+
+### Project readiness fixtures
+
+Task fixtures must create their Wave and Project, select the Project in SQLite,
+and retain Home placement before creating work. YAML binding imports belong to
+explicit activation tests; passive status reads do not import them. Keep readiness
+fields in inline Swift responses as well as shared DTO fixtures.
+
+Changes to Project selection or planning admission require the full materialized
+Rust suite and headless Swift tests, including Task consumers and status readers.
+Run the installation harness for migration changes; its released-source proof
+must retain Wave placement before projecting accepted Projects.
 
 ### Shared identity fixtures
 

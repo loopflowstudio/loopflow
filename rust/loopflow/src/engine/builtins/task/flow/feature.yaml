@@ -1,4 +1,0 @@
-# Design and build to a published PR. Design review and the demo happen in the
-# Task conversation; `ship` lands the result once it is accepted.
-- flow: task-design
-- flow: pursue

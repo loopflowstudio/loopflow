@@ -1,21 +1,22 @@
-//! Display projection of one captured Flow definition.
+//! Display projection of one compiled Flow definition.
 //!
 //! Surfaces draw the Flow from this shape instead of parsing YAML or inferring
-//! topology from skill names. Node keys are captured preorder IDs, including
-//! every sorted XOR alternative. Authored names and runtime cursor paths remain
-//! separate; repeated skills keep distinct IDs within their captured Flow.
+//! topology from skill names. Node keys are preorder IDs, including every
+//! sorted XOR alternative. Authored names and runtime cursor paths remain
+//! separate; repeated skills keep distinct IDs within their Flow.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::engine::flow::{flatten_resolved, resolve_flow, ResolvedFlowItem};
+use crate::engine::flow::{flatten_resolved, resolve_flow, return_target, ResolvedFlowItem};
 
 use std::path::Path;
 
 use crate::engine::execution::{ExecutionCursor, NestedCursor};
 use crate::engine::flow::ConcreteStep;
+use crate::engine::workflow::{self, WorkflowDefinition};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowGraph {
@@ -119,20 +120,38 @@ fn template_items(
         .collect()
 }
 
-/// One selectable Flow and the topology it would pin if started now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CatalogKind {
+    Flow,
+    Workflow,
+}
+
+/// One Flow or workflow a Task can run, as it would be captured if started now.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowCatalogEntry {
     pub name: String,
-    /// `None` when the definition cannot be loaded or compiled.
+    pub kind: CatalogKind,
+    /// The repository file that defines it; `None` for a builtin.
+    pub source: Option<String>,
+    /// A Flow's topology; `None` for a workflow or an unusable definition.
     pub graph: Option<FlowGraph>,
     pub template: Option<FlowTemplate>,
-    /// Why the definition is unusable; set exactly when `graph` is `None`.
+    /// A workflow's nodes and edges; `None` for a Flow or an unusable definition.
+    pub workflow: Option<WorkflowDefinition>,
+    /// Why the definition is unusable; set exactly when it has no topology.
     pub unavailable: Option<String>,
 }
 
-/// Every Flow available in `repo`, each compiled through the shared loader.
+/// Every Flow and workflow available in `repo`, each read through the shared
+/// loader. A file that does not load stays listed with the reason.
 pub fn flow_catalog(repo: &Path) -> Vec<FlowCatalogEntry> {
-    crate::engine::available_flow_names(repo)
+    let source = |path: Option<std::path::PathBuf>| {
+        let path = path?;
+        let relative = path.strip_prefix(repo).unwrap_or(&path);
+        Some(relative.to_string_lossy().into_owned())
+    };
+    let flows = crate::engine::available_flow_names(repo)
         .into_iter()
         .map(|name| {
             let compiled = crate::engine::load_flow(&name, repo)
@@ -150,22 +169,39 @@ pub fn flow_catalog(repo: &Path) -> Vec<FlowCatalogEntry> {
                         template,
                     ))
                 });
-            match compiled {
-                Ok((graph, template)) => FlowCatalogEntry {
-                    name,
-                    graph: Some(graph),
-                    template: Some(template),
-                    unavailable: None,
-                },
-                Err(reason) => FlowCatalogEntry {
-                    name,
-                    graph: None,
-                    template: None,
-                    unavailable: Some(reason),
-                },
+            let (topology, unavailable) = match compiled {
+                Ok(topology) => (Some(topology), None),
+                Err(reason) => (None, Some(reason)),
+            };
+            let (graph, template) = topology.unzip();
+            FlowCatalogEntry {
+                source: source(crate::engine::flow::find_flow_source_path(&name, repo)),
+                name,
+                kind: CatalogKind::Flow,
+                graph,
+                template,
+                workflow: None,
+                unavailable,
             }
-        })
-        .collect()
+        });
+    let workflows = workflow::available_workflow_names(repo)
+        .into_iter()
+        .map(|name| {
+            let (workflow, unavailable) = match workflow::load_workflow(&name, repo) {
+                Ok(workflow) => (workflow, None),
+                Err(error) => (None, Some(error.to_string())),
+            };
+            FlowCatalogEntry {
+                source: source(workflow::workflow_path(&name, repo)),
+                name,
+                kind: CatalogKind::Workflow,
+                graph: None,
+                template: None,
+                workflow,
+                unavailable,
+            }
+        });
+    flows.chain(workflows).collect()
 }
 
 /// Participation stages and bounded references to the captured automated routes.
@@ -400,31 +436,63 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<FlowNode> {
     result
 }
 
-/// Index of the earlier occurrence the deciding skill at `index` returns to.
-fn return_target(steps: &[ConcreteStep], index: usize) -> Option<usize> {
-    let ConcreteStep::Skill(skill) = &steps[index] else {
-        return None;
-    };
-    let from = skill.repeat.as_ref()?.from.as_str();
-    steps[..index].iter().position(|target| {
-        matches!(target, ConcreteStep::Skill(target) if target.id.as_deref() == Some(from))
-    })
+/// Exact occurrence in this compiled graph: its preorder node key, counting
+/// every XOR alternative, and the returns taken at each nesting level.
+pub(crate) fn location(
+    steps: &[ConcreteStep],
+    cursor: &ExecutionCursor,
+) -> anyhow::Result<(u32, Vec<Vec<u32>>)> {
+    fn count(steps: &[ConcreteStep]) -> usize {
+        steps
+            .iter()
+            .map(|step| {
+                1 + match step {
+                    ConcreteStep::Xor(branch) => {
+                        branch.paths.values().map(|path| count(&path.steps)).sum()
+                    }
+                    _ => 0,
+                }
+            })
+            .sum()
+    }
+    fn locate(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> anyhow::Result<usize> {
+        let step = steps
+            .get(cursor.index)
+            .ok_or_else(|| anyhow::anyhow!("cursor has no captured node"))?;
+        let mut index = count(&steps[..cursor.index]);
+        if let Some(child) = cursor.child.as_deref() {
+            let (ConcreteStep::Xor(branch), NestedCursor::Xor { selected, cursor }) = (step, child)
+            else {
+                anyhow::bail!("cursor child does not belong to a captured XOR");
+            };
+            let mut paths: Vec<_> = branch.paths.iter().collect();
+            paths.sort_by_key(|(name, _)| *name);
+            index += 1;
+            for (name, path) in paths {
+                if name == selected {
+                    return Ok(index + locate(&path.steps, cursor)?);
+                }
+                index += count(&path.steps);
+            }
+            anyhow::bail!("cursor selects an uncaptured XOR alternative");
+        }
+        Ok(index)
+    }
+    Ok((
+        u32::try_from(locate(steps, cursor)?)?,
+        flow_iterations(steps, cursor),
+    ))
 }
 
 /// Ordered backward-edge traversal counts at each active nesting level, outermost
 /// first. Empty levels are retained so nested counts never masquerade as root
 /// counts. Visit tokens used for human-boundary identity are deliberately absent.
 pub fn flow_iterations(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Vec<Vec<u32>> {
-    let counts = steps
-        .iter()
-        .enumerate()
-        .filter_map(|(index, step)| {
-            return_target(steps, index)?;
-            let ConcreteStep::Skill(skill) = step else {
-                return None;
-            };
-            let id = skill.id.as_ref()?;
-            Some(cursor.progress.repeats.get(id).copied().unwrap_or(0))
+    let counts = (0..steps.len())
+        .filter(|index| return_target(steps, *index).is_some())
+        .map(|index| {
+            let traversals = cursor.progress.repeats.get(&index.to_string());
+            traversals.copied().unwrap_or(0)
         })
         .collect();
     let mut levels = vec![counts];
@@ -443,10 +511,30 @@ pub fn flow_iterations(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Vec<
     levels
 }
 
-/// Where a saved cursor stands inside its captured definition.
+/// Recorded return counts (see `flow_iterations`) in words: the pass each
+/// returned loop is on, loops numbered in authored order. `None` on a first pass.
+pub fn loop_passes(iterations: &[Vec<u32>]) -> Option<String> {
+    let counts: Vec<u32> = iterations.iter().flatten().copied().collect();
+    let passes: Vec<String> = counts
+        .iter()
+        .enumerate()
+        .filter(|(_, count)| **count > 0)
+        .map(|(index, count)| {
+            let pass = u64::from(*count) + 1;
+            if counts.len() == 1 {
+                format!("pass {pass}")
+            } else {
+                format!("loop {} pass {pass}", index + 1)
+            }
+        })
+        .collect();
+    (!passes.is_empty()).then(|| passes.join(", "))
+}
+
+/// Where a recorded step stands inside its Flow's graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CursorProjection {
-    /// Key of the current occurrence; `None` when the cursor selects no node.
+pub struct PositionProjection {
+    /// Key of the current occurrence; `None` once the Flow finished.
     pub current: Option<u32>,
     /// Occurrences already finished in the current pass, including the router of
     /// a selected XOR. Earlier passes' completions are not carried forward.
@@ -454,92 +542,75 @@ pub struct CursorProjection {
     pub returns: Vec<FlowReturn>,
 }
 
-pub fn project_cursor(graph: &FlowGraph, cursor: &ExecutionCursor) -> CursorProjection {
-    let mut projection = CursorProjection {
+/// Project the step at `key`, which recorded `iterations` (see
+/// `flow_iterations`), onto `graph`. Deciders outside the step's own path
+/// report no traversals.
+pub fn project_position(
+    graph: &FlowGraph,
+    key: u32,
+    iterations: &[Vec<u32>],
+    finished: bool,
+) -> PositionProjection {
+    fn contains(node: &FlowNode, key: u32) -> bool {
+        node.key == key
+            || node
+                .paths
+                .iter()
+                .any(|path| path.steps.iter().any(|node| contains(node, key)))
+    }
+    fn walk(
+        nodes: &[FlowNode],
+        key: u32,
+        levels: &[Vec<u32>],
+        active: bool,
+        projection: &mut PositionProjection,
+    ) {
+        let counts = levels.first().filter(|_| active);
+        let on_path = nodes.iter().position(|node| active && contains(node, key));
+        let mut decider = 0;
+        for (index, node) in nodes.iter().enumerate() {
+            if on_path.is_some_and(|current| index < current) {
+                projection.completed.push(node.key);
+            }
+            if node.returns_to.is_some() {
+                projection.returns.push(FlowReturn {
+                    decider: node.key,
+                    traversals: counts
+                        .and_then(|counts| counts.get(decider))
+                        .copied()
+                        .unwrap_or(0),
+                });
+                decider += 1;
+            }
+            let here = on_path == Some(index);
+            if here && node.key == key {
+                projection.current = Some(key);
+            } else if here {
+                projection.completed.push(node.key);
+            }
+            for path in &node.paths {
+                let selected = here && path.steps.iter().any(|node| contains(node, key));
+                walk(
+                    &path.steps,
+                    key,
+                    levels.get(1..).unwrap_or_default(),
+                    selected,
+                    projection,
+                );
+            }
+        }
+    }
+    let mut projection = PositionProjection {
         current: None,
         completed: Vec::new(),
         returns: Vec::new(),
     };
-    walk_cursor(&graph.steps, Some(cursor), &mut projection);
-    collect_returns(
-        &graph.steps,
-        Some(cursor),
-        &cursor.progress.repeats,
-        &mut projection.returns,
-    );
-    projection
-}
-
-fn walk_cursor(
-    nodes: &[FlowNode],
-    cursor: Option<&ExecutionCursor>,
-    projection: &mut CursorProjection,
-) {
-    let Some(cursor) = cursor else { return };
-    projection
-        .completed
-        .extend(nodes.iter().take(cursor.index).map(|node| node.key));
-    let Some(node) = nodes.get(cursor.index) else {
-        return;
-    };
-    if let Some(NestedCursor::Xor {
-        selected,
-        cursor: child,
-    }) = cursor.child.as_deref()
-    {
-        if let Some(path) = node.paths.iter().find(|path| &path.name == selected) {
-            if child.index < path.steps.len() {
-                projection.completed.push(node.key);
-                walk_cursor(&path.steps, Some(child), projection);
-                return;
-            }
-        }
+    walk(&graph.steps, key, iterations, true, &mut projection);
+    if finished {
+        projection.current = None;
+        projection.completed = graph.steps.iter().map(|node| node.key).collect();
     }
-    // A completed or unrecorded child still waits on its XOR.
-    projection.current = Some(node.key);
-}
-
-fn collect_returns(
-    nodes: &[FlowNode],
-    cursor: Option<&ExecutionCursor>,
-    repeats: &BTreeMap<String, u32>,
-    out: &mut Vec<FlowReturn>,
-) {
-    for (index, node) in nodes.iter().enumerate() {
-        if let (Some(id), Some(_)) = (&node.id, node.returns_to) {
-            out.push(FlowReturn {
-                decider: node.key,
-                traversals: repeats.get(id).copied().unwrap_or(0),
-            });
-        }
-        for path in &node.paths {
-            let child =
-                cursor
-                    .filter(|cursor| cursor.index == index)
-                    .and_then(|cursor| match cursor.child.as_deref() {
-                        Some(NestedCursor::Xor { selected, cursor }) if selected == &path.name => {
-                            Some(cursor)
-                        }
-                        _ => None,
-                    });
-            // Runtime repeat storage keeps its own path convention. Only the
-            // public node reference changes; active counts still win.
-            let settled_prefix = format!("xor:{index}:{}/", path.name);
-            let settled: BTreeMap<String, u32> = repeats
-                .iter()
-                .filter_map(|(key, count)| {
-                    key.strip_prefix(&settled_prefix)
-                        .map(|key| (key.to_owned(), *count))
-                })
-                .collect();
-            collect_returns(
-                &path.steps,
-                child,
-                child.map_or(&settled, |child| &child.progress.repeats),
-                out,
-            );
-        }
-    }
+    projection
 }
 
 #[cfg(test)]
@@ -571,9 +642,9 @@ mod tests {
         description: Continue
         steps: []
 - step: {name: sample, id: start}
-- step: {name: loop-decide, id: inner, repeat: {from: start}}
+- loop: start
 - demo
-- step: {name: loop-decide, id: outer, repeat: {from: start}}
+- loop: start
 "#,
         )
         .unwrap();
@@ -641,20 +712,24 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
 
     use crate::engine::execution::{ExecutionCursor, NestedCursor};
-    use crate::engine::flow::{
-        ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, RepeatPolicy, Skill,
+    use crate::engine::flow::{ConcretePath, ConcreteSkill, ConcreteStep, ConcreteXor, Skill};
+    use crate::engine::flow_graph::{
+        flow_iterations, project_position, FlowGraph, FlowNodeKind, PositionProjection,
     };
-    use crate::engine::flow_graph::{flow_iterations, project_cursor, FlowGraph, FlowNodeKind};
     use crate::engine::{compile_flow, load_flow};
 
-    fn skill(name: &str, id: Option<&str>, human: bool, from: Option<&str>) -> ConcreteStep {
+    /// The projection of the step `cursor` selects, as its driver records it.
+    fn project(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> PositionProjection {
+        let (key, iterations) = super::location(steps, cursor).unwrap();
+        project_position(&FlowGraph::new("", steps), key, &iterations, false)
+    }
+
+    fn skill(name: &str, id: Option<&str>, human: bool, returns: Option<usize>) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(name),
             id: id.map(str::to_string),
             human,
-            repeat: from.map(|from| RepeatPolicy {
-                from: from.to_string(),
-            }),
+            returns,
             sources: Vec::new(),
         })
     }
@@ -664,9 +739,9 @@ mod tests {
         let steps = vec![
             skill("review", Some("start"), true, None),
             skill("implement", Some("build"), false, None),
-            skill("decide", None, false, Some("build")),
+            skill("decide", None, false, Some(1)),
             skill("review", Some("second"), true, None),
-            skill("decide", None, false, Some("start")),
+            skill("decide", None, false, Some(4)),
         ];
         let graph = FlowGraph::new("example", &steps);
         let projection = super::project_interactions(&graph);
@@ -698,7 +773,7 @@ mod tests {
             &[
                 skill("build", Some("build"), false, None),
                 skill("review", None, true, None),
-                skill("decide", None, false, Some("build")),
+                skill("decide", None, false, Some(2)),
             ],
         );
         let exit = graph
@@ -780,33 +855,6 @@ mod tests {
     fn builtin_flows_keep_their_delivery_boundaries_without_review_steps() {
         let repo = tempfile::tempdir().unwrap();
         let cases: &[(&str, &[&str], &[usize], usize)] = &[
-            (
-                "code",
-                &[
-                    "implement",
-                    "compress",
-                    "sync",
-                    "realign",
-                    "loop-decide",
-                    "pr-publish",
-                ],
-                &[],
-                1,
-            ),
-            (
-                "feature",
-                &[
-                    "kickoff",
-                    "implement",
-                    "compress",
-                    "sync",
-                    "realign",
-                    "loop-decide",
-                    "pr-publish",
-                ],
-                &[],
-                1,
-            ),
             ("queue", &["compress", "sync", "realign", "gate"], &[], 0),
             ("refresh", &["sync", "realign"], &[], 0),
             ("task-design", &["kickoff"], &[], 0),
@@ -818,7 +866,7 @@ mod tests {
                     "compress",
                     "sync",
                     "realign",
-                    "loop-decide",
+                    "loop-or-next",
                     "pr-publish",
                 ],
                 &[],
@@ -874,37 +922,36 @@ mod tests {
     }
 
     #[test]
-    fn feature_designs_then_pursues_to_a_published_pr() {
+    fn pursue_loops_to_a_published_pr() {
         let repo = tempfile::tempdir().unwrap();
-        let flow = load_flow("feature", repo.path()).unwrap();
+        let flow = load_flow("pursue", repo.path()).unwrap();
         let graph = FlowGraph::new(&flow.name, &compile_flow(&flow, repo.path()).unwrap());
         let labels: Vec<_> = graph.steps.iter().map(|node| node.label.as_str()).collect();
         assert_eq!(
             labels,
             [
-                "kickoff",
                 "implement",
                 "compress",
                 "sync",
                 "realign",
-                "loop-decide",
+                "loop-or-next",
                 "pr-publish",
             ]
         );
-        let implement = graph.steps[1].key;
+        let implement = graph.steps[0].key;
         let returns: Vec<_> = graph
             .steps
             .iter()
-            .filter_map(|node| node.returns_to.as_ref().map(|to| (node.id.clone(), to)))
+            .filter_map(|node| node.returns_to.as_ref().map(|to| (node.key, to)))
             .collect();
-        assert_eq!(returns, [(Some("decide".to_string()), &implement)]);
+        assert_eq!(returns, [(graph.steps[4].key, &implement)]);
         // Review and landing are the conversation's to launch, not this Flow's.
         assert!(graph.steps.iter().all(|node| !node.human));
         assert!(graph
             .steps
             .iter()
             .all(|node| node.kind != FlowNodeKind::Op || node.label == "sync"));
-        assert_eq!(graph.steps[4].sources, ["feature", "pursue", "refresh"]);
+        assert_eq!(graph.steps[3].sources, ["pursue", "refresh"]);
     }
 
     #[test]
@@ -912,26 +959,21 @@ mod tests {
         let steps = vec![
             skill("design", Some("design"), false, None),
             skill("implement", Some("implement"), false, None),
-            skill("loop-decide", Some("decide"), false, Some("implement")),
+            skill("loop-or-next", None, false, Some(1)),
             skill("demo", Some("demo"), true, None),
-            skill(
-                "loop-decide",
-                Some("decide_delivery"),
-                false,
-                Some("implement"),
-            ),
+            skill("loop-or-next", None, false, Some(3)),
             skill("land", None, false, None),
         ];
         let cursor = ExecutionCursor {
             index: 1,
             iteration: 3,
             progress: crate::engine::transitions::FlowProgress {
-                repeats: BTreeMap::from([("decide".into(), 2), ("decide_delivery".into(), 1)]),
+                repeats: BTreeMap::from([("2".into(), 2), ("4".into(), 1)]),
                 ..Default::default()
             },
             ..Default::default()
         };
-        let projection = project_cursor(&FlowGraph::new("", &steps), &cursor);
+        let projection = project(&steps, &cursor);
         assert_eq!(projection.current, Some(1));
         // Only the opening step is complete; earlier passes' decisions are not.
         assert_eq!(projection.completed, [0]);
@@ -962,7 +1004,7 @@ mod tests {
                         description: "Fix it".into(),
                         steps: vec![
                             skill("patch", Some("patch"), false, None),
-                            skill("check", Some("check"), false, Some("patch")),
+                            skill("check", Some("check"), false, Some(1)),
                         ],
                     },
                 ),
@@ -996,7 +1038,7 @@ mod tests {
         let cursor = ExecutionCursor {
             index: 1,
             progress: crate::engine::transitions::FlowProgress {
-                repeats: BTreeMap::from([("xor:1:fix/check".into(), 4)]),
+                repeats: BTreeMap::from([("xor:1:fix/1".into(), 4)]),
                 ..Default::default()
             },
             child: Some(Box::new(NestedCursor::Xor {
@@ -1005,7 +1047,7 @@ mod tests {
                     index: 1,
                     iteration: 2,
                     progress: crate::engine::transitions::FlowProgress {
-                        repeats: BTreeMap::from([("check".into(), 2)]),
+                        repeats: BTreeMap::from([("1".into(), 2)]),
                         ..Default::default()
                     },
                     ..Default::default()
@@ -1013,17 +1055,25 @@ mod tests {
             })),
             ..Default::default()
         };
-        let projection = project_cursor(&FlowGraph::new("", &steps), &cursor);
+        let projection = project(&steps, &cursor);
         assert_eq!(projection.current, Some(3));
         assert_eq!(projection.completed, [0, 1, 2]);
         // The active child's own count wins over an older settled visit.
         assert_eq!(projection.returns[0].traversals, 2);
         assert_eq!(flow_iterations(&steps, &cursor), [vec![], vec![2]]);
+        assert_eq!(
+            super::loop_passes(&[vec![], vec![2]]).as_deref(),
+            Some("pass 3")
+        );
+        assert_eq!(
+            super::loop_passes(&[vec![2, 0], vec![1]]).as_deref(),
+            Some("loop 1 pass 3, loop 3 pass 2")
+        );
+        assert_eq!(super::loop_passes(&[vec![0, 0]]), None);
     }
 
     #[test]
     fn numeric_wire_matches_captured_ids_across_nested_alternatives() {
-        use crate::engine::invocation::QueuedInvocation;
         use crate::ops::task_flow::{TaskFlowRecord, TaskFlowSnapshot};
 
         fn branch(paths: Vec<(&str, Vec<ConcreteStep>)>) -> ConcreteStep {
@@ -1047,25 +1097,24 @@ mod tests {
         fn begin() -> ConcreteStep {
             skill("patch", Some("begin"), false, None)
         }
-        fn check() -> ConcreteStep {
-            skill("check", Some("check"), false, Some("begin"))
+        fn check(returns: usize) -> ConcreteStep {
+            skill("check", Some("check"), false, Some(returns))
         }
         let steps = vec![
             begin(),
             branch(vec![
-                ("zeta", vec![begin(), check()]),
+                ("zeta", vec![begin(), check(1)]),
                 (
                     "alpha",
                     vec![
                         begin(),
-                        branch(vec![("fix", vec![begin(), check()])]),
-                        check(),
+                        branch(vec![("fix", vec![begin(), check(1)])]),
+                        check(2),
                     ],
                 ),
             ]),
-            check(),
+            check(2),
         ];
-        let invocation = QueuedInvocation::new("nested", steps).unwrap();
         let fixture: TaskFlowSnapshot = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/flow_numeric_nested.json"
         ))
@@ -1073,7 +1122,7 @@ mod tests {
         let TaskFlowRecord::Latest(pinned) = fixture.record else {
             panic!("launched Flow fixture")
         };
-        let graph = FlowGraph::new("nested", &invocation.steps);
+        let graph = FlowGraph::new("nested", &steps);
         assert_eq!(graph, pinned.graph);
         // Root 0, XOR 1, alpha 2/3/(fix 4/5)/6, zeta 7/8, root 9.
         // Compare every cursor with the existing storage identity algorithm.
@@ -1102,10 +1151,10 @@ mod tests {
             result
         }
         let mut ids = Vec::new();
-        for cursor in cursors(&invocation.steps) {
-            let id = invocation.node_id(&cursor).unwrap();
+        for cursor in cursors(&steps) {
+            let id = super::location(&steps, &cursor).unwrap().0;
             ids.push(id);
-            assert_eq!(project_cursor(&graph, &cursor).current, Some(id));
+            assert_eq!(project(&steps, &cursor).current, Some(id));
             assert_eq!(graph.node_at(id).unwrap().key, id);
         }
         ids.sort();
@@ -1113,7 +1162,7 @@ mod tests {
         let cursor = ExecutionCursor {
             index: 1,
             progress: crate::engine::transitions::FlowProgress {
-                repeats: BTreeMap::from([("check".into(), 3)]),
+                repeats: BTreeMap::from([("2".into(), 3)]),
                 ..Default::default()
             },
             child: Some(Box::new(NestedCursor::Xor {
@@ -1125,7 +1174,7 @@ mod tests {
                         cursor: ExecutionCursor {
                             index: 1,
                             progress: crate::engine::transitions::FlowProgress {
-                                repeats: BTreeMap::from([("check".into(), 2)]),
+                                repeats: BTreeMap::from([("1".into(), 2)]),
                                 ..Default::default()
                             },
                             ..Default::default()
@@ -1136,27 +1185,17 @@ mod tests {
             })),
             ..Default::default()
         };
-        let projection = project_cursor(&graph, &cursor);
+        let projection = project(&steps, &cursor);
         assert_eq!(projection.current, pinned.current);
         assert_eq!(projection.completed, pinned.completed);
         assert_eq!(projection.returns, pinned.returns);
-        assert_eq!(
-            flow_iterations(&invocation.steps, &cursor),
-            pinned.iterations
-        );
-        // Settled nested counts retain their runtime keys, including inactive paths.
-        let settled = ExecutionCursor {
+        assert_eq!(flow_iterations(&steps, &cursor), pinned.iterations);
+        // A step outside the alternatives reports their deciders untraversed.
+        let last = ExecutionCursor {
             index: 2,
-            progress: crate::engine::transitions::FlowProgress {
-                repeats: BTreeMap::from([
-                    ("xor:1:alpha/xor:1:fix/check".into(), 7),
-                    ("xor:1:zeta/check".into(), 4),
-                ]),
-                ..Default::default()
-            },
             ..Default::default()
         };
-        let projection = project_cursor(&graph, &settled);
+        let projection = project(&steps, &last);
         assert_eq!(projection.current, Some(9));
         assert_eq!(projection.completed, [0, 1]);
         assert_eq!(
@@ -1165,13 +1204,10 @@ mod tests {
                 .iter()
                 .map(|r| (r.decider, r.traversals))
                 .collect::<Vec<_>>(),
-            [(5, 7), (6, 0), (8, 4), (9, 0)]
+            [(5, 0), (6, 0), (8, 0), (9, 0)]
         );
-        let finished = ExecutionCursor {
-            index: 3,
-            ..Default::default()
-        };
-        assert_eq!(project_cursor(&graph, &finished).current, None);
-        assert_eq!(project_cursor(&graph, &finished).completed, [0, 1, 9]);
+        let finished = project_position(&graph, 9, &[vec![0]], true);
+        assert_eq!(finished.current, None);
+        assert_eq!(finished.completed, [0, 1, 9]);
     }
 }

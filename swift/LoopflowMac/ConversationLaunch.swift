@@ -35,11 +35,11 @@ struct ConversationLaunch: Equatable {
         case .wave(_, let id): ["--wave", "\(id)"]
         case .task(_, let id): ["--task", "\(id)"]
         }
-        return [lf, "--mode", "interactive"] + binding + [":", prompt]
+        return [lf, "--interactive"] + binding + [":", prompt]
     }
 }
 
-extension PodiumModel {
+extension WorkModel {
     var conversationScope: ConversationScope? {
         guard let repoPath else { return nil }
         guard navigation.content != .overview, let selection else { return .repo(repoPath) }
@@ -72,11 +72,11 @@ struct SessionSkillLaunch: Equatable {
     let skill: String
 
     func arguments(lf: String) -> [String] {
-        [lf, "--mode", "interactive"] + (wave.map { ["--wave", $0] } ?? []) + ["skill", skill]
+        [lf, "--interactive"] + (wave.map { ["--wave", $0] } ?? []) + ["skill", skill]
     }
 }
 
-extension PodiumModel {
+extension WorkModel {
     var sessionSkillLaunch: SessionSkillLaunch? {
         sessionSkillLaunch(for: navigation.content == .overview ? nil : selection)
     }

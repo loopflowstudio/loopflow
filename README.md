@@ -93,9 +93,9 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```
 
 ```bash
-lf --wave designer wave/operate        # one finite planning pass
+lf --wave designer wave/operate        # one finite pass: keep started Tasks moving
 lf --wave designer wave/operate "ship the button audit first"
-lf --wave designer wave/operate        # one finite planning pass
+lf session ensure -w designer          # the Wave's ongoing conversation, applying that pass on every return
 ```
 
 Edit `wave/designer/MEMORY.md` directly when durable context changes; it is a
@@ -105,13 +105,15 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
 lf checkout INF-123                               # durable Task Work + worktree, no controller
-lf --task INF-123 flow start                      # launch a fresh Flow in the background
+lf -b task run INF-123                            # place the Task, then run its Flow here until it ends
+lf task run INF-123 pursue                        # on a workflow: take the edge that runs pursue
 lf comment INF-123 "take the smaller approach"   # post a Linear comment for the Task's running Flow
 lf interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
-lf --task INF-123 flow start --reason "reconcile all scratch first" # publish direction, then launch fresh work
+lf task run INF-123 --reason "reconcile all scratch first" # publish direction, then run fresh work
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
+lf --task INF-123 skill task/session               # ongoing conversation that keeps applying task/operate
 lf arm -c                                          # request exact-head auto-merge and return
 lf land -c                                         # hand off delivery; complete the Task after verified merge
 lf pr reconcile                                      # check recorded deliveries once and settle merges
@@ -120,7 +122,7 @@ lf ci watch                                          # watch PR checks; start a 
 
 Task comments in Linear also reach the Task's running Flow. Steering never starts
 an idle Task or broadcasts to independent conversations. A stopped Flow is
-history: `flow start` never continues it, so inspect `lf task status` first.
+history: `task run` never continues it, so inspect `lf task status` first.
 
 Turn a reviewed design into work without another planning subsystem:
 
@@ -164,12 +166,12 @@ lf session bind SESSION --task INF-123
 A Session keeps the conversation's identity, name, feedback and native history
 across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed
-ones. `--all` means all repositories.
+ones, and `--waiting` keeps those waiting on you. `--all` means all repositories.
 
 `lf resume` is short for `lf session resume`. It selects the latest human message
 in this worktree, falling back per Session to its last opening when native input
 history is unavailable. Assistant output and background work do not change that
-order. A Flow is never resumed; `lf --task ISSUE flow start` launches a fresh one.
+order. A Flow is never resumed; `lf task run ISSUE` runs a fresh one.
 
 Bind assigns an unbound conversation to one Task permanently, including a done Task.
 
@@ -178,14 +180,14 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | Object | What it does | Where it lives |
 | --- | --- | --- |
 | **Skill** | Gives the agent reusable instructions and context | `.lf/skills/*.md` |
-| **Flow** | Composes agent work and mechanical operations | `.lf/flows/*.yaml` |
+| **Flow** | Composes agent work and mechanical operations; a run is one driver Exec and the step Execs it starts | `.lf/flows/*.yaml` |
+| **Workflow** | Gives a Task nodes, where you take part in its conversation, joined by the Flows between them | `.lf/workflows/*.yaml` |
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `wave/<name>/` |
-| **Project** | Holds one Wave's plan, Tasks, KRs, targets and default Flow | Linear |
+| **Project** | Holds one Wave's plan, Tasks, KRs, targets and the workflow its Tasks take up | Linear |
 | **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
-| **Task** | Owns concrete work, its checkout, serial PRs and every Flow run for it | Linear and local SQLite |
+| **Task** | Owns concrete work, its checkout, serial PRs and every Flow exec for it | Linear and local SQLite |
 | **Exec** | Records one actual lf process and its observed command outcome | Home-local SQLite |
 | **AgentSession** | Keeps a continuable interactive or headless conversation and native history | Home-local SQLite and provider-native storage |
-| **FlowSession** | Keeps a captured Flow and consumes exact boundary completions | Home-local SQLite |
 | **Home** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
 
 The [execution contract and cutover status](docs/architecture-reference.md#cutover-status)

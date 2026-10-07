@@ -304,7 +304,6 @@ mod tests {
             .sqlite
             .rename_session(
                 &session_id,
-                None,
                 "Retained conversation",
                 crate::session::TitleSource::Human,
             )
@@ -355,10 +354,10 @@ mod tests {
                 "INSERT INTO waves(id,name,repo,created_at) VALUES('{wave}','live','/repo',1);
                  INSERT INTO projects(id,wave_id,external_project_id,created_at)
                  VALUES('project','{wave}','project',1);
-                 INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
-                 VALUES('{task}','project','{task}','{task}','/repo.one',1),
-                       ('{other_task}','project','{other_task}','{other_task}','/repo.two',1),
-                       ('{untouched}','project','{untouched}','{untouched}','/repo.three',1);"
+                 INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,pm_snapshot_synced_at,pm_writeback_json,worktree,workspace_slug,created_at,updated_at)
+                 VALUES('{task}','project','{task}','{task}','Task','',1,'{{\"state\":\"current\"}}','/repo.one','one',1,1),
+                       ('{other_task}','project','{other_task}','{other_task}','Other Task','',1,'{{\"state\":\"current\"}}','/repo.two','two',1,1),
+                       ('{untouched}','project','{untouched}','{untouched}','Untouched Task','',1,'{{\"state\":\"current\"}}','/repo.three','three',1,1);"
             ))
             .unwrap();
         }

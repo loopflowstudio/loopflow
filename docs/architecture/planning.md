@@ -5,38 +5,111 @@ lf --wave product wave/operate
 lf task status INF-124 --json
 lf checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
-lf --task INF-124 flow start
-lf repo new-chapter 2026-10 --dry-run
+lf task run INF-124
+lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run
 ```
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
 cadence, budget and metric instruments across plans. Its one In Progress Linear
-Project owns Tasks, KRs, targets and the default Flow. A Chapter is the shared
-name of those current Projects across the repository. This page specifies the
-accepted model; [cutover status](../architecture-reference.md#cutover-status)
-records the remaining implementation and proof gaps.
+Project owns Tasks, KRs, targets and an optional workflow. A Chapter is the shared
+name of those current Projects across the repository. The rotation below describes
+the explicit shared Project binding. Rotation retains exact destinations and selected
+issue IDs for recovery, while unreviewed backlog stays in its original Project.
+[Cutover status](../architecture-reference.md#cutover-status) records
+other implementation and proof gaps.
+
+```bash
+lf wave bind-project product <project-uuid> --json
+lf wave ensure product --json
+```
+
+Validate one existing Project and select its accepted local record on the Wave's
+SQLite row (`waves.current_project_id`). Repeating the same binding preserves it;
+a different existing binding is left unchanged. Setup preserves provider status,
+content and identity, including a Backlog Project without a workflow. It does not
+activate the Project. Operation routing and status select this exact ID; the JSON
+Project summary carries a required `current` boolean for Desktop. Status and
+roadmap retain predecessor Projects and Tasks. Registration and unstarted managed
+work require that exact Project to be In Progress; another In Progress Project
+does not compete with the binding. Already-started Tasks retain continuation in
+predecessor Projects.
+
+`ensure` activates the configured Backlog or Planned Project with a status-only
+write. Without a binding it reserves one UUID in SQLite before creation, attaches
+it to the Wave's Initiative, activates it, then commits selection and creation settlement together. Retry
+reuses the reservation across uncertain responses and failed binding writes.
+Terminal, archived, paused or foreign Projects report their condition without
+replacement. Names, content and an empty workflow remain intact. Ensure neither searches
+for candidates nor performs rotation; status and roadmap never call it. Desktop
+ensures on explicit opening or retry while retaining cached planning and independent
+Session reads. Both primary and Portfolio surfaces render the same SQLite-derived
+`project_readiness` through `lf monitor work --watch --json`. Committed selection,
+accepted facts, transitions and exact activation Exec outcomes invalidate that reading.
+A pending transition or unfinished Exec is unresolved evidence, not proof of liveness.
+Watchers and status reads never provision or import.
+
+The first explicit ensure, binding setup or applied rotation imports an existing
+`<Home>/waves/<WaveId>/config.yaml` selection once, after exact provider ownership
+validation. SQLite commits the selected Project and original YAML bytes together in
+`project_binding_imports`; absent files are recorded too. Malformed files or failed
+provider reads leave import retryable and prohibit creation. After import, the file
+is inert, even if a stale checkout or old writer changes it. Other YAML bytes remain
+untouched. An imported completed Project stays selected history and cannot be reopened.
+Activation records its exact Exec on the Wave; that Exec remains the sole owner of
+its terminal outcome and error. Swift retains command transport feedback only.
 
 ## Rotate the plan, preserve the work
 
 ```bash
-lf repo new-chapter 2026-10
-lf refresh product
+lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run --json
+lf repo new-chapter 2026-10 --plan scratch/chapter.json --json
+lf wave new-chapter product 2026-10 --plan scratch/chapter.json --json
 ```
 
-A Planned Project expresses the next plan. Rotation reuses the explicitly named
-successor or creates one with the predecessor's Flow. Started unfinished Tasks
-move with identity, checkout, PR and captured execution intact. Proven untouched
-backlog is canceled; completed Tasks stay historical. Missing local or provider
-evidence cannot establish that work should be retired. Linear keeps the Projects
-and their Tasks.
+Retain one JSON input with `name` and `waves`. Each entry supplies `wave_id`,
+`successor_id`, `create`, `project_name` and `content`:
 
-Rotation reads fresh provider state after each interruption. A partial transition
-to the requested name is recoverable using stable Project identities and one
-unambiguous predecessor group. Unrelated competing current plans remain unresolved;
-newest-looking names never win. Status mutations do not form a distributed
-transaction. Another Home observes the new plan through normal synchronization.
-There is no Chapter row, packet or local switch. See [Waves](../waves.md#the-planning-model)
-for adoption, default Flow and disposition details.
+```json
+{
+  "name": "2026-10",
+  "waves": [{
+    "wave_id": "<registered-wave-id>",
+    "successor_id": "<new-or-existing-project-uuid>",
+    "create": true,
+    "project_name": "Autumn customer work",
+    "content": {
+      "workflow": "",
+      "metric_targets": [],
+      "krs": [{"text": "Customers can resume unfinished work", "holds": false}]
+    }
+  }]
+}
+```
+
+Allocate a new UUID once when authoring a creation plan. Set `create` to false
+for an existing exact destination; absence never turns that instruction into
+creation. Every destination requires authored KRs before any provider write.
+Existing Projects keep their names, summaries and unrelated content; supplied
+KRs, targets and optional workflow replace only those planning fields.
+
+The repository operation validates all selected Waves, destinations, legacy
+conversions and Task evidence before reserving every pair and applying the first
+Wave. The Wave command consumes only its entry through the same operation.
+The shared binding identifies the predecessor. Names never select either endpoint.
+Started unfinished Tasks move with identity, checkout, PR and captured execution
+intact. Unreviewed backlog remains historical; unknown evidence blocks apply.
+
+Retry with the same file. SQLite retains exact endpoints, create/existing intent, and
+selected issue IDs; those records never select the current Project. Before the
+binding switch, retry permits corrected planning fields and reclassifies new work. After it, only retained
+selected issues are reconciled; new historical starts stay put and external moves
+remain conflicts. Predecessor completion follows the binding switch. Settled
+Waves can be retried alongside unfinished ones without new Projects, and an old
+plan cannot overwrite an intervening binding. No Chapter table is required.
+
+Task candidate admission follows Project creation separately. Retain those
+candidates alongside the input and use the existing Task creation operation;
+failure there does not undo the selected Projects or their KRs.
 
 ## Inspect planning before starting execution
 
@@ -85,17 +158,50 @@ carry `revision`; a newer Project observation updates independently of the issue
 revision. Older observations cannot overwrite it. Project responses must include
 nullable content fields and relationship sets.
 
+Snapshot and detail ingestion project accepted entities into durable Project and
+Task rows in the same SQLite transaction. Projection uses each stored entity's
+acquisition time, never the Wave's aggregate sync time. A projection failure rolls
+back observation acceptance. It preserves execution fields and retained identity;
+an unknown destination does not authorize a Task transfer. Restart changes
+execution without rewriting accepted planning. Rotation accepts confirmed Project
+and transfer readbacks through the same owner. A single Project observation does
+not advance the Wave's full-refresh timestamp. Reteam accepts complete issue
+readbacks through that same owner and reconciles confirmed Team relationships
+without changing Initiative ownership or independently newer Project facts.
+
+Full and partial Wave ingestion validate the accepted Project's Initiative before
+recording membership or freshness. Detail refresh resolves that Initiative through
+Wave configuration and the registry, then accepts the association and projects
+facts in one transaction. A durable Project row alone grants no Wave ownership.
+Unconfirmed cold detail retains durable plans; foreign or unmapped ownership at
+the operation boundary reports an error. Both Project and Task projection require
+an exact accepted Initiative match. Snapshot acquisition and cold-detail readback
+hold the Wave planning lock through SQLite acceptance. Queued workers retain
+shared ownership after their async caller is canceled. Reteam and rotation acquire
+participating Wave locks in stable ID order; already-held refresh paths reuse them.
+Cold detail discovers ownership, locks, then reads ownership again. Null detail
+invalidates only the cached revision and observation it queried; it cannot invalidate
+a newer accepted Task. Readback follows the issue UUID across identifier changes.
+
+The `project_readiness` migration preserves original Linear Project bodies and
+acquisition evidence before a one-time name/slug correction from fresh provider
+facts. Only pre-cutover rows receive this exception; all non-name conflict checks
+remain, and later equal-revision name conflicts are rejected. Rejected ingestion
+cannot consume the exception or update durable Project facts first.
+
 List coverage never removes a Project merely because a later response omits it.
 Without removal evidence, refresh fails and retains the previous observation.
 Project revisions do not establish ordering for separate Initiative/Team
 relationships. A contradictory relationship set stays unresolved, retains its
 last-good facts, and blocks managed readers. Replaying a list or detail does not
-clear that uncertainty; acquiring ordered relationship evidence remains future work.
+clear that uncertainty. Explicit reteam reconciles the exact confirmed Team set
+under acquisition ownership; it cannot reconcile a changed Initiative.
 
-Chapter rollover transfers unfinished work and settles backlog before completing
-each predecessor Project in Linear. It confirms provider completion before recording
-the Project. Closing the Project does not complete transferred Tasks or change
-historical KR results. Current Project selection follows provider status.
+Chapter rollover transfers started work and retains unreviewed backlog in its
+predecessor Project before completing that Project in Linear. It confirms provider
+completion before recording the Project. Closing it neither completes transferred
+Tasks nor changes historical KR results. Current Project readers follow the shared
+binding, which rotation switches before confirming predecessor completion.
 
 The planning store can retain explicit archival acknowledgements. Integrating
 archival into the provider-backed chapter operation and preserving old acknowledgements
@@ -112,43 +218,82 @@ across the combined migration frontier remain unfinished.
 
 ```bash
 lf flow build
-lf flow show FLOW_SESSION --sessions --json
+lf flow show DRIVER_EXEC --sessions --json
 ```
 
-Starting a Flow compiles its definition into one FlowSession's captured graph,
-including every Skill, router, alternative and review policy. Source edits or
-deletion cannot change it. One cursor and its return counters identify loop
-passes. Subflows and passes are display lenses, with no separate FlowSession
-or process.
+A Flow is one driver Exec and the step Execs it starts; its ID is the driver
+Exec's. Starting one compiles its definition, including every router and
+alternative, into a graph the driver holds in memory. One cursor and its return
+counters identify loop passes. Subflows and passes are display lenses over the
+step Execs, with no separate record or driver.
 
-Every FlowSession naming a Task, or run in its checkout, is equally that Task's
+Every Flow naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
-driver. Each `flow start` captures a fresh FlowSession; the Project's Flow
-supplies the default and naming a Flow selects another. Flows hold autonomous
+driver. Each `task run` starts a fresh Flow as a child `lf run`, and a fresh
+one again when that Flow exec fails. Flows hold autonomous
 steps only: launching one with a `human: true` step is rejected. Finishing
 retains history and chooses no successor; Flow completion alone does not
 complete Task Work.
 
-## Settle the exact boundary
+## Move a Task through its workflow
 
-A boundary is the FlowSession, node and iteration tuple. One process drives the
-invocation under its per-invocation driver lock, and the row's position version
-fences each mutation. Agent boundaries select a native start in an AgentSession
-and consume its exact successful completion once. Mechanical boundaries retain
-correlated starts and results in Flow history. Each executed skill or operation
-runs in its own child lf Exec through the ordinary command path. The Flow driver
-owns navigation; a child's command outcome alone cannot settle agent work.
+A [workflow](../authoring.md#workflows) is the outer shape of a Task: nodes
+where a person takes part in the Task conversation, and edges that each run
+one Flow. A Task takes up its Project's on its first `lf task run`, or the one
+named; a Task that named its own keeps it. `task_workflows` holds one
+row per Task: the graph as it was then, never edited, and the Task's
+position. A later edit to the YAML applies to Tasks that take it up
+afterwards; taking one up again starts over at `start`.
 
-A deciding step returns a JSON `decision`: `advance` or `iterate` with a nonempty
-`summary`, or `blocked` with a nonempty `reason`. The unused field is null; all three
-keys are required in the provider schema. Settlement also accepts persisted receipts
-that omitted the unused field. A router returns a JSON object containing
-`path`, constrained to the captured branch's path names. Each provider receives
-the schema before generation. Session history retains the native output and
-completion separately; only the exact selected successful result is consumed
-inside the Flow's fenced settlement transaction. Invalid output receives at most
-two corrective turns in the same conversation; provider failure remains distinct.
-Helpers, older successes and late generations cannot settle the current selection.
+Position is stored: at a node, or on an edge with the Exec carrying it.
+Whether that Exec still runs is read from the Exec, never stored. The store
+has one read and four writes, and every write appends to
+`task_workflow_moves`:
+
+| Call | Effect |
+| --- | --- |
+| take up | store the graph at `start` |
+| choose | from the edge's `from` node, or from a stopped edge that left it: on the edge, carried by the choosing Exec; straight to `to` for an edge that runs nothing. Refused when the Task has moved since it was read |
+| arrive | the Exec that carried the edge, on success, puts the Task at `to` if it is still on that edge |
+| set | put the Task at a named node |
+
+`lf task run ISSUE [NAME]` chooses, then runs the edge's Flow in the same
+process, which arrives when the Flow succeeds. A Flow that stops leaves the
+Task on its edge. `lf task move ISSUE NODE` sets. An edge is not chosen
+while another runs. A move's author is its Exec's calling conversation, else
+a person; an arrival is the edge's own.
+
+A Task's state is read from that position and stored nowhere else: not ready
+with no Workflow, ready at `start`, active at a node or on an edge, done at
+`end`. Abandoned is the Task's own mark. Any move that reaches `end` is
+completion: one transaction writes the position, the Completed event and the
+retirement of an empty unpublished PR, after the settled-PR and
+unresolved-execution checks and the Linear write. A Task with no Workflow
+reaches `end` on `unplanned`, which has nothing between. Linear calling an
+active Task complete is read as `planning_conflict`; `end` then takes `--force`,
+kept in the move's note.
+
+## Read each step's result
+
+Each executed skill or operation runs in its own child lf Exec as the plain
+command: `lf -b skill <name> [message]`, or the operation's own command. The
+step is told nothing about its Flow. The driver owns navigation and the Flow's
+record, FlowExec: the Flow's name and graph as compiled at launch, then one
+appended row per step with its Exec, graph node key and per-edge iterations.
+Nothing reads it back to resume. A step's result is how its process exited; a
+deciding or routing step also answers through the final answer of the Session
+turn its Exec captured. After an operation the driver stops the Flow when a
+landing of its checkout is still being watched: neither failed.
+
+A deciding step's message asks for a JSON `decision`: `advance` or `iterate`
+with a nonempty `summary`, or `blocked` with a nonempty `reason`; the unused
+field is null. A router's message asks for a JSON object containing `path`, one
+of the branch's path names. The contract travels in the message, not as a
+provider schema, and the driver accepts the value inside prose or a code fence.
+Session history retains the native output and completion separately. An invalid
+answer is corrected by `lf -b session resume ID MESSAGE` in the same
+conversation, at most twice, then the Flow fails; provider failure remains
+distinct.
 
 Blocked records the reason and stops at the current Flow position. Existing logs
 and outcomes provide the evidence. The Wave operator resolves
@@ -159,21 +304,24 @@ or resumes a stopped Flow.
 
 ```bash
 lf task status INF-124
-lf flow show FLOW_SESSION --sessions --json
+lf flow show DRIVER_EXEC --sessions --json
 lf task interrupt INF-124
-lf --task INF-124 flow start --reason "take the smaller approach"
+lf task run INF-124 --reason "take the smaller approach"
 ```
 
-A FlowSession whose driver died keeps its last cursor, failure, events and effect
-receipts as history. Nothing resumes it and no command does. Crash recovery
+A killed driver leaves its Execs and FlowExec rows as history; the last step
+row shows where it stood. Nothing restarts or resumes it. A Flow is `current` while its
+driver has no recorded exit, `completed` when the driver succeeded and `stopped`
+when it exited before the last step. Crash recovery
 belongs to the caller, normally the Task conversation: inspect the Session,
 process and effect receipts, then launch fresh work. Observation does not replay
 work or consume a surviving child's result.
 
-`flow start` always launches a fresh ordinary Flow, detached in the Task
-checkout, with the caller's prompt and provider options. `--reason` publishes
-direction to the Task first. To change direction, interrupt, inspect, then
-launch.
+`task run` places the Task, then runs a fresh ordinary Flow in its checkout:
+the same command, checks and records as `lf --task ISSUE run FLOW` or a run
+from the worktree. It blocks until the Flow ends; a caller that will not wait
+backgrounds it. `--reason` publishes direction to the Task first. To change
+direction, interrupt, inspect, then run.
 
 Task status and roadmap `execution` observe the Task's most recently launched
 Flow: `none`, `latest` or `finished`. Its only control is `start`, available

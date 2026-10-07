@@ -19,8 +19,17 @@ uv run python scripts/benchmarks/desktop-performance/launch.py run --work /tmp/d
 uv run python scripts/benchmarks/desktop-performance/startup.py capture --repo ~/src/loopflow --output /tmp/startup-capture
 uv run python scripts/benchmarks/desktop-performance/startup.py run --capture /tmp/startup-capture --output /tmp/startup-run
 
-# The older capture/OCR journeys and their hash-pinned baseline.
-uv run python scripts/desktop_performance.py run --output /tmp/desktop-after --baseline scripts/benchmarks/desktop-performance/20260924-capture-input
+# A commit from another process to the row on screen, through the real reader, on that private copy.
+uv run python scripts/desktop_performance.py write-visible --home /tmp/desktop-launch/home --repo ~/src/loopflow --output /tmp/write-visible
+
+# Capture/OCR journeys: record a baseline before changing the production build.
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-before
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-after --baseline /tmp/desktop-before
+
+# Preserve a realistic Home, then exercise Task links through Podium and local CLI reads.
+uv run python scripts/desktop_performance.py snapshot --database /path/to/Home/loopflow.db --output /tmp/task-snapshot
+uv run python scripts/desktop_performance.py run --snapshot /tmp/task-snapshot --lf /path/to/lf --repo /path/to/repo --issue LOO-368 --samples 21 --output /tmp/task-before
+uv run python scripts/desktop_performance.py run --snapshot /tmp/task-snapshot --lf /path/to/optimized-lf --repo /path/to/repo --issue LOO-368 --samples 21 --output /tmp/task-after --baseline /tmp/task-before
 ```
 
 The app appends to `<Home>/desktop-cache/timings/launches.ndjson` and
@@ -43,6 +52,26 @@ timeout, so a hung read shows as a launch that never reached `fresh`. A launch
 still running, or quit early, is counted the same way. `first_frame` is a
 commit, not on-glass presentation; CPU, memory and main-thread stalls are
 `record_live.py`'s.
+
+Snapshot runs preserve every database row and use a fresh private copy for each
+invocation. Keep snapshots outside Git: they contain private history and credentials.
+Only local read commands run against copied records; provider connection and
+execution are refused. Repository files and placement metadata still come from
+the supplied repository, so preserve those inputs across comparisons too.
+Use the same host, CLI build mode, snapshot and measurement source before/after.
+Both runner modes build their native tests and launch the selected test directly
+so interruption can stop its process group. Allow disk/build capacity first.
+Archived SwiftPM-launcher runs remain historical evidence; the changed command
+requires fresh baselines for comparisons.
+
+The endpoint is a native bitmap with recognized Task identity, not OS application
+launch, compositor presentation or usable Session input. Read timings and sampled
+window/focus/sheet transitions are in `attempts.jsonl`. The
+[October 4 evidence](20261004-task-open/README.md) records failed attempts,
+overlapping-run discovery and the budgets' origin; it establishes no speedup.
+The [October 5 evidence](20261005-task-open/README.md) compares base and branch
+on one snapshot: warm and reopen meet 250 ms, cold misses 5,000 ms behind one
+`lf` read. The runner changed afterward, so new runs need a fresh baseline.
 
 `record_live.py record` attaches to the app you are already using (`Loopflow` from
 /Applications, or `LoopflowMac` from `swift/.build`), waits `--seconds`, then writes
@@ -96,7 +125,26 @@ it started. `--built` reuses the bundle already in `--work`; `--home <other
 work>/home` copies another run's Home, so a baseline and a candidate read the
 same data. It needs a logged-in desktop; OS file caches stay warm, and
 main-thread stalls are `record_live.py`'s. `20261004-launch-rendered/` compares
-a baseline and a candidate.
+a baseline and a candidate; `20261005-first-render/` alternates the two in
+rounds so both see the same host load.
+
+`--first-launch N` (three by default) opens N copies of the bundle, each at a
+new path and each once, with a saved workspace. The system charges a binary it
+has not run before, so this is the launch after an update; the other scenarios
+reopen one bundle and never pay it. `--strip` builds the bundle without local
+symbols. `20261005-first-launch/` is the receipt: about 390 ms more before
+`main`.
+
+`desktop_performance.py write-visible` opens one window on a private Home
+through the real `lf monitor work --watch` reader, then commits from
+`sqlite3`: a Task created and renamed, a Session created, renamed and completed.
+Each interval runs from the writer's exit to the row read back from a captured
+bitmap; `write_ms` is recorded beside it. The Home must be a copy (it refuses
+the one in use) already at the schema of the `--lf` being measured, and a
+current Task in `--repo` is the model for the new one. Written Tasks are
+deleted after each attempt; completed benchmark Sessions stay in the copy. It
+needs a logged-in desktop. Each write waits for an idle reader, so it does not
+sample a commit landing behind a reading already in flight.
 
 `startup.py` measures when the model first holds outline content for an
 uncached launch, a launch with a saved workspace, a saved launch whose reads

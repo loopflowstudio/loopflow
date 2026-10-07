@@ -1,17 +1,20 @@
 //! Provider planning operations shared by Task, Wave, and repository commands.
 //!
-//! Linear owns authored chapter content and Tasks; the durable chapter binding
-//! identifies the current Project. `lf repo refresh` projects provider state into
-//! SQLite; reads serve that snapshot and only reach Linear through a bounded
-//! staleness policy (see `load_show_snapshot`).
+//! Linear owns authored Project content and Tasks. `lf repo refresh` accepts
+//! provider facts and projects them into SQLite atomically. Reads serve that
+//! snapshot and only reach Linear through a bounded staleness policy
+//! (see `load_show_snapshot`).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::OpenOptions;
 use std::future::Future;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::future::try_join_all;
 
+use crate::durable::WorkRef;
 use crate::engine::config::load_repo_config;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -20,7 +23,6 @@ use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
 use crate::pm::{
     PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProviderKind, PmSnapshot, PmWave,
-    ProjectContent,
 };
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
@@ -31,6 +33,7 @@ use crate::store::{
     ProviderToken, ProviderTokenReplacement, StorageConfig, Store,
 };
 use crate::work::wave::config::{read_wave_config, update_wave_goal_config, WavePmConfig};
+use crate::work::wave::Wave;
 
 // ── Options and results ─────────────────────────────────────────────
 
@@ -167,7 +170,6 @@ pub struct PmReteamProjectMove {
     pub wave: String,
     pub id: String,
     pub name: String,
-    pub target_name: String,
     pub from_teams: Vec<String>,
 }
 
@@ -851,47 +853,67 @@ async fn fetch_pm_snapshot_for_projects(
     ctx: &PmContext,
     projects: Vec<PmProject>,
 ) -> OpsResult<PmSnapshot> {
-    let project_items = try_join_all(projects.iter().cloned().map(|project| async move {
-        let mut items = ctx
-            .client
-            .list_items(&project.id)
-            .await
-            .map_err(pm_to_ops)?;
-        for item in &mut items {
-            item.project_id = Some(project.id.clone());
-            item.project = Some(project.slug.clone());
-        }
-        Ok::<_, OpsError>(items)
-    }))
-    .await?;
+    let project_items = try_join_all(
+        projects
+            .iter()
+            .map(|project| ctx.client.list_items(&project.id)),
+    )
+    .await
+    .map_err(pm_to_ops)?;
     Ok(PmSnapshot {
         projects,
         items: project_items.into_iter().flatten().collect(),
     })
 }
 
-async fn store_pm_snapshot(
-    repo: &Path,
-    wave: &str,
-    ctx: &PmContext,
-    snapshot: &PmSnapshot,
-    observed_at: i64,
-    store: &Store,
-) -> OpsResult<()> {
-    let registered = crate::work::wave::ensure_wave_row(store, repo, wave)
+pub(crate) async fn require_planning_home(store: &Store, wave: &Wave) -> OpsResult<()> {
+    let placement = store
+        .placement(&WorkRef::Wave(wave.id().clone()))
         .await
-        .map_err(|err| OpsError::Message(format!("failed to register PM Wave: {err}")))?;
-    super::chapter::sync_projects(store, &registered, snapshot).await?;
-    store
-        .put_pm_snapshot(PmSnapshotRow {
-            wave_id: registered.id().clone(),
-            provider: ctx.provider.as_str().to_string(),
-            initiative: ctx.initiative.clone(),
-            synced_at: observed_at,
-            snapshot: snapshot.clone(),
-        })
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let local = store
+        .local_home()
         .await
-        .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    if placement.home_id != local.id {
+        return Err(OpsError::Message(format!(
+            "Wave {} is placed on {}; run this command with `lf home ssh {}`",
+            wave.slug(),
+            placement.home_id,
+            placement.home_id
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::store::PlanningLocks>> {
+    // Keep the existing lock inode namespace shared with already-running callers.
+    let path = crate::store::lf_home_dir().join("chapter-locks");
+    #[cfg(test)]
+    let path = PM_TEST_CONTEXT
+        .try_with(|context| context.path.with_extension("chapter-locks"))
+        .unwrap_or(path);
+    std::fs::create_dir_all(&path).map_err(|error| OpsError::Message(error.to_string()))?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path.join(format!("{}.lock", wave.id())))
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    // OS ownership releases on crash; provider state makes the next holder a resumer.
+    for _ in 0..300 {
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => return Ok(Arc::new(crate::store::PlanningLocks::new(file))),
+            Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(cause) => return Err(OpsError::Message(cause.to_string())),
+        }
+    }
+    Err(OpsError::Message(
+        "another planning operation is active; retry after it finishes".into(),
+    ))
 }
 
 pub(crate) async fn refresh_pm_snapshot(
@@ -899,10 +921,36 @@ pub(crate) async fn refresh_pm_snapshot(
     wave: &str,
     ctx: &PmContext,
 ) -> OpsResult<PmSnapshot> {
-    let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let store = pm_store().await?;
-    let snapshot = fetch_pm_snapshot_with_store(repo, wave, ctx, &store).await?;
-    store_pm_snapshot(repo, wave, ctx, &snapshot, observed_at, &store).await?;
+    let registered = crate::work::wave::ensure_wave_row(&store, repo, wave)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let acquisition = lock_wave_planning(&registered).await?;
+    refresh_pm_snapshot_locked(repo, &registered, ctx, &store, acquisition).await
+}
+
+pub(crate) async fn refresh_pm_snapshot_locked(
+    repo: &Path,
+    wave: &Wave,
+    ctx: &PmContext,
+    store: &Store,
+    acquisition: Arc<crate::store::PlanningLocks>,
+) -> OpsResult<PmSnapshot> {
+    let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+    let snapshot = fetch_pm_snapshot_with_store(repo, wave.slug(), ctx, store).await?;
+    store
+        .put_pm_snapshot(
+            PmSnapshotRow {
+                wave_id: wave.id().clone(),
+                provider: ctx.provider.as_str().to_string(),
+                initiative: ctx.initiative.clone(),
+                synced_at: observed_at,
+                snapshot: snapshot.clone(),
+            },
+            Some(acquisition),
+        )
+        .await
+        .map_err(|err| OpsError::Message(format!("failed to store PM snapshot: {err}")))?;
     Ok(snapshot)
 }
 
@@ -1182,11 +1230,11 @@ where
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message(format!("Wave {wave} is not initialized")))?;
-    super::chapter::require_chapter_home(&store, &registered).await?;
-    let _lock = super::chapter::rotation_lock(&registered).await?;
+    require_planning_home(&store, &registered).await?;
+    let acquisition = lock_wave_planning(&registered).await?;
     let ctx = resolve_context(repo, wave).await?;
-    refresh_pm_snapshot(repo, wave, &ctx).await?;
-    let project = super::chapter::current_project(&store, &registered).await?;
+    refresh_pm_snapshot_locked(repo, &registered, &ctx, &store, acquisition.clone()).await?;
+    let project = super::project::current_project(&store, &registered)?;
     let find_existing = |items: Vec<PmItem>| {
         items
             .into_iter()
@@ -1293,33 +1341,6 @@ pub(crate) async fn pm_update_async(
                 item.identifier
             )));
         }
-        let store = pm_store().await?;
-        let registered = crate::work::wave::ensure_wave_row(&store, repo, &wave)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        super::chapter::sync_projects(&store, &registered, &PmSnapshot {
-            projects: vec![record.project.clone()],
-            items: vec![item.clone()],
-        }).await?;
-        if let Some(task) = store
-            .get_task_by_issue(&item.id)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-        {
-            store
-                .update_task_plan(
-                    &task.id,
-                    &crate::planning::TaskPlan {
-                        id: task.plan.id,
-                        identifier: item.identifier.clone(),
-                        title: item.name.clone(),
-                        description: item.description.clone(),
-                        pm_snapshot_synced_at: record.observed_at,
-                    },
-                )
-                .await
-                .map_err(|error| OpsError::Message(error.to_string()))?;
-        }
         Ok::<(), OpsError>(())
     }
     .await;
@@ -1346,7 +1367,7 @@ pub(crate) async fn complete_planning_task(
     )
     .await
     .map_err(|cause| OpsError::Message(format!(
-        "Task {issue} completion was not confirmed: {cause}. Retry `lf task complete {issue} --summary <original-summary>`."
+        "Task {issue} completion was not confirmed: {cause}. Retry `lf task move {issue} end --reason <original-reason>`."
     )))?;
     let publish_summary = async {
         let client = issue_client(repo).await?;
@@ -1370,7 +1391,7 @@ pub(crate) async fn complete_planning_task(
         Ok::<(), OpsError>(())
     };
     publish_summary.await.map_err(|cause| OpsError::Message(format!(
-        "Task {issue} is complete, but its summary was not confirmed: {cause}. Retry `lf task complete {issue} --summary <original-summary>`."
+        "Task {issue} is complete, but its summary was not confirmed: {cause}. Retry `lf task move {issue} end --reason <original-reason>`."
     )))
 }
 
@@ -1757,22 +1778,62 @@ async fn inspect_task_planning_async(
             refresh_error: None,
         });
     }
+    let selector = existing
+        .record
+        .as_ref()
+        .map_or(issue, |record| record.item.id.as_str());
     let fetch = async {
         let repository = resolve_repository_context(repo).await?;
-        let selector = existing
-            .record
-            .as_ref()
-            .map_or(issue, |record| record.item.id.as_str());
-        let observation = repository
+        let mut observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        let mut observation = repository
             .client
             .issue_ownership(selector)
             .await
             .map_err(pm_to_ops)?;
-        let Some((mut item, mut project)) = observation else {
-            store
-                .invalidate_pm_task(&scope, provider.as_str(), selector)
-                .await
+        let discovered_project = observation
+            .as_ref()
+            .and_then(|(_, project)| project.as_ref())
+            .or_else(|| {
+                existing
+                    .record
+                    .as_ref()
+                    .and_then(|record| record.project.as_ref())
+            });
+        let mut acquisition = None;
+        let mut confirmed_wave = None;
+        if let Some(project) = discovered_project {
+            let initiative = singular_project_initiative(project)?;
+            let wave = wave_for_initiative(repo, &initiative)?;
+            let locator = crate::work::wave::WaveLocator::discover(repo, &wave)
                 .map_err(|error| OpsError::Message(error.to_string()))?;
+            let registered = store
+                .get_wave_at(&locator)
+                .await
+                .map_err(|error| OpsError::Message(error.to_string()))?
+                .ok_or_else(|| OpsError::Message(format!("Wave {wave} is not initialized")))?;
+            acquisition = Some(lock_wave_planning(&registered).await?);
+            observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+            observation = repository
+                .client
+                .issue_ownership(selector)
+                .await
+                .map_err(pm_to_ops)?;
+            if let Some((_, Some(project))) = &observation {
+                if project.initiative_ids.as_slice() != [initiative.as_str()] {
+                    return Err(OpsError::Message(format!(
+                        "Task {selector} ownership changed during discovery; retry planning"
+                    )));
+                }
+                confirmed_wave = Some((registered.id().clone(), initiative));
+            }
+        }
+        let Some((item, project)) = observation else {
+            if let Some(expected) = &existing.record {
+                store
+                    .invalidate_pm_task(&scope, provider.as_str(), expected.clone(), acquisition)
+                    .await
+                    .map_err(|error| OpsError::Message(error.to_string()))?;
+            }
             return Ok(false);
         };
         if item.team_id != repository.team_id {
@@ -1781,17 +1842,6 @@ async fn inspect_task_planning_async(
                 item.identifier, item.team_id, repository.team_id
             )));
         }
-        if let Some(project) = project.as_mut() {
-            // Exact inspection also permits unbound Projects. Bound Projects use
-            // the same names as Wave snapshots before comparing provider revisions.
-            if let Ok(wave) = singular_project_initiative(project)
-                .and_then(|initiative| wave_for_initiative(repo, &initiative))
-            {
-                let title_path = canonical_wave_title_path_with_store(repo, &wave, &store).await?;
-                canonicalize_project_name(&title_path, &wave, project)?;
-                item.project = Some(project.slug.clone());
-            }
-        }
         store
             .put_pm_task(
                 &scope,
@@ -1799,8 +1849,10 @@ async fn inspect_task_planning_async(
                 PmTaskRecord {
                     item,
                     project,
-                    observed_at: now,
+                    observed_at,
                 },
+                confirmed_wave,
+                acquisition,
             )
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -1815,11 +1867,11 @@ async fn inspect_task_planning_async(
     };
     // Read again: an event may have invalidated the record while acquisition ran.
     let mut observation = store
-        .pm_task_observation(&scope, provider.as_str(), issue)
+        .pm_task_observation(&scope, provider.as_str(), selector)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let refresh_error = match result {
-        Ok(false) if observation.state == PlanningState::Removed => None,
+        Ok(false) if matches!(observation.state, PlanningState::Removed | PlanningState::Available) => None,
         Ok(false) => {
             observation.state = PlanningState::Absent;
             Some(format!("task {issue:?} is absent from repository planning"))
@@ -1848,16 +1900,11 @@ pub fn pm_resolve_task(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
 pub(crate) async fn pm_resolve_task_async(repo: &Path, issue: &str) -> OpsResult<PmResolvedTask> {
     let ResolvedTask {
         wave,
-        mut item,
-        mut project,
+        item,
+        project,
         ..
     } = resolve_owned_issue(repo, issue).await?;
     let initiative_id = singular_project_initiative(&project)?;
-    let title_path = canonical_wave_title_path_async(repo, &wave).await?;
-    project.name = canonical_project_name(&title_path, &wave, &project.name)?;
-    project.slug = crate::pm::project_slug(&project.name);
-    item.project_id = Some(project.id.clone());
-    item.project = Some(project.slug.clone());
     Ok(PmResolvedTask {
         wave,
         initiative_id,
@@ -1909,41 +1956,20 @@ pub(crate) fn wave_for_initiative(repo: &Path, initiative_id: &str) -> OpsResult
 
 // ── reteam ──────────────────────────────────────────────────────────
 
-/// How repository-wide `reteam` treats one issue.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ReteamClass {
-    Already,
-    Move,
-}
-
-fn classify_reteam_item(item: &PmItem, team_id: &str) -> ReteamClass {
-    if item.team_id == team_id {
-        return ReteamClass::Already;
-    }
-    ReteamClass::Move
-}
-
 fn project_needs_reteam(bound_team: &str, project_team_ids: &[String]) -> bool {
     project_team_ids.len() != 1 || project_team_ids[0] != bound_team
 }
 
 #[derive(Debug)]
 struct ReteamIdentifierUpdate {
+    wave: String,
     issue_id: String,
-    old_identifier: String,
-    new_identifier: String,
 }
 
 struct ResolvedReteamContext {
     repository: RepositoryPmContext,
     team_key: String,
     store: Store,
-}
-
-#[derive(Debug, Clone)]
-struct ReteamProjectState {
-    project: PmProject,
-    target_name: String,
 }
 
 fn reteam_comment_marker(old_identifier: &str, team_key: &str) -> String {
@@ -2005,6 +2031,96 @@ async fn pm_reteam_async(
     apply_or_plan_repository_reteam(&resolved, repo, options.apply, progress).await
 }
 
+async fn accept_reteam_project(
+    resolved: &ResolvedReteamContext,
+    wave: &crate::work::wave::Wave,
+    project: &PmProject,
+    acquisition: Arc<crate::store::PlanningLocks>,
+    expected_teams: &[String],
+) -> OpsResult<()> {
+    let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+    let confirmed = resolved
+        .repository
+        .client
+        .project_ownership(&project.id)
+        .await
+        .map_err(pm_to_ops)?;
+    if confirmed.initiative_ids != project.initiative_ids
+        || confirmed.team_ids.len() != expected_teams.len()
+        || !expected_teams
+            .iter()
+            .all(|team| confirmed.team_ids.contains(team))
+    {
+        return Err(OpsError::Message(format!(
+            "Project {} ownership changed during reteam",
+            project.id
+        )));
+    }
+    resolved
+        .store
+        .reconcile_pm_project_teams(
+            wave.id(),
+            resolved.repository.provider.as_str(),
+            &project.initiative_ids[0],
+            confirmed,
+            observed_at,
+            acquisition,
+        )
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))
+}
+
+async fn accept_reteam_task(
+    repo: &Path,
+    resolved: &ResolvedReteamContext,
+    wave: &crate::work::wave::Wave,
+    issue: &str,
+    acquisition: Arc<crate::store::PlanningLocks>,
+) -> OpsResult<(String, bool)> {
+    let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+    let (item, project) = resolved
+        .repository
+        .client
+        .issue_ownership(issue)
+        .await
+        .map_err(pm_to_ops)?
+        .ok_or_else(|| OpsError::Message(format!("Task {issue} disappeared during reteam")))?;
+    let project = project
+        .ok_or_else(|| OpsError::Message(format!("Task {issue} lost its Project during reteam")))?;
+    let initiative = read_initiative(repo, wave.slug(), resolved.repository.provider)
+        .ok_or_else(|| OpsError::Message(format!("Wave {} lost its Initiative", wave.slug())))?;
+    if item.team_id != resolved.repository.team_id
+        || project.initiative_ids.as_slice() != [initiative.as_str()]
+    {
+        return Err(OpsError::Message(format!(
+            "Task {issue} ownership changed during reteam"
+        )));
+    }
+    let identifier = item.identifier.clone();
+    let changed = resolved
+        .store
+        .task_issue_identifier(issue)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .is_some_and(|previous| previous != identifier);
+    resolved
+        .store
+        .put_pm_task(
+            wave.repo(),
+            resolved.repository.provider.as_str(),
+            PmTaskRecord {
+                item,
+                project: Some(project),
+                observed_at,
+            },
+            Some((wave.id().clone(), initiative)),
+            Some(acquisition),
+        )
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    Ok((identifier, changed))
+}
+
 async fn apply_or_plan_repository_reteam(
     resolved: &ResolvedReteamContext,
     repo: &Path,
@@ -2020,21 +2136,47 @@ async fn apply_or_plan_repository_reteam(
             "repository has no Waves linked to Linear Initiatives".to_string(),
         ));
     }
-    let mut project_moves = Vec::new();
-    let mut moves = Vec::new();
-    let mut identifier_updates = Vec::new();
-    let mut states = Vec::new();
-    let mut seen_initiatives = BTreeMap::new();
-    let mut seen_projects = BTreeSet::new();
-    let mut already = 0usize;
-    let mut task_updates = 0usize;
-
     if apply && repo.join(".git").exists() && !crate::engine::git::is_clean(repo)? {
         return Err(OpsError::Message(
             "`lf repo reteam --apply` requires a clean Git checkout so its repository PM config and Wave bindings can commit atomically; commit or stash existing changes, then rerun the dry-run"
                 .to_string(),
         ));
     }
+
+    let mut registered = Vec::new();
+    for wave in &waves {
+        if apply {
+            registered.push(
+                crate::work::wave::ensure_wave_row(store, repo, wave)
+                    .await
+                    .map_err(|error| OpsError::Message(error.to_string()))?,
+            );
+        } else {
+            let locator = crate::work::wave::WaveLocator::discover(repo, wave)
+                .map_err(|error| OpsError::Message(error.to_string()))?;
+            if let Some(wave) = store
+                .get_wave_at(&locator)
+                .await
+                .map_err(|error| OpsError::Message(error.to_string()))?
+            {
+                registered.push(wave);
+            }
+        }
+    }
+    registered.sort_by(|left, right| left.id().as_str().cmp(right.id().as_str()));
+    let mut locked_waves = BTreeMap::new();
+    for wave in registered {
+        let acquisition = lock_wave_planning(&wave).await?;
+        locked_waves.insert(wave.slug().to_string(), (wave, acquisition));
+    }
+    let mut project_moves = Vec::new();
+    let mut moves = Vec::new();
+    let mut identifier_updates = Vec::new();
+    let mut projects = Vec::new();
+    let mut seen_initiatives = BTreeMap::new();
+    let mut seen_projects = BTreeSet::new();
+    let mut already = 0usize;
+    let mut task_updates = 0usize;
 
     for wave in &waves {
         let initiative =
@@ -2049,14 +2191,13 @@ async fn apply_or_plan_repository_reteam(
             )));
         }
         progress.status(&format!("preflighting wave/{wave} Initiative {initiative}"));
-        let projects = resolved
+        let wave_projects = resolved
             .repository
             .client
             .list_projects(&initiative)
             .await
             .map_err(pm_to_ops)?;
-        let title_path = canonical_wave_title_path_with_store(repo, wave, store).await?;
-        for project in projects {
+        for project in wave_projects {
             if !seen_projects.insert(project.id.clone()) {
                 return Err(OpsError::Message(format!(
                     "Linear Project `{}` ({}) appears under multiple Wave Initiatives",
@@ -2072,14 +2213,11 @@ async fn apply_or_plan_repository_reteam(
                     project.initiative_ids.join(", ")
                 )));
             }
-            let canonical_name = canonical_project_name(&title_path, wave, &project.name)?;
-            let target_name = format!("{title_path} — {canonical_name}");
-            if project_needs_reteam(team_id, &project.team_ids) || project.name != target_name {
+            if project_needs_reteam(team_id, &project.team_ids) {
                 project_moves.push(PmReteamProjectMove {
                     wave: wave.clone(),
                     id: project.id.clone(),
                     name: project.name.clone(),
-                    target_name: target_name.clone(),
                     from_teams: project.team_ids.clone(),
                 });
             }
@@ -2105,79 +2243,70 @@ async fn apply_or_plan_repository_reteam(
                         project.team_ids.join(", ")
                     )));
                 }
-                let registered_identifier =
-                    store
+                if item.team_id == *team_id {
+                    already += 1;
+                    let registered_identifier = store
                         .task_issue_identifier(&item.id)
                         .await
                         .map_err(|error| {
                             OpsError::Message(format!("failed to read task registry: {error}"))
                         })?;
-                match classify_reteam_item(&item, team_id) {
-                    ReteamClass::Already => {
-                        already += 1;
-                        if let Some(old_identifier) = registered_identifier
-                            .filter(|identifier| identifier != &item.identifier)
-                        {
-                            identifier_updates.push(ReteamIdentifierUpdate {
-                                issue_id: item.id,
-                                old_identifier,
-                                new_identifier: item.identifier,
-                            });
-                        }
+                    if registered_identifier.is_some_and(|identifier| identifier != item.identifier)
+                    {
+                        identifier_updates.push(ReteamIdentifierUpdate {
+                            wave: wave.clone(),
+                            issue_id: item.id,
+                        });
                     }
-                    ReteamClass::Move => moves.push(PmReteamMove {
+                } else {
+                    moves.push(PmReteamMove {
                         wave: wave.clone(),
                         project_id: project.id.clone(),
                         id: item.id,
                         old_identifier: item.identifier,
                         title: item.name,
                         new_identifier: None,
-                    }),
+                    });
                 }
             }
-            states.push(ReteamProjectState {
-                project,
-                target_name,
-            });
+            projects.push((wave, project));
         }
     }
 
     if apply {
         // Linear requires the destination Team on a Project before its Issues
         // can move. Expand first; narrowing is the final provider phase.
-        for state in &states {
-            if !state.project.team_ids.iter().any(|team| team == team_id) {
-                let mut teams = state.project.team_ids.clone();
-                teams.push(team_id.clone());
+        for (wave, project) in &projects {
+            let (wave, acquisition) = &locked_waves[*wave];
+            let mut expected_teams = project.team_ids.clone();
+            if !expected_teams.contains(team_id) {
+                expected_teams.push(team_id.clone());
                 progress.status(&format!(
                     "attaching team {team_key} to Project `{}`",
-                    state.project.name
+                    project.name
                 ));
                 resolved
                     .repository
                     .client
-                    .set_project_teams(&state.project.id, &teams)
+                    .set_project_teams(&project.id, &expected_teams)
                     .await
                     .map_err(pm_to_ops)?;
             }
+            accept_reteam_project(
+                resolved,
+                wave,
+                project,
+                acquisition.clone(),
+                &expected_teams,
+            )
+            .await?;
         }
-
         for update in identifier_updates {
-            task_updates += usize::from(
-                store
-                    .rebind_task_issue_identifier(
-                        &update.issue_id,
-                        &update.old_identifier,
-                        &update.new_identifier,
-                    )
-                    .await
-                    .map_err(|err| {
-                        OpsError::Message(format!(
-                            "failed to reconcile Task {}: {err}",
-                            update.new_identifier
-                        ))
-                    })?,
-            );
+            let (wave, acquisition) = &locked_waves[&update.wave];
+            let (_, changed) =
+                accept_reteam_task(repo, resolved, wave, &update.issue_id, acquisition.clone())
+                    .await?;
+            task_updates += usize::from(changed);
         }
 
         for mv in &mut moves {
@@ -2210,49 +2339,41 @@ async fn apply_or_plan_repository_reteam(
                 .move_item_to_team(&mv.id, team_id)
                 .await
                 .map_err(pm_to_ops)?;
-            task_updates += usize::from(
-                store
-                    .rebind_task_issue_identifier(&mv.id, &mv.old_identifier, &new_identifier)
-                    .await
-                    .map_err(|err| {
-                        OpsError::Message(format!(
-                            "moved {} to {new_identifier}, but failed to reconcile its Task: {err}",
-                            mv.old_identifier
-                        ))
-                    })?,
-            );
+            let (wave, acquisition) = &locked_waves[&mv.wave];
+            let (confirmed_identifier, changed) =
+                accept_reteam_task(repo, resolved, wave, &mv.id, acquisition.clone()).await?;
+            if confirmed_identifier != new_identifier {
+                return Err(OpsError::Message(format!(
+                    "Task {} move is not confirmed",
+                    mv.id
+                )));
+            }
+            task_updates += usize::from(changed);
             mv.new_identifier = Some(new_identifier);
         }
 
-        for state in &states {
-            if project_needs_reteam(team_id, &state.project.team_ids) {
+        for (wave, project) in &projects {
+            let (wave, acquisition) = &locked_waves[*wave];
+            if project_needs_reteam(team_id, &project.team_ids) {
                 progress.status(&format!(
                     "narrowing Project `{}` onto team {team_key}",
-                    state.project.name
+                    project.name
                 ));
                 resolved
                     .repository
                     .client
-                    .move_project_to_team(&state.project.id, team_id)
+                    .set_project_teams(&project.id, std::slice::from_ref(team_id))
                     .await
                     .map_err(pm_to_ops)?;
             }
-            if state.project.name != state.target_name {
-                resolved
-                    .repository
-                    .client
-                    .update_project(
-                        &state.project.id,
-                        &state.target_name,
-                        &ProjectContent {
-                            metric_targets: state.project.metric_targets.clone(),
-                            flow: state.project.flow.clone(),
-                            krs: state.project.krs.clone(),
-                        },
-                    )
-                    .await
-                    .map_err(pm_to_ops)?;
-            }
+            accept_reteam_project(
+                resolved,
+                wave,
+                project,
+                acquisition.clone(),
+                std::slice::from_ref(team_id),
+            )
+            .await?;
         }
 
         // Re-fetch and validate the complete repository before deleting any
@@ -2264,10 +2385,8 @@ async fn apply_or_plan_repository_reteam(
                 repository: resolved.repository.clone(),
                 initiative,
             };
-            let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-            let projects = checked_projects_with_store(repo, &ctx, wave, store).await?;
-            let snapshot = fetch_pm_snapshot_for_projects(&ctx, projects).await?;
-            store_pm_snapshot(repo, wave, &ctx, &snapshot, observed_at, store).await?;
+            let (registered, acquisition) = &locked_waves[wave];
+            refresh_pm_snapshot_locked(repo, registered, &ctx, store, acquisition.clone()).await?;
         }
         remove_legacy_pm_sentinels(repo, &waves)?;
         if repo.join(".git").exists() {
@@ -2435,7 +2554,6 @@ async fn pm_sync_async(
             _ => {}
         }
 
-        let title_path = canonical_wave_title_path_async(repo, wave).await?;
         let projects = client
             .list_projects(&initiative_id)
             .await
@@ -2484,35 +2602,20 @@ async fn pm_sync_async(
                     blocking.push(message);
                 }
             }
-            let canonical_name = match canonical_project_name(&title_path, wave, &project.name) {
-                Ok(name) => name,
-                Err(error) => {
-                    let message = error.to_string();
-                    diagnostics.push(message.clone());
-                    blocking.push(message);
-                    continue;
-                }
-            };
-            let slug = crate::pm::project_slug(&canonical_name);
-            if let Some(existing) = slugs.insert(slug.clone(), canonical_name.clone()) {
+            let name = &project.name;
+            let slug = &project.slug;
+            if let Some(existing) = slugs.insert(slug.clone(), name.clone()) {
                 let message = format!(
-                    "Linear Projects `{existing}` and `{canonical_name}` in wave/{wave} both derive slug `{slug}`"
+                    "Linear Projects `{existing}` and `{name}` in wave/{wave} both derive slug `{slug}`"
                 );
                 diagnostics.push(message.clone());
                 blocking.push(message);
-            }
-            let expected_project_name = format!("{title_path} — {canonical_name}");
-            if project.name != expected_project_name {
-                actions.push(format!(
-                    "rename Linear Project `{}` ({}) to `{expected_project_name}`",
-                    project.name, project.id
-                ));
             }
 
             let items = client.list_items(&project.id).await.map_err(pm_to_ops)?;
             if items.iter().all(|item| item.completed) {
                 diagnostics.push(format!(
-                    "Linear Project `{canonical_name}` ({}) in wave/{wave} has no open tasks",
+                    "Linear Project `{name}` ({}) in wave/{wave} has no open tasks",
                     project.id
                 ));
             }
@@ -2572,21 +2675,6 @@ async fn pm_sync_async(
             };
             let store = pm_store().await?;
             super::chapter::adopt_legacy_projects(repo, &store, wave, &ctx, true).await?;
-            let title_path = canonical_wave_title_path_async(repo, wave).await?;
-            for project in client.list_projects(&initiative).await.map_err(pm_to_ops)? {
-                if project_is_foreign(&project, &team_id) {
-                    continue;
-                }
-                validate_project_ownership(&project, wave, &initiative, &team_id)?;
-                let canonical_name = canonical_project_name(&title_path, wave, &project.name)?;
-                let expected_name = format!("{title_path} — {canonical_name}");
-                if project.name != expected_name {
-                    client
-                        .rename_project(&project.id, &expected_name)
-                        .await
-                        .map_err(pm_to_ops)?;
-                }
-            }
             refresh_pm_snapshot(repo, wave, &ctx).await?;
         }
     }
@@ -2845,7 +2933,7 @@ fn ensure_unique_project_slugs(projects: &[PmProject], wave: &str) -> OpsResult<
     Ok(())
 }
 
-/// List repository Projects and enforce singular Team + Initiative ownership.
+#[cfg(test)]
 pub(crate) async fn checked_projects(
     repo: &Path,
     ctx: &PmContext,
@@ -2855,13 +2943,12 @@ pub(crate) async fn checked_projects(
     checked_projects_with_store(repo, ctx, wave, &store).await
 }
 
-async fn checked_projects_with_store(
+pub(super) async fn checked_projects_with_store(
     repo: &Path,
     ctx: &PmContext,
     wave: &str,
     store: &Store,
 ) -> OpsResult<Vec<PmProject>> {
-    let title_path = canonical_wave_title_path_with_store(repo, wave, store).await?;
     let mut projects = ctx
         .client
         .list_projects(&ctx.initiative)
@@ -2904,9 +2991,8 @@ async fn checked_projects_with_store(
         }
     }
     projects.retain(|project| !project_is_foreign(project, &ctx.team_id));
-    for project in &mut projects {
+    for project in &projects {
         validate_project_ownership(project, wave, &ctx.initiative, &ctx.team_id)?;
-        canonicalize_project_name(&title_path, wave, project)?;
     }
     ensure_unique_project_slugs(&projects, wave)?;
     Ok(projects)
@@ -2946,49 +3032,6 @@ fn title_case(slug: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-pub(crate) async fn linear_project_name(
-    repo: &Path,
-    wave: &str,
-    canonical_name: &str,
-) -> OpsResult<String> {
-    Ok(format!(
-        "{} — {}",
-        canonical_wave_title_path_async(repo, wave).await?,
-        canonical_name.trim()
-    ))
-}
-
-fn canonicalize_project_name(
-    title_path: &str,
-    wave: &str,
-    project: &mut PmProject,
-) -> OpsResult<()> {
-    project.name = canonical_project_name(title_path, wave, &project.name)?;
-    project.slug = crate::pm::project_slug(&project.name);
-    Ok(())
-}
-
-fn canonical_project_name(title_path: &str, wave: &str, linear_name: &str) -> OpsResult<String> {
-    let expected = format!("{title_path} — ");
-    if let Some(name) = linear_name.strip_prefix(&expected) {
-        return Ok(name.trim().to_string());
-    }
-    let leaf = wave.rsplit('/').next().unwrap_or(wave);
-    for legacy in [title_case(wave), title_case(leaf)] {
-        let prefix = format!("{legacy} — ");
-        if let Some(name) = linear_name.strip_prefix(&prefix) {
-            return Ok(name.trim().to_string());
-        }
-    }
-    if linear_name.contains(" — ") {
-        return Err(OpsError::Message(format!(
-            "Linear Project title {linear_name:?} has an unrecognized Wave prefix; \
-             inspect `lf home doctor --planning` and correct the provider title before retrying"
-        )));
-    }
-    Ok(linear_name.trim().to_string())
 }
 
 pub fn canonical_wave_title_path(repo: &Path, wave: &str) -> OpsResult<String> {
@@ -3090,7 +3133,7 @@ pub(crate) async fn chapter_sweep_candidates(repo: &Path) -> OpsResult<ChapterSw
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?
             .ok_or_else(|| OpsError::Message(format!("{name}: current chapter is unavailable")))?;
-        let chapter = super::chapter::current_project(&store, &wave).await?;
+        let chapter = super::project::current_project(&store, &wave)?;
         for project in ctx
             .client
             .list_projects_including_archived(&ctx.initiative, true)
@@ -3150,7 +3193,7 @@ pub(crate) async fn require_outside_current_chapter(
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message("current Wave is unavailable".into()))?;
-    let chapter = super::chapter::current_project(&store, &wave).await?;
+    let chapter = super::project::current_project(&store, &wave)?;
     if resolved.item.project_id.as_deref() == Some(chapter.id.as_str())
         || resolved.item.completed
         || matches!(
@@ -3237,7 +3280,7 @@ mod tests {
             "id": id,
             "name": name,
             "description": "",
-            "content": "flow: feature\n\n## Definition\n\nA measured bet.\n\n## KRs\n",
+            "content": "workflow: feature\n\n## Definition\n\nA measured bet.\n\n## KRs\n",
             "status": {"type":"started"},
             "initiatives": { "nodes": [{ "id": "initiative-123" }] },
             "teams": { "nodes": [{ "id": "team-123" }] }
@@ -3366,28 +3409,30 @@ mod tests {
         assert!(error.to_string().contains("PRD-44"));
     }
 
-    #[test]
-    fn project_titles_strip_only_recognized_wave_paths() {
-        assert_eq!(
-            canonical_project_name("Survival", "survival", "Survival — A real task").unwrap(),
-            "A real task"
-        );
-        assert_eq!(
-            canonical_project_name(
-                "Survival / Infrastructure",
-                "infrastructure",
-                "Infrastructure — Gmail",
+    async fn run_reteam_fixture(
+        resolved: &ResolvedReteamContext,
+        repo: &Path,
+        database: &Path,
+    ) -> OpsResult<PmReteamResult> {
+        PM_TEST_CONTEXT
+            .scope(
+                PmTestContext {
+                    path: database.to_path_buf(),
+                    store: Arc::new(Store::from_sqlite_for_test(resolved.store.sqlite.clone())),
+                    graphql_url: String::new(),
+                },
+                apply_or_plan_repository_reteam(resolved, repo, true, &NullProgress),
             )
-            .unwrap(),
-            "Gmail"
-        );
-        assert!(canonical_project_name(
-            "Survival / Infrastructure",
-            "infrastructure",
-            "Another Wave — Gmail",
-        )
-        .is_err());
-        assert_eq!(default_team_key("loopflow"), "LOO");
+            .await
+    }
+
+    fn project_readback(project: &Value) -> QueuedResponse {
+        json_response(StatusCode::OK, json!({"data": {"project": project}}))
+    }
+
+    fn issue_readback(mut issue: Value, project: &Value) -> QueuedResponse {
+        issue["project"] = project.clone();
+        json_response(StatusCode::OK, json!({"data": {"issue": issue}}))
     }
 
     #[tokio::test]
@@ -3438,10 +3483,14 @@ mod tests {
         );
         let new_infrastructure = migration_project_node(
             "project-infrastructure",
-            "Survival / Infrastructure — Gmail",
+            "Infrastructure — Gmail",
             "initiative-infrastructure",
             &["team-loo"],
         );
+        let mut expanded_survival = old_survival.clone();
+        expanded_survival["teams"] = json!({"nodes": [{"id":"team-old"},{"id":"team-loo"}]});
+        let mut expanded_infrastructure = old_infrastructure.clone();
+        expanded_infrastructure["teams"] = expanded_survival["teams"].clone();
         let responses = vec![
             projects_response(json!([old_survival])),
             issues_response(json!([migration_issue_node(
@@ -3462,7 +3511,9 @@ mod tests {
                 true,
             )])),
             project_update_response("project-survival"),
+            project_readback(&expanded_survival),
             project_update_response("project-infrastructure"),
+            project_readback(&expanded_infrastructure),
             issue_comments_response(),
             json_response(
                 StatusCode::OK,
@@ -3471,6 +3522,17 @@ mod tests {
             json_response(
                 StatusCode::OK,
                 json!({ "data": { "issueUpdate": { "issue": { "id": "issue-open", "identifier": "LOO-1" } } } }),
+            ),
+            issue_readback(
+                migration_issue_node(
+                    "issue-open",
+                    "LOO-1",
+                    "project-survival",
+                    "Survival — A real task reaches done",
+                    "team-loo",
+                    false,
+                ),
+                &expanded_survival,
             ),
             issue_comments_response(),
             json_response(
@@ -3481,9 +3543,21 @@ mod tests {
                 StatusCode::OK,
                 json!({ "data": { "issueUpdate": { "issue": { "id": "issue-done", "identifier": "LOO-2" } } } }),
             ),
+            issue_readback(
+                migration_issue_node(
+                    "issue-done",
+                    "LOO-2",
+                    "project-infrastructure",
+                    "Infrastructure — Gmail",
+                    "team-loo",
+                    true,
+                ),
+                &expanded_infrastructure,
+            ),
             project_update_response("project-survival"),
+            project_readback(&new_survival),
             project_update_response("project-infrastructure"),
-            project_update_response("project-infrastructure"),
+            project_readback(&new_infrastructure),
             projects_response(json!([new_survival])),
             issues_response(json!([migration_issue_node(
                 "issue-open",
@@ -3498,7 +3572,7 @@ mod tests {
                 "issue-done",
                 "LOO-2",
                 "project-infrastructure",
-                "Survival / Infrastructure — Gmail",
+                "Infrastructure — Gmail",
                 "team-loo",
                 true,
             )])),
@@ -3520,7 +3594,7 @@ mod tests {
             store,
         };
 
-        let result = apply_or_plan_repository_reteam(&resolved, repo.path(), true, &NullProgress)
+        let result = run_reteam_fixture(&resolved, repo.path(), &database)
             .await
             .unwrap();
 
@@ -3544,6 +3618,16 @@ mod tests {
             assert!(pm.provider.is_none());
             assert!(pm.linear_team.is_none());
             assert!(pm.linear_initiative.is_some());
+            let locator = crate::work::wave::WaveLocator::discover(repo.path(), wave).unwrap();
+            let registered = resolved.store.get_wave_at(&locator).await.unwrap().unwrap();
+            let planning = resolved
+                .store
+                .pm_snapshot(registered.id())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(planning.snapshot.projects.len(), 1);
+            assert_eq!(planning.snapshot.projects[0].team_ids, ["team-loo"]);
         }
 
         let requests = requests.lock().await;
@@ -3556,13 +3640,43 @@ mod tests {
             .filter(|request| request.body.contains("SetProjectTeams"))
             .count();
         assert_eq!(attached_before_move, 2);
-        assert!(requests
+        assert_eq!(
+            result
+                .project_moves
+                .iter()
+                .map(|project| project.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "Survival — A real task reaches done",
+                "Infrastructure — Gmail"
+            ]
+        );
+        assert!(!requests
             .iter()
-            .any(|request| { request.body.contains("Survival / Infrastructure — Gmail") }));
+            .any(|request| request.body.contains("UpdateProject(")));
     }
 
     #[tokio::test]
     async fn repository_team_reteam_resumes_after_an_interrupted_issue_move() {
+        interrupted_reteam(false, "move").await;
+    }
+
+    #[tokio::test]
+    async fn repository_team_reteam_resumes_with_cached_project_membership() {
+        interrupted_reteam(true, "move").await;
+    }
+
+    #[tokio::test]
+    async fn repository_team_reteam_recovers_expansion_response_loss() {
+        interrupted_reteam(true, "expansion").await;
+    }
+
+    #[tokio::test]
+    async fn repository_team_reteam_recovers_narrowing_response_loss() {
+        interrupted_reteam(true, "narrowing").await;
+    }
+
+    async fn interrupted_reteam(cache_planning: bool, interruption: &str) {
         let repo = tempfile::tempdir().unwrap();
         write_repo_config(
             repo.path(),
@@ -3580,14 +3694,12 @@ mod tests {
         ))
         .await
         .unwrap();
-        store
-            .create_wave(&Wave::new(
-                WaveId::new(),
-                "survival".to_string(),
-                repo.path().display().to_string(),
-            ))
-            .await
-            .unwrap();
+        let wave = Wave::new(
+            WaveId::new(),
+            "survival".to_string(),
+            repo.path().display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
 
         let old_project = migration_project_node(
             "project-survival",
@@ -3624,30 +3736,78 @@ mod tests {
             false,
         );
         let marker = reteam_comment_body("OLD-1", "LOO");
-        let responses = vec![
-            projects_response(json!([old_project])),
+        let mut responses = Vec::new();
+        if cache_planning {
+            responses.push(projects_response(json!([old_project.clone()])));
+            responses.push(issues_response(json!([old_issue.clone()])));
+        }
+        let failure = || {
+            json_response(
+                StatusCode::OK,
+                json!({"errors":[{"message":format!("{interruption} interrupted")}]}),
+            )
+        };
+        let move_success = || {
+            json_response(
+                StatusCode::OK,
+                json!({"data":{"issueUpdate":{"issue":{"id":"issue-open","identifier":"LOO-1"}}}}),
+            )
+        };
+        let comment_success = || {
+            json_response(
+                StatusCode::OK,
+                json!({"data":{"commentCreate":{"comment":{"id":"comment-reteam"}}}}),
+            )
+        };
+        responses.extend([
+            projects_response(json!([old_project.clone()])),
             issues_response(json!([old_issue.clone()])),
-            project_update_response("project-survival"),
-            issue_comments_response(),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "commentCreate": { "comment": { "id": "comment-reteam" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "errors": [{ "message": "move interrupted" }] }),
-            ),
-            projects_response(json!([expanded_project])),
-            issues_response(json!([old_issue])),
-            issue_comments_response_with(Some(&marker)),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueUpdate": { "issue": { "id": "issue-open", "identifier": "LOO-1" } } } }),
-            ),
-            project_update_response("project-survival"),
-            projects_response(json!([migrated_project])),
-            issues_response(json!([migrated_issue])),
-        ];
+        ]);
+        if interruption == "expansion" {
+            responses.extend([
+                failure(),
+                projects_response(json!([expanded_project.clone()])),
+                issues_response(json!([old_issue.clone()])),
+                project_readback(&expanded_project),
+                issue_comments_response(),
+                comment_success(),
+            ]);
+        } else {
+            responses.extend([
+                project_update_response("project-survival"),
+                project_readback(&expanded_project),
+                issue_comments_response(),
+                comment_success(),
+            ]);
+            if interruption == "move" {
+                responses.extend([
+                    failure(),
+                    projects_response(json!([expanded_project.clone()])),
+                    issues_response(json!([old_issue.clone()])),
+                    project_readback(&expanded_project),
+                    issue_comments_response_with(Some(&marker)),
+                ]);
+            }
+        }
+        responses.extend([
+            move_success(),
+            issue_readback(migrated_issue.clone(), &expanded_project),
+        ]);
+        if interruption == "narrowing" {
+            responses.extend([
+                failure(),
+                projects_response(json!([migrated_project.clone()])),
+                issues_response(json!([migrated_issue.clone()])),
+                project_readback(&migrated_project),
+            ]);
+        } else {
+            responses.push(project_update_response("project-survival"));
+        }
+        responses.extend([
+            project_readback(&migrated_project),
+            projects_response(json!([migrated_project.clone()])),
+            issues_response(json!([migrated_issue.clone()])),
+        ]);
         let (base_url, requests) = test_server::spawn(responses).await;
         let resolved = ResolvedReteamContext {
             repository: RepositoryPmContext {
@@ -3664,16 +3824,62 @@ mod tests {
             store,
         };
 
-        let first = apply_or_plan_repository_reteam(&resolved, repo.path(), true, &NullProgress)
+        if cache_planning {
+            let projects = resolved
+                .repository
+                .client
+                .list_projects("initiative-survival")
+                .await
+                .unwrap();
+            let items = resolved
+                .repository
+                .client
+                .list_items("project-survival")
+                .await
+                .unwrap();
+            resolved
+                .store
+                .put_pm_snapshot(
+                    PmSnapshotRow {
+                        wave_id: wave.id().clone(),
+                        provider: "linear".into(),
+                        initiative: "initiative-survival".into(),
+                        synced_at: 1,
+                        snapshot: PmSnapshot { projects, items },
+                    },
+                    None,
+                )
+                .await
+                .unwrap();
+        }
+
+        let first = run_reteam_fixture(&resolved, repo.path(), &database)
             .await
             .unwrap_err();
-        assert!(first.to_string().contains("move interrupted"));
+        assert!(
+            first
+                .to_string()
+                .contains(&format!("{interruption} interrupted")),
+            "{first}"
+        );
         assert!(!legacy_pm_sentinels(repo.path()).unwrap().is_empty());
 
-        let resumed = apply_or_plan_repository_reteam(&resolved, repo.path(), true, &NullProgress)
+        let resumed = run_reteam_fixture(&resolved, repo.path(), &database)
             .await
             .unwrap();
-        assert_eq!(resumed.moves[0].new_identifier.as_deref(), Some("LOO-1"));
+        if interruption == "narrowing" {
+            assert!(resumed.moves.is_empty());
+        } else {
+            assert_eq!(resumed.moves[0].new_identifier.as_deref(), Some("LOO-1"));
+        }
+        let planning = resolved
+            .store
+            .pm_snapshot(wave.id())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(planning.snapshot.projects[0].team_ids, ["team-loo"]);
+        assert_eq!(planning.snapshot.items[0].identifier, "LOO-1");
         assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
         let requests = requests.lock().await;
         assert_eq!(
@@ -3696,7 +3902,7 @@ mod tests {
             summary: String::new(),
 
             metric_targets: Vec::new(),
-            flow: "feature".into(),
+            workflow: "feature".into(),
             status: crate::pm::ProjectStatus::Started,
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],
@@ -3727,7 +3933,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_pm_snapshot_reads_projects_and_tags_their_items() {
+    async fn fetch_pm_snapshot_reads_projects_and_their_items() {
         let (base_url, requests) = test_server::spawn(vec![
             projects_response(json!([project_node("project-123", "Scan")])),
             issues_response(json!([
@@ -3754,6 +3960,48 @@ mod tests {
         assert_eq!(
             requests.lock().await[1].authorization.as_deref(),
             Some("Bearer linear-secret")
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_pm_snapshot_preserves_moved_and_detached_issue_ownership() {
+        let (base_url, _) = test_server::spawn(vec![
+            projects_response(json!([project_node("project-123", "Scan")])),
+            issues_response(json!([
+                { "id": "moved", "identifier": "LOO-1", "url": null,
+                  "title": "Moved", "description": "Preserve the observed destination",
+                  "completedAt": null, "prioritySortOrder": 0.0, "sortOrder": 0.0,
+                  "updatedAt": "2026-10-05T12:00:00Z",
+                  "assignee": null, "state": { "type": "started" },
+                  "project": { "id": "successor", "name": "Next work" },
+                  "team": { "id": "team-123" } },
+                { "id": "detached", "identifier": "LOO-2", "url": null,
+                  "title": "Detached", "description": "Do not invent membership",
+                  "completedAt": null, "prioritySortOrder": 1.0, "sortOrder": 1.0,
+                  "updatedAt": "2026-10-05T12:00:01Z",
+                  "assignee": null, "state": { "type": "started" },
+                  "project": null, "team": { "id": "team-123" } }
+            ])),
+        ])
+        .await;
+        let ctx = linear_test_ctx(base_url, "initiative-123");
+        let repo = tempfile::tempdir().unwrap();
+        let store = isolated_pm_store(repo.path()).await;
+
+        let snapshot = fetch_pm_snapshot_with_store(repo.path(), "scan", &ctx, &store)
+            .await
+            .unwrap();
+        assert_eq!(snapshot.items[0].project_id.as_deref(), Some("successor"));
+        assert_eq!(snapshot.items[0].project.as_deref(), Some("next-work"));
+        assert_eq!(
+            snapshot.items[0].revision.as_deref(),
+            Some("2026-10-05T12:00:00Z")
+        );
+        assert_eq!(snapshot.items[1].project_id, None);
+        assert_eq!(snapshot.items[1].project, None);
+        assert_eq!(
+            snapshot.items[1].revision.as_deref(),
+            Some("2026-10-05T12:00:01Z")
         );
     }
 

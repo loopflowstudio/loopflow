@@ -48,7 +48,9 @@ publication, deployment, and secret handling in the publisher.
 ## Re-entry
 
 `lf release run` resumes an existing release PR or incomplete latest tag after
-interruptions.
+interruptions. An unpublished preparation commit does not consume a version.
+Correct it with another commit under the same version; do not bump the version
+to escape a failed build, late migration, or interrupted publication.
 
 A minor run records its selected patch, minor version, and source snapshot in
 `.lf/releases/minor-<target>.json`. Retry `lf release run minor` to complete that

@@ -33,6 +33,7 @@ pub(crate) mod task_pm;
 pub(crate) mod telemetry;
 pub mod trace;
 pub(crate) mod util;
+pub mod workflow;
 pub mod wt;
 pub mod wt_timing;
 
@@ -48,13 +49,13 @@ pub use cron::{
 };
 pub(crate) use cron::{cron_receipt_ids, list_cron_obligations, CronObligation};
 pub use error::{OpsError, OpsResult};
-pub use flow::execute_flow_command;
-pub(crate) use flow::execute_flow_command_with_cron;
+pub use flow::run_telemetry_scorecard;
 pub use land::{arm, mark_ready, submit, LandOptions};
 pub(crate) use land::{finish_arm_after_sync, finish_submit_after_sync};
 pub use pr::{create_or_update_pr, current_pr, PrInfo, PrOptions, PrResult};
 pub use present::{present_pr_review, ReviewSurface};
 pub use progress::{NullProgress, Progress};
+pub(crate) use release::release_run_with_cron;
 pub use release::{
     bump_version, generate_release, preview_release_notes, release_bump, release_check,
     release_notes, release_publish, release_run, release_status, release_tag, MergedPr,
@@ -62,7 +63,6 @@ pub use release::{
     ReleaseStatusResult,
 };
 pub(crate) use run::render_task_context;
-pub(crate) use run::{exec_task_flow, TaskFlowExec};
 #[doc(hidden)]
 pub use run::{
     resolve_checkout_binding, resolve_execution_binding, resolve_work_binding,

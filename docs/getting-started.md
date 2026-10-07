@@ -90,8 +90,8 @@ lf : "add type hints to utils.py"
 | `--docs PATH,PATH` | Add specific files, globs, or directories to context |
 | `--diff files` | Full content of files changed on the branch |
 | `--diff patch` | Raw `git diff` output |
-| `--mode interactive` | Interactive mode |
-| `--mode batch` | Batch/headless mode |
+| `-i` | Interactive mode |
+| `-b` | Batch/headless mode |
 
 ---
 
@@ -100,7 +100,8 @@ lf : "add type hints to utils.py"
 Start from a Linear task; Loopflow creates and retains its worktree.
 
 ```bash
-lf task create --run --wave <wave> --title "add OAuth login"
+lf task create --wave <wave> --title "add OAuth login"
+lf -b task run <issue-id> &
 lf task status <issue-id>
 lf comment <issue-id> "support passkeys too"
 lf wait <issue-id> --until terminal
@@ -196,7 +197,7 @@ lf ps --json
 
 Author `wave/shipper/GOAL.md` with an objective and operating guidance. Optional
 `crons:` schedules recurring commands; `pm:` connects shared planning. Each
-`wave/operate` invocation reviews the plan and takes a bounded next action.
+`wave/operate` invocation reviews the plan and keeps every started Task moving.
 Tasks own implementation in stable worktrees; `lf land` hands off delivery and
 `lf pr reconcile` settles verified merges; `lf ci watch` repairs failed CI
 while it runs.

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import plistlib
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -41,9 +43,7 @@ def test_release_bundle_renames_swift_product_to_bundle_executable(tmp_path: Pat
     assert not (app_macos_dir / "LoopflowMac").exists()
 
 
-def test_release_bundle_carries_the_cli(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_release_bundle_carries_the_cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     release_dir = tmp_path / "release"
     release_dir.mkdir()
     for name in ("lf",):
@@ -140,3 +140,84 @@ def test_notarization_without_credentials_fails_clearly(
 
     assert release_loopflow._notarize_dmg(tmp_path / "Loopflow.dmg") == 1
     assert "Missing notarization credentials" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("failure", ["wait", "staple"])
+def test_notarization_retry_reuses_submission_after_checkout_cleanup(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str
+) -> None:
+    checkout = tmp_path / "checkout"
+    dmg = checkout / "swift/dist/Loopflow.dmg"
+    dmg.parent.mkdir(parents=True)
+    dmg.write_bytes(b"signed candidate")
+    retained = tmp_path / "retained"
+    monkeypatch.setattr(release_loopflow, "SWIFT_DIR", checkout / "swift")
+    monkeypatch.setenv("LF_RELEASE_NOTARIZATION_DIR", str(retained))
+    for name in ("NOTARY_KEY", "NOTARY_KEY_ID", "NOTARY_ISSUER"):
+        monkeypatch.setenv(name, "fixture")
+    submissions: list[bytes] = []
+    failed = False
+
+    def capture(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal failed
+        if cmd[0] == "git":
+            return subprocess.CompletedProcess(cmd, 0, "source-commit\n", "")
+        if cmd[2] == "submit":
+            submissions.append(Path(cmd[3]).read_bytes())
+            return subprocess.CompletedProcess(cmd, 0, '{"id":"submission-1"}', "")
+        assert cmd[2:4] == ["wait", "submission-1"]
+        if failure == "wait" and not failed:
+            failed = True
+            raise RuntimeError("wait timed out")
+        return subprocess.CompletedProcess(cmd, 0, '{"status":"Accepted"}', "")
+
+    def run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal failed
+        assert cmd[:3] == ["xcrun", "stapler", "staple"]
+        assert Path(cmd[3]).read_bytes() == b"signed candidate"
+        Path(cmd[3]).write_bytes(b"stapled candidate")
+        if failure == "staple" and not failed:
+            failed = True
+            raise RuntimeError("stapling interrupted")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(release_loopflow, "run_capture", capture)
+    monkeypatch.setattr(release_loopflow, "run", run)
+    with pytest.raises(RuntimeError):
+        release_loopflow._notarize_dmg(dmg)
+    shutil.rmtree(checkout)
+    assert release_loopflow.release() == 0
+    assert submissions == [b"signed candidate"]
+    assert dmg.read_bytes() == b"stapled candidate"
+    assert (retained / "Loopflow.dmg").read_bytes() == b"signed candidate"
+
+
+@pytest.mark.parametrize("changed", ["artifact", "source", "unknown"])
+def test_notarization_does_not_resubmit_uncertain_or_changed_artifacts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, changed: str
+) -> None:
+    retained = tmp_path / "retained"
+    retained.mkdir()
+    (retained / "Loopflow.dmg").write_bytes(b"signed candidate")
+    (retained / "submission.json").write_text(
+        json.dumps(
+            {
+                "source_commit": "different" if changed == "source" else "source",
+                "sha256": "wrong"
+                if changed == "artifact"
+                else release_loopflow.hashlib.sha256(b"signed candidate").hexdigest(),
+                "submission_id": None if changed == "unknown" else "submission-1",
+            }
+        )
+    )
+    monkeypatch.setenv("LF_RELEASE_NOTARIZATION_DIR", str(retained))
+    for name in ("NOTARY_KEY", "NOTARY_KEY_ID", "NOTARY_ISSUER"):
+        monkeypatch.setenv(name, "fixture")
+
+    def capture(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert cmd[0] == "git", "uncertain artifact must not be submitted"
+        return subprocess.CompletedProcess(cmd, 0, "source", "")
+
+    monkeypatch.setattr(release_loopflow, "run_capture", capture)
+    with pytest.raises(RuntimeError, match="changed|different source|outcome unknown"):
+        release_loopflow._notarize_dmg(tmp_path / "checkout/Loopflow.dmg")

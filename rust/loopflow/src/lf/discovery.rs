@@ -750,7 +750,7 @@ mod tests {
                 "{name}"
             );
         }
-        for name in ["code", "incident", "feature", "vsm-operate"] {
+        for name in ["pursue", "incident", "vsm-operate"] {
             assert!(
                 matches!(
                     resolve_definition(tmp.path(), name, None).unwrap(),
@@ -758,6 +758,14 @@ mod tests {
                 ),
                 "{name}"
             );
+        }
+        // A workflow is traversed by `lf task run`, never run as a Flow.
+        for name in ["feature", "code"] {
+            let error = resolve_definition(tmp.path(), name, None).unwrap_err();
+            assert!(matches!(
+                error.downcast_ref::<crate::engine::LoadError>(),
+                Some(crate::engine::LoadError::Workflow(_))
+            ));
         }
     }
 }

@@ -179,7 +179,7 @@ struct WaveLensTests {
 
     private func makeCondition(state: String, reason: String) throws -> TaskConditionSnapshot {
         let json = """
-        {"state":"\(state)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null}}
+        {"state":"\(state)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"unresolved_execution":false}
         """
         return try JSONDecoder().decode(TaskConditionSnapshot.self, from: Data(json.utf8))
     }
@@ -190,7 +190,7 @@ struct WaveLensTests {
         "reference":{"issue_url":null,"workspace":null},"runtime":null,"directive":null,
         "flow":{"recommended":"feature","record":{"kind":"none"},"controls":[]},
         "next_move":{"owner":"task","reason":"\(reason)"},
-        "condition":{"state":"\(state)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null}},
+        "condition":{"state":"\(state)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"unresolved_execution":false},
         "actions":{"recommended":null,"reason":"Task is ready to start"},
         "prs":[],"active_pr":null}
         """

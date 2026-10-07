@@ -352,7 +352,7 @@ fn seed(home: &Path, repo: &Path) -> Wave {
         repo.join("plan.json"),
         serde_json::to_vec(&loopflow::pm::ProjectContent {
             metric_targets: vec![],
-            flow: "feature".into(),
+            workflow: "feature".into(),
             krs: vec![],
         })
         .unwrap(),
@@ -718,7 +718,7 @@ fn cron_add_rejects_a_development_binary_before_mutation() {
         .env("LF_HOME", &home)
         .env("HOME", &home)
         .env("LF_WAVE_ID", alpha_uuid)
-        .env_remove("LF_RUN_ID")
+        .env_remove("LF_CAPTURE_KEY")
         .output()
         .expect("run cron add");
 

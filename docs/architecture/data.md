@@ -3,11 +3,11 @@
 ```bash
 lf session list --interactive false --json
 lf session history SESSION --json
-lf flow show FLOW_SESSION --sessions --json
+lf flow show DRIVER_EXEC --sessions --json
 lf ps --json
 ```
 
-A conversation, a captured Flow and an operating-system process answer different
+A conversation, a Flow and an operating-system process answer different
 questions. SQLite owns their identities and history references; large payloads
 and provider-native state keep their own storage formats. This page specifies
 those ownership boundaries. [Cutover status](../architecture-reference.md#cutover-status)
@@ -20,8 +20,7 @@ and `Store::{run,create_run,runs}` / `SqliteStore::{run,create_run,end_run,runs}
 methods are removed. This is a source-breaking change for Rust callers.
 Reserve conversations with `create_session`, retain replacement inputs with
 `replace_session_input`, and read conversation identity through `session` or
-`sessions`. Read native evidence through `SqliteStore::session_history`; only the
-existing Flow settlement operations consume successful selected history.
+`sessions`. Read native evidence through `SqliteStore::session_history`.
 An actual command records its Exec outcome independently of agent completion.
 
 The cutover retains current Work, account routing and resumable conversations.
@@ -37,8 +36,10 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Actual lf command process, causal parent and observed command outcome | `execs` |
 | Agent conversation, title, feedback, native identity and driver | `agent_sessions` |
 | Native starts, outcomes, retries and usage | AgentSession history, correlated to native turn and driving Exec |
-| Captured Flow graph, cursor and return counts | `flow_sessions` |
-| Mechanical boundary results and consumed agent completions | FlowSession history |
+| A Flow's identity, state and step results | Its driver Exec and child step Execs in `execs` |
+| A Flow's name, launched graph and each step's node | FlowExec: `flow_execs` and `flow_exec_steps`, appended by the driver |
+| A Task's Workflow: its graph, position and moves | `task_workflows`, one row per Task updated in place, and append-only `task_workflow_moves`; written by `lf task run` and `lf task move` |
+| A Task's state: not ready, ready, active, done | Read from its `task_workflows` position; never stored. `tasks.abandoned_at` is the one mark beside it |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
 | Credentials and provider-native conversation files | The selected provider account's native Home |
 | Current local liveness | OS process evidence matched to exact recorded PID/start identity |
@@ -65,19 +66,27 @@ History retains the original Exec and provider generation when a later driver
 recovers a missed native completion. Missing command outcome, usage or process
 evidence stays unknown.
 
-FlowSession owns one captured graph and progression. Every FlowSession naming a
-Task, or run in its checkout, is equally that Task's work. Taskless execution
-uses the same owner and driver. One process drives an invocation under its
-per-invocation driver lock; every write is fenced by the row's position
-version. Agent boundaries consume the exact successful
-native history entry; mechanical boundaries record their own start and result.
-No generic attempt lifecycle sits between these owners.
+A capture's `events.jsonl` holds every provider event verbatim. SQLite history
+keeps what streaming increments add up to: a run of deltas is one event at the
+first delta's position, a Turn keeps its last cumulative diff, and the raw
+notification behind each increment stays in the file. Complete items, usage,
+input and outcomes are kept in both. Sizes and the reasoning are in the
+[storage footprint review](../reviews/storage-footprint.md).
 
-A retry appends history. Replacing a failed selected turn also discards its
-navigation candidate; the successful successor must supply its own verdict or
-route. A FlowSession whose driver died keeps its last cursor, failure, events and
-effect receipts as history; nothing resumes it, and its caller launches fresh
-work. Cursor movement alone never proves an external operation happened once.
+A Flow is one driver Exec and the step Execs it starts, and its ID is the
+driver Exec's. The driver keeps the cursor in memory and appends FlowExec: the
+Flow's name and compiled graph at launch, then each step's Exec, node and
+iteration counts. Nothing updates those rows, and no step reads or writes them.
+A Session reaches its Flow through the step row of the Exec that captured its
+input. Every Flow naming a Task, or run in its checkout, is equally that Task's
+work. Taskless execution uses the same driver. A step's result is how its
+process exited; a deciding or routing step also answers through the Session turn
+its Exec captured. No generic attempt lifecycle sits between these owners.
+
+A retry appends Session history. A killed driver leaves its Execs as history;
+nothing resumes it, and its caller launches fresh work. A past Flow whose YAML
+changed is drawn from the sequence its step Execs recorded. Cursor movement
+alone never proves an external operation happened once.
 
 ## Admission and publication
 
@@ -104,7 +113,7 @@ authority, and do not synchronize private writes back to the installation.
 
 ## Attribution and Started
 
-Typed ancestry belongs to AgentSession and FlowSession. Task implies Wave;
+Typed ancestry belongs to AgentSession and Exec. Task implies Wave;
 constructors fill omitted ancestors and reject contradictions in the transaction.
 Flow members share their owner's nullable Task. Historical work events retain
 their recorded attribution independently of current assignment or driver.
@@ -144,7 +153,7 @@ A Chapter is the shared name of each Wave's In Progress Linear Project. Project
 status owns current, planned and historical plans; there is no Chapter table,
 packet or Home-local switch. The local Project row is a synchronized projection.
 Rotation converges through fresh provider facts and stable identities, preserving
-started Tasks and their worktree, PR and FlowSession. Partial rotation remains
+started Tasks and their worktree, PR and execution. Partial rotation remains
 retryable; unrelated competing current Projects remain unresolved.
 
 No transaction spans SQLite, payload files, Git, Linear, GitHub and provider

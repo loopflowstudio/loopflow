@@ -1,11 +1,10 @@
+mod support;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::durable::FlowSession;
-use loopflow::engine::invocation::QueuedInvocation;
-use loopflow::engine::ExecutionCursor;
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearProjectId, ProjectPlan};
 use loopflow::store::{open_ephemeral_store, PmSnapshotRow, StorageConfig};
@@ -27,7 +26,12 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             "wave/product/GOAL.md",
             "---\npm:\n  linear_initiative: initiative-1\n---\nKeep working.\n",
         );
-        repo.create_file(".lf/flows/adoption.yaml", "- step:\n    id: design\n    name: design\n    human: true\n- step:\n    id: demo\n    name: demo\n    human: true\n");
+        repo.create_file(".lf/flows/adoption.yaml", "- cmd: sync --plan\n");
+        // The Project names a workflow; its planning is what the launches below test.
+        repo.create_file(
+            ".lf/workflows/adoption.yaml",
+            "nodes:\n  demo: demo\nedges:\n  - { from: start, to: demo, flow: adoption }\n  - { from: demo, to: end }\n",
+        );
         repo.stage_all();
         repo.commit("Fixture planning");
         repo.push();
@@ -96,7 +100,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 id: LinearProjectId::new("project-1").unwrap(),
                 slug: "chapter".into(),
                 name: "Chapter".into(),
-                flow: "adoption".into(),
+                workflow: "adoption".into(),
                 status: loopflow::pm::ProjectStatus::Started,
                 prompt_context: "Adopt existing work".into(),
                 pm_snapshot_synced_at: now.unix_timestamp(),
@@ -108,7 +112,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         };
         let snapshot: loopflow::pm::PmSnapshot = serde_json::from_value(json!({
             "projects": [{"id":"project-1", "slug":"chapter", "name":"Chapter",
-                "summary":"", "metric_targets":[], "flow":"adoption", "status":"started",
+                "summary":"", "metric_targets":[], "workflow":"adoption", "status":"started",
                 "krs":[], "initiative_ids":["initiative-1"], "team_ids":["team-1"]}],
             "items": [{"id":"issue-1", "identifier":"FIX-1", "branch_name":branch, "revision":"2026-09-29T12:00:00Z",
                 "url":null, "name":"A different title", "description":"Existing implementation",
@@ -119,26 +123,39 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         runtime.block_on(async {
             store.create_wave(&wave).await.unwrap();
             store.create_project(&project).await.unwrap();
+            rusqlite::Connection::open(home.path().join("loopflow.db"))
+                .unwrap()
+                .execute(
+                    "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                    rusqlite::params![wave.id(), project.id.as_str()],
+                )
+                .unwrap();
             let mut historical = snapshot.clone();
             historical.items[0].branch_name = None;
             store
-                .put_pm_snapshot(PmSnapshotRow {
-                    wave_id: wave.id().clone(),
-                    provider: "linear".into(),
-                    initiative: "initiative-1".into(),
-                    synced_at: now.unix_timestamp(),
-                    snapshot: historical,
-                })
+                .put_pm_snapshot(
+                    PmSnapshotRow {
+                        wave_id: wave.id().clone(),
+                        provider: "linear".into(),
+                        initiative: "initiative-1".into(),
+                        synced_at: now.unix_timestamp(),
+                        snapshot: historical,
+                    },
+                    None,
+                )
                 .await
                 .unwrap();
             store
-                .put_pm_snapshot(PmSnapshotRow {
-                    wave_id: wave.id().clone(),
-                    provider: "linear".into(),
-                    initiative: "initiative-1".into(),
-                    synced_at: now.unix_timestamp(),
-                    snapshot,
-                })
+                .put_pm_snapshot(
+                    PmSnapshotRow {
+                        wave_id: wave.id().clone(),
+                        provider: "linear".into(),
+                        initiative: "initiative-1".into(),
+                        synced_at: now.unix_timestamp(),
+                        snapshot,
+                    },
+                    None,
+                )
                 .await
                 .unwrap();
             assert!(store.list_tasks(None).await.unwrap().is_empty());
@@ -230,50 +247,19 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
         assert_eq!(runtime.block_on(store.list_tasks(None)).unwrap().len(), 1);
 
         if operation == "checkout" {
-            assert!(runtime
-                .block_on(store.latest_task_flow(&task.id))
-                .unwrap()
-                .is_none());
-            runtime
-                .block_on(store.create_flow(FlowSession {
-                    invocation: QueuedInvocation::load(&checkout, "adoption").unwrap(),
-                    cursor: ExecutionCursor {
-                        index: 1,
-                        iteration: 3,
-                        ..Default::default()
-                    },
-                    version: 0,
-                    task_id: Some(task.id.clone()),
-                    wave_id: Some(task.wave_id.clone()),
-                    cwd: checkout.clone(),
-                    message: None,
-                    model: None,
-                    current_attempt: None,
-                    pending_session_id: None,
-                    failure: None,
-                    finished: false,
-                    updated_at: now,
-                }))
-                .unwrap();
+            assert!(support::recorded_flows(home.path()).is_empty());
+            support::record_flow(home.path(), &checkout, "adoption", "implement", "failed");
         }
-        let saved = runtime
-            .block_on(store.latest_task_flow(&task.id))
-            .unwrap()
-            .unwrap();
-        // Catalog changes must not rewrite a captured graph or its cursor.
+        let saved = support::recorded_flows(home.path());
+        assert_eq!(saved.len(), 1);
+        // Neither a catalog change nor another checkout touches a Flow's Execs.
         fs::write(
             checkout.join(".lf/flows/adoption.yaml"),
             "- cmd: sync --plan\n",
         )
         .unwrap();
         invoke("checkout");
-        assert_eq!(
-            runtime
-                .block_on(store.latest_task_flow(&task.id))
-                .unwrap()
-                .unwrap(),
-            saved
-        );
+        assert_eq!(support::recorded_flows(home.path()), saved);
         assert_eq!(
             runtime
                 .block_on(store.active_task_pr(&task.id))
@@ -334,7 +320,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                     observed.project.as_mut().unwrap().id = "project-2".into();
                 }
                 runtime
-                    .block_on(store.put_pm_task(&scope, "linear", observed))
+                    .block_on(store.put_pm_task(&scope, "linear", observed, None, None))
                     .unwrap();
                 if condition == "connection" {
                     fs::write(
@@ -348,20 +334,14 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                         .block_on(store.observe_pm_issue_change("issue-1", None, true))
                         .unwrap();
                 }
-                let output = run(repo.path(), &["--task", "FIX-1", "flow", "start", "--json"]);
+                let output = run(repo.path(), &["-b", "task", "run", "FIX-1"]);
                 assert!(
                     !output.status.success(),
                     "{condition} allowed a Task Flow launch"
                 );
                 let error = String::from_utf8_lossy(&output.stderr);
                 assert!(error.contains(expected), "{condition}: {error}");
-                assert_eq!(
-                    runtime
-                        .block_on(store.latest_task_flow(&task.id))
-                        .unwrap()
-                        .unwrap(),
-                    saved
-                );
+                assert_eq!(support::recorded_flows(home.path()), saved);
                 assert_eq!(
                     runtime.block_on(store.get_task(&task.id)).unwrap(),
                     task_before

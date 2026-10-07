@@ -10,12 +10,20 @@ enum RepoFilter: Hashable {
     case repo(String)
 }
 
+@MainActor
+private final class WindowModel {
+    private(set) lazy var model = WorkModel.window(query: RegistryQueryLocal.shared)
+}
+
 struct WavesView: View {
     let portfolioService: PortfolioService
     @State private var sessionWorkspaces = SessionsWorkspaceRegistry()
     /// The window's one workspace model: the Work list and the Task sheet both
     /// read it, and it opens from the saved workspace like every other window.
-    @State private var model = PodiumModel.window(query: RegistryQueryLocal.shared)
+    /// Built when a window first renders: the app describes this view at every
+    /// launch, and a model decodes the saved workspace.
+    @State private var window = WindowModel()
+    private var model: WorkModel { window.model }
     @State private var showsTaskWorkspace = false
 
     /// A repo to pre-select on appear (from `--repo`, a deep link, or the repo
@@ -131,7 +139,21 @@ struct WavesView: View {
                 .frame(minWidth: 1100, minHeight: 700)
             }
         }
-        .task(id: model.repoPath) { await model.keepWorkspaceCurrent() }
+        .task { await model.keepWorkCurrent() }
+        .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
+        .onChange(of: selectedWave?.id, initial: true) { _, _ in
+            model.detailWaveId = selectedWave.flatMap { $0.isRegistered ? $0.id : nil }
+            if let wave = selectedWave, wave.isRegistered {
+                model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave))
+            }
+        }
+        // Waves arrive with every planning frame.
+        .onChange(of: model.planningSequence) { _, _ in
+            Task {
+                await syncRepoStates()
+                await refreshAuthoredWaves()
+            }
+        }
         .sheet(isPresented: $isShowingCreate) {
             CreateWaveSheet(
                 repos: repos,
@@ -153,7 +175,6 @@ struct WavesView: View {
             }
             ensureRepoStates()
             await syncRepoStates()
-            await pollRegistry()
         }
         .onChange(of: portfolioService.repos.map(\.path)) { _, _ in
             Task {
@@ -296,6 +317,10 @@ struct WavesView: View {
             WaveDetailPane(
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
+                streamed: model.waveDetail,
+                isProjectActivationPending: model.isProjectActivationPending(id: wave.id),
+                transportError: model.projectCommandErrors[wave.id],
+                onActivateProject: { model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave)) },
                 onClose: { selectedWaveId = nil },
                 onOpenTask: { id in
                     model.setRepoPath(waveRepoPath(for: wave))
@@ -437,7 +462,14 @@ struct WavesView: View {
         ensureRepoStates()
 
         do {
-            let waves = try await RegistryQueryLocal.shared.allWaves()
+            // The window's stream already holds the registry's Waves; read
+            // once only before its first planning frame.
+            let waves: [Wave]
+            if let streamed = model.waves.value {
+                waves = streamed
+            } else {
+                waves = try await RegistryQueryLocal.shared.allWaves()
+            }
             let plans = await buildWavePlanCache(registryWaves: waves)
             plansByWaveKey = plans
             for state in repoStates.values {
@@ -545,17 +577,6 @@ struct WavesView: View {
 
         Task.detached {
             try? saveLoopflowState(LoopflowState(selectedRepoPath: selectedRepoPath))
-        }
-    }
-
-    /// Refresh Work observations without starting execution.
-    private func pollRegistry() async {
-        if AppTestMode.shouldBypassRegistry { return }
-        while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(5))
-            if Task.isCancelled { return }
-            await syncRepoStates()
-            await refreshAuthoredWaves()
         }
     }
 

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use loopflow::harness::codex_connection::CodexConnection;
 use loopflow::id::ExecId;
-use loopflow::session::{AgentSession, SessionKind, TitleSource};
+use loopflow::session::{AgentSession, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
@@ -115,8 +115,8 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
         rusqlite::params![project.as_str(),wave]).unwrap();
     connection
         .execute(
-            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,work_state,work_terminal_at,created_at)
-        VALUES(?1,?2,'issue-proof','PROOF-1','done',2,1)",
+            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at)
+        VALUES(?1,?2,'issue-proof','PROOF-1',1)",
             rusqlite::params![task.as_str(), project.as_str()],
         )
         .unwrap();
@@ -323,6 +323,7 @@ async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
 }
 
 #[tokio::test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
 async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
@@ -446,14 +447,10 @@ fn assert_recorded_exit(home: &Path, code: i32) {
         .collect::<Result<_, _>>()
         .unwrap();
     assert_eq!(rows, vec![("failed".into(), Some(code), true, None)]);
-    let work: (i64, i64) = conn
-        .query_row(
-            "SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM flow_sessions)",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
+    let sessions: i64 = conn
+        .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(work, (0, 0));
+    assert_eq!(sessions, 0);
 }
 
 #[tokio::test]
@@ -807,7 +804,7 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 captured: None,
                 task_id: None,
                 wave_id: None,
-                flow_session_id: None,
+                flow_id: None,
                 work_source: None,
                 bound_at: None,
                 id: session_id.into(),
@@ -820,7 +817,6 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 model: None,
                 node: None,
                 iterations: None,
-                kind: SessionKind::Conversation,
                 interactive: true,
                 repo: None,
                 title: "Engine ownership".into(),
@@ -830,7 +826,6 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 completed_at: None,
                 created_at: 1,
             },
-            None,
             None,
         )
         .unwrap();
@@ -961,46 +956,74 @@ fn serve_gate(
     })
 }
 
-#[test]
-fn monitor_prune_preview_preserves_receipts_in_text_and_json() {
+#[tokio::test]
+async fn monitor_prune_preserves_unknown_outcomes_and_removes_only_settled_dead_receipts() {
     let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    let conn = rusqlite::Connection::open(database).unwrap();
+    let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+    let pid = child.id();
+    child.kill().unwrap();
+    child.wait().unwrap();
     let directory = home.path().join("runtime/exec-processes");
     std::fs::create_dir_all(&directory).unwrap();
-    let receipt = directory.join("4294967295.json");
-    let bytes = serde_json::to_vec(&serde_json::json!({
-        "schema_version": 1,
-        "trace_id": "stale-trace",
-        "exec_id": "stale-exec",
-        "pid": u32::MAX,
-        "started_at": 1,
-    }))
-    .unwrap();
 
-    for json in [false, true] {
-        std::fs::write(&receipt, &bytes).unwrap();
-        for dry_run in [true, false] {
-            let mut args = vec!["monitor", "prune"];
-            if dry_run {
-                args.push("--dry-run");
+    for terminal in [false, true] {
+        let id = ExecId::new();
+        conn.execute(
+            "INSERT INTO execs(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?1,1,?2,?3)",
+            rusqlite::params![id, terminal.then_some(2), terminal.then_some("failed")],
+        )
+        .unwrap();
+        // Existing PID-named receipts and new Exec-named receipts share retention rules.
+        for name in [pid.to_string(), id.to_string()] {
+            let receipt = directory.join(format!("{name}.json"));
+            let bytes = serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1, "trace_id": id, "exec_id": id,
+                "pid": pid, "started_at": 1,
+            }))
+            .unwrap();
+            for json in [false, true] {
+                std::fs::write(&receipt, &bytes).unwrap();
+                for dry_run in [true, false] {
+                    let mut args = vec!["monitor", "prune"];
+                    if dry_run {
+                        args.push("--dry-run");
+                    }
+                    if json {
+                        args.push("--json");
+                    }
+                    let output = command(home.path(), home.path(), &args).output().unwrap();
+                    assert!(output.status.success(), "{output:?}");
+                    assert_eq!(receipt.exists(), dry_run || !terminal, "{args:?}");
+                    if receipt.exists() {
+                        assert_eq!(std::fs::read(&receipt).unwrap(), bytes);
+                    }
+                    if json {
+                        let report: serde_json::Value =
+                            serde_json::from_slice(&output.stdout).unwrap();
+                        assert_eq!(report["dry_run"], dry_run);
+                        assert_eq!(
+                            report["removed_exec_receipts"],
+                            u32::from(!dry_run && terminal)
+                        );
+                        assert_eq!(report["errors"], 0);
+                    }
+                }
             }
-            if json {
-                args.push("--json");
-            }
-            let output = command(home.path(), home.path(), &args).output().unwrap();
-            assert!(output.status.success(), "{output:?}");
-            assert_eq!(receipt.exists(), dry_run, "{args:?}");
-            if dry_run {
-                assert_eq!(std::fs::read(&receipt).unwrap(), bytes);
-            }
-            if json {
-                let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-                assert_eq!(report["dry_run"], dry_run);
-                assert_eq!(report["removed_exec_receipts"], u32::from(!dry_run));
-            } else {
-                let action = if dry_run { "WOULD PRUNE" } else { "PRUNED" };
-                assert!(String::from_utf8_lossy(&output.stdout).contains(action));
+            if receipt.exists() {
+                std::fs::remove_file(receipt).unwrap();
             }
         }
+        let outcome: Option<String> = conn
+            .query_row("SELECT outcome FROM execs WHERE id=?1", [&id], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(outcome.as_deref(), terminal.then_some("failed"));
     }
 }
 

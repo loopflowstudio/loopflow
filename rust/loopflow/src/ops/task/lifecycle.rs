@@ -3,12 +3,13 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::durable::{FlowSession, WorkRef, WorkStatus};
+use crate::durable::{WorkRef, WorkStatus};
 use crate::engine::git::current_branch;
 use crate::engine::worktrees::main_repo_root;
 use crate::ops::pm::PmResolvedTask;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
+use crate::store::sqlite::OpenExecs;
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
 use crate::work::task::{PrPhase, Task, TaskPr};
 
@@ -77,17 +78,19 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         Ok(())
     }
     .await;
-    result.map_err(|error| task_error(format!(
-        "Task {} is complete, but cleanup is incomplete: {error}. Retry `lf task complete {} --summary 'Retry cleanup'`.",
-        task.plan.identifier, task.plan.identifier,
-    )))
+    result.map_err(|error| {
+        task_error(format!(
+            "Task {} is complete, but cleanup is incomplete: {error}. Retry `lf task move {} end`.",
+            task.plan.identifier, task.plan.identifier,
+        ))
+    })
 }
 
 async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore, Task)>> {
     let store = match open_registry_for_authority().await {
         Ok(store) => Arc::new(store),
         Err(RegistryUnavailable::MissingFile { .. })
-            if std::env::var_os(crate::durable::RUN_ID_ENV).is_none() =>
+            if crate::journal::agent_caller().is_none() =>
         {
             return Ok(None)
         }
@@ -102,24 +105,6 @@ async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore
         return Err(task_error("branch belongs to a Task in another repository"));
     }
     Ok(Some((store, task)))
-}
-
-fn execution_unsettled(store: &SharedStore, flow: &FlowSession) -> OpsResult<bool> {
-    let step = store
-        .sqlite
-        .pending_flow_step_exec(flow.id())
-        .map_err(task_error)?;
-    let provider_pending = store
-        .sqlite
-        .pending_flow_conversation(flow.id())
-        .map_err(task_error)?
-        .is_some();
-    Ok(provider_pending
-        || step.as_ref().is_some_and(|exec| {
-            crate::journal::exec_process_evidence(&store.sqlite, exec)
-                != crate::journal::ProcessIdentityEvidence::Dead
-        })
-        || crate::ops::flow_run::driver_live(flow.id()))
 }
 
 async fn require_idle(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -481,9 +466,150 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
         .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
 }
 
+/// A Task decision, never an Exec outcome or process-control receipt.
+pub(super) fn accept_historical_uncertainty(
+    store: &SharedStore,
+    task: &Task,
+    exec_ids: &[crate::id::ExecId],
+    reason: &str,
+) -> OpsResult<()> {
+    if exec_ids.is_empty() {
+        return Ok(());
+    }
+    let work = store.sqlite.task_work(&task.id).map_err(task_error)?;
+    for id in exec_ids {
+        if !historical_unknown_exec(store, &work, id)? {
+            return Err(task_error(format!(
+                "Exec {id} is not an unowned historical unknown in Task {}; retained all execution protection",
+                task.plan.identifier
+            )));
+        }
+    }
+    let accepted = store
+        .sqlite
+        .task_accepted_unknown_execs(&task.id)
+        .map_err(task_error)?;
+    let mut new_ids: Vec<_> = exec_ids
+        .iter()
+        .filter(|id| !accepted.contains(*id))
+        .cloned()
+        .collect();
+    new_ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    new_ids.dedup();
+    if !new_ids.is_empty() {
+        store
+            .sqlite
+            .append_task_event(
+                &task.id,
+                &crate::work::task::TaskEventKind::HistoricalUncertaintyAccepted {
+                    exec_ids: new_ids,
+                    reason: reason.to_string(),
+                },
+            )
+            .map_err(task_error)?;
+    }
+    Ok(())
+}
+
+fn historical_unknown_exec(
+    store: &SharedStore,
+    work: &crate::task_work::TaskWork,
+    id: &crate::id::ExecId,
+) -> OpsResult<bool> {
+    let Some(exec) = work.execs.iter().find(|exec| &exec.id == id) else {
+        return Ok(false);
+    };
+    // Any process receipt disqualifies acceptance, regardless of liveness.
+    // Without a receipt, completion or a previous boot already proves exit.
+    if crate::journal::current_exec_id().as_ref() == Some(id)
+        || exec.completed_at.is_some()
+        || crate::journal::began_before_boot(exec.started_at)
+        || crate::journal::read_exec_process_receipts_at(&crate::store::lf_home_dir())
+            .map_err(task_error)?
+            .iter()
+            .any(|receipt| receipt.exec_id == id.as_str())
+    {
+        return Ok(false);
+    }
+    if let Some(caller) = &exec.caller_session_id {
+        if !store
+            .sqlite
+            .session(caller)
+            .map_err(task_error)?
+            .is_some_and(|session| session.completed_at.is_some())
+        {
+            return Ok(false);
+        }
+    }
+    for session in work
+        .sessions
+        .iter()
+        .filter(|session| session.completed_at.is_none())
+    {
+        if let Some(driver) = store
+            .sqlite
+            .session_driver(&session.id)
+            .map_err(task_error)?
+        {
+            if driver.exec_id.as_ref() == Some(id) || &driver.provider_exec_id == id {
+                return Ok(false);
+            }
+        }
+    }
+    for flow in work
+        .flows
+        .iter()
+        .filter(|flow| flow.summary.state == crate::session::FlowSummaryState::Current)
+    {
+        if store
+            .sqlite
+            .flow_exec(&flow.summary.id)
+            .map_err(task_error)?
+            .is_some_and(|(flow, _)| {
+                &flow.driver.id == id || flow.steps.iter().any(|step| &step.exec.id == id)
+            })
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+pub(super) fn completion_work_blockers(
+    store: &SharedStore,
+    task: &Task,
+    open: &OpenExecs,
+) -> OpsResult<Vec<String>> {
+    let mut work = store
+        .sqlite
+        .task_open_work(&task.id, open)
+        .map_err(task_error)?;
+    let mut accepted = HashSet::new();
+    for id in store
+        .sqlite
+        .task_accepted_unknown_execs(&task.id)
+        .map_err(task_error)?
+    {
+        // Acceptance cannot hide a newly observed process or current owner.
+        if historical_unknown_exec(store, &work, &id)? {
+            accepted.insert(id);
+        }
+    }
+    work.execs.retain(|exec| !accepted.contains(&exec.id));
+    execution_blockers(store, &work)
+}
+
 /// A Flow whose driver died is history; only live or unresolved execution waits.
 pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
     associated_execution_blockers(store, task)
+}
+
+fn open_work(store: &SharedStore, task: &Task) -> OpsResult<crate::task_work::TaskWork> {
+    let open = store.sqlite.open_execs().map_err(task_error)?;
+    store
+        .sqlite
+        .task_open_work(&task.id, &open)
+        .map_err(task_error)
 }
 
 /// Restoring a checkout preserves idle Flows; only unresolved execution waits.
@@ -491,10 +617,7 @@ pub(super) fn associated_execution_blockers(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<Vec<String>> {
-    execution_blockers(
-        store,
-        &store.sqlite.task_work(&task.id).map_err(task_error)?,
-    )
+    execution_blockers(store, &open_work(store, task)?)
 }
 
 fn execution_blockers(
@@ -513,58 +636,13 @@ fn execution_blockers(
             .map_err(task_error)?
             .and_then(|exec| exec.parent_exec_id);
     }
-    let ended_flows: HashSet<&str> = work
-        .flows
-        .iter()
-        .filter(|flow| flow.summary.state != crate::session::FlowSummaryState::Current)
-        .map(|flow| flow.summary.id.as_str())
-        .collect();
-    let mut own_flows = HashSet::new();
-    for flow in work
-        .flows
-        .iter()
-        .filter(|flow| flow.summary.state == crate::session::FlowSummaryState::Current)
-    {
-        if store
-            .sqlite
-            .flow_exec_ids(&flow.summary.id)
-            .map_err(task_error)?
-            .iter()
-            .any(|exec| lineage.contains(exec))
-        {
-            own_flows.insert(flow.summary.id.as_str());
-            continue;
-        }
-        if let Some(position) = store.sqlite.flow(&flow.summary.id).map_err(task_error)? {
-            if execution_unsettled(store, &position)? {
-                blockers.push(format!(
-                    "Flow {} has live or unresolved execution",
-                    flow.summary.id
-                ));
-            }
-        }
-    }
-    for session in work.sessions.iter().filter(|session| {
-        session
-            .flow_session_id
-            .as_deref()
-            .is_none_or(|flow| !own_flows.contains(flow))
-    }) {
+    // A Flow is its driver and step Execs; the loop over Execs below judges
+    // them. Sessions are judged here on their own evidence.
+    for session in &work.sessions {
         if let Some(input) = store.sqlite.session(&session.id).map_err(task_error)? {
             if input.completed_at.is_none() && !input.interactive && !input.input_published {
                 blockers.push(format!("Session {} has a reserved input", session.id));
             }
-        }
-        // Nothing waits for a review whose Flow ended; its Execs and turns are
-        // still judged on their own evidence.
-        if session.completed_at.is_none()
-            && session.kind != crate::session::SessionKind::Conversation
-            && !session
-                .flow_session_id
-                .as_deref()
-                .is_some_and(|flow| ended_flows.contains(flow))
-        {
-            blockers.push(format!("Session {} awaits completion", session.id));
         }
         if store
             .sqlite

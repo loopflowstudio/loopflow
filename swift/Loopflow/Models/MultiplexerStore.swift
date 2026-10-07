@@ -160,7 +160,7 @@ public final class MultiplexerStore {
         }
 
         switch focusedPane.content {
-        case .shell, .monitor:
+        case .shell, .flowLog, .files:
             _ = _split(focusedPaneId, axis: .vertical, content: .session(id: sessionId))
             return
         case .empty, .session:
@@ -191,10 +191,11 @@ public final class MultiplexerStore {
         _notify()
     }
 
-    /// Reveal one Task's observation beside existing terminals, never replacing them.
-    public func showMonitor(taskId: String) {
-        let content = PaneContent.monitor(taskId: taskId)
+    /// Reveal a Task's Flow exec log or files beside existing terminals,
+    /// never replacing them.
+    public func show(_ content: PaneContent) {
         if let pane = layout.allPanes.first(where: { $0.content == content }) {
+            setCollapsed(paneId: pane.id, collapsed: false)
             setFocusedPane(pane.id)
         } else if focusedPane.content == .empty {
             layout = layout.replacingContent(of: focusedPaneId, with: content)

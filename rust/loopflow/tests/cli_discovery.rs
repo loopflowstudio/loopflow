@@ -219,14 +219,8 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     for args in [
-        &["--interactive"][..],
-        &["--batch"][..],
-        &["--tui"][..],
-        &["--ide"][..],
-        &["-i"][..],
-        &["-b"][..],
         &["--as", "wave:exports"][..],
-        &["task", "run", "EXP-12"][..],
+        &["task", "create", "--run"][..],
         &["--mode", "invalid"][..],
         &["--no-diff"][..],
         &["--diff-files"][..],
@@ -240,7 +234,6 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
         &["wt", "list", "--full"],
         &["wave", "status", "--no-sync"],
         &["wt", "list", "--format", "json"],
-        &["commit", "--push"],
         &["account", "status"],
         &["account", "--verify"],
         &["account", "route", "show"],

@@ -50,7 +50,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     }
   },
   "completed": {
@@ -77,6 +78,7 @@
     "runtime": {
       "work_id": "ts_completed",
       "status": "done",
+      "planning_conflict": null,
       "reason": "done",
       "updated_at": "2026-07-14T20:00:00Z",
       "provider": "codex",
@@ -117,7 +119,8 @@
         "authored_commits": false,
         "recovery_required": false,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     }
   },
   "stale": {
@@ -143,7 +146,8 @@
     },
     "runtime": {
       "work_id": "ts_stale",
-      "status": "ready",
+      "status": "active",
+      "planning_conflict": "Linear calls Task LOO-1 complete while it is active on its workflow; `lf task move LOO-1 end --force` completes it here",
       "reason": "ready",
       "updated_at": "2026-07-14T18:00:00Z",
       "provider": "codex",
@@ -208,7 +212,7 @@
             {
               "key": 3,
               "id": "decide",
-              "label": "loop-decide",
+              "label": "loop-or-next",
               "kind": "skill",
               "human": false,
               "returns_to": 1,
@@ -234,7 +238,7 @@
             {
               "key": 5,
               "id": "decide_delivery",
-              "label": "loop-decide",
+              "label": "loop-or-next",
               "kind": "skill",
               "human": false,
               "returns_to": 1,
@@ -470,7 +474,8 @@
         "authored_commits": false,
         "recovery_required": true,
         "reason": null
-      }
+      },
+      "unresolved_execution": true
     }
   },
   "unavailable": {
@@ -496,7 +501,8 @@
     },
     "runtime": {
       "work_id": "ts_unavailable",
-      "status": "ready",
+      "status": "not_ready",
+      "planning_conflict": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:00:00Z",
       "provider": "codex",
@@ -536,7 +542,8 @@
         "authored_commits": null,
         "recovery_required": true,
         "reason": "failed to inspect Task worktree"
-      }
+      },
+      "unresolved_execution": true
     }
   },
   "user_wait": {
@@ -563,6 +570,7 @@
     "runtime": {
       "work_id": "task-user",
       "status": "ready",
+      "planning_conflict": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:59:00Z",
       "provider": "codex",
@@ -627,7 +635,7 @@
             {
               "key": 3,
               "id": "decide",
-              "label": "loop-decide",
+              "label": "loop-or-next",
               "kind": "skill",
               "human": false,
               "returns_to": 1,
@@ -653,7 +661,7 @@
             {
               "key": 5,
               "id": "decide_delivery",
-              "label": "loop-decide",
+              "label": "loop-or-next",
               "kind": "skill",
               "human": false,
               "returns_to": 1,
@@ -890,7 +898,8 @@
         "authored_commits": false,
         "recovery_required": false,
         "reason": null
-      }
+      },
+      "unresolved_execution": true
     }
   },
   "dirty": {
@@ -917,6 +926,7 @@
     "runtime": {
       "work_id": "ts_dirty",
       "status": "ready",
+      "planning_conflict": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:50:00Z",
       "provider": "codex",
@@ -956,7 +966,8 @@
         "authored_commits": false,
         "recovery_required": true,
         "reason": null
-      }
+      },
+      "unresolved_execution": true
     }
   },
   "authored_commits": {
@@ -983,6 +994,7 @@
     "runtime": {
       "work_id": "ts_commits",
       "status": "ready",
+      "planning_conflict": null,
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
@@ -1076,7 +1088,7 @@
             {
               "key": 3,
               "id": "decide",
-              "label": "loop-decide",
+              "label": "loop-or-next",
               "kind": "skill",
               "human": false,
               "returns_to": 1,
@@ -1102,7 +1114,7 @@
             {
               "key": 5,
               "id": "decide_delivery",
-              "label": "loop-decide",
+              "label": "loop-or-next",
               "kind": "skill",
               "human": false,
               "returns_to": 1,
@@ -1337,7 +1349,8 @@
         "authored_commits": true,
         "recovery_required": false,
         "reason": null
-      }
+      },
+      "unresolved_execution": true
     }
   }
 }

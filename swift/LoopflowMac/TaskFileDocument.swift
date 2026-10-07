@@ -313,11 +313,20 @@ final class TaskFilesStore {
     }
 
     private func invalidate(_ paths: [String]) {
+        // A commit, checkout or staging moved what the comparison reads.
+        var comparisonChanged = false
         for path in paths {
-            if path == ".git" || path.hasPrefix(".git/") { continue }
+            if path == ".git" || path.hasPrefix(".git/") {
+                // Git and lf write other files here on every read; these move with the comparison.
+                let name = (path as NSString).lastPathComponent
+                if ["HEAD", "ORIG_HEAD", "index"].contains(name) || path.contains("/refs/") {
+                    comparisonChanged = true
+                }
+                continue
+            }
             changedPaths.insert(path)
         }
-        guard !changedPaths.isEmpty else { return }
+        guard !changedPaths.isEmpty || comparisonChanged else { return }
         invalidation?.cancel()
         invalidation = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(150)) } catch { return }

@@ -16,8 +16,8 @@ print, and keeps no separate copy.
 - **Wave conversations**: ordinary Sessions with Wave context.
 - **Roadmap**: every task across every Wave, each marked waiting, blocked,
   clear, or unknown.
-- **Sessions**: the conversations that are open, including the ones waiting
-  for your review. Each one is a terminal inside the app, where you talk to
+- **Sessions**: the conversations that are open, with the ones waiting
+  on you listed first. Each one is a terminal inside the app, where you talk to
   the AI directly.
 - **Task workspace**: the files a task changed, and what changed in each.
 - **Telemetry**: what the work cost, how the project grew, and whether
@@ -81,8 +81,8 @@ filters inventory; it cannot opt a new Session out of Task membership.
 
 Use Session identity to return to a conversation and its native history. A
 successful provider turn, the command's outcome and the Flow's progress can
-differ: the engine can finish after its driver dies, and a completed command
-can leave a Flow parked at review.
+differ: the engine can finish after its driver dies, and a finished Flow
+leaves its Task at a workflow node, waiting on you.
 
 `lf mon show` and `lf replay` retain their historical selectors during the conversion.
 Their current fields and reader limitations are recorded in
@@ -123,10 +123,11 @@ Reading is half; the system stays steerable while it runs.
 
 ```bash
 lf --wave <wave> wave/operate "ship the parser fix first"
+lf session ensure -w <wave>                # the Wave's ongoing conversation and operator
 lf --wave <wave> : "Review this plan"          # start a conversation
 lf comment INF-123 "smaller PR"            # post a Linear comment; deliver to its running Flow
 lf interrupt INF-123                     # end this turn and re-read direction
-lf session list --needs-me --json             # conversations waiting for review or reply
+lf session list --waiting --json              # conversations waiting on you
 lf session connect <session-id> --json           # recover one exact conversation
 ```
 
@@ -142,7 +143,7 @@ chat. Review happens in the Task conversation; Flows hold autonomous steps only.
 Use `lf --task <task> : "<prompt>"` when another agent perspective is needed.
 
 A Flow whose driver died stays as history. Nothing resumes it. Read
-`lf task status <task>`, then launch fresh work with `lf --task <task> flow start`.
+`lf task status <task>`, then launch fresh work with `lf task run <task>`.
 
 ## Inspect and resume
 
@@ -155,8 +156,8 @@ lf session connect <id>                   # start or resume the selected convers
 Open a Session in the app or CLI to return to its provider-native conversation.
 Task workspace shells run directly in the app's terminal.
 
-Use the [Sessions lifecycle](../README.md#sessions) to open and explicitly
-resolve every unresolved Session.
+See the [Sessions lifecycle](../README.md#sessions) for opening and replacing
+conversations.
 Use `lf comment` for durable Task direction,
 and `lf --task` for another agent perspective.
 

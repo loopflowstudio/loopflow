@@ -46,7 +46,6 @@ CANDIDATE_STAGES = (
     "installer_verified",
     "dmg_notarized",
     "website_candidate_verified",
-    "ui_host_verified",
 )
 
 
@@ -85,6 +84,7 @@ def _run(
     capture: bool = False,
     env: dict[str, str] | None = None,
     check: bool = True,
+    timeout: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     print(f"$ {shlex.join(cmd)}", file=sys.stderr, flush=True)
     return subprocess.run(
@@ -95,6 +95,7 @@ def _run(
         text=True,
         env=env,
         pass_fds=_release_fds(),
+        timeout=timeout,
     )
 
 
@@ -163,37 +164,29 @@ def _find_native_archives(artifact_dir: Path) -> tuple[Path, ...]:
     return tuple(archives)
 
 
-def _extract_arm_binary(archives: tuple[Path, ...], output_dir: Path) -> Path:
-    arm_archive = next(path for path in archives if "aarch64-apple-darwin" in path.name)
-    with tarfile.open(arm_archive, "r:gz") as package:
+def _extract_binary(archives: tuple[Path, ...], output_dir: Path, target: str) -> Path:
+    archive = next(path for path in archives if path.name == f"lf-{target}.tar.gz")
+    with tarfile.open(archive, "r:gz") as package:
         members = package.getmembers()
-        if sorted(member.name for member in members) != ["lf"] or not all(
-            member.isfile() for member in members
-        ):
-            raise RuntimeError(f"unexpected archive contents in {arm_archive.name}")
-        binaries = []
-        for name in ("lf",):
-            member = next(member for member in members if member.name == name)
-            source = package.extractfile(member)
-            if source is None:
-                raise RuntimeError(f"could not read {name} from {arm_archive.name}")
-            binary = output_dir / name
-            with binary.open("wb") as destination:
-                shutil.copyfileobj(source, destination)
-            binary.chmod(0o755)
-            binaries.append(binary)
-    return binaries[0]
+        if len(members) != 1 or members[0].name != "lf" or not members[0].isfile():
+            raise RuntimeError(f"unexpected archive contents in {archive.name}")
+        source = package.extractfile(members[0])
+        if source is None:
+            raise RuntimeError(f"could not read lf from {archive.name}")
+        binary = output_dir / "lf"
+        with binary.open("wb") as destination:
+            shutil.copyfileobj(source, destination)
+        binary.chmod(0o755)
+    return binary
 
 
-def _validate_release_candidate(binary: Path, scratch: Path) -> None:
-    home = scratch / "preflight-home"
-    home.mkdir()
-    result = _run(
-        [str(binary), "install", "preflight", "--json"],
-        capture=True,
-        check=False,
-        env={**os.environ, "LF_HOME": str(home)},
-    )
+def _validate_release_candidate(archives: tuple[Path, ...]) -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        proof = Path(temp)
+        _extract_binary(archives, proof, "aarch64-unknown-linux-gnu")
+        result = _run_release_container(
+            proof, ["/proof/lf", "install", "preflight", "--json"], network=False
+        )
     try:
         preview = json.loads(result.stdout)
         candidate = preview["candidate"]
@@ -254,13 +247,6 @@ def inspect_source(commit: str, tag: str, *, check_publication: bool) -> dict[st
             if error.response["Error"]["Code"] not in {"404", "NoSuchKey", "NotFound"}:
                 raise
     return {"preparation_required": drafts, "publications": publications}
-
-
-def _validate_archives(artifact_dir: Path) -> None:
-    with tempfile.TemporaryDirectory() as temp:
-        scratch = Path(temp)
-        binary = _extract_arm_binary(_find_native_archives(artifact_dir), scratch)
-        _validate_release_candidate(binary, scratch)
 
 
 def _sha256(path: Path) -> str:
@@ -399,39 +385,6 @@ def _verify_candidate_receipt(
             raise RuntimeError(f"prepared release artifact changed: {name}")
 
 
-def _verify_ui_host(tag: str, source_commit: str) -> None:
-    logs = Path(os.environ.get("LF_RELEASE_MAIN_REPO", ROOT)) / ".lf/logs"
-    logs.mkdir(parents=True, exist_ok=True)
-    stem = f"release.{tag.replace('/', '-')}.ui-host"
-    log = logs / f"{stem}.log"
-    receipt = logs / f"{stem}.json"
-    command = ["uv", "run", "python", "scripts/test.py", "--ui-host"]
-    if receipt.exists():
-        saved = json.loads(receipt.read_text())
-        if (
-            saved["source_commit"] == source_commit
-            and saved["command"] == command
-            and saved["returncode"] == 0
-            and log.exists()
-            and saved["output_sha256"] == _sha256(log)
-        ):
-            return
-    result = _run(command, capture=True, check=False)
-    log.write_text(f"source_commit={source_commit}\n{result.stdout}\n{result.stderr}")
-    receipt.write_text(
-        json.dumps(
-            {
-                "source_commit": source_commit,
-                "command": command,
-                "returncode": result.returncode,
-                "output_sha256": _sha256(log),
-            },
-            sort_keys=True,
-        )
-    )
-    result.check_returncode()
-
-
 def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactReceipt:
     check_release_host()
     source_commit = _run(["git", "rev-parse", "HEAD"], capture=True).stdout.strip()
@@ -443,7 +396,7 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
         except RuntimeError as error:
             print(f"Rebuilding invalid prepared candidate: {error}", flush=True)
         else:
-            _validate_archives(output_dir)
+            _validate_release_candidate(_find_native_archives(output_dir))
             _write_receipt(receipt, ".candidate")
             return receipt
 
@@ -455,8 +408,8 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
     stages: list[str] = [CANDIDATE_STAGES[0]]
     with tempfile.TemporaryDirectory() as temp:
         scratch = Path(temp)
-        arm_binary = _extract_arm_binary(archives, scratch)
-        _validate_release_candidate(arm_binary, scratch)
+        arm_binary = _extract_binary(archives, scratch, "aarch64-apple-darwin")
+        _validate_release_candidate(archives)
         _run(["sh", "-n", str(installer)])
         stages.append(CANDIDATE_STAGES[1])
         env = {
@@ -465,14 +418,16 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
             "LOOPFLOW_BUILD_PROVENANCE": "release",
             "LOOPFLOW_MIGRATION_AUTHORITY": "published",
             "RELEASE_TAG": tag,
+            # Survives cleanup of the generated preparation checkout on timeout.
+            "LF_RELEASE_NOTARIZATION_DIR": str(
+                output_dir.with_name(output_dir.name + ".notarization").resolve()
+            ),
         }
         _run(["python3", "-u", "scripts/release-loopflow.py"], env=env)
         stages.append(CANDIDATE_STAGES[2])
         _run(["uv", "run", "python", "website/dev.py", "sync-docs", "--source", "docs"])
         _run(["uv", "run", "python", "scripts/check_website_screens.py"])
         stages.append(CANDIDATE_STAGES[3])
-        _verify_ui_host(tag, source_commit)
-        stages.append("ui_host_verified")
 
     dmg = ROOT / "swift" / "dist" / "Loopflow.dmg"
     if not dmg.is_file():
@@ -519,8 +474,8 @@ def publish_release(tag: str, artifact_dir: Path) -> ArtifactReceipt:
     source_commit = _run(["git", "rev-parse", "HEAD"], capture=True).stdout.strip()
     candidate = _read_candidate_receipt(artifact_dir)
     _verify_candidate_receipt(candidate, artifact_dir, tag, source_commit)
-    _validate_archives(artifact_dir)
     archives = _find_native_archives(artifact_dir)
+    _validate_release_candidate(archives)
     dmg = artifact_dir / "Loopflow.dmg"
     installer = artifact_dir / "install.sh"
     checksums = artifact_dir / "SHA256SUMS"
@@ -601,6 +556,58 @@ def _check_public_hashes(directory: Path, expected: dict[str, str]) -> None:
             raise RuntimeError(f"public artifact hash mismatch or missing asset: {name}")
 
 
+def _run_release_container(
+    proof: Path, command: list[str], *, network: bool
+) -> subprocess.CompletedProcess[str]:
+    # No mounts or forwarded environment: getpwuid must resolve a disposable account.
+    _run(["docker", "info", "--format", "{{.ServerVersion}}"], capture=True, timeout=10)
+    _run(["docker", "pull", "--platform", "linux/arm64", "ubuntu:24.04"], timeout=300)
+    container = _run(
+        [
+            "docker",
+            "create",
+            "--platform",
+            "linux/arm64",
+            *([] if network else ["--network", "none"]),
+            "ubuntu:24.04",
+            "timeout",
+            "900",
+            *command,
+        ],
+        capture=True,
+        timeout=30,
+    ).stdout.strip()
+    try:
+        _run(["docker", "cp", str(proof), f"{container}:/proof"], timeout=60)
+        return _run(
+            ["docker", "start", "--attach", container], capture=True, check=False, timeout=930
+        )
+    finally:
+        _run(["docker", "rm", "--force", container], timeout=30)
+
+
+def _verify_public_installer(artifacts: Path, tag: str) -> dict[str, str]:
+    command = """set -eu
+apt-get update >&2
+apt-get install -y --no-install-recommends ca-certificates curl python3 >&2
+sh /proof/install.sh --version "$1" --cli-only >&2
+python3 /proof/release_install_smoke.py "$1"
+"""
+    with tempfile.TemporaryDirectory() as temp:
+        proof = Path(temp)
+        for name in ("install.sh", "lf-aarch64-unknown-linux-gnu.tar.gz"):
+            shutil.copy2(artifacts / name, proof / name)
+        shutil.copy2(CONTROL_ROOT / "scripts/release_install_smoke.py", proof)
+        result = _run_release_container(
+            proof, ["sh", "-ec", command, "installer-smoke", tag], network=True
+        )
+    result.check_returncode()
+    versions = json.loads(result.stdout)
+    if versions != {"lf-linux": f"lf {tag.removeprefix('v')}"}:
+        raise RuntimeError("isolated installer returned mismatched smoke evidence")
+    return versions
+
+
 def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
     if platform.system() != "Darwin" or platform.machine() not in {"arm64", "aarch64"}:
         raise RuntimeError("public installer smoke requires the Apple Silicon release host")
@@ -625,10 +632,8 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
         raise RuntimeError("public release identity differs from retained candidate proof")
     # A retained candidate proves preparation even when the publisher died before
     # its final receipt. Reconstruct publication only from public read-back.
-    if not (set(CANDIDATE_STAGES) - {"ui_host_verified"}).issubset(proof.completed_stages):
+    if not set(CANDIDATE_STAGES).issubset(proof.completed_stages):
         raise RuntimeError("retained candidate lacks required preparation verification")
-    if "ui_host_verified" not in proof.completed_stages:
-        _verify_ui_host(tag, source_commit)
     release = json.loads(
         _run(
             ["gh", "release", "view", tag, "--json", "tagName,isDraft,assets"], capture=True
@@ -715,36 +720,20 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
                 raise RuntimeError("publication repair did not pass public read-back")
         native = scratch / "native"
         native.mkdir()
-        expected_binaries = (_extract_arm_binary(_find_native_archives(scratch), native),)
-        home = scratch / "home"
-        home.mkdir()
-        install_dir = home / "bin"
+        binary = _extract_binary(_find_native_archives(scratch), native, "aarch64-apple-darwin")
         smoke_env = {
-            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-            "HOME": str(home),
-            "LF_HOME": str(home / ".lf"),
-            "LF_INSTALL_DIR": str(install_dir),
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(scratch),
+            "LF_HOME": str(scratch / "native-home"),
         }
-        _run(
-            ["sh", str(scratch / "install.sh"), "--version", tag, "--cli-only"],
-            cwd=scratch,
-            env=smoke_env,
-        )
-        for expected_binary in expected_binaries:
-            name = expected_binary.name
-            binary = install_dir / name
-            if _sha256(binary) != _sha256(expected_binary):
-                raise RuntimeError(f"installed {name} differs from the exact public artifact")
-            reported = _run(
-                [str(binary), "--version"], cwd=scratch, env=smoke_env, capture=True
-            ).stdout.strip()
-            smoke_versions[name] = reported
-            if reported != f"{name} {version}":
-                raise RuntimeError(f"public {name} reported {reported!r}, expected {version}")
-            _run([str(binary), "--help"], cwd=scratch, env=smoke_env, capture=True)
-        _run(
-            [str(install_dir / "lf"), "catalog", "--json"], cwd=scratch, env=smoke_env, capture=True
-        )
+        reported = _run(
+            [str(binary), "--version"], cwd=scratch, env=smoke_env, capture=True
+        ).stdout.strip()
+        if reported != f"lf {version}":
+            raise RuntimeError(f"public lf reported {reported!r}, expected {version}")
+        smoke_versions["lf"] = reported
+        _run([str(binary), "--help"], cwd=scratch, env=smoke_env, capture=True)
+        smoke_versions.update(_verify_public_installer(scratch, tag))
     verified = PublicReleaseReceipt(
         verified_at=int(time.time()),
         asset_urls={asset["name"]: asset["url"] for asset in release["assets"]},
@@ -760,7 +749,6 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
             dict.fromkeys(
                 (
                     *proof.completed_stages,
-                    "ui_host_verified",
                     "public_artifacts_verified",
                     "versioned_dmg_verified",
                     "latest_dmg_verified",

@@ -37,7 +37,7 @@ fn run_lf(home: &Path, args: &[&str]) -> Output {
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
         .env_remove("LF_WAVE_ID")
-        .env_remove("LF_RUN_ID")
+        .env_remove("LF_CAPTURE_KEY")
         .output()
         .unwrap()
 }
@@ -231,7 +231,7 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     fs::write(&receipt_path, serde_json::to_vec(&recovery).unwrap()).unwrap();
     let missing = run_lf(home.path(), &["doctor", "--json"]);
     assert_eq!(continuity_check(&missing)["status"], "fail");
-    let blocked = run_lf(home.path(), &["--mode", "batch", "flow", "telemetry-daily"]);
+    let blocked = run_lf(home.path(), &["--batch", "flow", "telemetry-daily"]);
     assert!(!blocked.status.success());
     assert!(!String::from_utf8_lossy(&blocked.stdout).contains("Lifecycle scorecard"));
     assert_eq!(
@@ -257,7 +257,7 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
         assert!(detail.contains(&format!("2026-08-{day:02}")), "{detail}");
     }
 
-    let telemetry = run_lf(home.path(), &["--mode", "batch", "flow", "telemetry-daily"]);
+    let telemetry = run_lf(home.path(), &["--batch", "flow", "telemetry-daily"]);
     assert!(
         telemetry.status.success(),
         "telemetry-daily failed: {}{}",

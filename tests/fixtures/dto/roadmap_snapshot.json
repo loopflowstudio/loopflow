@@ -84,6 +84,7 @@
             "runtime": {
               "work_id": "ts_now00000000000000000000000000000",
               "status": "ready",
+              "planning_conflict": null,
               "reason": "ready",
               "updated_at": "2026-07-14T23:44:00Z",
               "provider": "claude",
@@ -148,7 +149,7 @@
                     {
                       "key": 3,
                       "id": "decide",
-                      "label": "loop-decide",
+                      "label": "loop-or-next",
                       "kind": "skill",
                       "human": false,
                       "returns_to": 1,
@@ -174,7 +175,7 @@
                     {
                       "key": 5,
                       "id": "decide_delivery",
-                      "label": "loop-decide",
+                      "label": "loop-or-next",
                       "kind": "skill",
                       "human": false,
                       "returns_to": 1,
@@ -409,7 +410,8 @@
                 "authored_commits": false,
                 "recovery_required": false,
                 "reason": null
-              }
+              },
+              "unresolved_execution": true
             }
           },
           {
@@ -437,6 +439,7 @@
             "runtime": {
               "work_id": "ts_review00000000000000000000000000",
               "status": "ready",
+              "planning_conflict": null,
               "reason": "ready",
               "updated_at": "2026-07-14T22:00:00Z",
               "provider": "claude",
@@ -530,7 +533,7 @@
                     {
                       "key": 3,
                       "id": "decide",
-                      "label": "loop-decide",
+                      "label": "loop-or-next",
                       "kind": "skill",
                       "human": false,
                       "returns_to": 1,
@@ -556,7 +559,7 @@
                     {
                       "key": 5,
                       "id": "decide_delivery",
-                      "label": "loop-decide",
+                      "label": "loop-or-next",
                       "kind": "skill",
                       "human": false,
                       "returns_to": 1,
@@ -793,7 +796,8 @@
                 "authored_commits": true,
                 "recovery_required": false,
                 "reason": null
-              }
+              },
+              "unresolved_execution": true
             }
           },
           {
@@ -847,7 +851,8 @@
                 "authored_commits": null,
                 "recovery_required": null,
                 "reason": null
-              }
+              },
+              "unresolved_execution": false
             }
           },
           {
@@ -875,6 +880,7 @@
             "runtime": {
               "work_id": "ts_later000000000000000000000000000",
               "status": "done",
+              "planning_conflict": null,
               "reason": "done",
               "updated_at": "2026-07-14T21:00:00Z",
               "provider": "claude",
@@ -914,7 +920,8 @@
                 "authored_commits": false,
                 "recovery_required": false,
                 "reason": null
-              }
+              },
+              "unresolved_execution": false
             }
           }
         ],
@@ -939,8 +946,9 @@
             "work_id": "proj-chapter-current",
             "slug": "loopflow-api",
             "name": "current",
-            "flow": "feature",
+            "workflow": "feature",
             "status": "started",
+            "current": true,
             "metric_targets": [
               {
                 "metric_id": "task-loop-trust",
@@ -959,6 +967,13 @@
           }
         ],
         "truncated": false
+      },
+      "project_readiness": {
+        "state": "ready",
+        "project_id": "project-1",
+        "observed_at": null,
+        "pending_successor": null,
+        "activation": null
       }
     },
     {
@@ -993,6 +1008,13 @@
       "projects": {
         "state": "unavailable",
         "reason": "Project planning unavailable"
+      },
+      "project_readiness": {
+        "state": "unconfigured",
+        "project_id": null,
+        "observed_at": null,
+        "pending_successor": null,
+        "activation": null
       }
     }
   ]

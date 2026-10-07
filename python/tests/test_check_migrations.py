@@ -226,14 +226,14 @@ def test_a_new_legacy_three_part_migration_fails(repo: Path):
     assert "legacy three-part format" in result.stderr
 
 
-def test_a_release_cannot_publish_more_than_its_single_batch(repo: Path):
+def test_corrected_release_accepts_an_additional_batch(repo: Path):
+    (repo / MIGRATIONS / "0.10.1.001_release.sql").write_text("-- draft: first_cut\nSELECT 1;\n")
     (repo / MIGRATIONS / "0.10.1.002_release.sql").write_text("-- draft: add_note\nSELECT 1;\n")
-    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 2, "release"))
+    _register(repo, (0, 10, 1, "initial"), (0, 10, 1, 1, "release"), (0, 10, 1, 2, "release"))
 
     result = check(repo)
 
-    assert result.returncode == 1
-    assert "single `<version>.001_release.sql`" in result.stderr
+    assert result.returncode == 0, result.stderr
 
 
 def test_a_release_batch_requires_draft_provenance(repo: Path):

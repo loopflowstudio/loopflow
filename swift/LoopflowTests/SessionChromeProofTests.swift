@@ -50,7 +50,7 @@ struct SessionChromeProofTests {
         var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
         value["state"] = "active"
         value["provider"] = "claude"
-        value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
+        value["actions"] = sessionActionFixture(state: "active")
         value["terminal_ids"] = [panes[0]]
         value["open_argv"] = ["must-not-launch"]
         value["flow_membership"] = ["kind": "step", "flow": "feature", "invocation_id": invocation,
@@ -65,7 +65,7 @@ struct SessionChromeProofTests {
             default: throw RegistryQueryError("Session chrome must not launch or mutate: \(args)")
             }
         }
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         model.select(.task(id: "issue-review"))
         model.navigation.selectedSessionId = "release"
@@ -181,7 +181,7 @@ struct SessionChromeProofTests {
             default: throw RegistryQueryError("Keybinds must not launch or mutate: \(args)")
             }
         }
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refreshSessions()
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
@@ -259,7 +259,7 @@ struct SessionChromeProofTests {
         let records = try [record, companion].enumerated().map { index, record in
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
             value["state"] = "active"
-            value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
+            value["actions"] = sessionActionFixture(state: "active")
             if case .shell(let pane) = terminals[index].terminal { value["terminal_ids"] = [pane] }
             return value
         }
@@ -273,7 +273,7 @@ struct SessionChromeProofTests {
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No launch or mutation authorized by palette inspection")
         }
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         model.select(.task(id: "issue-review"))
         model.navigation.content = .terminals
@@ -316,7 +316,7 @@ struct SessionChromeProofTests {
         #expect(terminals[0].surface == surfaces[0])
         #expect(terminals[1].surface == surfaces[1])
         #expect(throws: Never.self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "podium-detail-task")
+            try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-detail-task")
         }
 
         // Arrow navigation operates on the visible ranked list, including recents.

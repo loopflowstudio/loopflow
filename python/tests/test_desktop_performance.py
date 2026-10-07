@@ -1,11 +1,114 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import signal
+import sqlite3
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from scripts import desktop_performance as performance
+
+
+@pytest.mark.parametrize("termination", ["signal", "timeout"])
+def test_interruption_stops_owned_benchmark_and_returns_outcome(
+    tmp_path: Path, termination: str
+) -> None:
+    ready = tmp_path / "ready"
+    child = (
+        "import os, time; from pathlib import Path; "
+        f"Path({str(ready)!r}).write_text(str(os.getpid())); time.sleep(60)"
+    )
+    script = (
+        "import json, os, sys; from scripts import desktop_performance as p; "
+        f"result = p._run_process([sys.executable, '-c', {child!r}], "
+        f"os.environ.copy(), sys.stderr, {2 if termination == 'timeout' else 30}); "
+        "print(json.dumps(result))"
+    )
+    runner = subprocess.Popen(
+        [sys.executable, "-c", script],
+        cwd=performance.REPO,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    child_pid = None
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists(), "Owned benchmark did not start"
+        child_pid = int(ready.read_text())
+        if termination == "signal":
+            runner.send_signal(signal.SIGTERM)
+        stdout, stderr = runner.communicate(timeout=10)
+        assert runner.returncode == 0, stderr
+        code, outcome = json.loads(stdout)
+        assert code != 0
+        assert outcome == ("interrupted" if termination == "signal" else "timeout")
+        with pytest.raises(ProcessLookupError):
+            os.kill(child_pid, 0)
+    finally:
+        if runner.poll() is None:
+            runner.kill()
+            runner.wait()
+        if child_pid is not None:
+            try:
+                os.killpg(child_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_snapshot_preserves_committed_wal_history_without_mutating_source(tmp_path: Path) -> None:
+    source = tmp_path / "live.db"
+    with sqlite3.connect(source) as database:
+        database.execute("PRAGMA journal_mode=WAL")
+        database.execute("CREATE TABLE history(id INTEGER PRIMARY KEY, text TEXT)")
+        database.executemany(
+            "INSERT INTO history(text) VALUES (?)", [(f"event {i}",) for i in range(1000)]
+        )
+        database.commit()
+        output = tmp_path / "snapshot"
+        performance._snapshot(source, output)
+        database.execute("INSERT INTO history(text) VALUES ('later')")
+        database.commit()
+        with sqlite3.connect(output / "loopflow.db") as copy:
+            assert copy.execute("SELECT count(*) FROM history").fetchone()[0] == 1000
+            assert (
+                copy.execute("SELECT text FROM history WHERE id=1000").fetchone()[0] == "event 999"
+            )
+        assert database.execute("SELECT count(*) FROM history").fetchone()[0] == 1001
+    manifest = json.loads((output / "snapshot.json").read_text())
+    assert manifest["counts"]["history"] == 1000
+    assert manifest["sha256"] == hashlib.sha256((output / "loopflow.db").read_bytes()).hexdigest()
+    assert (output.stat().st_mode & 0o777) == 0o700
+
+
+def test_snapshot_comparison_rejects_different_population(tmp_path: Path) -> None:
+    baseline = _report(tmp_path, _events())
+    current = _report(tmp_path, _events())
+    baseline["metadata"]["snapshot"] = {"sha256": "before"}
+    current["metadata"]["snapshot"] = {"sha256": "different"}
+    assert performance._comparison(current, baseline) == {
+        "available": False,
+        "reason": "Different snapshot",
+    }
+
+
+def test_comparison_retains_observed_timeouts(tmp_path: Path) -> None:
+    events = _events()
+    events[-1]["outcome"] = "timeout"
+    baseline = _report(tmp_path, events)
+    current = _report(tmp_path, _events())
+    comparison = performance._comparison(current, baseline)
+    assert comparison["available"]
+    assert comparison["deltas"][1]["before_failure_rate"] == 1 / 20
+    assert comparison["deltas"][1]["after_failure_rate"] == 0
 
 
 def _events(samples: int = 21) -> list[dict]:

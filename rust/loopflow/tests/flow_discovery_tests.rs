@@ -1,17 +1,17 @@
+mod support;
+
 use std::process::Command;
 
 use clap::Parser;
 
-use loopflow::durable::{FlowPage, FlowSession};
-use loopflow::engine::invocation::QueuedInvocation;
-use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
+use loopflow::durable::FlowPage;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 
 #[test]
 fn flow_inventory_wire_keeps_unknowns_and_requires_metadata() {
     let json = include_str!("../../../tests/fixtures/dto/flow_page.json");
     let page: FlowPage = serde_json::from_str(json).unwrap();
-    assert_eq!(page.entries[0].summary.name, None);
+    assert_eq!(page.entries[0].summary.name, "feature");
     assert_eq!(page.entries[0].repo, None);
     assert_eq!(
         serde_json::to_value(page).unwrap(),
@@ -51,37 +51,21 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
         .status()
         .unwrap()
         .success());
-    let store = open_ephemeral_store(&StorageConfig::sqlite(dir.path().join("loopflow.db")))
+    open_ephemeral_store(&StorageConfig::sqlite(dir.path().join("loopflow.db")))
         .await
         .unwrap();
-    let flow = store
-        .create_flow(FlowSession {
-            invocation: QueuedInvocation::new(
-                "no-template",
-                vec![ConcreteStep::Skill(ConcreteSkill {
-                    skill: Skill::named("saved-skill"),
-                    sources: vec![],
-                    id: None,
-                    human: false,
-                    repeat: None,
-                })],
-            )
-            .unwrap(),
-            cursor: ExecutionCursor::default(),
-            version: 0,
-            task_id: None,
-            wave_id: None,
-            cwd: dir.path().into(),
-            message: None,
-            model: None,
-            current_attempt: None,
-            pending_session_id: None,
-            failure: None,
-            finished: false,
-            updated_at: time::OffsetDateTime::now_utc(),
-        })
-        .await
-        .unwrap();
+    let expected_repo = loopflow::repository::CanonicalRepo::discover(dir.path())
+        .unwrap()
+        .to_string();
+    // A Flow whose definition no longer exists: only its Execs describe it.
+    let flow = support::record_flow(
+        dir.path(),
+        std::path::Path::new(&expected_repo),
+        "no-template",
+        "saved-skill",
+        "failed",
+    );
+    let before = support::recorded_flows(dir.path());
     let output = command(
         dir.path(),
         &[
@@ -101,10 +85,11 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
         String::from_utf8_lossy(&output.stderr)
     );
     let page: FlowPage = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(page.entries[0].summary.id, flow.id());
-    let expected_repo = loopflow::repository::CanonicalRepo::discover(dir.path())
-        .unwrap()
-        .to_string();
+    assert_eq!(page.entries[0].summary.id, flow);
+    assert_eq!(
+        page.entries[0].summary.state,
+        loopflow::session::FlowSummaryState::Stopped
+    );
     assert_eq!(
         page.entries[0].repo.as_deref(),
         Some(expected_repo.as_str())
@@ -121,12 +106,9 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
             .entries[0]
             .summary
             .id,
-        flow.id()
+        flow
     );
-    let detail = command(
-        dir.path(),
-        &["flow", "show", "--sessions", "--json", flow.id()],
-    );
+    let detail = command(dir.path(), &["flow", "show", "--sessions", "--json", &flow]);
     assert!(
         detail.status.success(),
         "{}",
@@ -134,8 +116,14 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
     );
     let detail: loopflow::durable::FlowDetail = serde_json::from_slice(&detail.stdout).unwrap();
     assert_eq!(detail.graph.name, "no-template");
+    assert_eq!(detail.graph.steps[0].label, "saved-skill");
     assert_eq!(detail.current, Some(0));
-    assert_eq!(store.flow(flow.id()).await.unwrap().unwrap(), flow);
+    assert_eq!(detail.steps.len(), 1);
+    assert_eq!(
+        support::recorded_flows(dir.path()),
+        before,
+        "reading changes nothing"
+    );
     let bad = command(dir.path(), &["flow", "list", "--limit", "1"]);
     assert!(!bad.status.success());
     let templates = command(dir.path(), &["flow", "list", "--json"]);

@@ -19,7 +19,7 @@ and shows **Updating…** until this launch's reads replace it. Saved rows open
 and navigate; Flow state, Task condition, Session state and every action except
 opening a Session wait for the fresh read. The Portfolio window opens from the
 same saved workspace. A failed refresh keeps what is shown under one
-**Couldn't update** line. Delete the file to start from **Loading workspace…**.
+**Couldn't update** line. Delete the file to start from **Loading work…**.
 
 ```sh
 uv run python scripts/benchmarks/desktop-performance/timings.py   # how long your launches took
@@ -47,27 +47,35 @@ checks; `lf ci watch --status` shows its last poll and what it started.
 ```
 
 Shell panes with Ghostty shell integration group each completed command and its
-output into a full-width block. Click anywhere in a block to select the whole
-unit, then use Command-C or the terminal's context menu to copy the command and
-all of its output.
-Command-Up/Down navigates between prompts. The live prompt remains ungrouped;
+output into a full-width block. A command that exited non-zero has a red
+background. Click anywhere in a block to select the whole unit; drag to select
+text instead. There is one selection at a time, and Command-C or the context
+menu copies it: a block copies its command and all of its output. Right-click
+keeps the selection it lands on. A selected block clears when you type or press
+Escape. Command-Up and Command-Down jump between prompts. The live prompt remains ungrouped;
 Session/provider panes keep their native TUI behavior and do not expose shell
 command blocks.
 Automatic integration depends on the configured shell; macOS `/bin/bash` is
-excluded by the pinned Ghostty build.
+excluded by the pinned Ghostty build. A zsh shell still on the macOS default
+prompt gets a small dim directory line above each bold command, with the gap
+between blocks shared evenly; any other prompt is left as it is.
+
+Terminals start from Desktop's own terminal settings. A launcher's `NO_COLOR`,
+`TERM`, pager and agent variables do not reach them, so provider CLIs keep their
+colors however Desktop was opened.
 
 If macOS cannot provide Ghostty's display link, terminals use timer rendering.
 The app logs the CoreVideo error code; the user's Ghostty configuration is unchanged.
 
-Choose **Show Files** in a Task or Session toolbar to browse its checkout beside
-the retained terminal. Expand folders to read one page of up to 500 entries;
+**+ → Files** in a Task's toolbar opens its checkout as a pane beside the
+retained terminal. Expand folders to read one page of up to 500 entries;
 **Load more** continues the directory and **Show ignored** includes ignored paths.
 Tracked, unchanged and untracked files remain available without an active PR.
 **Changes** optionally compares the worktree with the Task PR's
 recorded base; **HEAD** compares with its current commit. The displayed SHA pins
 the file list and selected diff. A recorded PR links above the file navigator.
 Use ↑/↓ in the navigator to select files; hover a row for its full path.
-**Show Files** / **Hide Files** remembers the browser visibility across relaunches.
+Closing the pane keeps its drafts in this window.
 
 **File** retains editable UTF-8 drafts and selection in this window; **Diff**
 shows the draft comparison read-only. Task headers show the recorded checkout;
@@ -134,17 +142,33 @@ below the outline. Sessions without a Task association are also available under
 **Debug → Sessions → Orphan Sessions** in the repository menu, or `lf session list --orphan`.
 There is no creation opt-out from checkout association. **Task details** opens the description, comments and Run history.
 
-The Task's compact Flow shows interactive stages and inspectable background work.
-Select a current stage to join its exact conversation; select a future stage to
-inspect it. **Detailed Flow** exposes the captured branches and repeats. The header
-uses the shared read: the Flow **Start** would launch (click its name to search
-the catalogue) and, once one has been launched, the most recent Flow's captured
-definition, current occurrence, and each loop's iteration. **Start** always
-launches a fresh Flow, including beside an earlier one, and is disabled with
-Rust's reason when it cannot be used. A launched Flow without a live worker
-reads **Stopped**; there is no Pause until Loopflow can hold a Flow at a boundary.
-**Recent runs** under the Flow reads nothing until expanded; it then lists that
-Task's newest 50 Runs from the last seven days (`lf usage --days 0 --task ID --json`) with each recorded
+A Task's workspace is its Workflow in the header and a multiplexer below.
+Opening a Task opens its one Session (`lf session ensure --task`); there is no
+Sessions list. The header draws the Workflow as a graph scaled to the window:
+`start` and `end` as circles, each node a box saying what you do there, one
+labelled arrow per edge, a loop back as an arc over its node. The current node
+or running edge is marked. The labels of the edges leaving the current node
+are buttons; each runs `lf -b task run` as a child of the app. No edge is offered while one runs. An edge whose Flow stopped holds the
+Task, is drawn stopped, and is offered again with the others leaving its
+node. **Move to** puts the Task at any node through `lf task move`; `end` completes it.
+When Linear calls an active Task complete, the header shows that as an error with
+**Complete anyway**, which runs the move with `--force`. A Task that has taken
+up no workflow offers **Start**, which runs `lf -b task run ISSUE`.
+
+The toolbar's **+** changes what the multiplexer shows: **New shell**,
+**Files** or **Flow execs**. The Flow exec log lists every Flow exec in the
+Task's checkout, newest first, whether an edge or a person started it; it is
+not the Workflow's history. One line each: Flow, state, when it started and
+how long it ran. A row opens to its id, graph and steps (the shape of
+`lf flow show ID --sessions --json`). An exec whose driver exited early reads
+**stopped**. One whose driver was killed has no exit record and keeps reading
+as running. **Task details → Debug** lists the Task's raw Sessions and Execs.
+Sessions list **Waiting** first and working ones in a compact group.
+The Wave page's **Workflow** sets the Project's workflow from the catalogue
+(`lf flow list`); **Customize** or **Edit** opens its source in
+your editor, writing a builtin to `.lf/` first.
+**Session history** under the Flow reads nothing until expanded; it then lists that
+Task's complete recorded input history (`lf usage --days 0 --task ID --json`) with each recorded
 outcome. Session rows show the provider recorded on their Run and a ready summary
 only when the Session recorded one.
 Below the Description, **Comments (n)** is collapsed and counts the Task's Linear
@@ -162,7 +186,7 @@ rename`; the shown name is the shared readback, and a rejected name stays in the
 field with its error. A remote Flow Session's name lives on its Home and is not
 renamed here. Beside the name, the Session shows its Flow step and iteration as
 quiet mono text, **Independent**, or why membership is unknown. On the right sit
-the Task's read-only worktree location and the Activity and Monitor glyphs.
+the Task's read-only worktree location and the Activity glyph.
 
 A single pane has no header. With two or more, each pane carries a 24pt strip:
 a state dot and the conversation's name (or the shell's title). Hovering the
@@ -170,19 +194,13 @@ focused pane's strip reveals split right, split down and close; the strip's
 context menu and the keybinds above offer the same plus zoom. Unfocused panes
 dim slightly; nothing draws a focus border.
 
-**Monitor** opens beside retained Sessions and shells in the same multiplexer.
-Split, resize, zoom, close and Undo work for all pane content. Monitor shows the
-selected Task's active Sessions and updates automatically. **Refresh** requests an
-observation from the same reader. Recovery and read failures retain the last
-observation with a visible reason; **Retry** restarts a failed reader. Incomplete
-ownership evidence cannot report confirmed emptiness. Closing a Monitor preserves
-the window's shared reader and terminals. **Sessions** selects an exact conversation and
-returns keyboard focus to its terminal with unfinished input retained.
+Files and the Flow exec log open beside retained Sessions and shells in the
+same multiplexer. Split, resize, zoom, close and Undo work for all pane content.
 
 Press **⌘K** to search Waves, all planned Tasks, named Sessions and Flows in the
 selected repository. Empty search shows recent destinations first; arrows select,
 Return opens and Escape returns focus to the previous terminal. Flow entries
-inspect the template. **Choose Flow for ISSUE** opens the Task's existing picker.
+inspect the template. **Flow execs of ISSUE** opens the Task's log pane.
 The sidebar search remains a filter. Each repository retains up to 20 recent
 destinations for the window. Visited historical Tasks remain in recents after
 leaving their pages; opening one reads its exact identity again. This does not
@@ -205,6 +223,9 @@ outside the current chapter, without starting a Task Flow. A repository-qualifie
 link opens its exact match even when another Wave's planning is unavailable.
 Ambiguous links offer repository-qualified choices; failed reads keep the current
 workspace and offer Retry. Only one workspace window receives a link.
+Links prefer a window already selecting the destination. Reopening its Task keeps
+the selected conversation and pane layout. Loaded repository-qualified links reuse
+observed planning; successful opens do not present a Task-finding sheet.
 Add `session` to open an existing Task conversation in its terminal pane. A
 missing or unrelated Session leaves the current workspace intact and offers Retry.
 Opening a conversation does not complete a review or start a Task Flow.
@@ -250,9 +271,8 @@ Session completion controls are retired; historical completion timestamps and
 feedback remain inspectable.
 The shared Session projection supplies action labels, unavailable reasons and Work
 paths to both CLI and Mac; local terminal presence only determines which pane to show.
-Closing or detaching a review never resolves it.
 
-Task FlowSteps run ordinary `lf --mode tui --task <id> <skill>` provider Sessions.
+Flow steps run as ordinary `lf -b skill <name>` commands under their driver.
 The app lists, opens, and acts on the shared
 Rust `SessionRecord` projection; it owns no parallel queue.
 The Session ID targets conversation actions and history lookup. A prepared
@@ -275,13 +295,7 @@ creating a Task or running an autonomous operating pass. **New shell** opens
 an ordinary shell in the active checkout. A conversation launched here returns
 to a shell when it exits or hands off to an external app.
 
-In a Task workspace, one existing Session starts with the Sessions sidebar hidden;
-multiple Sessions show a collapsible sidebar. Use the toolbar to toggle it. Clicking
-a Session focuses its visible pane or opens it in the active Session pane, preserving
-other splits. **⌘-click** toggles a pane without ending the Session; **Option-click**
-or **Open alongside** reveals its saved split or opens it to the right. Visible rows
-are highlighted, and the focused row has an accent marker. New arrivals preserve
-the current layout and sidebar preference. Running shells stay intact.
+Running shells stay intact when a Task's Session or another pane opens.
 
 Selecting a Session in another checkout restores that worktree's conversation,
 companion terminals, split layout, and focus. Outside Task context, the toolbar's
@@ -298,7 +312,7 @@ that window and are never mounted twice.
 Session reads and preparation run in the opened repository rather than a
 machine-wide aggregate.
 
-Planning and Sessions share the Podium readings; there is no separate
+Planning and Sessions share the WorkModel readings; there is no separate
 Sessions-only roadmap query. A failed read keeps its last useful evidence and
 exposes the error. Inspection shows the planning snapshot's generation time,
 which does not establish a fresh provider sync, and an explicit no-Session state
@@ -354,7 +368,7 @@ codebase tree, and registry health.
   it has no separate operator.
 - **Task workspace presentation** reads `lf diff --files --json`,
   `lf diff --json` and `lf file --json`.
-  Lifecycle mutations remain `lf flow start` and `lf interrupt`; review nodes use
+  Lifecycle mutations remain `lf task run` and `lf interrupt`; review nodes use
   the Task's persisted flow position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf wave list/status/roadmap/ps/activity/usage/doctor/tokens --json`; the app does not
@@ -365,15 +379,15 @@ codebase tree, and registry health.
 
 ## Code map
 
-- `LoopflowMac/Views/PodiumView.swift` — one repository/Wave/Task/Session outline and retained workspace
+- `LoopflowMac/Views/RepoView.swift` — one repository/Wave/Task/Session outline and retained workspace
 - `LoopflowMac/Views/SessionsView.swift` — every Session in a native split multiplexer
 - `Loopflow/Models/MultiplexerLayout.swift` — immutable pane split tree
 - `Loopflow/Models/MultiplexerStore.swift` — reference-owned layout, focus, zoom, and undo
 - `LoopflowMac/Views/WorkActivityView.swift` — filtered durable Activity and proof links
-- `LoopflowMac/PodiumModel.swift` — shared readings, stable selection, and local scope
+- `LoopflowMac/WorkModel.swift` — shared readings, stable selection, and local scope
 - `LoopflowMac/Views/WavesView.swift` — previous Wave workspace during migration
 - `LoopflowMac/Views/RoadmapView.swift` — all-Wave roadmap and lifecycle controls
-- `LoopflowMac/Views/WaveDetailPane.swift` — current chapter plan, Tasks and Runs
+- `LoopflowMac/Views/WaveDetailPane.swift` — streamed Project plan, Tasks and metrics
 - `LoopflowMac/PortfolioRepoState.swift` — one repository's Wave projection
 - `Loopflow/Services/RegistryQuery.swift` — typed `lf --json` reads
 - `LoopflowMac/Services/RegistryQueryLocal.swift` — local `lf` subprocess
@@ -460,19 +474,28 @@ xcodebuild -quiet \
 
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
-Task Monitor's shared reader is `RegistryQuery.watchActiveSessions()`, backed by
-`lf monitor active --watch --json`. Its `sessions` rows retain stable AgentSession IDs, titles and current typed Work.
-Verified Exec/process and native-client receipts establish activity independently
-of command outcomes. Input replacement keeps the same row; unresolved engine
-ownership stays a gap. SQL ownership is reread on every tick, even outside Home. Confirm emptiness
-only when `discovery` is `ready` and `gaps` is empty. Keep scanning, unavailable,
-and incomplete evidence visible. Podium starts one reader on first demand and
-retains it across pane and repository navigation until window teardown. Wake
-requests a rescan. Helper/Home configuration replacement drains the old reader
-and clears its evidence before starting the new one. Pipes drain off the main
-actor, frames are limited to 16 MiB, and pending delivery retains only the latest
-snapshot. Ten seconds without a frame pauses updates until Retry. Cancellation
-closes stdin, then terminates and reaps only the owned reader if necessary.
+```bash
+lf monitor work --watch --json    # what a window shows, as it changes
+```
+
+Each window keeps one such reader open through `RegistryQuery.watchWork()`.
+Its frames carry planning, the repository's Sessions, the shown Task's work
+with its Workflow and every Flow exec, the shown Wave's detail and activity.
+The Task page reads nothing else: after `lf task run` or `lf task move` the
+window asks the reader again and shows the frame that answers. A part arrives again only when a commit
+changed what it shows, so a Task created by `lf`, a worker or another window
+appears without a refresh. A file written or a commit made in a Task checkout
+shows within a few seconds, and token totals within about ten. A Session
+turns **Waiting** after two quiet minutes on the reader's clock, with no write.
+Nothing in the window reads on a timer. Workflow definitions are files: the
+catalogue is read once per repository and again when the app becomes active. Each request
+the window sends carries an id and each frame names the newest one it answers;
+a frame read before a local write is ignored. If the reader ends, the last
+reading stays on screen marked unavailable until a new reader answers.
+
+The reader's pipes drain off the main actor. Ten seconds without a frame ends
+the reading; cancellation closes stdin, then terminates and reaps only the
+owned reader if necessary.
 
 ## Headless checks
 
@@ -485,3 +508,21 @@ Gate and CI build the app and inspect production views and controls without
 launching a window. Display/terminal integration is opt-in with
 `LOOPFLOW_NATIVE_TESTS=1`; use it for configured-host diagnostics or demo.
 See [TESTING.md](../TESTING.md) for the full commands and CLI prerequisite.
+
+Wave opening and Retry call `WorkModel.activateProject` from both WorkSurface and
+Portfolio. The command outlives the opened view; it never refreshes a view directly.
+Both surfaces show “Preparing Project…” while that Wave's local command is pending,
+retaining cached planning. Retry appears after failure. An unfinished persisted
+Exec without a pending local command remains an unknown outcome.
+The Work stream supplies `project_readiness`: selected Project, dated accepted
+facts, unresolved transition and the exact activation Exec's outcome. Empty default
+Flows render no template section. Command transport errors remain scoped to the Wave.
+
+Work observation and navigation project durable Waves, Projects and Tasks with
+associated Sessions and Execs; they introduce no additional Work kinds.
+`RepoView` shows one selected repository; `WorkModel` also serves Portfolio.
+`TaskProjection` and `WaveProjection` join planning with associated conversations.
+`TaskWorktreeSnapshot` describes a Task's Git worktree. `WorkspaceIdentity` and
+`SessionWorkspace` retain their names because primary Sessions can use a non-Git
+directory. Terminal workspaces own pane layouts. Saved cache paths, selection keys
+and placement JSON fields retain their existing bytes across these source renames.

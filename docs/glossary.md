@@ -9,24 +9,26 @@ first, then the engineering words it borrows.
 |---|---|
 | **Skill** | One step: instructions for the AI, written as a text file in `.lf/skills/`. |
 | **Flow** | Steps in order, written as a file in `.lf/flows/`. |
+| **Workflow** | A Task's nodes, where you take part in its conversation, joined by the flows that run between them. Written as a file in `.lf/workflows/`. |
 | **Loopflow** | A flow that can go back and try again. Exactly: a flow with at least one backward edge. |
 | **Deciding step** | The step that chooses between moving on and going back. |
 | **Task** | One piece of work with a finish line. |
 | **Wave** | A goal Loopflow keeps working on. It has a written objective, a memory, and a schedule. |
 | **Chapter** | The shared name of every Wave's In Progress Linear Project; it has no separate stored object. |
-| **Project** | One Wave's Linear plan: status, Tasks, KRs, targets and default Flow. |
+| **Project** | One Wave's Linear plan: status, Tasks, KRs, targets and the workflow its Tasks take up. |
 | **KR** | Key result. A result you can check, stated before the work starts. |
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
 | **AgentSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
+| **Run** | What the product calls a headless Session; an interactive one is a Session. |
+| **Waiting** | A conversation that asked a question, handed its turn back, or went quiet with no tool call outstanding. |
 | **Exec** | One actual lf process, its causal parent and its observed command outcome. |
-| **FlowSession** | One captured Flow invocation, its cursor and exact boundary completion history. It is never resumed. |
 | **Home** | A stable execution destination on a machine, where work for a Wave can be assigned. |
 | **Data directory** | Local Loopflow state in `~/.lf` by default; explicit `LF_HOME` selects a disposable experiment. |
 | **Steer** | A message you send to work that is already running, to change its direction. |
 | **Harness**, **provider** | The AI coding tool Loopflow drives: Claude Code, Codex, or OpenCode. |
 | **Scratch** | The `scratch/` folder, for working notes. It is cleared when the work lands. |
 
-Historical `Run` names remain on transitional CLI/wire surfaces; see
+Historical capture paths and immutable receipts retain their encoding; see
 [cutover status](architecture-reference.md#cutover-status). They are not a fourth
 execution owner in the accepted model.
 

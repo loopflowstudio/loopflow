@@ -102,6 +102,12 @@ and the GitHub Release. It deploys the website from the exact tag and requires
 image and leaves the release incomplete. Publishing the non-draft GitHub
 Release records an external effect. Scheduled settlement follows public artifact
 read-back and exact-version installer smoke, with every required check retained.
+Public installer smoke requires a running Docker engine. It installs the pinned
+release in a disposable Ubuntu 24.04 ARM64 container, copies only public inputs,
+and checks the selected CLI bytes plus the installed gate's version/help/list.
+No host Home or credentials enter the container. Native macOS version/help smoke
+and signing/notarization remain separate checks; Linux smoke does not prove Mac
+app installation. Missing Docker or failed cleanup prevents verified settlement.
 In history JSON, `attempts[].verification` holds those checks once; each attempt
 saves its checks and product outcome together. `attempts[].telemetry` retains
 original prerequisite associations with retained schedule/Home segments and the
@@ -183,34 +189,40 @@ Manual tag and publication commands record intervention on pending scheduled
 releases. Nested publisher calls reusing the active lock preserve the owning
 execution's provenance.
 
-An invalid saved candidate can advance to a patch successor only after exact-source
+An invalid untagged candidate is corrected under the same version after exact-source
 inspection confirms that preparation remains and GitHub, crates.io, and the
-versioned DMG are all unpublished. Unknown or partial publication blocks
-replacement. Release history retains the rejected candidate and inspection on
-the same opportunity's attempt; earlier failures and original dues remain.
+versioned DMG are all unpublished. The corrected PR uses a retry branch derived
+from the rejected commit; earlier preparation commits remain in history.
+Unknown or partial publication blocks replacement. Release history retains the
+rejected candidate and inspection on the same opportunity's attempt.
 A valid interrupted candidate resumes unchanged. Cached packaged binaries must
-still pass installation preflight in a fresh Home before reuse or publication.
+still pass candidate installation preflight before reuse or publication. Each
+check runs the exact packaged ARM64 Linux CLI in a new Ubuntu 24.04 container,
+with networking disabled and no host mounts or forwarded credentials. Preparation
+uses the same check. Docker must be running; rejection or failed cleanup stops
+preparation/publication. This proves fresh Linux-account preflight, not macOS
+installation; native macOS packaging and smoke checks remain separate.
 
-Preparation runs the required `scripts/test.py --ui-host` gate before tagging.
+Required headless Desktop checks remain in gate and CI; the optional UI-host
+exercise is not a publication prerequisite.
 The publisher retains candidate hashes and gate evidence before external writes.
 Its `verify --tag <tag>` mode checks the public asset set and hashes, both versioned
 and latest DMGs, website release identity, crate version, and installed `lf`
-version in an isolated Home. Scheduled settlement uses `reconcile --tag <tag>`:
+version and selected bytes in a disposable Linux container. Scheduled settlement
+uses `reconcile --tag <tag>`:
 it repairs missing crate/versioned-DMG publication and stale website/latest-DMG
 stages from the exact source and verified public artifacts, then repeats read-back.
 Repair requires this tag to remain GitHub's latest release. Unavailable services
 and conflicting immutable bytes fail without overwriting them. A crash after
 publication does not require signing again or republishing GitHub assets just to
-obtain a receipt. A missing historical host-gate result must be executed against
-that exact source; published assets cannot substitute for the check.
+obtain a receipt. Public assets do not substitute for required verification.
 
 After integration, the publisher inspects the exact merged source before the
 controller builds or tags it. A migration arriving after preparation causes a
-new patch cut; canonical batches already on main stay immutable. For an invalid
-tagged candidate, replacement first requires confirmed absence of a GitHub
-Release (including drafts), crates.io version, and versioned R2 download.
-Provider errors leave publication state unresolved. Partial publication needs
-reconciliation; the controller never rewrites the old tag.
+corrected cut at the same version, appending a canonical migration batch while
+preserving earlier batches. A failed build or publisher preparation likewise
+keeps the version. Tagged releases must finish or report their recovery blocker;
+the controller neither rewrites their tags nor skips ahead to another version.
 
 The configured publisher's read-only `inspect --commit SHA --tag TAG` emits JSON
 with `preparation_required` (a list of reasons) and `publications` (null when

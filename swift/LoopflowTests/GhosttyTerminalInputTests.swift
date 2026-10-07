@@ -99,6 +99,236 @@ import GhosttyKit
 @testable import LoopflowMac
 @testable import Loopflow
 
+#if canImport(GhosttyKit)
+/// Shell block behavior that needs no display, so it runs headless.
+@Suite("Embedded terminal shell blocks")
+struct GhosttyShellBlockTests {
+    @Test("the default-prompt shell gets a context header and reports a failed command")
+    func zshBootstrapMarksHeaderAndFailure() throws {
+        let resources = try #require(GhosttyRuntimeResources.directoryURL)
+        let bootstrap = try #require(LoopflowZshBootstrap.install())
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-zsh-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        func run(rc: String) throws -> String {
+            try rc.write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            process.arguments = [
+                "-i",
+                "-c",
+                """
+                source ~/.zshrc
+                _loopflow_prompt
+                _ghostty_deferred_init
+                print -Pn "$PS1"
+                _ghostty_preexec "loopflow-missing-command"
+                loopflow-missing-command
+                _ghostty_precmd
+                print -Pn "$PS1"
+                """,
+            ]
+            process.currentDirectoryURL = home
+            process.environment = [
+                "HOME": home.path,
+                "PATH": "/usr/bin:/bin",
+                "GHOSTTY_RESOURCES_DIR": resources.path,
+                "GHOSTTY_SHELL_FEATURES": "",
+                "TERM": "xterm-256color",
+                "ZDOTDIR": bootstrap,
+            ]
+            let stdout = Pipe()
+            process.standardOutput = stdout
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            // Drain before waiting: a full pipe would block the shell forever.
+            let output = stdout.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return String(decoding: output, as: UTF8.self)
+        }
+
+        func expectInOrder(_ markers: [String], in output: String) throws {
+            var remaining = output[...]
+            for marker in markers {
+                let range = try #require(remaining.range(of: marker), "missing \(marker.debugDescription)")
+                remaining = remaining[range.upperBound...]
+            }
+        }
+
+        // The stock prompt becomes a blank row, a concealed header row holding
+        // the directory, then the command line.
+        let stock = try run(rc: "PS1='\(LoopflowZshBootstrap.macOSDefaultPrompt)'\n")
+        try expectInOrder([
+            "\u{1B}]133;A;cl=line\u{7}",
+            "\n\u{1B}]133;A;k=s\u{7}",
+            "\u{1B}[8m\(GhosttyBlockHeader.marker)",
+            home.lastPathComponent,
+            "\u{1B}[28m",
+            "\n\u{1B}]133;A;k=s\u{7}",
+            "\u{276F}",
+            "\u{1B}]133;B\u{7}",
+            "\u{1B}]133;C\u{7}",
+            "\u{1B}]133;D;127\u{7}",
+            "\u{1B}]133;A;cl=line\u{7}",
+        ], in: stock)
+
+        // A prompt someone chose is theirs, and still marks its commands.
+        let custom = try run(rc: "PS1='mine> '\n")
+        #expect(!custom.contains("\u{276F}"))
+        try expectInOrder([
+            "\u{1B}]133;A;cl=line\u{7}",
+            "mine> ",
+            "\u{1B}]133;B\u{7}",
+            "\u{1B}]133;C\u{7}",
+            "\u{1B}]133;D;127\u{7}",
+        ], in: custom)
+    }
+
+    @Test("command blocks are full-width bands on the padded grid's rows")
+    func commandBlockLayout() throws {
+        let bounds = CGRect(x: 0, y: 0, width: 300, height: 200)
+        let block = GhosttyCommandBlockLayout(startRow: 1, endRow: 3, exitCode: nil, selected: false)
+        let frame = ghosttyCommandBlockFrame(block, bounds: bounds, cellHeight: 18)
+
+        // Rows start below the top padding; spare height stays at the bottom.
+        #expect(frame == CGRect(x: 0, y: 200 - 8 - 4 * 18, width: 300, height: 54))
+        func row(atY y: CGFloat) -> Int? {
+            ghosttyViewportRow(at: CGPoint(x: 150, y: y), bounds: bounds, rows: 10, cellHeight: 18)
+        }
+        #expect(row(atY: frame.maxY - 1) == 1)
+        #expect(row(atY: frame.minY + 1) == 3)
+        #expect(row(atY: 196) == nil)
+        #expect(row(atY: 200 - 8 - 10 * 18 - 1) == nil)
+
+        // Under the Loopflow prompt the blank row between two blocks is split:
+        // each edge beside one sits half a row lower.
+        let padded = ghosttyCommandBlockFrame(
+            block, bounds: bounds, cellHeight: 18, blankRowAbove: true, blankRowBelow: true
+        )
+        #expect(padded == frame.offsetBy(dx: 0, dy: -9))
+        let scrolledPastHeader = ghosttyCommandBlockFrame(
+            block, bounds: bounds, cellHeight: 18, blankRowBelow: true
+        )
+        #expect(scrolledPastHeader.maxY == frame.maxY)
+        #expect(scrolledPastHeader.minY == padded.minY)
+    }
+
+    @Test("a header is the marked prompt row, looked for only where a prompt can be")
+    func blockHeader() throws {
+        let marker = GhosttyBlockHeader.marker
+        #expect(GhosttyBlockHeader.text(inRow: "\(marker)~/src/loopflow   ") == "~/src/loopflow")
+        #expect(GhosttyBlockHeader.text(inRow: "~/src/loopflow") == nil)
+        #expect(GhosttyBlockHeader.text(inRow: "\u{276F} ls") == nil)
+        #expect(GhosttyBlockHeader.text(inRow: marker) == nil)
+
+        // Rows 0-1: an empty prompt. Rows 2-6: a block (blank, header,
+        // command, two output rows). Rows 7-9: the live prompt.
+        let block = GhosttyCommandBlockLayout(startRow: 2, endRow: 6, exitCode: 0, selected: false)
+        #expect(GhosttyBlockHeader.candidateRows(blocks: [block], rows: 10) == [0, 1, 2, 3, 7, 8, 9])
+
+        // The header is drawn on its own row, inside the grid's padding.
+        let frame = ghosttyBlockHeaderFrame(
+            row: 3, bounds: CGRect(x: 0, y: 0, width: 300, height: 200), cellHeight: 18
+        )
+        #expect(frame == CGRect(x: 12, y: 200 - 8 - 4 * 18, width: 276, height: 18))
+    }
+
+    @Test("only a reported failure is red; a resting block has no fill")
+    func commandBlockStyle() throws {
+        func style(exit: Int?, selected: Bool = false, hovered: Bool = false) -> GhosttyCommandBlockStyle {
+            GhosttyCommandBlockStyle(
+                block: GhosttyCommandBlockLayout(startRow: 0, endRow: 1, exitCode: exit, selected: selected),
+                hovered: hovered
+            )
+        }
+        func isRed(_ color: NSColor) -> Bool {
+            color.alphaComponent > 0 && color.redComponent > 0.8 && color.greenComponent < 0.4
+        }
+
+        #expect(style(exit: 0).fill.alphaComponent == 0)
+        #expect(style(exit: nil).fill.alphaComponent == 0)
+        #expect(isRed(style(exit: 127).fill))
+        #expect(isRed(style(exit: 1, selected: true).fill))
+        #expect(!isRed(style(exit: 0, selected: true).fill))
+        #expect(!isRed(style(exit: nil, hovered: true).fill))
+        // Selection is never red: a selected failure keeps its fill and changes its bar.
+        #expect(isRed(style(exit: 1).accent))
+        #expect(!isRed(style(exit: 1, selected: true).accent))
+        #expect(!isRed(style(exit: 0, selected: true).accent))
+        #expect(style(exit: 0, selected: true).accent == style(exit: 1, selected: true).accent)
+    }
+
+    @Test("dim text stays readable on every block fill")
+    @MainActor
+    func commandBlockFillContrast() throws {
+        func rgb(_ hex: UInt) -> [CGFloat] {
+            [CGFloat((hex >> 16) & 0xFF), CGFloat((hex >> 8) & 0xFF), CGFloat(hex & 0xFF)].map { $0 / 255 }
+        }
+        func luminance(_ rgb: [CGFloat]) -> CGFloat {
+            let linear = rgb.map { $0 <= 0.03928 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+        }
+        // Palette 8 is the dimmest color a shell prints text in.
+        let config = GhosttyManager.loopflowConfig
+        let entry = try #require(config.range(of: "palette = 8=#"))
+        let dim = rgb(try #require(UInt(config[entry.upperBound...].prefix(6), radix: 16)))
+        let background = rgb(TerminalPalette.backgroundHex)
+
+        for exit in [0, 1] {
+            for (selected, hovered) in [(false, true), (true, false), (false, false)] {
+                let fill = try #require(GhosttyCommandBlockStyle(
+                    block: GhosttyCommandBlockLayout(startRow: 0, endRow: 1, exitCode: exit, selected: selected),
+                    hovered: hovered
+                ).fill.usingColorSpace(.sRGB))
+                let alpha = fill.alphaComponent
+                let shown = zip([fill.redComponent, fill.greenComponent, fill.blueComponent], background)
+                    .map { $0 * alpha + $1 * (1 - alpha) }
+                let ratio = (luminance(dim) + 0.05) / (luminance(shown) + 0.05)
+                #expect(ratio >= 3, "exit \(exit) selected \(selected) hovered \(hovered): \(ratio)")
+            }
+        }
+    }
+
+    @Test("a right-click on the selected block keeps it; anywhere else goes to the terminal")
+    func rightClickKeepsSelectedBlock() {
+        let blocks = [
+            GhosttyCommandBlockLayout(startRow: 0, endRow: 2, exitCode: 0, selected: false),
+            GhosttyCommandBlockLayout(startRow: 3, endRow: 5, exitCode: 1, selected: true),
+        ]
+        #expect(ghosttyRightClickKeepsBlock(row: 3, blocks: blocks))
+        #expect(ghosttyRightClickKeepsBlock(row: 5, blocks: blocks))
+        // Another block, the live prompt and the padding are Ghostty's to handle.
+        #expect(!ghosttyRightClickKeepsBlock(row: 1, blocks: blocks))
+        #expect(!ghosttyRightClickKeepsBlock(row: 6, blocks: blocks))
+        #expect(!ghosttyRightClickKeepsBlock(row: nil, blocks: blocks))
+    }
+
+    @Test("the embedded config parses, and Command-Up and Command-Down jump between prompts")
+    @MainActor
+    func embeddedConfigBindsPromptJumps() throws {
+        try #require(GhosttyManager.libraryReady)
+        let config = try #require(ghostty_config_new())
+        defer { ghostty_config_free(config) }
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("loopflow-ghostty-\(UUID().uuidString)")
+        try GhosttyManager.embeddedConfig.write(to: path, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: path) }
+        path.path.withCString { ghostty_config_load_file(config, $0) }
+        ghostty_config_finalize(config)
+        #expect(ghostty_config_diagnostics_count(config) == 0)
+
+        for (action, key) in [("jump_to_prompt:-1", GHOSTTY_KEY_ARROW_UP), ("jump_to_prompt:1", GHOSTTY_KEY_ARROW_DOWN)] {
+            let trigger = action.withCString { ghostty_config_trigger(config, $0, UInt(action.utf8.count)) }
+            #expect(trigger.tag == GHOSTTY_TRIGGER_PHYSICAL)
+            #expect(trigger.key.physical == key)
+            #expect(trigger.mods == GHOSTTY_MODS_SUPER)
+        }
+    }
+}
+#endif
+
 @Suite("Embedded terminal input", .requiresDisplay)
 struct GhosttyTerminalInputTests {
     // SwiftPM links GhosttyKit; the Xcode compile-check target builds the fallback.
@@ -126,9 +356,9 @@ struct GhosttyTerminalInputTests {
             views.append(view)
             _ = try #require(view.surface)
             let data = try JSONSerialization.data(withJSONObject: [
-                "id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": NSNull(), "title": id,
+                "id": id, "run_id": id, "interactive": true, "work": NSNull(), "title": id,
                 "detail": "test", "cwd": NSTemporaryDirectory(), "state": "active",
-                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "task_ids": [], "terminal_ids": [pane], "open_argv": ["unused"],
+                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": [], "terminal_ids": [pane], "open_argv": ["unused"],
             ])
             records.append(try JSONDecoder().decode(SessionRecord.self, from: data))
         }
@@ -168,7 +398,7 @@ struct GhosttyTerminalInputTests {
         #expect(terminalText(view).contains("companion:return-proof"))
     }
 
-    @Test("block clicks copy command and output, then the live prompt clears selection")
+    @Test("text and block selection replace each other, and copy follows the one shown")
     @MainActor
     func commandBlockClickAndCopy() async throws {
         _ = NSApplication.shared
@@ -181,27 +411,31 @@ struct GhosttyTerminalInputTests {
         let view = GhosttyMetalView(terminal: .shell("block-copy-proof"), frame: window.contentLayoutRect)
         window.contentView = view
         view.workingDirectory = NSTemporaryDirectory()
-        // Feed known OSC 133 boundaries through a real PTY and Ghostty parser.
-        view.command = #"/bin/sh -c 'printf "\033]133;A\007$ \033]133;B\007echo alpha\r\n\033]133;C\007alpha\r\n\033]133;D;0\007\033]133;A\007$ \033]133;B\007echo beta\r\n\033]133;C\007beta\r\n\033]133;D;0\007\033]133;A\007$ \033]133;B\007ready"; exec /bin/cat'"#
+        // Feed known OSC 133 boundaries through a real PTY and Ghostty parser:
+        // a command that succeeded, one that failed, and the live prompt.
+        view.command = #"/bin/sh -c 'printf "\033]133;A\007$ \033]133;B\007echo alpha\r\n\033]133;C\007alpha\r\n\033]133;D;0\007\033]133;A\007$ \033]133;B\007sdl\r\n\033]133;C\007command not found: sdl\r\n\033]133;D;127\007\033]133;A\007$ \033]133;B\007ready"; exec /bin/cat'"#
         view.createSurface(manager: manager)
         defer { view.handleSurfaceClose() }
         let surface = try #require(view.surface)
-        var blocks = Array(repeating: ghostty_command_block_s(), count: 10)
-        var count = 0
-        let deadline = ContinuousClock.now + .seconds(3)
-        while true {
-            count = blocks.withUnsafeMutableBufferPointer {
+
+        func blocks() -> [ghostty_command_block_s] {
+            var raw = Array(repeating: ghostty_command_block_s(), count: 10)
+            let count = raw.withUnsafeMutableBufferPointer {
                 ghostty_surface_command_blocks(surface, $0.baseAddress, $0.count)
             }
-            // Read once more after a delayed wake-up before declaring timeout.
-            if count == 2 || ContinuousClock.now >= deadline { break }
+            return Array(raw.prefix(count))
+        }
+        let deadline = ContinuousClock.now + .seconds(3)
+        // Read once more after a delayed wake-up before declaring timeout.
+        while blocks().count != 2, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
-        try #require(count == 2)
+        let initial = blocks()
+        try #require(initial.count == 2)
+        #expect(initial.map(\.exit_code) == [0, 127])
+        #expect(initial.allSatisfy { !$0.selected })
         view.setFrameSize(view.frame.size)
-        let size = ghostty_surface_size(surface)
-        let cellHeight = CGFloat(size.cell_height_px) / window.backingScaleFactor
-        let topInset = max(0, (view.bounds.height - CGFloat(size.rows) * cellHeight) / 2)
+
         let copy = try #require(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: .command,
             timestamp: 0, windowNumber: window.windowNumber, context: nil,
@@ -219,32 +453,96 @@ struct GhosttyTerminalInputTests {
             pasteboard.clearContents()
             pasteboard.writeObjects(savedItems)
         }
-        let clicks: [(UInt16, String?)] = [
-            (blocks[0].start_row, "echo alpha\nalpha"),
-            (blocks[0].end_row, "echo alpha\nalpha"),
-            (blocks[1].end_row, "echo beta\nbeta"),
-            (blocks[1].end_row + 1, nil),
-        ]
-        for (row, expected) in clicks {
-            let point = CGPoint(
-                x: view.bounds.midX,
-                y: view.bounds.height - topInset - (CGFloat(row) + 0.5) * cellHeight
+
+        func point(row: UInt16, column: CGFloat) -> CGPoint {
+            let size = ghostty_surface_size(surface)
+            let scale = window.backingScaleFactor
+            return CGPoint(
+                x: GhosttyTerminalPadding.x + (column + 0.5) * CGFloat(size.cell_width_px) / scale,
+                y: view.bounds.height - GhosttyTerminalPadding.y
+                    - (CGFloat(row) + 0.5) * CGFloat(size.cell_height_px) / scale
             )
-            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-                let event = try #require(NSEvent.mouseEvent(
-                    with: type, location: view.convert(point, to: nil), modifierFlags: [],
-                    timestamp: ProcessInfo.processInfo.systemUptime,
-                    windowNumber: window.windowNumber, context: nil,
-                    eventNumber: 1, clickCount: 1, pressure: 1
-                ))
-                if type == .leftMouseDown { view.mouseDown(with: event) }
-                else { view.mouseUp(with: event) }
-            }
-            pasteboard.clearContents()
-            #expect(view.performKeyEquivalent(with: copy) == (expected != nil))
-            #expect(pasteboard.string(forType: .string) == expected)
-            #expect(!ghostty_surface_has_selection(surface))
         }
+        func mouse(_ type: NSEvent.EventType, _ point: CGPoint) throws {
+            let event = try #require(NSEvent.mouseEvent(
+                with: type, location: view.convert(point, to: nil), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil,
+                eventNumber: 1, clickCount: 1, pressure: 1
+            ))
+            switch type {
+            case .leftMouseDown: view.mouseDown(with: event)
+            case .leftMouseDragged: view.mouseDragged(with: event)
+            default: view.mouseUp(with: event)
+            }
+        }
+        func click(row: UInt16) throws {
+            try mouse(.leftMouseDown, point(row: row, column: 20))
+            try mouse(.leftMouseUp, point(row: row, column: 20))
+        }
+        func copied() -> String? {
+            pasteboard.clearContents()
+            _ = view.performKeyEquivalent(with: copy)
+            return pasteboard.string(forType: .string)
+        }
+
+        // A click anywhere in a block selects it; another block replaces it.
+        try click(row: initial[0].start_row)
+        #expect(blocks().map(\.selected) == [true, false])
+        #expect(copied() == "echo alpha\nalpha")
+        try click(row: initial[1].end_row)
+        #expect(blocks().map(\.selected) == [false, true])
+        #expect(copied() == "sdl\ncommand not found: sdl")
+
+        // Dragging across text inside a block selects text and ends the block.
+        let outputRow = initial[1].end_row
+        try mouse(.leftMouseDown, point(row: outputRow, column: 0))
+        try mouse(.leftMouseDragged, point(row: outputRow, column: 6))
+        try mouse(.leftMouseUp, point(row: outputRow, column: 6))
+        #expect(ghostty_surface_has_selection(surface))
+        #expect(blocks().allSatisfy { !$0.selected })
+        #expect(copied() == "command")
+
+        // Clicking a block ends the text selection.
+        try click(row: initial[0].end_row)
+        #expect(!ghostty_surface_has_selection(surface))
+        #expect(blocks().map(\.selected) == [true, false])
+
+        // Command-C left the block selected; a key that goes to the shell ends
+        // it, and so does Escape.
+        func press(_ characters: String, keyCode: UInt16) throws {
+            view.keyDown(with: try #require(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                characters: characters, charactersIgnoringModifiers: characters,
+                isARepeat: false, keyCode: keyCode
+            )))
+        }
+        #expect(copied() == "echo alpha\nalpha")
+        #expect(blocks().map(\.selected) == [true, false])
+        try press("x", keyCode: 7)
+        #expect(blocks().allSatisfy { !$0.selected })
+        try click(row: initial[0].end_row)
+        try press("\u{1B}", keyCode: 53)
+        #expect(blocks().allSatisfy { !$0.selected })
+        try click(row: initial[0].end_row)
+        #expect(blocks().map(\.selected) == [true, false])
+
+        // The selection and the failure survive a resize that wraps output.
+        view.setFrameSize(CGSize(width: 150, height: 300))
+        let narrowDeadline = ContinuousClock.now + .seconds(3)
+        while blocks().last.map({ $0.end_row - $0.start_row }) == 1, ContinuousClock.now < narrowDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let wrapped = blocks()
+        #expect(wrapped.map(\.selected) == [true, false])
+        #expect(wrapped.map(\.exit_code) == [0, 127])
+        #expect(copied() == "echo alpha\nalpha")
+
+        // The live prompt is not a block: clicking it leaves nothing selected.
+        try click(row: wrapped[1].end_row + 1)
+        #expect(blocks().allSatisfy { !$0.selected })
+        #expect(copied() == nil)
     }
 
     @Test("releasing a retained terminal affects only its owning window")
@@ -390,108 +688,6 @@ struct GhosttyTerminalInputTests {
         defer { ghostty_surface_free_text(surface, &text) }
         guard let bytes = text.text else { return "" }
         return String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
-    }
-
-    @Test("bundled shell integration emits semantic command boundaries")
-    func shellIntegrationEmitsSemanticMarks() throws {
-        let resources = try #require(GhosttyRuntimeResources.directoryURL)
-        let home = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ghostty-shell-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: home) }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = [
-            "--mode", "interactive",
-            "-c",
-            """
-            _ghostty_deferred_init
-            print -Pn "$PS1"
-            _ghostty_preexec "print block-proof"
-            print block-proof
-            _ghostty_precmd
-            print -Pn "$PS1"
-            """,
-        ]
-        var environment = ProcessInfo.processInfo.environment
-        environment["HOME"] = home.path
-        environment["GHOSTTY_RESOURCES_DIR"] = resources.path
-        environment["GHOSTTY_SHELL_FEATURES"] = ""
-        environment["GHOSTTY_ZSH_ZDOTDIR"] = home.path
-        environment["TERM"] = "xterm-256color"
-        environment["ZDOTDIR"] = resources
-            .appendingPathComponent("shell-integration/zsh", isDirectory: true)
-            .path
-        process.environment = environment
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        try process.run()
-        process.waitUntilExit()
-
-        let output = String(
-            decoding: stdout.fileHandleForReading.readDataToEndOfFile(),
-            as: UTF8.self
-        )
-        let error = String(
-            decoding: stderr.fileHandleForReading.readDataToEndOfFile(),
-            as: UTF8.self
-        )
-        #expect(process.terminationStatus == 0, "zsh failed: \(error)")
-
-        let markers = [
-            "\u{1B}]133;A;cl=line\u{7}",
-            "\u{1B}]133;B\u{7}",
-            "\u{1B}]133;C\u{7}",
-            "block-proof",
-            "\u{1B}]133;D;0\u{7}",
-        ]
-        var remaining = output[...]
-        for marker in markers {
-            let range = try #require(remaining.range(of: marker))
-            remaining = remaining[range.upperBound...]
-        }
-    }
-
-    @Test("a click anywhere in a command or its output resolves the whole block")
-    func commandBlockHitTesting() throws {
-        let block = GhosttyCommandBlockLayout(id: 7, startRow: 2, endRow: 5)
-        let blocks = [block]
-
-        #expect(ghosttyCommandBlock(atViewportRow: 2, in: blocks) == block)
-        #expect(ghosttyCommandBlock(atViewportRow: 4, in: blocks) == block)
-        #expect(ghosttyCommandBlock(atViewportRow: 5, in: blocks) == block)
-        #expect(ghosttyCommandBlock(atViewportRow: 1, in: blocks) == nil)
-        #expect(ghosttyCommandBlock(atViewportRow: 6, in: blocks) == nil)
-    }
-
-    @Test("command blocks occupy full-width, row-aligned terminal surfaces")
-    func commandBlockLayout() throws {
-        let bounds = CGRect(x: 0, y: 0, width: 300, height: 200)
-        let block = GhosttyCommandBlockLayout(id: 7, startRow: 1, endRow: 3)
-        let frame = ghosttyCommandBlockFrame(
-            block,
-            bounds: bounds,
-            rows: 10,
-            cellHeight: 18
-        )
-
-        #expect(frame == CGRect(x: 4, y: 119, width: 292, height: 52))
-        #expect(ghosttyViewportRow(
-            at: CGPoint(x: 150, y: 150),
-            bounds: bounds,
-            rows: 10,
-            cellHeight: 18
-        ) == 2)
-        #expect(ghosttyViewportRow(
-            at: CGPoint(x: 150, y: 195),
-            bounds: bounds,
-            rows: 10,
-            cellHeight: 18
-        ) == nil)
     }
 
     @Test("clicking a split terminal makes that exact pane the input target")

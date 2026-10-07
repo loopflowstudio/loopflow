@@ -1,10 +1,13 @@
 ---
-description: Operate one Wave through delivery, coordination, capacity, adaptation and identity; focus on a few useful moves.
+description: Operate one Wave; keep every started Task moving and judge delivery, coordination, capacity, adaptation and identity.
 action_style: procedural
 ---
-Operate the selected Wave once: read, judge, act, and exit. Aim for one or two
-useful moves; let the evidence determine how much is worthwhile.
-No action is a valid result. No chat or schedule is required.
+Operate the selected Wave once: read, judge, act, verify, and exit. You are this
+Wave's operator: a started Task with no live driver has nobody else to take its
+next step. A pass is finished when each started Task has a disposition, not
+after a number of moves. No chat or schedule is required. Another conversation
+or scheduled pass may be operating this Wave at the same time; work it is
+driving is moving, and you leave it alone.
 
 ## Scope and evidence
 
@@ -25,6 +28,52 @@ not refresh it. Failed reads, stale plans, missing outcomes and unknown liveness
 cannot establish an empty backlog, health, or a completed outcome.
 Continue independent work from available evidence without repairing auth or
 waiting indefinitely.
+
+## Keep started work moving
+
+Give every started, unfinished Task in the Wave exactly one disposition, with
+its evidence: the first row below that fits. Started is the recorded fact,
+whether or not a driver is alive now. Include Tasks status lists under
+`unavailable_tasks`; they are unknown until read. Unstarted backlog is listed
+as backlog and left alone: starting it is the person's selection.
+
+| Disposition | Evidence and action |
+| --- | --- |
+| moving | A live driver was observed. Leave it alone. A connected conversation or review Session is not a driver. |
+| acted | This pass continued, recovered or delivered it through a supported control, then reread status and saw the effect. |
+| waiting on a person | A named review, decision or merge click, with the Session or PR to open. Never completed or approved for them. |
+| waiting on a dependency or capacity | The named Task, PR, check, account or limit. |
+| paused | The person's instruction to stop, or an explicit hold (`lf task automate <issue> off`) on work nothing else is moving. |
+| unknown | The named read or liveness evidence that is missing. Unknown is not idle and never a reason to start a second driver. |
+
+“Ready”, “needs reconciliation” and “the Wave owns this” are not dispositions.
+When status gives `next_move.owner` as `wave`, that owner is you: the Task's
+disposition is yours to establish, never a handoff. Its recommended action is
+a suggestion to check against the rules below, not an instruction. No action is
+a valid result only when every started Task already holds a disposition above.
+
+- **Look for a live driver first.** Read `lf task status <issue> --json` and
+  check every Flow in `execution.work.flows` and every unfinished Exec in
+  `execution.work.execs` against `lf ps --json`. A live process makes the Task
+  moving, whoever launched it. Unknown liveness is not idle.
+- **Recover before reporting a blocker.** Read the failed step's log and
+  inspect its effects. Repair a supported cause, then launch only the remaining
+  authorized work with `lf task run <issue> <flow> --reason "<what changed>"`.
+  A stopped Flow is history and cannot be resumed. Retry only on new evidence;
+  report an unchanged failure instead of repeating it.
+- **A Flow ends where authored.** A finished Flow or published PR does not
+  complete the Task. Name what remains and the PR or Task conversation awaiting
+  a decision. A Task on a workflow (`execution.work.workflow`) at a node its
+  last edge reached waits on a person there; rerun an edge that stopped or
+  failed with `lf task run <issue> <flow>`, and take no other edge for them;
+  do not choose a new direction or arm an unapproved merge.
+- **Reviews stay in the Task conversation.** Surface the Session from
+  `lf session list --waiting --json`. Discuss feedback and preserve agreed
+  direction there; closing a Session supplies no navigation authority.
+  Headless, required judgment is a waiting disposition.
+
+Start authorized remaining work without asking. Do not approve reviews,
+arm a merge, cancel or abandon Tasks, or change direction.
 
 ## Exercise all five functions within the Wave
 
@@ -73,24 +122,25 @@ is an approval prerequisite. A Task's Flows carry its autonomous work; do not
 perform a Flow's steps here. Preserve Flow history, conversation reviews,
 worktrees, placement and execution history.
 
-- Start selected work with `lf --task <issue-id> flow start`; use the
-  current Project's Flow unless an explicit choice is warranted. Each start
-  launches a fresh Flow; leave a live one running instead of duplicating it.
+- Start selected work with `lf task run <issue-id>`; use the
+  current Project's Flow unless an explicit choice is warranted. Each run
+  is a fresh Flow and returns when it ends; background it with your own tool.
+  Leave a live one running instead of duplicating it.
 - Inspect `lf task status` and existing logs before recovery. Resolve
   impediments; discuss missing judgment in the ongoing Wave chat when present.
   Headless operation stops with the reason when it cannot proceed. After a
   failure, inspect its effects and launch fresh work with
-  `lf --task <issue> flow start <flow> --reason "<what changed>"` only when new
+  `lf task run <issue> <flow> --reason "<what changed>"` only when new
   evidence warrants it. Unknown liveness is not idle. Preserve historical review
   evidence; discuss feedback and next work in the ongoing Task conversation.
-- Read existing Tasks before `lf task create --wave <wave>`. Use `--run` only
-  when execution is intended. Give work an observable outcome.
+- Read existing Tasks before `lf task create --wave <wave>`. Give work an
+  observable outcome.
 - Update the plan through `lf update-plan --wave <wave> --plan
   <plan.json>`; curate durable decisions in `wave/<wave>/MEMORY.md`. Change
   GOAL.md only within accepted direction. Supply the complete content object
-  with `metric_targets`, required nonempty `flow` and `krs`; for example
-  `{"metric_targets":[],"flow":"feature","krs":[]}`. This edits the Wave's
-  one In Progress Linear Project. Preserve authored Flow and other plan fields.
+  with `metric_targets`, required nonempty `workflow` and `krs`; for example
+  `{"metric_targets":[],"workflow":"feature","krs":[]}`. This edits the Wave's
+  one In Progress Linear Project. Preserve the authored workflow and other plan fields.
 - Use supported Task/Work operations for changes, not raw stores, unclaimed
   process signals or a competing worker on this Home. A missing Home stays an
   explicit blocker.
@@ -114,24 +164,35 @@ reconstructed starting membership. Do not introduce competing current Projects.
 
 ## Finish
 
-Reply in this conversation with the decisive source, judgment, action/result
-and unresolved decisions or evidence gaps. If no move is useful, say why briefly.
-Persist only changed decisions, durable learning and unresolved concerns at
+Reply in this conversation with each started Task once, grouped under these
+headings in this order, omitting an empty group:
+
+1. **Waiting on you** — each review, decision or merge, with what to open.
+2. **Moving** — live work left alone, and what this pass acted on with its result.
+3. **Stuck** — waiting on a dependency or capacity, paused, or unknown, with
+   the named cause or missing evidence.
+
+Then list unstarted backlog, and after it any judgment, unresolved decisions
+and evidence gaps. Keep each row to its disposition and decisive evidence. If
+nothing needed action, say why briefly. Persist only changed decisions, durable learning and unresolved concerns at
 their existing owners. Report external posts only after confirming delivery;
 this skill does not automatically send the reply to a channel.
 
 When reporting more than one Task, use the status/roadmap reads above and render
 operational rows as
-`[identifier · Task title](provider URL) — status; next action/owner`.
+`[identifier · Task title](provider URL) — status; next action/owner · [PR #n](PR URL)`.
 
 Use this ID-first form in operational lists. In prose, use
 `[Task title · identifier](provider URL)` on first mention; shorten later
 references when unambiguous.
 
 Fill the link from `task.identifier` and `reference.issue_url`, and the readable
-title from `task.title`. Take status from `runtime.status` or the roadmap
-`section`, and next owner from `next_move.owner`. State the next action only
-when supported by current evidence; leave unknown state unknown. Include an
+title from `task.name`. Give the Task's disposition as its status, not
+`runtime.status` alone, and take the next owner from `next_move.owner`. An
+owner of `wave` names work this pass acts on, not a handoff: report its result.
+Link each published PR from that Task's `prs[].publication.github` `number` and
+`url`. State the next action only when supported by current evidence; leave
+unknown state unknown. Include an
 active PR/workspace slug only when navigating that workspace is the job. In
 roadmap, use `active_pr.slug`; in status, match `active_pr` to `prs[].id` and
 use that PR's `slug`. Fall back to `reference.workspace.slug`. Never infer a

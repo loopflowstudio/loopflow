@@ -17,7 +17,7 @@ Earlier landing approval does not certify this revision or unexecuted proof.
 ## Delivered behavior
 
 Sessions group by resolved checkout and owning Home, independently from recorded
-Run attribution and Flow membership. Retained workspace owners keep shell processes,
+Session attribution and Flow membership. Retained workspace owners keep shell processes,
 Session surfaces, file drafts and layout while switching Tasks. Directory browsing
 and revisioned file saving do not require a Project or PR. Readable symlinks are
 read-only; access changes precede content-revision shortcuts and preserve drafts.

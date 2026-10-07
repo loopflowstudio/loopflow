@@ -52,7 +52,7 @@ struct WorkNavigationProofTests {
         }
         let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
         let host = NSHostingView(rootView: view.id("/src/loopflow"))
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1100, height: 600),
@@ -173,7 +173,7 @@ struct WorkNavigationProofTests {
         let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
         model.select(.task(id: "task-0-7"))
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let view = SessionsView(model: model, repoPath: "/src/loopflow", workspaces: registry, query: query)
         let host = NSHostingView(rootView: view.id("/src/loopflow"))
         let captureDirectory = ProcessInfo.processInfo.environment["LOOPFLOW_OUTLINE_CAPTURE_DIR"].map(URL.init(fileURLWithPath:))
@@ -242,7 +242,7 @@ struct WorkNavigationProofTests {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<3 {
@@ -559,7 +559,7 @@ struct WorkNavigationProofTests {
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
         let paths = [repo, "/src/loopflow.task"]
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let outer = registry.layout(for: fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         var records: [[String: Any]] = []
@@ -768,7 +768,7 @@ struct WorkNavigationProofTests {
         }
         let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
         workspace.multiplexer.load(sessionId: "navigation-split")
         let sessionPane = workspace.multiplexer.focusedPaneId

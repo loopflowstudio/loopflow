@@ -912,7 +912,7 @@ pub(crate) async fn adopt_legacy_projects(
 async fn disposition(store: &Store, item: PmItem) -> OpsResult<ChapterTask> {
     let mut evidence = TaskStartEvidence {
         begun: false,
-        // This Home's missing Task row says nothing about work on another Home.
+        // This Machine's missing Task row says nothing about work on another Machine.
         authored: None,
         published: false,
         abandoned: false,

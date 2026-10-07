@@ -99,7 +99,7 @@ fn pm_show_requires_team_identity_even_without_project_ownership() {
 }
 
 #[test]
-fn wave_detail_preserves_flow_and_requires_home() {
+fn wave_detail_preserves_flow_and_requires_machine() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
     assert_eq!(
         snapshot.project_readiness.state,
@@ -129,9 +129,12 @@ fn wave_detail_preserves_flow_and_requires_home() {
         serde_json::to_value(&snapshot.projects).unwrap()
     );
 
-    let mut missing_home: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
-    missing_home["wave"].as_object_mut().unwrap().remove("home");
-    assert!(serde_json::from_value::<WaveDetailSnapshot>(missing_home).is_err());
+    let mut missing_machine: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
+    missing_machine["wave"]
+        .as_object_mut()
+        .unwrap()
+        .remove("machine");
+    assert!(serde_json::from_value::<WaveDetailSnapshot>(missing_machine).is_err());
 }
 
 #[test]
@@ -428,7 +431,7 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
     let json = include_str!("../../../tests/fixtures/dto/task_checkout.json");
     let snapshot: loopflow::ops::task::TaskSnapshot = serde_json::from_str(json).unwrap();
     assert_eq!(
-        snapshot.home_id.as_ref().unwrap().as_str(),
+        snapshot.machine_id.as_ref().unwrap().as_str(),
         "home_00000000000000000000000000000001"
     );
     assert_eq!(snapshot.worktree, "/src/loopflow.workspace");

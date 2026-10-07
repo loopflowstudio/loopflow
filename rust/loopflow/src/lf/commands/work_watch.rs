@@ -636,7 +636,7 @@ impl Reader {
             })),
             Part::Activity => WorkContent::Activity(Some(super::top::load_snapshot()?)),
             Part::Task | Part::Wave | Part::WorkActivity => {
-                anyhow::bail!("no Loopflow store exists in this Home yet")
+                anyhow::bail!("no Loopflow store exists in this Machine yet")
             }
         })
     }

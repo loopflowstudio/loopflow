@@ -355,8 +355,8 @@ final class WorkModel {
 
     private let query: RegistryQuery
     @ObservationIgnored private let cache: WorkCache?
-    /// The Home the saved workspace was read from, until `confirmHome` checks it.
-    @ObservationIgnored private(set) var savedHomeId: String?
+    /// The Machine the saved workspace was read from, until `confirmMachine` checks it.
+    @ObservationIgnored private(set) var savedMachineId: String?
     /// Parts still showing saved text instead of a read from this launch.
     private var showsSavedPlanning = false
     private var savedSessionRepos: Set<String> = []
@@ -371,7 +371,7 @@ final class WorkModel {
     /// Moves with every planning frame, for views that derive from planning.
     private(set) var planningSequence = 0
     @ObservationIgnored private var workObservation: WorkObservation?
-    @ObservationIgnored private var workHome: String?
+    @ObservationIgnored private var workMachine: String?
     @ObservationIgnored private var workOpened = ContinuousClock.now
     @ObservationIgnored private var nextRequestId = 0
     @ObservationIgnored private var sentScope: WorkScope?
@@ -447,7 +447,7 @@ final class WorkModel {
 
     /// Show the saved workspace before any read. Text that no longer decodes is skipped.
     private func restore(_ saved: WorkSnapshot) {
-        savedHomeId = saved.homeId
+        savedMachineId = saved.machineId
         if let text = saved.roadmap, let value = try? RegistryQuery.decode(RoadmapSnapshot.self, from: text) {
             roadmap = .available(value)
             showsSavedPlanning = true
@@ -480,15 +480,15 @@ final class WorkModel {
         LaunchJournal.home.mark(.fresh)
     }
 
-    /// Reads now come from `id`. A workspace saved under another Home is dropped
+    /// Reads now come from `id`. A workspace saved under another Machine is dropped
     /// unless this launch has already replaced it.
-    func confirmHome(_ id: String) {
-        if let savedHomeId, savedHomeId != id {
+    func confirmMachine(_ id: String) {
+        if let savedMachineId, savedMachineId != id {
             if showsSavedPlanning {
                 roadmap = .loading
                 waves = .loading
                 showsSavedPlanning = false
-                // Work chosen from the other Home's rows names nothing here.
+                // Work chosen from the other Machine's rows names nothing here.
                 for navigation in navigationByRepo.values {
                     navigation.selection = nil
                     navigation.selectedTaskEvidence = nil
@@ -498,8 +498,8 @@ final class WorkModel {
             for repo in savedSessionRepos { sessionReadings[repo] = nil }
             savedSessionRepos = []
         }
-        savedHomeId = id
-        cache?.confirmHome(id)
+        savedMachineId = id
+        cache?.confirmMachine(id)
     }
 
     var visibleRoadmaps: [WaveRoadmap] {
@@ -593,7 +593,7 @@ final class WorkModel {
                 }
                 if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
             } catch WorkObservationError.configurationChanged {
-                // The installed `lf` or its Home selection was replaced.
+                // The installed `lf` or its Machine selection was replaced.
                 delay = .milliseconds(100)
             } catch {
                 if !Task.isCancelled { workUnavailable(error.localizedDescription) }
@@ -663,11 +663,11 @@ final class WorkModel {
         let part = frame.content.part
         if case .heartbeat = frame.content { return }
         guard frame.sequence > appliedSequence[part] ?? 0 else { return }
-        if let workHome, workHome != frame.home {
-            // Another Home answers now; nothing shown from the previous one names anything here.
-            dropHomeContent()
+        if let workMachine, workMachine != frame.home {
+            // Another Machine answers now; nothing shown from the previous one names anything here.
+            dropMachineContent()
         }
-        workHome = frame.home
+        workMachine = frame.home
         let answers = frame.answers ?? 0
         let reason = frame.unavailable ?? "Work reader returned no \(part) reading"
         switch frame.content {
@@ -766,7 +766,7 @@ final class WorkModel {
         syncWorkScope()
     }
 
-    private func dropHomeContent() {
+    private func dropMachineContent() {
         roadmap = .loading
         waves = .loading
         showsSavedPlanning = false

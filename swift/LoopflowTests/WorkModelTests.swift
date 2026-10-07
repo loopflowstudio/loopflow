@@ -488,7 +488,7 @@ struct WorkModelStreamTests {
         #expect(model.selection == .task(id: "issue-now"))
         #expect(model.workStatus == .current)
 
-        // Sequence 2 was read before sequence 3; another Home's frame names nothing here.
+        // Sequence 2 was read before sequence 3; another Machine's frame names nothing here.
         await feed.send(try fixture.planningFrame(sequence: 2, answers: nil))
         await feed.send(try fixture.heartbeat(sequence: 4))
         try await Task.sleep(for: .milliseconds(50))
@@ -496,8 +496,8 @@ struct WorkModelStreamTests {
         #expect(!model.roadmap.isLoading)
     }
 
-    @Test("Another Home's frame replaces what the previous Home showed")
-    func anotherHomeDropsPreviousContent() async throws {
+    @Test("Another Machine's frame replaces what the previous Machine showed")
+    func anotherMachineDropsPreviousContent() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
         let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
@@ -512,12 +512,12 @@ struct WorkModelStreamTests {
         try await eventually { model.sessions.value?.count == session.ids.count }
         model.select(.task(id: "issue-now"))
 
-        // The other Home has the same repository path and none of these Sessions.
+        // The other Machine has the same repository path and none of these Sessions.
         await feed.send(try fixture.heartbeat(sequence: 3, home: "/elsewhere"))
         try await Task.sleep(for: .milliseconds(50))
         #expect(model.selection == .task(id: "issue-now"))
-        await feed.send(try fixture.planningFrame(sequence: 4, answers: scope.id, renaming: "Other Home", home: "/elsewhere"))
-        try await eventually { model.task(id: "issue-now")?.task.task.name == "Other Home" }
+        await feed.send(try fixture.planningFrame(sequence: 4, answers: scope.id, renaming: "Other Machine", home: "/elsewhere"))
+        try await eventually { model.task(id: "issue-now")?.task.task.name == "Other Machine" }
         #expect(model.selection == nil)
         #expect(model.sessions.value == nil)
     }

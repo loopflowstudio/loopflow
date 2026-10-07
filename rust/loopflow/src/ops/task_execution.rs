@@ -88,17 +88,6 @@ pub(crate) async fn task_execution_and_flow(
             }
         }
     }
-    // An unfinished Flow is history once its Task is terminal. Independent
-    // Sessions remain discoverable through the Session inventory.
-    let status = store
-        .work_status(&crate::durable::WorkRef::Task(task_id.clone()))
-        .await?;
-    if status != crate::durable::WorkStatus::Ready {
-        snapshot.state = TaskExecutionState::Idle;
-        snapshot.reason = format!("Task is {status}");
-        snapshot.step = None;
-        snapshot.captured = None;
-    }
     let record = if entry.summary.state == FlowSummaryState::Completed {
         TaskFlowRecord::Finished {
             flow: entry.summary.name,

@@ -11,7 +11,7 @@ import Testing
 struct LocalWaveAgentLauncherTests {
     // MARK: - Command construction
 
-    @Test("development launcher preserves the selected Home registry")
+    @Test("development launcher preserves the selected Machine registry")
     func launchEnvironmentPreservesRegistry() {
         let environment = GUIProcessEnvironment.enriched([
             "PATH": "/usr/bin:/bin",
@@ -77,7 +77,7 @@ struct LocalWaveAgentLauncherTests {
         #expect(!command.contains { $0.hasPrefix("http") })
     }
 
-    @Test("Prepared checkout receipts retain the owning Home and require its evidence")
+    @Test("Prepared checkout receipts retain the owning Machine and require its evidence")
     func checkoutIdentityFixture() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let json = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/task_checkout.json"), encoding: .utf8)
@@ -92,7 +92,7 @@ struct LocalWaveAgentLauncherTests {
         #expect(LocalWaveAgentLauncher.taskCheckoutCommand(lfPath: "/bin/lf", issue: "LOO-291")
             == ["/bin/lf", "task", "checkout", "LOO-291", "--json"])
         let worktree = try LocalWaveAgentLauncher.taskCheckoutWorkspace("""
-        {"home_id": "home_00000000000000000000000000000001", "id": "task_1", "issue": "LOO-291", "worktree": "/src/loopflow.main-view-task", "agent": "claude"}
+        {"machine_id": "home_00000000000000000000000000000001", "id": "task_1", "issue": "LOO-291", "worktree": "/src/loopflow.main-view-task", "agent": "claude"}
         """)
         #expect(worktree == fixtureWorkspace("/src/loopflow.main-view-task"))
         #expect(throws: LocalLfError.self) { try LocalWaveAgentLauncher.taskCheckoutWorkspace("not json") }
@@ -140,7 +140,7 @@ struct LocalWaveAgentLauncherTests {
             try LocalWaveAgentLauncher.queryLf(args, cwd: cwd)
         }
 
-        #expect(try await !query.localHomeId().isEmpty)
+        #expect(try await !query.localMachineId().isEmpty)
     }
     #endif
 

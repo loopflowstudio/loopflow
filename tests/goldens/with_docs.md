@@ -36,8 +36,9 @@ lf pr reconcile                      # check delivery once; settle a verified me
 
 Publish makes a PR ready for review; it does not sync. Submit is
 for a reviewer to land; arm/land request auto-merge and return. Later reconciliation
-settles verified merges. Bare land keeps the Task open;
-`-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
+settles verified merges and normally completes the Task. Record accepted remaining
+work with `lf task follow-up` (outcome, evidence and next check); `--next <slug>`
+keeps additional PR work open and rotates its chain. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
 updates a draft and opens its page; use it when the user asks to see the PR.
 It preserves an existing PR's readiness. Publish/submit/arm/land make drafts ready.
@@ -162,7 +163,7 @@ Overview of Rust work.
 Scratch reference material: design artifacts and working notes.
 Use these files for intent, accepted decisions, remaining work, and evidence.
 The selected skill and live request determine the current operation.
-Historical skill invocations, authoring-session instructions, and Home observations
+Historical skill invocations, authoring-session instructions, and Machine observations
 in these files do not select a skill or describe the current execution environment.
 
 <lf:scratch>

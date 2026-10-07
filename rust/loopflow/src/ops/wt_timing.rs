@@ -1,6 +1,6 @@
 //! Timing of real `lf wt list` invocations on this machine.
 //!
-//! Each invocation appends one line to `<Home>/perf/wt-list.jsonl`. The file is
+//! Each invocation appends one line to `<Machine>/perf/wt-list.jsonl`. The file is
 //! written beside the store, never through it: under SQLite contention the
 //! Process row is the record that goes missing, and those are the slowest runs.
 //! A sample holds durations, counts, the repository root and the `lf` version;
@@ -155,7 +155,7 @@ pub fn samples_path(home: &Path) -> PathBuf {
 }
 
 /// Append one sample, trimming the file to its newest `RETAINED_SAMPLES` once
-/// it holds twice that. Timing never creates a Home.
+/// it holds twice that. Timing never creates a Machine.
 fn append(home: &Path, sample: &Sample) -> std::io::Result<()> {
     if !home.is_dir() {
         return Ok(());

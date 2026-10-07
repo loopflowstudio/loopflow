@@ -25,6 +25,42 @@ with PTY transport or deferring emission to LOO-394 remains an unresolved choice
 not Jack's scope decision. Details and acceptance: `scratch/read-and-write-program-status.md`;
 original design is preserved at `c62c19f5c:scratch/read-and-write-program-status.md`.
 
+## Machine terminology (LOO-394, 2026-10-07)
+
+Jack Heart authorized the rename, then two changes to PR #1484 and republication
+only: discard old Desktop caches and name the installation scope `installation`.
+A machine is one OS user and data directory; `LF_HOME` retains its filesystem
+meaning. Opaque `home_…` IDs, cron plist keys and historical payloads survive.
+Cron reads released JSON keys. Desktop discards version-1 caches; this supersedes
+the earlier translation decision. Installation owns artifact updates and skill
+exports; short commands stay. Retain `~/.lf-machine/install` and the promotion
+lock path because released gates, receipts and jobs pin them; no relocation is
+proved. Retained binaries use the shared `install` shorthand. Exact-frontier
+fixtures seed released SQL without drafts. Local checks prove neither installed
+migration nor remote continuity. Schedule ownership and activation stay intact. Release's
+operation-entry lesson also applies to command removal: reject the retired
+option beneath a valid current owner; an unknown owner can produce a false pass.
+Corrected installation fixtures still require disposable OS-account isolation.
+
+## Task decisions and delivered work (LOO-408, 2026-10-07)
+
+Jack Heart authorized autonomous repair, verification and landing, with verified
+merges completing Tasks by default. Explicit remaining work carries its outcome,
+evidence condition and next check; overdue calls for a decision, never invented
+success. Task state changes must preserve Session turns, reservations, process
+outcomes, ancestry and live controls. Historical uncertainty can retain a checkout,
+but cannot veto an authorized completion or cancellation. The old per-Exec
+acceptance ritual is superseded; its recorded decisions remain history.
+
+Installed 0.13.9 reproduces LOO-353's five pending turns, one reserved input and
+two unknown processes despite its merged PR's completion intent. Source fixtures
+prove preservation. PR #1483's Process/LFID vocabulary and migration are integrated
+without another draft; installed acceptance awaits published repair. Current
+Infrastructure reads retain LOO-285's unattended settlement proof, LOO-304's
+performance/soak acceptance, LOO-375's installed timing and LOO-390's prevention
+measurement. Their merge status alone proves none of those outcomes. Legacy
+keep-open requests without explicit remaining work need scope reconciliation.
+
 ## Process vocabulary (LOO-400, 2026-10-07)
 
 Jack Heart approved Process, LFID/PID and PR #1483 landing
@@ -328,18 +364,15 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Installed worker recovery (2026-10-02 PDT; curated October 7)
+## Installed worker recovery (curated 2026-10-07)
 
-Jack Heart authorized published v0.12.32 recovery. Exact release identities,
-preserved-file checks and LOO-367's resumed saved Flow remain at
-`8d8f68dc1e8cae33fd3b05a28a50b864d4d503ab:wave/infrastructure/MEMORY.md`.
-LOO-295 and LOO-292's later acceptance above supersedes their pending demos.
-LOO-373 retains the `invalid stored landing placement: home` defect; supported
-re-entry settled the release without deleting records or checkouts. LOO-285's
-operator-triggered release proved no automatic settlement. Jack questioned
-serial releases; batching repairs was the operator's commitment, not Jack's
-approval of a new release policy. Full dated account:
-`6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`.
+October 2 recovery evidence remains at
+`6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`
+under this heading. Published v0.12.32 preserved the Home without migration and
+resumed LOO-367. LOO-295 and LOO-292's later acceptance above supersedes their
+then-open review obligations. LOO-373 owns the retained landing-placement defect;
+re-entry preserved records and checkouts. Manual releases prove no automatic settlements. The operator's batching proposal was not Jack Heart's
+approval of a new release policy; source, installation and acceptance stay distinct.
 
 ## Optional chapters and Task workflows (2026-10-02)
 
@@ -483,12 +516,15 @@ Unshipped branch evidence: `986be7988:wave/infrastructure/MEMORY.md`.
 
 ## One main Home (LOO-342, curated 2026-10-04)
 
-Jack Heart approved one main Home for ordinary commands and workers. PR #1381
-merged at `6c73356074c4`; installed routing passed on v0.12.31 and LOO-342 is done.
-Current mechanics: [CLI docs](../../docs/lf.md#use-one-home) and
-[Homes](../../docs/architecture/homes.md#one-main-home). Exact configured checks
-and v0.12.29–v0.12.31 recovery evidence remain at
-`c62c19f5c:wave/infrastructure/MEMORY.md` under this heading and its linked archive.
+Jack Heart approved the one-Home cutover: ordinary CLI commands, Task workers,
+Flow steps and agent tools use the installed CLI and `~/.lf`; an explicit
+`LF_HOME` experiment initializes once and needs a fresh directory after schema
+changes. [PR #1381](https://github.com/loopflowstudio/loopflow/pull/1381) merged
+at `6c73356074c4`; installed routing acceptance passed on v0.12.31 and the Task
+reads done (see the 2026-10-04 entry above). Current behavior belongs in
+[CLI docs](../../docs/lf.md#use-one-machine) and [Machines](../../docs/architecture/machines.md#one-main-machine).
+The dated cleanup receipts, v0.12.29–v0.12.31 release recovery and the exact
+configured checks are in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/cd344891b611914adf44eeb53844193d7a987d2c/wave/infrastructure/MEMORY.md#one-main-home-loo-342-branch-evidence-2026-09-30).
 
 ### Legacy retirement completed (2026-10-04)
 
@@ -531,15 +567,14 @@ local Git is the larger phase, with no measured hard lower bound. Numbers and me
   admission or completion** without a completion receipt (Jack authorized).
   Live or unknown providers still block.
 
-## Environment variables (LOO-341, branch evidence 2026-10-01)
+## Environment variables (LOO-341, reconciled 2026-10-07)
 
-Jack Heart requested the audit in [Environment](../../docs/architecture/environment.md).
-`LF_HOME` alone selects the Home; its database is `loopflow.db`. Shared Exec-context
-names drive shell and tmux clearing. The unreviewed branch evidence and retired
-variable inventory remain at
+Jack Heart's audit lives in [Environment](../../docs/architecture/environment.md).
+`LF_HOME` selects the machine's data directory and `loopflow.db`; shared Exec
+names drive shell/tmux clearing. Earlier branch evidence remains at
 `c31279995a4ea0eec09c053e39c2f71a81d26034:wave/infrastructure/MEMORY.md`.
-LOO-370 removes those presence-based runtime decisions. Its accepted scope excludes
-conversion; source gate and delivery remain unfinished.
+LOO-370's October 6 completion above supersedes this section's pending-delivery
+claim; it establishes no physical capture conversion.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 
@@ -550,12 +585,11 @@ reconstruct ownership from paths. Membership is additive, includes descendants
 at component boundaries and closed history, and survives a missing checkout.
 It changes neither recorded usage attribution nor process/Flow authority.
 
-The managed Flow remains one marked member for worker progression, claims,
-Task review settlement and worker delivery authority. Independent unfinished
-Flows, pending Ask/review Sessions and live or unresolved Execs preserve work
-during completion, recovery and cleanup. General membership cannot settle or
-signal them. Current mechanics live in the architecture reference; this branch
-entry is not evidence of shipment or configured Desktop acceptance.
+Every Flow naming the Task is equally its work; the earlier marked-worker model
+is superseded. Membership grants no process or settlement authority. LOO-408
+separates Task decisions from execution and retains conservative checkout cleanup.
+Earlier branch details remain at
+`6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`.
 
 ## Synced planning integration (LOO-334, 2026-09-30)
 
@@ -607,7 +641,7 @@ app acceptance or remote app transport. Home placement is distinct from a data
 directory, and database isolation does not isolate provider or checkout effects.
 Restore saved Task/PR/checkout identity; explicit replacement owns new definitions.
 Authored command removals must cover runtime, app and DTO consumers. Current
-mechanics belong to docs/lf.md and docs/architecture/homes.md; superseded command
+mechanics belong to docs/lf.md and docs/architecture/machines.md; superseded command
 names and store-selection policies are historical evidence, not instructions.
 
 ## Managed account identity (LOO-339, branch evidence 2026-09-30)
@@ -700,31 +734,13 @@ verification uses disposable stores; no old branch binary may migrate main.
 
 ## Data model and performance decisions (reconciled 2026-09-30)
 
-Jack's rule, verbatim: "The main user objects should line up with the main
-tables in the DB and when we see stuff like this where a main record is
-actually a union over 4 things, we should be suspicious." The trigger was a
-2026-09-26 product-first review of Session/Run/Task/Wave: a Session was four read-time
-projections over four stores (Run dir, `task_flow_positions`,
-`human-sessions/*.json`, `flows/*/position.json`); Run→Task is a `task:`
-string in a ranked subject list with a two-value source, mirrored into a
-Task event because the Run could not be queried by Task; every post-launch fact
-(name, completion, attachment) became a sidecar beside the manifest. Reads
-reused the launch resolver, so a bound Session became an orphan when its
-Task's PR merged. The store's `runs` table had the Task FK and no writer.
-
-LOO-298 ([PR #1296](https://github.com/loopflowstudio/loopflow/pull/1296)) implements
-the three-owner model in this branch. Run no longer exists as a product object
-or table. Current contracts belong in [architecture-reference](../../docs/architecture-reference.md)
-and [CLI reference](../../docs/lf-reference.md); branch code is not installed acceptance.
-
-Jack Heart authorized autonomous landing on 2026-09-30: “try to do this all
-autonomously, no need to review with me.” Land #1296 as one PR after technical
-verification, without a demo or review wait. The independent resource-recovery,
-publication-continuity and resident-Wave cuts already landed as #1358, #1359 and
-#1360; local main history records them. Exec/Chapter extraction would remove
-only about 10% and requires manual cutting, so the old decomposition is rejected.
-Jack selected merging main, not rebasing; `e3a2c7e2c` integrated #1360. Landing
-authorization is not evidence that #1296 merged or that a release migrated data.
+Jack Heart selected public objects with one SQLite owner, direct skill/operation
+Execs and compiled Flow graphs. The four-store Session counterexample, LOO-298's
+autonomous single-PR landing authorization, rejected decomposition and merge-not-rebase
+decision remain at
+`08191d19269af96e15d79918689a04b4fa44dc30:wave/infrastructure/MEMORY.md`
+under this heading. Current contracts belong in the architecture and CLI references;
+source history does not establish installed conversion or configured acceptance.
 
 **One client, one main Home.** Jack reports only this machine is a client; the
 pinned dev Home is gone and its active Tasks were moved by hand to `~/.lf`.

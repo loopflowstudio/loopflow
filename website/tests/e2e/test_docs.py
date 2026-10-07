@@ -115,7 +115,7 @@ def test_architecture_area_routes_render(page: Page, base_url: str):
         "execution",
         "planning",
         "delivery",
-        "homes",
+        "machines",
         "data",
         "codebase",
         "reference",

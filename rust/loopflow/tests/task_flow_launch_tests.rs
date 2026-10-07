@@ -748,3 +748,95 @@ fn linear_completing_a_task_that_never_started_withdraws_it() {
     assert!(support::recorded_flows(task.home.path()).is_empty());
     assert_eq!(task.state(), "not_ready");
 }
+
+#[test]
+fn completion_preserves_retained_session_input_and_unknown_process_history() {
+    let task = WorkflowTask::new();
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let exec = uuid::Uuid::new_v4().to_string();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    db.execute("INSERT INTO processes(lfid,trace_id,cwd,started_at,command) VALUES(?1,?1,?2,?3,'historical inspection')",
+        rusqlite::params![exec, task.repo.path().canonicalize().unwrap().to_str().unwrap(), now]).unwrap();
+    db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,interactive,task_id,wave_id,cwd)
+        VALUES('retained-input','retained input','generated',?1,0,0,?2,?3,?4)",
+        rusqlite::params![now, task.registered.task.id.as_str(), task.registered.task.wave_id.as_str(), task.repo.path().to_str().unwrap()]).unwrap();
+    db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('retained-input','captured',?1,1,'{}')", [uuid::Uuid::new_v4().simple().to_string()]).unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET current_capture=?1 WHERE id='retained-input'",
+        [db.last_insert_rowid()],
+    )
+    .unwrap();
+    let sessions: String = db.query_row("SELECT json_object('published',input_published,'completed',completed_at,'cwd',cwd) FROM agent_sessions WHERE id='retained-input'", [], |row| row.get(0)).unwrap();
+    for _ in 0..2 {
+        task.ok(&["task", "move", "INF-123", "end"]);
+        assert_eq!(task.state(), "done");
+        assert!(task.repo.path().exists());
+    }
+    let after: String = db.query_row("SELECT json_object('published',input_published,'completed',completed_at,'cwd',cwd) FROM agent_sessions WHERE id='retained-input'", [], |row| row.get(0)).unwrap();
+    assert_eq!(sessions, after);
+    let unfinished: bool = db
+        .query_row(
+            "SELECT completed_at IS NULL AND outcome IS NULL FROM processes WHERE lfid=?1",
+            [&exec],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(unfinished);
+    let count: i64 = db
+        .query_row(
+            "SELECT count(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='completed'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn remaining_work_is_visible_until_an_explicit_evidence_decision() {
+    let task = WorkflowTask::new();
+    let followup = [
+        "task",
+        "follow-up",
+        "INF-123",
+        "--outcome",
+        "Installed latency meets budget",
+        "--evidence",
+        "20 warm samples below 1s p95",
+        "--check-at",
+        "2000-01-01T00:00:00Z",
+    ];
+    task.ok(&followup);
+    task.ok(&followup);
+    let error = refusal(task.run(&["task", "move", "INF-123", "end"]));
+    assert!(error.contains("Installed latency meets budget"), "{error}");
+    assert!(error.contains("20 warm samples below 1s p95"), "{error}");
+    assert!(error.contains("overdue"), "{error}");
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let count = || {
+        db.query_row(
+            "SELECT count(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='follow_up'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(count(), 1);
+    task.ok(&[
+        "task",
+        "follow-up",
+        "INF-123",
+        "--clear",
+        "Installed measurements meet the budget",
+    ]);
+    task.ok(&[
+        "task",
+        "follow-up",
+        "INF-123",
+        "--clear",
+        "Installed measurements meet the budget",
+    ]);
+    assert_eq!(count(), 2);
+    task.ok(&["task", "move", "INF-123", "end"]);
+    assert_eq!(task.state(), "done");
+}

@@ -478,7 +478,7 @@ impl SqliteStore {
         if !unidentified {
             return Ok(false);
         }
-        // A copied Home cannot witness the death of a provider on its origin
+        // A copied Machine cannot witness the death of a provider on its origin
         // host. Establish locality from the provider Process's retained capture,
         // then bind the witness to the machine's OS identity across restarts.
         let local: bool = tx.query_row(

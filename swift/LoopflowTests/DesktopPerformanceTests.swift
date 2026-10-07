@@ -67,7 +67,7 @@ struct DesktopPerformanceTests {
 #endif
     }
 
-    /// Another process commits to a private Home's store; the interval ends when
+    /// Another process commits to a private Machine's store; the interval ends when
     /// the real reader's frame has reached captured pixels. Run through
     /// `scripts/desktop_performance.py write-visible`.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LF_DESKTOP_PERF_WRITE_OUTPUT"] != nil))
@@ -103,7 +103,7 @@ struct DesktopPerformanceTests {
         let model = WorkModel(query: query, repoPath: repo)
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
         let window = PerformanceWindow(contentRect: CGRect(x: 0, y: 0, width: 1400, height: 800),
                                        styleMask: [.titled], backing: .buffered, defer: false)
@@ -111,7 +111,7 @@ struct DesktopPerformanceTests {
         window.contentView = NSHostingView(rootView: view)
         window.orderFront(nil)
         defer { window.contentView = nil; window.close() }
-        // The first reading of a real Home asks Git about every checkout.
+        // The first reading of a real Machine asks Git about every checkout.
         try await wait(window, for: .seconds(300)) {
             model.roadmap.value != nil && model.sessions.value != nil
         }
@@ -147,7 +147,7 @@ struct DesktopPerformanceTests {
                 let label = String(format: "Probe %03d", attempt)
                 let task = "bench-\(run)-\(attempt)"
                 let session = "bench-session-\(run)-\(attempt)"
-                // The filter keeps the written row on screen whatever the Home holds.
+                // The filter keeps the written row on screen whatever the Machine holds.
                 try search.setInput("Probe")
                 try picker.select(value: WorkPresentation.compact)
                 await model.refresh()
@@ -417,7 +417,7 @@ struct DesktopPerformanceTests {
         }
         try #require(model.projection.waves.first?.tasks.count == taskCount)
         try #require(model.sessions.value?.count == taskCount / 2)
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace(checkout.path))
         let files = workspace.files(taskId: "perf-work-0", issue: "perf-work-0", cwd: checkout.path, query: query)
         files.autosave = false
@@ -734,7 +734,7 @@ struct DesktopPerformanceTests {
         try #require(record.taskIds.contains(fixture.taskId))
         let identity = TerminalIdentity.session(fixture.sessionId)
         let workspace = registry.workspace(for: try #require(record.workspace).identity)
-        let store = registry.workspace(for: WorkspaceIdentity(homeId: try #require(record.workspace).homeId, worktree: fixture.repo))
+        let store = registry.workspace(for: WorkspaceIdentity(machineId: try #require(record.workspace).machineId, worktree: fixture.repo))
             .sessionStore(repoPath: fixture.repo, query: query)
         let multiplexer = workspace.multiplexer
         multiplexer.load(sessionId: fixture.sessionId)
@@ -1042,11 +1042,11 @@ struct DesktopPerformanceTests {
             planning["completed"] = false
             task["task"] = planning
             var reference: [String: Any] = ["issue_url": NSNull(), "workspace": [
-                "slug": "benchmark", "branch": "benchmark", "home_id": fixtureHomeId,
+                "slug": "benchmark", "branch": "benchmark", "machine_id": fixtureMachineId,
                 "worktree": checkout, "local_exists": true,
             ]]
             if index == 1 {
-                reference["workspace"] = ["slug": "benchmark-empty", "branch": "benchmark-empty", "home_id": fixtureHomeId,
+                reference["workspace"] = ["slug": "benchmark-empty", "branch": "benchmark-empty", "machine_id": fixtureMachineId,
                                           "worktree": NSTemporaryDirectory(), "local_exists": true]
             }
             task["reference"] = reference
@@ -1067,7 +1067,7 @@ struct DesktopPerformanceTests {
         let sessions = try JSONSerialization.data(withJSONObject: stride(from: 0, to: taskCount, by: 2).map { index in
             ["id": "perf-session-\(index)", "run_id": "perf-run-\(index)", "interactive": true,
              "work": ["kind": "task", "id": "perf-work-\(index)"],
-             "workspace": ["home_id": fixtureHomeId, "worktree": checkout,
+             "workspace": ["machine_id": fixtureMachineId, "worktree": checkout,
                            "task_id": "perf-work-\(index)", "unavailable": NSNull()],
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
              "cwd": checkout, "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
@@ -1092,7 +1092,7 @@ struct DesktopPerformanceTests {
         let query = RegistryQuery(watchWork: { await reader.open() }) { args, _ in
             await planning.count(args)
             switch args.first {
-            case "home" where args.dropFirst().first == "id": return "{\"id\":\"\(fixtureHomeId)\"}"
+            case "machine" where args.dropFirst().first == "id": return "{\"id\":\"\(fixtureMachineId)\"}"
             case "roadmap": return await planning.read()
             case "flow" where args.dropFirst().first == "list" && args.contains("--json"): return catalogJSON
             case "wave" where args.dropFirst().first == "list": return "[]"
@@ -1311,7 +1311,7 @@ private func performanceResidentBytes() -> UInt64? {
     return result == KERN_SUCCESS ? info.resident_size : nil
 }
 
-/// The other process: `sqlite3` committing to the private Home's store. The
+/// The other process: `sqlite3` committing to the private Machine's store. The
 /// schema's own triggers move the revisions, as they do for any writer.
 private struct PerformanceStore {
     let database: String
@@ -1531,7 +1531,7 @@ actor SnapshotReads {
         defer { active -= 1 }
         do {
             let verb = args.prefix(2).joined(separator: " ")
-            if let fixture, verb == "session connect" || verb == "home id"
+            if let fixture, verb == "session connect" || verb == "machine id"
                 || args.contains(fixture.issue) || args.contains(fixture.taskId) {
                 return .success(try await fixture.read(args))
             }
@@ -1574,7 +1574,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     // Copied launch authority is never exercised. This transport permits only local
     // reads; no network, Session connection, watcher, worker or provider can start.
     let verb = args.prefix(2).joined(separator: " ")
-    guard ["roadmap", "activity"].contains(args.first ?? "") || ["wave list", "wave status", "session list", "session history", "home id", "task status", "task files", "task diff", "flow list"].contains(verb) else {
+    guard ["roadmap", "activity"].contains(args.first ?? "") || ["wave list", "wave status", "session list", "session history", "machine id", "task status", "task files", "task diff", "flow list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
     let process = Foundation.Process()

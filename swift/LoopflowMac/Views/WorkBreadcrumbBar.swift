@@ -152,9 +152,9 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                     .accessibilityIdentifier("breadcrumb-session")
             }
             if session.titleSource == .unavailable {
-                Text("name on its Home")
+                Text("name on its Machine")
                     .foregroundStyle(palette.textSecondary)
-                    .help("This Session's canonical name lives on the Home that runs it.")
+                    .help("This Session's canonical name lives on the Machine that runs it.")
             } else {
                 Button {
                     model.beginSessionRename(session)

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Launch the release app for real against a private copy of the Home and report its own timings.
+"""Launch the release app for real against a private copy of the Machine and report its own timings.
 
 uv run python scripts/benchmarks/desktop-performance/launch.py run --work /tmp/desktop-launch --output /tmp/desktop-launch/run
 uv run python scripts/benchmarks/desktop-performance/launch.py run --work /tmp/desktop-launch --output /tmp/run2 --built --saved 5 --uncached 1 --failed 1
 
-`run` copies the Home's database with SQLite's backup (a read of the live
+`run` copies the Machine's database with SQLite's backup (a read of the live
 file and its write-ahead log), builds the release binary into a private app
 bundle with its own bundle id, and opens it in the background once per sample.
 The bundle's `lf` forwards only the startup reads to the installed `lf` under
-the copied Home and refuses everything else, so nothing is launched, repaired
-or written in the live Home. `--home <other work>/home` copies another run's
-Home instead, so a baseline and a candidate read the same data. The numbers are
+the copied Machine and refuses everything else, so nothing is launched, repaired
+or written in the live Machine. `--home <other work>/home` copies another run's
+Machine instead, so a baseline and a candidate read the same data. The numbers are
 the app's launch journal; `timings.py --home <work>/home` reads the same files.
 Needs a logged-in desktop session. Windows appear behind your work and close
 again.
@@ -38,7 +38,7 @@ from timings import BUDGETS_MS, _stats
 REPO = Path(__file__).resolve().parents[3]
 SWIFT = REPO / "swift"
 BUNDLE_ID = "com.loopflow.mac.bench"
-READS = '"home id"|"wave list"|"roadmap "*|"session list"|"activity "*|"ps "*|"ps "'
+READS = '"machine id"|"wave list"|"roadmap "*|"session list"|"activity "*|"ps "*|"ps "'
 SHIM = f"""#!/bin/sh
 # Forward the app's startup reads to the real lf; refuse everything else.
 case "$1 $2" in
@@ -76,7 +76,7 @@ def _lf() -> str:
 
 
 def snapshot(home: Path, source: Path) -> None:
-    """Copy the Home's database; the copy appears only once it is complete."""
+    """Copy the Machine's database; the copy appears only once it is complete."""
     target = home / "loopflow.db"
     if target.exists():
         return
@@ -84,7 +84,7 @@ def snapshot(home: Path, source: Path) -> None:
     partial = home / "loopflow.db.partial"
     partial.unlink(missing_ok=True)
     try:
-        # mode=ro still reads the write-ahead log, so a live Home copies whole.
+        # mode=ro still reads the write-ahead log, so a live Machine copies whole.
         with (
             closing(
                 sqlite3.connect(f"{(source / 'loopflow.db').resolve().as_uri()}?mode=ro", uri=True)
@@ -298,7 +298,7 @@ def render(report: dict) -> str:
         "# Desktop launch, rendered",
         "",
         f"Release build of `{report['source']}`, `{report['lf']}`, {report['host']}. "
-        f"Home copy: {report['database_mb']} MB database.",
+        f"Machine copy: {report['database_mb']} MB database.",
         f"Budgets: first frame {report['budgets_ms']['first_frame']} ms, usable {report['budgets_ms']['usable']} ms. "
         "Milliseconds from kernel process start; p95 needs 20 samples.",
     ]
@@ -383,14 +383,14 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     runner = sub.add_parser("run")
     runner.add_argument(
-        "--work", type=Path, required=True, help="holds the Home copy and the app bundle"
+        "--work", type=Path, required=True, help="holds the Machine copy and the app bundle"
     )
     runner.add_argument("--output", type=Path, required=True)
     runner.add_argument(
         "--home",
         type=Path,
         default=Path(os.environ.get("LF_HOME") or Path.home() / ".lf"),
-        help="Home to copy; another run's <work>/home compares two builds over one copy",
+        help="Machine to copy; another run's <work>/home compares two builds over one copy",
     )
     runner.add_argument("--repo", type=Path, default=Path.home() / "src/loopflow")
     runner.add_argument("--uncached", type=int, default=3)

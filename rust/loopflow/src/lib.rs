@@ -6,9 +6,9 @@ pub mod durable;
 pub mod engine;
 pub mod harness;
 pub mod id;
+pub mod installation;
 pub mod journal;
 pub mod lf;
-pub mod machine_install;
 pub mod process;
 pub mod task_work;
 // Build-time parsing lives here so its golden tests compile against the exact parser.

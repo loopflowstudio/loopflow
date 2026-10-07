@@ -97,7 +97,7 @@ pub(crate) fn session_engine_unresolved(
         }))
 }
 
-async fn repository_tasks(
+pub(crate) async fn repository_tasks(
     store: &SharedStore,
     repo: &crate::repository::RepoId,
 ) -> OpsResult<Vec<Task>> {
@@ -142,7 +142,7 @@ pub fn status(repo: &Path) -> OpsResult<AutomationStatus> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let store = super::pr_landing::landing_store().await?;
-        let local = store.local_home().await.map_err(error)?;
+        let local = store.local_machine().await.map_err(error)?;
         let key = super::cron::repository_cron_key(&root, &local.id);
         let jobs = super::cron::list_crons(
             &super::cron::default_launch_agents_dir()?,

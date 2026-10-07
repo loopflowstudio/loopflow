@@ -3,14 +3,14 @@ import Observation
 
 public struct WorkspaceIdentity: Decodable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey {
-        case homeId = "home_id"
+        case machineId = "machine_id"
         case worktree
     }
-    public let homeId: String
+    public let machineId: String
     public let worktree: String
 
-    public init(homeId: String, worktree: String) {
-        self.homeId = homeId
+    public init(machineId: String, worktree: String) {
+        self.machineId = machineId
         self.worktree = worktree
     }
 }

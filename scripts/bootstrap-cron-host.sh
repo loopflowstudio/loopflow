@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Bootstrap repo-owned cron jobs on the Wave's placed Home.
+# Bootstrap repo-owned cron jobs on the Wave's placed Machine.
 #
-# Run this from the placed Home after promoting a release `lf`. The script
+# Run this from the placed Machine after promoting a release `lf`. The script
 # reconstructs the unattended environment from non-secret host-local paths;
-# the Home-local publisher command injects authority only into its child.
+# the Machine-local publisher command injects authority only into its child.
 #
 # Usage: scripts/bootstrap-cron-host.sh [wave]
 #   scripts/bootstrap-cron-host.sh infrastructure
@@ -21,14 +21,14 @@ cd "$repo_root"
 
 step() { printf '\n== %s ==\n' "$1"; }
 
-step "placed Home"
-local_home="$(lf home id)"
-placed_home="$(lf wave status "$wave" --json | jq -er '.wave.home.id')"
-if [ "$local_home" != "$placed_home" ]; then
-  printf 'Wave %s is not placed on this Home\n' "$wave" >&2
+step "placed Machine"
+local_machine="$(lf machine id)"
+placed_machine="$(lf wave status "$wave" --json | jq -er '.wave.machine.id')"
+if [ "$local_machine" != "$placed_machine" ]; then
+  printf 'Wave %s is not placed on this Machine\n' "$wave" >&2
   exit 1
 fi
-printf 'Wave %s is placed on this Home\n' "$wave"
+printf 'Wave %s is placed on this Machine\n' "$wave"
 
 lf_home="${LF_HOME:-$HOME/.lf}"
 minimal_env=(
@@ -64,7 +64,7 @@ step "host-local provider authority"
 auth_status="$("${minimal_env[@]}" lf account --json)"
 printf '%s\n' "$auth_status"
 if ! jq -e 'any(.accounts[]; .scope == "managed" and .verification == "accepted")' >/dev/null <<<"$auth_status"; then
-  printf 'no managed provider account verified live from the Home store\n' >&2
+  printf 'no managed provider account verified live from the Machine store\n' >&2
   exit 1
 fi
 
@@ -79,7 +79,7 @@ step "prove GOAL.md matches loaded launchd jobs"
 cron_json="$("${minimal_env[@]}" lf cron list --wave "$wave" --json)"
 "${minimal_env[@]}" \
   "CRON_LIST_JSON=$cron_json" \
-  "EXPECTED_HOME_ID=$local_home" \
+  "EXPECTED_MACHINE_ID=$local_machine" \
   uv run python - "$wave" <<'PY'
 import json
 import os
@@ -104,8 +104,8 @@ for entry in installed:
         raise SystemExit(f"wrong Wave in installed cron: {entry['flow']}")
     if not entry["loaded"]:
         raise SystemExit(f"cron is not loaded: {entry['flow']}")
-    if entry["home_id"] != os.environ["EXPECTED_HOME_ID"]:
-        raise SystemExit(f"wrong Home in installed cron: {entry['flow']}")
+    if entry["machine_id"] != os.environ["EXPECTED_MACHINE_ID"]:
+        raise SystemExit(f"wrong Machine in installed cron: {entry['flow']}")
 print(f"{len(installed)}/{len(expected)} jobs loaded and exact")
 PY
 
@@ -129,4 +129,4 @@ if [ "$result" -ne 0 ]; then
   printf '\nbootstrap installed the jobs, but a configured-path run is red; inspect the receipt and log above\n' >&2
   exit "$result"
 fi
-printf '\nbootstrap complete: this Home owns Wave %s cron receipts\n' "$wave"
+printf '\nbootstrap complete: this Machine owns Wave %s cron receipts\n' "$wave"

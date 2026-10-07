@@ -1001,16 +1001,16 @@ async fn disconnect_account(raw_provider: &str, raw_email: &str) -> Result<()> {
         .map(|home| acquire_managed_login_lock(home, provider, &account_id))
         .transpose()?;
     if let Some(home) = account.home.as_deref() {
-        let expected_home = account_home_path(provider, &account_id)?;
-        if home != expected_home {
+        let expected_machine = account_home_path(provider, &account_id)?;
+        if home != expected_machine {
             return Err(anyhow!(
                 "refusing to remove unexpected {} account home {}",
                 provider.display_name(),
                 home.display()
             ));
         }
-        disconnect_provider_account_auth(provider, expected_home.clone()).await?;
-        remove_account_home(&expected_home)?;
+        disconnect_provider_account_auth(provider, expected_machine.clone()).await?;
+        remove_account_home(&expected_machine)?;
     }
     account.credential_state = CredentialState::Missing;
     account.utilization_percent = None;

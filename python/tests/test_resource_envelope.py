@@ -123,7 +123,7 @@ def test_snapshot_measures_home_session_captures_and_names_retention(
     assert source.bytes > 0
     assert source.disposable is False
     assert snapshot.ok
-    warning = next(warning for warning in snapshot.warnings if "Loopflow Home" in warning)
+    warning = next(warning for warning in snapshot.warnings if "Loopflow Machine" in warning)
     assert str(home / "runs") in warning
     assert "never auto-deleted" in warning
 
@@ -149,7 +149,7 @@ def test_recovery_removes_only_inactive_allowlisted_builds(tmp_path: Path) -> No
         resources.ResourceSource(
             id="session-captures:home",
             kind="session-captures",
-            owner="Loopflow Home",
+            owner="Loopflow Machine",
             root=durable,
             paths=(durable / "runs",),
             bytes=resources._allocated_bytes(durable / "runs"),

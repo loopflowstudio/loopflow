@@ -962,7 +962,7 @@ mod tests {
         sqlite
             .place_work(
                 &crate::durable::WorkRef::Wave(wave.clone()),
-                &sqlite.local_home().unwrap().id,
+                &sqlite.local_machine().unwrap().id,
             )
             .unwrap();
         let store = Store { sqlite };

@@ -1173,7 +1173,9 @@ fn require_current_actor_in(conn: &Connection, id: &str) -> StoreResult<()> {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?
-            .ok_or_else(|| invalid("capture does not belong to a recorded Session in this Home"))?;
+            .ok_or_else(|| {
+                invalid("capture does not belong to a recorded Session in this Machine")
+            })?;
         if crate::journal::agent_caller().is_some_and(|caller| caller.session_id != owner) {
             return Err(invalid("capture belongs to another Session"));
         }

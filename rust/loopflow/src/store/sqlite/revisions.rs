@@ -62,7 +62,7 @@ mod tests {
         "project_binding_imports",
         "auth_browser_bindings",
         "blob_tokens",
-        "homes",
+        "machines",
         "provider_account_limits",
         "provider_account_switches",
         "provider_accounts",

@@ -169,7 +169,7 @@ For most settings, repo overrides global. For additive settings (`docs`, `contex
 # ~/.lf/config.yaml (global)
 agent: claude:opus
 session:
-  terminal: Ghostty       # presents review FlowStep sessions on this Home
+  terminal: Ghostty       # presents review FlowStep sessions on this Machine
 
 # .lf/config.yaml (repo)
 agent: codex        # overrides global

@@ -41,12 +41,12 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | A Task's Workflow: its graph, position and moves | `task_workflows`, one row per Task updated in place, and append-only `task_workflow_moves`; written by `lf task run` and `lf task move` |
 | A Task's state: not ready, ready, active, done | Read from its `task_workflows` position; never stored. `tasks.abandoned_at` is the one mark beside it |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
-| Credentials and provider-native conversation files | The selected provider account's native Home |
+| Credentials and provider-native conversation files | The selected provider account's native Machine |
 | Current local liveness | OS process evidence matched to exact recorded PID/start identity |
 | Live exclusion | Kernel-held locks and fenced database mutations |
-| Selected executable and installation progress | Machine-install receipts |
+| Selected executable and installation progress | Installation receipts |
 
-A Home owns its local store and payloads. Linear and GitHub remain shared truth;
+A Machine owns its local store and payloads. Linear and GitHub remain shared truth;
 a local snapshot cannot authorize a provider mutation when a fresh observation
 is required. An identifier joins evidence without transferring authority.
 The [checked inventory](../architecture-reference.md#complete-ownership-map)
@@ -106,7 +106,7 @@ an incompatible store. Observation failures remain explicit; they never justify
 an agent launch without its required records. Optional stream failures preserve
 missingness without inventing a terminal result.
 
-Saved Session handoffs retain the executable, Home and database together. A later
+Saved Session handoffs retain the executable, Machine and database together. A later
 installation selection must not redirect an already-prepared command. Failed
 launch diagnostics survive retry. Store copies preserve data, not live process
 authority, and do not synchronize private writes back to the installation.
@@ -145,13 +145,13 @@ provider history when its selected turn needs reconciliation.
 For this machine, resumable filesystem conversations are converted offline after
 old writers stop and before promotion. The binary has no old-layout discovery or
 import command. Rehearse on a database backup and copied captures; never point a
-branch binary at the installed Home.
+branch binary at the installed Machine.
 
 ## Planning and external transitions
 
 A Chapter is the shared name of each Wave's In Progress Linear Project. Project
 status owns current, planned and historical plans; there is no Chapter table,
-packet or Home-local switch. The local Project row is a synchronized projection.
+packet or Machine-local switch. The local Project row is a synchronized projection.
 Rotation converges through fresh provider facts and stable identities, preserving
 started Tasks and their worktree, PR and execution. Partial rotation remains
 retryable; unrelated competing current Projects remain unresolved.
@@ -164,7 +164,7 @@ recovering a lost response. Record uncertainty at each seam.
 
 Released migration bytes remain immutable. Candidate promotion validates an
 isolated copy and preserves current operating state before activation.
-See [Homes and processes](homes.md#promote-a-new-artifact) for installation authority.
+See [Machines and processes](machines.md#promote-a-new-artifact) for installation authority.
 
 [Execution](execution.md) describes admission and recovery;
 [Planning](planning.md) describes captured progression.

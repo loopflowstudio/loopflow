@@ -135,8 +135,8 @@ public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
 }
 
 public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
-    public let homeId: String?
-    public var identity: WorkspaceIdentity? { homeId.map { WorkspaceIdentity(homeId: $0, worktree: worktree) } }
+    public let machineId: String?
+    public var identity: WorkspaceIdentity? { machineId.map { WorkspaceIdentity(machineId: $0, worktree: worktree) } }
     public let slug: String
     public let branch: String?
     public let worktree: String
@@ -144,7 +144,7 @@ public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case slug, branch, worktree
-        case homeId = "home_id"
+        case machineId = "machine_id"
         case localExists = "local_exists"
     }
 }
@@ -221,7 +221,6 @@ public enum TaskAction: String, Decodable, Sendable, Hashable {
     case resume
     case openPr = "open_pr"
     case startNextPr = "start_next_pr"
-    case complete
     case noAction = "no_action"
 }
 

@@ -52,6 +52,9 @@ plan in the conversation; do not require a document template or a prior skill.
    Read or add the plan's **Delete — do not maintain** list: concrete files/symbols
    and their exclusive tests/fixtures slated for removal, with required behavior,
    data, and tests to preserve. Keep it current across passes.
+   Remove what this change replaces in the same diff; leave no parallel path.
+   Add newly discovered predecessors to the delete list as you find them,
+   preserving required behavior and data on the surviving path.
 
 2. **Implement**
    - Make the deepest planned deletions first: remove obsolete concepts,
@@ -128,7 +131,7 @@ If `<lf:wave>` is present, check `wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
 ## When the design is wrong
 
 Keep named, dated decisions, draft/accepted status and remaining work in the
-plan. Record one check-result line. Omit session instructions and ambient Home
+plan. Record one check-result line. Omit session instructions and ambient Machine
 facts; the plan must not direct its next reader. Keep transcripts separate and
 historical skill names unprefixed.
 

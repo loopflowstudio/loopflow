@@ -53,7 +53,7 @@ subprocess edge to one concept.
 | Wave facts and authored context | [`work/wave/`](../../rust/loopflow/src/work/wave/) | identity, config, memory, repository scope |
 | Wave facts | [`work/wave/`](../../rust/loopflow/src/work/wave/) | goals, metrics, memory, relocation |
 | store abstraction | [`store/`](../../rust/loopflow/src/store/) | domain rows and transactions |
-| machine install | [`machine_install.rs`](../../rust/loopflow/src/machine_install.rs) | artifact set and switch receipt |
+| installation | [`installation.rs`](../../rust/loopflow/src/installation.rs) | artifact set and switch receipt |
 | Mac read surfaces | [`swift/Loopflow/`](../../swift/Loopflow/) | required-field DTOs from `lf --json` |
 
 ## Public process surfaces
@@ -77,7 +77,7 @@ Flows may invoke the named internal operations that own their exact boundary.
 | `lf wt`, `commit`, `sync`, `pr`, `ci` | worktree and delivery operations |
 | `lf mon show`, `usage`, `activity` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
-| `lf home`, `lf ssh` | Home identity, placement, command routing |
+| `lf machine`, `lf ssh` | Machine identity, placement, command routing |
 | `lf account` | provider credential and account authority |
 | `lf install`, `release` | artifact selection and release workflow |
 
@@ -111,8 +111,8 @@ not resolve either from the planning store.
 ## External transport
 
 The CLI talks to planning and model providers. The independent Discord bridge
-uses outbound REST requests. Remote execution reaches the target Home through
-`lf ssh`; see [Homes and processes](homes.md).
+uses outbound REST requests. Remote execution reaches the target Machine through
+`lf ssh`; see [Machines and processes](machines.md).
 
 ## Add a provider
 
@@ -156,7 +156,7 @@ authority.
 
 Process control begins at spawn, not at a later lookup. Create a fresh process
 scope and publish birth-validated ownership before exposing stop or steer. The
-receipt must include PID plus kernel birth identity, Home/boot identity, and
+receipt must include PID plus kernel birth identity, Machine/boot identity, and
 the exact group, session, or native scope. Revalidate every later signal.
 
 Never infer ownership from a conversation ID, Work, PID alone, tmux name, telemetry, or
@@ -169,7 +169,7 @@ uv run python scripts/check_architecture.py
 ```
 
 The checker materializes the live schema and discovers public CLI families,
-process entrypoints, Home and Wave HTTP routes, provider kinds, subprocess
+process entrypoints, Machine and Wave HTTP routes, provider kinds, subprocess
 edges, read projections, compatibility seams, and retired vocabulary. Every
 discovered item must occur once in the checked reference.
 

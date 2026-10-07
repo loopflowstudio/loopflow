@@ -1,5 +1,5 @@
 //! Original due times survive late wakes, retries, and changes to installed jobs.
-//! One attempt write freezes coverage across same-Home segments; readers derive owners.
+//! One attempt write freezes coverage across same-Machine segments; readers derive owners.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{calendar, CronOutcome, CronReceipt, CronSource, CronSpec};
-use crate::durable::{CronReceiptId, HomeId};
+use crate::durable::{CronReceiptId, MachineId};
 use crate::ops::{OpsError, OpsResult};
 
 #[derive(Debug)]
@@ -67,7 +67,7 @@ struct Trigger {
 fn trigger_path(spec: &CronSpec) -> OpsResult<PathBuf> {
     let key = fingerprint(&(
         &spec.working_directory.canonicalize()?,
-        (&spec.host.home_id, &spec.wave, &spec.flow),
+        (&spec.host.machine_id, &spec.wave, &spec.flow),
     ))?;
     Ok(spec
         .host
@@ -151,7 +151,8 @@ pub struct ObligationSegment {
     pub schema_version: u32,
     pub id: String,
     pub repo: PathBuf,
-    pub home_id: HomeId,
+    #[serde(alias = "home_id")]
+    pub machine_id: MachineId,
     pub wave: String,
     pub flow: String,
     pub schedule: String,
@@ -536,7 +537,7 @@ pub(super) fn read(home: &Path) -> OpsResult<Vec<ObligationSegment>> {
     Ok(result)
 }
 
-// A successor can continue only its uninterrupted same-Home predecessor chain.
+// A successor can continue only its uninterrupted same-Machine predecessor chain.
 fn predecessors(records: &[ObligationSegment], start: usize) -> OpsResult<Vec<usize>> {
     let mut chain = vec![start];
     let mut current = start;
@@ -548,7 +549,7 @@ fn predecessors(records: &[ObligationSegment], start: usize) -> OpsResult<Vec<us
         if chain.contains(&prior) {
             return Err(failure("cyclic obligation replacement"));
         }
-        if records[prior].home_id != records[start].home_id {
+        if records[prior].machine_id != records[start].machine_id {
             break;
         }
         chain.push(prior);
@@ -699,7 +700,7 @@ pub(crate) fn observe(
     records.retain(|r| r.repo == repo && r.wave == spec.wave && r.flow == spec.flow);
     if let Some(current) = records.iter().find(|r| {
         r.closed_at.is_none()
-            && r.home_id == spec.host.home_id
+            && r.machine_id == spec.host.machine_id
             && r.schedule == spec.schedule.expression()
             && r.timezone == timezone
             && r.installation_activated_at == activated_at
@@ -721,7 +722,7 @@ pub(crate) fn observe(
         .map(|r| r.id.clone());
     let id = fingerprint(&(
         &repo,
-        &spec.host.home_id,
+        &spec.host.machine_id,
         &spec.wave,
         &spec.flow,
         spec.schedule.expression(),
@@ -733,7 +734,7 @@ pub(crate) fn observe(
         schema_version: 1,
         id: id.clone(),
         repo,
-        home_id: spec.host.home_id.clone(),
+        machine_id: spec.host.machine_id.clone(),
         wave: spec.wave.clone(),
         flow: spec.flow.clone(),
         schedule: spec.schedule.expression().to_string(),
@@ -804,8 +805,8 @@ pub(crate) fn telemetry_due(
         obligation_id: None,
         due_at: None,
         uncertainty: Some(format!(
-            "no retained telemetry obligation on Home {} at original release due {}",
-            context.home_id, opportunity.due_at
+            "no retained telemetry obligation on Machine {} at original release due {}",
+            context.machine_id, opportunity.due_at
         )),
         receipts: Vec::new(),
     };
@@ -813,7 +814,7 @@ pub(crate) fn telemetry_due(
         s.repo == context.repo
             && s.wave == context.wave
             && s.flow == "telemetry-daily"
-            && s.home_id == context.home_id
+            && s.machine_id == context.machine_id
             && s.activated_at <= opportunity.due_at
             && s.closed_at.is_none_or(|end| opportunity.due_at < end)
     }) else {
@@ -847,7 +848,7 @@ pub(crate) fn telemetry_due(
         .iter()
         .filter(|r| {
             (r.repo == segment.repo || r.repo.canonicalize().ok().as_ref() == Some(&segment.repo))
-                && r.home_id == segment.home_id
+                && r.machine_id == segment.machine_id
                 && r.wave == segment.wave
                 && r.flow == segment.flow
                 && r.schedule == segment.schedule
@@ -874,7 +875,7 @@ pub(crate) fn begin(
         .ok_or_else(|| failure(format!("missing release obligation {obligation}")))?;
     let record = &records[execution];
     if record.repo != receipt.repo.canonicalize()?
-        || record.home_id != receipt.home_id
+        || record.machine_id != receipt.machine_id
         || record.wave != receipt.wave
         || record.flow != receipt.flow
         || record.schedule != receipt.schedule
@@ -1222,8 +1223,8 @@ fn retry_continuation(
 ) -> OpsResult<String> {
     if let Some(closed) = record.closed_at {
         return Ok(format!(
-            "obligation {} closed at {closed}; no future firing on original Home {}; record repair there: lf cron disposition {opportunity} --wave {} --owner <task-work-id> --reason <repair-plan>",
-            record.id, record.home_id, record.wave
+            "obligation {} closed at {closed}; no future firing on original Machine {}; record repair there: lf cron disposition {opportunity} --wave {} --owner <task-work-id> --reason <repair-plan>",
+            record.id, record.machine_id, record.wave
         ));
     }
     let zone: Tz = record
@@ -1235,8 +1236,8 @@ fn retry_continuation(
         .and_then(|due| calendar::after(&zone, due, hour, minute))
         .ok_or_else(|| failure("cannot compute next configured release firing"))?;
     Ok(format!(
-        "next configured release due {next}; obligation {}; Home {}; observed at {now}",
-        record.id, record.home_id
+        "next configured release due {next}; obligation {}; Machine {}; observed at {now}",
+        record.id, record.machine_id
     ))
 }
 
@@ -1422,11 +1423,33 @@ mod tests {
         begin, close, finish_process, history, observe, read, select, settle, ReleaseSelection,
         ScheduledReleaseOutcome,
     };
-    use crate::durable::{CronReceiptId, HomeId};
+    use crate::durable::{CronReceiptId, MachineId};
     use crate::ops::{
         parse_schedule, CronHost, CronOutcome, CronReceipt, CronSource, CronSpec, CronTargetKind,
     };
     use std::path::Path;
+
+    #[test]
+    fn released_obligation_keeps_its_activation_and_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let spec = spec(temp.path());
+        let id = observe(&spec, 100, 100, "UTC").unwrap();
+        let original = read(&spec.host.lf_home).unwrap();
+        let mut released = serde_json::to_value(&original[0]).unwrap();
+        let object = released.as_object_mut().unwrap();
+        let machine = object.remove("machine_id").unwrap();
+        object.insert("home_id".into(), machine);
+        std::fs::write(
+            spec.host
+                .lf_home
+                .join("cron/obligations")
+                .join(format!("{id}.json")),
+            serde_json::to_vec(&released).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(observe(&spec, 100, 200, "UTC").unwrap(), id);
+        assert_eq!(read(&spec.host.lf_home).unwrap(), original);
+    }
 
     fn spec(root: &Path) -> CronSpec {
         CronSpec {
@@ -1437,7 +1460,7 @@ mod tests {
             working_directory: root.to_path_buf(),
             lf_path: root.join("lf"),
             host: CronHost {
-                home_id: HomeId::new(),
+                machine_id: MachineId::new(),
                 lf_home: root.join("home"),
                 path_env: "/usr/bin".into(),
             },
@@ -1450,7 +1473,7 @@ mod tests {
             id: CronReceiptId::new(),
             runner_pid: 1,
             runner_started_at: None,
-            home_id: spec.host.home_id.clone(),
+            machine_id: spec.host.machine_id.clone(),
             wave: spec.wave.clone(),
             flow: spec.flow.clone(),
             target_kind: spec.target_kind,
@@ -1697,11 +1720,11 @@ mod tests {
             },
         )
         .unwrap();
-        let original_home = job.host.home_id.clone();
-        job.host.home_id = HomeId::new();
+        let original_home = job.host.machine_id.clone();
+        job.host.machine_id = MachineId::new();
         observe(&job, 40000, 40000, "UTC").unwrap();
-        // Returning to the first Home still must not leap over the intervening authority.
-        job.host.home_id = original_home;
+        // Returning to the first Machine still must not leap over the intervening authority.
+        job.host.machine_id = original_home;
         let successor = observe(&job, 50000, 50000, "UTC").unwrap();
         let retry = receipt(&job, 122400);
         let owner = begin(&home, &successor, &retry).unwrap().unwrap();
@@ -1740,7 +1763,7 @@ mod tests {
                 continuation.contains(&format!("next configured release due {next}")),
                 "{continuation}"
             );
-            assert!(continuation.contains(job.host.home_id.as_str()));
+            assert!(continuation.contains(job.host.machine_id.as_str()));
         }
         let blocked = receipt(&job, 122400);
         let physical = super::record_overlap(home, &id, &blocked).unwrap();
@@ -1763,7 +1786,7 @@ mod tests {
         let continuation = super::overlap_continuation(home, wake.id.as_str(), 300000).unwrap();
         assert!(continuation.contains("closed at 122401"));
         assert!(continuation.contains(&format!("lf cron disposition {owner}")));
-        assert!(continuation.contains(job.host.home_id.as_str()));
+        assert!(continuation.contains(job.host.machine_id.as_str()));
         assert!(!continuation.contains("next configured release due"));
         assert_eq!(read(home).unwrap()[0].opportunities[0], original[0]);
     }
@@ -1804,7 +1827,7 @@ mod tests {
             let temp = tempfile::tempdir().unwrap();
             let mut job = spec(temp.path());
             let home = job.host.lf_home.clone();
-            let original_home = job.host.home_id.clone();
+            let original_home = job.host.machine_id.clone();
             let id = observe(&job, 0, 0, "UTC").unwrap();
             let wake = receipt(&job, 86400 + 36000);
             let owner = begin(&home, &id, &wake).unwrap().unwrap();
@@ -1829,7 +1852,7 @@ mod tests {
                 }
                 "home" => {
                     close(&job, closed).unwrap();
-                    job.host.home_id = HomeId::new();
+                    job.host.machine_id = MachineId::new();
                     job.host.lf_home = temp.path().join("other-home");
                     observe(&job, closed, closed, "UTC").unwrap();
                 }
@@ -1839,7 +1862,7 @@ mod tests {
             let now = closed + 2 * 86400;
             let report = release_history(&home, temp.path(), &job.wave, 1, now).unwrap();
             let retained = report.obligations.iter().find(|r| r.id == id).unwrap();
-            assert_eq!(retained.home_id, original_home);
+            assert_eq!(retained.machine_id, original_home);
             assert_eq!(&retained.opportunities[..2], &original.opportunities);
             let missed = retained.opportunities[2].id.clone();
             assert!(retained.opportunities[2].attempts.is_empty());
@@ -1857,7 +1880,7 @@ mod tests {
                     &job.wave,
                     subject,
                     TaskId::new(),
-                    "reconcile retained candidate on original Home",
+                    "reconcile retained candidate on original Machine",
                     now,
                 )
                 .unwrap();
@@ -1934,8 +1957,8 @@ mod tests {
         let recovered = receipt(&telemetry, 86400 + 28801);
         let third = observe(&telemetry, 86400, 2 * 86400, "America/New_York").unwrap();
         let eastern = receipt(&telemetry, 2 * 86400 + 46801);
-        // A receipt on the new Home cannot stand in for the old Home's check.
-        telemetry.host.home_id = HomeId::new();
+        // A receipt on the new Machine cannot stand in for the old Machine's check.
+        telemetry.host.machine_id = MachineId::new();
         let fourth = observe(&telemetry, 3 * 86400, 3 * 86400, "UTC").unwrap();
         let mut wrong_home = receipt(&telemetry, failed.started_at);
         wrong_home.schedule = failed.schedule.clone();

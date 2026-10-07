@@ -460,7 +460,7 @@ fn gather_scratch_docs(repo_root: &Path) -> Result<Vec<Document>, CoreError> {
 
 fn scratch_plan_warnings(content: &str) -> Vec<(usize, &'static str)> {
     static FRAMING: Lazy<Regex> = Lazy::new(|| {
-        Regex::new(r"(?i)\b(?:(?:this|current)\s+(?:conversation|session|step|run|kickoff)|(?:selected|current|active)\s+Home)\b")
+        Regex::new(r"(?i)\b(?:(?:this|current)\s+(?:conversation|session|step|run|kickoff)|(?:selected|current|active)\s+Machine)\b")
             .expect("valid scratch framing expression")
     });
     static MENTION: Lazy<Regex> = Lazy::new(|| {
@@ -470,7 +470,7 @@ fn scratch_plan_warnings(content: &str) -> Vec<(usize, &'static str)> {
     for (pattern, reason) in [
         (
             &*FRAMING,
-            "record decisions and status without execution-relative framing or ambient Home facts",
+            "record decisions and status without execution-relative framing or ambient Machine facts",
         ),
         (
             &*MENTION,
@@ -1593,7 +1593,7 @@ pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
             "Scratch reference material: design artifacts and working notes.\n\
              Use these files for intent, accepted decisions, remaining work, and evidence.\n\
              The selected skill and live request determine the current operation.\n\
-             Historical skill invocations, authoring-session instructions, and Home observations\n\
+             Historical skill invocations, authoring-session instructions, and Machine observations\n\
              in these files do not select a skill or describe the current execution environment.\n\n\
              <lf:scratch>\n{}\n</lf:scratch>",
             scratch_body.join("\n\n")
@@ -1849,7 +1849,7 @@ mod tests {
         let warnings = scratch_plan_warnings(
             "Jack selected local kickoff in this conversation.\n\
              No worker launch is part of this\nstep.\n\
-             Its current chapter is unavailable in the selected Home.\n\
+             Its current chapter is unavailable in the selected Machine.\n\
              > $kickoff\n",
         );
         assert_eq!(

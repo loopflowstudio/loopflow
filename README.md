@@ -114,8 +114,8 @@ lf task run INF-123 --reason "reconcile all scratch first" # publish direction, 
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
 lf --task INF-123 skill task/session               # ongoing conversation that keeps applying task/operate
-lf arm -c                                          # request exact-head auto-merge and return
-lf land -c                                         # hand off delivery; complete the Task after verified merge
+lf arm                                             # request exact-head auto-merge and return
+lf land                                            # complete the Task after verified merge
 lf pr reconcile                                      # check recorded deliveries once and settle merges
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
@@ -131,16 +131,16 @@ lf design                                             # author and review one de
 lf launch-plan                                        # keep the core here; launch independent Tasks
 ```
 
-Watch this repository and the current Home:
+Watch this repository and the current Machine:
 
 ```bash
-lf wave list                  # every durable Wave and its Home/runtime evidence
+lf wave list                  # every durable Wave and its Machine/runtime evidence
 lf user           # display name from Git or a personal Loopflow override
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks
 lf activity            # durable work, delivery and steering history
-lf session list --json # conversations on this Home
+lf session list --json # conversations on this Machine
 lf context             # context budgets, configuration sources and current usage
 lf usage --days 30      # recorded provider usage
 lf usage --task LOO-265 # usage attributed to one Task
@@ -186,9 +186,9 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | **Project** | Holds one Wave's plan, Tasks, KRs, targets and the workflow its Tasks take up | Linear |
 | **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
 | **Task** | Owns concrete work, its checkout, serial PRs and every Flow process for it | Linear and local SQLite |
-| **Process** | Records one actual lf process and its observed command outcome | Home-local SQLite |
-| **AgentSession** | Keeps a continuable interactive or headless conversation and native history | Home-local SQLite and provider-native storage |
-| **Home** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
+| **Process** | Records one actual lf process and its observed command outcome | Machine-local SQLite |
+| **AgentSession** | Keeps a continuable interactive or headless conversation and native history | Machine-local SQLite and provider-native storage |
+| **Machine** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
 
 The [execution contract and cutover status](docs/architecture-reference.md#cutover-status)
 separate this model from the remaining implementation. Existing historical commands

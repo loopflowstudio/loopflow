@@ -1,6 +1,6 @@
 //! Opt-in process and SQLite volume receipts. No SQL, arguments or row values
 //! leave the process. LF_PERF_OUTPUT names an existing output directory; it
-//! selects observation only and provides no Home or execution authority.
+//! selects observation only and provides no Machine or execution authority.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;

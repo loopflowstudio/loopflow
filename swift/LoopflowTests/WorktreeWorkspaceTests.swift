@@ -4,9 +4,9 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-let fixtureHomeId = "home_00000000000000000000000000000001"
+let fixtureMachineId = "home_00000000000000000000000000000001"
 func fixtureWorkspace(_ path: String) -> WorkspaceIdentity {
-    WorkspaceIdentity(homeId: fixtureHomeId, worktree: path)
+    WorkspaceIdentity(machineId: fixtureMachineId, worktree: path)
 }
 
 @Suite("Worktree workspaces")
@@ -29,11 +29,11 @@ struct WorktreeWorkspaceTests {
         #expect(!panes.collapsedPaneIds.contains(log))
     }
 
-    @Test("Equal paths on different Homes retain separate layouts and documents")
-    func homesAreDistinct() {
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+    @Test("Equal paths on different Machines retain separate layouts and documents")
+    func machinesAreDistinct() {
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let local = fixtureWorkspace("/repo")
-        let remote = WorkspaceIdentity(homeId: "remote", worktree: "/repo")
+        let remote = WorkspaceIdentity(machineId: "remote", worktree: "/repo")
         let first = registry.workspace(for: local)
         let other = registry.workspace(for: remote)
         first.multiplexer.newShell(command: ["server"])
@@ -51,19 +51,19 @@ struct WorktreeWorkspaceTests {
         #expect(document.editor.string == "draft")
     }
 
-    @Test("A failed Home refresh retains the same workspace identity")
-    func failedHomeRefresh() async {
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+    @Test("A failed Machine refresh retains the same workspace identity")
+    func failedMachineRefresh() async {
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace("/repo"))
-        await registry.refreshHome(query: RegistryQuery { _, _ in throw RegistryQueryError("offline") })
-        #expect(registry.localHomeId == fixtureHomeId)
-        #expect(registry.homeError == "offline")
+        await registry.refreshMachine(query: RegistryQuery { _, _ in throw RegistryQueryError("offline") })
+        #expect(registry.localMachineId == fixtureMachineId)
+        #expect(registry.machineError == "offline")
         #expect(registry.workspace(for: fixtureWorkspace("/repo")) === workspace)
     }
 
     @Test("Reassociation removes only old placement and reuses the window-owned terminal")
     func reassociationKeepsSurface() throws {
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let source = registry.workspace(for: fixtureWorkspace("/first"))
         let target = registry.workspace(for: fixtureWorkspace("/second"))
         let otherRepo = registry.workspace(for: fixtureWorkspace("/other-repo"))
@@ -72,7 +72,7 @@ struct WorktreeWorkspaceTests {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/session.json"))
         var record = try JSONDecoder().decode(SessionRecord.self, from: data)
-        record.workspace = SessionWorkspace(homeId: fixtureHomeId, worktree: "/second", taskId: "task", unavailable: nil)
+        record.workspace = SessionWorkspace(machineId: fixtureMachineId, worktree: "/second", taskId: "task", unavailable: nil)
         source.multiplexer.reveal(sessionId: record.id)
         source.multiplexer.newShell(command: ["server"])
         let shell = source.multiplexer.focusedPaneId
@@ -109,7 +109,7 @@ struct WorktreeWorkspaceTests {
 
     @Test("Switching worktrees restores companion terminals, layout and focus")
     func restoresWholeWorkspace() {
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let outer = registry.layout(for: fixtureWorkspace("/repo"))
         outer.select(fixtureWorkspace("/repo.design"))
         let design = registry.workspace(for: fixtureWorkspace("/repo.design"))
@@ -131,7 +131,7 @@ struct WorktreeWorkspaceTests {
 
     @Test("Both split levels are independent and closing an outer slot retains its workspace")
     func independentSplits() {
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let outer = registry.layout(for: fixtureWorkspace("/repo"))
         let firstSlot = outer.focusedSlotId
         let first = registry.workspace(for: fixtureWorkspace("/repo"))

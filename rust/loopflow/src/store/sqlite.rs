@@ -41,7 +41,7 @@ mod task_work;
 pub(crate) use durable::task_state_sql;
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
-pub(crate) use task_work::{EndMove, OpenProcesses};
+pub(crate) use task_work::EndMove;
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable
@@ -87,7 +87,7 @@ fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
     conn.path()
         .and_then(|path| Path::new(path).parent())
         .map(Path::to_path_buf)
-        .ok_or_else(|| StoreError::InvalidData("store has no owning Home path".into()))
+        .ok_or_else(|| StoreError::InvalidData("store has no owning Machine path".into()))
 }
 
 /// Recorded checkout evidence remains usable without chapter metadata.
@@ -97,7 +97,7 @@ pub(crate) struct TaskCheckout {
     pub issue_id: String,
     pub issue_identifier: String,
     pub worktree: PathBuf,
-    pub home_id: Option<crate::durable::HomeId>,
+    pub machine_id: Option<crate::durable::MachineId>,
 }
 
 /// Stable identity fields for observation, independent of execution schema.
@@ -431,7 +431,7 @@ impl SqliteStore {
         )
     }
 
-    /// Open the shared store as `lf home install promote` — the single authorized
+    /// Open the shared store as `lf install promote` — the single authorized
     /// owner of the migration frontier. Applies pending migrations under the
     /// caller's exclusive promotion lock.
     pub(crate) fn open_as_promotion_boundary(path: &Path) -> StoreResult<Self> {
@@ -502,7 +502,7 @@ impl SqliteStore {
         if !may_apply_migrations && !existing_database {
             return Err(StoreError::InvalidData(format!(
                 "shared store {} is not initialized and an ordinary lf may not create it; \
-                 install a published release with `lf home install`",
+                 install a published release with `lf install`",
                 path.display()
             )));
         }
@@ -536,7 +536,7 @@ impl SqliteStore {
                 return Err(StoreError::InvalidData(format!(
                     "shared store {} is at an older frontier than this lf (pending {pending}); \
                      an ordinary lf must not advance it — install a published release with \
-                     `lf home install`",
+                     `lf install`",
                     path.display()
                 )));
             }
@@ -2236,12 +2236,12 @@ mod frontier_tests {
     /// The machine home whose `.lf/loopflow.db` `may_apply_migrations` treats as
     /// the shared release store. The regressions inject it so they never touch a
     /// developer's real `~/.lf`.
-    struct SharedHome {
+    struct SharedMachine {
         _dir: tempfile::TempDir,
         home: PathBuf,
     }
 
-    impl SharedHome {
+    impl SharedMachine {
         fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
             let home = dir.path().to_path_buf();
@@ -2293,7 +2293,7 @@ mod frontier_tests {
 
     #[test]
     fn private_development_store_opens_with_the_current_work_schema() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.home.join("private/loopflow.db");
         let store = open(&path, ValidationOnly, &shared.home, Forbidden)
             .expect("private development store opens at the embedded draft frontier");
@@ -2319,13 +2319,13 @@ mod frontier_tests {
     /// would create the path and this fails.
     #[test]
     fn an_ordinary_open_never_creates_or_initializes_an_absent_shared_store() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.shared_db();
 
         let error = open(&path, Published, &shared.home, Forbidden)
             .expect_err("an ordinary open must not initialize the shared store");
         assert!(
-            error.to_string().contains("lf home install"),
+            error.to_string().contains("lf install"),
             "the refusal must name the authorized boundary: {error}"
         );
         assert!(
@@ -2341,7 +2341,7 @@ mod frontier_tests {
     /// returned a usable store instead of erroring, fails this test.
     #[test]
     fn an_ordinary_open_ahead_of_the_shared_frontier_refuses_without_advancing() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.shared_db();
         seed_shared_store_at_prior_head(&path);
         let installed_frontier = frontier(&path).unwrap();
@@ -2353,7 +2353,7 @@ mod frontier_tests {
         let error = open(&path, Published, &shared.home, Forbidden)
             .expect_err("an ordinary open ahead of the frontier must refuse");
         assert!(
-            error.to_string().contains("lf home install"),
+            error.to_string().contains("lf install"),
             "the refusal must name the authorized boundary: {error}"
         );
         assert!(
@@ -2379,7 +2379,7 @@ mod frontier_tests {
     /// (c) The promotion boundary owns both first initialization and advancement.
     #[test]
     fn the_promotion_boundary_initializes_and_advances_the_shared_store() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.shared_db();
 
         // Initialization from absent.
@@ -2399,7 +2399,7 @@ mod frontier_tests {
         );
 
         // Advancement from a prior-head store.
-        let advanced = SharedHome::new();
+        let advanced = SharedMachine::new();
         let advanced_path = advanced.shared_db();
         seed_shared_store_at_prior_head(&advanced_path);
         assert_eq!(
@@ -2419,7 +2419,7 @@ mod frontier_tests {
     /// Wave untouched; explicit promotion advances once and retains the Wave.
     #[test]
     fn branch_candidate_cannot_advance_shared_store_or_damage_current_state_outside_promotion() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.shared_db();
         seed_shared_store_at_prior_head(&path);
         seed_current_wave(&path);
@@ -2459,10 +2459,10 @@ mod frontier_tests {
     }
 
     /// Opening the shared store reads its schema, never its rows: a dangling
-    /// reference is installation preflight's and `lf home doctor`'s to report.
+    /// reference is installation preflight's and `lf machine doctor`'s to report.
     #[test]
     fn an_ordinary_open_of_the_shared_store_does_not_scan_stored_rows() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.shared_db();
         open(&path, Published, &shared.home, Authorized).expect("boundary initializes");
         let conn = rusqlite::Connection::open(&path).unwrap();
@@ -2484,7 +2484,7 @@ mod frontier_tests {
     /// the isolated dev escape the directive preserves.
     #[test]
     fn validation_only_is_walled_from_the_shared_store_but_not_private_ones() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.shared_db();
         open(&path, ValidationOnly, &shared.home, Authorized)
             .expect_err("a validation-only build must never initialize the shared store");

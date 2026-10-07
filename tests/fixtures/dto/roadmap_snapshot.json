@@ -14,7 +14,7 @@
         "retired_at": null,
         "superseded_by_wave_id": null,
         "retirement_reason": null,
-        "home": {
+        "machine": {
           "id": "home_00000000000000000000000000000001",
           "route": "local",
           "created_at": "1970-01-01T00:00:00Z",
@@ -74,7 +74,7 @@
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap-the-machine-wide-view",
               "workspace": {
-                "home_id": "home_00000000000000000000000000000001",
+                "machine_id": "home_00000000000000000000000000000001",
                 "slug": "make-lf-work-the-machine",
                 "branch": "jack-heart/make-lf-work-the-machine",
                 "worktree": "/src/loopflow.make-lf-work-the-machine",
@@ -429,7 +429,7 @@
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-131/show-the-all-wave-roadmap",
               "workspace": {
-                "home_id": "home_00000000000000000000000000000001",
+                "machine_id": "home_00000000000000000000000000000001",
                 "slug": "all-wave-roadmap",
                 "branch": "jack-heart/all-wave-roadmap",
                 "worktree": "/src/loopflow.all-wave-roadmap",
@@ -870,7 +870,7 @@
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-141/now-available-work-views-research",
               "workspace": {
-                "home_id": "home_00000000000000000000000000000001",
+                "machine_id": "home_00000000000000000000000000000001",
                 "slug": "now-available-research",
                 "branch": "jack-heart/now-available-research",
                 "worktree": "/src/loopflow.now-available-research",
@@ -989,7 +989,7 @@
         "retired_at": null,
         "superseded_by_wave_id": null,
         "retirement_reason": null,
-        "home": {
+        "machine": {
           "id": "home_00000000000000000000000000000002",
           "route": "ssh://jack@mini-heart",
           "created_at": "1970-01-01T00:00:00Z",

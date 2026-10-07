@@ -30,7 +30,7 @@ struct RepoView: View {
             ? loadLoopflowState()?.selectedRepoPath : nil
         let model = WorkModel.window(query: query, launchCandidates: [initialRepoPath, restored].compactMap { $0 })
         _model = State(initialValue: model)
-        _sessionWorkspaces = State(initialValue: SessionsWorkspaceRegistry(localHomeId: model.savedHomeId))
+        _sessionWorkspaces = State(initialValue: SessionsWorkspaceRegistry(localMachineId: model.savedMachineId))
     }
 
     var body: some View {

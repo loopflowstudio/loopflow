@@ -375,10 +375,15 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: RepoCommand,
     },
-    /// Inspect this Home and observe routes to other Homes
-    Home {
+    /// Manage the installed Loopflow release and exported skills
+    Installation {
         #[command(subcommand)]
-        cmd: HomeCommand,
+        cmd: InstallationCommand,
+    },
+    /// Inspect this Machine and observe routes to other Machines
+    Machine {
+        #[command(subcommand)]
+        cmd: MachineCommand,
     },
     /// Bridge new Discord messages to finite Wave Sessions
     Discord {
@@ -706,10 +711,10 @@ pub enum WaveCommand {
         #[arg(long)]
         sync: bool,
     },
-    /// Set the Home for Wave schedules and newly created work
+    /// Set the Machine for Wave schedules and newly created work
     Place {
         name: String,
-        home_id: crate::durable::HomeId,
+        machine_id: crate::durable::MachineId,
         #[arg(long)]
         json: bool,
     },
@@ -772,6 +777,20 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Record accepted work remaining after merge, or resolve it with evidence
+    FollowUp {
+        issue: String,
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        outcome: Option<String>,
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        evidence: Option<String>,
+        /// Next observation or decision, as an RFC 3339 timestamp
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        check_at: Option<String>,
+        /// Evidence that the remaining work is satisfied or no longer needed
+        #[arg(long)]
+        clear: Option<String>,
+    },
     /// Enable or hold CI repair for a Task without interrupting running work
     Automate {
         issue: String,
@@ -825,9 +844,6 @@ pub enum TaskCommand {
         /// Reach `end` although Linear already calls the active Task complete
         #[arg(long)]
         force: bool,
-        /// Accept one historical Process's unknown outcome when reaching `end`; retain its checkout
-        #[arg(long, value_name = "PROCESS_LFID")]
-        accept_unknown_process: Vec<crate::id::ProcessLfid>,
     },
     /// File a Task in the current chapter
     Create {
@@ -983,7 +999,8 @@ impl TaskCommand {
             | Self::Refile { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
-            | Self::Wait { issue, .. } => Some(issue),
+            | Self::Wait { issue, .. }
+            | Self::FollowUp { issue, .. } => Some(issue),
         }
     }
 }
@@ -1005,10 +1022,10 @@ pub enum InstallCommand {
         #[arg(value_enum, default_value = "weekly")]
         frequency: InstallFrequency,
     },
-    /// Continue one interrupted machine install switch from its pinned candidate.
+    /// Continue one interrupted installation switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {
-        /// The fixed machine switch receipt to continue.
+        /// The fixed installation switch receipt to continue.
         #[arg(long)]
         switch: String,
     },
@@ -1112,6 +1129,7 @@ pub enum PrCommand {
         strict: bool,
         #[arg(short = 'p', long = "create-pr")]
         create_pr: bool,
+        /// Complete after verified merge (the default unless --next is supplied)
         #[arg(short = 'c', long)]
         complete: bool,
         #[arg(long = "next")]
@@ -1131,6 +1149,7 @@ pub enum PrCommand {
         strict: bool,
         #[arg(long)]
         local: bool,
+        /// Complete after verified merge (the default unless --next is supplied)
         #[arg(short = 'c', long)]
         complete: bool,
         #[arg(long = "next")]
@@ -1150,6 +1169,7 @@ pub enum PrCommand {
         strict: bool,
         #[arg(long)]
         local: bool,
+        /// Complete after verified merge (the default unless --next is supplied)
         #[arg(short = 'c', long)]
         complete: bool,
         #[arg(long = "next")]
@@ -1205,7 +1225,7 @@ pub enum CronCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Validate Home authority and declared jobs without changing launchd
+    /// Validate Machine authority and declared jobs without changing launchd
     Preflight {
         /// Wave whose GOAL.md `crons:` are validated
         #[arg(short = 'w', long = "wave")]
@@ -1220,7 +1240,7 @@ pub enum CronCommand {
             conflicts_with = "repo"
         )]
         wave: Option<String>,
-        /// Install the finite repository Task check on this Home
+        /// Install the finite repository Task check on this Machine
         #[arg(long)]
         repo: bool,
         /// Remove the repository schedule; running work retains its authority
@@ -1353,7 +1373,7 @@ pub enum RepoCommand {
         #[arg(long, value_name = "DAYS")]
         days: Option<u32>,
     },
-    /// Show how failed CI is detected, repaired, and landed across this Home
+    /// Show how failed CI is detected, repaired, and landed across this Machine
     Ci {
         #[command(subcommand)]
         cmd: Option<CiCommand>,
@@ -1378,16 +1398,9 @@ pub enum RepoCommand {
     },
 }
 
-/// Inspect and observe durable Homes.
+/// Manage the installed artifacts and exported skills.
 #[derive(Debug, Subcommand)]
-pub enum HomeCommand {
-    /// Open or focus Loopflow.app
-    Desktop,
-    /// Capture a URL or local HTML file without claiming the user's browser
-    Screenshot {
-        #[command(flatten)]
-        screenshot: ScreenshotArgs,
-    },
+pub enum InstallationCommand {
     /// Install the latest published Loopflow release from any directory
     Install {
         #[command(subcommand)]
@@ -1403,6 +1416,18 @@ pub enum HomeCommand {
         #[arg(long = "no-prune")]
         no_prune: bool,
     },
+}
+
+/// Inspect and observe durable Machines.
+#[derive(Debug, Subcommand)]
+pub enum MachineCommand {
+    /// Open or focus Loopflow.app
+    Desktop,
+    /// Capture a URL or local HTML file without claiming the user's browser
+    Screenshot {
+        #[command(flatten)]
+        screenshot: ScreenshotArgs,
+    },
     /// Diagnose installation, storage, Process integrity and scheduled receipts
     Doctor {
         /// Diagnose repository planning without changing it
@@ -1412,12 +1437,12 @@ pub enum HomeCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run lf on a Home or SSH host carrying your local credentials.
+    /// Run lf on a Machine or SSH host carrying your local credentials.
     ///
     /// Resolves local credentials and forwards a foreground account lease over
     /// SSH; Loopflow writes no managed provider credential on the remote. The
     /// Doppler token is never forwarded — name specific secrets with `--secret`
-    /// to resolve them locally. Example: `lf home ssh <home-id> pr open`.
+    /// to resolve them locally. Example: `lf machine ssh <machine-id> pr open`.
     Ssh {
         /// Prefer this origin account when the remote lf chooses a provider.
         #[arg(
@@ -1435,7 +1460,7 @@ pub enum HomeCommand {
             conflicts_with = "ssh_preferred_provider_account"
         )]
         origin_only_account: Vec<String>,
-        /// HomeId (preferred), SSH alias, or user@host
+        /// MachineId (preferred), SSH alias, or user@host
         target: String,
         /// Repository path on the remote, relative to $HOME
         #[arg(long = "repo")]
@@ -1458,14 +1483,14 @@ pub enum HomeCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Print this machine's stable local Home identity.
+    /// Print this machine's stable local Machine identity.
     Id {
         #[arg(long)]
         json: bool,
     },
-    /// Record the current route for a known Home identity.
+    /// Record the current route for a known Machine identity.
     Observe {
-        home_id: crate::durable::HomeId,
+        machine_id: crate::durable::MachineId,
         route: String,
         #[arg(long)]
         json: bool,
@@ -1771,7 +1796,7 @@ mod tests {
                 "home_00000000000000000000000000000001",
             ],
             vec!["lf", "discord", "serve", "product"],
-            vec!["lf", "home", "doctor", "--planning", "--json"],
+            vec!["lf", "machine", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],
         ] {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
@@ -1799,7 +1824,7 @@ mod tests {
     fn screenshot_requires_an_output_and_accepts_a_viewport() {
         let cli = Cli::try_parse_from([
             "lf",
-            "home",
+            "machine",
             "screenshot",
             "page.html",
             "--output",
@@ -1810,8 +1835,8 @@ mod tests {
             "844",
         ])
         .expect("parse screenshot");
-        let Some(Commands::Home {
-            cmd: crate::lf::HomeCommand::Screenshot { screenshot },
+        let Some(Commands::Machine {
+            cmd: crate::lf::MachineCommand::Screenshot { screenshot },
         }) = cli.command
         else {
             panic!("expected screenshot command");
@@ -1819,15 +1844,18 @@ mod tests {
         assert_eq!(screenshot.source, "page.html");
         assert_eq!(screenshot.output, PathBuf::from("capture.png"));
         assert_eq!((screenshot.width, screenshot.height), (390, 844));
-        assert!(Cli::try_parse_from(["lf", "home", "screenshot", "page.html"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "machine", "screenshot", "page.html"]).is_err());
     }
 
     #[test]
     fn install_exposes_refresh_and_schedule_but_hides_transaction_commands() {
         let mut command = Cli::command();
-        let home = command.find_subcommand_mut("home").unwrap();
-        assert!(home.render_long_help().to_string().contains("install"));
-        let help = home
+        let installation = command.find_subcommand_mut("installation").unwrap();
+        assert!(installation
+            .render_long_help()
+            .to_string()
+            .contains("install"));
+        let help = installation
             .find_subcommand_mut("install")
             .unwrap()
             .render_long_help()
@@ -1835,16 +1863,17 @@ mod tests {
         assert!(help.contains("schedule"));
         assert!(!help.contains("preflight"));
         assert!(matches!(
-            Cli::try_parse_from(["lf", "home", "install"])
+            Cli::try_parse_from(["lf", "installation", "install"])
                 .unwrap()
                 .command,
-            Some(Commands::Home {
-                cmd: crate::lf::HomeCommand::Install { cmd: None }
+            Some(Commands::Installation {
+                cmd: crate::lf::InstallationCommand::Install { cmd: None }
             })
         ));
-        assert!(Cli::try_parse_from(["lf", "home", "install", "schedule"]).is_ok());
-        assert!(Cli::try_parse_from(["lf", "home", "install", "status"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "home", "install", "preflight"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "machine", "install"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "installation", "install", "schedule"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "installation", "install", "status"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "installation", "install", "preflight"]).is_ok());
     }
 
     #[test]
@@ -1865,7 +1894,7 @@ mod tests {
         ));
         assert!(Cli::try_parse_from(["lf", "wave", "probe", "product", "--json"]).is_err());
         assert!(Cli::try_parse_from(["lf", "pr", "checks", "--logs"]).is_ok());
-        assert!(Cli::try_parse_from(["lf", "home", "probe", "product"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "machine", "probe", "product"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "ci"]).is_err());
     }
 
@@ -2021,7 +2050,7 @@ mod tests {
     fn ssh_parser_respects_the_internal_target_boundary() {
         let cli = Cli::try_parse_from([
             "lf",
-            "home",
+            "machine",
             "ssh",
             "--account",
             "reserve",
@@ -2035,14 +2064,14 @@ mod tests {
         assert!(cli.account.is_empty());
         assert!(matches!(
             cli.command,
-            Some(Commands::Home { cmd: crate::lf::HomeCommand::Ssh { origin_account, lf_args, .. } })
+            Some(Commands::Machine { cmd: crate::lf::MachineCommand::Ssh { origin_account, lf_args, .. } })
                 if origin_account == vec!["reserve"]
                     && lf_args == vec!["task", "pursue"]
         ));
 
         let after_host = Cli::try_parse_from([
             "lf",
-            "home",
+            "machine",
             "ssh",
             "mini",
             "--",
@@ -2055,7 +2084,7 @@ mod tests {
         assert!(after_host.account.is_empty());
         assert!(matches!(
             after_host.command,
-            Some(Commands::Home { cmd: crate::lf::HomeCommand::Ssh { lf_args, .. } })
+            Some(Commands::Machine { cmd: crate::lf::MachineCommand::Ssh { lf_args, .. } })
                 if lf_args == vec!["--account", "reserve", "task", "pursue"]
         ));
     }
@@ -2346,14 +2375,11 @@ mod tests {
             "--reason",
             "Delivered",
             "--force",
-            "--accept-unknown-process",
-            "00000000-0000-0000-0000-000000000001",
         ])
         .unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason, force: true, accept_unknown_process } })
-                if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")
-                    && accept_unknown_process.iter().map(|id| id.as_str()).collect::<Vec<_>>() == ["00000000-0000-0000-0000-000000000001"]));
+            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason, force: true } })
+                if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")));
         assert!(Cli::try_parse_from([
             "lf",
             "task",

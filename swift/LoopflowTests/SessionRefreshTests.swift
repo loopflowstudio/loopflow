@@ -13,7 +13,7 @@ struct SessionRefreshTests {
     func unchangedFailure() async throws {
         let source = SessionRefreshSource(firstPage: #"{"entries":[],"next":null}"#)
         await source.release()
-        let model = PodiumModel(query: RegistryQuery { _, _ in
+        let model = WorkModel(query: RegistryQuery { _, _ in
             try await source.read(lastPage: false)
         }, repoPath: "/src/loopflow")
         await model.refreshSessions()
@@ -53,7 +53,7 @@ struct SessionRefreshTests {
         let record = try JSONDecoder().decode(SessionRecord.self, from: data)
         let page = "{\"entries\":[\(String(decoding: data, as: UTF8.self))],\"next\":\"end\"}"
         let source = SessionRefreshSource(firstPage: page)
-        let model = PodiumModel(query: RegistryQuery { args, _ in
+        let model = WorkModel(query: RegistryQuery { args, _ in
             try await source.read(lastPage: args.contains("--after"))
         }, repoPath: "/src/loopflow")
         let first = Task { await model.refreshSessions() }

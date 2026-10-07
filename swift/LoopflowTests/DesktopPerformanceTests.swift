@@ -1097,8 +1097,7 @@ struct DesktopPerformanceTests {
             case "flow" where args.dropFirst().first == "list" && args.contains("--json"): return catalogJSON
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
-            case "session" where args.dropFirst().first == "history": return historyJSON
-            case "usage": return contextJSON
+            case "usage": return args.contains("--context") ? contextJSON : historyJSON
             case "task" where args.dropFirst().first == "status": return "{\"work\":\(workJSON)}"
             case "task" where args.dropFirst().first == "comment" && args.contains("--json"): return commentsJSON
             case "task" where args.dropFirst().first == "files":
@@ -1119,14 +1118,25 @@ struct DesktopPerformanceFixtureTests {
     @Test func completeHistoryAndDraftRefreshUseOnlyFixtureTransport() async throws {
         let (query, _) = try DesktopPerformanceTests().populationQuery(taskCount: 256)
         let model = WorkModel(query: query, repoPath: "/src/loopflow")
-        await model.refresh()
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        let deadline = ContinuousClock.now + .seconds(5)
+        while model.roadmap.value == nil || model.sessions.value == nil {
+            try #require(ContinuousClock.now < deadline)
+            try await Task.sleep(for: .milliseconds(5))
+        }
         #expect(model.projection.waves.first?.tasks.count == 256)
         #expect(model.sessions.value?.count == 128)
         let task = try #require(model.task(id: "perf-task-0"))
         #expect(task.task.reference.workspace?.identity == fixtureWorkspace("/src/loopflow"))
         #expect(model.sessions.value?.first?.workspace?.identity == task.task.reference.workspace?.identity)
         await model.loadFlowCatalog()
-        await model.loadTaskWork(task: task.task, wave: task.wave.wave)
+        model.select(.task(id: task.task.id))
+        model.syncWorkScope()
+        while model.taskWork[task.task.id].value == nil {
+            try #require(ContinuousClock.now < deadline)
+            try await Task.sleep(for: .milliseconds(5))
+        }
         await model.loadTaskContext(task: task.task, wave: task.wave.wave)
         #expect(model.flowCatalog.errorMessage == nil)
         #expect(model.taskWork[task.task.id].errorMessage == nil)

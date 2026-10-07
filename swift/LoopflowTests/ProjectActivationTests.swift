@@ -17,7 +17,7 @@ struct ProjectActivationTests {
             return "{}"
         })
         model.applyFixture(roadmap: .available(roadmap), waves: .available([]),
-            processActivity: .loading, workActivity: .loading, repos: [])
+            workActivity: .loading, repos: [])
         await model.activateProject(id: "a", name: "a", repo: "/repo")?.value
         #expect(model.projectCommandErrors["a"] == "offline")
         #expect(!model.isProjectActivationPending(id: "a"))
@@ -65,7 +65,7 @@ struct ProjectActivationTests {
             throw RegistryQueryError("offline")
         })
         model.applyFixture(roadmap: .available(roadmap), waves: .available([]),
-            processActivity: .loading, workActivity: .loading, repos: [])
+            workActivity: .loading, repos: [])
         let wave = roadmap.waves[0].wave
         model.select(.wave(id: wave.id))
         let command = model.activateProject(id: wave.id, name: wave.name, repo: wave.repo)
@@ -122,7 +122,7 @@ struct ProjectActivationTests {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: data))
         let model = WorkModel(query: RegistryQuery { _, _ in "{}" })
         model.applyFixture(roadmap: .available(roadmap), waves: .available([]),
-            processActivity: .loading, workActivity: .loading, repos: [])
+            workActivity: .loading, repos: [])
         model.select(.wave(id: roadmap.waves[0].wave.id))
         let view = try WorkSurfaceView(model: model).inspect()
         #expect(view.findAll(ViewType.Text.self) {

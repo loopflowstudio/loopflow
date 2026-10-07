@@ -303,10 +303,14 @@ Scenario receipts in `cli-volume/` cover native reopening; setup receipts stay
 separate in `fixture-setup-cli-volume/` and `fixture_setup_cli_volume` in the report.
 Both retain partial counts. Older recordings without separate setup receipts
 remain unscoped. Fixture-mode counters do not measure DTO-backed planning refresh
-or the retained-cat soak. Snapshot mode records real refresh and Task-link CLI
-reads from both Homes throughout the combined soak. The combined path is
-implemented; a matched rendered comparison and hour-long acceptance receipt
-remain outstanding.
+or the retained-cat soak. The historical combined snapshot path recorded real
+refresh and Task-link reads from both Homes. After integrating main's Work
+observation stream, the contained copied-data adapter still supplies one-shot
+reads only. Snapshot Task opening and owned reopening remain available, but a
+nonzero snapshot soak reports unavailable until that adapter supports the stream
+within the same containment boundary. These new observations cannot reuse the
+older polling cohorts as matched baselines. Matched rendered and hour-long
+acceptance remain outstanding.
 
 ### October 6 rendering capability
 

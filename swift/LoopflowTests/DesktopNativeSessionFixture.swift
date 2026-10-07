@@ -197,9 +197,9 @@ struct DesktopNativeSessionTests {
         let activity = try JSONDecoder().decode(WorkActivitySnapshot.self, from: Data(activityJSON.utf8))
         #expect(activity.items.contains { $0.work == copiedRecord.work })
         await #expect(throws: (any Error).self) { try await query.openSession(id: copiedRecord.id) }
-        let model = PodiumModel(query: query, repoPath: fixture.repo)
+        let model = WorkModel(query: query, repoPath: fixture.repo)
         await model.refresh()
-        let originalIDs = Set(model.workspace.waves.flatMap { $0.tasks.map { $0.task.id } })
+        let originalIDs = Set(model.projection.waves.flatMap { $0.tasks.map { $0.task.id } })
         #expect(originalIDs.contains(fixture.taskId))
         // Closed copied conversations belong to explicit history, not the
         // current working set. The unfiltered transport retains them unchanged.
@@ -240,7 +240,7 @@ struct DesktopNativeSessionTests {
             #expect(document.text == "Preserved draft")
             #expect(document.editor.selectedRange() == NSRange(location: 2, length: 3))
             #expect(workspace.multiplexer.layout == layout)
-            #expect(Set(model.workspace.waves.flatMap { $0.tasks.map { $0.task.id } }) == originalIDs)
+            #expect(Set(model.projection.waves.flatMap { $0.tasks.map { $0.task.id } }) == originalIDs)
             #expect(try fixture.historyIsPreserved())
         }
         let after = try await reads.read(binary: fixture.cli, home: snapshot,

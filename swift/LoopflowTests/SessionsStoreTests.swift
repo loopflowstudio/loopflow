@@ -70,7 +70,7 @@ struct SessionsStoreTests {
     @Test("Explicit reopen revalidates a cached observation failure", arguments: ["available", "refused", "unavailable"])
     func reopenRevalidatesCachedFailure(result: String) async throws {
         let reason = "Session client observation unavailable"
-        let record = session(id: "native", state: "closed", kind: "conversation")
+        let record = session(id: "native", state: "closed")
         let blocked = record.replacingOccurrences(of: "\"unavailable_reason\":null", with: "\"unavailable_reason\":\"\(reason)\"")
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { _, _ in
             if result == "refused" { throw RegistryQueryError(reason) }

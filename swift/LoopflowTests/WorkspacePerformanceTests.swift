@@ -36,19 +36,19 @@ struct WorkspacePerformanceTests {
                 from: JSONSerialization.data(withJSONObject: snapshot))
             let sessions = try (0..<count).map { index in
                 try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: [
-                    "id": "session-\(index)", "interactive": true, "kind": "conversation",
+                    "id": "session-\(index)", "run_id": "run-\(index)", "interactive": true,
                     "work": ["kind": "task", "id": "work-\(index)"],
                     "title": "Session \(index)", "detail": "fixture", "cwd": "/src/loopflow",
                     "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(),
-                    "work_path": NSNull(), "title_source": "generated",
-                    "actions": sessionActionFixture(kind: "conversation", state: "active"),
+                    "work_path": NSNull(), "title_source": "generated", "task_primary": false,
+                    "actions": sessionActionFixture(state: "active"),
                     "flow_membership": ["kind": "independent"],
                     "task_ids": ["work-\(index)"], "terminal_ids": [], "open_argv": ["must-not-launch"],
                 ]))
             }
             for attempt in 0..<21 {
                 let start = ContinuousClock.now
-                let projection = WorkspaceProjection(roadmaps: roadmap.waves, sessions: sessions)
+                let projection = WorkProjection(roadmaps: roadmap.waves, sessions: sessions)
                 let elapsed = start.duration(to: .now)
                 let milliseconds = Double(elapsed.components.seconds) * 1000
                     + Double(elapsed.components.attoseconds) / 1e15

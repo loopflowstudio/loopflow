@@ -2,17 +2,18 @@
 
 ## Machine terminology (LOO-394, 2026-10-07)
 
-Jack Heart authorized the Home-to-machine rename as PR 1, publication and then
-stop; later remote-work slices are not authorized in this pass. A machine means
-one OS user and Loopflow data directory. `LF_HOME` and provider/account homes
-retain their filesystem meanings. Preserve opaque `home_…` IDs, installed cron
-plist keys, saved Desktop selection keys and historical capture payloads.
-Source renames commands, Rust/Swift DTOs and SQLite placement; the single draft
-renames tables/columns without relocating data. Cron readers retain released
-JSON field compatibility. Installation remains separate, with its lock path
-unchanged. Local source checks do not establish installed migration or remote
-continuity. Release's retained-schedule evidence reinforces that a naming change
-must not invent another activation or lose original cron ownership.
+Jack Heart authorized only the Home-to-machine rename, PR 1 publication and then
+stop. A machine means one OS user and Loopflow data directory. `LF_HOME` and
+provider/account homes retain filesystem meanings. Commands, Rust/Swift DTOs and
+one SQLite draft rename the authority without relocating data. Opaque `home_…`
+IDs, cron plist keys, Desktop selection keys and historical payloads survive.
+Cron accepts released JSON keys; Desktop translates version-1 cached DTO keys
+on read without rewriting the file. Installation keeps its separate owner and
+lock path. Retained binaries may predate a command rename: installer recovery
+uses the shared `install` shorthand. Exact-frontier fixtures must seed released
+SQL, not the experiment initializer that adds drafts. Local checks prove no
+installed migration or remote continuity. Release's schedule evidence requires
+preserving original ownership and activation through a naming change.
 
 ## Storage footprint (LOO-390, 2026-10-06)
 
@@ -526,15 +527,14 @@ local Git is the larger phase, with no measured hard lower bound. Numbers and me
   admission or completion** without a completion receipt (Jack authorized).
   Live or unknown providers still block.
 
-## Environment variables (LOO-341, branch evidence 2026-10-01)
+## Environment variables (LOO-341, reconciled 2026-10-07)
 
-Jack Heart requested the audit in [Environment](../../docs/architecture/environment.md).
-`LF_HOME` alone selects the Home; its database is `loopflow.db`. Shared Exec-context
-names drive shell and tmux clearing. The unreviewed branch evidence and retired
-variable inventory remain at
+Jack Heart's audit lives in [Environment](../../docs/architecture/environment.md).
+`LF_HOME` selects the machine's data directory and `loopflow.db`; shared Exec
+names drive shell/tmux clearing. Earlier branch evidence remains at
 `c31279995a4ea0eec09c053e39c2f71a81d26034:wave/infrastructure/MEMORY.md`.
-LOO-370 removes those presence-based runtime decisions. Its accepted scope excludes
-conversion; source gate and delivery remain unfinished.
+LOO-370's October 6 completion above supersedes this section's pending-delivery
+claim; it establishes no physical capture conversion.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 

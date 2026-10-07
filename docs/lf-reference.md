@@ -139,7 +139,7 @@ Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Not
 |---|---|
 | `--strict` | strict Default: false. |
 | `--create-pr / -p` | create pr Default: false. |
-| `--complete / -c` | complete Default: false. |
+| `--complete / -c` | Complete after verified merge (the default unless --next is supplied) Default: false. |
 | `--next` | next |
 | `--worktree / -w` | worktree |
 | `--message / -m` | message |
@@ -155,7 +155,7 @@ Prepare a PR, request exact-head auto-merge, and return without watching
 |---|---|
 | `--strict` | strict Default: false. |
 | `--local` | local Default: false. |
-| `--complete / -c` | complete Default: false. |
+| `--complete / -c` | Complete after verified merge (the default unless --next is supplied) Default: false. |
 | `--next` | next |
 | `--worktree / -w` | worktree |
 | `--message / -m` | message |
@@ -171,7 +171,7 @@ Request auto-merge, retain settlement intent, and return
 |---|---|
 | `--strict` | strict Default: false. |
 | `--local` | local Default: false. |
-| `--complete / -c` | complete Default: false. |
+| `--complete / -c` | Complete after verified merge (the default unless --next is supplied) Default: false. |
 | `--next` | next |
 | `--worktree / -w` | worktree |
 | `--message / -m` | message |
@@ -1031,14 +1031,16 @@ Manage Wave identity, placement and planning
 
 ## lf wave new-chapter
 
-Rotate one Wave through the repository rotation operation.
+Rotate this Wave using its exact destination in a retained chapter plan
 
 | Argument | What it does |
 |---|---|
-| `<wave> <name>` | Select the Wave and chapter name |
-| `--plan <path>` | Required retained JSON plan; consumes this Wave's exact entry |
-| `--dry-run` | Preview without provider writes |
-| `--json` | Emit the rotation result as JSON |
+| `<wave>` | wave |
+| `<name>` | name |
+| `--plan` | plan |
+| `--dry-run` | dry run Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
 
 ## lf wave ensure
 
@@ -1252,6 +1254,19 @@ Check authorized deliveries once, then exit
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
+## lf task follow-up
+
+Record accepted work remaining after merge, or resolve it with evidence
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--outcome` | outcome |
+| `--evidence` | evidence |
+| `--check-at` | Next observation or decision, as an RFC 3339 timestamp |
+| `--clear` | Evidence that the remaining work is satisfied or no longer needed |
+| `--help / -h` | Print help |
+
 ## lf task automate
 
 Enable or hold CI repair for a Task without interrupting running work
@@ -1312,7 +1327,6 @@ Put a Task at a node of its workflow without running anything; `end` completes i
 | `<node>` | `start`, `end` or one of the workflow's nodes |
 | `--reason` | Why, kept in the Task's workflow history |
 | `--force` | Reach `end` although Linear already calls the active Task complete Default: false. |
-| `--accept-unknown-process` | Accept one historical Process's unknown outcome when reaching `end`; retain its checkout |
 | `--help / -h` | Print help |
 
 ## lf task create

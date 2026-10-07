@@ -1,6 +1,8 @@
 [
   {
     "name": "feature",
+    "kind": "flow",
+    "source": null,
     "graph": {
       "name": "feature",
       "steps": [
@@ -45,7 +47,7 @@
         {
           "key": 3,
           "id": "decide",
-          "label": "loop-decide",
+          "label": "loop-or-next",
           "kind": "skill",
           "human": false,
           "returns_to": 1,
@@ -71,7 +73,7 @@
         {
           "key": 5,
           "id": "decide_delivery",
-          "label": "loop-decide",
+          "label": "loop-or-next",
           "kind": "skill",
           "human": false,
           "returns_to": 1,
@@ -324,12 +326,95 @@
           "paths": {}
         }
       ]
-    }
+    },
+    "workflow": null
   },
   {
     "name": "broken",
+    "kind": "flow",
+    "source": ".lf/flows/broken.yaml",
     "graph": null,
     "unavailable": "failed to load skill \"missing\": not found",
-    "template": null
+    "template": null,
+    "workflow": null
+  },
+  {
+    "name": "code",
+    "kind": "workflow",
+    "source": null,
+    "graph": null,
+    "template": null,
+    "workflow": {
+      "name": "code",
+      "nodes": [
+        {
+          "name": "demo",
+          "skill": "demo",
+          "description": "you try the change"
+        }
+      ],
+      "edges": [
+        {
+          "from": "start",
+          "to": "demo",
+          "flow": "pursue"
+        },
+        {
+          "from": "demo",
+          "to": "demo",
+          "flow": "pursue"
+        },
+        {
+          "from": "demo",
+          "to": "end",
+          "flow": "ship"
+        }
+      ]
+    },
+    "unavailable": null
+  },
+  {
+    "name": "proof",
+    "kind": "workflow",
+    "source": ".lf/workflows/proof.yaml",
+    "graph": null,
+    "template": null,
+    "workflow": null,
+    "unavailable": "invalid flow: workflow proof: stage lost is unreachable from start"
+  },
+  {
+    "name": "research",
+    "kind": "workflow",
+    "source": null,
+    "graph": null,
+    "template": null,
+    "workflow": {
+      "name": "research",
+      "nodes": [
+        {
+          "name": "findings",
+          "skill": "research",
+          "description": "you read the findings"
+        }
+      ],
+      "edges": [
+        {
+          "from": "start",
+          "to": "findings",
+          "flow": "research"
+        },
+        {
+          "from": "findings",
+          "to": "findings",
+          "flow": "research"
+        },
+        {
+          "from": "findings",
+          "to": "end",
+          "flow": null
+        }
+      ]
+    },
+    "unavailable": null
   }
 ]

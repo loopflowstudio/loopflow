@@ -1,7 +1,7 @@
 {
   "recommended": "feature",
   "record": {
-    "kind": "pinned",
+    "kind": "latest",
     "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
     "graph": {
       "name": "feature",
@@ -49,8 +49,7 @@
     "completed": [],
     "returns": [],
     "execution": "stalled",
-    "reason": "Session event 12 is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it.",
-    "restart_required": false,
+    "reason": "Session event 12 is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, inspect its effects, then launch fresh work.",
     "iterations": [
       []
     ]
@@ -58,14 +57,6 @@
   "controls": [
     {
       "kind": "start",
-      "unavailable": "A Flow is already pinned; resume it or stop and restart with another"
-    },
-    {
-      "kind": "resume",
-      "unavailable": "Session event 12 is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, then resume it."
-    },
-    {
-      "kind": "restart",
       "unavailable": null
     }
   ]

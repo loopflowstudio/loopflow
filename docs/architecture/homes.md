@@ -46,18 +46,15 @@ shell / automation / Loopflow.app
                |
         store + repository
                |
-      FlowSession claim --> AgentSession <--> native engine
-                            |
-                       driving Exec
+       Flow driver Exec --> step Exec --> AgentSession <--> native engine
 ```
 
-Wave operations are finite attributed conversations. Tasks drive their selected Flow
-invocation through the common executor. Cron invokes commands on schedule;
+Wave operations are finite attributed conversations. Each Task Flow
+runs through the common driver. Cron invokes commands on schedule;
 local PR supervision watches and repairs delivery in the invoking process.
 
 The process that directly spawns a child owns its child handle. Cross-process
-recovery requires exact saved process identity and the applicable claim or
-lock. A PID, tmux name, parent Exec, Work identity or telemetry row alone grants
+recovery requires exact saved process identity and the applicable lock. A PID, tmux name, parent Exec, Work identity or telemetry row alone grants
 no signal authority.
 
 ## Observe processes
@@ -112,7 +109,7 @@ LF_HOME="$(mktemp -d)" local-bin/lf wave list --json
 ```
 
 All ordinary commands use the installed CLI and `~/.lf`. Source CLI commands
-forward there before opening a store. Task workers, Flow steps, sessions and
+forward there before opening a store. Task Flows, Flow steps, sessions and
 agent tools inherit the same Home; no source-specific or installed-development
 Home exists.
 

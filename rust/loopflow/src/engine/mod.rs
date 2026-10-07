@@ -10,6 +10,8 @@ pub mod execution;
 pub mod flow;
 pub mod flow_graph;
 pub mod flow_output;
+#[cfg(target_os = "macos")]
+pub(crate) mod fs_events;
 pub mod git;
 pub mod identity;
 pub mod naming;
@@ -22,6 +24,7 @@ pub mod structured_reply;
 pub mod target;
 pub mod transitions;
 pub mod wave_home;
+pub mod workflow;
 pub mod worktree;
 pub mod worktrees;
 
@@ -63,5 +66,3 @@ pub use structured_reply::{
     render_structured_reply_guidance, structured_replies_for_context, ClientContext,
     StructuredReply,
 };
-
-pub mod invocation;

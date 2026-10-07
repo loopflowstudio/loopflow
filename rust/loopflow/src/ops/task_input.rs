@@ -19,24 +19,6 @@ pub(crate) struct TaskSeed {
     pub interrupt: i64,
 }
 
-pub(crate) async fn prepare(store: &SharedStore, task: &Task, wave: &str) -> Result<TaskSeed> {
-    let consumed = match crate::ops::flow_run::token()? {
-        Some(token) => {
-            let flow = store
-                .flow(&token.invocation)
-                .await?
-                .ok_or_else(|| anyhow!("Flow {} is missing", token.invocation))?;
-            anyhow::ensure!(
-                flow.version == token.version && flow.task_id.as_ref() == Some(&task.id),
-                "Task input belongs to a stale or different Flow"
-            );
-            store.sqlite.completed_step_steer_id(&flow)?
-        }
-        None => 0,
-    };
-    read_seed(store, task, wave, consumed).await
-}
-
 /// Read a Task snapshot without refreshing providers or advancing a control cursor.
 pub(crate) async fn read_seed(
     store: &SharedStore,

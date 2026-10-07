@@ -1,5 +1,11 @@
 # Task workspace review — October 1, 2026
 
+October 4 supersession: PR #1369 merged as `2f14e4422`. Jack Heart's later
+approved Task-conversation design assigns Task primary selection and complete
+worker/review-handshake deletion to LOO-353. It supersedes this review's LOO-364
+Task-runtime split, mutable Flow switching and attention presentation. Historical
+checks below retain their original limits; configured workspace proof remains open.
+
 Jack Heart requested landing, then withdrew the branch from merging until the Task
 Session model is corrected. PR #1369 was disarmed during this correction. The revised model is implemented
 and locally verified; the previously requested landing can resume.
@@ -65,12 +71,14 @@ for the revised Task Session model. Carry remaining proof into LOO-353.
 
 ## Remaining ownership
 
-- LOO-353 remains open: finish configured workspace proof and UX iteration; improve
+- LOO-353 remains open: implement the approved Task conversation/runtime cut,
+  including Task primaries and worker/review-handshake deletion; finish configured
+  workspace proof and UX iteration; improve
   default Flow selection and direct source-file editing; update the website to the
   shipped focus-on-your-own-work story and remove obsolete resident/chat claims.
-- LOO-364 owns primary repo/Wave/Task Sessions, safe native wake delivery and durable
-  Flow switching. Do not duplicate that runtime work in LOO-353. Its older plan must
-  be restated on the current AgentSession/FlowSession/Exec model before implementation.
+- LOO-364 supplied the repo/Wave primary Session foundation. Jack's October 4
+  direction places Task primaries in LOO-353 and deletes mutable Flow switching;
+  the former runtime split no longer governs this work.
 - LOO-366 owns reliably available ordinary Projects with optional chapter coordination.
 - LOO-367 owns Task admission/completion without unrelated workflow prerequisites.
 

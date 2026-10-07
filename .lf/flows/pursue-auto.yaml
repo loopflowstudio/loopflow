@@ -1,18 +1,8 @@
-- step:
-    id: implement
-    name: implement
+- implement
 - compress
 - flow: refresh
-- step:
-    id: decide
-    name: loop-decide
-    repeat:
-      from: implement
+- loop: implement
 - gate
-- step:
-    id: decide_verified
-    name: loop-decide
-    repeat:
-      from: implement
+- loop: implement
 - pr-publish
 - cmd: task pr land

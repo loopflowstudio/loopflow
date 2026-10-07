@@ -80,6 +80,17 @@ pub const AGENT_CALLER_ENV: &str = "LF_AGENT_CALLER";
 #[error("command exited with status {0}")]
 pub struct CommandExit(pub u8);
 
+/// A Flow stopped where a person or a watcher takes over: blocked, or short of
+/// its last step. Its process exits with [`FlowHeld::EXIT`], so a caller can
+/// tell it from a Flow that failed.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct FlowHeld(pub String);
+
+impl FlowHeld {
+    pub const EXIT: u8 = 3;
+}
+
 /// Stable provenance installed in one provider conversation's tool environment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentCaller {

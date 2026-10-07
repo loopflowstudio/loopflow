@@ -4,7 +4,7 @@ A Task binds durable planning to one managed worktree and one active remote
 branch at a time. The current implementation retains settled PRs as a serial
 delivery history.
 Git owns commits and branches. GitHub owns PR heads, checks, and merge. Local
-state records enough evidence to resume the workflow safely.
+state records enough evidence to continue delivery safely.
 
 ```bash
 lf checkout INF-123
@@ -47,8 +47,8 @@ The exact landing fence is modeled in
 
 `lf checkout` resolves one existing Linear Issue inside one Project and
 creates or reuses its managed worktree and first serial PR record. It starts no
-execution. `lf flow start` uses the same substrate and additionally advances the
-declared Task flow. The repository identity—not the caller's
+execution. `lf task run ISSUE` uses the same substrate and additionally
+runs a fresh Flow there. The repository identity—not the caller's
 current directory spelling—selects the Git directory and sibling worktree
 namespace.
 
@@ -58,7 +58,7 @@ they do not edit product files in substitute worktrees.
 A dependent change that must begin before its parent merges uses another Task:
 
 ```bash
-lf --task INF-124 flow start --stack-on INF-123
+lf task run INF-124 --stack-on INF-123
 ```
 
 The child records its fork point and targets the parent's active PR branch.
@@ -92,12 +92,12 @@ landing share that ancestry check; unrelated or divergent bases still fail.
 and push the exact head. Branch commits and merge resolutions retain their identities.
 GitHub squash-merges the final PR tree into one commit on main. `arm` and `land` request
 GitHub auto-merge, record the landing, and return. Success means handoff;
-`lf task reconcile` checks enrolled Tasks and recorded repository landings once;
+`lf task reconcile` checks recorded repository landings once;
 `lf pr reconcile` uses its delivery-only path. `lf cron sync --repo` installs the
 finite minute check on this Home. Neither repairs CI; `lf ci watch` does. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
-commands inspect Task delivery state when present; they do not require a live
-Task worker or certify that a particular Flow ran.
+commands inspect Task delivery state when present; they do not require a running
+Task Flow or certify that a particular Flow ran.
 
 Scratch cleanup selects landing candidates for this repository's
 [hosted CI](../../TESTING.md); PR readiness alone does not select CI.
@@ -322,14 +322,11 @@ delivery.
 
 ## Scheduled Task admission
 
-Task owns enrollment, hold and unchanged-failure retry count. A repository check
-never chooses a new Flow for a finished Task. Enrollment without a prior Flow
-captures the Project default once; explicit Task launches preserve their choice.
-Session input reservations, Flow review reservations and worker claims share a
-short checkout admission lock. Automatic claims re-read membership and Hold
-under that boundary. Unknown process identity, live unrelated work and unresolved
-reviews defer admission. A proven-dead managed reservation can recover through
-the common Flow driver; completed effects are consumed without repeating them.
+Task owns its CI-repair hold and unchanged-failure retry count. A repository
+check never launches, continues or chooses a Flow. Session input reservations
+share a short checkout admission lock; automatic repair admission re-reads Hold
+under that boundary. Unknown process identity and live unrelated work defer
+admission.
 
 The repository lock skips overlapping observations. Per-Task and per-PR claims
 still fence direct callers. A pass budgets 45 seconds and each Task or external

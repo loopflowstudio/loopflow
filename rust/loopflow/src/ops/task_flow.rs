@@ -1,12 +1,12 @@
-//! A Task's Flow as surfaces draw it: the recommended definition before start,
-//! the pinned invocation and its saved cursor once started, and the Flow
-//! controls that are legal now. Legality and reasons live here so clients
-//! render them without a lifecycle matrix of their own.
+//! A Task's Flow as surfaces draw it: the recommended definition before any
+//! launch, the most recently launched Flow and how far its steps got, and
+//! whether a fresh launch is legal now. Every other Flow naming the Task is
+//! equally its work and is listed with the Task's work.
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{FlowSession, WorkStatus};
-use crate::engine::flow_graph::{flow_iterations, project_cursor, FlowGraph, FlowReturn};
+use crate::durable::WorkStatus;
+use crate::engine::flow_graph::{FlowGraph, FlowReturn};
 use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,18 +21,17 @@ pub struct TaskFlowSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskFlowRecord {
-    /// No Flow position or finished Flow is recorded for this Task. Runtime
-    /// `started` separately reports whether any other execution is recorded.
+    /// No Flow has been launched for this Task. Runtime `started` separately
+    /// reports whether any other execution is recorded.
     None,
-    /// The captured invocation and where its saved cursor stands.
-    Pinned(PinnedTaskFlow),
-    /// The Flow finished; its captured definition is not retained, so no
-    /// topology is drawn in its place.
+    /// The most recently launched Flow and how far its steps got.
+    Latest(LatestTaskFlow),
+    /// The most recently launched Flow finished.
     Finished { flow: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PinnedTaskFlow {
+pub struct LatestTaskFlow {
     pub invocation_id: String,
     pub graph: FlowGraph,
     pub current: Option<u32>,
@@ -42,27 +41,19 @@ pub struct PinnedTaskFlow {
     pub iterations: Vec<Vec<u32>>,
     pub execution: TaskExecutionState,
     pub reason: String,
-    /// A durable blocker that only a restart can clear.
-    pub restart_required: bool,
 }
 
-impl PinnedTaskFlow {
-    pub(crate) fn new(position: &FlowSession, execution: &TaskExecutionSnapshot) -> Self {
-        let graph = FlowGraph::new(&position.invocation.flow, &position.invocation.steps);
-        let projection = project_cursor(&graph, &position.cursor);
+impl LatestTaskFlow {
+    pub(crate) fn new(flow: crate::durable::FlowDetail, execution: &TaskExecutionSnapshot) -> Self {
         Self {
-            invocation_id: position.invocation.id.clone(),
-            graph,
-            current: projection.current,
-            completed: projection.completed,
-            returns: projection.returns,
-            iterations: flow_iterations(&position.invocation.steps, &position.cursor),
+            invocation_id: flow.entry.summary.id,
+            graph: flow.graph,
+            current: flow.current,
+            completed: flow.completed,
+            returns: flow.returns,
+            iterations: flow.iterations,
             execution: execution.state,
             reason: execution.reason.clone(),
-            restart_required: position
-                .failure
-                .as_ref()
-                .is_some_and(|failure| failure.restart_required),
         }
     }
 }
@@ -70,12 +61,8 @@ impl PinnedTaskFlow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskFlowControlKind {
-    /// `lf --task ISSUE flow start FLOW`
+    /// `lf task run ISSUE [FLOW]`
     Start,
-    /// `lf --task ISSUE flow start`
-    Resume,
-    /// `lf task restart ISSUE --flow FLOW`
-    Restart,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,134 +80,57 @@ pub(crate) struct TaskFlowGate<'a> {
     pub plan_terminal_reason: Option<&'a str>,
     pub worktree_blocker: Option<&'a str>,
     pub launch_refusal: Option<&'a str>,
-    pub resume_refusal: Option<&'a str>,
 }
 
-pub(crate) fn task_flow_controls(
-    record: &TaskFlowRecord,
-    gate: &TaskFlowGate,
-) -> Vec<TaskFlowControl> {
+pub(crate) fn task_flow_controls(gate: &TaskFlowGate) -> Vec<TaskFlowControl> {
     let terminal = match gate.status {
         Some(WorkStatus::Done) => Some("Task is complete"),
         Some(WorkStatus::Abandoned) => Some("Task is abandoned; recover it before running a Flow"),
-        None => gate.plan_terminal_reason,
-        _ => None,
+        _ => gate.plan_terminal_reason,
     };
-    let control = |kind, unavailable: Option<String>| TaskFlowControl {
-        kind,
-        unavailable: terminal.map(str::to_string).or(unavailable),
-    };
-    let pinned = matches!(record, TaskFlowRecord::Pinned(_));
-    let blocker = gate.worktree_blocker.or(gate.launch_refusal);
-
-    let start = if pinned {
-        Some("A Flow is already pinned; resume it or stop and restart with another".to_string())
-    } else {
-        blocker.map(str::to_string)
-    };
-
-    let resume = match record {
-        TaskFlowRecord::Pinned(flow) => match flow.execution {
-            TaskExecutionState::Running | TaskExecutionState::Starting => {
-                Some("The Task worker is already advancing this Flow".to_string())
-            }
-            TaskExecutionState::Human => {
-                Some(format!("{}; continue it through its Session", flow.reason))
-            }
-            TaskExecutionState::Unknown
-            | TaskExecutionState::Blocked
-            | TaskExecutionState::Stalled => Some(flow.reason.clone()),
-            TaskExecutionState::Idle => gate.resume_refusal.map(str::to_string),
-        },
-        TaskFlowRecord::None | TaskFlowRecord::Finished { .. } => {
-            Some("No pinned Flow to resume; start one".to_string())
-        }
-    };
-
-    let restart = if gate.status.is_none() {
-        Some("Task has no Work yet; start a Flow instead".to_string())
-    } else {
-        match record {
-            TaskFlowRecord::Pinned(flow) if flow.execution == TaskExecutionState::Unknown => {
-                Some(flow.reason.clone())
-            }
-            _ => gate.worktree_blocker.map(str::to_string),
-        }
-    };
-
-    vec![
-        control(TaskFlowControlKind::Start, start),
-        control(TaskFlowControlKind::Resume, resume),
-        control(TaskFlowControlKind::Restart, restart),
-    ]
+    vec![TaskFlowControl {
+        kind: TaskFlowControlKind::Start,
+        unavailable: terminal
+            .or(gate.worktree_blocker)
+            .or(gate.launch_refusal)
+            .map(str::to_string),
+    }]
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        task_flow_controls, PinnedTaskFlow, TaskFlowControlKind, TaskFlowGate, TaskFlowRecord,
-        TaskFlowSnapshot,
+        task_flow_controls, TaskFlowControlKind, TaskFlowGate, TaskFlowRecord, TaskFlowSnapshot,
     };
     use crate::durable::WorkStatus;
-    use crate::engine::flow_graph::FlowGraph;
     use crate::ops::task_execution::TaskExecutionState;
 
-    fn pinned(execution: TaskExecutionState, restart_required: bool) -> TaskFlowRecord {
-        TaskFlowRecord::Pinned(PinnedTaskFlow {
-            invocation_id: "inv".into(),
-            graph: FlowGraph::new("feature", &[]),
-            current: Some(2),
-            completed: vec![0, 1],
-            returns: Vec::new(),
-            iterations: vec![vec![]],
-            execution,
-            reason: "Waiting for your review at demo".into(),
-            restart_required,
-        })
-    }
-
-    fn available(record: &TaskFlowRecord, status: Option<&WorkStatus>) -> Vec<TaskFlowControlKind> {
-        task_flow_controls(
-            record,
-            &TaskFlowGate {
-                status,
-                plan_terminal_reason: None,
-                worktree_blocker: None,
-                launch_refusal: None,
-                resume_refusal: None,
-            },
-        )
-        .into_iter()
-        .filter(|control| control.unavailable.is_none())
-        .map(|control| control.kind)
-        .collect()
-    }
-
     #[test]
-    fn controls_follow_the_saved_boundary_not_a_client_matrix() {
+    fn a_fresh_launch_is_legal_whenever_the_task_can_run() {
+        let gate = |status, launch_refusal| TaskFlowGate {
+            status,
+            plan_terminal_reason: None,
+            worktree_blocker: None,
+            launch_refusal,
+        };
+        let start = |gate: &TaskFlowGate| {
+            let controls = task_flow_controls(gate);
+            assert_eq!(controls.len(), 1);
+            assert_eq!(controls[0].kind, TaskFlowControlKind::Start);
+            controls[0].unavailable.clone()
+        };
         let ready = WorkStatus::Ready;
+        assert_eq!(start(&gate(None, None)), None);
+        assert_eq!(start(&gate(Some(&ready), None)), None);
         assert_eq!(
-            available(&TaskFlowRecord::None, None),
-            [TaskFlowControlKind::Start]
+            start(&gate(Some(&ready), Some("agent unavailable"))).as_deref(),
+            Some("agent unavailable")
         );
-        assert_eq!(
-            available(&pinned(TaskExecutionState::Idle, false), Some(&ready)),
-            [TaskFlowControlKind::Resume, TaskFlowControlKind::Restart]
-        );
-        for busy in [
-            TaskExecutionState::Running,
-            TaskExecutionState::Human,
-            TaskExecutionState::Blocked,
-        ] {
-            assert_eq!(
-                available(&pinned(busy, false), Some(&ready)),
-                [TaskFlowControlKind::Restart],
-                "{busy:?}"
-            );
-        }
         let done = WorkStatus::Done;
-        assert!(available(&pinned(TaskExecutionState::Idle, false), Some(&done)).is_empty());
-        assert!(available(&pinned(TaskExecutionState::Unknown, false), Some(&ready)).is_empty());
+        assert_eq!(
+            start(&gate(Some(&done), None)).as_deref(),
+            Some("Task is complete")
+        );
     }
 
     #[test]
@@ -231,8 +141,8 @@ mod tests {
         .unwrap();
         let snapshots: Vec<TaskFlowSnapshot> = serde_json::from_value(value.clone()).unwrap();
         assert!(matches!(snapshots[0].record, TaskFlowRecord::None));
-        let TaskFlowRecord::Pinned(running) = &snapshots[1].record else {
-            panic!("second fixture is pinned");
+        let TaskFlowRecord::Latest(running) = &snapshots[1].record else {
+            panic!("second fixture is a launched Flow");
         };
         // Both authored returns keep separate counts.
         let edges: Vec<_> = running
@@ -259,7 +169,7 @@ mod tests {
         .unwrap();
         let snapshot: TaskFlowSnapshot = serde_json::from_value(stalled.clone()).unwrap();
         assert!(
-            matches!(&snapshot.record, TaskFlowRecord::Pinned(flow) if flow.execution == TaskExecutionState::Stalled)
+            matches!(&snapshot.record, TaskFlowRecord::Latest(flow) if flow.execution == TaskExecutionState::Stalled)
         );
         assert_eq!(serde_json::to_value(snapshot).unwrap(), stalled);
 

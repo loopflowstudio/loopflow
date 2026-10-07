@@ -1,6 +1,6 @@
-// A Task's Flow: the definition a Start would pin, or the pinned invocation and
-// where its saved cursor stands. Topology, occurrence keys, return counts, and
-// control legality come from Rust (`TaskFlowSnapshot`); this view draws them.
+// Flow diagrams: a definition's template and one Flow exec's launched graph
+// with where it stands. Topology, occurrence keys and return counts come
+// from Rust; these views draw them.
 
 #if os(macOS)
 import Loopflow
@@ -11,7 +11,6 @@ import SwiftUI
 enum FlowNodeState: Equatable {
     case completed
     case running
-    case waitingForHuman
     case blocked
     case stalled
     case stopped
@@ -21,11 +20,11 @@ enum FlowNodeState: Equatable {
 }
 
 /// Classify every drawn occurrence from the shared projection.
-func flowNodeStates(_ graph: FlowGraph, pinned: PinnedTaskFlow?) -> [UInt32: FlowNodeState] {
+func flowNodeStates(_ graph: FlowGraph, latest: LatestTaskFlow?) -> [UInt32: FlowNodeState] {
     var states: [UInt32: FlowNodeState] = [:]
     func visit(_ nodes: [FlowNode]) {
         for node in nodes {
-            states[node.key] = state(of: node, pinned: pinned)
+            states[node.key] = state(of: node, latest: latest)
             for path in node.paths { visit(path.steps) }
         }
     }
@@ -33,499 +32,20 @@ func flowNodeStates(_ graph: FlowGraph, pinned: PinnedTaskFlow?) -> [UInt32: Flo
     return states
 }
 
-private func state(of node: FlowNode, pinned: PinnedTaskFlow?) -> FlowNodeState {
-    guard let pinned else { return node.human ? .pendingHuman : .pending }
-    let isCurrent = pinned.current.map { node.contains($0) } ?? false
+private func state(of node: FlowNode, latest: LatestTaskFlow?) -> FlowNodeState {
+    guard let latest else { return node.human ? .pendingHuman : .pending }
+    let isCurrent = latest.current.map { node.contains($0) } ?? false
     if isCurrent {
-        switch pinned.execution {
+        switch latest.execution {
         case .running, .starting: return .running
-        case .human: return .waitingForHuman
         case .blocked: return .blocked
         case .stalled: return .stalled
         case .idle: return .stopped
         case .unknown: return .unknown
         }
     }
-    if pinned.completed.contains(node.key) { return .completed }
+    if latest.completed.contains(node.key) { return .completed }
     return node.human ? .pendingHuman : .pending
-}
-
-/// Match a current captured occurrence and pass; skill labels never select a conversation.
-func participationSession(node: String, pinned: PinnedTaskFlow, sessions: [SessionRecord]) -> SessionRecord? {
-    sessions.first { session in
-        guard session.kind == .flow,
-              case let .step(_, invocation, _, occurrence, iterations, .current) = session.flowMembership
-        else { return false }
-        return invocation == pinned.invocationId && occurrence == UInt32(node) && iterations == pinned.iterations
-    }
-}
-
-struct TaskFlowView: View {
-    @Bindable var model: PodiumModel
-    let task: RoadmapTask
-    let wave: WaveSnapshot
-    var onOpenSession: ((SessionRecord) -> Void)?
-
-    @Environment(\.palette) private var palette
-    @State private var showsDetailedFlow = false
-    @State private var inspectedTransition: InteractionTransition?
-    @State private var hovering = false
-    /// Clock for the running status line's elapsed time; ticks while running.
-    @State private var now = Date()
-    @FocusState private var focus: HeaderFocus?
-
-    private enum HeaderFocus: Hashable { case name, restart, search }
-
-    private var flow: TaskFlowSnapshot { task.flow }
-    private var catalog: PodiumReading<[FlowCatalogEntry]> { model.flowCatalog }
-
-    private var draft: TaskFlowDraft {
-        get { model.navigation.flowDrafts[task.id] ?? TaskFlowDraft() }
-        nonmutating set { model.navigation.flowDrafts[task.id] = newValue }
-    }
-
-    private var inspected: Binding<UInt32?> {
-        Binding(get: {
-            guard let selection = draft.selectedNode,
-                  selection.invocationId == pinned?.invocationId else { return nil }
-            return selection.node
-        }, set: { node in
-            var next = draft
-            next.selectedNode = node.map { FlowNodeSelection(invocationId: pinned?.invocationId, node: $0) }
-            draft = next
-        })
-    }
-
-    private var search: Binding<String> {
-        Binding(get: { draft.search }, set: { draft.search = $0 })
-    }
-
-    private var pinned: PinnedTaskFlow? {
-        if case .pinned(let pinned) = flow.record { return pinned }
-        return nil
-    }
-
-    private var previewName: String { draft.preview ?? flow.recommended }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                header
-                if draft.picker != nil { pickerList }
-                if let pendingRestart = draft.pendingRestart { restartConfirmation(pendingRestart) }
-                if let error = draft.error {
-                    Text(error)
-                        .font(Typography.body(12))
-                        .foregroundStyle(WorkspaceTone.blocked.ink)
-                        .textSelection(.enabled)
-                        .accessibilityIdentifier("task-flow-error")
-                }
-                diagram
-            }
-            .workspacePanel(padding: 13)
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Circle().fill(statusTone.ink).frame(width: 7, height: 7)
-                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                    .accessibilityHidden(true)
-                statusText
-                    .font(Typography.body(13))
-                    .foregroundStyle(statusTone == .blocked ? statusTone.ink : palette.textSecondary)
-                    .textSelection(.enabled)
-                    .accessibilityIdentifier("task-flow-status")
-            }
-            .padding(.leading, 2)
-        }
-        .id("task-flow-anchor")
-        .task { await model.loadFlowCatalog() }
-        .task(id: runningStep != nil) {
-            // Elapsed time only moves while the worker runs; unchanged readings
-            // do not re-render, so the line keeps its own coarse clock.
-            guard runningStep != nil else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(30))
-                now = Date()
-            }
-        }
-        .onExitCommand { dismissTransient() }
-    }
-
-    /// One line under the Flow. Running work reads `● realign · 12m · claude`:
-    /// the current occurrence, how long the shared Task record has been in this
-    /// state, and the provider recorded by the managed Task runtime.
-    private var statusText: Text {
-        guard let step = runningStep else { return Text(statusLine) }
-        var parts: [String] = []
-        if let elapsed = task.runtime.flatMap({ Self.elapsed(since: $0.updatedAt, now: now) }) { parts.append(elapsed) }
-        if let provider = task.runtime?.provider { parts.append(provider) }
-        return Text(step).font(Typography.mono) + Text(parts.map { " · \($0)" }.joined())
-    }
-
-    /// The label of the occurrence the worker is running, when it is.
-    private var runningStep: String? {
-        guard let pinned, pinned.execution == .running || pinned.execution == .starting,
-              let current = pinned.current else { return nil }
-        return pinned.graph.node(current)?.label ?? String(current)
-    }
-
-    /// `12s`, `12m`, `3h 05m`, `2d 03h`; nil when the timestamp does not parse.
-    static func elapsed(since iso: String, now: Date) -> String? {
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let since = parser.date(from: iso) ?? {
-            parser.formatOptions = [.withInternetDateTime]
-            return parser.date(from: iso)
-        }()
-        guard let since else { return nil }
-        let seconds = max(0, Int(now.timeIntervalSince(since)))
-        switch seconds {
-        case ..<60: return "\(seconds)s"
-        case ..<3600: return "\(seconds / 60)m"
-        case ..<86400: return String(format: "%dh %02dm", seconds / 3600, seconds % 3600 / 60)
-        default: return String(format: "%dd %02dh", seconds / 86400, seconds % 86400 / 3600)
-        }
-    }
-
-    private var statusTone: WorkspaceTone {
-        switch flow.record {
-        case .pinned(let pinned): pinned.execution.presentation.tone
-        case .finished: .done
-        case .none: .neutral
-        }
-    }
-
-    /// Returns per loop, in authored order: the Flow's iteration tuple.
-    private var iterationTuple: String? {
-        guard let pinned else { return nil }
-        return flowIterationLabel(pinned.iterations).map { "Iteration \($0)" }
-    }
-
-    // MARK: Header
-
-    private var header: some View {
-        HStack(alignment: .center, spacing: Spacing.sm) {
-            Button {
-                open(pinned == nil ? .preview : .restart)
-            } label: {
-                HStack(spacing: 4) {
-                    Text(pinned?.graph.name ?? previewName)
-                        .font(Typography.code(15))
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(palette.textTertiary)
-                }
-                .foregroundStyle(palette.text)
-            }
-            .buttonStyle(.plain)
-            .focused($focus, equals: .name)
-            .help(pinned == nil ? "Choose the Flow to start" : "Pinned Flow · choose a replacement to stop and restart")
-            .accessibilityLabel(pinned == nil ? "Flow \(previewName), choose another" : "Pinned Flow \(pinned!.graph.name)")
-            .accessibilityIdentifier("task-flow-name")
-
-            if let iterationTuple {
-                Text(iterationTuple)
-                    .font(Typography.code(11.5))
-                    .monospacedDigit()
-                    .foregroundStyle(FlowPalette.loops[1])
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(FlowPalette.loops[0].opacity(0.10), in: RoundedRectangle(cornerRadius: 4))
-                    .help("Returns per loop, in authored order")
-                    .accessibilityIdentifier("task-flow-iteration")
-            } else if pinned == nil {
-                Text("Preview").font(Typography.caption(12)).foregroundStyle(palette.textTertiary)
-            }
-
-            if pinned != nil, revealRestart {
-                let restart = flow.control(.restart)
-                Button("Stop & restart…") { open(.restart) }
-                    .buttonStyle(.plain)
-                    .font(Typography.body(12.5))
-                    .foregroundStyle(palette.accentInk)
-                    .focused($focus, equals: .restart)
-                    .disabled(restart?.unavailable != nil || draft.acting)
-                    .help(restart?.unavailable ?? "Replace this Flow after confirming")
-                    .accessibilityIdentifier("task-flow-restart")
-            }
-            Spacer(minLength: Spacing.sm)
-            if draft.acting { ProgressView().controlSize(.small) }
-            controls
-        }
-        .frame(minHeight: 28)
-        .onHover { hovering = $0 }
-    }
-
-    private var revealRestart: Bool {
-        hovering || focus == .name || focus == .restart || draft.picker == .restart || draft.pendingRestart != nil
-    }
-
-    @ViewBuilder
-    private var controls: some View {
-        if pinned != nil {
-            let resume = flow.control(.resume)
-            Button("Resume") { run(.resume) }
-                .buttonStyle(WorkspaceOutlineButtonStyle())
-                .disabled(resume?.unavailable != nil || draft.acting)
-                .help(resume?.unavailable ?? "Continue from the saved boundary")
-                .accessibilityIdentifier("task-flow-resume")
-        } else {
-            let start = flow.control(.start)
-            Button("Start") { run(.start(flow: previewName)) }
-                .buttonStyle(WorkspaceOutlineButtonStyle())
-                .disabled(start?.unavailable != nil || draft.acting || previewEntry?.graph == nil)
-                .help(start?.unavailable ?? "Pin \(previewName) and start its first step")
-                .accessibilityIdentifier("task-flow-start")
-        }
-    }
-
-    // MARK: Picker
-
-    private var matches: [FlowCatalogEntry] {
-        let entries = catalog.value ?? []
-        let needle = draft.search.trimmingCharacters(in: .whitespaces).lowercased()
-        return needle.isEmpty ? entries : entries.filter { $0.name.lowercased().contains(needle) }
-    }
-
-    private var pickerList: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                TextField(draft.picker == .restart ? "Replacement Flow" : "Search Flows", text: search)
-                    .textFieldStyle(.plain)
-                    .font(Typography.code(12))
-                    .focused($focus, equals: .search)
-                    .onSubmit { if let first = matches.first(where: { $0.graph != nil }) { choose(first.name) } }
-                    .accessibilityIdentifier("task-flow-search")
-                Button("Cancel") { dismissTransient() }
-                    .buttonStyle(.link)
-                    .font(Typography.body(12))
-                    .accessibilityIdentifier("task-flow-search-cancel")
-            }
-            .padding(Spacing.xs)
-            .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: CornerRadius.md))
-            if let reason = catalog.errorMessage {
-                Text("Flows unavailable: \(reason)").font(Typography.caption(11)).foregroundStyle(Color.statusWarning)
-            } else if catalog.isLoading {
-                Text("Reading Flows…").font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-            } else if matches.isEmpty {
-                Text("No Flow matches").font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-            }
-            ForEach(matches.prefix(8)) { entry in
-                Button { choose(entry.name) } label: {
-                    HStack {
-                        Text(entry.name).font(Typography.code(12))
-                        if entry.name == flow.recommended {
-                            Text("recommended").font(Typography.caption(10)).foregroundStyle(palette.textSecondary)
-                        }
-                        Spacer()
-                        if let reason = entry.unavailable {
-                            Text("unavailable").font(Typography.caption(10)).foregroundStyle(Color.statusWarning).help(reason)
-                        }
-                    }
-                    .padding(.vertical, 3)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(entry.graph == nil)
-                .accessibilityIdentifier("task-flow-option-\(entry.name)")
-            }
-        }
-    }
-
-    private func restartConfirmation(_ replacement: String) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("Stop \(pinned?.graph.name ?? "the Flow") and restart with \(replacement)?")
-                .font(Typography.strong(13))
-            Text("Loopflow refreshes this Task from Linear, commits and pushes every change in its worktree as a checkpoint, stops the current worker, and starts \(replacement) from its first step. The Task, worktree, and PR history stay.")
-                .font(Typography.body(12))
-                .foregroundStyle(palette.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("Cancel") { dismissTransient() }
-                    .accessibilityIdentifier("task-flow-restart-cancel")
-                Button("Stop & restart") { run(.restart(flow: replacement)) }
-                    .buttonStyle(WorkspaceOutlineButtonStyle())
-                    .disabled(draft.acting)
-                    .accessibilityIdentifier("task-flow-restart-confirm")
-            }
-            .controlSize(.small)
-        }
-        .padding(Spacing.sm)
-        .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: CornerRadius.md))
-        .accessibilityIdentifier("task-flow-restart-confirmation")
-    }
-
-    // MARK: Diagram
-
-    private var previewEntry: FlowCatalogEntry? {
-        catalog.value?.first { $0.name == previewName }
-    }
-
-    @ViewBuilder
-    private var diagram: some View {
-        if let pinned {
-            participation(pinned.graph, pinned: pinned)
-        } else if let graph = previewEntry?.graph {
-            participation(graph, pinned: nil)
-        } else if let entry = catalog.value?.first(where: { $0.name == previewName }), let reason = entry.unavailable {
-            Text("\(previewName) cannot be previewed: \(reason)")
-                .font(Typography.caption(11)).foregroundStyle(Color.statusWarning)
-        } else if let reason = catalog.errorMessage {
-            Text("Flow preview unavailable: \(reason)")
-                .font(Typography.caption(11)).foregroundStyle(Color.statusWarning)
-        } else if catalog.value != nil {
-            Text("\(previewName) is not an available Flow here")
-                .font(Typography.caption(11)).foregroundStyle(Color.statusWarning)
-        } else {
-            Text("Reading Flows…").font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
-        }
-    }
-
-    @ViewBuilder
-    private func participation(_ graph: FlowGraph, pinned: PinnedTaskFlow?) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            ScrollView(.horizontal) {
-                HStack(spacing: Spacing.sm) {
-                    Text("Start").font(Typography.meta)
-                    ForEach(["@start"] + graph.interactions.stages, id: \.self) { source in
-                        if let node = UInt32(source).flatMap(graph.node) {
-                            Button(node.label) {
-                                if let pinned, let session = participationSession(node: source, pinned: pinned,
-                                    sessions: model.sessions.value ?? []) {
-                                    onOpenSession?(session)
-                                } else {
-                                    inspected.wrappedValue = UInt32(source)
-                                    showsDetailedFlow = true
-                                }
-                            }.buttonStyle(.bordered)
-                            .accessibilityIdentifier("flow-stage-\(source)")
-                        }
-                        ForEach(Array(graph.interactions.transitions.filter { $0.from == source }.enumerated()), id: \.offset) { _, transition in
-                            Button {
-                                inspectedTransition = transition
-                            } label: {
-                                Text(edgeLabel(transition, graph: graph))
-                                    .font(Typography.meta)
-                            }.buttonStyle(.plain)
-                            .help("Inspect automated steps and routes")
-                        }
-                    }
-                    Text("End").font(Typography.meta)
-                }
-            }
-            DisclosureGroup("Detailed Flow", isExpanded: $showsDetailedFlow) {
-                if pinned == nil, let template = previewEntry?.template {
-                    FlowTemplateView(graph: graph, template: template, navigation: model.navigation)
-                } else {
-                    FlowDiagram(graph: graph, pinned: pinned, delivery: deliveryState, inspected: inspected)
-                }
-            }
-        }
-        .popover(isPresented: Binding(get: { inspectedTransition != nil }, set: { if !$0 { inspectedTransition = nil } })) {
-            if let edge = inspectedTransition {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Spacing.sm) {
-                        Text("\(stageLabel(edge.from, graph: graph)) → \(stageLabel(edge.to, graph: graph))")
-                            .font(Typography.textStrong)
-                        ForEach(edge.nodes, id: \.self) { key in
-                            if let node = UInt32(key).flatMap(graph.node) {
-                                Text("\(node.sources.joined(separator: " / ")) · \(node.label) [\(key)]")
-                            }
-                        }
-                        ForEach(Array(edge.routes.enumerated()), id: \.offset) { _, route in
-                            Text("\(route.from) → \(route.to)\(route.condition.map { " · " + $0 } ?? "")")
-                                .font(Typography.code(11))
-                        }
-                        if let pinned { Text(pinned.reason); Text(flowIterationLabel(pinned.iterations) ?? "First pass") }
-                    }.padding()
-                }.frame(minWidth: 340, idealWidth: 480, maxHeight: 420)
-            }
-        }
-    }
-
-    private func stageLabel(_ key: String, graph: FlowGraph) -> String {
-        UInt32(key).flatMap(graph.node)?.label ?? (key == "@start" ? "Start" : "End")
-    }
-
-    private func edgeLabel(_ edge: InteractionTransition, graph: FlowGraph) -> String {
-        let contexts = Set(edge.nodes.flatMap { UInt32($0).flatMap(graph.node)?.sources ?? [] }).sorted()
-        let label = contexts.isEmpty ? (edge.nodes.isEmpty ? "Continue" : graph.name) : contexts.joined(separator: " / ")
-        return "→ \(label) → \(stageLabel(edge.to, graph: graph))"
-    }
-
-    /// The delivery operation's real state, from the Task's active PR record.
-    /// Queue admission is never presented as a merge.
-    private var deliveryState: String? {
-        guard let pr = task.activePr else { return nil }
-        let number = pr.publication?.github.map { "PR #\($0.number)" }
-        switch pr.phase {
-        case .working: return nil
-        case .publishing: return "publishing"
-        case .open:
-            if pr.publication?.merge?.mode == .auto { return [number, "auto-merge requested"].compactMap { $0 }.joined(separator: " ") }
-            return [number, "open"].compactMap { $0 }.joined(separator: " ")
-        case .merged: return [number, "merged"].compactMap { $0 }.joined(separator: " ")
-        case .abandoned: return [number, "abandoned"].compactMap { $0 }.joined(separator: " ")
-        }
-    }
-
-    private var statusLine: String {
-        switch flow.record {
-        case .pinned(let pinned):
-            // Running, starting, review and unknown reasons already name their
-            // state; a failure reason and an idle boundary need the label.
-            switch pinned.execution {
-            case .blocked: return "Blocked · \(pinned.reason)"
-            case .idle: return "Stopped · \(pinned.reason)"
-            case .running, .starting, .human, .unknown, .stalled: return pinned.reason
-            }
-        case .finished(let name):
-            return "\(name) finished · its pinned definition is not retained. Preview: \(previewName)"
-        case .none:
-            if task.runtime?.started == true {
-                return "No Flow recorded"
-            }
-            return "Not started · No execution history yet."
-        }
-    }
-
-    // MARK: Actions
-
-    private func open(_ mode: TaskFlowDraft.Picker) {
-        guard !draft.acting else { return }
-        if mode == .restart, flow.control(.restart)?.unavailable != nil { return }
-        var next = draft
-        next.picker = mode
-        next.pendingRestart = nil
-        next.search = ""
-        draft = next
-        focus = .search
-        Task { await model.loadFlowCatalog(force: true) }
-    }
-
-    private func choose(_ name: String) {
-        var next = draft
-        switch next.picker {
-        case .preview:
-            next.preview = name
-            next.selectedNode = nil
-        case .restart: next.pendingRestart = name
-        case nil: break
-        }
-        next.picker = nil
-        next.search = ""
-        draft = next
-    }
-
-    private func dismissTransient() {
-        var next = draft
-        next.picker = nil
-        next.pendingRestart = nil
-        next.search = ""
-        draft = next
-        inspected.wrappedValue = nil
-    }
-
-    private func run(_ request: TaskFlowControlRequest) {
-        Task { await model.performFlowControl(request, task: task, wave: wave) }
-    }
 }
 
 // MARK: - Diagram
@@ -533,7 +53,7 @@ struct TaskFlowView: View {
 struct FlowTemplateView: View {
     let graph: FlowGraph
     let template: FlowTemplate
-    @Bindable var navigation: WorkspaceNavigation
+    @Bindable var navigation: WorkNavigation
 
     private var expanded: Binding<Set<String>> {
         Binding(get: { navigation.expandedTemplateGroups[template.revision] ?? [] },
@@ -541,7 +61,7 @@ struct FlowTemplateView: View {
     }
 
     static func spans(_ original: FlowGraph, projection: FlowTemplateProjection) -> [LoopSpan] {
-        FlowDiagram.spans(original, pinned: nil).compactMap { edge in
+        FlowDiagram.spans(original, latest: nil).compactMap { edge in
             guard let fromKey = projection.visibleKeys[original.steps[edge.from].key],
                   let toKey = projection.visibleKeys[original.steps[edge.to].key],
                   let from = projection.graph.steps.firstIndex(where: { $0.key == fromKey }),
@@ -638,7 +158,7 @@ private struct TemplateDiagram: View {
     @State private var inspected: UInt32?
     var body: some View {
         let projection = FlowTemplateProjection(graph: graph, items: items, expanded: expanded)
-        FlowDiagram(graph: projection.graph, pinned: nil, inspected: Binding(
+        FlowDiagram(graph: projection.graph, latest: nil, inspected: Binding(
             get: { inspected },
             set: { key in
                 if let key, let group = projection.groups[key] {
@@ -657,9 +177,7 @@ private struct TemplateDiagram: View {
 /// gets its own labelled row. Only an overwide loop row scrolls.
 struct FlowDiagram: View {
     let graph: FlowGraph
-    let pinned: PinnedTaskFlow?
-    /// Real state of the delivery operation (the `pr land` op), shown on its chip.
-    var delivery: String? = nil
+    let latest: LatestTaskFlow?
     @Binding var inspected: UInt32?
     var templateSpans: [LoopSpan]? = nil
     /// Layout may fold nodes; detail reads the complete definition.
@@ -679,9 +197,9 @@ struct FlowDiagram: View {
     static let rowGap: CGFloat = 6
     static let loopLabelHeight: CGFloat = 12
 
-    /// Top-level authored returns in authored order, numbered from 1. A pinned
+    /// Top-level authored returns in authored order, numbered from 1. A launched
     /// Flow adds each edge's saved counts. Nested XOR returns appear in node detail.
-    static func spans(_ graph: FlowGraph, pinned: PinnedTaskFlow?) -> [LoopSpan] {
+    static func spans(_ graph: FlowGraph, latest: LatestTaskFlow?) -> [LoopSpan] {
         let steps = graph.steps
         return steps.enumerated().compactMap { to, node -> (Int, Int, FlowNode)? in
             guard let target = node.returnsTo,
@@ -691,12 +209,12 @@ struct FlowDiagram: View {
         .enumerated()
         .map { number, edge in
             LoopSpan(decider: edge.2.key, number: number + 1, from: edge.0, to: edge.1,
-                     evidence: pinned?.returns.first { $0.decider == edge.2.key })
+                     evidence: latest?.returns.first { $0.decider == edge.2.key })
         }
     }
 
     var body: some View {
-        let states = flowNodeStates(graph, pinned: pinned)
+        let states = flowNodeStates(graph, latest: latest)
         let rows = layout(width: available > 0 ? available : 1000)
         let contentWidth = rows.map(\.width).max() ?? 0
         VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -721,7 +239,7 @@ struct FlowDiagram: View {
                 }
             }
             if let key = inspected, let node = (detailGraph ?? graph).node(key) {
-                FlowNodeDetail(node: node, state: states[key] ?? .pending, pinned: pinned, graph: detailGraph ?? graph)
+                FlowNodeDetail(node: node, state: states[key] ?? .pending, latest: latest, graph: detailGraph ?? graph)
             }
         }
     }
@@ -765,7 +283,6 @@ struct FlowDiagram: View {
     private func nodeText(_ node: FlowNode) -> String {
         switch node.kind {
         case .xor: "\(node.label) · \(node.paths.count) paths"
-        case .op where node.label.hasPrefix("pr ") && delivery != nil: "\(node.label) · \(delivery!)"
         case .op, .skill: node.label
         }
     }
@@ -787,7 +304,7 @@ struct FlowDiagram: View {
 
     private func layout(width available: CGFloat, gap: CGFloat) -> [Row] {
         let count = graph.steps.count
-        let spans = templateSpans ?? Self.spans(graph, pinned: pinned)
+        let spans = templateSpans ?? Self.spans(graph, latest: latest)
         guard let first = spans.map(\.from).min(), let last = spans.map(\.to).max() else {
             // No loops: wrap the sequence greedily.
             var rows: [Row] = []
@@ -1035,7 +552,7 @@ struct LoopSpan {
 private struct FlowNodeDetail: View {
     let node: FlowNode
     let state: FlowNodeState
-    let pinned: PinnedTaskFlow?
+    let latest: LatestTaskFlow?
     let graph: FlowGraph
 
     @Environment(\.palette) private var palette
@@ -1053,7 +570,7 @@ private struct FlowNodeDetail: View {
                     .foregroundStyle(palette.textSecondary)
             }
             ForEach(node.paths, id: \.name) { path in
-                let current = pinned?.current.map { key in path.steps.contains { $0.contains(key) } } ?? false
+                let current = latest?.current.map { key in path.steps.contains { $0.contains(key) } } ?? false
                 Text("\(path.name)\(current ? " (selected)" : "") — \(path.steps.map(\.label).joined(separator: " → ").ifEmpty("no steps")) · \(path.description)")
                     .font(Typography.caption(11))
                     .foregroundStyle(current ? palette.text : palette.textSecondary)
@@ -1076,7 +593,7 @@ private struct FlowNodeDetail: View {
         if let id = node.id { facts.append("id \(id)") }
         if let target = node.returnsTo {
             let label = graph.node(target)?.label ?? String(target)
-            let taken = pinned?.returns.first { $0.decider == node.key }?.traversals
+            let taken = latest?.returns.first { $0.decider == node.key }?.traversals
             facts.append("Iterate returns to \(label)" + (taken.map { " · taken \($0)×" } ?? ""))
         }
         if node.sources.count > 1 { facts.append("from \(node.sources.joined(separator: " › "))") }
@@ -1092,11 +609,11 @@ enum FlowPalette {
     /// Loop tints in authored order; running shares the first.
     static let loops = [Color.adaptive(light: 0x3A74C4, dark: 0x86B0EA), Color.adaptive(light: 0x24508F, dark: 0xB4CDEF)]
 
-    static func tone(_ state: FlowNodeState) -> WorkspaceTone {
+    static func tone(_ state: FlowNodeState) -> WorkTone {
         switch state {
         case .completed: .done
         case .running: .running
-        case .waitingForHuman, .pendingHuman: .human
+        case .pendingHuman: .human
         case .blocked, .stalled: .blocked
         case .stopped, .unknown: .stopped
         case .pending: .neutral
@@ -1107,9 +624,8 @@ enum FlowPalette {
         switch state {
         case .completed: "completed this pass"
         case .running: "running"
-        case .waitingForHuman: "waiting for your review"
         case .blocked: "blocked"
-        case .stalled: "stalled; interrupt then resume"
+        case .stalled: "stalled"
         case .stopped: "stopped here"
         case .unknown: "current, worker state unknown"
         case .pendingHuman: "human review, pending"

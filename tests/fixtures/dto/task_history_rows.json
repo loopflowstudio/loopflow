@@ -32,7 +32,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -46,14 +47,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is canceled"
         }
       ]
@@ -94,7 +87,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -108,14 +102,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is canceled"
         }
       ]
@@ -156,7 +142,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -170,14 +157,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is canceled"
         }
       ]
@@ -218,7 +197,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -232,14 +212,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is canceled"
         }
       ]
@@ -280,7 +252,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -294,14 +267,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is canceled"
         }
       ]
@@ -342,7 +307,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -356,14 +322,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is canceled"
         }
       ]
@@ -404,7 +362,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -418,14 +377,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is canceled"
         }
       ]
@@ -466,7 +417,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -481,14 +433,6 @@
         {
           "kind": "start",
           "unavailable": null
-        },
-        {
-          "kind": "resume",
-          "unavailable": "No pinned Flow to resume; start one"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Task has no Work yet; start a Flow instead"
         }
       ]
     },
@@ -528,7 +472,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -543,14 +488,6 @@
         {
           "kind": "start",
           "unavailable": null
-        },
-        {
-          "kind": "resume",
-          "unavailable": "No pinned Flow to resume; start one"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Task has no Work yet; start a Flow instead"
         }
       ]
     },
@@ -590,7 +527,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -605,14 +543,6 @@
         {
           "kind": "start",
           "unavailable": null
-        },
-        {
-          "kind": "resume",
-          "unavailable": "No pinned Flow to resume; start one"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Task has no Work yet; start a Flow instead"
         }
       ]
     },
@@ -652,7 +582,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -667,14 +598,6 @@
         {
           "kind": "start",
           "unavailable": null
-        },
-        {
-          "kind": "resume",
-          "unavailable": "No pinned Flow to resume; start one"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Task has no Work yet; start a Flow instead"
         }
       ]
     },
@@ -714,7 +637,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -728,14 +652,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is complete"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is complete"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is complete"
         }
       ]
@@ -776,7 +692,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -790,14 +707,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is complete"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is complete"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is complete"
         }
       ]
@@ -838,7 +747,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -852,14 +762,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is complete"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is complete"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is complete"
         }
       ]
@@ -900,7 +802,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -915,14 +818,6 @@
         {
           "kind": "start",
           "unavailable": null
-        },
-        {
-          "kind": "resume",
-          "unavailable": "No pinned Flow to resume; start one"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Task has no Work yet; start a Flow instead"
         }
       ]
     },
@@ -962,7 +857,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     },
     "actions": {
       "recommended": null,
@@ -976,14 +872,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Linear Task is canceled"
-        },
-        {
-          "kind": "restart",
           "unavailable": "Linear Task is canceled"
         }
       ]

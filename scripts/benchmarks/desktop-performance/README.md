@@ -19,6 +19,9 @@ uv run python scripts/benchmarks/desktop-performance/launch.py run --work /tmp/d
 uv run python scripts/benchmarks/desktop-performance/startup.py capture --repo ~/src/loopflow --output /tmp/startup-capture
 uv run python scripts/benchmarks/desktop-performance/startup.py run --capture /tmp/startup-capture --output /tmp/startup-run
 
+# A commit from another process to the row on screen, through the real reader, on that private copy.
+uv run python scripts/desktop_performance.py write-visible --home /tmp/desktop-launch/home --repo ~/src/loopflow --output /tmp/write-visible
+
 # Native capture/OCR journeys; the historical September receipt remains on disk.
 uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-after
 # Capture/OCR journeys: record a baseline before changing the production build.
@@ -157,6 +160,17 @@ has not run before, so this is the launch after an update; the other scenarios
 reopen one bundle and never pay it. `--strip` builds the bundle without local
 symbols. `20261005-first-launch/` is the receipt: about 390 ms more before
 `main`.
+
+`desktop_performance.py write-visible` opens one window on a private Home
+through the real `lf monitor work --watch` reader, then commits from
+`sqlite3`: a Task created and renamed, a Session created, renamed and completed.
+Each interval runs from the writer's exit to the row read back from a captured
+bitmap; `write_ms` is recorded beside it. The Home must be a copy (it refuses
+the one in use) already at the schema of the `--lf` being measured, and a
+current Task in `--repo` is the model for the new one. Written Tasks are
+deleted after each attempt; completed benchmark Sessions stay in the copy. It
+needs a logged-in desktop. Each write waits for an idle reader, so it does not
+sample a commit landing behind a reading already in flight.
 
 `startup.py` measures when the model first holds outline content for an
 uncached launch, a launch with a saved workspace, a saved launch whose reads

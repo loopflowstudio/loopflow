@@ -3,7 +3,7 @@
   "observed_at": 1784606400,
   "nodes": [
     {
-      "id": "exec:exec-podium",
+      "id": "exec:exec-loopflow",
       "parent_id": null,
       "kind": "exec",
       "label": "lf task pursue",
@@ -16,7 +16,7 @@
     },
     {
       "id": "provider:4101",
-      "parent_id": "exec:exec-podium",
+      "parent_id": "exec:exec-loopflow",
       "kind": "provider_process",
       "label": "codex 4101",
       "repo": "/src/loopflow",
@@ -28,7 +28,7 @@
     },
     {
       "id": "provider:4201",
-      "parent_id": "exec:exec-podium",
+      "parent_id": "exec:exec-loopflow",
       "kind": "provider_process",
       "label": "claude 4201",
       "repo": "/src/loopflow",

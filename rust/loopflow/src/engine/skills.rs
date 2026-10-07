@@ -235,7 +235,7 @@ fn first_line(value: &str) -> String {
     value.lines().next().unwrap_or("").trim().to_string()
 }
 
-fn first_prose_line(body: &str) -> Option<String> {
+pub(crate) fn first_prose_line(body: &str) -> Option<String> {
     for raw in body.lines() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with('#') || line.starts_with("```") {
@@ -423,10 +423,9 @@ mod tests {
             assert!(!root.join("loopflow/SKILL.md").exists());
             assert!(!root.join("review-open-work/SKILL.md").exists());
             let control = fs::read_to_string(root.join("repo/operate/SKILL.md")).unwrap();
-            assert!(control.contains("lf restart"));
             assert!(control.contains("lf wave place"));
             let implement = fs::read_to_string(root.join("implement/SKILL.md")).unwrap();
-            assert!(!implement.contains("lf restart"));
+            assert!(!implement.contains("lf wave place"));
         }
     }
 

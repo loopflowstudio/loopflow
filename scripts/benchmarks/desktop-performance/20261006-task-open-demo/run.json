@@ -1,0 +1,100 @@
+{
+  "binary_sha256": "3c59cb7dc75731b493ce3971baf138457997d449051bd13ee22411ef0b4b7f4c",
+  "build_command": [
+    "swift",
+    "build",
+    "--package-path",
+    "swift",
+    "--build-tests",
+    "-Xswiftc",
+    "-gnone",
+    "--jobs",
+    "4"
+  ],
+  "build_mode": "SwiftPM debug -gnone",
+  "command": [
+    "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/libexec/swift/pm/swiftpm-testing-helper",
+    "--test-bundle-path",
+    "/Users/jack/src/loopflow.open-tasks-directly-and-optimize/swift/.build/debug/LoopflowSwiftPackageTests.xctest/Contents/MacOS/LoopflowSwiftPackageTests",
+    "--testing-library",
+    "swift-testing",
+    "--filter",
+    "DesktopPerformanceTests.measureSnapshotTaskOpening"
+  ],
+  "exit_code": 0,
+  "host": {
+    "arch": "arm64",
+    "name": "Jacks-MacBook-Pro-2.local",
+    "os": "macOS-26.0.1-arm64-arm-64bit-Mach-O"
+  },
+  "issue": "LOO-368",
+  "measurement_source": "c715d567b3a96cf933fb0de40f84b8eac9459ee364d9f537c4fb232466def173",
+  "population_source": "isolated SQLite online backup",
+  "repo": "/Users/jack/src/loopflow",
+  "resources_after": {
+    "free_bytes": 95895171072,
+    "load_average": [
+      18.19580078125,
+      19.654296875,
+      16.783203125
+    ]
+  },
+  "resources_before": {
+    "free_bytes": 99030351872,
+    "load_average": [
+      25.3359375,
+      19.51171875,
+      16.25390625
+    ]
+  },
+  "schema": 1,
+  "snapshot": {
+    "captured_at": "2026-10-05T20:32:39.541715+00:00",
+    "counts": {
+      "access_profiles": 4,
+      "agent_sessions": 604,
+      "auth_browser_bindings": 7,
+      "blob_tokens": 1401,
+      "ci_incidents": 212,
+      "execs": 218637,
+      "flow_events": 901,
+      "flow_sessions": 104,
+      "homes": 1,
+      "metric_instruments": 0,
+      "metric_observations": 0,
+      "pm_issue_changes": 0,
+      "pm_items": 163,
+      "pm_projects": 35,
+      "pm_wave_projects": 35,
+      "pm_wave_sync": 21,
+      "pr_landings": 142,
+      "project_events": 30536,
+      "projects": 49,
+      "provider_account_limits": 12,
+      "provider_account_switches": 1,
+      "provider_accounts": 6,
+      "provider_routes": 12,
+      "provider_session_accounts": 3724,
+      "provider_tokens": 5,
+      "schema_migrations": 62,
+      "session_events": 521637,
+      "sqlite_sequence": 3,
+      "task_deletions": 1,
+      "task_events": 66836,
+      "task_issue_identities": 1,
+      "task_linear_ingested_comments": 611,
+      "task_linear_observations": 342,
+      "task_pr_repair_incidents": 3,
+      "task_prs": 449,
+      "tasks": 342,
+      "tool_responses": 0,
+      "waves": 53,
+      "work_placements": 441
+    },
+    "sha256": "2d4ec12d2103f3200d3675ec419f97a6b06b782c697f63f0ab9d80c583901725"
+  },
+  "source_after": "a055e2c7a45642e022191e5322e60c6656a92ee6257680b4da5d2d724ef49ac1",
+  "source_before": "a055e2c7a45642e022191e5322e60c6656a92ee6257680b4da5d2d724ef49ac1",
+  "started_at": "2026-10-06T11:45:55.903967+00:00",
+  "test_binary_sha256": "b5051356f3ce7fe83b5854a287221f3469b74c56b1afc827cf5746e489985ef8"
+}

@@ -1,7 +1,7 @@
 # Environment
 
 Environment configures a process; it never decides what the process is. A
-variable that names a Home, an Exec or a claim is checked against the store or
+variable that names a Home or an Exec is checked against the store or
 the filesystem before it grants anything, and a new session starts without it.
 
 ```bash
@@ -30,13 +30,11 @@ drops it too, so sessions a person opens by hand inherit none of it.
 |---|---|---|---|
 | `LF_CAPTURE_KEY` | Session capture and native resume | Capture lookup, provider callbacks, Task comments | Selects subordinate captured history in the resolved Home. SQLite must record its owning Session; a present manifest must agree. It grants neither Task nor Flow authority. |
 | `LF_TRACE_ID`, `LF_PROCESS_ID` | Journal, agent and session launch | Journal, git operations | Joins a child's events to its caller's trace. |
-| `LF_AGENT_CALLER` | Session capture and native resume | Journal, once, then resolved process context | Carries Session identity, provider generation and origin Exec. Nested commands use the resolved caller for ancestry and checkpoint composition; review mutations reject replaced providers. |
-| `LF_AS` | `--as`, Task worker launch | Skill and Task commands | Declares the Work a command contributes to; resolved against the registry. |
+| `LF_AGENT_CALLER` | Session capture and native resume | Journal, once, then resolved process context | Carries Session identity, provider generation and origin Exec for nested command ancestry and checkpoint composition. |
+| `LF_AS` | `--as` | Run and Task commands | Declares the Work a command contributes to; resolved against the registry. |
+| `LF_FLOW_ID` | Flow driver, for each agent step | The step's agent and skills | Names the Flow a step serves: its driver Exec's id. Steps of one Flow share notes under it; `lf` reads nothing from it. |
 | `LF_WAVE_ID` | Wave and Task launches | Wave resolution | Default Wave for a child command. |
-| `LF_FLOW_STEP` | Flow driver | `ops::flow_run::token` | Fences a step to one Flow position; validated against the saved Flow. |
-| `LF_WORK_ADVANCE_CLAIM` | Task worker launch | Flow and run commands, once, then removed | One-shot claim; must match the Task's stored claim. |
-| `LF_TASK_SKILL_OPTIONS` | `lf task` commands | Task worker, once | Carries step flags across the worker launch. |
-| `LF_HUMAN_SESSION`, `LF_PREPARED_CAPTURE`, `LF_REVIEW_CAPTURE` | Conversation and review launch | `ops::human_session`, removed on use | Identify the prepared conversation a new terminal opens. |
+| `LF_HUMAN_SESSION`, `LF_PREPARED_CAPTURE` | Conversation launch | `ops::human_session`, removed on use | Identify the prepared conversation a new terminal opens. |
 | `LF_GIT_OPERATION_ID` | `ops::git_operation` | Nested lf commands inside an owned git operation | Lets recovery continue its own operation; checked against the worktree's record. |
 | `LF_PROVIDER_ACCOUNT_ID` | Provider launch | provider callback | Records which account a provider child used. |
 | `LF_INSTALL_SWITCH` | Published install | `machine_install` | One-shot capability; must equal the id of the switch receipt in progress. |

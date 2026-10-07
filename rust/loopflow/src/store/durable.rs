@@ -70,6 +70,11 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.work_status(&work)).await
     }
 
+    pub async fn task_state(&self, task: &TaskId) -> StoreResult<crate::durable::TaskState> {
+        let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_state(&task)).await
+    }
+
     pub async fn work_for_child(&self, target: &ChildRef) -> StoreResult<WorkRef> {
         let target = target.clone();
         run_sqlite(&self.sqlite, move |store| store.work_for_child(&target)).await

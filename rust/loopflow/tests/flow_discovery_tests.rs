@@ -1,19 +1,18 @@
+mod support;
+
 use std::process::Command;
 
 use clap::Parser;
 
-use loopflow::durable::{FlowPage, FlowSession};
-use loopflow::engine::invocation::QueuedInvocation;
-use loopflow::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
+use loopflow::durable::FlowPage;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 
 #[test]
 fn flow_inventory_wire_keeps_unknowns_and_requires_metadata() {
     let json = include_str!("../../../tests/fixtures/dto/flow_page.json");
     let page: FlowPage = serde_json::from_str(json).unwrap();
-    assert_eq!(page.entries[0].summary.name, None);
+    assert_eq!(page.entries[0].summary.name, "feature");
     assert_eq!(page.entries[0].repo, None);
-    assert!(!page.entries[0].managed);
     assert_eq!(
         serde_json::to_value(page).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
@@ -22,7 +21,7 @@ fn flow_inventory_wire_keeps_unknowns_and_requires_metadata() {
     missing["entries"][0]
         .as_object_mut()
         .unwrap()
-        .remove("managed");
+        .remove("updated_at");
     assert!(serde_json::from_value::<FlowPage>(missing).is_err());
 }
 
@@ -52,40 +51,21 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
         .status()
         .unwrap()
         .success());
-    let store = open_ephemeral_store(&StorageConfig::sqlite(dir.path().join("loopflow.db")))
+    open_ephemeral_store(&StorageConfig::sqlite(dir.path().join("loopflow.db")))
         .await
         .unwrap();
-    let flow = store
-        .create_flow(FlowSession {
-            invocation: QueuedInvocation::new(
-                "no-template",
-                vec![ConcreteStep::Skill(ConcreteSkill {
-                    skill: Skill::named("saved-skill"),
-                    sources: vec![],
-                    id: None,
-                    human: false,
-                    repeat: None,
-                })],
-            )
-            .unwrap(),
-            cursor: ExecutionCursor::default(),
-            version: 0,
-            task_id: None,
-            wave_id: None,
-            cwd: dir.path().into(),
-            message: None,
-            model: None,
-            selected_capture: None,
-            pending_session_id: None,
-            ready_summary: None,
-            worker_generation: 0,
-            claim: None,
-            failure: None,
-            finished: false,
-            updated_at: time::OffsetDateTime::now_utc(),
-        })
-        .await
-        .unwrap();
+    let expected_repo = loopflow::repository::CanonicalRepo::discover(dir.path())
+        .unwrap()
+        .to_string();
+    // A Flow whose definition no longer exists: only its Execs describe it.
+    let flow = support::record_flow(
+        dir.path(),
+        std::path::Path::new(&expected_repo),
+        "no-template",
+        "saved-skill",
+        "failed",
+    );
+    let before = support::recorded_flows(dir.path());
     let output = command(
         dir.path(),
         &[
@@ -105,10 +85,11 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
         String::from_utf8_lossy(&output.stderr)
     );
     let page: FlowPage = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(page.entries[0].summary.id, flow.id());
-    let expected_repo = loopflow::repository::CanonicalRepo::discover(dir.path())
-        .unwrap()
-        .to_string();
+    assert_eq!(page.entries[0].summary.id, flow);
+    assert_eq!(
+        page.entries[0].summary.state,
+        loopflow::session::FlowSummaryState::Stopped
+    );
     assert_eq!(
         page.entries[0].repo.as_deref(),
         Some(expected_repo.as_str())
@@ -125,12 +106,9 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
             .entries[0]
             .summary
             .id,
-        flow.id()
+        flow
     );
-    let detail = command(
-        dir.path(),
-        &["flow", "show", "--sessions", "--json", flow.id()],
-    );
+    let detail = command(dir.path(), &["flow", "show", "--sessions", "--json", &flow]);
     assert!(
         detail.status.success(),
         "{}",
@@ -138,8 +116,14 @@ async fn public_flow_discovery_reads_saved_detail_without_selecting_work() {
     );
     let detail: loopflow::durable::FlowDetail = serde_json::from_slice(&detail.stdout).unwrap();
     assert_eq!(detail.graph.name, "no-template");
+    assert_eq!(detail.graph.steps[0].label, "saved-skill");
     assert_eq!(detail.current, Some(0));
-    assert_eq!(store.flow(flow.id()).await.unwrap().unwrap(), flow);
+    assert_eq!(detail.steps.len(), 1);
+    assert_eq!(
+        support::recorded_flows(dir.path()),
+        before,
+        "reading changes nothing"
+    );
     let bad = command(dir.path(), &["flow", "list", "--limit", "1"]);
     assert!(!bad.status.success());
     let templates = command(dir.path(), &["flow", "list", "--json"]);
@@ -162,8 +146,6 @@ fn flow_inventory_flags_do_not_select_task_launch_context() {
         "PROOF-1",
         "--for-wave",
         "wave",
-        "--managed",
-        "false",
         "--limit",
         "2",
         "--json",
@@ -176,11 +158,22 @@ fn flow_inventory_flags_do_not_select_task_launch_context() {
             cmd: loopflow::lf::FlowCommand::List { inventory, json },
         }) => {
             assert_eq!(inventory.for_task.as_deref(), Some("PROOF-1"));
-            assert_eq!(inventory.managed, Some(false));
             assert!(json);
         }
         _ => panic!("expected Flow discovery"),
     }
+    assert!(
+        loopflow::lf::Cli::try_parse_from([
+            "lf",
+            "flow",
+            "list",
+            "--sessions",
+            "--managed",
+            "true"
+        ])
+        .is_err(),
+        "no Flow is selected over another"
+    );
     assert!(loopflow::lf::Cli::try_parse_from([
         "lf",
         "flow",

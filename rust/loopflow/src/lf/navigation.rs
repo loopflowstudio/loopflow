@@ -222,7 +222,9 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
         Commands::Help { .. }
             | Commands::List { .. }
             | Commands::Flow {
-                cmd: FlowCommand::List { .. } | FlowCommand::Show { .. }
+                cmd: FlowCommand::List { .. }
+                    | FlowCommand::Show { .. }
+                    | FlowCommand::Customize { .. }
             }
     ) {
         return None;
@@ -238,7 +240,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
             } => {
                 anyhow::ensure!(
                     inventory.is_empty(),
-                    "saved FlowSession filters require --sessions"
+                    "filters over Flows that ran require --sessions"
                 );
                 crate::lf::commands::flow::list(&repo, *json)?;
             }
@@ -248,6 +250,12 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 anyhow::ensure!(!json, "--json requires --sessions for flow show");
                 crate::lf::commands::flow::show(name, &repo)?;
             }
+            Commands::Flow {
+                cmd: FlowCommand::Customize { name },
+            } => println!(
+                "{}",
+                crate::engine::workflow::customize(name, &repo)?.display()
+            ),
             _ => unreachable!("inspection command selected above"),
         }
         Ok(())
@@ -288,7 +296,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
             .filter(|cmd| !cmd.is_hide_set())
             .map(Command::get_name)
             .collect::<Vec<_>>();
-        let mut output = String::from("Usage: lf <name> [message] | <command>\n\nRun\n  lf feature [message]       carry a change through its authored reviews\n  lf run <name> [message]    select a flow, otherwise a skill\n  lf skill <name> [message]  select a skill explicitly\n\nDiscover\n  lf list                   commands, skills, and flows\n  lf help <path>             explain a command or definition\n  lf help --all              show the complete command tree\n\nCommands\n");
+        let mut output = String::from("Usage: lf <name> [message] | <command>\n\nRun\n  lf pursue [message]        build a change through to a published PR\n  lf run <name> [message]    select a flow, otherwise a skill\n  lf skill <name> [message]  select a skill explicitly\n\nDiscover\n  lf list                   commands, skills, and flows\n  lf help <path>             explain a command or definition\n  lf help --all              show the complete command tree\n\nCommands\n");
         for row in names.chunks(5) {
             output.push_str(&format!(
                 "  {}\n",

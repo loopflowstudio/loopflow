@@ -126,7 +126,7 @@ pub fn run(
     Ok(())
 }
 
-fn build_snapshot(
+pub(crate) fn build_snapshot(
     store: &SqliteStore,
     generated_at: i64,
     since: i64,

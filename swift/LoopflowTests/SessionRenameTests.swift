@@ -13,7 +13,7 @@ import Testing
             try record("first", title: "review-design"),
             try record("second", title: "lyric-cadenza"),
         ])
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         await model.refreshSessions()
         model.navigation.selectedSessionId = "first"
@@ -54,7 +54,7 @@ import Testing
             try record("second", title: "lyric-cadenza"),
         ])
         await source.reject("Session name must be at most 80 characters")
-        let model = PodiumModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refreshSessions()
         model.navigation.selectedSessionId = "first"
         model.beginSessionRename(try #require(model.sessions.value?.first { $0.id == "first" }))
@@ -78,14 +78,14 @@ import Testing
     func breadcrumbNamesTheExactSession() throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
         let task = WorkReference.task(id: "ts_review00000000000000000000000000")
-        let one = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [try record("first", title: "review-design", work: task)])
+        let one = WorkProjection(roadmaps: roadmap.waves, sessions: [try record("first", title: "review-design", work: task)])
         let single = try #require(one.breadcrumb(selection: nil, sessionId: "first"))
         #expect(single.wave?.roadmap.wave.name == "product")
         #expect(single.task?.task.task.identifier == "W2-131")
         #expect(single.session?.id == "first")
         #expect(single.siblings.map(\.id) == ["first"])
 
-        let many = WorkspaceProjection(roadmaps: roadmap.waves, sessions: [
+        let many = WorkProjection(roadmaps: roadmap.waves, sessions: [
             try record("first", title: "Launch design", work: task),
             try record("second", title: "Verification cases", work: task),
             try record("loose", title: "lyric-cadenza", work: nil),
@@ -100,7 +100,7 @@ import Testing
         #expect(unmatched.wave == nil && unmatched.task == nil)
     }
 
-    private func title(_ model: PodiumModel, _ id: String) -> String? {
+    private func title(_ model: WorkModel, _ id: String) -> String? {
         model.sessions.value?.first { $0.id == id }?.title
     }
 }
@@ -112,10 +112,10 @@ func renameFixtureRecord(
     let taskIds = work.flatMap { $0.kind == .task ? [$0.id] : nil } ?? []
     let taskIdsJSON = String(decoding: try JSONEncoder().encode(taskIds), as: UTF8.self)
     return try JSONDecoder().decode(SessionRecord.self, from: Data("""
-    {"id":"\(id)","run_id":"run_\(id)", "interactive": true,"kind":"conversation","work":\(workJSON),"title":"\(title)",
+    {"id":"\(id)","run_id":"run_\(id)", "interactive": true,"work":\(workJSON),"title":"\(title)",
      "detail":"codex","cwd":"/src/loopflow","state":"active","wave_id":null,"work_path":null,
-     "actions":\(sessionActionFixtureJSON(kind: "conversation", state: "active")),
-     "ready_summary":null,"title_source":"\(source)","flow_membership":{"kind":"independent"},
+     "actions":\(sessionActionFixtureJSON(state: "active")),
+     "ready_summary":null,"title_source":"\(source)","task_primary":false, "flow_membership":{"kind":"independent"},
      "task_ids": \(taskIdsJSON), "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
     """.utf8))
 }

@@ -35,14 +35,6 @@
         {
           "kind": "start",
           "unavailable": null
-        },
-        {
-          "kind": "resume",
-          "unavailable": "No pinned Flow to resume; start one"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Task has no Work yet; start a Flow instead"
         }
       ]
     },
@@ -58,7 +50,8 @@
         "authored_commits": null,
         "recovery_required": null,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     }
   },
   "completed": {
@@ -85,6 +78,7 @@
     "runtime": {
       "work_id": "ts_completed",
       "status": "done",
+      "planning_conflict": null,
       "reason": "done",
       "updated_at": "2026-07-14T20:00:00Z",
       "provider": "codex",
@@ -110,14 +104,6 @@
         {
           "kind": "start",
           "unavailable": "Task is complete"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Task is complete"
-        },
-        {
-          "kind": "restart",
-          "unavailable": "Task is complete"
         }
       ]
     },
@@ -133,7 +119,8 @@
         "authored_commits": false,
         "recovery_required": false,
         "reason": null
-      }
+      },
+      "unresolved_execution": false
     }
   },
   "stale": {
@@ -159,7 +146,8 @@
     },
     "runtime": {
       "work_id": "ts_stale",
-      "status": "ready",
+      "status": "active",
+      "planning_conflict": "Linear calls Task LOO-1 complete while it is active on its workflow; `lf task move LOO-1 end --force` completes it here",
       "reason": "ready",
       "updated_at": "2026-07-14T18:00:00Z",
       "provider": "codex",
@@ -178,7 +166,7 @@
     "flow": {
       "recommended": "build",
       "record": {
-        "kind": "pinned",
+        "kind": "latest",
         "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
         "graph": {
           "name": "feature",
@@ -224,7 +212,7 @@
             {
               "key": 3,
               "id": "decide",
-              "label": "loop-decide",
+              "label": "loop-or-next",
               "kind": "skill",
               "human": false,
               "returns_to": 1,
@@ -250,7 +238,7 @@
             {
               "key": 5,
               "id": "decide_delivery",
-              "label": "loop-decide",
+              "label": "loop-or-next",
               "kind": "skill",
               "human": false,
               "returns_to": 1,
@@ -460,7 +448,6 @@
         ],
         "execution": "blocked",
         "reason": "Release target is unavailable",
-        "restart_required": true,
         "iterations": [
           [
             0,
@@ -471,14 +458,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "A Flow is already pinned; resume it or stop and restart with another"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Release target is unavailable. Only Stop & restart can clear this blocker"
-        },
-        {
-          "kind": "restart",
           "unavailable": null
         }
       ]
@@ -495,7 +474,8 @@
         "authored_commits": false,
         "recovery_required": true,
         "reason": null
-      }
+      },
+      "unresolved_execution": true
     }
   },
   "unavailable": {
@@ -521,7 +501,8 @@
     },
     "runtime": {
       "work_id": "ts_unavailable",
-      "status": "ready",
+      "status": "not_ready",
+      "planning_conflict": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:00:00Z",
       "provider": "codex",
@@ -546,14 +527,6 @@
         {
           "kind": "start",
           "unavailable": null
-        },
-        {
-          "kind": "resume",
-          "unavailable": "No pinned Flow to resume; start one"
-        },
-        {
-          "kind": "restart",
-          "unavailable": null
         }
       ]
     },
@@ -569,7 +542,8 @@
         "authored_commits": null,
         "recovery_required": true,
         "reason": "failed to inspect Task worktree"
-      }
+      },
+      "unresolved_execution": true
     }
   },
   "user_wait": {
@@ -596,6 +570,7 @@
     "runtime": {
       "work_id": "task-user",
       "status": "ready",
+      "planning_conflict": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:59:00Z",
       "provider": "codex",
@@ -614,7 +589,7 @@
     "flow": {
       "recommended": "feature",
       "record": {
-        "kind": "pinned",
+        "kind": "latest",
         "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
         "graph": {
           "name": "feature",
@@ -660,7 +635,7 @@
             {
               "key": 3,
               "id": "decide",
-              "label": "loop-decide",
+              "label": "loop-or-next",
               "kind": "skill",
               "human": false,
               "returns_to": 1,
@@ -686,7 +661,7 @@
             {
               "key": 5,
               "id": "decide_delivery",
-              "label": "loop-decide",
+              "label": "loop-or-next",
               "kind": "skill",
               "human": false,
               "returns_to": 1,
@@ -895,9 +870,8 @@
             "traversals": 1
           }
         ],
-        "execution": "human",
+        "execution": "idle",
         "reason": "Waiting for your review at demo",
-        "restart_required": false,
         "iterations": [
           [
             1,
@@ -908,14 +882,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "A Flow is already pinned; resume it or stop and restart with another"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "Waiting for your review at demo; continue it through its Session"
-        },
-        {
-          "kind": "restart",
           "unavailable": null
         }
       ]
@@ -932,7 +898,8 @@
         "authored_commits": false,
         "recovery_required": false,
         "reason": null
-      }
+      },
+      "unresolved_execution": true
     }
   },
   "dirty": {
@@ -959,6 +926,7 @@
     "runtime": {
       "work_id": "ts_dirty",
       "status": "ready",
+      "planning_conflict": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:50:00Z",
       "provider": "codex",
@@ -983,14 +951,6 @@
         {
           "kind": "start",
           "unavailable": null
-        },
-        {
-          "kind": "resume",
-          "unavailable": "No pinned Flow to resume; start one"
-        },
-        {
-          "kind": "restart",
-          "unavailable": null
         }
       ]
     },
@@ -1006,7 +966,8 @@
         "authored_commits": false,
         "recovery_required": true,
         "reason": null
-      }
+      },
+      "unresolved_execution": true
     }
   },
   "authored_commits": {
@@ -1033,6 +994,7 @@
     "runtime": {
       "work_id": "ts_commits",
       "status": "ready",
+      "planning_conflict": null,
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
@@ -1080,7 +1042,7 @@
     "flow": {
       "recommended": "feature",
       "record": {
-        "kind": "pinned",
+        "kind": "latest",
         "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
         "graph": {
           "name": "feature",
@@ -1126,7 +1088,7 @@
             {
               "key": 3,
               "id": "decide",
-              "label": "loop-decide",
+              "label": "loop-or-next",
               "kind": "skill",
               "human": false,
               "returns_to": 1,
@@ -1152,7 +1114,7 @@
             {
               "key": 5,
               "id": "decide_delivery",
-              "label": "loop-decide",
+              "label": "loop-or-next",
               "kind": "skill",
               "human": false,
               "returns_to": 1,
@@ -1361,7 +1323,6 @@
         ],
         "execution": "running",
         "reason": "Worker is running realign",
-        "restart_required": false,
         "iterations": [
           [
             2,
@@ -1372,14 +1333,6 @@
       "controls": [
         {
           "kind": "start",
-          "unavailable": "A Flow is already pinned; resume it or stop and restart with another"
-        },
-        {
-          "kind": "resume",
-          "unavailable": "The Task worker is already advancing this Flow"
-        },
-        {
-          "kind": "restart",
           "unavailable": null
         }
       ]
@@ -1396,7 +1349,8 @@
         "authored_commits": true,
         "recovery_required": false,
         "reason": null
-      }
+      },
+      "unresolved_execution": true
     }
   }
 }

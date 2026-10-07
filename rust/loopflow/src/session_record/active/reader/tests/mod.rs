@@ -231,7 +231,7 @@ async fn periodic_read_observes_sql_only_membership_and_rename_outside_home() {
     session.id = "sql-only-conversation".into();
     session.artifact_key = input.clone();
     session.title = "Before rename".into();
-    store.create_session(session, None).await.unwrap();
+    store.create_session(session).await.unwrap();
     // No invalidation/refresh: this is the same observe call used by the watch tick.
     visible(&mut reader, &store, std::slice::from_ref(&input)).await;
     store
@@ -311,18 +311,12 @@ async fn discovery_cost_matrix() {
         started_at: time::OffsetDateTime::UNIX_EPOCH,
     };
     let native = serde_json::to_vec(&stale).unwrap();
-    let owner = crate::durable::TaskWorkerOwner {
-        trace_id: crate::id::TraceId::new(),
-        exec_id: crate::id::ExecId::new(),
-        pid: stale.pid,
-        started_at: 0,
-    };
     let exec = serde_json::to_vec(&crate::journal::ExecProcessReceipt {
         schema_version: 1,
-        trace_id: owner.trace_id.to_string(),
-        exec_id: owner.exec_id.to_string(),
-        pid: owner.pid,
-        started_at: owner.started_at,
+        trace_id: crate::id::TraceId::new().to_string(),
+        exec_id: crate::id::ExecId::new().to_string(),
+        pid: stale.pid,
+        started_at: 0,
     })
     .unwrap();
     fs::create_dir_all(home.path().join("runtime/exec-processes")).unwrap();
@@ -336,7 +330,7 @@ async fn discovery_cost_matrix() {
         historical.id = format!("historical-{index}");
         historical.artifact_key =
             crate::session_record::parse_artifact_key(&format!("run_{index:032x}")).unwrap();
-        store.create_session(historical, None).await.unwrap();
+        store.create_session(historical).await.unwrap();
     }
     let mut previous = 0;
     for population in [100, 10_000, 100_000] {

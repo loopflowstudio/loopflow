@@ -20,8 +20,8 @@ is the whole method; this section only says when to apply it.
   operation; it does not end it. Resume afterwards and finish before the turn
   ends.
 - End a turn only when the Task has its disposition.
-- Record direction the user gives in the Task's brief or scratch so its workers
-  receive it. An idea that is other work belongs in its own Task: read
+- Record direction the user gives in the Task's brief or scratch so later work
+  receives it. An idea that is other work belongs in its own Task: read
   `lf help capture-tasks`.
 
 ## What happens between turns
@@ -31,7 +31,7 @@ watch, check back or follow up later.
 
 - Within a turn, `lf task wait <issue> --until submitted` (or `terminal`, with
   `--timeout`) waits for a state change without polling.
-- Between turns, the Task's own worker keeps running. The periodic Task check
+- Between turns, the Task's launched Flows keep running independently. The periodic Task check
   and the CI watcher help only where they are installed: read
   `lf task automation` and `lf ci watch --status`, and say which are active.
 - This conversation keeps the instructions it launched with; start a new one

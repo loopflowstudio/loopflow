@@ -5,13 +5,11 @@ import SwiftUI
 
 enum RoadmapTaskAction: Equatable {
     case run
-    case resume
     case openPr
 
     var label: String {
         switch self {
         case .run: "Start"
-        case .resume: "Resume"
         case .openPr: "Open PR"
         }
     }
@@ -22,25 +20,18 @@ enum RoadmapTaskAction: Equatable {
 /// recommendation onto the affordance the app can offer, and never re-derives
 /// it from status.
 func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
-    guard task.runtime != nil else {
-        guard let start = task.flow.control(.start), start.unavailable == nil else { return nil }
-        return .run
-    }
+    let startable = task.flow.control(.start).map { $0.unavailable == nil } ?? false
+    guard task.runtime != nil else { return startable ? .run : nil }
     switch task.actions.recommended {
-    case .resume: return .resume
+    case .resume:
+        // Continuing a Task is a fresh Flow launch; Rust's Start legality governs it.
+        if startable { return .run }
     case .openPr:
         if task.activePr?.publication?.github != nil { return .openPr }
     case .startNextPr, .complete, .noAction, .none:
         break
     }
     return nil
-}
-
-private struct RoadmapTaskSelection: Identifiable {
-    let wave: WaveSnapshot
-    let task: RoadmapTask
-
-    var id: String { "\(wave.id):\(task.id)" }
 }
 
 /// One query, two shapes. Both read the single `lf roadmap` snapshot: NOW
@@ -67,13 +58,13 @@ func roadmapTaskIsActionable(_ task: RoadmapTask) -> Bool {
     roadmapTaskAction(task) != nil
 }
 
-/// The Podium's shared Work surface: one machine-wide `lf roadmap --json`
+/// Loopflow Desktop's shared Work surface: one machine-wide `lf roadmap --json`
 /// read, rendered without re-querying each Wave or inventing another work model.
 struct RoadmapView: View {
     let onOpenWave: (WaveSnapshot) -> Void
 
     @Environment(\.palette) private var palette
-    private let model: PodiumModel
+    private let model: WorkModel
     @Binding private var selection: WorkReference?
     @State private var lens: WorkLens = .now
     @State private var controlError: String?
@@ -81,7 +72,7 @@ struct RoadmapView: View {
 
     /// Renders the window's model; that window keeps it current.
     init(
-        model: PodiumModel,
+        model: WorkModel,
         onOpenWave: @escaping (WaveSnapshot) -> Void
     ) {
         self.model = model
@@ -197,7 +188,7 @@ struct RoadmapView: View {
         }
         .font(Typography.caption(9).weight(.semibold))
         .foregroundStyle(palette.textSecondary)
-        .accessibilityIdentifier("podium-work-breadcrumb")
+        .accessibilityIdentifier("loopflow-work-breadcrumb")
     }
 
     private var breadcrumbSeparator: some View {
@@ -241,23 +232,23 @@ struct RoadmapView: View {
     @ViewBuilder
     private var content: some View {
         if snapshot == nil, queryError == nil {
-            ProgressView(WorkspaceStatus.loading.message ?? "")
+            ProgressView(WorkReadingStatus.loading.message ?? "")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityIdentifier("podium-work-loading")
+                .accessibilityIdentifier("loopflow-work-loading")
         } else if snapshot == nil {
             ContentUnavailableView(
                 "Work unavailable",
                 systemImage: "exclamationmark.triangle",
                 description: Text("Couldn't read the latest work. Refresh to try again.")
             )
-            .accessibilityIdentifier("podium-work-unavailable")
+            .accessibilityIdentifier("loopflow-work-unavailable")
         } else if visibleWaves.isEmpty {
             ContentUnavailableView(
                 repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
                 systemImage: "map",
-                description: Text("Waves without readable chapters remain in the Waves sidebar.")
+                description: Text("Waves without readable Projects remain in the Waves sidebar.")
             )
-            .accessibilityIdentifier("podium-work-empty")
+            .accessibilityIdentifier("loopflow-work-empty")
         } else {
             if selection != nil {
                 focusedContent
@@ -283,7 +274,7 @@ struct RoadmapView: View {
             }
         case .project:
             if let roadmap = selectedWaveRoadmap { focusedScroll { waveCard(roadmap) } }
-            else { missingFocus("Chapter unavailable") }
+            else { missingFocus("Project unavailable") }
         case .task:
             if let selectedTask {
                 focusedScroll {
@@ -340,7 +331,7 @@ struct RoadmapView: View {
                                 selection = .task(id: row.task.id)
                             },
                             onTaskAction: { row, action in
-                                perform(action, on: RoadmapTaskSelection(wave: row.wave, task: row.task))
+                                perform(action, task: row.task, wave: row.wave)
                             },
                             onOpenWorktree: openWorktree
                         )
@@ -382,7 +373,7 @@ struct RoadmapView: View {
             onRefresh: { await refresh() },
             onError: { controlError = $0 },
             onTaskAction: { task, action in
-                perform(action, on: RoadmapTaskSelection(wave: roadmap.wave, task: task))
+                perform(action, task: task, wave: roadmap.wave)
             },
             onOpenWorktree: openWorktree
         )
@@ -395,7 +386,7 @@ struct RoadmapView: View {
             activeControlId: activeControlId,
             onSelect: {},
             onAction: { action in
-                perform(action, on: RoadmapTaskSelection(wave: wave, task: task))
+                perform(action, task: task, wave: wave)
             },
             onOpenWorktree: openWorktree
         )
@@ -439,51 +430,35 @@ struct RoadmapView: View {
         onOpenWave(wave)
     }
 
-    private enum TaskControl {
-        case run
-        case resume
-    }
-
-    private func perform(_ action: RoadmapTaskAction, on selection: RoadmapTaskSelection) {
+    private func perform(_ action: RoadmapTaskAction, task: RoadmapTask, wave: WaveSnapshot) {
         switch action {
-        case .run:
-            perform(TaskControl.run, on: selection)
-        case .resume:
-            perform(TaskControl.resume, on: selection)
         case .openPr:
-            if let github = selection.task.activePr?.publication?.github {
+            if let github = task.activePr?.publication?.github {
                 NSWorkspace.shared.open(github.url)
             }
-        }
-    }
-
-    private func perform(_ control: TaskControl, on selection: RoadmapTaskSelection) {
-        let controlId = "task:\(selection.task.id)"
-        activeControlId = controlId
-        controlError = nil
-        Task {
-            do {
-                let repo = selection.wave.repo
-                let issue = selection.task.task.identifier
-                try await Task.detached(priority: .userInitiated) {
-                    switch control {
-                    case .run:
+        case .run:
+            let controlId = "task:\(task.id)"
+            activeControlId = controlId
+            controlError = nil
+            Task {
+                do {
+                    let repo = wave.repo
+                    let issue = task.task.identifier
+                    try await Task.detached(priority: .userInitiated) {
                         try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
-                    case .resume:
-                        try LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
-                    }
-                }.value
-                await refresh()
-            } catch {
-                controlError = error.localizedDescription
-            }
-            if activeControlId == controlId {
-                activeControlId = nil
+                    }.value
+                    await refresh()
+                } catch {
+                    controlError = error.localizedDescription
+                }
+                if activeControlId == controlId {
+                    activeControlId = nil
+                }
             }
         }
     }
 
-    private func openWorktree(_ workspace: TaskWorkspaceSnapshot) {
+    private func openWorktree(_ workspace: TaskWorktreeSnapshot) {
         var components = URLComponents()
         components.scheme = "warp"
         components.host = "action"
@@ -506,7 +481,7 @@ private struct RoadmapWaveCard: View {
     let onRefresh: () async -> Void
     let onError: (String) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
-    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
 
@@ -542,12 +517,12 @@ private struct RoadmapWaveCard: View {
                     .textSelection(.enabled)
             }
 
-            if let chapter = roadmap.currentProject { WaveChapterView(chapter: chapter) }
+            if let chapter = roadmap.currentProject { WaveProjectView(project: chapter) }
             switch roadmap.tasks {
             case .unavailable(let reason):
                 Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(Color.statusWarning)
             case .available(let tasks, let truncated):
-                if tasks.isEmpty { Text("No Tasks in this chapter.").foregroundStyle(palette.textSecondary) }
+                if tasks.isEmpty { Text("No Tasks in this Project.").foregroundStyle(palette.textSecondary) }
                 ForEach(tasks) { task in
                     RoadmapTaskRow(task: task, isSelected: selection == .task(id: task.id),
                         activeControlId: activeControlId, onSelect: { onSelect(.task(id: task.id)) },
@@ -570,7 +545,7 @@ private struct RoadmapWaveCard: View {
                     lineWidth: selection == .wave(id: roadmap.wave.id) ? 2 : 1
                 )
         }
-        .accessibilityIdentifier("podium-wave-\(roadmap.wave.id)")
+        .accessibilityIdentifier("loopflow-wave-\(roadmap.wave.id)")
     }
 }
 
@@ -580,7 +555,7 @@ struct RoadmapTaskRow: View {
     let activeControlId: String?
     let onSelect: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
-    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
 
@@ -634,7 +609,7 @@ struct RoadmapTaskRow: View {
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-        .accessibilityIdentifier("podium-task-\(task.id)")
+        .accessibilityIdentifier("loopflow-task-\(task.id)")
         .opacity(roadmapTaskIsActionable(task) ? 1 : 0.55)
     }
 }
@@ -670,11 +645,8 @@ struct WorkChannelChips: View {
         .clipShape(Capsule())
     }
 
-    private func statusColor(_ status: WorkStatus) -> Color {
-        switch status {
-        case .done, .abandoned: .statusNeutral
-        case .ready: .statusInfo
-        }
+    private func statusColor(_ status: TaskState) -> Color {
+        status.isTerminal ? .statusNeutral : .statusInfo
     }
 }
 
@@ -686,7 +658,7 @@ struct TaskActionCluster: View {
     let isActing: Bool
     let controlsDisabled: Bool
     let onAction: (RoadmapTaskAction) -> Void
-    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     var body: some View {
         HStack(spacing: Spacing.xs) {
@@ -718,7 +690,7 @@ struct NowSectionView: View {
     let activeControlId: String?
     let onSelect: (NowRow) -> Void
     let onTaskAction: (NowRow, RoadmapTaskAction) -> Void
-    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
 
@@ -748,7 +720,7 @@ struct NowSectionView: View {
                 )
             }
         }
-        .accessibilityIdentifier("podium-now-\(section.group.rawValue)")
+        .accessibilityIdentifier("loopflow-now-\(section.group.rawValue)")
     }
 
     private func nowColor(_ group: TaskConditionState) -> Color {
@@ -767,7 +739,7 @@ private struct NowRowView: View {
     let activeControlId: String?
     let onSelect: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
-    let onOpenWorktree: (TaskWorkspaceSnapshot) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
 
@@ -819,7 +791,7 @@ private struct NowRowView: View {
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-        .accessibilityIdentifier("podium-task-\(task.id)")
+        .accessibilityIdentifier("loopflow-task-\(task.id)")
         .opacity(roadmapTaskIsActionable(task) ? 1 : 0.55)
     }
 }

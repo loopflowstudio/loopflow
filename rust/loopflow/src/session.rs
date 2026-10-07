@@ -75,11 +75,11 @@ pub struct AgentSession {
     pub iterations: Option<Vec<Vec<u32>>>,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
-    pub flow_session_id: Option<String>,
+    /// The Flow whose step captured the current input; derived, never stored.
+    pub flow_id: Option<String>,
     pub work_source: Option<WorkSource>,
     /// Time of a prospective bind; absent for admission or unknown historical timing.
     pub bound_at: Option<i64>,
-    pub kind: SessionKind,
     pub interactive: bool,
     /// Canonical local repository at admission; absent when unknown or taskless outside Git.
     pub repo: Option<String>,
@@ -102,11 +102,21 @@ pub struct SessionBind {
     pub wave: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionKind {
-    Conversation,
-    FlowReview,
+/// Quiet time after which a conversation with no unresolved tool call waits
+/// on a person. A long silent provider step can read as Waiting.
+pub(crate) const WAITING_QUIET_SECONDS: i64 = 120;
+
+/// What a Session's driver last read from its provider's own stream. One row
+/// per Session, replaced by whichever driver currently owns that stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionActivity {
+    pub observed_at: i64,
+    /// Tool calls started and not yet answered.
+    pub open_tools: usize,
+    /// Questions the provider asked a person and has no answer to.
+    pub pending_input: usize,
+    /// The provider handed its last turn back successfully.
+    pub yielded: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,13 +126,15 @@ pub enum TitleSource {
     Human,
 }
 
-/// What a conversation is the one ongoing conversation of. The Session row
-/// already carries the scope's identity; primary grants no Flow or process authority.
+/// What a conversation is the one ongoing conversation of. A repository's or
+/// Wave's row carries the scope's identity; a Task names its own, which stays
+/// one of the Task's conversations. Primary grants no Flow or process authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PrimaryScope {
     Repository(crate::repository::CanonicalRepo),
     Wave(WaveId),
+    Task(TaskId),
 }
 
 /// The Work a conversation names. Admission fills a Task's Wave.
@@ -151,6 +163,8 @@ pub struct SessionFilter {
     pub task: Option<String>,
     pub search: Option<String>,
     pub interactive: Option<bool>,
+    /// Only conversations waiting on a person, chosen before paging.
+    pub waiting: bool,
     pub history: bool,
     pub limit: usize,
     pub offset: usize,
@@ -166,6 +180,7 @@ impl Default for SessionFilter {
             task: None,
             search: None,
             interactive: Some(true),
+            waiting: false,
             history: false,
             limit: 100,
             offset: 0,
@@ -180,8 +195,11 @@ impl Default for SessionFilter {
 pub(crate) struct SessionSummary {
     pub primary_scope: Option<String>,
     pub driver_outcome: Option<String>,
-    pub latest_turn: Option<String>,
+    /// Waiting on a person, as of the read's clock.
+    pub waiting: bool,
     pub task_terminal: bool,
+    /// Its Task names it as the Task's primary conversation.
+    pub task_primary: bool,
     pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,
     pub id: String,
@@ -190,11 +208,10 @@ pub(crate) struct SessionSummary {
     pub title_source: TitleSource,
     pub ready_summary: Option<String>,
     pub completed_at: Option<i64>,
-    pub kind: SessionKind,
     pub interactive: bool,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
-    pub flow_session_id: Option<String>,
+    pub flow_id: Option<String>,
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,
@@ -202,33 +219,45 @@ pub(crate) struct SessionSummary {
     pub node: Option<u32>,
     pub iterations: Option<Vec<Vec<u32>>>,
     pub flow: Option<FlowSummary>,
+    /// Whether this Session's step is the last its Flow launched.
+    pub flow_step_latest: bool,
     pub independent: bool,
     pub wave_name: Option<String>,
     pub task_identifier: Option<String>,
-    pub managed: bool,
-    pub home_id: Option<crate::durable::HomeId>,
-    pub home_route: Option<String>,
 }
 
-/// Recorded Flow facts; Current says nothing about a live driver or process.
+/// A Flow as its driver Exec records it; Current says nothing about a live process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowSummary {
+    /// The driver Exec.
     pub id: String,
-    pub name: Option<String>,
+    pub name: String,
     pub state: FlowSummaryState,
-    pub current_capture: Option<i64>,
-    pub pending_session: Option<String>,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
+    /// When its latest step started, or its driver exited.
     pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowSummaryState {
+    /// The driver has no recorded exit.
     Current,
     Completed,
-    Replaced,
+    /// The driver exited before the Flow's last step.
+    Stopped,
+}
+
+impl FlowSummaryState {
+    /// What a driver Exec's recorded outcome and exit time say of its Flow.
+    pub(crate) fn of_driver(outcome: Option<&str>, completed_at: Option<i64>) -> Self {
+        match (outcome, completed_at) {
+            (Some("succeeded"), _) => Self::Completed,
+            (None, None) => Self::Current,
+            _ => Self::Stopped,
+        }
+    }
 }
 
 /// Read-local admission context. Immutable observations override current-input

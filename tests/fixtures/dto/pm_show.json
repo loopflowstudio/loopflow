@@ -22,7 +22,7 @@
         "team-loo"
       ],
       "metric_targets": [],
-      "flow": "feature",
+      "workflow": "feature",
       "status": "started"
     }
   ],

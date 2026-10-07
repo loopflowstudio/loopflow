@@ -240,10 +240,9 @@ mod tests {
         for contract in [
             "Do not create a manifest, receipt, marker, or new planning state",
             "Keep that core in this Task",
-            "lf task create --run",
-            "--flow <chosen-flow>",
+            "lf task create --wave <wave>",
             "lf checkout <issue> --json",
-            "lf --task <issue> flow start <chosen-flow>",
+            "lf task run <issue>",
             "Use the Flow the user selected",
         ] {
             assert!(
@@ -274,7 +273,7 @@ mod tests {
 
         let demo = get_builtin_skill("demo").expect("demo skill");
         for contract in [
-            "human feedback, revised artifact references, and remaining",
+            "feedback, revised artifact paths and remaining work",
             "headless surface",
             "blocker in ordinary output and stop",
             "closing, detaching, provider exit, or lack of response",
@@ -301,7 +300,7 @@ mod tests {
             "lf wave list --json",
             "lf wave status <wave> --json",
             "lf roadmap --wave <wave> --json",
-            "lf --task <ISSUE-ID> flow start",
+            "lf task run <ISSUE-ID>",
             "lf observe <home-id>",
             "lf ssh <home-id> --wave <wave> wave/operate",
         ] {
@@ -326,7 +325,7 @@ mod tests {
         assert!(!LOOPFLOW_DOC.contains("--detach"));
 
         let wave = get_builtin_skill("wave/operate").expect("wave operate");
-        assert!(wave.contains("lf --task <issue> flow start"));
+        assert!(wave.contains("lf task run <issue-id>"));
         assert!(wave.contains("lf task status"));
         assert!(wave.contains("Tasks progress independently"));
         assert!(wave.contains("S5 · Identity"));
@@ -339,12 +338,13 @@ mod tests {
 
         assert!(get_builtin_flow("task").is_none());
         let first = get_builtin_flow("task-design").expect("Task first flow");
-        assert!(first.contains("name: kickoff"));
-        assert_eq!(first.matches("human: true").count(), 1);
-        assert!(first.contains("id: review_kickoff"));
-        assert!(!get_builtin_flow("incident")
-            .expect("incident first flow")
-            .contains("human:"));
+        assert!(first.contains("- kickoff"));
+        // Review stages belong to the Task conversation, never to a builtin Flow.
+        for flow in ["task-design", "pursue", "incident"] {
+            assert!(!get_builtin_flow(flow)
+                .unwrap_or_else(|| panic!("{flow} is builtin"))
+                .contains("human:"));
+        }
         assert!(get_builtin_flow("pursue")
             .expect("Task loop flow")
             .contains("flow: refresh"));
@@ -360,6 +360,8 @@ mod tests {
     #[test]
     fn builtin_skills_do_not_name_retired_child_controls() {
         let retired = [
+            "lf session ready",
+            "lf session complete",
             "lf handoff",
             "lf reviews",
             "lf task follow-up",

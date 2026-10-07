@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use loopflow::harness::codex_connection::CodexConnection;
 use loopflow::id::ExecId;
-use loopflow::session::{AgentSession, SessionKind, TitleSource};
+use loopflow::session::{AgentSession, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
@@ -115,8 +115,8 @@ async fn exec_discovery_pages_real_commands_and_preserves_unknown_history() {
         rusqlite::params![project.as_str(),wave]).unwrap();
     connection
         .execute(
-            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,work_state,work_terminal_at,created_at)
-        VALUES(?1,?2,'issue-proof','PROOF-1','done',2,1)",
+            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at)
+        VALUES(?1,?2,'issue-proof','PROOF-1',1)",
             rusqlite::params![task.as_str(), project.as_str()],
         )
         .unwrap();
@@ -447,14 +447,10 @@ fn assert_recorded_exit(home: &Path, code: i32) {
         .collect::<Result<_, _>>()
         .unwrap();
     assert_eq!(rows, vec![("failed".into(), Some(code), true, None)]);
-    let work: (i64, i64) = conn
-        .query_row(
-            "SELECT (SELECT count(*) FROM agent_sessions), (SELECT count(*) FROM flow_sessions)",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
+    let sessions: i64 = conn
+        .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(work, (0, 0));
+    assert_eq!(sessions, 0);
 }
 
 #[tokio::test]
@@ -808,7 +804,7 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 captured: None,
                 task_id: None,
                 wave_id: None,
-                flow_session_id: None,
+                flow_id: None,
                 work_source: None,
                 bound_at: None,
                 id: session_id.into(),
@@ -821,7 +817,6 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 model: None,
                 node: None,
                 iterations: None,
-                kind: SessionKind::Conversation,
                 interactive: true,
                 repo: None,
                 title: "Engine ownership".into(),
@@ -831,7 +826,6 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 completed_at: None,
                 created_at: 1,
             },
-            None,
             None,
         )
         .unwrap();
@@ -1034,7 +1028,7 @@ async fn monitor_prune_preserves_unknown_outcomes_and_removes_only_settled_dead_
 }
 
 #[tokio::test]
-async fn monitor_separates_waiting_finished_and_missing_observations() {
+async fn monitor_does_not_treat_historical_feedback_as_live_readiness() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -1047,7 +1041,7 @@ async fn monitor_separates_waiting_finished_and_missing_observations() {
     let connection = rusqlite::Connection::open(&database).unwrap();
     connection
         .execute(
-            "UPDATE agent_sessions SET ready_summary='Review the API' WHERE id='waiting'",
+            r#"INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('waiting','observed','legacy_review_feedback',1,'{"type":"legacy_review_feedback","summary":"Review the API"}')"#,
             [],
         )
         .unwrap();
@@ -1066,9 +1060,9 @@ async fn monitor_separates_waiting_finished_and_missing_observations() {
     for (id, state, reason, action) in [
         (
             "waiting",
-            "waiting",
-            "Review the API",
-            "lf session connect waiting",
+            "unknown",
+            "No current provider observation",
+            "lf session history waiting",
         ),
         (
             "finished",

@@ -5,10 +5,9 @@ listener and `lf wave status` contracts consumed by the Mac app. Every absent fi
 is a parse error or an explicit null.
 
 `task_status.json` pins the planning/execution envelope for available, unavailable,
-invalid, removed and absent planning. Rust round-trips it; Swift decodes the `TaskStatus` model
-returned by `RegistryQuery.taskStatus`. These cases have no execution. Complete
-Task execution/action-state parity remains acceptance work; Wave contracts have
-their own fixtures below.
+invalid, removed and absent planning. Rust round-trips it. This CLI-only contract
+has no Swift mirror: the Mac app reads a Task's work from the workspace stream's
+`task` part (`work_frame.json`). These cases have no execution.
 
 `task_execution.json` pins the execution boundary inside the status envelope's
 optional Task snapshot (`execution.execution`).
@@ -30,8 +29,8 @@ reconstruct the condition from process flags.
 
 `activity_snapshot.json` pins `lf ps --json`: exact live Exec and provider
 processes carry OS-derived state, while a provider without exact ownership
-stays separate from the call tree. Rust round-trips it; Desktop no longer
-reads it.
+stays separate from the call tree. Desktop receives the same wire type through
+the Work observation stream; it does not poll `lf ps`.
 
 `session_history_summary.json` and `wave_detail.json` pin the `SessionHistory`
 shape used by `lf usage --json` and Wave detail. Captured event sequences

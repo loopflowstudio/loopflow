@@ -24,6 +24,92 @@ database into that fresh Home first (a copy-on-write clone on APFS), so the run
 pays for a store of real size and writes only to the copy. `--offline` routes
 every remote call to a closed local port.
 
+## 2026-10-06: status reads in turn, installed 0.13.6
+
+Installed 0.13.6 on the main Home, 54 worktrees, 20 alternating pairs: text
+1.47 s median / 1.51 s p95, JSON 1.39 s / 1.44 s, no failures or timeouts.
+`lf wt timing` put local Git at 1.24 s, where 0.13.4 had read 0.39 s.
+
+**One lock made every Git read wait for the one before it.** #1452 gave the
+Desktop watcher a store of retained Git answers behind a mutex. A command that
+retains nothing still took that mutex and held it while `git` ran, so the 16
+listing threads ran one process at a time. Git's own trace of an installed
+listing shows it: 54 `status` reads summing 1.05 s of Git time, one overlapping
+pair among them, 2.02 s from first start to last exit (traced). The mutex is
+now released before Git starts; a test with two reads that each wait for the
+other fails in 32 s on the old code.
+
+Same host and repository, isolated empty Homes, one warm-up discarded, 20
+untraced alternating pairs per mode. `baseline` is installed 0.13.6;
+`candidate` is this branch. Phases are each binary's own `lf wt timing`,
+median / p95. Raw rows: [20261006/](20261006/).
+
+| Run | Mode | Median | p95 | Max | Local Git | Remote |
+|---|---|---|---|---|---|---|
+| baseline | text | 1.48 s | 1.71 s | 2.55 s | 1.27 / 1.46 s | 0.81 / 1.49 s |
+| baseline | JSON | 1.40 s | 1.81 s | 2.18 s | 1.28 / 1.99 s | 0.81 / 1.20 s |
+| candidate | text | 1.23 s | 1.66 s | 2.90 s | 0.31 / 0.40 s | 1.03 / 1.49 s |
+| candidate | JSON | 1.12 s | 1.31 s | 1.45 s | 0.31 / 0.41 s | 1.00 / 1.28 s |
+
+- **≤1 s warm p95 is still not met online.** Local Git is back to a third of a
+  second and the remote is what the listing waits for: start (0.09 s), the
+  reads before the request, then GitHub. This is the measured bottleneck, not
+  a proven lower bound.
+- The remote phase read 0.2 s longer once the status reads ran beside it. Load
+  was 19–37 throughout, from other workers on this host; whether a quiet host
+  shows the same overlap cost is not measured.
+- The traced rows (`status-side-by-side-*`, two rounds of ten) agree: 1.45–1.59 s
+  → 1.15–1.25 s median, with Git's summed time rising from 0.7 s to 2.5 s as
+  the processes share cores instead of queueing.
+- 71 and 67 Git processes, four `gh` requests, unchanged. Nothing is retained
+  between listings; dirty state is read from each checkout every time.
+- Installed figures for this change do not exist yet.
+
+## 2026-10-05: GitHub's answer time, installed 0.13.4
+
+`lf wt timing` on the main Home after 0.13.4 was installed (JSON, 55 worktrees):
+
+| Installed | Samples | Median | p95 | Startup | Local Git | Remote | Receipts |
+|---|---|---|---|---|---|---|---|
+| 0.13.3 | 4 | 8.09 s | 16.67 s | 4.90 s | 0.42 s | 1.64 s | 2.45 s |
+| 0.13.4 | 3 | 1.80 s | 2.09 s | 0.14 s | 0.39 s | 1.62 s | 0.00 s |
+
+Phase columns are medians. Three and four samples are not a p95. The listing
+now ends about 0.2 s after GitHub answers, so GitHub is what is left.
+
+**GitHub's answer time grew with the branches in one query.** For this
+repository's 53 branches, `gh api graphql` took 0.41 s for a trivial query,
+0.67 s for branch existence alone, 0.71 s for PR states alone and 0.91–1.11 s
+for both (five or six runs each). The same branches split across 2, 4 and 8
+requests side by side took 0.69 s, 0.65 s and 0.67 s. The listing now asks 16
+branches per request, and reads the Git facts it needs first side by side
+instead of in turn. One request that fails or is stopped leaves every branch
+unknown, as a failed single call did.
+
+Same host and repository, fresh empty Home, one warm-up discarded, two
+alternating rounds of ten samples. `baseline` is installed 0.13.4; `candidate`
+is this branch. Raw rows: [20261005/](20261005/) (`github-requests-*`).
+
+| Run | Mode | Samples | Median | p95 | `gh` processes | `gh` each | Load (1 m) |
+|---|---|---|---|---|---|---|---|
+| baseline | text | 10 + 10 | 1.47 s, 1.53 s | 1.72 s, 1.81 s | 1 | 1.11–1.16 s | 26, 19 |
+| baseline | JSON | 10 + 10 | 1.52 s, 1.42 s | 1.73 s, 1.72 s | 1 | 1.08–1.18 s | 26, 16 |
+| candidate | text | 10 + 10 | 1.06 s, 1.07 s | 1.40 s, 1.18 s | 4 | 0.69–0.70 s | 22, 15 |
+| candidate | JSON | 10 + 10 | 1.02 s, 1.04 s | 1.11 s, 1.82 s | 4 | 0.68–0.69 s | 20, 14 |
+
+- **≤1 s warm p95 is still not met online**: about 1.0–1.1 s median. A request
+  costs about 0.4 s before GitHub does any work and 0.7 s with a quarter of the
+  branches; the rest is process start, the Git reads before the request, and
+  output. Going lower means answering PR state or `remote_gone` from something
+  other than the remote, which the listing does not do.
+- One JSON round's p95 is a single 1.82 s sample; a request's tail now has four
+  chances to land in a listing. Ten samples do not size that.
+- A fresh Home, so no store cost: 0.13.4 already measured that at 0.14 s on the
+  main Home. Installed figures for this change come from `lf wt timing`.
+- After these rows the listing stopped reading branch heads twice: 72 and 68
+  Git processes, not 73 and 69. Its one check ran at load 112 (1.73 s and
+  1.29 s medians), which sizes nothing; the rows above were not re-measured.
+
 ## 2026-10-05: startup against a 1.1 GB store
 
 The first sample from ordinary use (installed 0.13.3, JSON) read 8.09 s total:
@@ -152,7 +238,36 @@ no working deadline. It now releases within 2 s of real time whatever the
 runtime is doing (`harness/dispatch.rs`, two regression tests that fail against
 the previous dispatch).
 
-### Production timing
+### Installed v0.13.6 — October 6, 2026
+
+After PR #1456 shipped in v0.13.6, the published installer updated Jack Heart's
+CLI and Desktop successfully. On the live Home, 20 alternating text/JSON pairs
+listed 54 worktrees. All 40 commands succeeded, with no recorded remote timeout,
+interruption or missing receipt. These are ordinary installed reads under the
+current host load, not a matched replay of the earlier release populations.
+
+| Surface | Samples | External median / p95 | Instrumented median / p95 |
+|---|---:|---:|---:|
+| Text | 20 | 1.465 / 1.511 s | 1.420 / 1.471 s |
+| JSON | 20 | 1.387 / 1.443 s | 1.348 / 1.404 s |
+
+Production phase median / p95 in milliseconds: text startup 113/118, local Git
+1242/1295, remote 872/956, receipts 4/4; JSON startup 114/116, local Git 1232/1283,
+remote 815/907, receipts 4/8. Local and remote phases overlap; do not add them.
+An additional diagnostic Git trace counted 67 Git processes, including 54 status
+reads (summed 1052 ms, median 12.6 ms, max 174.6 ms). Those summed subprocess
+times are not the local phase's wall time. SQLite query counts were not measured.
+
+Both surfaces still miss the one-second warm p95 aim. The installed instrumentation
+works and identifies local Git as the larger phase, but this does not establish a
+hard lower bound or complete the remaining performance investigation. Preserve
+unknown statuses and checkout read-only behavior when reducing that cost.
+Private receipts: `/tmp/infra-375-installed-0136/samples.json`,
+`/tmp/infra-375-installed-after.json`, and
+`/tmp/infra-375-installed-git-trace.jsonl`. The timing command remains
+`lf wt timing --json`.
+
+### Reading production timing
 
 Each real `lf wt list` appends one line to `<Home>/perf/wt-list.jsonl`:
 
@@ -169,8 +284,7 @@ The file is trimmed to its newest 500 lines when it reaches 1,000. It is
 appended under a file lock, never through SQLite, so a contended store cannot
 lose the slow sample. Text-mode diff stats are `total − startup − listing`.
 A process killed with SIGKILL leaves no sample; time before `main` is not
-measured. No numbers from ordinary use exist yet: the only samples so far are
-four runs in a disposable Home while building this.
+measured. Numbers from ordinary use are in the dated sections above.
 
 ### Limits of this evidence
 

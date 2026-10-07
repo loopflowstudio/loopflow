@@ -85,7 +85,7 @@ struct TaskSessionLaunchProofTests {
             fi
             if [ "$mode" = "missing-helper" ]; then chmod -x "$0"; fi
             cat "$fixture_dir/receipt.json"
-        elif [ "$1" = "--mode" ] && [ "$2" = "interactive" ]; then
+        elif [ "$1" = "--interactive" ]; then
             printf '%s\n' "$@" > "$fixture_dir/conversation-args"
             pwd > "$fixture_dir/conversation-cwd"
             exec /bin/cat
@@ -131,7 +131,7 @@ struct TaskSessionLaunchProofTests {
             }
         }
         let repo = directory.path
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         let origin = model.navigation
         let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)

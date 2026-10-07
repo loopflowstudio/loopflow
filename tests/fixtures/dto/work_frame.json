@@ -1,0 +1,72 @@
+[
+  {
+    "part": "planning",
+    "sequence": 1,
+    "answers": null,
+    "home": "/Users/fixture/.lf",
+    "revisions": {"planning": 911, "sessions": 402, "flows": 88, "execs": 5120, "usage": 77},
+    "unavailable": null,
+    "body": {"roadmap": {"generated_at": "2026-10-05T00:00:00Z", "waves": []}, "waves": []}
+  },
+  {
+    "part": "sessions",
+    "sequence": 2,
+    "answers": 7,
+    "home": "/Users/fixture/.lf",
+    "revisions": {"planning": 911, "sessions": 403, "flows": 88, "execs": 5120, "usage": 77},
+    "unavailable": null,
+    "body": {"repo": "/src/loopflow", "includes_headless": false, "entries": []}
+  },
+  {
+    "part": "task",
+    "sequence": 3,
+    "answers": 7,
+    "home": "/Users/fixture/.lf",
+    "revisions": {"planning": 911, "sessions": 403, "flows": 88, "execs": 5120, "usage": 77},
+    "unavailable": "Task LOO-1 is not registered",
+    "body": null
+  },
+  {
+    "part": "work_activity",
+    "sequence": 4,
+    "answers": 7,
+    "home": "/Users/fixture/.lf",
+    "revisions": {"planning": 911, "sessions": 403, "flows": 88, "execs": 5120, "usage": 77},
+    "unavailable": null,
+    "body": {
+      "scope": {"wave": "product", "project": null, "task": "LOO-1"},
+      "snapshot": {"generated_at": 1791220000, "since": 1790615200, "limit": 50, "truncated": false, "items": []}
+    }
+  },
+  {
+    "part": "activity",
+    "sequence": 5,
+    "answers": 7,
+    "home": "/Users/fixture/.lf",
+    "revisions": null,
+    "unavailable": null,
+    "body": {"schema_version": 1, "observed_at": 1791220000, "nodes": [], "provider_processes": []}
+  },
+  {
+    "part": "heartbeat",
+    "sequence": 6,
+    "answers": 7,
+    "home": "/Users/fixture/.lf",
+    "revisions": {"planning": 911, "sessions": 403, "flows": 88, "execs": 5120, "usage": 77},
+    "unavailable": null,
+    "body": {"projections": {"planning": 3, "sessions": 2}}
+  },
+  {
+    "part": "task",
+    "sequence": 7,
+    "answers": 8,
+    "home": "/Users/fixture/.lf",
+    "revisions": {"planning": 912, "sessions": 403, "flows": 89, "execs": 5121, "usage": 77},
+    "unavailable": null,
+    "body": {
+      "task": "LOO-1",
+      "work": {"sessions": [], "flows": [], "execs": [], "workflow": null},
+      "flow_runs": []
+    }
+  }
+]

@@ -1,10 +1,6 @@
-//! Automation selection belongs to Task; repair admission belongs to its CI incident.
-use std::fs::{File, OpenOptions};
-use std::path::Path;
+//! Task CI repair holds and incident-owned repair admission.
 
-use fs2::FileExt;
 use rusqlite::{params, OptionalExtension};
-use sha2::{Digest, Sha256};
 
 use crate::durable::TaskId;
 use crate::id::ExecId;
@@ -29,68 +25,26 @@ impl SqliteStore {
             "SELECT repair_conclusion IS NOT NULL OR (responded_at IS NOT NULL AND repair_exec_id IS NULL) FROM ci_incidents WHERE identity=?1", [identity], |row| row.get(0))?)
     }
 
-    pub(crate) fn lock_checkout(&self, cwd: &Path) -> StoreResult<File> {
-        let database = self
-            .conn
-            .lock()
-            .expect("store mutex poisoned")
-            .path()
-            .map(str::to_string);
-        let root = Path::new(database.as_deref().unwrap_or("/tmp/loopflow.db"))
-            .with_extension("admission");
-        std::fs::create_dir_all(&root)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        let cwd = crate::engine::git::worktree_root(cwd).unwrap_or_else(|_| cwd.to_path_buf());
-        let name = hex::encode(Sha256::digest(cwd.as_os_str().as_encoded_bytes()));
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(root.join(name))
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        loop {
-            match file.try_lock_exclusive() {
-                Ok(()) => break,
-                Err(error)
-                    if error.kind() == std::io::ErrorKind::WouldBlock
-                        && std::time::Instant::now() < deadline =>
-                {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Err(error) => {
-                    return Err(StoreError::InvalidData(format!(
-                        "checkout admission unavailable: {error}"
-                    )))
-                }
-            }
-        }
-        Ok(file)
-    }
-
     pub(crate) fn task_automation(&self, task: &TaskId) -> StoreResult<TaskAutomation> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row("SELECT automation_enabled,automation_exec_id,automation_retry_key,automation_retries,automation_checked_at,automation_detail,issue_identifier FROM tasks WHERE id=?1", [task.as_str()], |row| Ok(TaskAutomation {
-            task_id: task.to_string(), issue: row.get(6)?, enabled: row.get(0)?, exec_id: row.get(1)?, retry_key: row.get(2)?, retries: row.get(3)?, checked_at: row.get(4)?, detail: row.get(5)?,
-        }))?)
+        Ok(conn.query_row(
+            "SELECT automation_enabled,issue_identifier FROM tasks WHERE id=?1",
+            [task.as_str()],
+            |row| {
+                Ok(TaskAutomation {
+                    task_id: task.to_string(),
+                    issue: row.get(1)?,
+                    enabled: row.get(0)?,
+                })
+            },
+        )?)
     }
 
-    pub(crate) fn set_task_automation(
-        &self,
-        task: &TaskId,
-        enabled: bool,
-        only_unset: bool,
-    ) -> StoreResult<()> {
+    pub(crate) fn set_task_automation(&self, task: &TaskId, enabled: bool) -> StoreResult<()> {
         self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE tasks SET automation_enabled=?2, automation_retries=CASE WHEN ?3=0 AND ?2=1 THEN 0 ELSE automation_retries END WHERE id=?1 AND (?3=0 OR automation_enabled IS NULL)", params![task.as_str(), enabled, only_unset])?;
-        Ok(())
-    }
-
-    pub(crate) fn record_automation(&self, state: &TaskAutomation) -> StoreResult<()> {
-        self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE tasks SET automation_exec_id=?2,automation_retry_key=?3,automation_retries=?4,automation_checked_at=?5,automation_detail=?6 WHERE id=?1",
-            params![state.task_id,state.exec_id,state.retry_key,state.retries,state.checked_at,state.detail])?;
+            "UPDATE tasks SET automation_enabled=?2 WHERE id=?1",
+            params![task.as_str(), enabled],
+        )?;
         Ok(())
     }
 

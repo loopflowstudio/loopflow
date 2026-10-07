@@ -100,113 +100,19 @@ impl Subscription {
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use std::ffi::{c_char, c_void, CStr, CString};
-    use std::os::unix::ffi::OsStrExt;
-    use std::path::{Path, PathBuf};
-    use std::ptr;
-    use std::sync::Mutex;
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
 
-    use anyhow::{bail, Result};
+    use anyhow::Result;
 
     use super::{relevant, Changes};
-
-    type Ref = *mut c_void;
-    type Callback = unsafe extern "C" fn(Ref, Ref, usize, Ref, *const u32, *const u64);
-
-    #[repr(C)]
-    struct Context {
-        version: isize,
-        info: Ref,
-        retain: Option<unsafe extern "C" fn(Ref) -> Ref>,
-        release: Option<unsafe extern "C" fn(Ref)>,
-        description: Option<unsafe extern "C" fn(Ref) -> Ref>,
-    }
-
-    #[link(name = "CoreServices", kind = "framework")]
-    unsafe extern "C" {
-        fn FSEventStreamCreate(
-            allocator: Ref,
-            callback: Callback,
-            context: *mut Context,
-            paths: Ref,
-            since: u64,
-            latency: f64,
-            flags: u32,
-        ) -> Ref;
-        fn FSEventStreamSetDispatchQueue(stream: Ref, queue: Ref);
-        fn FSEventStreamStart(stream: Ref) -> u8;
-        fn FSEventStreamFlushSync(stream: Ref);
-        fn FSEventStreamStop(stream: Ref);
-        fn FSEventStreamInvalidate(stream: Ref);
-        fn FSEventStreamRelease(stream: Ref);
-    }
-
-    #[link(name = "CoreFoundation", kind = "framework")]
-    unsafe extern "C" {
-        fn CFStringCreateWithFileSystemRepresentation(allocator: Ref, path: *const c_char) -> Ref;
-        fn CFArrayCreate(allocator: Ref, values: *const Ref, count: isize, callbacks: Ref) -> Ref;
-        fn CFRelease(value: Ref);
-    }
-
-    unsafe extern "C" {
-        fn dispatch_queue_create(label: *const c_char, attribute: Ref) -> Ref;
-        fn dispatch_sync_f(queue: Ref, context: Ref, function: unsafe extern "C" fn(Ref));
-        fn dispatch_release(object: Ref);
-    }
-
-    #[derive(Debug)]
-    struct State {
-        home: PathBuf,
-        changes: Mutex<Changes>,
-    }
+    use crate::engine::fs_events::Stream;
 
     #[derive(Debug)]
     pub(crate) struct Subscription {
-        stream: Ref,
-        queue: Ref,
-        paths: Ref,
-        root: Ref,
-        state: Box<State>,
+        stream: Stream,
+        changes: Arc<Mutex<Changes>>,
     }
-
-    // SAFETY: the handle has one owner; callbacks touch only the boxed Mutex.
-    // FSEvents/dispatch objects are not thread-affine. No concurrent stream calls.
-    unsafe impl Send for Subscription {}
-
-    unsafe extern "C" fn callback(
-        _: Ref,
-        info: Ref,
-        count: usize,
-        paths: Ref,
-        flags: *const u32,
-        _: *const u64,
-    ) {
-        // SAFETY: FSEvents supplies count-sized arrays and our live boxed context.
-        // Subscription drains the callback queue before releasing the box.
-        unsafe {
-            let state = &*info.cast::<State>();
-            let mut changes = state
-                .changes
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            for index in 0..count {
-                let flags = *flags.add(index);
-                // MustScanSubDirs, UserDropped, KernelDropped, EventIdsWrapped,
-                // RootChanged, Mount, Unmount. Interpret these before filtering.
-                if flags & 0xef != 0 {
-                    changes.invalidate();
-                    continue;
-                }
-                let bytes = CStr::from_ptr(*paths.cast::<*const c_char>().add(index)).to_bytes();
-                let path = Path::new(std::ffi::OsStr::from_bytes(bytes));
-                if relevant(&state.home, path) {
-                    changes.insert(path.to_owned());
-                }
-            }
-        }
-    }
-
-    unsafe extern "C" fn barrier(_: Ref) {}
 
     impl Subscription {
         pub fn start(home: &Path) -> Result<Self> {
@@ -214,92 +120,28 @@ mod macos {
                 .ancestors()
                 .find(|path| path.is_dir())
                 .ok_or_else(|| anyhow::anyhow!("no existing Home ancestor to observe"))?;
-            let root = CString::new(root.as_os_str().as_bytes())?;
-            let mut state = Box::new(State {
-                home: home.to_owned(),
-                changes: Mutex::new(Changes::default()),
-            });
-            // SAFETY: all CF objects remain alive for the stream lifetime. The
-            // context is boxed and stable; the callback executes on its own queue.
-            unsafe {
-                let root =
-                    CFStringCreateWithFileSystemRepresentation(ptr::null_mut(), root.as_ptr());
-                if root.is_null() {
-                    bail!("cannot encode filesystem event root");
+            let changes = Arc::new(Mutex::new(Changes::default()));
+            let (sink, home) = (changes.clone(), home.to_owned());
+            let stream = Stream::start(&[root], 0.05, true, move |path| {
+                let mut changes = sink.lock().unwrap_or_else(|error| error.into_inner());
+                match path {
+                    // Interpret lost coverage before filtering.
+                    None => changes.invalidate(),
+                    Some(path) if relevant(&home, path) => changes.insert(path.to_owned()),
+                    Some(_) => {}
                 }
-                let paths = CFArrayCreate(ptr::null_mut(), &root, 1, ptr::null_mut());
-                if paths.is_null() {
-                    CFRelease(root);
-                    bail!("cannot allocate event roots");
-                }
-                let queue =
-                    dispatch_queue_create(c"loopflow.active-sessions".as_ptr(), ptr::null_mut());
-                let mut context = Context {
-                    version: 0,
-                    info: (&mut *state as *mut State).cast(),
-                    retain: None,
-                    release: None,
-                    description: None,
-                };
-                let stream = FSEventStreamCreate(
-                    ptr::null_mut(),
-                    callback,
-                    &mut context,
-                    paths,
-                    u64::MAX,
-                    0.05,
-                    0x14, // WatchRoot | FileEvents; events since subscription.
-                );
-                if stream.is_null() {
-                    dispatch_release(queue);
-                    CFRelease(paths);
-                    CFRelease(root);
-                    bail!("cannot create filesystem event stream");
-                }
-                let subscription = Self {
-                    stream,
-                    queue,
-                    paths,
-                    root,
-                    state,
-                };
-                FSEventStreamSetDispatchQueue(stream, queue);
-                if FSEventStreamStart(stream) == 0 {
-                    bail!("cannot start filesystem event stream");
-                }
-                Ok(subscription)
-            }
+            })?;
+            Ok(Self { stream, changes })
         }
 
         pub fn changes(&self) -> Changes {
-            // SAFETY: only the reader calls this, never its callback queue. The
-            // SDK guarantees delivery of preceding events when FlushSync returns.
-            unsafe {
-                FSEventStreamFlushSync(self.stream);
-            }
+            self.stream.flush();
             std::mem::take(
                 &mut *self
-                    .state
                     .changes
                     .lock()
                     .unwrap_or_else(|error| error.into_inner()),
             )
-        }
-    }
-
-    impl Drop for Subscription {
-        fn drop(&mut self) {
-            // SAFETY: stop scheduling callbacks, drain any already submitted,
-            // then release the stream/queue/CF values before the context box.
-            unsafe {
-                FSEventStreamStop(self.stream);
-                FSEventStreamInvalidate(self.stream);
-                dispatch_sync_f(self.queue, ptr::null_mut(), barrier);
-                FSEventStreamRelease(self.stream);
-                dispatch_release(self.queue);
-                CFRelease(self.paths);
-                CFRelease(self.root);
-            }
         }
     }
 }

@@ -4,27 +4,39 @@ use time::OffsetDateTime;
 use crate::child::ChildRef;
 use crate::durable::{
     AbandonReceipt, Author, Home, HomeId, Placement, ProjectId, Steer, SteerComment, TaskId,
-    ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    TaskState, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
-use crate::work::project::{Project, ProjectEventKind};
+use crate::work::project::ProjectEventKind;
 use crate::work::task::{Task, TaskEventKind};
 
 use super::SqliteStore;
 
 impl SqliteStore {
+    /// A Task may launch a Flow while it is ready, not being abandoned, and
+    /// planned in its Wave's current chapter.
+    pub(crate) fn require_task_launch(&self, task_id: &TaskId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let work = WorkRef::Task(task_id.clone());
+        require_ready_work(&conn, &work)?;
+        let abandoning: bool = conn.query_row(
+            "SELECT abandon_requested_at IS NOT NULL FROM tasks WHERE id=?1",
+            [task_id.as_str()],
+            |row| row.get(0),
+        )?;
+        if abandoning {
+            return Err(StoreError::InvalidAuthority(
+                "Task cancellation is pending; retry task abandon".into(),
+            ));
+        }
+        require_current_task_project(&conn, &work)
+    }
+
     pub fn begin_task_abandon(&self, task_id: &TaskId) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if super::flows::task_flow_in(&tx, task_id)?
-            .is_some_and(|position| position.claim.is_some())
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Task acquired a worker; cancellation was not attempted".into(),
-            ));
-        }
         match work_status_in(&tx, &WorkRef::Task(task_id.clone()))? {
             WorkStatus::Done => {
                 return Err(StoreError::InvalidAuthority(
@@ -144,23 +156,17 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = now_unix();
         let (table, id) = work_table(work);
-        if let WorkRef::Task(task_id) = work {
-            if super::flows::task_flow_in(&tx, task_id)?
-                .is_some_and(|position| position.claim.is_some())
-            {
-                return Err(StoreError::InvalidAuthority(
-                    "Task has a worker claim; settle execution before abandonment".into(),
-                ));
-            }
-        }
-        if tx.execute(
-            &format!(
+        let abandon = match work {
+            WorkRef::Task(_) => format!(
+                "UPDATE tasks AS t SET abandoned_at=?2 WHERE t.id=?1 AND {}",
+                task_open_sql("t")
+            ),
+            _ => format!(
                 "UPDATE {table} SET work_state='abandoned', work_terminal_at=?2
                  WHERE id=?1 AND work_state='ready'"
             ),
-            params![id, now],
-        )? != 1
-        {
+        };
+        if tx.execute(&abandon, params![id, now])? != 1 {
             return Err(StoreError::InvalidAuthority(format!(
                 "{} {} is not ready",
                 work.kind(),
@@ -172,7 +178,6 @@ impl SqliteStore {
                 "UPDATE tasks SET abandon_requested_at=NULL,abandon_reason=NULL WHERE id=?1",
                 [task_id.as_str()],
             )?;
-            super::flows::retire_unclaimed_task_flow_in(&tx, task_id)?;
         }
         tx.commit()?;
         Ok(AbandonReceipt {
@@ -186,6 +191,11 @@ impl SqliteStore {
     pub fn work_status(&self, work: &WorkRef) -> StoreResult<WorkStatus> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         work_status_in(&conn, work)
+    }
+
+    pub fn task_state(&self, task: &TaskId) -> StoreResult<TaskState> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        task_state_in(&conn, task)
     }
 
     pub fn work_for_child(&self, target: &ChildRef) -> StoreResult<WorkRef> {
@@ -555,7 +565,35 @@ fn inherit_placement(
     write_placement(tx, work, &home_id, placed_at)
 }
 
+/// SQL for the state of Task row `t`, read from its Workflow position.
+pub(crate) fn task_state_sql(t: &str) -> String {
+    format!(
+        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' ELSE COALESCE((
+            SELECT CASE WHEN wf.edge IS NOT NULL THEN 'active' WHEN wf.node='start' THEN 'ready'
+                WHEN wf.node='end' THEN 'done' ELSE 'active' END
+            FROM task_workflows wf WHERE wf.task_id={t}.id),'not_ready') END"
+    )
+}
+
+/// SQL: Task row `t` is neither done nor abandoned.
+pub(crate) fn task_open_sql(t: &str) -> String {
+    format!("({}) NOT IN ('done','abandoned')", task_state_sql(t))
+}
+
+pub(crate) fn task_state_in(conn: &Connection, task: &TaskId) -> StoreResult<TaskState> {
+    let state: String = conn.query_row(
+        &format!("SELECT {} FROM tasks t WHERE t.id=?1", task_state_sql("t")),
+        [task.as_str()],
+        |row| row.get(0),
+    )?;
+    TaskState::parse(&state)
+        .ok_or_else(|| StoreError::InvalidData(format!("invalid Task state {state:?}")))
+}
+
 pub(crate) fn work_status_in(conn: &Connection, work: &WorkRef) -> StoreResult<WorkStatus> {
+    if let WorkRef::Task(task) = work {
+        return Ok(task_state_in(conn, task)?.work_status());
+    }
     let (table, id) = work_table(work);
     let state: String = conn.query_row(
         &format!("SELECT work_state FROM {table} WHERE id=?1"),
@@ -584,37 +622,38 @@ pub(super) fn require_ready_work(conn: &Connection, work: &WorkRef) -> StoreResu
     }
 }
 
-pub(super) fn require_task_worker_eligible(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
-    require_ready_work(conn, work)?;
-    if let WorkRef::Task(task) = work {
-        let abandoning: bool = conn.query_row(
-            "SELECT abandon_requested_at IS NOT NULL FROM tasks WHERE id=?1",
-            [task.as_str()],
-            |row| row.get(0),
-        )?;
-        if abandoning {
-            return Err(StoreError::InvalidAuthority(
-                "Task cancellation is pending; retry task abandon".into(),
-            ));
-        }
-    }
-    require_current_task_chapter(conn, work)
-}
-
-pub(super) fn require_current_task_chapter(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
+pub(super) fn require_current_task_project(conn: &Connection, work: &WorkRef) -> StoreResult<()> {
     let WorkRef::Task(task) = work else {
         return Ok(());
     };
-    let expired: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM tasks t JOIN projects p ON p.id=t.project_id
-         WHERE t.id=?1 AND t.started_at IS NULL AND
-         (p.status != 'started' OR (SELECT count(*) FROM projects current
-          WHERE current.wave_id=p.wave_id AND current.status='started') != 1))",
+    let (project, started): (String, bool) = conn.query_row(
+        "SELECT project_id, started_at IS NOT NULL FROM tasks WHERE id=?1",
         [task.as_str()],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    if expired {
-        return Err(StoreError::InvalidAuthority("this Task belongs to chapter history; resume the chapter transition before starting work".into()));
+    if started {
+        return Ok(());
+    }
+    require_selected_project(conn, &ProjectId::from_raw(project))
+}
+
+pub(super) fn require_selected_project(conn: &Connection, project: &ProjectId) -> StoreResult<()> {
+    let (wave, provider_id, status): (WaveId, String, String) = conn.query_row(
+        "SELECT wave_id, external_project_id, status FROM projects WHERE id=?1",
+        [project.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    let selected = super::project_selection::read_in(conn, &wave).map_err(invalid_durable)?;
+    if selected.as_deref() != Some(provider_id.as_str()) {
+        return Err(StoreError::InvalidAuthority(
+            "Task Project is not the Wave's configured Project; ensure the Wave before starting new work".into(),
+        ));
+    }
+    if status != "started" {
+        return Err(StoreError::InvalidAuthority(
+            "configured Project is not In Progress; ensure the Wave before starting new work"
+                .into(),
+        ));
     }
     Ok(())
 }
@@ -652,63 +691,30 @@ pub(crate) fn create_wave_work(
     inherit_placement(tx, &work, None, created_at)
 }
 
-pub(crate) fn create_project_work(tx: &Transaction<'_>, project: &Project) -> StoreResult<()> {
-    let project_id = tx
-        .query_row(
-            "SELECT id FROM projects WHERE external_project_id=?1",
-            [project.plan.id.as_str()],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .unwrap_or_else(|| ProjectId::new().to_string());
-    tx.execute(
-        "INSERT OR IGNORE INTO projects (
-            id, wave_id, external_project_id, created_at
-         ) VALUES (?1, ?2, ?3, ?4)",
-        params![
-            project_id,
-            project.wave_id.as_str(),
-            project.plan.id.as_str(),
-            project.created_at.unix_timestamp(),
-        ],
+pub(super) fn inherit_project_placement(
+    tx: &Transaction<'_>,
+    project_id: &ProjectId,
+) -> StoreResult<()> {
+    let (wave_id, created_at) = tx.query_row(
+        "SELECT wave_id,created_at FROM projects WHERE id=?1",
+        [project_id.as_str()],
+        |row| Ok((row.get::<_, WaveId>(0)?, row.get::<_, i64>(1)?)),
     )?;
-    let work = WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?);
-    let parent = WorkRef::Wave(project.wave_id.clone());
     inherit_placement(
         tx,
-        &work,
-        Some(&parent),
-        project.created_at.unix_timestamp(),
-    )?;
-    Ok(())
+        &WorkRef::Project(project_id.clone()),
+        Some(&WorkRef::Wave(wave_id)),
+        created_at,
+    )
 }
 
-pub(crate) fn create_task_work(tx: &Transaction<'_>, task: &Task) -> StoreResult<()> {
-    let project_id = task.project_id.as_str().to_string();
-    let task_id = tx
-        .query_row(
-            "SELECT id FROM tasks WHERE external_issue_id=?1",
-            [task.plan.id.as_str()],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .unwrap_or_else(|| TaskId::new().to_string());
-    tx.execute(
-        "INSERT OR IGNORE INTO tasks (
-            id, project_id, external_issue_id, issue_identifier, created_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![
-            task_id,
-            project_id,
-            task.plan.id.as_str(),
-            task.plan.identifier,
-            task.created_at.unix_timestamp(),
-        ],
-    )?;
-    let work = WorkRef::Task(TaskId::parse(&task_id).map_err(invalid_durable)?);
-    let parent = WorkRef::Project(ProjectId::parse(&project_id).map_err(invalid_durable)?);
-    inherit_placement(tx, &work, Some(&parent), task.created_at.unix_timestamp())?;
-    Ok(())
+pub(super) fn inherit_task_placement(tx: &Transaction<'_>, task: &Task) -> StoreResult<()> {
+    inherit_placement(
+        tx,
+        &WorkRef::Task(task.id.clone()),
+        Some(&WorkRef::Project(task.project_id.clone())),
+        task.created_at.unix_timestamp(),
+    )
 }
 
 pub(crate) fn work_for_child_in(conn: &Connection, target: &ChildRef) -> StoreResult<WorkRef> {
@@ -774,19 +780,13 @@ mod durable_store_tests {
     use std::thread;
 
     use super::super::sessions::reserve_session_in;
-    use crate::durable::{
-        FlowSession, ProjectId, TaskFlowBlocker, TaskId, TaskWorkerClaim, TaskWorkerClaimOutcome,
-        TaskWorkerOwner,
-    };
-    use crate::engine::execution::NestedCursor;
-    use crate::engine::flow::{ConcretePath, ConcreteXor};
-    use crate::engine::transitions::{FlowDecision, FlowVerdict};
-    use crate::engine::{ConcreteStep, ExecutionCursor, Skill};
-    use crate::id::{ExecId, TraceId, WaveId};
+    use crate::durable::{ProjectId, TaskId};
+
+    use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::session::{AgentSession, SessionKind, TitleSource, WorkSource};
+    use crate::session::{AgentSession, TitleSource, WorkSource};
     use crate::store::sqlite::SqliteStore;
-    use crate::store::StoreResult;
+
     use crate::work::project::Project;
     use crate::work::task::{PmWritebackState, Task, TaskEventKind, TaskPr, TaskPrId};
 
@@ -809,10 +809,9 @@ mod durable_store_tests {
             iterations: None,
             task_id,
             wave_id,
-            flow_session_id: None,
+            flow_id: None,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
-            kind: SessionKind::Conversation,
             interactive: false,
             repo: None,
             title: "Investigation".into(),
@@ -850,9 +849,9 @@ mod durable_store_tests {
         let project = Project {
             id: project_id.clone(),
             plan: ProjectPlan {
-                flow: "feature".into(),
+                workflow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
-                id: LinearProjectId::new("project-uuid").unwrap(),
+                id: LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap(),
                 slug: "probe".to_string(),
                 name: "Probe".to_string(),
                 prompt_context: "Probe Task execution".to_string(),
@@ -865,6 +864,14 @@ mod durable_store_tests {
             updated_at: now,
         };
         store.insert_project(&project).unwrap();
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store,
+            &wave_id,
+            None,
+            project.plan.id.as_str(),
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
         let task = Task {
             id: task_id.clone(),
             plan: TaskPlan {
@@ -904,8 +911,113 @@ mod durable_store_tests {
             created_at: now,
             updated_at: now,
         };
-        store.insert_task(&task, &pr).unwrap();
+        store.insert_task(task.clone(), &pr, false).unwrap();
         (dir, store, task_id)
+    }
+
+    #[test]
+    fn configured_project_admission_preserves_started_continuation() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut other = store.project(&task.project_id).unwrap().unwrap();
+        other.id = ProjectId::new();
+        other.plan.id = LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap();
+        other.plan.name = "An unrelated ordinary plan".into();
+        store.insert_project(&other).unwrap();
+        // Another Started Project does not compete with the configured identity.
+        let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
+        store.insert_task(new_task.clone(), &pr, false).unwrap();
+        store.require_task_launch(&task_id).unwrap();
+        assert!(!store.task_started(&task_id).unwrap());
+        let mut input = unpublished_conversation(Some(new_task.id.clone()), None, 1);
+        input.cwd = new_task.worktree.clone();
+        store.create_session(input, None).unwrap();
+        assert!(store.task_started(&new_task.id).unwrap());
+        let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store,
+            &task.wave_id,
+            Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3"),
+            other.plan.id.as_str(),
+            &guard,
+        )
+        .unwrap();
+        let (mut rejected, mut rejected_pr) =
+            unregistered_task(&store, &task_id, dir.path().join("rejected"));
+        rejected.plan.id = LinearIssueId::new("third-issue").unwrap();
+        rejected.plan.identifier = "PROBE-3".into();
+        rejected.workspace_slug = "rejected".into();
+        rejected_pr.slug = "rejected".into();
+        rejected_pr.branch = "rejected".into();
+        assert!(store
+            .insert_task(rejected.clone(), &rejected_pr, false)
+            .is_err());
+        assert!(store.task(&rejected.id).unwrap().is_none());
+        assert!(store.task_prs(&rejected.id).unwrap().is_empty());
+        assert!(store.require_task_launch(&task_id).is_err());
+        // An established start remains eligible after its Project becomes history.
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE projects SET status='completed' WHERE id=?1",
+                [task.project_id.as_str()],
+            )
+            .unwrap();
+        }
+        store.require_task_launch(&new_task.id).unwrap();
+        assert!(store.task_started(&new_task.id).unwrap());
+        assert_eq!(
+            store.task(&task_id).unwrap().unwrap().worktree,
+            task.worktree
+        );
+    }
+
+    #[test]
+    fn configured_project_admission_requires_a_selected_active_project() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE waves SET current_project_id=NULL WHERE id=?1",
+                [&task.wave_id],
+            )
+            .unwrap();
+        assert!(store.require_task_launch(&task_id).is_err());
+        assert!(!store.task_started(&task_id).unwrap());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                rusqlite::params![task.wave_id, task.project_id.as_str()],
+            )
+            .unwrap();
+        for status in ["backlog", "planned", "paused", "completed", "canceled"] {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE projects SET status=?2 WHERE id=?1",
+                    rusqlite::params![task.project_id.as_str(), status],
+                )
+                .unwrap();
+            assert!(store.require_task_launch(&task_id).is_err());
+        }
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE projects SET status='started', workflow='' WHERE id=?1",
+                [task.project_id.as_str()],
+            )
+            .unwrap();
+        store.require_task_launch(&task_id).unwrap();
     }
 
     #[test]
@@ -924,158 +1036,8 @@ mod durable_store_tests {
         assert_eq!(store.task_events_after(&task, 0).unwrap(), vec![event]);
     }
 
-    fn autonomous_position(task_id: &TaskId) -> FlowSession {
-        FlowSession {
-            invocation: crate::durable::test_flow_invocation(
-                "task",
-                0,
-                "implement",
-                Some("implement"),
-                false,
-            ),
-            cursor: Default::default(),
-            version: 0,
-            task_id: Some(task_id.clone()),
-            wave_id: None,
-            cwd: "/repo.probe".into(),
-            message: None,
-            model: None,
-            selected_capture: None,
-            pending_session_id: None,
-            ready_summary: None,
-            worker_generation: 0,
-            claim: None,
-            failure: None,
-            finished: false,
-            updated_at: time::OffsetDateTime::now_utc(),
-        }
-    }
-
-    fn review_position(task_id: &TaskId) -> FlowSession {
-        let mut position = autonomous_position(task_id);
-        position.invocation = crate::durable::test_flow_invocation(
-            "review",
-            0,
-            "review-design",
-            Some("review"),
-            true,
-        );
-        position
-    }
-
-    fn owner(pid: u32) -> TaskWorkerOwner {
-        TaskWorkerOwner {
-            trace_id: TraceId::new(),
-            exec_id: ExecId::new(),
-            pid,
-            started_at: 1_700_000_000,
-        }
-    }
-
-    fn claim(store: &SqliteStore, task: &TaskId, flow: &FlowSession, pid: u32) -> TaskWorkerClaim {
-        match store
-            .claim_task_worker(
-                task,
-                &flow.invocation.id,
-                flow.version,
-                &owner(pid),
-                time::OffsetDateTime::now_utc(),
-            )
-            .unwrap()
-        {
-            TaskWorkerClaimOutcome::Claimed(claim) => claim,
-            outcome => panic!("unexpected claim outcome: {outcome:?}"),
-        }
-    }
-
-    /// Reserve the input explicitly when the fixture starts work.
-    fn reserved_capture(store: &SqliteStore, task: &TaskId) -> String {
-        let flow = store.task_flow(task).unwrap().unwrap();
-        store
-            .reserve_attempt(flow.id(), flow.version, flow.claim.as_ref(), None)
-            .unwrap()
-            .selected_capture
-            .unwrap()
-            .artifact_key
-    }
-
-    /// Launch the reserved capture: the worker's publication of its attempt.
-    fn publish(
-        store: &SqliteStore,
-        flow: &FlowSession,
-        run: &str,
-        claim: &TaskWorkerClaim,
-    ) -> StoreResult<()> {
-        store.publish_attempt(
-            flow.id(),
-            flow.version,
-            store.captured_sequence(run).unwrap().unwrap(),
-            Some(claim),
-            "codex",
-            None,
-        )
-    }
-
-    /// Park a Task's Flow at its review with the review's capture published and,
-    /// when given, its feedback ready.
-    fn parked_review(
-        store: &SqliteStore,
-        task: &TaskId,
-        position: &FlowSession,
-        ready: Option<&str>,
-    ) -> (FlowSession, String, String) {
-        let flow = store.start_task_flow(task, position).unwrap();
-        let flow = store.reserve_task_review(flow.id(), flow.version).unwrap();
-        let session_id = crate::ops::human_session::flow_id(&flow).unwrap();
-        let run = store.session(&session_id).unwrap().unwrap().artifact_key;
-        store
-            .publish_review_capture(
-                &session_id,
-                store.captured_sequence(&run).unwrap().unwrap(),
-                flow.version,
-                "codex",
-                None,
-            )
-            .unwrap();
-        if let Some(summary) = ready {
-            store
-                .ready_session(&session_id, store.captured_sequence(&run).unwrap(), summary)
-                .unwrap();
-        }
-        (store.task_flow(task).unwrap().unwrap(), session_id, run)
-    }
-
-    fn find_decision_index(steps: &[ConcreteStep]) -> usize {
-        steps
-            .iter()
-            .position(|step| matches!(step, ConcreteStep::Skill(skill) if skill.repeat.is_some()))
-            .expect("fixture Flow has a repeating decision")
-    }
-
-    fn retained_invocation(store: &SqliteStore, id: &str) -> (FlowSession, String) {
-        let flow = store.flow(id).unwrap().unwrap();
-        let state = store
-            .conn
-            .lock()
-            .unwrap()
-            .query_row("SELECT state FROM flow_sessions WHERE id=?1", [id], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        (flow, state)
-    }
-
-    /// `flow` as its row reads once the Flow ended.
-    fn ended(flow: &FlowSession) -> FlowSession {
-        FlowSession {
-            finished: true,
-            claim: None,
-            ..flow.clone()
-        }
-    }
-
     fn conversation(
-        flow_session_id: Option<String>,
+        flow_id: Option<String>,
         task_id: Option<TaskId>,
         wave_id: Option<WaveId>,
     ) -> crate::session::AgentSession {
@@ -1093,10 +1055,9 @@ mod durable_store_tests {
             iterations: None,
             task_id,
             wave_id,
-            flow_session_id,
+            flow_id,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
-            kind: crate::session::SessionKind::Conversation,
             interactive: false,
             repo: None,
             title: "Implementation".into(),
@@ -1112,9 +1073,6 @@ mod durable_store_tests {
     fn session_admission_infers_ancestors_and_rejects_conflicts_atomically() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
-        let position = store
-            .start_task_flow(&task_id, &autonomous_position(&task_id))
-            .unwrap();
         let mut conn = store.conn.lock().unwrap();
         let other_wave = WaveId::new();
         conn.execute(
@@ -1126,18 +1084,6 @@ mod durable_store_tests {
         conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
             SELECT ?1,project_id,?1,?1,'/repo.other',1 FROM tasks WHERE id=?2",
             rusqlite::params![other_task.as_str(), task_id.as_str()]).unwrap();
-        let taskless = crate::engine::invocation::QueuedInvocation::new(
-            "taskless",
-            position.invocation.steps.clone(),
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO flow_sessions(id,invocation_json,cwd,step_index,iteration,
-            position_version,worker_generation,updated_at,state)
-            VALUES(?1,?2,'/repo',0,0,1,0,1,'current')",
-            rusqlite::params![taskless.id, serde_json::to_string(&taskless).unwrap()],
-        )
-        .unwrap();
         for (invocation, task_input, wave_input, expected_task, expected_wave) in [
             (None, None, None, None, None),
             (
@@ -1155,26 +1101,11 @@ mod durable_store_tests {
                 Some(task.wave_id.clone()),
             ),
             (
-                Some(position.invocation.id.clone()),
                 None,
-                None,
-                Some(task_id.clone()),
-                Some(task.wave_id.clone()),
-            ),
-            (
-                Some(position.invocation.id.clone()),
                 Some(task_id.clone()),
                 Some(task.wave_id.clone()),
                 Some(task_id.clone()),
                 Some(task.wave_id.clone()),
-            ),
-            (Some(taskless.id.clone()), None, None, None, None),
-            (
-                Some(taskless.id.clone()),
-                None,
-                Some(other_wave.clone()),
-                None,
-                Some(other_wave.clone()),
             ),
         ] {
             let tx = conn
@@ -1197,29 +1128,9 @@ mod durable_store_tests {
         let run_count: i64 = conn
             .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
             .unwrap();
-        // Callers cannot publish a capture under a different node or loop pass.
-        for (node, iterations) in [(Some(u32::MAX), None), (None, Some(vec![vec![99]]))] {
-            let mut requested = conversation(Some(position.invocation.id.clone()), None, None);
-            requested.node = node;
-            requested.iterations = iterations;
-            {
-                let tx = conn
-                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                    .unwrap();
-                assert!(super::super::sessions::reserve_session_in(&tx, requested, None).is_err());
-            }
-            assert_eq!(
-                conn.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
-                    .get::<_, i64>(0))
-                    .unwrap(),
-                run_count
-            );
-        }
         for (invocation, task_input, wave_input) in [
             (None, Some(task_id.clone()), Some(other_wave.clone())),
-            (Some(position.invocation.id.clone()), Some(other_task), None),
-            (Some(taskless.id.clone()), Some(task_id.clone()), None),
-            (Some("missing".into()), None, None),
+            (None, Some(other_task), Some(other_wave.clone())),
             (None, Some(TaskId::new()), None),
             (None, None, Some(WaveId::new())),
         ] {
@@ -1248,12 +1159,6 @@ mod durable_store_tests {
             );
         }
         // Changing a parent cannot invalidate an already reserved child's ancestry.
-        assert!(conn
-            .execute(
-                "UPDATE flow_sessions SET task_id=NULL WHERE id=?1",
-                [&position.invocation.id]
-            )
-            .is_err());
         assert!(conn
             .execute(
                 "UPDATE projects SET wave_id=?1 WHERE id=?2",
@@ -1299,7 +1204,7 @@ mod durable_store_tests {
         let error = writer.join().unwrap().unwrap_err();
         assert!(error
             .to_string()
-            .contains("Project would change AgentSession ancestry"));
+            .contains("selected Project cannot change Wave ownership"));
         let (run_wave, project_wave): (String, String) = conn
             .query_row(
                 "SELECT r.wave_id,p.wave_id FROM agent_sessions r JOIN tasks t ON t.id=r.task_id
@@ -1310,6 +1215,274 @@ mod durable_store_tests {
             .unwrap();
         assert_eq!(run_wave, task.wave_id.as_str());
         assert_eq!(run_wave, project_wave);
+    }
+
+    #[test]
+    fn chapter_evidence_retains_taskless_mechanical_work_without_marking_started() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        assert!(!store.chapter_task_evidence(&task_id).unwrap().begun);
+        // A Flow run from the checkout names no Task; its step is still work there.
+        store.test_flow(
+            "sync",
+            &task.worktree.to_string_lossy(),
+            &[("sync --plan", None)],
+            None,
+        );
+        assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
+        assert!(!store.task_started(&task_id).unwrap());
+    }
+
+    fn unregistered_task(
+        store: &SqliteStore,
+        existing: &TaskId,
+        checkout: PathBuf,
+    ) -> (Task, TaskPr) {
+        let mut task = store.task(existing).unwrap().unwrap();
+        let mut pr = store.task_prs(existing).unwrap().remove(0);
+        task.id = TaskId::new();
+        task.plan.id = LinearIssueId::new("later-issue").unwrap();
+        task.plan.identifier = "PROBE-2".into();
+        task.worktree = checkout;
+        task.workspace_slug = "later-checkout".into();
+        pr.id = TaskPrId::new();
+        pr.task_id = task.id.clone();
+        pr.slug = task.workspace_slug.clone();
+        pr.branch = task.workspace_slug.clone();
+        (task, pr)
+    }
+
+    #[test]
+    fn descendant_admission_excludes_registration_of_a_missing_root() {
+        for initializing in [false, true] {
+            let (dir, store, existing) = store_with_task();
+            let (task, pr) = unregistered_task(&store, &existing, dir.path().join("missing-root"));
+            let cwd = task.worktree.join("src/nested");
+            let admission = store.lock_checkout(&cwd).unwrap();
+            let mut earlier = unpublished_conversation(None, None, 1);
+            earlier.cwd = cwd;
+            earlier.work_source = None;
+            let register = || store.insert_task(task.clone(), &pr, initializing);
+            assert!(register().is_err());
+            assert!(store.task(&task.id).unwrap().is_none());
+            assert!(store.task_prs(&task.id).unwrap().is_empty());
+            drop(admission);
+            let earlier = store.create_session(earlier, None).unwrap();
+            register().unwrap();
+            assert_eq!(
+                store.session_task_ids(&earlier.id).unwrap(),
+                vec![task.id.clone()]
+            );
+            assert_eq!(store.session(&earlier.id).unwrap().unwrap(), earlier);
+            assert!(!store.task_started(&task.id).unwrap());
+        }
+    }
+
+    #[test]
+    fn missing_root_exclusion_preserves_taskless_session_admission() {
+        let (dir, store, existing) = store_with_task();
+        let (task, pr) = unregistered_task(&store, &existing, dir.path().join("missing-root"));
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = task.worktree.join("src/nested");
+        conversation.work_source = None;
+        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        assert!(store.create_session(conversation.clone(), None).is_err());
+        assert!(store.session(&conversation.id).unwrap().is_none());
+        drop(exclusion);
+        let session = store.create_session(conversation, None).unwrap();
+        store.insert_task(task.clone(), &pr, true).unwrap();
+        assert_eq!(
+            store.session_task_ids(&session.id).unwrap(),
+            vec![task.id.clone()]
+        );
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+        assert!(!store.task_started(&task.id).unwrap());
+    }
+
+    #[test]
+    fn unrelated_checkout_exclusion_does_not_block_task_registration() {
+        let (dir, store, existing) = store_with_task();
+        let (task, pr) =
+            unregistered_task(&store, &existing, dir.path().join("independent-checkout"));
+
+        let _unrelated = store
+            .lock_checkout(&dir.path().join("unrelated-checkout/missing/src"))
+            .unwrap();
+        store.insert_task(task.clone(), &pr, true).unwrap();
+        assert_eq!(
+            store.task(&task.id).unwrap().unwrap().worktree,
+            task.worktree
+        );
+        assert_eq!(store.task_prs(&task.id).unwrap(), vec![pr]);
+    }
+
+    #[test]
+    fn checkout_exclusion_preserves_registration_and_retry() {
+        for initializing in [false, true] {
+            let (dir, store, existing) = store_with_task();
+            let (task, pr) =
+                unregistered_task(&store, &existing, dir.path().join("missing-checkout"));
+
+            let mut conversation = unpublished_conversation(None, None, 1);
+            conversation.cwd = task.worktree.join("src");
+            conversation.work_source = None;
+            let session = store.create_session(conversation, None).unwrap();
+            let exclusion = store.lock_checkout(&task.worktree).unwrap();
+            let register = || store.insert_task(task.clone(), &pr, initializing);
+            assert!(register().is_err());
+            assert!(store.task(&task.id).unwrap().is_none());
+            assert!(store.task_prs(&task.id).unwrap().is_empty());
+            assert!(store.session_task_ids(&session.id).unwrap().is_empty());
+            assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+            drop(exclusion);
+            register().unwrap();
+            assert_eq!(
+                store.session_task_ids(&session.id).unwrap(),
+                vec![task.id.clone()]
+            );
+            assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+            let work = store.task_work(&task.id).unwrap();
+            assert_eq!(work.sessions.len(), 1);
+            assert_eq!(work.sessions[0].id, session.id);
+            assert!(!store.task_started(&task.id).unwrap());
+            assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
+        }
+    }
+
+    #[test]
+    fn checkout_session_membership_survives_project_transfer_without_binding() {
+        let (_dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = task.worktree.join("src");
+        conversation.work_source = None;
+        let session = store.create_session(conversation, None).unwrap();
+        let before = store.task_work(&task_id).unwrap();
+        assert_eq!(before.sessions.len(), 1);
+        assert_eq!(before.sessions[0].id, session.id);
+        assert_eq!(session.task_id, None);
+        assert!(!store.task_started(&task_id).unwrap());
+        assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
+
+        let successor = ProjectId::new();
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'successor',2)",
+            rusqlite::params![successor.as_str(), task.wave_id.as_str()],
+        ).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET project_id=?2 WHERE id=?1",
+                rusqlite::params![task_id.as_str(), successor.as_str()],
+            )
+            .unwrap();
+
+        let retained = store.task(&task_id).unwrap().unwrap();
+        assert_eq!(retained.project_id, successor);
+        assert_eq!(retained.worktree, task.worktree);
+        let after = store.task_work(&task_id).unwrap();
+        assert_eq!(after.sessions, before.sessions);
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+    }
+
+    #[test]
+    fn checkout_exclusion_preserves_unbound_history_until_binding_retries() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = dir.path().join("elsewhere");
+        let session = store.create_session(conversation, None).unwrap();
+        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        assert!(store
+            .bind_session(&session.id, session.captured, &task_id)
+            .is_err());
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+        assert!(!store.task_started(&task_id).unwrap());
+        drop(exclusion);
+        let bound = store
+            .bind_session(&session.id, session.captured, &task_id)
+            .unwrap();
+        assert_eq!(bound.task_id.as_ref(), Some(&task_id));
+        assert!(store.task_started(&task_id).unwrap());
+    }
+
+    #[test]
+    fn checkout_exclusion_preserves_bound_session_input_until_retry() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut input = unpublished_conversation(Some(task_id.clone()), None, 1);
+        input.cwd = dir.path().join("elsewhere");
+        let session = store.create_session(input, None).unwrap();
+        let mut next = session.clone();
+        next.artifact_key = crate::session_record::new_artifact_key();
+        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        let result = store.replace_session_input(session.captured, next.clone());
+        assert!(
+            result.is_err(),
+            "input changed while its Task checkout was excluded"
+        );
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+        drop(exclusion);
+        let replaced = store.replace_session_input(session.captured, next).unwrap();
+        assert_eq!(replaced.task_id.as_ref(), Some(&task_id));
+        assert_eq!(replaced.cwd, session.cwd);
+        assert_ne!(replaced.captured, session.captured);
+    }
+
+    #[test]
+    fn checkout_exclusion_covers_missing_subdirectories_and_explicit_tasks() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = task.worktree.join("missing/subdirectory");
+        assert!(store.create_session(conversation.clone(), None).is_err());
+        assert!(store.session(&conversation.id).unwrap().is_none());
+        conversation.cwd = dir.path().join("elsewhere");
+        conversation.task_id = Some(task_id.clone());
+        assert!(store.create_session(conversation.clone(), None).is_err());
+        assert!(!store.task_started(&task_id).unwrap());
+        drop(exclusion);
+        let created = store.create_session(conversation, None).unwrap();
+        assert_eq!(created.task_id.as_ref(), Some(&task_id));
+        assert!(store.task_started(&task_id).unwrap());
+    }
+
+    #[test]
+    fn session_binding_retains_a_task_in_completed_project_history() {
+        let (dir, store, task_id) = store_with_task();
+        let task = store.task(&task_id).unwrap().unwrap();
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = dir.path().to_path_buf();
+        let session = store.create_session(conversation, None).unwrap();
+        assert!(!store.task_started(&task_id).unwrap());
+
+        // Rotation can complete a predecessor after observing untouched backlog.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE projects SET status='completed' WHERE id=?1",
+                [task.project_id.as_str()],
+            )
+            .unwrap();
+        let bound = store
+            .bind_session(&session.id, session.captured, &task_id)
+            .unwrap();
+        assert_eq!(bound.task_id.as_ref(), Some(&task_id));
+        assert!(store.task_started(&task_id).unwrap());
+        let retained = store.task(&task_id).unwrap().unwrap();
+        assert_eq!(retained.project_id, task.project_id);
+        assert_eq!(retained.worktree, task.worktree);
+        assert_eq!(
+            store
+                .bind_session(&session.id, session.captured, &task_id)
+                .unwrap(),
+            bound
+        );
     }
 
     #[test]
@@ -1326,7 +1499,7 @@ mod durable_store_tests {
         }
         // A done Task is still a valid assignment target.
         conn.execute(
-            "UPDATE tasks SET work_state='done',work_terminal_at=1 WHERE id=?1",
+            "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,'{\"name\":\"unplanned\",\"nodes\":[],\"edges\":[{\"from\":\"start\",\"to\":\"end\",\"flow\":null}]}','end',1)",
             [bound_task.as_str()],
         )
         .unwrap();
@@ -1505,7 +1678,7 @@ mod durable_store_tests {
                 caller_artifact_key: None,
                 task_id: None,
                 wave_id: wave,
-                flow_session_id: None,
+                flow_id: None,
                 work_source: None,
                 bound_at: None,
                 id: id.to_string(),
@@ -1517,7 +1690,6 @@ mod durable_store_tests {
                 model: None,
                 node: None,
                 iterations: None,
-                kind: crate::session::SessionKind::Conversation,
                 interactive: true,
                 repo: None,
                 title: id.to_string(),
@@ -1527,7 +1699,7 @@ mod durable_store_tests {
                 completed_at: None,
                 created_at: 1,
             };
-            store.create_session(session, None, None).unwrap()
+            store.create_session(session, None).unwrap()
         };
         let first = open("orphan", None);
         let replacement = store
@@ -1669,121 +1841,12 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn a_task_points_at_one_invocation_while_other_flows_name_it() {
-        let (_dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        let managed = store
-            .start_task_flow(&task_id, &autonomous_position(&task_id))
-            .unwrap();
-        // `lf --task X flow review-design`: a Flow about the Task, not its Flow.
-        let about = crate::engine::invocation::QueuedInvocation::new(
-            "review-design",
-            managed.invocation.steps.clone(),
-        )
-        .unwrap();
-        store
-            .create_flow(&crate::durable::FlowSession {
-                invocation: about.clone(),
-                cursor: ExecutionCursor::default(),
-                version: 0,
-                task_id: Some(task_id.clone()),
-                wave_id: Some(task.wave_id.clone()),
-                cwd: "/repo".into(),
-                message: None,
-                model: None,
-                selected_capture: None,
-                pending_session_id: None,
-                ready_summary: None,
-                worker_generation: 0,
-                claim: None,
-                failure: None,
-                finished: false,
-                updated_at: time::OffsetDateTime::now_utc(),
-            })
-            .unwrap();
-        assert_eq!(store.task_flow(&task_id).unwrap(), Some(managed.clone()));
-
-        // Attributed conversations inherit this Flow's Task without changing its managed selection.
-        let session = store
-            .create_session(conversation(Some(about.id.clone()), None, None), None, None)
-            .unwrap();
-        assert_eq!(session.task_id, Some(task_id.clone()));
-        assert_eq!(session.wave_id, Some(task.wave_id.clone()));
-        let other_task = TaskId::new();
-        store.conn.lock().unwrap().execute(
-            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
-            SELECT ?1,project_id,?1,?1,'/repo.other',1 FROM tasks WHERE id=?2",
-            rusqlite::params![other_task.as_str(), task_id.as_str()],
-        )
-        .unwrap();
-        assert!(store
-            .create_session(
-                conversation(Some(about.id.clone()), Some(other_task.clone()), None),
-                None,
-                None
-            )
-            .is_err());
-        assert_eq!(
-            store
-                .sessions(&crate::session::SessionFilter {
-                    task: Some(task_id.to_string()),
-                    interactive: None,
-                    history: true,
-                    ..Default::default()
-                })
-                .unwrap()
-                .len(),
-            1
-        );
-
-        // Restart closes the Task's Flow and clears the pointer; the other Flow
-        // stays current, and the pointer accepts only an invocation naming X.
-        store
-            .restart_task_flow(
-                &task,
-                store.task_flow(&task.id).unwrap().as_ref(),
-                "checkpoint",
-            )
-            .unwrap();
-        assert_eq!(store.task_flow(&task_id).unwrap(), None);
-        assert_eq!(
-            retained_invocation(&store, &managed.invocation.id).1,
-            "replaced"
-        );
-        let conn = store.conn.lock().unwrap();
-        let state: String = conn
-            .query_row(
-                "SELECT state FROM flow_sessions WHERE id=?1",
-                [&about.id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(state, "current");
-        let point = |task: &TaskId, invocation: &str| {
-            conn.execute(
-                "UPDATE tasks SET current_invocation_id=?2 WHERE id=?1",
-                rusqlite::params![task.as_str(), invocation],
-            )
-        };
-        assert!(point(&other_task, &about.id).is_err());
-        point(&task_id, &about.id).unwrap();
-        drop(conn);
-        assert_eq!(
-            store
-                .task_flow(&task_id)
-                .unwrap()
-                .map(|position| position.invocation.id),
-            Some(about.id)
-        );
-    }
-
-    #[test]
     fn competing_session_assignments_start_only_the_winning_task() {
         let (dir, store, task_id) = store_with_task();
         let wave = store.task(&task_id).unwrap().unwrap().wave_id;
         let other_task = TaskId::new();
         let session = store
-            .create_session(unpublished_conversation(None, None, 1), None, None)
+            .create_session(unpublished_conversation(None, None, 1), None)
             .unwrap();
         {
             let conn = store.conn.lock().unwrap();
@@ -1831,1181 +1894,5 @@ mod durable_store_tests {
                 assert!(error.to_string().contains("binding is permanent"));
             }
         }
-    }
-
-    #[test]
-    fn task_started_tracks_reserved_review_and_retained_history() {
-        let (_dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        assert!(!store.task_started(&task_id).unwrap());
-        let position = store
-            .start_task_flow(&task_id, &review_position(&task_id))
-            .unwrap();
-        assert!(!store.task_started(&task_id).unwrap());
-        let position = store
-            .reserve_task_review(position.id(), position.version)
-            .unwrap();
-        let session_id = crate::ops::human_session::flow_id(&position).unwrap();
-        // The review's reserved capture starts the Task before anything launches.
-        assert!(store.task_started(&task_id).unwrap());
-        assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
-        assert!(!store.retire_chapter_backlog(&task_id).unwrap());
-
-        // Activation may precede transfer. A reserved Task is already started
-        // and must retain execution while its Project is still the predecessor.
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE projects SET status='completed' WHERE id=?1",
-                [task.project_id.as_str()],
-            )
-            .unwrap();
-        let (reserved, run) = store.reserve_review_capture(&position).unwrap();
-        assert_eq!(store.session(&session_id).unwrap().unwrap(), run);
-        assert!(!run.input_published);
-
-        store
-            .publish_review_capture(
-                &session_id,
-                run.captured.unwrap(),
-                reserved.version,
-                "codex",
-                None,
-            )
-            .unwrap();
-        assert!(store.task_started(&task_id).unwrap());
-        store
-            .ready_session(&session_id, run.captured, "approved scope")
-            .unwrap();
-        let position = store.task_flow(&task_id).unwrap().unwrap();
-        store
-            .complete_task_review(&task_id, &position, "approved scope")
-            .unwrap();
-        assert!(store.task_flow(&task_id).unwrap().is_none());
-        assert!(store.task_started(&task_id).unwrap());
-    }
-
-    #[test]
-    fn review_session_retains_feedback_and_history_across_replacement_and_corrupt_neighbors() {
-        let (_dir, store, task_id) = store_with_task();
-        let (mut position, session_id, first_run) = parked_review(
-            &store,
-            &task_id,
-            &review_position(&task_id),
-            Some("Keep the reviewed parser behavior"),
-        );
-        store
-            .rename_session(
-                &session_id,
-                "Parser review",
-                crate::session::TitleSource::Human,
-            )
-            .unwrap();
-        let first_attempt = store.session(&session_id).unwrap().unwrap();
-        assert_eq!(first_attempt.work_source, Some(WorkSource::Inherited));
-        let mut runs = vec![first_run];
-        for _ in 0..2 {
-            let stale = position.clone();
-            let (reserved, run) = store.reserve_review_capture(&position).unwrap();
-            assert!(!run.input_published);
-            assert_eq!(run.task_id, first_attempt.task_id);
-            assert_eq!(run.wave_id, first_attempt.wave_id);
-            assert_eq!(run.flow_session_id, first_attempt.flow_session_id);
-            assert_eq!(run.work_source, Some(WorkSource::Inherited));
-            assert_eq!(
-                store
-                    .session_inputs(&session_id)
-                    .unwrap()
-                    .iter()
-                    .find(|input| **input == first_attempt.artifact_key),
-                Some(&first_attempt.artifact_key)
-            );
-            assert!(store.reserve_review_capture(&stale).is_err());
-            assert!(store
-                .ready_session(
-                    &session_id,
-                    store.captured_sequence(runs.last().unwrap()).unwrap(),
-                    "late feedback"
-                )
-                .is_err());
-            assert!(store
-                .complete_task_review(&task_id, &stale, "late completion")
-                .is_err());
-            assert!(store
-                .publish_review_capture(
-                    &session_id,
-                    store
-                        .captured_sequence(runs.last().unwrap())
-                        .unwrap()
-                        .unwrap(),
-                    reserved.version,
-                    "codex",
-                    None
-                )
-                .is_err());
-            store
-                .publish_review_capture(
-                    &session_id,
-                    run.captured.unwrap(),
-                    reserved.version,
-                    "codex",
-                    None,
-                )
-                .unwrap();
-            assert!(store
-                .publish_review_capture(
-                    &session_id,
-                    run.captured.unwrap(),
-                    reserved.version,
-                    "codex",
-                    None
-                )
-                .is_err());
-            runs.push(run.artifact_key);
-            position = store.task_flow(&task_id).unwrap().unwrap();
-            assert_eq!(
-                position.ready_summary.as_deref(),
-                Some("Keep the reviewed parser behavior")
-            );
-        }
-        store
-            .rename_session(
-                &session_id,
-                "generated suggestion",
-                crate::session::TitleSource::Generated,
-            )
-            .unwrap();
-        let session = store.session(&session_id).unwrap().unwrap();
-        let current = session.clone();
-        assert_eq!(session.title, "Parser review");
-        assert_eq!(current.artifact_key, *runs.last().unwrap());
-        let history = store.session_inputs(&session_id).unwrap();
-        assert_eq!(current.node, first_attempt.node);
-        assert_eq!(current.iterations, first_attempt.iterations);
-        assert_eq!(history.len(), 3);
-        for run in &runs {
-            assert!(history.contains(run));
-        }
-
-        // Checkpointing execution cannot replace or erase conversation state.
-        store
-            .checkpoint_flow(
-                position.id(),
-                position.version,
-                &position.cursor,
-                None,
-                None,
-            )
-            .unwrap();
-        assert_eq!(store.session(&session_id).unwrap(), Some(session.clone()));
-        assert_eq!(store.session_inputs(&session_id).unwrap(), history);
-
-        // An unrelated malformed autonomous capture remains an identified error,
-        // while direct Session discovery does not deserialize that invocation.
-        let broken = TaskId::new();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at)
-                SELECT ?1,project_id,?1,?1,'/repo.broken',1 FROM tasks WHERE id=?2",
-                rusqlite::params![broken.as_str(), task_id.as_str()]).unwrap();
-            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,
-                position_version,worker_generation,updated_at,state)
-                SELECT 'broken',?1,p.wave_id,'{\"id\":\"broken\",\"flow\":\"broken\",\"steps\":\"unreadable\"}',0,0,1,0,1,'current'
-                FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
-                [broken.as_str()]).unwrap();
-            conn.execute(
-                "UPDATE tasks SET current_invocation_id='broken' WHERE id=?1",
-                [broken.as_str()],
-            )
-            .unwrap();
-        }
-        assert_eq!(
-            store
-                .sessions(&crate::session::SessionFilter::default())
-                .unwrap(),
-            vec![session.clone()]
-        );
-        assert!(store
-            .task_flow(&broken)
-            .unwrap_err()
-            .to_string()
-            .contains(broken.as_str()));
-        let summary = position.ready_summary.clone().unwrap();
-        store
-            .complete_task_review(&task_id, &position, &summary)
-            .unwrap();
-        assert!(store
-            .complete_task_review(&task_id, &position, &summary)
-            .is_err());
-        assert!(store
-            .ready_session(
-                &session_id,
-                store.captured_sequence(runs.last().unwrap()).unwrap(),
-                "after completion"
-            )
-            .is_err());
-        let completed = store.session(&session_id).unwrap().unwrap();
-        assert!(completed.completed_at.is_some());
-        assert_eq!(completed.ready_summary, session.ready_summary);
-        assert_eq!(store.session_inputs(&session_id).unwrap(), history);
-        assert!(store
-            .sessions(&crate::session::SessionFilter::default())
-            .unwrap()
-            .is_empty());
-        let events = store.task_events_after(&task_id, 0).unwrap();
-        assert_eq!(
-            events
-                .iter()
-                .filter(|event| matches!(event.kind, TaskEventKind::FlowFinished { .. }))
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn a_new_flow_replaces_the_unclaimed_current_one_and_rejects_stale_writes() {
-        let (_dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        let (original, _, _) = parked_review(
-            &store,
-            &task_id,
-            &review_position(&task_id),
-            Some("keep this feedback"),
-        );
-        assert!(store.start_task_flow(&task_id, &original).is_err());
-
-        // `lf --task --flow flow start other` while the review waits: the review closes
-        // as replaced and its Session stops listing.
-        let replacement = store
-            .start_task_flow(&task_id, &autonomous_position(&task_id))
-            .unwrap();
-        assert_eq!(replacement.version, 1);
-        assert!(store
-            .sessions(&crate::session::SessionFilter::default())
-            .unwrap()
-            .is_empty());
-        assert_eq!(
-            retained_invocation(&store, &original.invocation.id),
-            (ended(&original), "replaced".into())
-        );
-        assert!(store
-            .complete_task_review(&task_id, &original, "late")
-            .is_err());
-        assert_eq!(
-            store.task_flow(&task_id).unwrap(),
-            Some(replacement.clone())
-        );
-
-        // A worker holding the replacement fences another selection.
-        let held = claim(&store, &task_id, &replacement, 401);
-        assert!(store
-            .start_task_flow(&task_id, &autonomous_position(&task_id))
-            .is_err());
-        assert_eq!(
-            store.task_flow(&task_id).unwrap().unwrap().claim,
-            Some(held.clone())
-        );
-
-        let stopped = store
-            .release_flow(replacement.id(), held.position_version, Some(&held))
-            .unwrap();
-        store
-            .restart_task_flow(&task, Some(&stopped), "checkpoint")
-            .unwrap();
-        assert!(store.task_flow(&task_id).unwrap().is_none());
-        assert_eq!(
-            retained_invocation(&store, &original.invocation.id),
-            (ended(&original), "replaced".into())
-        );
-        assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
-        assert!(!store.retire_chapter_backlog(&task_id).unwrap());
-    }
-
-    #[test]
-    fn review_retirement_fences_service_and_driver_and_retries_replacement() {
-        let (_dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        let flow = store
-            .start_task_flow(&task_id, &review_position(&task_id))
-            .unwrap();
-        let flow = store.reserve_task_review(flow.id(), flow.version).unwrap();
-        let id = flow.pending_session_id.as_ref().unwrap();
-        let before = store.session(id).unwrap().unwrap();
-        let exec = ExecId::new();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,?1,1)",
-                [&exec],
-            )
-            .unwrap();
-        store.record_review_service(&flow, &exec).unwrap();
-        let driver = store.claim_session_driver(id, None, &exec, true).unwrap();
-        assert_eq!(store.review_execs(id).unwrap(), vec![exec.clone()]);
-        store.retire_task_review(&flow).unwrap();
-        let retired_driver = store.session_driver(id).unwrap();
-        store.retire_task_review(&flow).unwrap();
-        assert_eq!(store.session_driver(id).unwrap(), retired_driver);
-        assert!(store.with_session_driver(id, &driver, || Ok(())).is_err());
-        assert!(store.record_review_service(&flow, &ExecId::new()).is_err());
-        assert!(store
-            .claim_session_driver(id, retired_driver.as_ref(), &exec, false)
-            .is_err());
-        assert!(store.reserve_review_capture(&flow).is_err());
-        assert!(store
-            .ready_session(id, before.captured, "late approval")
-            .is_err());
-        // Retirement is durable, but cannot authorize replacement until its exact
-        // processes are observed stopped. Re-entry uses the same Session/capture.
-        assert!(store.restart_task_flow(&task, Some(&flow), "head").is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap(), Some(flow.clone()));
-        store.record_review_stop_processes(id, &[]).unwrap();
-        store.review_execution_stopped(id).unwrap();
-        store.conn.lock().unwrap().execute_batch(
-            "CREATE TRIGGER interrupt_restart BEFORE UPDATE ON flow_sessions WHEN NEW.state='replaced' BEGIN SELECT RAISE(FAIL,'interrupted replacement'); END;"
-        ).unwrap();
-        assert!(store.restart_task_flow(&task, Some(&flow), "head").is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap(), Some(flow.clone()));
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute_batch("DROP TRIGGER interrupt_restart")
-            .unwrap();
-        store.restart_task_flow(&task, Some(&flow), "head").unwrap();
-        let replacement = store
-            .start_task_flow(&task_id, &autonomous_position(&task_id))
-            .unwrap();
-        assert_eq!(store.task_flow(&task_id).unwrap(), Some(replacement));
-        let retired = store.session(id).unwrap().unwrap();
-        assert_eq!(retired.captured, before.captured);
-        assert_eq!(retired.artifact_key, before.artifact_key);
-        assert!(retired.completed_at.is_some());
-        assert!(retired.ready_summary.is_none());
-        assert_eq!(retained_invocation(&store, flow.id()).1, "replaced");
-    }
-
-    #[test]
-    fn human_completion_retains_feedback_without_leaving_a_pending_review() {
-        let (_dir, store, task_id) = store_with_task();
-        let (position, _, _) = parked_review(
-            &store,
-            &task_id,
-            &review_position(&task_id),
-            Some("approved scope"),
-        );
-        store
-            .complete_task_review(&task_id, &position, "approved scope")
-            .unwrap();
-
-        assert!(store.task_flow(&task_id).unwrap().is_none());
-        assert!(store
-            .sessions(&crate::session::SessionFilter::default())
-            .unwrap()
-            .is_empty());
-        assert_eq!(
-            retained_invocation(&store, &position.invocation.id),
-            (ended(&position), "completed".into())
-        );
-        assert!(store
-            .complete_task_review(&task_id, &position, "duplicate")
-            .is_err());
-        let events = store.task_events_after(&task_id, 0).unwrap();
-        assert_eq!(
-            events
-                .iter()
-                .filter(|event| matches!(event.kind, TaskEventKind::FlowFinished { .. }))
-                .count(),
-            1
-        );
-        assert_eq!(
-            store
-                .work_status(&crate::durable::WorkRef::Task(task_id))
-                .unwrap(),
-            crate::durable::WorkStatus::Ready
-        );
-    }
-
-    #[test]
-    fn worker_handoff_moves_process_ownership_without_replacing_progress() {
-        let (_dir, store, task_id) = store_with_task();
-        let position = store
-            .start_task_flow(&task_id, &autonomous_position(&task_id))
-            .unwrap();
-        let launcher = claim(&store, &task_id, &position, 301);
-        let before = store.task_flow(&task_id).unwrap().unwrap();
-        let worker = owner(302);
-        let handed = store
-            .handoff_task_worker(&task_id, &launcher, &worker)
-            .unwrap();
-        let mut expected = before;
-        expected.claim = Some(handed.clone());
-        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), expected);
-        assert_eq!(handed.owner, worker);
-        assert_eq!(handed.generation, launcher.generation);
-        assert_eq!(handed.claimed_at, launcher.claimed_at);
-        assert!(store
-            .handoff_task_worker(&task_id, &launcher, &owner(303))
-            .is_err());
-        assert!(store
-            .release_flow(position.id(), position.version, Some(&launcher))
-            .is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), expected);
-        store
-            .release_flow(position.id(), position.version, Some(&handed))
-            .unwrap();
-        assert!(store.task_flow(&task_id).unwrap().unwrap().claim.is_none());
-    }
-
-    #[test]
-    fn loop_verdict_survives_recovery_and_rejects_unrelated_runs() {
-        let (_dir, store, task_id) = store_with_task();
-        let mut position = autonomous_position(&task_id);
-        position.invocation = crate::engine::invocation::QueuedInvocation::load(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
-            "feature",
-        )
-        .unwrap();
-        position.cursor.index = find_decision_index(&position.invocation.steps);
-        let position = store.start_task_flow(&task_id, &position).unwrap();
-        let first = claim(&store, &task_id, &position, 301);
-        let run = reserved_capture(&store, &task_id);
-        publish(&store, &position, &run, &first).unwrap();
-        let actor = store.test_flow_turn(&run);
-        let id = position.id();
-        let verdict = crate::engine::transitions::FlowVerdict {
-            decision: crate::engine::transitions::FlowDecision::Iterate,
-            summary: "repair the missing case".into(),
-        };
-        store.test_decision_output(&actor, &verdict).unwrap();
-        store.test_decision_output(&actor, &verdict).unwrap();
-        let different = crate::engine::transitions::FlowVerdict {
-            decision: crate::engine::transitions::FlowDecision::Advance,
-            summary: "changed mind".into(),
-        };
-        let before = store.task_flow(&task_id).unwrap().unwrap();
-        assert!(store.test_decision_output(&actor, &different).is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-        // The worker died: retain its output as history, without a navigation candidate.
-        store.test_finish_flow_turn(&actor, "interrupted");
-        let replacement = store
-            .reclaim_task_worker(
-                &task_id,
-                &first,
-                &owner(302),
-                time::OffsetDateTime::now_utc(),
-            )
-            .unwrap();
-        store.test_decision_output(&actor, &verdict).unwrap();
-        assert!(store.flow_output(id).is_err());
-        let recovered = store.task_flow(&task_id).unwrap().unwrap();
-        assert_eq!(recovered.cursor.progress.verdict, None);
-        assert_eq!(recovered.claim, Some(replacement.clone()));
-        assert_eq!(
-            recovered
-                .selected_capture
-                .as_ref()
-                .unwrap()
-                .outcome
-                .as_deref(),
-            Some("interrupted")
-        );
-        // A reported provider failure differs from a crash: its result cannot
-        // authorize a later retry; its output remains historical evidence.
-        let released = store
-            .release_flow(id, recovered.version, Some(&replacement))
-            .unwrap();
-        assert!(released.cursor.progress.verdict.is_none());
-        assert!(released.claim.is_none());
-        assert_eq!(released.selected_capture, recovered.selected_capture);
-        assert!(store.flow_output(id).is_err());
-        let retried = store.retry_flow(id, None).unwrap();
-        assert!(retried.selected_capture.is_none());
-    }
-
-    #[test]
-    fn stale_driver_recovery_preserves_the_replacement_claim_and_attempt() {
-        let (_dir, store, task_id) = store_with_task();
-        let position = store
-            .start_task_flow(&task_id, &autonomous_position(&task_id))
-            .unwrap();
-        let first = claim(&store, &task_id, &position, 301);
-        let run = reserved_capture(&store, &task_id);
-        publish(&store, &position, &run, &first).unwrap();
-        let replacement = store
-            .reclaim_task_worker(
-                &task_id,
-                &first,
-                &owner(302),
-                time::OffsetDateTime::now_utc(),
-            )
-            .unwrap();
-        let before = store.task_flow(&task_id).unwrap().unwrap();
-        let events = store.task_events_after(&task_id, 0).unwrap();
-        assert_eq!(before.claim.as_ref(), Some(&replacement));
-        assert!(store.recover_flow(position.id(), Some(&first)).is_err());
-        assert!(store.recover_flow(position.id(), None).is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-        assert_eq!(store.task_events_after(&task_id, 0).unwrap(), events);
-        assert!(store
-            .recover_flow(position.id(), Some(&replacement))
-            .is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-        assert_eq!(before.selected_capture.unwrap().artifact_key, run);
-        assert_eq!(store.task_events_after(&task_id, 0).unwrap(), events);
-    }
-
-    #[test]
-    fn review_discovery_follows_the_captured_nested_step() {
-        let (_dir, store, task_id) = store_with_task();
-        let mut position = autonomous_position(&task_id);
-        assert!(store
-            .sessions(&crate::session::SessionFilter::default())
-            .unwrap()
-            .is_empty());
-        let review = crate::durable::test_flow_invocation(
-            "captured",
-            0,
-            "review-design",
-            Some("review"),
-            true,
-        );
-        position.invocation.steps = vec![
-            ConcreteStep::Xor(ConcreteXor {
-                router: Skill::named("route"),
-                paths: [(
-                    "selected".into(),
-                    ConcretePath {
-                        description: "captured path".into(),
-                        steps: review.steps,
-                    },
-                )]
-                .into_iter()
-                .collect(),
-                sources: vec![],
-            }),
-            position.invocation.steps[0].clone(),
-        ];
-        position.cursor.child = Some(Box::new(NestedCursor::Xor {
-            selected: "selected".into(),
-            cursor: ExecutionCursor::default(),
-        }));
-        let saved = store.start_task_flow(&task_id, &position).unwrap();
-        let saved = store
-            .reserve_task_review(saved.id(), saved.version)
-            .unwrap();
-        let sessions = store
-            .sessions(&crate::session::SessionFilter::default())
-            .unwrap();
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(
-            Some(&sessions[0].artifact_key),
-            saved
-                .selected_capture
-                .as_ref()
-                .map(|attempt| &attempt.artifact_key)
-        );
-        assert_eq!(saved.current().step, "review-design");
-        assert_eq!(saved.current().id.as_deref(), Some("review"));
-        assert_eq!(store.task_flow(&task_id).unwrap(), Some(saved.clone()));
-
-        let mut moved = saved.cursor.clone();
-        moved.child = None;
-        moved.index = 1;
-        store
-            .checkpoint_flow(saved.id(), saved.version, &moved, None, None)
-            .unwrap();
-        let next = store.task_flow(&task_id).unwrap().unwrap();
-        assert_eq!(next.current().step, "implement");
-        assert!(next.pending_session_id.is_none());
-        assert!(store
-            .sessions(&crate::session::SessionFilter::default())
-            .unwrap()
-            .is_empty());
-        assert!(store
-            .checkpoint_flow(saved.id(), saved.version, &saved.cursor, None, None)
-            .is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap(), Some(next));
-    }
-
-    #[test]
-    fn nested_cursor_recovers_routes_and_verdicts_under_exact_worker_authority() {
-        for routing in [true, false] {
-            let (_dir, store, task_id) = store_with_task();
-            let mut position = autonomous_position(&task_id);
-            let body = crate::engine::invocation::QueuedInvocation::load(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR")),
-                "pursue",
-            )
-            .unwrap()
-            .steps;
-            let decision_index = find_decision_index(&body);
-            let branch = ConcreteStep::Xor(ConcreteXor {
-                router: Skill::named("nested-router"),
-                paths: ["chosen", "other"]
-                    .into_iter()
-                    .map(|name| {
-                        (
-                            name.into(),
-                            ConcretePath {
-                                description: name.into(),
-                                steps: body.clone(),
-                            },
-                        )
-                    })
-                    .collect(),
-                sources: Vec::new(),
-            });
-            let steps = if routing { vec![branch] } else { body };
-            position.invocation.steps = vec![ConcreteStep::Xor(ConcreteXor {
-                router: Skill::named("outer-router"),
-                paths: [(
-                    "outer".into(),
-                    ConcretePath {
-                        description: "outer".into(),
-                        steps,
-                    },
-                )]
-                .into_iter()
-                .collect(),
-                sources: Vec::new(),
-            })];
-            position.cursor.iteration = 7;
-            position.cursor.progress.repeats.insert("root".into(), 3);
-            let mut leaf = ExecutionCursor {
-                index: if routing { 0 } else { decision_index },
-                iteration: 2,
-                ..Default::default()
-            };
-            leaf.progress.repeats.insert("decide".into(), 1);
-            leaf.progress.direction = Some("preserved direction".into());
-            position.cursor.child = Some(Box::new(NestedCursor::Xor {
-                selected: "outer".into(),
-                cursor: leaf,
-            }));
-            let saved = store.start_task_flow(&task_id, &position).unwrap();
-            assert_eq!(saved.current().iteration, 7);
-            assert_eq!(
-                saved.current().step,
-                if routing {
-                    "nested-router"
-                } else {
-                    "loop-decide"
-                }
-            );
-            assert_eq!(saved.cursor, position.cursor);
-            let id = saved.id();
-            let held = claim(&store, &task_id, &saved, 501);
-            let run = reserved_capture(&store, &task_id);
-            publish(&store, &saved, &run, &held).unwrap();
-            let actor = store.test_flow_turn(&run);
-            let verdict = FlowVerdict {
-                decision: FlowDecision::Iterate,
-                summary: "next pass".into(),
-            };
-            if routing {
-                store
-                    .test_output(&actor, &serde_json::json!({"path": "chosen"}))
-                    .unwrap();
-                store
-                    .test_output(&actor, &serde_json::json!({"path": "chosen"}))
-                    .unwrap();
-                let before = store.task_flow(&task_id).unwrap().unwrap();
-                assert!(store
-                    .test_output(&actor, &serde_json::json!({"path": "other"}))
-                    .is_err());
-                assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-            } else {
-                store.test_decision_output(&actor, &verdict).unwrap();
-                assert!(store
-                    .test_output(&actor, &serde_json::json!({"path": "chosen"}))
-                    .is_err());
-            }
-            let pending = store.task_flow(&task_id).unwrap().unwrap();
-            assert!(!pending.has_pending_decision());
-            assert_eq!(pending.cursor.progress, saved.cursor.progress);
-            store.test_finish_flow_turn(&actor, "interrupted");
-            let replacement = store
-                .reclaim_task_worker(
-                    &task_id,
-                    &held,
-                    &owner(502),
-                    time::OffsetDateTime::now_utc(),
-                )
-                .unwrap();
-            let recovered = store.task_flow(&task_id).unwrap().unwrap();
-            assert_eq!(recovered.cursor, pending.cursor);
-            assert!(
-                store.flow_output(id).is_err(),
-                "interrupted outputs cannot navigate"
-            );
-            assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), recovered);
-            let cleared = if routing {
-                store
-                    .fail_flow(
-                        id,
-                        recovered.version,
-                        Some(&replacement),
-                        &TaskFlowBlocker {
-                            captured: None,
-                            reason: "router failed after publishing".into(),
-                            restart_required: false,
-                            observed_at: time::OffsetDateTime::now_utc(),
-                        },
-                    )
-                    .unwrap()
-            } else {
-                store
-                    .release_flow(id, recovered.version, Some(&replacement))
-                    .unwrap()
-            };
-            assert_eq!(cleared.cursor, saved.cursor);
-            assert!(!cleared.has_pending_decision());
-            assert!(cleared.claim.is_none());
-        }
-    }
-
-    #[test]
-    fn human_session_runtime_survives_a_store_round_trip() {
-        let (_dir, store, work) = store_with_task();
-        let mut position = review_position(&work);
-        position.invocation = crate::durable::test_flow_invocation(
-            "review",
-            1,
-            "review-design",
-            Some("human_review"),
-            true,
-        );
-        position.cursor.index = 1;
-        position.cursor.iteration = 2;
-        let (_, _, run_id) = parked_review(&store, &work, &position, Some("Ready for review"));
-
-        let stored = store.task_flow(&work).unwrap().unwrap();
-        assert_eq!(stored.review_artifact_key(), Some(&run_id));
-        assert_eq!(stored.ready_summary.as_deref(), Some("Ready for review"));
-    }
-
-    #[test]
-    fn headless_position_retains_attempts_and_rejects_the_replaced_run() {
-        let (_dir, store, task_id) = store_with_task();
-        let task = store.task(&task_id).unwrap().unwrap();
-        let mut initial = autonomous_position(&task_id);
-        let mut decision = initial.invocation.steps[0].clone();
-        let ConcreteStep::Skill(skill) = &mut decision else {
-            unreachable!()
-        };
-        skill.skill = Skill::named("loop-decide");
-        skill.id = Some("decide".into());
-        skill.repeat = Some(crate::engine::flow::RepeatPolicy {
-            from: "implement".into(),
-        });
-        initial.invocation.steps.push(decision);
-        initial.cursor.index = 1;
-        let position = store.start_task_flow(&task_id, &initial).unwrap();
-        let id = position.id();
-        let node = position.invocation.node_id(&position.cursor).unwrap();
-        let tuple = crate::engine::flow_graph::flow_iterations(
-            &position.invocation.steps,
-            &position.cursor,
-        );
-        let first_claim = claim(&store, &task_id, &position, 501);
-        let first = reserved_capture(&store, &task_id);
-        publish(&store, &position, &first, &first_claim).unwrap();
-        let first_actor = store.test_flow_turn(&first);
-        let verdict = FlowVerdict {
-            decision: FlowDecision::Advance,
-            summary: "candidate before failure".into(),
-        };
-        store.test_decision_output(&first_actor, &verdict).unwrap();
-        store.test_finish_flow_turn(&first_actor, "interrupted");
-        store
-            .release_flow(id, position.version, Some(&first_claim))
-            .unwrap();
-        let failed = store.task_flow(&task_id).unwrap().unwrap();
-        assert_eq!(failed.cursor.index, position.cursor.index);
-        assert_eq!(failed.cursor.iteration, position.cursor.iteration);
-        assert!(!failed.has_pending_decision());
-        assert_eq!(
-            failed.selected_capture.as_ref().unwrap().artifact_key,
-            first
-        );
-        let failed = store.retry_flow(id, None).unwrap();
-        let second_claim = claim(&store, &task_id, &failed, 502);
-        let second = reserved_capture(&store, &task_id);
-        assert_ne!(first, second);
-        publish(&store, &failed, &second, &second_claim).unwrap();
-        let second_actor = store.test_flow_turn(&second);
-        let before = store.task_flow(&task_id).unwrap().unwrap();
-        store.test_decision_output(&first_actor, &verdict).unwrap();
-        assert!(
-            store.flow_output(id).is_err(),
-            "old output cannot satisfy the replacement"
-        );
-        assert!(store
-            .end_flow(id, position.version, Some(&first_claim), "")
-            .is_err());
-        assert_eq!(store.task_flow(&task_id).unwrap().unwrap(), before);
-        let session = store.session_for_artifact(&second).unwrap().unwrap();
-        assert_eq!(
-            store.session_for_artifact(&first).unwrap().unwrap().id,
-            session.id
-        );
-        assert_eq!(session.node, Some(node));
-        assert_eq!(session.iterations.as_ref(), Some(&tuple));
-        let inputs = store.session_inputs(&session.id).unwrap();
-        assert_eq!(inputs.len(), 2);
-        assert!(inputs.contains(&first) && inputs.contains(&second));
-        let history = store.session_history(&session.id, 0, 0).unwrap();
-        store.test_decision_output(&second_actor, &verdict).unwrap();
-        store.test_finish_flow_turn(&second_actor, "completed");
-        store
-            .end_flow(
-                id,
-                failed.version,
-                Some(&second_claim),
-                "successful attempt",
-            )
-            .unwrap();
-        assert!(store.task_flow(&task_id).unwrap().is_none());
-        assert_eq!(store.session_inputs(&session.id).unwrap(), inputs);
-        assert!(store
-            .end_flow(id, failed.version, Some(&second_claim), "")
-            .is_err());
-
-        let listed = store
-            .sessions(&crate::session::SessionFilter {
-                task: Some(task.plan.identifier.clone()),
-                interactive: None,
-                history: true,
-                ..Default::default()
-            })
-            .unwrap();
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].task_id, Some(task_id));
-        assert_eq!(listed[0].wave_id, Some(task.wave_id));
-        assert_eq!(
-            listed[0].flow_session_id.as_ref(),
-            Some(&position.invocation.id)
-        );
-        assert_eq!(listed[0].provider.as_deref(), Some("codex"));
-        let retained = store.session_history(&session.id, 0, 0).unwrap();
-        assert_eq!(&retained[..history.len()], history.as_slice());
-        assert_eq!(retained.last().unwrap().payload["status"], "completed");
-        store.assert_no_historical_runs();
-    }
-
-    #[test]
-    fn the_step_reserves_conversation_input_after_its_driver_claim() {
-        let (_dir, store, work) = store_with_task();
-        let position = store
-            .start_task_flow(&work, &autonomous_position(&work))
-            .unwrap();
-        claim(&store, &work, &position, 77);
-        assert!(!store.task_started(&work).unwrap());
-        assert!(store
-            .task_flow(&work)
-            .unwrap()
-            .unwrap()
-            .selected_capture
-            .is_none());
-        reserved_capture(&store, &work);
-        let conn = store.conn.lock().unwrap();
-        let reserved: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM agent_sessions WHERE flow_session_id=?1 AND input_published=0",
-                [&position.invocation.id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            reserved, 1,
-            "the step reserves the conversation's input before publication"
-        );
-        drop(conn);
-        assert!(store.task_started(&work).unwrap());
-        // The launch publishes that capture under the claim; nothing else can.
-        let flow = store.task_flow(&work).unwrap().unwrap();
-        let run = flow.selected_capture.clone().unwrap();
-        assert!(!run.published);
-        assert!(store
-            .publish_attempt(flow.id(), flow.version, run.captured, None, "codex", None)
-            .is_err());
-        publish(
-            &store,
-            &flow,
-            &run.artifact_key,
-            flow.claim.as_ref().unwrap(),
-        )
-        .unwrap();
-        assert!(
-            store
-                .task_flow(&work)
-                .unwrap()
-                .unwrap()
-                .selected_capture
-                .unwrap()
-                .published
-        );
-        assert_eq!(
-            store
-                .sessions(&crate::session::SessionFilter {
-                    task: Some(work.to_string()),
-                    interactive: None,
-                    history: true,
-                    ..Default::default()
-                })
-                .unwrap()
-                .len(),
-            1
-        );
-    }
-
-    #[test]
-    fn concurrent_task_worker_claims_choose_one_worker() {
-        let (dir, store, work) = store_with_task();
-        let position = store
-            .start_task_flow(&work, &autonomous_position(&work))
-            .unwrap();
-        let barrier = Arc::new(Barrier::new(20));
-        let stores = (0..20)
-            .map(|_| SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap())
-            .collect::<Vec<_>>();
-        let handles = stores
-            .into_iter()
-            .enumerate()
-            .map(|(index, store)| {
-                let work = work.clone();
-                let position = position.clone();
-                let barrier = barrier.clone();
-                thread::spawn(move || {
-                    barrier.wait();
-                    store
-                        .claim_task_worker(
-                            &work,
-                            &position.invocation.id,
-                            position.version,
-                            &owner(1_000 + u32::try_from(index).unwrap()),
-                            time::OffsetDateTime::from_unix_timestamp(1_700_000_100).unwrap(),
-                        )
-                        .unwrap()
-                })
-            })
-            .collect::<Vec<_>>();
-        let outcomes = handles
-            .into_iter()
-            .map(|handle| handle.join().unwrap())
-            .collect::<Vec<_>>();
-        let claimed = outcomes
-            .iter()
-            .filter_map(|outcome| match outcome {
-                TaskWorkerClaimOutcome::Claimed(claim) => Some(claim),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(claimed.len(), 1);
-        assert_eq!(claimed[0].generation, 1);
-        assert!(outcomes.iter().all(|outcome| match outcome {
-            TaskWorkerClaimOutcome::Claimed(claim) | TaskWorkerClaimOutcome::Busy(claim) =>
-                claim == claimed[0],
-            TaskWorkerClaimOutcome::Stale { .. } => false,
-        }));
-    }
-
-    #[test]
-    fn previously_disabled_tasks_can_launch_and_recover() {
-        let (_dir, store, task_id) = store_with_task();
-        let position = store
-            .start_task_flow(&task_id, &autonomous_position(&task_id))
-            .unwrap();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE work_placements SET enabled=0 WHERE task_id=?1",
-                [task_id.as_str()],
-            )
-            .unwrap();
-        let claim = match store
-            .claim_task_worker(
-                &task_id,
-                &position.invocation.id,
-                position.version,
-                &owner(201),
-                time::OffsetDateTime::now_utc(),
-            )
-            .unwrap()
-        {
-            TaskWorkerClaimOutcome::Claimed(claim) => claim,
-            outcome => panic!("unexpected claim outcome: {outcome:?}"),
-        };
-        let replacement = store
-            .reclaim_task_worker(
-                &task_id,
-                &claim,
-                &owner(202),
-                time::OffsetDateTime::now_utc(),
-            )
-            .unwrap();
-        let recovered = store.task_flow(&task_id).unwrap().unwrap();
-        assert_eq!(recovered.invocation, position.invocation);
-        assert_eq!(recovered.cursor, position.cursor);
-        assert_eq!(replacement.generation, claim.generation + 1);
-        assert_eq!(recovered.claim, Some(replacement));
-    }
-
-    #[test]
-    fn only_the_claim_holder_settles_a_position() {
-        let (_dir, store, work) = store_with_task();
-        let mut initial = autonomous_position(&work);
-        initial.invocation = crate::durable::test_flow_invocation("task", 1, "review", None, false);
-        let position = store.start_task_flow(&work, &initial).unwrap();
-        let held = claim(&store, &work, &position, 101);
-        let mut next = position.cursor.clone();
-        next.index = 1;
-
-        assert!(store
-            .checkpoint_flow(
-                position.id(),
-                position.version,
-                &next,
-                None,
-                Some("advanced")
-            )
-            .is_err());
-        let version = store
-            .checkpoint_flow(
-                position.id(),
-                position.version,
-                &next,
-                Some(&held),
-                Some("advanced"),
-            )
-            .unwrap();
-        let settled = store.task_flow(&work).unwrap().unwrap();
-        assert_eq!(
-            (settled.version, version.version),
-            (position.version + 1, position.version + 1)
-        );
-        assert_eq!(settled.current().step, "review");
-        assert_eq!(settled.invocation, position.invocation);
-        assert_eq!(
-            settled.claim,
-            Some(held.clone()),
-            "the driver keeps the position until it stops"
-        );
-        assert!(
-            settled.selected_capture.is_none(),
-            "a new position has no attempt"
-        );
-        assert!(store
-            .checkpoint_flow(position.id(), position.version, &next, Some(&held), None)
-            .is_err());
-        let events = store.task_events_after(&work, 0).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            &events[0].kind,
-            TaskEventKind::Progress { summary } if summary == "advanced"
-        ));
-    }
-
-    #[test]
-    fn only_the_claim_holder_finishes_a_position_without_a_successor() {
-        let (_dir, store, work) = store_with_task();
-        let position = store
-            .start_task_flow(&work, &autonomous_position(&work))
-            .unwrap();
-        let held = claim(&store, &work, &position, 111);
-        reserved_capture(&store, &work);
-        let final_position = store.task_flow(&work).unwrap().unwrap();
-
-        assert!(store
-            .end_flow(position.id(), position.version, None, "finished")
-            .is_err());
-        store
-            .end_flow(position.id(), position.version, Some(&held), "finished")
-            .unwrap();
-        assert!(store.task_flow(&work).unwrap().is_none());
-        assert_eq!(
-            retained_invocation(&store, &position.invocation.id),
-            (ended(&final_position), "completed".into())
-        );
-        let evidence = store.chapter_task_evidence(&work).unwrap();
-        assert!(evidence.begun);
-        assert!(!evidence.worker_claimed);
-        assert!(store
-            .end_flow(position.id(), position.version, Some(&held), "finished")
-            .is_err());
-        let events = store.task_events_after(&work, 0).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            &events[0].kind,
-            TaskEventKind::FlowFinished { summary, .. } if summary == "finished"
-        ));
-        let next = store
-            .start_task_flow(&work, &autonomous_position(&work))
-            .unwrap();
-        assert_eq!(next.version, position.version);
-        assert!(store
-            .end_flow(position.id(), position.version, Some(&held), "late finish")
-            .is_err());
-        assert_eq!(store.task_flow(&work).unwrap(), Some(next));
-        assert_eq!(
-            retained_invocation(&store, &position.invocation.id),
-            (ended(&final_position), "completed".into())
-        );
-    }
-
-    #[test]
-    fn reclaim_fences_the_old_worker_and_increments_generation() {
-        let (_dir, store, work) = store_with_task();
-        let position = store
-            .start_task_flow(&work, &autonomous_position(&work))
-            .unwrap();
-        let first = claim(&store, &work, &position, 201);
-        let replacement = store
-            .reclaim_task_worker(&work, &first, &owner(202), time::OffsetDateTime::now_utc())
-            .unwrap();
-
-        assert_eq!(replacement.generation, 2);
-        let flow = store.task_flow(&work).unwrap().unwrap();
-        let run = reserved_capture(&store, &work);
-        assert!(publish(&store, &flow, &run, &first).is_err());
-        publish(&store, &flow, &run, &replacement).unwrap();
-        let failure = TaskFlowBlocker {
-            captured: None,
-            reason: "provider exited".to_string(),
-            restart_required: false,
-            observed_at: time::OffsetDateTime::now_utc(),
-        };
-        let failed = store
-            .fail_flow(flow.id(), flow.version, Some(&replacement), &failure)
-            .unwrap();
-        assert!(failed.claim.is_none());
-        assert_eq!(
-            failed.failure.as_ref(),
-            Some(&TaskFlowBlocker {
-                captured: store.captured_sequence(&run).unwrap(),
-                ..failure.clone()
-            })
-        );
-        assert!(store
-            .fail_flow(flow.id(), failed.version, Some(&first), &failure)
-            .is_err());
-        let events = store.task_events_after(&work, 0).unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            &events[0].kind,
-            TaskEventKind::Failed { error, resumable: true } if error == &failure.reason
-        ));
-
-        let retried = claim(&store, &work, &failed, 205);
-        assert_eq!(retried.generation, 3);
-        assert!(store.task_flow(&work).unwrap().unwrap().failure.is_none());
     }
 }

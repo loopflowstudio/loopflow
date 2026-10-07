@@ -12,9 +12,10 @@ struct RoadmapViewTests {
         let wave = try #require(snapshot.waves.first)
         let tasks = wave.tasks.items
 
-        // No exact process evidence means planning offers Resume, never an
-        // inferred attach or interrupt action.
-        #expect(roadmapTaskAction(tasks[0]) == .resume)
+        // Continuing started work is a fresh Start, never an inferred attach
+        // or interrupt action.
+        #expect(tasks[0].actions.recommended == .resume)
+        #expect(roadmapTaskAction(tasks[0]) == .run)
 
         // An explicit User merge request advertises Open PR: the server
         // recommends the exact head, and the app does not re-derive it.

@@ -1,0 +1,842 @@
+#if os(macOS)
+import Foundation
+import Testing
+import ViewInspector
+@testable import Loopflow
+@testable import LoopflowMac
+
+@Suite("Unified Work and Session navigation")
+@MainActor
+struct WorkNavigationTests {
+    @Test("A collapsed Wave exposes every Task Session, including idle conversations")
+    func collapsedWaveParticipation() throws {
+        let snapshot = try roadmap()
+        var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(session("review", work: .task(id: "ts_review00000000000000000000000000")))) as? [String: Any])
+        value["kind"] = "flow"
+        value["state"] = "unknown"
+        let review = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+        let idle = try session("idle", work: .task(id: "ts_review00000000000000000000000000"))
+        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [idle, review])
+        let wave = try #require(projection.waves.first)
+        let rows = projection.outline(presentation: .full, collapsed: [wave.id], search: "", planningReadable: true)
+        let waveRow = try #require(rows.first { $0.workKey == wave.id })
+        #expect(waveRow.inlineSessions.map(\.id) == ["idle", "review"])
+        #expect(!rows.contains { $0.workKey?.work.kind == .task && $0.inlineSessions.contains(where: { $0.id == "review" }) })
+    }
+
+    @Test("Checkout association groups independent Sessions despite different attribution")
+    func checkoutOwnsGroupingWithoutGrantingFlowMembership() throws {
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
+        let original = try session("independent", work: .task(id: "another-task"))
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        json["workspace"] = ["home_id": "local", "worktree": "/src/loopflow.review",
+                             "task_id": "ts_review00000000000000000000000000"]
+        let associated = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
+        let projection = WorkProjection(roadmaps: roadmap.waves, sessions: [associated])
+        let task = try #require(projection.waves.flatMap(\.tasks).first { !$0.sessions.isEmpty })
+        #expect(task.task.runtime?.workId == associated.workspace?.taskId)
+        #expect(associated.work == .task(id: "another-task"))
+        #expect(associated.flowMembership == .independent)
+        #expect(projection.unmatchedSessions.isEmpty)
+        #expect(projection.subject(for: associated.id) == task.id.work)
+    }
+
+    @Test("Checkout-only Sessions use Rust membership in Task navigation")
+    func checkoutMembershipKeepsUnboundConversationReachable() throws {
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
+        let bindings: [WorkReference?] = [nil, .wave(id: roadmap.waves[0].wave.id)]
+        for work in bindings {
+            let original = try session("manual", work: work)
+            var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+            json["task_ids"] = ["ts_review00000000000000000000000000"]
+            let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
+            let projection = WorkProjection(roadmaps: roadmap.waves, sessions: [record])
+            #expect(record.work == work)
+            #expect(projection.subject(for: "manual") == .task(id: "issue-review"))
+            #expect(projection.unmatchedSessions.isEmpty)
+            #expect(projection.waves.allSatisfy { $0.sessions.isEmpty })
+            #expect(projection.breadcrumb(selection: nil, sessionId: "manual")?.task?.task.id == "issue-review")
+        }
+    }
+
+    @Test("Repo and Wave Sessions cannot join a Task through checkout or stored associations")
+    func explicitScopesStaySeparate() throws {
+        let snapshot = try roadmap()
+        let original = try session("scoped", work: .task(id: "ts_review00000000000000000000000000"))
+        for scope in ["repository", "wave"] {
+            var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+            value["primary_scope"] = scope
+            let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+            let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [record])
+            #expect(projection.waves.flatMap(\.tasks).allSatisfy { $0.sessions.isEmpty })
+            #expect(projection.unmatchedSessions.map(\.id) == ["scoped"])
+            #expect(projection.subject(for: "scoped") == nil)
+            #expect(projection.breadcrumb(selection: nil, sessionId: "scoped")?.taskWork == nil)
+        }
+    }
+
+    @Test("Task navigation and counts show unfinished interactive participation")
+    func taskVisibilityDoesNotRequireAttention() async throws {
+        let original = try session("idle", work: .task(id: "ts_review00000000000000000000000000"))
+        let value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        let rows = ["idle", "active", "review", "completed", "background"].map { id in
+            var row = value
+            row["id"] = id
+            row["interactive"] = id != "background"
+            row["attention"] = NSNull()
+            row["state"] = id == "completed" ? "closed" : id == "active" ? "active" : "unknown"
+            row["kind"] = id == "review" ? "flow" : "conversation"
+            return row
+        }
+        let source = try ReadingSource(roadmap: roadmapJSON(),
+            sessions: String(decoding: JSONSerialization.data(withJSONObject: rows), as: UTF8.self))
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        let visible = model.visibleWork.waves.flatMap(\.tasks).flatMap(\.sessions)
+        #expect(visible.map(\.id) == ["idle", "active", "review"])
+        let outline = model.visibleWork.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
+        let taskRow = try #require(outline.first { $0.workKey?.work.id == "issue-review" })
+        #expect(taskRow.inlineSessions.count == 3)
+        #expect(model.paletteRows.filter { if case .session = $0.id { true } else { false } }.count == 3)
+        model.navigation.showsHeadlessSessions = true
+        #expect(model.visibleSessions.map(\.id) == ["idle", "active", "review", "background"])
+        #expect(model.sessions.value?.count == 5)
+    }
+
+    @Test("Repository path spellings share one outline root")
+    func repositoryAliasesShareRoot() async throws {
+        let source = try ReadingSource(
+            roadmap: roadmapJSON().replacingOccurrences(of: "\"/src/loopflow\"", with: "\"/src/loopflow/\""),
+            sessions: sessionsJSON())
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        model.navigation.presentation = .full
+        let view = WorkNavigator(model: model, onOpenSession: { _ in })
+        let roots = try view.inspect().findAll(ViewType.Button.self) {
+            (try? $0.accessibilityIdentifier().hasPrefix("work-repository-")) == true
+        }
+        #expect(roots.count == 1)
+        #expect(try roots.first?.accessibilityIdentifier() == "work-repository-/src/loopflow")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-issue-review")
+    }
+
+    @Test("Compression promotes leaves without changing identity or hiding upcoming Tasks")
+    func compressedOutlinePreservesIdentity() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        var waves = try #require(json["waves"] as? [[String: Any]])
+        waves = [waves[0]]
+        waves[0]["unavailable_tasks"] = []
+        json["waves"] = waves
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        let records = try [session("human", work: .task(id: "ts_review00000000000000000000000000")),
+                           session("project", work: .project(id: "ps_11111111111111111111111111111111")),
+                           session("unknown", work: .task(id: "absent"))]
+        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: records)
+        func rows(_ mode: WorkPresentation, collapsed: Set<WorkNodeKey> = [], readable: Bool = true) -> [WorkOutlineRow] {
+            projection.outline(presentation: mode, collapsed: collapsed, search: "", planningReadable: readable)
+        }
+        let full = rows(.full)
+        let compact = rows(.compact)
+        let flat = rows(.sessions)
+        // Task Sessions ride their Task row; Wave and unmatched Sessions stay leaves.
+        func sessionIds(_ rows: [WorkOutlineRow]) -> Set<String> {
+            Set(rows.flatMap { ($0.session.map { [$0.id] } ?? []) + $0.inlineSessions.map(\.id) })
+        }
+        #expect(sessionIds(full) == sessionIds(compact))
+        #expect(sessionIds(full) == Set(flat.compactMap { $0.session?.id }))
+        #expect(compact.compactMap(\.workKey).allSatisfy { $0.work.kind == .task })
+        let review = try #require(compact.first { $0.workKey?.work == .task(id: "issue-review") })
+        #expect(review.inlineSessions.map(\.id) == ["human"])
+        #expect(!compact.contains { $0.session?.id == "human" })
+        // Upcoming work lives in the Wave plan, not the started working set.
+        #expect(!compact.contains { $0.workKey?.work == .task(id: "issue-available") })
+        #expect(flat.allSatisfy { $0.session != nil && $0.depth == 0 })
+        let human = try #require(flat.first { $0.session?.id == "human" })
+        #expect(human.ancestors.map(\.key.work.kind) == [.wave, .task])
+        let project = projection.waves[0].id
+        let folded = rows(.compact, collapsed: [project])
+        #expect(folded.contains { $0.workKey == project })
+        #expect(folded.contains { $0.inlineSessions.contains { $0.id == "human" } })
+        #expect(rows(.sessions, collapsed: [project]).map(\.id) == flat.map(\.id))
+        #expect(rows(.compact, readable: false).map(\.id) == full.map(\.id))
+        let searched = projection.outline(presentation: .compact, collapsed: [project], search: "human", planningReadable: true)
+        #expect(searched.contains { $0.inlineSessions.contains { $0.id == "human" } })
+        let identifierSearch = projection.outline(presentation: .sessions, collapsed: [], search: "W2-131", planningReadable: true)
+        #expect(identifierSearch.compactMap { $0.session?.id } == ["human"])
+    }
+
+    @Test("Compact keeps an empty Wave available for inspection and conversation")
+    func compactRetainsEmptySubjects() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        var wave = try #require((json["waves"] as? [[String: Any]])?.first)
+        wave["tasks"] = ["state": "ok", "items": [], "truncated": false]
+        wave["unavailable_tasks"] = []
+        json["waves"] = [wave]
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
+        let rows = projection.outline(presentation: .compact, collapsed: [], search: "", planningReadable: true)
+        #expect(rows.count == 1)
+        #expect(rows.first?.workKey?.work.kind == .wave)
+        #expect(projection.outline(presentation: .sessions, collapsed: [], search: "", planningReadable: true).isEmpty)
+    }
+
+    @Test("Compact preserves Wave context when planning is multiple, partial or unavailable",
+          arguments: ["multiple", "partial", "unavailable"])
+    func compressionRequiresPlanningEvidence(evidence: String) throws {
+        var json = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        var wave = try #require((json["waves"] as? [[String: Any]])?.first)
+        wave["unavailable_tasks"] = []
+        var tasks = try #require(wave["tasks"] as? [String: Any])
+        if evidence == "partial" { tasks["truncated"] = true }
+        else if evidence == "unavailable" { tasks = ["state": "unavailable", "reason": "offline"] }
+        wave["tasks"] = tasks
+        var waves = [wave]
+        if evidence == "multiple" {
+            var second = wave
+            var identity = try #require(wave["wave"] as? [String: Any])
+            identity["id"] = "another-wave"
+            second["wave"] = identity
+            second["tasks"] = ["state": "ok", "items": [], "truncated": false]
+            waves.append(second)
+        }
+        json["waves"] = waves
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
+        let rows = projection.outline(presentation: .compact, collapsed: [], search: "", planningReadable: true)
+        let kinds = rows.compactMap { $0.workKey?.work.kind }
+        #expect(!kinds.contains(.project))
+        #expect(kinds.filter { $0 == .wave }.count == (evidence == "multiple" ? 2 : 1))
+    }
+
+    @Test("Session list disambiguates same-named conversations and retains unknown ancestry")
+    func flatSessionsDisambiguate() throws {
+        let records = try [session("first", work: .task(id: "ts_review00000000000000000000000000")),
+                           session("second", work: .task(id: "ts_review00000000000000000000000000")),
+                           session("third", work: nil)].map { record in
+            var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
+            json["title"] = "Conversation"
+            return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
+        }
+        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: records)
+        let rows = projection.outline(presentation: .sessions, collapsed: [], search: "", planningReadable: true)
+        #expect(rows.count == 2)
+        #expect(Set(rows.map(\.detail)).count == 2)
+        #expect(rows.first { $0.session?.id == "first" }?.detail?.contains("first") == true)
+        // A Session with no Work is an orphan, not an ancestry-less leaf.
+        #expect(!rows.contains { $0.session?.id == "third" })
+        #expect(projection.orphanSessions(search: "").map(\.id) == ["third"])
+    }
+
+    @Test("Orphan Sessions are reachable only through the diagnostic menu")
+    func orphansStayOutOfTheTree() async throws {
+        let attached = try session("human", work: .task(id: "ts_review00000000000000000000000000"))
+        let orphan = try session("demo", work: nil)
+        let stray = try session("stray", work: .task(id: "absent"))
+        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: [attached, orphan, stray])
+        for presentation in WorkPresentation.allCases {
+            let rows = projection.outline(presentation: presentation, collapsed: [], search: "", planningReadable: true)
+            #expect(!rows.contains { $0.session?.id == "demo" })
+            #expect(rows.contains { $0.session?.id == "stray" })
+            #expect(!rows.contains { $0.inlineSessions.contains { $0.id == "demo" } })
+            #expect(rows.allSatisfy { $0.session == nil || !$0.ancestors.isEmpty })
+        }
+        #expect(projection.orphanSessions(search: "").map(\.id) == ["demo"])
+        #expect(projection.orphanSessions(search: "DEMO").map(\.id) == ["demo"])
+        #expect(projection.subject(for: "stray") == .task(id: "absent"))
+        #expect(projection.breadcrumb(selection: nil, sessionId: "stray")?.waveWork == nil)
+
+        let source = try ReadingSource(
+            roadmap: roadmapJSON(),
+            sessions: String(decoding: try JSONEncoder().encode([attached, orphan]), as: UTF8.self))
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        var opened: [String] = []
+        let view = WorkNavigator(model: model, onOpenSession: { opened.append($0.id) })
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-orphans-open") }
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-demo") }
+        try view.inspect().find(viewWithAccessibilityIdentifier: "debug-orphan-session-demo").button().tap()
+        #expect(opened == ["demo"])
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "Repository or unavailable ancestry") }
+
+        // Zero orphans hides the section entirely.
+        await source.replaceSessions(String(decoding: try JSONEncoder().encode([attached]), as: UTF8.self))
+        await model.refreshSessions()
+        #expect(model.projection.unmatchedSessions.isEmpty)
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-orphans-open") }
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-issue-review")
+    }
+
+    @Test("Hierarchy rows open their Task; the Session list opens the exact Session")
+    func sessionLeavesOpenAcrossPresentations() async throws {
+        let model = try model()
+        await model.refresh()
+        model.select(.task(id: "issue-review"))
+        let selected = model.selection
+        var opened: [String] = []
+        var tasks: [WorkReference] = []
+        for presentation in WorkPresentation.allCases {
+            model.navigation.presentation = presentation
+            let view = WorkNavigator(model: model, onOpenSession: { opened.append($0.id) },
+                                          onOpenTask: { tasks.append($0) })
+            if presentation == .sessions {
+                try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-human").button().tap()
+            } else {
+                try view.inspect().find(viewWithAccessibilityIdentifier: "work-task-issue-review").button().tap()
+                #expect(throws: (any Error).self) {
+                    try view.inspect().find(viewWithAccessibilityIdentifier: "session-row-human")
+                }
+            }
+            #expect(model.selection == selected)
+        }
+        #expect(opened == ["human"])
+        #expect(tasks == [.task(id: "issue-review"), .task(id: "issue-review")])
+    }
+
+    @Test("Autonomous, upcoming and human work share stable ranked planning rows")
+    func workDoesNotRequireSessions() throws {
+        let roadmap = try roadmap()
+        let empty = WorkProjection(roadmaps: roadmap.waves, sessions: [])
+        let interactive = try session("human", work: .task(id: "ts_review00000000000000000000000000"))
+        let joined = WorkProjection(roadmaps: roadmap.waves, sessions: [interactive])
+        let before = empty.waves[0].tasks
+        let after = joined.waves[0].tasks
+
+        #expect(before.map(\.id) == after.map(\.id))
+        #expect(after.map(\.task.id) == ["issue-later", "issue-review", "issue-now", "issue-available"])
+        #expect(after[2].task.condition.state == .clear)
+        #expect(after[3].task.runtime == nil)
+        #expect(after[1].sessions.map(\.id) == ["human"])
+        #expect(after[3].sessions.isEmpty)
+        #expect(joined.subject(for: "human") == .task(id: "issue-review"))
+        #expect(WorkNavigation().presentation == .compact)
+    }
+
+    @Test("The sidebar holds started work; inspection, a prepared checkout or a Session gap never changes it")
+    func startedWorkingSet() async throws {
+        let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        func sidebar() -> [String] {
+            model.projection.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
+                .compactMap { $0.workKey?.work.kind == .task ? $0.workKey?.work.id : nil }
+        }
+        // Started (review), prepared-but-unstarted (now), upcoming (available),
+        // completed (later): only started, incomplete work is in the working set.
+        #expect(sidebar() == ["issue-review"])
+        model.select(.task(id: "issue-available"))
+        #expect(sidebar() == ["issue-review"])
+        // Started work survives an inventory gap.
+        await source.replaceSessions("[]")
+        await model.refreshSessions()
+        #expect(sidebar() == ["issue-review"])
+        // All planned Tasks remain reachable in the Wave plan.
+        #expect(model.projection.waves[0].tasks.count == 4)
+    }
+
+    @Test("Many started Tasks across Waves populate the sidebar while every planned Task stays reachable")
+    func denseWorkingSet() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        let base = try #require((json["waves"] as? [[String: Any]])?.first)
+        let template = try #require(((base["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first {
+            (($0["task"] as? [String: Any])?["id"] as? String) == "issue-review"
+        })
+        var waves: [[String: Any]] = []
+        for waveIndex in 0..<3 {
+            var wave = base
+            var identity = try #require(base["wave"] as? [String: Any])
+            identity["id"] = "wave-\(waveIndex)"
+            identity["name"] = "Wave \(waveIndex)"
+            wave["wave"] = identity
+            wave["unavailable_tasks"] = []
+            let items = (0..<50).map { index -> [String: Any] in
+                var item = template
+                var task = item["task"] as! [String: Any]
+                task["id"] = "task-\(waveIndex)-\(index)"
+                task["identifier"] = "T-\(waveIndex)-\(index)"
+                task["rank"] = index
+                item["task"] = task
+                var runtime = item["runtime"] as! [String: Any]
+                runtime["work_id"] = "work-\(waveIndex)-\(index)"
+                // 20 started Tasks spread across the three Waves.
+                let global = waveIndex * 50 + index
+                runtime["started"] = global < 140 && global.isMultiple(of: 7)
+                item["runtime"] = runtime
+                return item
+            }
+            wave["tasks"] = ["state": "ok", "items": items, "truncated": false]
+            waves.append(wave)
+        }
+        json["waves"] = waves
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: json))
+        let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [])
+        let rows = projection.outline(presentation: .compact, collapsed: [], search: "", planningReadable: true)
+        #expect(rows.filter { $0.workKey?.work.kind == .task }.count == 20)
+        #expect(rows.filter { $0.workKey?.work.kind == .wave }.count == 3)
+        #expect(projection.waves.allSatisfy { $0.tasks.count == 50 })
+        // A poll that re-reads identical evidence yields identical rows.
+        let again = WorkProjection(roadmaps: snapshot.waves, sessions: [])
+            .outline(presentation: .compact, collapsed: [], search: "", planningReadable: true)
+        #expect(again.map(\.id) == rows.map(\.id))
+    }
+
+    @Test("Typed durable joins preserve top-level, multiple, completed and unmatched Sessions")
+    func everyHumanBoundaryRemainsReachable() throws {
+        let records = try [
+            session("repo", work: nil),
+            session("wave", work: .wave(id: "wave-1")),
+            session("project", work: .project(id: "ps_11111111111111111111111111111111")),
+            session("completed", work: .task(id: "ts_later000000000000000000000000000")),
+            session("another", work: .task(id: "ts_later000000000000000000000000000")),
+            session("wrong-kind", work: .project(id: "ts_review00000000000000000000000000")),
+            session("planning-id-is-not-work", work: .task(id: "issue-review")),
+        ]
+        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: records)
+        #expect(projection.waves[0].sessions.map(\.id) == ["wave", "project"])
+        let completed = try #require(projection.waves[0].tasks.first)
+        #expect(completed.task.task.completed)
+        #expect(completed.sessions.map(\.id) == ["completed", "another"])
+        #expect(projection.unmatchedSessions.map(\.id) == ["repo", "wrong-kind", "planning-id-is-not-work"])
+        let missing = WorkProjection(roadmaps: [], sessions: records)
+        #expect(missing.unmatchedSessions == records)
+    }
+
+    @Test("Presentation and repo changes preserve selection, expansion, search and terminal splits")
+    func navigationRetainsWorkspace() async throws {
+        let model = try model()
+        await model.refresh()
+        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let workspace = registry.workspace(for: fixtureWorkspace("/src/loopflow"))
+        workspace.multiplexer.load(sessionId: "human")
+        let sessionPane = workspace.multiplexer.focusedPaneId
+        _ = workspace.multiplexer.split(sessionPane, axis: .vertical)
+        workspace.multiplexer.newShell()
+        let layout = workspace.multiplexer.layout
+        let focused = workspace.multiplexer.focusedPaneId
+        model.select(.task(id: "issue-review"))
+        let navigation = model.navigation
+        navigation.selectedSessionId = "human"
+        #expect(navigation.selection == .task(id: "issue-review"))
+        let group = model.projection.waves[0].id
+        navigation.toggle(group)
+        navigation.search = "upcoming"
+        #expect(navigation.isExpanded(group))
+        navigation.toggle(group)
+        navigation.search = ""
+        #expect(!navigation.isExpanded(group))
+        navigation.content = .terminals
+        navigation.presentation = .sessions
+        model.setRepoPath("/src/context")
+        model.select(.wave(id: "wave-2"))
+        model.setRepoPath("/src/loopflow")
+
+        #expect(model.selection == .task(id: "issue-review"))
+        #expect(model.navigation === navigation)
+        #expect(model.navigation.content == .terminals)
+        #expect(model.navigation.selectedSessionId == "human")
+        #expect(!model.navigation.isExpanded(group))
+        #expect(registry.workspace(for: fixtureWorkspace("/src/loopflow")) === workspace)
+        #expect(workspace.multiplexer.layout == layout)
+        #expect(workspace.multiplexer.focusedPaneId == focused)
+        workspace.multiplexer.load(sessionId: "human")
+        workspace.multiplexer.load(sessionId: "human")
+        #expect(workspace.multiplexer.focusedPaneId == sessionPane)
+        #expect(workspace.multiplexer.layout == layout)
+    }
+
+    @Test("Failed reads keep last-good work and exact Sessions with a visible error")
+    func unavailableIsNotEmpty() async throws {
+        let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        let keys = model.projection.waves[0].tasks.map(\.id)
+        model.select(.task(id: "issue-review"))
+        await source.fail()
+        await model.refresh()
+        #expect(model.roadmap.errorMessage == "offline")
+        #expect(model.sessions.errorMessage == "offline")
+        #expect(model.projection.waves[0].tasks.map(\.id) == keys)
+        #expect(model.projection.subject(for: "human") == model.selection)
+        let view = WorkNavigator(model: model, onOpenSession: { _ in })
+        #expect(throws: Never.self) { try view.inspect().find(text: "Couldn't update: offline") }
+    }
+
+    @Test("Returning to a repository retains its last-good Sessions when refresh fails")
+    func lastGoodSessionsSurviveRepositorySwitch() async throws {
+        let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        model.setRepoPath("/src/context")
+        #expect(model.sessions.value == nil)
+        await source.fail()
+        model.setRepoPath("/src/loopflow")
+        #expect(model.sessions.value?.map(\.id) == ["human"])
+        await model.refreshSessions()
+        #expect(model.sessions.errorMessage == "offline")
+        #expect(model.sessions.value?.map(\.id) == ["human"])
+        model.setRepoPath("/src/context")
+        model.setRepoPath("/src/loopflow")
+        #expect(model.sessions.value?.map(\.id) == ["human"])
+        #expect(model.sessions.errorMessage == "offline")
+    }
+
+    @Test("Incomplete planning preserves the repository's selected Task", arguments: [false, true])
+    func unavailablePlanningPreservesRepositorySelection(truncated: Bool) async throws {
+        let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        model.select(.task(id: "issue-review"))
+        var snapshot = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        var waves = try #require(snapshot["waves"] as? [[String: Any]])
+        waves[0]["tasks"] = truncated
+            ? ["state": "ok", "items": [], "truncated": true]
+            : ["state": "unavailable", "reason": "planning offline"]
+        waves[0]["unavailable_tasks"] = []
+        snapshot["waves"] = waves
+        await source.replaceRoadmap(String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self))
+        await model.refresh()
+        #expect(model.selection == .task(id: "issue-review"))
+        await model.refreshPortfolio(initialRepoPath: nil)
+        #expect(model.selection == .task(id: "issue-review"))
+        model.setRepoPath("/src/context")
+        model.setRepoPath("/src/loopflow")
+        #expect(model.selection == .task(id: "issue-review"))
+        #expect(model.navigation.content == .details)
+        #expect(model.projection.unmatchedSessions.map(\.id) == ["human"])
+    }
+
+
+    @Test("Task details expose directive and current chapter proof from the same snapshot")
+    func inspectorShowsPlanning() async throws {
+        let model = try model()
+        await model.refresh()
+        model.select(.task(id: "issue-review"))
+        let task = try #require(model.task(id: "issue-review"))
+        let view = WorkSurfaceView(model: model, onNewSession: { _ in })
+        #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.name) }
+        #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
+        #expect(throws: Never.self) { try view.inspect().find(button: "New session") }
+        model.select(.wave(id: task.wave.wave.id))
+        #expect(throws: Never.self) { try view.inspect().find(text: task.wave.wave.goal) }
+        #expect(throws: Never.self) { try view.inspect().find(text: "Current KRs") }
+        #expect(throws: Never.self) { try view.inspect().find(text: task.wave.currentProject!.krs[0].text) }
+        #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-task-issue-available") }
+    }
+
+    @Test("A delayed New session failure stays with its Task across Task and repository navigation")
+    func newSessionFailureKeepsItsTask() async throws {
+        let model = try model()
+        await model.refresh()
+        model.select(.task(id: "issue-review"))
+        let owner = model.navigation
+        let gate = PlanningGate()
+        let view = WorkSurfaceView(model: model, onNewSession: { _ in
+            await gate.wait()
+            throw RegistryQueryError("Preparation failed for the original Task")
+        })
+        try view.inspect().find(button: "New session").tap()
+        await gate.started()
+        #expect(try view.inspect().find(button: "New session").isDisabled())
+        model.select(.task(id: "issue-available"))
+        #expect(try !view.inspect().find(button: "New session").isDisabled())
+        model.setRepoPath("/src/context")
+        let other = model.navigation
+        await gate.release()
+        let deadline = Date().addingTimeInterval(3)
+        while owner.startingTaskSessions.contains("issue-review"), Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(owner.startingTaskSessions.isEmpty)
+        #expect(other.taskSessionErrors.isEmpty)
+        model.setRepoPath("/src/loopflow")
+        model.select(.task(id: "issue-available"))
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(text: "Preparation failed for the original Task")
+        }
+        model.select(.task(id: "issue-review"))
+        #expect(throws: Never.self) {
+            try view.inspect().find(text: "Preparation failed for the original Task")
+        }
+        #expect(try !view.inspect().find(button: "New session").isDisabled())
+        // A retry clears only this Task's prior failure and settles normally.
+        let retry = WorkSurfaceView(model: model, onNewSession: { _ in })
+        try retry.inspect().find(button: "New session").tap()
+        #expect(throws: (any Error).self) {
+            try retry.inspect().find(text: "Preparation failed for the original Task")
+        }
+        while owner.startingTaskSessions.contains("issue-review"), Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(owner.taskSessionErrors.isEmpty)
+        #expect(owner.startingTaskSessions.isEmpty)
+    }
+
+    @Test("Inspection distinguishes no Sessions from an unavailable reading", arguments: [true, false])
+    func inspectorShowsSessionEvidence(hasSession: Bool) async throws {
+        let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        model.select(.task(id: hasSession ? "issue-review" : "issue-available"))
+        let view = WorkSurfaceView(model: model)
+        if hasSession {
+            #expect(throws: (any Error).self) { try view.inspect().find(text: "No open Sessions.") }
+            #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "task-session-human") }
+        } else {
+            #expect(throws: Never.self) { try view.inspect().find(text: "No open Sessions.") }
+        }
+        await source.fail()
+        await model.refresh()
+        #expect(throws: (any Error).self) {
+            try WorkSurfaceView(model: model).inspect().find(text: "No open Sessions.")
+        }
+    }
+
+    @Test("Work outside the plan remains explained in Wave details")
+    func unavailableTaskLivesInWaveDetails() async throws {
+        let model = try model()
+        await model.refresh()
+        let wave = try #require(model.projection.waves.first)
+        let task = try #require(wave.roadmap.unavailableTasks.first)
+        let text = "\(task.taskIdentifier): \(task.reason)"
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        #expect(throws: (any Error).self) { try navigator.inspect().find(text: text) }
+        model.select(wave.id.work)
+        // One quiet line names the Task; Details discloses reason and recovery.
+        let details = WorkSurfaceView(model: model)
+        #expect(throws: Never.self) { try details.inspect().find(text: "\(task.taskIdentifier) is outside the current plan.") }
+        #expect(throws: (any Error).self) { try details.inspect().find(text: text) }
+        try details.inspect().find(viewWithAccessibilityIdentifier: "wave-notice-details-\(task.taskId)").button().tap()
+        #expect(throws: Never.self) { try details.inspect().find(text: text) }
+        #expect(throws: Never.self) { try details.inspect().find(text: task.recovery) }
+    }
+
+    @Test("Incomplete planning keeps out-of-plan Work reachable", arguments: [false, true])
+    func incompletePlanningRetainsWork(hasUnplannedWork: Bool) async throws {
+        var snapshot = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        var wave = try #require((snapshot["waves"] as? [[String: Any]])?.first)
+        wave["tasks"] = ["state": "ok", "items": [], "truncated": false]
+        if !hasUnplannedWork { wave["unavailable_tasks"] = [] }
+        snapshot["waves"] = [wave]
+        let planning = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            switch args.first {
+            case "roadmap": return planning
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            case "session": return #"{"entries":[],"next":null}"#
+            default: return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            }
+        }, repoPath: "/src/loopflow")
+        await model.refresh()
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        #expect(throws: (any Error).self) { try navigator.inspect().find(text: "No active Tasks in this repository.") }
+        if hasUnplannedWork {
+            let projected = try #require(model.projection.waves.first)
+            try navigator.inspect().find(button: projected.roadmap.wave.displayName).tap()
+            #expect(model.selection == projected.id.work)
+            let task = try #require(projected.roadmap.unavailableTasks.first)
+            #expect(throws: Never.self) {
+                try WorkSurfaceView(model: model).inspect().find(text: "\(task.taskIdentifier) is outside the current plan.")
+            }
+        }
+    }
+
+    @Test("Slow planning does not gate Session reading or navigation")
+    func sessionsArriveBeforePlanning() async throws {
+        let snapshot = try roadmapJSON()
+        let records = try sessionsJSON()
+        let gate = PlanningGate()
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            switch args.first {
+            case "roadmap": await gate.wait(); return snapshot
+            case "session": return #"{"entries":\#(records),"next":null}"#
+            case "wave" where args.dropFirst().first == "list": return "[]"
+            default: return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            }
+        }, repoPath: "/src/loopflow")
+        let refresh = Task { await model.refresh() }
+        await gate.started()
+        await model.refreshSessions()
+        #expect(model.roadmap.isLoading)
+        #expect(model.projection.unmatchedSessions.map(\.id) == ["human"])
+        await gate.release()
+        await refresh.value
+        #expect(model.projection.subject(for: "human") == .task(id: "issue-review"))
+        #expect(model.projection.unmatchedSessions.isEmpty)
+    }
+
+    @Test("Bound Sessions retain ancestry and panes across planning loss and return",
+          arguments: ["absent-task", "unavailable", "no-current-project", "no-waves"])
+    func boundSessionRetainsAncestry(planning: String) async throws {
+        let work = WorkReference.task(id: "ts_review00000000000000000000000000")
+        let records = try [session("first", work: work, waveId: "wave-1"),
+                           session("second", work: work, waveId: "wave-1")]
+        let original = try roadmapJSON()
+        var snapshot = try #require(JSONSerialization.jsonObject(with: Data(original.utf8)) as? [String: Any])
+        var waves = try #require(snapshot["waves"] as? [[String: Any]])
+        waves[0]["tasks"] = planning == "unavailable"
+            ? ["state": "unavailable", "reason": "planning offline"]
+            : ["state": "ok", "items": [], "truncated": false]
+        waves[0]["unavailable_tasks"] = []
+        if planning == "no-current-project" {
+            waves[0]["projects"] = ["state": "ok", "items": [], "truncated": false]
+        }
+        snapshot["waves"] = planning == "no-waves" ? [] : waves
+        let missing = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
+        let source = ReadingSource(roadmap: original, sessions: String(decoding: try JSONEncoder().encode(records), as: UTF8.self))
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await model.refresh()
+        model.select(model.projection.subject(for: "first"))
+        model.navigation.selectedSessionId = "first"
+        model.navigation.content = .terminals
+        model.beginSessionRename(records[0])
+        model.navigation.renaming?.text = "Retained draft"
+        let selection = model.selection
+        let registry = SessionsWorkspaceRegistry()
+        let workspace = registry.workspace(for: WorkspaceIdentity(homeId: "local", worktree: "/src/loopflow"))
+        workspace.multiplexer.load(sessionId: "first")
+        let pane = workspace.multiplexer.focusedPaneId
+        _ = workspace.multiplexer.split(pane, axis: .vertical)
+        workspace.multiplexer.load(sessionId: "second")
+        workspace.multiplexer.load(sessionId: "first")
+        let layout = workspace.multiplexer.layout
+
+        await source.replaceRoadmap(missing)
+        await model.refresh()
+        let crumb = try #require(model.projection.breadcrumb(selection: model.selection, sessionId: "first"))
+        #expect(crumb.task == nil)
+        #expect(crumb.taskWork == work)
+        #expect(crumb.waveWork == .wave(id: "wave-1"))
+        #expect(crumb.siblings.map(\.id) == ["first", "second"])
+        #expect(model.projection.subject(for: "first") == work)
+        #expect(model.projection.orphanSessions(search: "").isEmpty)
+        let bar = WorkBreadcrumbBar(model: model, crumb: crumb, onOpenSession: { _ in })
+        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").text().string() == "Task \(work.id)")
+        for presentation in WorkPresentation.allCases {
+            let rows = model.projection.outline(presentation: presentation, collapsed: [], search: work.id, planningReadable: false)
+            #expect(Set(rows.compactMap { $0.session?.id }) == ["first", "second"])
+            #expect(rows.filter { $0.session != nil }.allSatisfy { $0.ancestors.last?.key.work == work })
+        }
+
+        // Fresh discovery cannot depend on cached planning names or selection.
+        let cold = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+        await cold.refresh()
+        cold.select(cold.projection.subject(for: "first"))
+        cold.navigation.selectedSessionId = "first"
+        #expect(cold.selection == work)
+        await source.replaceRoadmap(original)
+        await model.refresh()
+        await cold.refresh()
+        #expect(cold.selection == work)
+        #expect(cold.task(id: work.id)?.task.id == "issue-review")
+        #expect(model.selection == selection)
+        #expect(model.navigation.selectedSessionId == "first")
+        #expect(model.navigation.content == .terminals)
+        #expect(model.navigation.renaming?.text == "Retained draft")
+        #expect(model.projection.breadcrumb(selection: model.selection, sessionId: "first")?.task?.task.id == "issue-review")
+        #expect(workspace.multiplexer.layout == layout)
+        #expect(workspace.multiplexer.focusedPaneId == pane)
+    }
+
+    @Test("Unbound Sessions do not acquire ancestry from display text or checkout")
+    func unboundSessionHasNoAncestry() throws {
+        let record = try session("unbound", work: nil)
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
+        json["work_path"] = "wave-1/issue-review"
+        json["title"] = "Task ts_review00000000000000000000000000"
+        let unbound = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))
+        let projection = WorkProjection(roadmaps: try roadmap().waves, sessions: [unbound])
+        let crumb = try #require(projection.breadcrumb(selection: nil, sessionId: unbound.id))
+        #expect(projection.subject(for: unbound.id) == nil)
+        #expect(crumb.waveWork == nil)
+        #expect(crumb.taskWork == nil)
+        #expect(crumb.siblings == [unbound])
+        #expect(projection.orphanSessions(search: "") == [unbound])
+    }
+
+    @Test("New conversation follows the visible subject and repository scope")
+    func conversationFollowsZoom() async throws {
+        let model = try model()
+        await model.refresh()
+        #expect(model.conversationScope == .repo("/src/loopflow"))
+        model.select(.wave(id: "wave-1"))
+        guard case .wave = model.conversationScope else { Issue.record("Expected Wave context"); return }
+        model.select(.task(id: "issue-review"))
+        guard case .task(_, let issue) = model.conversationScope else { Issue.record("Expected Task context"); return }
+        #expect(issue == model.task(id: "issue-review")?.task.task.identifier)
+        model.navigation.content = .overview
+        #expect(model.selection == .task(id: "issue-review"))
+        #expect(model.conversationScope == .repo("/src/loopflow"))
+        #expect(model.conversationLabel == "loopflow")
+        model.navigation.content = .terminals
+        guard case .task = model.conversationScope else { Issue.record("Expected restored Task context"); return }
+    }
+
+    private func model() throws -> WorkModel {
+        let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
+        return WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
+    }
+    private func roadmap() throws -> RoadmapSnapshot {
+        try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
+    }
+    private func roadmapJSON() throws -> String {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        return try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
+    }
+    private func sessionsJSON() throws -> String {
+        let records = [try session("human", work: .task(id: "ts_review00000000000000000000000000"))]
+        return String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
+    }
+    private func session(_ id: String, work: WorkReference?, state: SessionState = .active, waveId: String? = nil) throws -> SessionRecord {
+        let workData = try JSONEncoder().encode(work)
+        let workJSON = String(decoding: workData, as: UTF8.self)
+        let taskJSON = String(decoding: try JSONEncoder().encode(work?.kind == .task ? work?.id : nil), as: UTF8.self)
+        let taskIds = work.flatMap { $0.kind == .task ? [$0.id] : nil } ?? []
+        let taskIdsJSON = String(decoding: try JSONEncoder().encode(taskIds), as: UTF8.self)
+        let waveJSON = String(decoding: try JSONEncoder().encode(waveId ?? (id == "project" ? "wave-1" : nil)), as: UTF8.self)
+        return try JSONDecoder().decode(SessionRecord.self, from: Data("""
+        {"id":"\(id)", "run_id": "\(id)", "interactive": true,"work":\(workJSON),"title":"\(id)",
+         "workspace":{"home_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
+         "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
+         "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(state: state.rawValue)),
+         "ready_summary":null,"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
+        """.utf8))
+    }
+}
+
+private actor PlanningGate {
+    private var response: CheckedContinuation<Void, Never>?
+    private var requested: CheckedContinuation<Void, Never>?
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            response = continuation
+            requested?.resume()
+            requested = nil
+        }
+    }
+    func started() async {
+        if response != nil { return }
+        await withCheckedContinuation { requested = $0 }
+    }
+    func release() { response?.resume(); response = nil }
+}
+
+private actor ReadingSource {
+    var roadmap: String
+    var sessions: String
+    var failed = false
+    init(roadmap: String, sessions: String) { self.roadmap = roadmap; self.sessions = sessions }
+    func fail() { failed = true }
+    func replaceRoadmap(_ value: String) { roadmap = value }
+    func replaceSessions(_ value: String) { sessions = value }
+    func read(_ args: [String]) throws -> String {
+        if failed { throw RegistryQueryError("offline") }
+        switch args.first {
+        case "roadmap": return roadmap
+        case "session": return #"{"entries":\#(sessions),"next":null}"#
+        case "wave" where args.dropFirst().first == "list": return "[]"
+        case "activity": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+        default: throw RegistryQueryError("unexpected command")
+        }
+    }
+}
+#endif

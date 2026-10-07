@@ -314,11 +314,12 @@ fn _copy_store_for_candidate(source_path: &Path, destination_path: &Path) -> Res
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     source.busy_timeout(Duration::from_secs(5))?;
+    let snapshot = source.unchecked_transaction()?;
+    // BEGIN is deferred: read a page to pin the WAL snapshot before backing up.
+    // Otherwise every intervening writer can restart the incremental backup.
+    snapshot.query_row("SELECT count(*) FROM sqlite_schema", [], |_| Ok(()))?;
     let mut destination = rusqlite::Connection::open(destination_path)?;
-    let backup = rusqlite::backup::Backup::new(&source, &mut destination)?;
-    // Finish a typical Home snapshot between controller writes. Tiny chunks
-    // repeatedly restart against the live WAL and can make a read-only
-    // preflight effectively unbounded.
+    let backup = rusqlite::backup::Backup::new(&snapshot, &mut destination)?;
     backup.run_to_completion(4096, Duration::from_millis(1), None)?;
     Ok(())
 }
@@ -368,10 +369,28 @@ fn _validate_executable_steps(steps: &[crate::engine::ConcreteStep]) -> Result<(
     Ok(())
 }
 
-/// Validate installed-state semantics against a migrated snapshot, never the
-/// live database. A migration may repair a persisted flow name, so checking the
-/// pre-migration rows would reject the candidate the migration makes valid.
-fn _read_executable_compatibility(store_path: &Path) -> ExecutableCompatibility {
+/// Validate installed-state semantics against the schema this candidate will
+/// run on. A migration may repair a persisted flow name, so checking the
+/// pre-migration rows would reject the candidate the migration makes valid:
+/// a pending frontier is migrated in a private snapshot, never the live
+/// database. An exact frontier has nothing to apply, so it is read in place —
+/// copying a multi-gigabyte store on every preflight outlived callers'
+/// deadlines and stranded the partial copies in the temporary directory.
+fn _read_executable_compatibility(
+    store_path: &Path,
+    compatibility: &Compatibility,
+) -> ExecutableCompatibility {
+    if matches!(compatibility, Compatibility::Exact { .. }) {
+        return match rusqlite::Connection::open_with_flags(
+            store_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) {
+            Ok(connection) => _executable_compatibility(&connection),
+            Err(error) => ExecutableCompatibility::Unreadable {
+                reason: format!("open shared store for candidate validation: {error}"),
+            },
+        };
+    }
     let directory = match tempfile::tempdir() {
         Ok(directory) => directory,
         Err(error) => {
@@ -470,7 +489,7 @@ pub fn build_preview(store_path: &Path) -> PromotionPreview {
     let candidate = CandidateIdentity::current();
     let database_path = store_path.display().to_string();
     let compatibility = read_store_evidence(store_path);
-    let executable_compatibility = _read_executable_compatibility(store_path);
+    let executable_compatibility = _read_executable_compatibility(store_path, &compatibility);
     let pending_migration_drafts = build_info::pending_migration_drafts();
     let verdict = decide(
         candidate.authority,
@@ -590,6 +609,71 @@ mod compatibility_tests {
     };
     use crate::build_info::MigrationAuthority::{Published, ValidationOnly};
 
+    #[test]
+    fn candidate_snapshot_finishes_while_wal_writes_continue() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc, Arc,
+        };
+        use std::time::{Duration, Instant};
+
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.db");
+        let destination = directory.path().join("candidate.db");
+        let writer = rusqlite::Connection::open(&source).unwrap();
+        writer
+            .execute_batch(
+                "PRAGMA journal_mode=WAL;
+             CREATE TABLE history (id INTEGER PRIMARY KEY, value INTEGER, payload BLOB);
+             INSERT INTO history VALUES (0, 0, zeroblob(67108864));",
+            )
+            .unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let finished = Arc::new(AtomicBool::new(false));
+        let (ready, started) = mpsc::channel();
+        let stop_writer = Arc::clone(&stop);
+        let writer_finished = Arc::clone(&finished);
+        let handle = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            writer
+                .execute("UPDATE history SET value=value+1 WHERE id=0", [])
+                .unwrap();
+            ready.send(()).unwrap();
+            while !stop_writer.load(Ordering::Relaxed) && Instant::now() < deadline {
+                writer
+                    .execute("UPDATE history SET value=value+1 WHERE id=0", [])
+                    .unwrap();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            writer_finished.store(true, Ordering::Relaxed);
+        });
+        started.recv().unwrap();
+        let result = super::_copy_store_for_candidate(&source, &destination);
+        let completed_during_writes = !finished.load(Ordering::Relaxed);
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+        result.unwrap();
+        assert!(
+            completed_during_writes,
+            "snapshot waited for the writer to stop"
+        );
+        let copy = rusqlite::Connection::open(&destination).unwrap();
+        let (version, bytes): (i64, i64) = copy
+            .query_row(
+                "SELECT value, length(payload) FROM history WHERE id=0",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(version > 0);
+        assert_eq!(bytes, 67108864);
+        assert_eq!(
+            copy.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+    }
+
     fn executable() -> ExecutableCompatibility {
         ExecutableCompatibility::Compatible { references: 0 }
     }
@@ -689,6 +773,22 @@ mod compatibility_tests {
         assert!(
             matches!(compatibility, ExecutableCompatibility::Compatible { .. }),
             "a dead-worktree ref must be skipped, not fail promotion: {compatibility:?}"
+        );
+    }
+
+    #[test]
+    fn an_exact_store_is_validated_in_place() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = directory.path().join("loopflow.db");
+        crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
+        let compatibility = super::read_store_evidence(&store);
+        assert!(matches!(compatibility, Compatibility::Exact { .. }));
+
+        let executable = super::_read_executable_compatibility(&store, &compatibility);
+
+        assert_eq!(
+            executable,
+            ExecutableCompatibility::Compatible { references: 0 }
         );
     }
 }

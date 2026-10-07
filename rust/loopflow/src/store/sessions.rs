@@ -1,4 +1,4 @@
-use crate::durable::{FlowSession, TaskId};
+use crate::durable::TaskId;
 use crate::session::{AgentSession, TitleSource};
 
 use super::{run_sqlite, Store, StoreResult};
@@ -10,21 +10,15 @@ impl Store {
     pub(crate) async fn session_summaries(
         &self,
         filter: &crate::session::SessionFilter,
+        now: i64,
     ) -> StoreResult<Vec<crate::session::SessionSummary>> {
         let filter = filter.clone();
-        run_sqlite(&self.sqlite, move |store| store.session_summaries(&filter)).await
-    }
-
-    pub async fn reserve_review_capture(
-        &self,
-        expected: &FlowSession,
-    ) -> StoreResult<(FlowSession, AgentSession)> {
-        let expected = expected.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.reserve_review_capture(&expected)
+            store.session_summaries(&filter, now)
         })
         .await
     }
+
     pub async fn session(&self, id: &str) -> StoreResult<Option<AgentSession>> {
         let id = id.to_string();
         run_sqlite(&self.sqlite, move |store| store.session(&id)).await
@@ -41,14 +35,38 @@ impl Store {
         .await
     }
 
-    pub async fn create_session(
-        &self,
-        session: AgentSession,
-        review: Option<FlowSession>,
-    ) -> StoreResult<AgentSession> {
+    pub async fn create_session(&self, session: AgentSession) -> StoreResult<AgentSession> {
         let caller = crate::journal::current_exec_id();
         run_sqlite(&self.sqlite, move |store| {
-            store.create_session(session, review.as_ref(), caller.as_ref())
+            store.create_session(session, caller.as_ref())
+        })
+        .await
+    }
+
+    pub(crate) async fn task_conversations(
+        &self,
+        task: &crate::durable::TaskId,
+    ) -> StoreResult<Vec<(AgentSession, Option<i64>)>> {
+        let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_conversations(&task)).await
+    }
+
+    pub(crate) async fn task_primary(
+        &self,
+        task: &crate::durable::TaskId,
+    ) -> StoreResult<Option<AgentSession>> {
+        let task = task.clone();
+        run_sqlite(&self.sqlite, move |store| store.task_primary(&task)).await
+    }
+
+    pub(crate) async fn choose_task_primary(
+        &self,
+        task: &crate::durable::TaskId,
+        session: &str,
+    ) -> StoreResult<AgentSession> {
+        let (task, session) = (task.clone(), session.to_string());
+        run_sqlite(&self.sqlite, move |store| {
+            store.choose_task_primary(&task, &session)
         })
         .await
     }
@@ -116,23 +134,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.sessions(&filter)).await
     }
 
-    pub async fn waiting_flow(&self, session_id: &str) -> StoreResult<Option<(String, String)>> {
-        let session_id = session_id.to_string();
-        run_sqlite(&self.sqlite, move |store| store.waiting_flow(&session_id)).await
-    }
-
-    pub async fn complete_session(
-        &self,
-        id: &str,
-        expected_capture: Option<i64>,
-    ) -> StoreResult<()> {
-        let id = id.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.complete_session(&id, expected_capture)
-        })
-        .await
-    }
-
     pub async fn session_inputs(&self, id: &str) -> StoreResult<Vec<String>> {
         let id = id.to_string();
         run_sqlite(&self.sqlite, move |store| store.session_inputs(&id)).await
@@ -151,17 +152,33 @@ impl Store {
         })
         .await
     }
+}
 
-    pub async fn ready_session(
+impl Store {
+    pub async fn flow_inventory(
         &self,
-        id: &str,
-        expected_capture: Option<i64>,
-        summary: &str,
-    ) -> StoreResult<()> {
-        let id = id.to_string();
-        let summary = summary.to_string();
+        filter: &crate::durable::FlowFilter,
+        after: Option<&str>,
+        limit: std::num::NonZeroU32,
+    ) -> StoreResult<crate::durable::FlowPage> {
+        let filter = filter.clone();
+        let after = after.map(str::to_owned);
         run_sqlite(&self.sqlite, move |store| {
-            store.ready_session(&id, expected_capture, &summary)
+            store.flow_inventory(&filter, after.as_deref(), limit)
+        })
+        .await
+    }
+
+    /// One Flow by driver Exec id or unique prefix, drawn from its Execs.
+    pub async fn flow_detail(
+        &self,
+        selector: &str,
+    ) -> StoreResult<Option<crate::durable::FlowDetail>> {
+        let selector = selector.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            Ok(store
+                .flow_exec(&selector)?
+                .map(|(flow, entry)| flow.detail(entry)))
         })
         .await
     }

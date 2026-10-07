@@ -195,6 +195,7 @@ struct RegistryQueryTests {
     "metrics": [],
     "contract_issues": []
   },
+  "project_readiness": {"state": "ready", "project_id": "project-1", "observed_at": null, "pending_successor": null, "activation": null},
   "projects": {
     "state": "ok",
     "items": [
@@ -203,8 +204,8 @@ struct RegistryQueryTests {
         "work_id": null,
         "slug": "release-feedback",
         "name": "current",
-        "flow": "task-design",
-        "status": "started",
+        "workflow": "task-design",
+        "status": "started", "current": true,
         "metric_targets": [],
         "krs": [
           {
@@ -263,7 +264,8 @@ struct RegistryQueryTests {
             "authored_commits": false,
             "recovery_required": false,
             "reason": null
-          }
+          },
+          "unresolved_execution": true
         },
         "actions": {
           "recommended": "resume",
@@ -289,7 +291,7 @@ struct RegistryQueryTests {
 
 
 
-        #expect(result.workMap.currentProject?.flow == "task-design")
+        #expect(result.workMap.currentProject?.workflow == "task-design")
         #expect(result.workMap.tasks.items[0].task.identifier == "INF-123")
         #expect(result.workMap.tasks.items[0].reference.issueUrl?.absoluteString.contains("INF-123") == true)
         #expect(result.workMap.tasks.items[0].reference.workspace?.slug == "wire-it")
@@ -377,6 +379,7 @@ struct RegistryQueryTests {
             "metrics": [],
             "contract_issues": []
           },
+          "project_readiness": {"state": "unavailable", "project_id": null, "observed_at": null, "pending_successor": null, "activation": null},
           "projects": {
             "state": "unavailable",
             "reason": "Project planning unavailable"

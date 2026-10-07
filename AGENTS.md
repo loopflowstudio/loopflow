@@ -7,10 +7,12 @@ This is the governing document of the loopflow codebase. Contributors and agents
 **Wave planning:**
 - Wave = durable objective, responsibility, memory, cadence, budget, chat, and metric instruments
 - Chapter = shared name of every Wave's In Progress Linear Project; no Chapter table
-- Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the default Flow
-- A Task's work is every Session, Flow and Exec in its checkout, plus explicit binds; its managed Flow is one marked member
+- Project = one Wave's Linear plan: status, Tasks, KRs, targets, and the workflow its Tasks take up
+- A Task's work is every Session, Flow and Exec in its checkout, plus explicit binds; no Flow is selected over another
+- Workflow = a Task's nodes (a person, in its conversation) joined by edges (Flows), with its stored position; `lf task run` chooses an edge, `lf task move` sets a node
+- A Task's state is its Workflow position: ready at `start`, active between, done at `end`; reaching `end` is completion, abandoned is its own mark
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
-- Untouched backlog expires as abandoned; uncertain evidence never auto-closes work
+- Unreviewed backlog stays in its Project until explicit disposition; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
 - Definitions name the beneficiary and experienced improvement; KRs prove it
 
@@ -199,33 +201,50 @@ The instinct on a bug is often a new check. Invert it: can the system adapt inst
 A Wave's objective, memory, cadence, budget and instruments survive planning
 boundaries. A Chapter is the shared name of each Wave's one In Progress Linear
 Project. Linear Project status owns current/planned/completed history; there is
-no Chapter table or plan packet. Project owns Tasks, KRs, targets and its `flow:`
-default, not another objective, memory or operator.
+no Chapter table or plan packet. Project owns Tasks, KRs, targets and its
+`workflow:`, not another objective, memory or operator.
 
-A Task's work includes every AgentSession, FlowSession and Exec associated with
+A Task's work includes every Session, Flow and Exec associated with
 its checkout, plus explicit binds. Rust owns this shared association for status,
 Desktop navigation, recovery and completion. Membership grants no process or
-Flow authority and never rewrites historical usage. The managed FlowSession is
-one marked member, selected only for worker progression, claim fencing and exact
-review/delivery settlement. The Project's Flow supplies its default; explicit
-Flow selection is allowed.
-Taskless execution uses the same captured graph, cursor, return counts and driver.
-Template composition expands the graph. One started Flow is one FlowSession;
-loop passes are node/iteration positions and lenses over its history, not child
-FlowSessions. Retry retains the pass; Iterate advances its return counters.
+Flow authority and never rewrites historical usage. Every Flow naming the Task
+is equally its work; a stopped Flow is history its caller inspects, never a
+position to resume. A Task with no Workflow takes up its Project's `workflow:`
+on its first `lf task run`; one that named its own keeps it.
+A Workflow is the Task's outer shape: the workflow definition it took up,
+whose nodes are where a person takes part in the Task conversation and whose
+edges each run one Flow, plus the Task's stored position on it. The graph is
+fixed when taken up. `lf task run` chooses an edge, starts its Flow as a child
+`lf run`, again when a Flow exec fails, and writes the arrival when one
+succeeds; a stopped Flow leaves the Task on its edge;
+`lf task move` sets a node. Each move is appended to the Task's history. It
+executes nothing, and no command approves or completes a node.
+Taskless execution uses the same driver. A Flow is one driver Exec and the step
+Execs it starts; its id is the driver Exec id. The driver holds the cursor and
+return counts in memory and writes FlowExec, append-only: the Flow's name and
+compiled graph at launch, then each step's Exec, node and iteration counts.
+Every Flow exec gets one; none is primary for a Task. A step is the plain command
+(`lf -b skill <name> [message]` or the operation's own) and neither reads nor
+writes it. Running, finished and results are read from Execs, never stored
+twice. Template composition expands the graph; loop passes are node/iteration
+positions on step rows, not child Flows.
 
 Repository rotation converges on an explicit target through fresh provider facts
 and stable Project identities. Partial status changes remain retryable; unrelated
 competing plans remain unresolved. Preserve active Task identity, worktree, PR
-and execution. Retire only proven untouched backlog; missing evidence is unknown.
+and execution. Preserve unreviewed backlog until explicit disposition; missing evidence is unknown.
 Current navigation stays Wave → Task and Linear retains past Projects.
 
 Exec is one actual lf process, including direct and agent-issued nested commands.
 AgentSession is one durable agent conversation, interactive or headless; identity,
-name, feedback and native history survive driver replacement. FlowSession owns
-captured progression and references exact successful agent completions. Agent
-outcomes and retries belong in Session history; mechanical results belong in
-Flow history. Do not replace Run with another generic attempt object.
+name, feedback and native history survive driver replacement. Product text says
+Session for interactive and Run for headless work. Waiting is the one attention
+state, judged in Rust from a provider stream `lf` owns. A step's result
+is how its process exited; a deciding or routing step also answers through the
+Session turn its Exec captured. Agent outcomes and retries belong in Session
+history; mechanical results are step Exec exits. A Session reaches its Flow
+through the step Exec that captured its input. Do not replace Run with another
+generic attempt object.
 
 Main records have one SQLite owner. Task implies Wave; constructors fill omitted
 ancestors and reject mismatches. Bind assigns an unassigned conversation once,

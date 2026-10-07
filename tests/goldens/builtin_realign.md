@@ -70,18 +70,21 @@ assignee. Ask for a necessary unknown name or leave the attribution unresolved.
 Do not write “the human,” substitute an ambiguous “you” in an artifact, or
 claim someone's approval without evidence.
 
-Answer the user in this conversation; never open another session merely to
-reach them. Headless work that lacks required input explains its failure in
-ordinary output and stops. A `human: true` Flow step is a review Session:
-Complete returns its feedback to the next step and a following loop-decide
-chooses navigation. Only the person decides a review.
+Answer the user in this conversation. Never open another
+session merely to reach them. Headless work that lacks required input explains
+its failure in ordinary output and stops. The Wave
+operator reads existing logs and discusses unresolved judgment in its ongoing
+Wave chat. Taskless callers receive the failure.
+Discuss review feedback in the ongoing conversation and preserve agreed direction.
+Inspect execution and effect history before choosing further work. Historical
+review boundaries grant no authority to close a conversation or launch a Flow.
 
 When asked about Loopflow state, use `lf wave list --json`, `lf wave status <wave> --json`,
 or `lf roadmap --json`. Do not reconstruct shared state from processes or
 worktrees. Supervision, recovery and placement belong to `repo/operate`,
 `wave/operate` and `task/operate`. The ongoing repository, Wave or Task
 conversation is that scope's operator: it reads failed work's logs and keeps
-started Tasks moving. Task workers and optional scheduled checks run
+started Tasks moving. Running Flows and optional scheduled checks continue
 independently; nothing re-invokes a conversation.
 
 Use `lf screenshot SOURCE -o OUTPUT` for unattended HTML or URL captures;
@@ -213,7 +216,7 @@ Finish briefly: what changed, what remains, and any decision needed. Keep the
 check result to one line with its command and result or deferred owner. Update
 the existing plan; do not accumulate reports or repeated untested-claim lists.
 If everything already agrees, say so without manufacturing changes.
-Supply the facts for a reader such as loop-decide to judge; do not preselect
+Supply the facts for a reader such as loop-or-next to judge; do not preselect
 Advance, Iterate, or Blocked. Publication and workflow navigation belong to
 the caller.
 

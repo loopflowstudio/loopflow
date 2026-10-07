@@ -312,7 +312,7 @@ fn register_task_fixture(
     let project = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
-            flow: "feature".into(),
+            workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
             id: LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
             slug: "task-pr-tests".to_string(),
@@ -367,6 +367,17 @@ fn register_task_fixture(
     };
     runtime.block_on(async {
         store.create_wave(&wave).await.expect("create test wave");
+        store
+            .create_project(&project)
+            .await
+            .expect("create test project");
+        rusqlite::Connection::open(home.join("loopflow.db"))
+            .expect("open fixture database")
+            .execute(
+                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                rusqlite::params![wave.id(), project.id.as_str()],
+            )
+            .expect("select fixture Project");
         let pm_payload = serde_json::json!({
             "projects": [{
                 "id": project.plan.id.as_str(),
@@ -374,7 +385,7 @@ fn register_task_fixture(
                 "name": project.plan.name.as_str(),
                 "summary": "",
                 "metric_targets": [],
-                "flow": project.plan.flow,
+                "workflow": project.plan.workflow,
                 "status": project.plan.status,
                 "krs": [],
                 "initiative_ids": ["initiative-task-pr-tests"],
@@ -395,21 +406,20 @@ fn register_task_fixture(
             }]
         });
         store
-            .put_pm_snapshot(PmSnapshotRow {
-                wave_id: wave.id().clone(),
-                provider: "linear".to_string(),
-                initiative: "initiative-task-pr-tests".to_string(),
-                synced_at: now.unix_timestamp(),
-                snapshot: serde_json::from_value(pm_payload).unwrap(),
-            })
+            .put_pm_snapshot(
+                PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".to_string(),
+                    initiative: "initiative-task-pr-tests".to_string(),
+                    synced_at: now.unix_timestamp(),
+                    snapshot: serde_json::from_value(pm_payload).unwrap(),
+                },
+                None,
+            )
             .await
             .expect("cache Task PR context");
         store
-            .create_project(&project)
-            .await
-            .expect("create test project");
-        store
-            .create_task(&task, &pr)
+            .create_task(&task, &pr, None)
             .await
             .expect("create test Task");
     });
@@ -448,7 +458,7 @@ pub fn register_sibling_task(
         ..registered.pr.clone()
     };
     runtime
-        .block_on(registered.store.create_task(&task, &pr))
+        .block_on(registered.store.create_task(&task, &pr, None))
         .expect("create sibling Task");
     task
 }
@@ -480,4 +490,125 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
         perms.set_mode(0o755);
         std::fs::set_permissions(&path, perms).expect("chmod");
     }
+}
+
+/// Record a Flow the way `lf run` leaves one: a driver Exec, its FlowExec row
+/// and one step Exec in `cwd`, both exited. Returns the driver's id, which
+/// names the Flow.
+#[allow(dead_code)] // Shared helper compiled into integration tests that record no Flow.
+pub fn record_flow(home: &Path, cwd: &Path, flow: &str, label: &str, outcome: &str) -> String {
+    use loopflow::engine::flow::{ConcreteSkill, ConcreteStep, Skill};
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
+    let driver = loopflow::id::ExecId::new();
+    let step = loopflow::id::ExecId::new();
+    for (id, parent, argv) in [
+        (driver.clone(), None, vec!["lf", "run", flow]),
+        (
+            step.clone(),
+            Some(driver.clone()),
+            vec!["lf", "--batch", "skill", label],
+        ),
+    ] {
+        db.execute(
+            "INSERT INTO execs(id,trace_id,parent_exec_id,command,repo,cwd,started_at,completed_at,outcome)
+             VALUES(?1,?2,?3,?4,?5,?5,1,2,?6)",
+            rusqlite::params![
+                id.as_str(),
+                loopflow::id::TraceId::new().as_str(),
+                parent.as_ref().map(|parent| parent.as_str().to_owned()),
+                serde_json::to_string(&argv).expect("argv serializes"),
+                cwd.to_string_lossy(),
+                outcome
+            ],
+        )
+        .expect("record Flow Exec");
+    }
+    let graph = loopflow::engine::flow_graph::FlowGraph::new(
+        flow,
+        &[ConcreteStep::Skill(ConcreteSkill {
+            skill: Skill::named(label),
+            id: None,
+            human: false,
+            returns: None,
+            sources: Vec::new(),
+        })],
+    );
+    db.execute(
+        "INSERT INTO flow_execs(exec_id,flow,graph) VALUES(?1,?2,?3)",
+        rusqlite::params![
+            driver.as_str(),
+            flow,
+            serde_json::to_string(&graph).expect("graph serializes")
+        ],
+    )
+    .expect("record FlowExec");
+    db.execute(
+        "INSERT INTO flow_exec_steps(flow_exec_id,exec_id,node,iterations) VALUES(?1,?2,0,'[[]]')",
+        rusqlite::params![driver.as_str(), step.as_str()],
+    )
+    .expect("record Flow step");
+    driver.to_string()
+}
+
+/// Every Flow in launch order: its driver's outcome and each recorded step as
+/// `{flow, label, key, iterations, argv}`, `argv` without the binary path.
+#[allow(dead_code)] // Shared helper compiled into integration tests that read no Flow.
+pub fn recorded_flows(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value>)> {
+    let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
+    let mut drivers = db
+        .prepare(
+            "SELECT d.id,d.outcome,f.flow,f.graph FROM flow_execs f JOIN execs d ON d.id=f.exec_id
+             ORDER BY d.rowid",
+        )
+        .expect("select Flow drivers");
+    let rows = drivers
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .expect("read Flow drivers")
+        .collect::<rusqlite::Result<Vec<(String, Option<String>, String, String)>>>()
+        .expect("decode Flow drivers");
+    rows.into_iter()
+        .map(|(driver, outcome, flow, graph)| {
+            let graph: loopflow::engine::flow_graph::FlowGraph =
+                serde_json::from_str(&graph).expect("a Flow graph");
+            fn label(nodes: &[loopflow::engine::flow_graph::FlowNode], key: u32) -> Option<String> {
+                nodes.iter().find_map(|node| {
+                    if node.key == key {
+                        return Some(node.label.clone());
+                    }
+                    node.paths.iter().find_map(|path| label(&path.steps, key))
+                })
+            }
+            let mut steps = db
+                .prepare(
+                    "SELECT e.command,s.node,s.iterations FROM flow_exec_steps s
+                     JOIN execs e ON e.id=s.exec_id WHERE s.flow_exec_id=?1 ORDER BY s.seq",
+                )
+                .expect("select Flow steps");
+            let steps = steps
+                .query_map([driver], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, u32>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .expect("read Flow steps")
+                .map(|row| {
+                    let (argv, key, iterations) = row.expect("a Flow step");
+                    let argv: Vec<String> = serde_json::from_str(&argv).expect("a JSON argv");
+                    serde_json::json!({
+                        "flow": flow,
+                        "label": label(&graph.steps, key).expect("a graph node"),
+                        "key": key,
+                        "iterations": serde_json::from_str::<serde_json::Value>(&iterations)
+                            .expect("iteration counts"),
+                        "argv": argv[1..],
+                    })
+                })
+                .collect();
+            (outcome, steps)
+        })
+        .collect()
 }

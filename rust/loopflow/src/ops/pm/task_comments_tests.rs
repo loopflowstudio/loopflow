@@ -54,7 +54,7 @@ async fn graphql(
         json!({"issue": {"id":"issue-uuid","identifier":"FIX-7","url":null,"title":"Comments",
             "description":"","completedAt": null, "prioritySortOrder":0.0,"sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z","assignee":null,
             "state":{"type":"unstarted"},"team":{"id":"team-1"},
-            "project":{"id":"project-1","name":"Chapter","description":"","content":"flow: feature",
+            "project":{"id":"project-1","name":"Chapter","description":"","content":"workflow: feature",
                 "status":{"type":"started"},
                 "initiatives":{"nodes":[{"id":"initiative-1"}]},"teams":{"nodes":[{"id":"team-1"}]}}}})
     } else if query.contains("mutation CreateComment") {
@@ -126,7 +126,7 @@ async fn graphql(
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)] // isolates capture provenance
-async fn task_comments_read_and_publish_without_placement() {
+async fn task_comments_read_and_publish_without_starting_work() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let directory = tempfile::tempdir().unwrap();
@@ -182,6 +182,16 @@ async fn task_comments_read_and_publish_without_placement() {
         })
         .await
         .unwrap();
+    for name in ["product", "other"] {
+        store
+            .create_wave(&crate::work::wave::Wave::new(
+                crate::id::WaveId::new(),
+                name.into(),
+                repo.display().to_string(),
+            ))
+            .await
+            .unwrap();
+    }
     let provider = Arc::new(Mutex::new(Provider {
         thread: Thread::Paged,
         queries: Vec::new(),
@@ -304,6 +314,6 @@ async fn task_comments_read_and_publish_without_placement() {
         .await;
     server.abort();
 
-    // Reading a thread registers no Work and prepares nothing.
-    assert!(store.list_waves(None).await.unwrap().is_empty());
+    // Reading a thread leaves the existing Wave inventory unchanged.
+    assert_eq!(store.list_waves(None).await.unwrap().len(), 2);
 }

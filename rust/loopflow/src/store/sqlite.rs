@@ -18,6 +18,7 @@ use crate::store::{
 };
 use crate::work::wave::{Wave, WaveLocator};
 
+mod admission;
 mod automation;
 mod chapters;
 mod children;
@@ -25,18 +26,29 @@ mod ci_incidents;
 mod durable;
 mod execs;
 mod flow_inventory;
-mod flows;
 mod metrics;
 mod planning;
 mod pr_landings;
+pub(crate) mod project_selection;
+mod project_transitions;
+mod revisions;
 mod session_events;
 pub(crate) mod sessions;
 mod task_work;
+
+#[cfg(test)]
+pub(crate) use durable::task_state_sql;
+pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
+pub use revisions::StoreRevisions;
+pub(crate) use task_work::{EndMove, OpenExecs};
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable
 /// writes wait for that bounded local contention instead of dropping evidence.
 pub(crate) const SQLITE_WRITE_BUSY_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Bytes of write-ahead log kept on disk after a checkpoint resets it.
+const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
 
 /// The first rollback-to-WAL transition can return BUSY immediately even with
 /// a busy handler: two readers cannot both upgrade their journal lock. Reuse
@@ -52,12 +64,29 @@ fn configure_write_connection(conn: &Connection, path: &Path) -> StoreResult<()>
         }
     }
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    // A WAL file never shrinks by itself: one migration or burst leaves its
+    // high-water mark on disk forever. Truncate it whenever a checkpoint resets it.
+    conn.pragma_update(None, "journal_size_limit", WAL_SIZE_LIMIT_BYTES)?;
     Ok(())
 }
 
 #[derive(Debug, Clone)]
 pub struct SqliteStore {
     conn: Arc<Mutex<Connection>>,
+}
+
+impl SqliteStore {
+    pub(crate) fn home_dir(&self) -> StoreResult<PathBuf> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        home_dir_in(&conn)
+    }
+}
+
+fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
+    conn.path()
+        .and_then(|path| Path::new(path).parent())
+        .map(Path::to_path_buf)
+        .ok_or_else(|| StoreError::InvalidData("store has no owning Home path".into()))
 }
 
 /// Recorded checkout evidence remains usable without chapter metadata.
@@ -110,7 +139,10 @@ pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<Pa
     )?;
     crate::performance::observe_sqlite(&conn);
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-    let mut statement = conn.prepare("SELECT worktree FROM tasks WHERE work_state='ready'")?;
+    let mut statement = conn.prepare(&format!(
+        "SELECT t.worktree FROM tasks t WHERE {}",
+        durable::task_open_sql("t")
+    ))?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     rows.map(|row| row.map(PathBuf::from).map_err(StoreError::from))
         .collect()
@@ -701,8 +733,10 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute(
-            "UPDATE tasks SET work_state='abandoned', work_terminal_at=?2
-             WHERE external_issue_id=?1 AND work_state='ready'",
+            &format!(
+                "UPDATE tasks AS t SET abandoned_at=?2 WHERE t.external_issue_id=?1 AND {}",
+                durable::task_open_sql("t")
+            ),
             params![issue_id, now_unix()],
         )?;
         record_task_deletion_in(&tx, wave_id, issue_id, identifier)?;
@@ -1840,7 +1874,12 @@ impl SqliteStore {
         // Canonicalization changes one repository identity, including every Wave
         // and shared planning entity under that alias. Move them atomically;
         // uniqueness conflicts must preserve both observations, never merge them.
-        for table in ["waves", "pm_projects", "pm_items"] {
+        for table in [
+            "waves",
+            "pm_projects",
+            "pm_items",
+            "pm_project_name_cutover",
+        ] {
             tx.execute(
                 &format!("UPDATE {table} SET repo = ?2 WHERE repo = ?1"),
                 params![expected_repo, target_repo],
@@ -2458,6 +2497,34 @@ mod frontier_tests {
             frontier(&private).as_deref(),
             Some(latest_known_version().as_str())
         );
+    }
+}
+
+#[cfg(test)]
+mod wal_tests {
+    use super::{configure_write_connection, WAL_SIZE_LIMIT_BYTES};
+
+    #[test]
+    fn a_burst_does_not_leave_its_wal_on_disk() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        configure_write_connection(&conn, &path).unwrap();
+        conn.execute_batch("CREATE TABLE history (payload BLOB)")
+            .unwrap();
+        let wal = directory.path().join("loopflow.db-wal");
+
+        conn.execute(
+            "INSERT INTO history VALUES (zeroblob(?1))",
+            [2 * WAL_SIZE_LIMIT_BYTES],
+        )
+        .unwrap();
+        assert!(std::fs::metadata(&wal).unwrap().len() > WAL_SIZE_LIMIT_BYTES as u64);
+        // The commit above checkpointed; the next write restarts the log.
+        conn.execute("INSERT INTO history VALUES (x'00')", [])
+            .unwrap();
+
+        assert!(std::fs::metadata(&wal).unwrap().len() <= WAL_SIZE_LIMIT_BYTES as u64);
     }
 }
 

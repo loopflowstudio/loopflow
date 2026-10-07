@@ -1,5 +1,7 @@
 //! Durable Project and Task rows and their events.
 
+use std::sync::Arc;
+
 use crate::id::WaveId;
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::{
@@ -8,43 +10,50 @@ use crate::work::task::{
 };
 use time::OffsetDateTime;
 
-use super::{run_sqlite, Store, StoreResult};
+use super::{run_planning_write, run_sqlite, Store, StoreResult};
 
 impl Store {
     pub(crate) async fn task_checkouts(&self) -> StoreResult<Vec<super::sqlite::TaskCheckout>> {
         run_sqlite(&self.sqlite, |store| store.task_checkouts()).await
     }
-    pub async fn create_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
-        let task = task.clone();
-        let pr = pr.clone();
-        run_sqlite(&self.sqlite, move |store| store.insert_task(&task, &pr)).await
-    }
-
-    pub async fn create_task_with_worktree(&self, task: &Task, pr: &TaskPr) -> StoreResult<()> {
-        let task = task.clone();
-        let pr = pr.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.insert_task_with_worktree(&task, &pr)
-        })
-        .await
-    }
-
-    pub async fn update_task_plan(
+    pub(crate) async fn lock_checkout_roots(
         &self,
-        task_id: &TaskId,
-        plan: &crate::planning::TaskPlan,
-    ) -> StoreResult<()> {
-        let task_id = task_id.clone();
-        let plan = plan.clone();
+        roots: Vec<std::path::PathBuf>,
+    ) -> StoreResult<Vec<Arc<std::fs::File>>> {
         run_sqlite(&self.sqlite, move |store| {
-            store.update_task_plan(&task_id, &plan)
+            store
+                .lock_checkout_roots(&[], &roots)
+                .map(|locks| locks.into_iter().map(Arc::new).collect())
         })
         .await
     }
 
-    pub async fn update_task(&self, task: &Task) -> StoreResult<()> {
+    pub async fn create_task(
+        &self,
+        task: &Task,
+        pr: &TaskPr,
+        acquisition: Option<Arc<super::PlanningLocks>>,
+    ) -> StoreResult<Task> {
         let task = task.clone();
-        run_sqlite(&self.sqlite, move |store| store.update_task(&task)).await
+        let pr = pr.clone();
+        run_planning_write(&self.sqlite, acquisition, move |store| {
+            store.insert_task(task, &pr, false)
+        })
+        .await
+    }
+
+    pub async fn create_task_with_worktree(
+        &self,
+        task: &Task,
+        pr: &TaskPr,
+        acquisition: Option<Arc<super::PlanningLocks>>,
+    ) -> StoreResult<Task> {
+        let task = task.clone();
+        let pr = pr.clone();
+        run_planning_write(&self.sqlite, acquisition, move |store| {
+            store.insert_task(task, &pr, true)
+        })
+        .await
     }
 
     pub async fn set_task_agent(&self, task_id: &TaskId, agent: &str) -> StoreResult<()> {
@@ -70,41 +79,25 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn restart_task_flow(
+    pub(crate) async fn complete_task(
         &self,
         task: &Task,
-        expected: Option<&crate::durable::FlowSession>,
-        checkpoint_head: &str,
-    ) -> StoreResult<()> {
-        let expected = expected.cloned();
-        let task = task.clone();
-        let checkpoint_head = checkpoint_head.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.restart_task_flow(&task, expected.as_ref(), &checkpoint_head)
-        })
-        .await
-    }
-
-    pub async fn rebind_task_issue_identifier(
-        &self,
-        issue_id: &str,
-        old_identifier: &str,
-        new_identifier: &str,
+        skipped_pr: Option<&TaskPr>,
+        how: crate::store::sqlite::EndMove,
+        note: Option<&str>,
     ) -> StoreResult<bool> {
-        let issue_id = issue_id.to_string();
-        let old_identifier = old_identifier.to_string();
-        let new_identifier = new_identifier.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.rebind_task_issue_identifier(&issue_id, &old_identifier, &new_identifier)
-        })
-        .await
-    }
-
-    pub async fn complete_task(&self, task: &Task, skipped_pr: Option<&TaskPr>) -> StoreResult<()> {
         let task = task.clone();
         let skipped_pr = skipped_pr.cloned();
+        let by = crate::journal::current_exec_id();
+        let note = note.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
-            store.complete_task(&task, skipped_pr.as_ref())
+            store.complete_task(
+                &task,
+                skipped_pr.as_ref(),
+                &how,
+                by.as_ref(),
+                note.as_deref(),
+            )
         })
         .await
     }
@@ -330,13 +323,10 @@ impl Store {
     ) -> StoreResult<TaskEvent> {
         let task_id = task_id.clone();
         let kind = kind.clone();
-        let write_task_id = task_id.clone();
-        let write_kind = kind.clone();
-        let event = run_sqlite(&self.sqlite, move |store| {
-            store.append_task_event(&write_task_id, &write_kind)
+        run_sqlite(&self.sqlite, move |store| {
+            store.append_task_event(&task_id, &kind)
         })
-        .await?;
-        Ok(event)
+        .await
     }
 
     pub async fn task_events_after(
@@ -368,11 +358,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.insert_project(&project)).await
     }
 
-    pub async fn update_project(&self, project: &Project) -> StoreResult<()> {
-        let project = project.clone();
-        run_sqlite(&self.sqlite, move |store| store.update_project(&project)).await
-    }
-
     pub async fn get_project(&self, project_id: &ProjectId) -> StoreResult<Option<Project>> {
         let project_id = project_id.clone();
         run_sqlite(&self.sqlite, move |store| store.project(&project_id)).await
@@ -401,13 +386,10 @@ impl Store {
     ) -> StoreResult<ProjectEvent> {
         let project_id = project_id.clone();
         let kind = kind.clone();
-        let write_project_id = project_id.clone();
-        let write_kind = kind.clone();
-        let event = run_sqlite(&self.sqlite, move |store| {
-            store.append_project_event(&write_project_id, &write_kind)
+        run_sqlite(&self.sqlite, move |store| {
+            store.append_project_event(&project_id, &kind)
         })
-        .await?;
-        Ok(event)
+        .await
     }
 
     pub async fn project_events_after(

@@ -10,7 +10,7 @@ struct TaskAutomationView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Background progress").font(.headline)
+            Text("Delivery checks").font(.headline)
             if let status {
                 HStack {
                     Text(status.coverage.capitalized)
@@ -19,7 +19,7 @@ struct TaskAutomationView: View {
                         perform { try await query.setAutomation(enabled: !status.enabled, cwd: repo) }
                     }
                 }
-                Text("Checks every minute while this Home is available. Running work continues when disabled.")
+                Text("Checks deliveries every minute while this Home is available. Flow recovery belongs to its caller.")
                     .font(.caption).foregroundStyle(.secondary)
                 if let checked = status.lastSuccessAt {
                     Text("Last successful check: \(Date(timeIntervalSince1970: Double(checked)), style: .relative) ago")
@@ -33,11 +33,10 @@ struct TaskAutomationView: View {
                         HStack {
                             Text(task.issue)
                             Spacer()
-                            Button(task.enabled == true ? "Hold" : "Enroll") {
-                                perform { try await query.automateTask(issue: task.issue, enabled: task.enabled != true, cwd: repo) }
+                            Button(task.enabled == false ? "Enable CI repair" : "Hold CI repair") {
+                                perform { try await query.automateTask(issue: task.issue, enabled: task.enabled == false, cwd: repo) }
                             }
                         }
-                        if let detail = task.detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
                     }
                 }
                 ForEach(status.deliveries, id: \.prNumber) { delivery in

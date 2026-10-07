@@ -304,6 +304,8 @@ def _comparison(current: dict, baseline: dict) -> dict:
         "build_mode",
         "command",
         "measurement_source",
+        "journey",
+        "inputs",
         "xctrace",
         "snapshot",
         "repo",
@@ -420,10 +422,16 @@ def _report(output: Path, baseline: Path | None) -> dict:
 
 
 def _markdown(summary: dict, *, scoped: bool) -> str:
-    snapshot_run = summary["metadata"].get("snapshot") is not None
+    metadata = summary["metadata"]
+    snapshot_run = metadata.get("snapshot") is not None
     lines = [
         f"# Desktop measurements: {summary['status']}",
         "",
+        *([
+            "Endpoint: another process's commit to a private Home, through the real work reader, to native bitmap capture with text verification.",
+            "**Not compositor paint time. Frame-hitch evidence is unavailable.**",
+            "The interval starts when the sqlite3 writer exits; each write waits for an idle reader.",
+        ] if metadata.get("journey") == "write-visible" else [
         "Endpoint: in-process native bitmap capture with text verification."
         + " Session return also waits for owned PTY replies.",
         "**Not compositor paint time. Soak trace evidence is reported separately.**",
@@ -434,10 +442,16 @@ def _markdown(summary: dict, *, scoped: bool) -> str:
         else "Snapshot mode uses real CLI reads and Task links; "
         "copied Session connections are disabled; the same workspace reopens one owned "
         "Task-bound Session with a synthetic provider.",
+        ]),
         f"Attempts: {len(summary['attempts'])}/{summary['expected_attempts']}; "
         f"not started: {summary['not_started']}.",
         "First interaction and warm samples are separate. "
         "p95 requires 20 successful samples. No budget is scored.",
+        *(
+            ["Targets, not gates: a created Task within 1000 ms p95, a Session row within 500 ms."]
+            if metadata.get("journey") == "write-visible"
+            else []
+        ),
         "",
         "| Population | Scenario | State | Pass/attempt | p50 ms | p95 ms |",
         "|---|---|---|---:|---:|---:|",
@@ -472,6 +486,7 @@ def _markdown(summary: dict, *, scoped: bool) -> str:
             for delta in comparison["deltas"]:
                 p50 = f"{delta['p50_delta_ms']:+.2f}" if delta["p50_delta_ms"] is not None else "—"
                 p95 = f"{delta['p95_delta_ms']:+.2f}" if delta["p95_delta_ms"] is not None else "—"
+                p50 = f"{delta['p50_delta_ms']:+.2f}" if delta["p50_delta_ms"] is not None else "—"
                 lines.append(
                     f"| {delta['population']} | {delta['scenario']} | {delta['state']} | "
                     f"{p50} | {p95} |"
@@ -1046,7 +1061,7 @@ def _checkout_inputs(database: Path, prefix: list[str], policy: Path, git: Path)
     }
 
 
-def _native_command(
+def _test_command(
     test_filter: str, environment: dict[str, str], optimized: bool = False
 ) -> list[str]:
     environment["LOOPFLOW_TEST_GIT"] = str(_benchmark_git())
@@ -1074,6 +1089,13 @@ def _native_command(
         "--filter",
         test_filter,
     ]
+    return command
+
+
+def _native_command(
+    test_filter: str, environment: dict[str, str], optimized: bool = False
+) -> list[str]:
+    command = _test_command(test_filter, environment, optimized)
     fixture_path = Path(environment["LOOPFLOW_TEST_NATIVE_FIXTURE"])
     fixture = json.loads(fixture_path.read_text())
     output = fixture_path.parent.resolve()
@@ -1311,6 +1333,34 @@ def _run_native(
             metadata["outcome"] = "repository configuration changed during measurement"
 
 
+def _private_home(home: Path, lf: Path) -> Path:
+    """The store the benchmark writes rows into: never the one in use."""
+    home = home.resolve()
+    live = Path(os.environ.get("LF_HOME") or Path.home() / ".lf").resolve()
+    if home == live:
+        raise SystemExit(
+            f"{home} is the Home in use. Copy it first: "
+            "scripts/benchmarks/desktop-performance/launch.py writes <work>/home."
+        )
+    if not (home / "loopflow.db").exists():
+        raise SystemExit(f"{home} has no loopflow.db")
+    if not lf.exists():
+        raise SystemExit(f"{lf} does not exist; build it or pass --lf")
+    # The copy must already have the schema this lf reads; say so before a
+    # five-minute wait for a reading that cannot come.
+    environment = {k: v for k, v in os.environ.items() if not k.startswith(("LF_", "LOOPFLOW_"))}
+    probe = subprocess.run(
+        [str(lf), "wave", "list", "--json"],
+        cwd=home,
+        env={**environment, "LF_HOME": str(home)},
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode != 0:
+        raise SystemExit(f"{lf} cannot read {home}:\n{probe.stderr.strip()}")
+    return home
+
+
 def _run(
     output: Path,
     samples: int,
@@ -1322,10 +1372,22 @@ def _run(
     issue: str | None = None,
     xctrace: bool = True,
     optimized: bool = False,
+    journey: str = "run",
+    extra: dict[str, str] | None = None,
 ) -> int:
     output.mkdir(parents=True, exist_ok=False)
+    extra = extra or {}
+    test_filter = (
+        "DesktopPerformanceTests.measureSnapshotTaskOpening"
+        if snapshot
+        else "DesktopPerformanceTests.measureWriteToVisible"
+        if journey == "write-visible"
+        else "DesktopPerformanceTests.measureExperiences"
+    )
     metadata = {
         "schema": 1,
+        "journey": journey,
+        "inputs": extra,
         "soak_seconds": soak_seconds,
         "xctrace": xctrace,
         "cli_sha256": hashlib.sha256(cli.read_bytes()).hexdigest(),
@@ -1356,7 +1418,13 @@ def _run(
                 ]
             )
         ).hexdigest(),
-        "population_source": "isolated DTO fixtures; no configured Home",
+        "population_source": "isolated DTO fixtures; no configured Home"
+        if journey == "run"
+        else "a private copy of a Home; the rows written are removed after each attempt",
+        "resources_before": {
+            "load_average": os.getloadavg(),
+            "free_bytes": shutil.disk_usage(output).free,
+        },
     }
     if snapshot:
         metadata.update(
@@ -1370,6 +1438,45 @@ def _run(
         metadata.update(
             outcome="unavailable", reason="Native benchmark requires macOS", exit_code=None
         )
+    elif journey == "write-visible":
+        environment = os.environ.copy()
+        journal = "LF_DESKTOP_PERF_OUTPUT" if journey == "run" else "LF_DESKTOP_PERF_WRITE_OUTPUT"
+        environment.pop("LF_DESKTOP_PERF_OUTPUT", None)
+        environment.pop("LF_DESKTOP_PERF_WRITE_OUTPUT", None)
+        environment.update(
+            {journal: str(output / "attempts.jsonl")},
+            LOOPFLOW_NATIVE_TESTS="1",
+            LF_DESKTOP_PERF_SAMPLES=str(samples),
+            **extra,
+        )
+        # These are host-boundary time limits, never latency targets. The attempt
+        # journal survives termination; only this invocation's process group stops.
+        with (output / "native.log").open("w") as log:
+            try:
+                # SwiftPM can put its test child in a separate process group.
+                # Both journeys build first, then own the native process directly.
+                code, outcome = _run_process(metadata["build_command"], environment, log, timeout=600)
+                if outcome:
+                    metadata.update(outcome=outcome, exit_code=code)
+                if code != 0 or outcome:
+                    raise subprocess.CalledProcessError(code, BUILD_COMMAND)
+                command = _test_command(test_filter, environment, optimized)
+                metadata["command"] = command
+                bundle = Path(command[2])
+                metadata["test_binary_sha256"] = hashlib.sha256(bundle.read_bytes()).hexdigest()
+                code, outcome = _run_process(
+                    command,
+                    environment,
+                    log,
+                    timeout=600 + samples * (150 if snapshot else 30),
+                )
+                metadata["exit_code"] = code
+                if outcome:
+                    metadata["outcome"] = outcome
+            except (OSError, subprocess.SubprocessError) as error:
+                metadata.setdefault("outcome", "unavailable")
+                metadata.setdefault("exit_code", None)
+                metadata["reason"] = str(error)
     else:
         try:
             _run_native(
@@ -1388,6 +1495,7 @@ def _run(
             metadata.update(outcome="failed", reason=str(error))
             metadata.setdefault("exit_code", None)
     metadata["source_after"] = _sources()
+    metadata["resources_after"] = {"load_average": os.getloadavg(), "free_bytes": shutil.disk_usage(output).free}
     metadata["cli_sha256_after"] = hashlib.sha256(cli.read_bytes()).hexdigest()
     _write(output / "run.json", metadata)
     summary = _report(output, baseline)
@@ -1512,6 +1620,29 @@ def main() -> int:
     prepare.add_argument("--snapshot", type=Path, required=True)
     prepare.add_argument("--schema-database", type=Path, required=True)
     prepare.add_argument("--output", type=Path, required=True)
+    written = commands.add_parser(
+        "write-visible",
+        help="Commit from another process to a private Home and time the row appearing",
+    )
+    written.add_argument(
+        "--output", type=Path, required=True, help="New directory; never overwrites evidence"
+    )
+    written.add_argument(
+        "--home", type=Path, required=True, help="A private copy of a Home; rows are written to it"
+    )
+    written.add_argument(
+        "--repo", type=Path, required=True, help="Repository whose Waves the window shows"
+    )
+    written.add_argument(
+        "--lf",
+        type=Path,
+        default=REPO / "target/release/lf",
+        help="The lf whose reader is measured; its schema must match the copy",
+    )
+    written.add_argument(
+        "--samples", type=int, default=21, help="Attempts per write; default 1 first + 20 warm"
+    )
+    written.add_argument("--baseline", type=Path)
     report = commands.add_parser(
         "report", help="Rebuild reports, including interrupted invocation evidence"
     )
@@ -1556,6 +1687,24 @@ def main() -> int:
             args.issue,
             not args.no_xctrace,
             args.optimized,
+        )
+    if args.command == "write-visible":
+        if args.samples < 1:
+            parser.error("--samples must be positive")
+        lf = args.lf.resolve()
+        return _run(
+            args.output.resolve(),
+            args.samples,
+            args.baseline,
+            soak_seconds=0,
+            cli=lf,
+            xctrace=False,
+            journey="write-visible",
+            extra={
+                "LF_DESKTOP_PERF_LF": str(lf),
+                "LF_DESKTOP_PERF_HOME": str(_private_home(args.home, lf)),
+                "LF_DESKTOP_PERF_REPO": str(args.repo.expanduser().resolve()),
+            },
         )
     summary = _report(args.output, args.baseline)
     print(args.output / "report.md")

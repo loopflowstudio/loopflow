@@ -58,6 +58,8 @@ lf telemetry-daily
 The flow runs the Home audit, renders the deterministic lifecycle
 scorecard, then publishes the weekly [context cost](context-cost.md) readings. The generator is an internal operation so it stays available to
 scheduled telemetry without becoming a general-user command or stable DTO.
+The lifecycle scorecard reports retained evidence without publishing the retired
+`task-loop-trust` metric. Context cost publishes its current metric contracts.
 
 `lf usage --binds` compares Task and Wave totals under the two
 [bind attribution](bind-attribution.md) rules.

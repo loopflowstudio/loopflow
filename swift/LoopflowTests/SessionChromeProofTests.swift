@@ -44,13 +44,13 @@ struct SessionChromeProofTests {
         let panes = workspace.multiplexer.layout.allPanes.map(\.id)
         workspace.multiplexer.setFocusedPane(panes[0])
 
-        let (roadmap, invocation) = try pinnedRoadmap()
+        let (roadmap, invocation) = try latestRoadmap()
         let task = WorkReference.task(id: "ts_review00000000000000000000000000")
         let record = try renameFixtureRecord("release", title: "Release outcomes", source: "human", work: task)
         var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
         value["state"] = "active"
         value["provider"] = "claude"
-        value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
+        value["actions"] = sessionActionFixture(state: "active")
         value["terminal_ids"] = [panes[0]]
         value["open_argv"] = ["must-not-launch"]
         value["flow_membership"] = ["kind": "step", "flow": "feature", "invocation_id": invocation,
@@ -65,7 +65,7 @@ struct SessionChromeProofTests {
             default: throw RegistryQueryError("Session chrome must not launch or mutate: \(args)")
             }
         }
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         model.select(.task(id: "issue-review"))
         model.navigation.selectedSessionId = "release"
@@ -100,7 +100,7 @@ struct SessionChromeProofTests {
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
         }
-        #expect(throws: Never.self, "complete") {
+        #expect(throws: (any Error).self) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "session-action-complete")
         }
 
@@ -181,7 +181,7 @@ struct SessionChromeProofTests {
             default: throw RegistryQueryError("Keybinds must not launch or mutate: \(args)")
             }
         }
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refreshSessions()
         model.navigation.content = .terminals
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
@@ -251,7 +251,7 @@ struct SessionChromeProofTests {
         }
         defer { for terminal in terminals { registry.surfaces.release(terminal.terminal) } }
         let surfaces = try terminals.map { try #require($0.surface) }
-        let (roadmap, _) = try pinnedRoadmap()
+        let (roadmap, _) = try latestRoadmap()
         let record = try renameFixtureRecord("palette-session", title: "Retained conversation", source: "human",
                                              work: .task(id: "ts_review00000000000000000000000000"))
         let companion = try renameFixtureRecord("palette-companion", title: "Companion conversation", source: "human",
@@ -259,7 +259,7 @@ struct SessionChromeProofTests {
         let records = try [record, companion].enumerated().map { index, record in
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
             value["state"] = "active"
-            value["actions"] = sessionActionFixture(kind: "conversation", state: "active")
+            value["actions"] = sessionActionFixture(state: "active")
             if case .shell(let pane) = terminals[index].terminal { value["terminal_ids"] = [pane] }
             return value
         }
@@ -273,7 +273,7 @@ struct SessionChromeProofTests {
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No launch or mutation authorized by palette inspection")
         }
-        let model = PodiumModel(query: query, repoPath: repo)
+        let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         model.select(.task(id: "issue-review"))
         model.navigation.content = .terminals
@@ -316,7 +316,7 @@ struct SessionChromeProofTests {
         #expect(terminals[0].surface == surfaces[0])
         #expect(terminals[1].surface == surfaces[1])
         #expect(throws: Never.self) {
-            try view.inspect().find(viewWithAccessibilityIdentifier: "podium-detail-task")
+            try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-detail-task")
         }
 
         // Arrow navigation operates on the visible ranked list, including recents.
@@ -495,12 +495,12 @@ struct SessionChromeProofTests {
         return nil
     }
 
-    private func pinnedRoadmap() throws -> (roadmap: String, invocation: String) {
+    private func latestRoadmap() throws -> (roadmap: String, invocation: String) {
         let fixtures = repoRoot.appendingPathComponent("tests/fixtures/dto")
         let flows = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             fixtures.appendingPathComponent("task_flow.json"))) as? [[String: Any]])
-        let pinned = try #require(flows[1]["record"] as? [String: Any])
-        let invocation = try #require(pinned["invocation_id"] as? String)
+        let latest = try #require(flows[1]["record"] as? [String: Any])
+        let invocation = try #require(latest["invocation_id"] as? String)
         var plan = try #require(JSONSerialization.jsonObject(with: placingTaskWorktrees(in: Data(contentsOf:
             fixtures.appendingPathComponent("roadmap_snapshot.json")), at: "/src/loopflow")) as? [String: Any])
         var waves = try #require(plan["waves"] as? [[String: Any]])

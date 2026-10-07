@@ -519,19 +519,18 @@ The fixture asserts that this scheduling point was reached. This is controlled
 ordering evidence, not a claim about how long a hosted signal handler paused.
 Other Unix platforms exercise the ordinary interruption path.
 
-Exercise native Flow recovery with real Codex and a local Responses fixture:
+Exercise a deciding step's structured output with real Codex and a local
+Responses fixture:
 
 ```bash
 uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
-  --lf target/debug/lf --launch --flow-driver-loss completed \
-  --output .lf/tmp/native-flow-completed
+  --lf target/debug/lf --launch --flow-decision-retry replace \
+  --output .lf/tmp/native-flow-decision
 ```
 
-Use `--flow-driver-loss running` for a surviving turn during public resume,
-`--flow-driver-loss both` for explicit retry after both driver and engine die,
-`--flow-decision-retry missing|replace` for native structured-output exhaustion
-or successful retry, `--flow-blocked` for keyed feedback continuation, and
-`--public-connect` for a live headless-to-terminal handoff.
+`--flow-decision-retry missing` exhausts the corrections of an invalid answer;
+`replace` proves a failed turn decides nothing. `--public-connect` covers a
+live headless-to-terminal handoff.
 `--shared-provider-home` proves Loopflow and plain Codex share one home signed
 in as one stored account at a time: switching, saved-back logins, isolation,
 and provider conversation IDs in `lf session`.
@@ -566,7 +565,7 @@ main Home. Children use the same Home and executable; PATH cannot choose a
 second store. A Home's database is always `$LF_HOME/loopflow.db`.
 
 When editing the repeated Task body, exercise every step on two passes and
-saved-decision recovery. Keep loop-decide after work and review so navigation
+saved-decision recovery. Keep loop-or-next after work and review so navigation
 cannot skip a later review.
 
 Include the CLI/desktop unblock projection when changing builtin Flow composition:
@@ -576,7 +575,7 @@ cargo test -p loopflow --test task_initialization_tests task_live_unblock
 ```
 
 Fixtures targeting a named boundary should resolve its node ID in the expanded
-invocation. A hard-coded step index can silently select a different skill when
+graph. A hard-coded step index can silently select a different skill when
 a nested Flow gains a step.
 
 For worktree creation or checkout-refresh changes, build the current CLI before
@@ -657,8 +656,8 @@ launch tests should prove that the canonical document is included.
 For migration regressions, use the materialized Rust
 test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,
-include Task controller consumers: durable work reservation retains Started
-after failure, while a mechanical worker claim alone leaves it unset. Use CI's materialized migration graph for trigger
+include Task consumers: durable work reservation retains Started after
+failure. Use CI's materialized migration graph for trigger
 changes; an ordinary draft build may omit the trigger. Experimental Homes hold
 this build's exact schema: use a fresh Home after changing it. Preserve
 populated historical fixtures for published migration coverage. A Task's draft is
@@ -733,9 +732,9 @@ toolchain explicitly.
 CLI owner-tree changes must include `cargo test -p loopflow --lib engine::flow_graph::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.
-Task status and automation must also handle the saved cursor past the last step
-while completion is still pending. Run `cargo test -p loopflow --lib ops::task_execution::tests`
-for that boundary; a fast mechanical Flow can finish while its start command reads status.
+Task status reads a Flow from its Execs and their processes. Run
+`cargo test -p loopflow --lib ops::task_execution::tests` for running, between
+steps, stopped and failed.
 Managed Task fixtures must bind the checkout's Team and Initiative before
 creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
 
@@ -755,7 +754,7 @@ product contract; its two cross-store promotion/continuation cases were removed.
 
 The adoption case starts with planning and no Task row. Public checkout/run
 reuse a dirty existing Git worktree or fetch an open PR's unseen remote branch,
-retain the PR identity, and preserve a saved later Flow cursor after source
+retain the PR identity, and leave an earlier Flow's Execs untouched after source
 changes. Linear planning and GitHub reads are fixtures; Git and CLI paths are real.
 
 The disposable OS account authors fixture installation records for routing proofs;
@@ -935,20 +934,16 @@ They check retained review identity/capture and the current Project's custom Flo
 default. Synthetic migration success does not authorize conversion of an installed
 Home or prove configured-provider resumption.
 
-When changing Flow step or prepared-input ownership, include the FlowSession
-store tests and the public Session lifecycle proofs. Review boundaries reserve a
-captured Session event before provider launch; fixtures must start that retained
-input instead of binding a fresh capture. A successful provider completion is
-selected by its exact Session event; an Exec exit alone cannot settle agent work.
+When changing how a Flow step is described or read back, include the step
+argument and Exec inventory tests and the public Session lifecycle proofs. A
+Flow is its driver Exec and step Execs; assert on those Execs and on the Session
+turn a step Exec captured.
 
 ```bash
-cargo test -p loopflow --lib store::sqlite::flows
+cargo test -p loopflow --lib ops::flow_run
+cargo test -p loopflow --lib store::sqlite::flow_inventory
 cargo nextest run -p loopflow --test session_lifecycle_tests --no-fail-fast
 ```
-
-Include `cargo test -p loopflow --test pr_tests` for Task resume changes. Resuming
-a human review preserves its invocation and cursor while preparing its captured input;
-assert those facts instead of equality of the entire versioned Flow record.
 
 When changing Task controls, include the GitHub-cache integration tests as well
 as controller tests. Bare interrupts prove local control during GitHub outages;
@@ -1039,6 +1034,18 @@ When a subprocess fixture signals readiness with file contents, write a sibling
 temporary file and rename it into place after closing it. File existence alone
 can expose an empty file between creation and the first write.
 
+### Project readiness fixtures
+
+Task fixtures must create their Wave and Project, select the Project in SQLite,
+and retain Home placement before creating work. YAML binding imports belong to
+explicit activation tests; passive status reads do not import them. Keep readiness
+fields in inline Swift responses as well as shared DTO fixtures.
+
+Changes to Project selection or planning admission require the full materialized
+Rust suite and headless Swift tests, including Task consumers and status readers.
+Run the installation harness for migration changes; its released-source proof
+must retain Wave placement before projecting accepted Projects.
+
 ### Shared identity fixtures
 
 Exercise Session fixtures through Rust as well as Swift after ancestry changes.
@@ -1053,5 +1060,5 @@ suite's environment lock and restores them afterward. Prove isolation from a
 live Session without shell-level scrubbing:
 
 ```bash
-cargo test -p loopflow --lib ops::flow_session::tests -- --test-threads=1
+cargo test -p loopflow --test session_cli_tests session_names_are_shared_and_human_names_win
 ```

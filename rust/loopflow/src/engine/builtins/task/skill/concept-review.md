@@ -55,4 +55,4 @@ Flow needs a product decision. It is not a routine headless loop step. If no
 person is present, state the exact product choice requiring conversation and
 return through the caller's existing blocked protocol. Do not invent approval,
 create a Task, publish, merge, or choose navigation. Completing the conversation
-returns evidence to the caller; loop-decide reassesses it.
+returns evidence to the caller; loop-or-next reassesses it.

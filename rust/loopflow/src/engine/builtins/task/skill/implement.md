@@ -51,7 +51,8 @@ plan in the conversation; do not require a document template or a prior skill.
    owners, persistence, and call paths before choosing where behavior belongs.
    Read or add the plan's **Delete — do not maintain** list: concrete files/symbols
    and their exclusive tests/fixtures slated for removal, with required behavior,
-   data, and tests to preserve. Keep it current across passes.
+   data, and tests to preserve. Keep it current across passes. When you find
+   another earlier attempt at the same job, add it and remove it in this diff.
 
 2. **Implement**
    - Make the deepest planned deletions first: remove obsolete concepts,

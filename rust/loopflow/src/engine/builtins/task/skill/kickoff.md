@@ -178,6 +178,8 @@ and acceptance checks; omit repeated validation requirements and pass ledgers.
 
 **Integrate over layer.** Map current concepts, types, authorities, writers, and
 launch paths before adding another one. Name what the change reshapes and what
-becomes obsolete. A Legacy/New split, v2, adapter, fallback, dual write, or
-parallel store is blocking unless the design explicitly justifies and bounds
-its deletion.
+becomes obsolete. Include earlier attempts at the same job that sit off the
+main path: partial implementations, unreachable branches, hidden commands. Put
+the ones this change replaces on the delete list. A Legacy/New split, v2,
+adapter, fallback, dual write, or parallel store is blocking unless the design
+explicitly justifies and bounds its deletion.

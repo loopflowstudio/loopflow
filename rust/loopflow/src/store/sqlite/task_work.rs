@@ -12,8 +12,9 @@ const FLOW_CWD: &str = "COALESCE(af.cwd,(SELECT worktree FROM tasks WHERE id=af.
 
 // Select the Flow's Sessions before reading events. Joining events to Sessions
 // lets SQLite scan unrelated history once per Flow instead of using the index.
+// Few events name an Exec; the partial index answers without seeking the rest.
 const FLOW_EXEC_IDS: &str = "SELECT exec_id FROM flow_events WHERE flow_id=?1 AND exec_id IS NOT NULL
-    UNION SELECT exec_id FROM session_events WHERE session_id IN
+    UNION SELECT exec_id FROM session_events INDEXED BY session_exec_membership WHERE session_id IN
         (SELECT id FROM agent_sessions WHERE flow_session_id=?1) AND exec_id IS NOT NULL
     UNION SELECT driver_exec_id FROM agent_sessions WHERE flow_session_id=?1 AND driver_exec_id IS NOT NULL";
 
@@ -88,9 +89,11 @@ fn exec_ids(selector: &str, unfinished: bool) -> String {
     };
     // History and current drivers share exactly the same Session membership.
     // Materialize it once within this query, never across store reads.
+    // Reading exec_id from each member's whole event history seeks one table
+    // row per retained event; the partial index holds only events naming an Exec.
     format!("WITH members AS MATERIALIZED ({})
         SELECT ae.id FROM execs ae {index} JOIN ({}) tw ON ({unfinished}{})
-        UNION SELECT se.exec_id FROM session_events se WHERE se.session_id IN (SELECT id FROM members) AND se.exec_id IS NOT NULL
+        UNION SELECT se.exec_id FROM session_events se INDEXED BY session_exec_membership WHERE se.session_id IN (SELECT id FROM members) AND se.exec_id IS NOT NULL
         UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN (SELECT id FROM members) AND a.driver_exec_id IS NOT NULL
         UNION SELECT fe.exec_id FROM flow_events fe WHERE fe.flow_id IN ({}) AND fe.exec_id IS NOT NULL",
         session_ids(selector), tasks(selector), checkout("ae.cwd"), flow_ids(selector))
@@ -422,6 +425,76 @@ mod tests {
         assert!(
             after <= before * 2,
             "Completed history increased query work: {before} → {after}"
+        );
+    }
+
+    #[test]
+    fn exec_membership_does_not_read_events_that_name_no_exec() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        let turn = ExecId::new();
+        let finished = ExecId::new();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+            [&wave],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
+        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1','/repo/task',1)", params![task.as_str(), project.as_str()]).unwrap();
+        // The Session is bound, and its Execs ran elsewhere: only event
+        // history associates them with the Task.
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,task_id,wave_id,cwd)
+            VALUES('bound','bound','human',1,0,?1,?2,'/elsewhere')", params![task.as_str(), wave]).unwrap();
+        for (id, completed) in [(&turn, None), (&finished, Some(2))] {
+            conn.execute(
+                "INSERT INTO execs(id,trace_id,cwd,started_at,completed_at,outcome) VALUES(?1,?2,'/elsewhere',1,?3,?4)",
+                params![id, TraceId::new(), completed, completed.map(|_: i64| "succeeded")],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload)
+                VALUES('bound','started',?1,?1,1,'{}')", [id]).unwrap();
+        }
+        let read = |unfinished: bool, expected: &[&ExecId]| {
+            let mut query = conn
+                .prepare(&format!(
+                    "{} WHERE {} e.id IN ({}) ORDER BY e.started_at DESC,e.id",
+                    super::super::execs::EXEC_SELECT,
+                    if unfinished {
+                        "e.completed_at IS NULL AND"
+                    } else {
+                        ""
+                    },
+                    super::exec_ids("?1", unfinished)
+                ))
+                .unwrap();
+            let mut ids = query
+                .query_map([task.as_str()], |row| row.get::<_, ExecId>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            let mut expected: Vec<_> = expected.iter().map(|id| (*id).clone()).collect();
+            expected.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            assert_eq!(ids, expected);
+            query.get_status(rusqlite::StatementStatus::VmStep)
+        };
+        let before = (read(true, &[&turn]), read(false, &[&turn, &finished]));
+        for n in 0..2_000 {
+            conn.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+                VALUES('bound','observed',?1,1,'{}')",
+                [n.to_string()],
+            )
+            .unwrap();
+        }
+        let after = (read(true, &[&turn]), read(false, &[&turn, &finished]));
+        assert!(
+            after.0 <= before.0 * 2 && after.1 <= before.1 * 2,
+            "Events naming no Exec increased membership work: {before:?} → {after:?}"
         );
     }
 

@@ -1141,3 +1141,84 @@ Release's immediate goal and current schedule/publication/installation memory we
 read; older incidents were not reread and provide no Desktop acceptance.
 Review retained the real failed Git child, rejected the unsupported SQL hint and
 kept publication separate from merge/completion.
+
+## Completion-gate history, concurrent Task details and command startup — October 6
+
+Jack Heart requested the completion-gate repair with a matched proof on the
+corrected Git policy. [Summary](gate-read-summary.json) retains every cohort,
+hash and limit; raw receipts are `/tmp/loo304-gate-read-20261006/`.
+
+**Fixture.** The prepared fixture `d9dc08b5…` and its retained snapshot no longer
+exist. This pair is a new one, never compared with earlier cohorts. Both sides
+are clones of the surviving `/tmp/loo304-release-20261006/index-diagnostic.db`:
+the prepared fixture plus one diagnostic index. All 39 tables match the prepared
+manifest's per-table hashes on both sides, and each schema equals a fresh Home
+created by its own binary. The files are not byte-identical to the lost fixture.
+Before is HEAD `d688c47fe`'s Rust, unchanged since `5f696f158`.
+
+**Three causes, three repairs.**
+
+- *Event history.* The gate's Exec read walked every event of a Task's Sessions
+  and sought each table row to read `exec_id`: 521,637 events, 1,669 naming an
+  Exec. A partial index on `(session_id, exec_id)` holds only those. Bundled
+  SQLite 3.53.2 returns identical rows for all 342 Tasks. The earlier 559/743
+  sample followed a fresh clone and measured cold page reads. With the index
+  alone, the first read after cloning fell 2863→1216 ms and the warm median
+  1101→1002 ms.
+- *Serial Git children.* Warm, 550 of 629 main-thread samples waited on 90 Git
+  children run one after another. Task details now gather on four workers and
+  return in request order. Every observation still runs fresh; none is cached,
+  skipped or reordered in the output. Eight workers saved another 30 ms of wall
+  time for 280 ms more CPU and were rejected.
+- *Command startup.* `lf home id` took 194 ms on an empty Home; `lf --version`
+  takes 12. A draft-bearing build replayed every migration in every process
+  to validate its schema. The build now embeds that reference as it already
+  does for the canonical schema: 35 ms. An installed release carries no drafts
+  and never paid this, so about 160 ms of each baseline read below is a cost
+  of development builds, not of the installed product.
+
+| Read, twenty warm observations each | Before median / p95 | After median / p95 |
+| --- | ---: | ---: |
+| Roadmap | 971 / 1008 ms | 412 / 428 ms |
+| Sessions | 259 / 264 ms | 98 / 100 ms |
+| Roadmap child CPU | 1008 / 1049 ms | 1067 / 1117 ms |
+| Session child CPU | 254 / 260 ms | 94 / 96 ms |
+
+All 84 reads exited zero on unchanged inputs: 57,887 file fingerprints and 378
+recorded checkouts (30 existing) agree across all four manifests. Each roadmap ran 90 Git children on both sides, 89
+successful; the historical `cadenza` path still fails discovery and still
+prevents full report scoring. All 39 tables keep identical rows, each copy
+gaining 42 inspection Execs. All 42 response pairs agree apart from fresh
+timestamps and 1,554 verified ages. Statement counts are identical, so refresh
+volume did not fall. Each measured read includes about 50 ms of `sandbox-exec`.
+Sessions meets 300 ms. Roadmap does not, and its CPU rose 6% despite losing the
+replay: overlap costs CPU.
+
+Two earlier runs are **rejected**: another Task committed to the shared
+repository mid-run and the manifests changed. Their numbers agree with the
+table and stay in the summary beside the index-only and eight-worker cohorts.
+
+**Mounted pair.** One sequential run each, 84/84 endpoints, twenty warm
+observations per scenario, 21 preserved rounds, no trace.
+
+| Warm scenario | Before median / p95 | After median / p95 |
+| --- | ---: | ---: |
+| Cold workspace | 870 / 896 ms | 597 / 673 ms |
+| Native Session reopen | 794 / 927 ms | 531 / 643 ms |
+| Reopen Task | 198 / 240 ms | 234 / 332 ms |
+| Warm Task | 260 / 268 ms | 266 / 276 ms |
+
+Reopen Task **worsened**; the cause is unknown. Four-round growth **failed** on
+both sides: +53.4 and +51.1 MiB. Recorder-sampled RSS growth rose 47.7→96.6 MiB,
+unexplained. Application CPU p95 was 23.2%→13.4%, excluding children. CLI
+processes rose 547→564: faster reads admit more refreshes. The runner refuses
+its own comparison because the fixture files differ; equality is the table
+proof above. Bitmap and OCR are not compositor paint.
+
+**Remaining.** Roadmap still spends most of its 412 ms on 23 fresh
+`git status` reads, about 10 ms each alone and slower when overlapped. Going
+lower means observing checkout changes instead of polling them, which belongs
+with change-driven refresh. Every original obligation stays open: 100 ms
+interactions, 300 ms roadmap, growth under 32 MiB, independent Swift
+attribution, compositor and input proof, recorder readiness and both full
+hours. No trace ran. Nothing touched the installed Home.

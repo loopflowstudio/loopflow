@@ -1095,10 +1095,30 @@ fn expected_schema(
                 "/canonical_schema.json"
             )))
             .expect("build-generated canonical schema is valid");
-            Mutex::new(HashMap::from([(
+            let mut references: References = HashMap::from([(
                 MIGRATIONS.iter().map(|migration| migration.sql).collect(),
                 canonical.into(),
-            )]))
+            )]);
+            // A draft-bearing build validates every store it opens against
+            // its drafts; without this each process replays all migrations.
+            let draft: Option<Vec<ProductSchemaObject>> =
+                serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/draft_schema.json")))
+                    .expect("build-generated draft schema is valid");
+            if let Some(draft) = draft {
+                references.insert(
+                    MIGRATIONS
+                        .iter()
+                        .map(|migration| migration.sql)
+                        .chain(
+                            crate::build_info::migration_draft_manifest()
+                                .iter()
+                                .map(|draft| draft.sql),
+                        )
+                        .collect(),
+                    draft.into(),
+                );
+            }
+            Mutex::new(references)
         })
         .lock()
         .expect("schema reference cache poisoned");

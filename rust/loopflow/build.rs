@@ -40,7 +40,7 @@ fn main() {
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"));
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
     emit_build_provenance(&manifest_dir, &out_dir);
-    emit_canonical_schema(&out_dir);
+    emit_schema_references(&manifest_dir, &out_dir);
     let builtins_dir = manifest_dir.join("src/engine/builtins");
 
     // Builtins live at `<cat>/<kind>/*.ext`. Skills and flows from CORE_CATEGORIES
@@ -84,7 +84,9 @@ fn main() {
     }
 }
 
-fn emit_canonical_schema(out_dir: &Path) {
+/// Replaying every migration costs each process that opens a store. Embed the
+/// canonical schema, and the schema a draft-bearing build validates against.
+fn emit_schema_references(manifest_dir: &Path, out_dir: &Path) {
     let connection =
         rusqlite::Connection::open_in_memory().expect("open canonical schema reference database");
     connection.execute_batch(
@@ -102,6 +104,31 @@ fn emit_canonical_schema(out_dir: &Path) {
     let json = serde_json::to_vec(&schema).expect("serialize canonical schema reference");
     fs::write(out_dir.join("canonical_schema.json"), json)
         .expect("write canonical schema reference");
+
+    let drafts = migration_drafts(manifest_dir);
+    for draft in &drafts {
+        connection
+            .execute_batch(&draft.sql)
+            .unwrap_or_else(|error| panic!("build draft schema at {}: {error}", draft.name));
+    }
+    let schema = (!drafts.is_empty()).then(|| {
+        migration_schema::product_schema(&connection).expect("project draft schema reference")
+    });
+    let json = serde_json::to_vec(&schema).expect("serialize draft schema reference");
+    fs::write(out_dir.join("draft_schema.json"), json).expect("write draft schema reference");
+}
+
+fn migration_drafts(manifest_dir: &Path) -> Vec<migration_drafts::DraftMigration> {
+    use migration_drafts::{read_draft_manifest, read_released_names};
+
+    let migrations_dir = manifest_dir.join("src/store/migrations");
+    let drafts_dir = migrations_dir.join("drafts");
+    println!("cargo:rerun-if-changed={}", drafts_dir.display());
+    println!("cargo:rerun-if-changed={}", migrations_dir.display());
+    let released_names = read_released_names(&migrations_dir)
+        .unwrap_or_else(|error| panic!("embed migration draft manifest: {error}"));
+    read_draft_manifest(&drafts_dir, &released_names)
+        .unwrap_or_else(|error| panic!("embed migration draft manifest: {error}"))
 }
 
 fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
@@ -254,16 +281,7 @@ fn emit_build_provenance(manifest_dir: &Path, out_dir: &Path) {
 }
 
 fn emit_migration_draft_manifest(manifest_dir: &Path, out_dir: &Path) {
-    use migration_drafts::{read_draft_manifest, read_released_names};
-
-    let migrations_dir = manifest_dir.join("src/store/migrations");
-    let drafts_dir = manifest_dir.join("src/store/migrations/drafts");
-    println!("cargo:rerun-if-changed={}", drafts_dir.display());
-    println!("cargo:rerun-if-changed={}", migrations_dir.display());
-    let released_names = read_released_names(&migrations_dir)
-        .unwrap_or_else(|error| panic!("embed migration draft manifest: {error}"));
-    let drafts = read_draft_manifest(&drafts_dir, &released_names)
-        .unwrap_or_else(|error| panic!("embed migration draft manifest: {error}"));
+    let drafts = migration_drafts(manifest_dir);
     let mut code = String::from("static MIGRATION_DRAFT_MANIFEST: &[MigrationDraft] = &[\n");
     for draft in drafts {
         writeln!(code, "    MigrationDraft {{").expect("write draft manifest");

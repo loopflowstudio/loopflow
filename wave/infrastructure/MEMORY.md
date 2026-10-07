@@ -807,33 +807,30 @@ bitmap wrappers released after ordinary suspension (before return with pooling),
 without handler/result accumulation or RSS benefit. The earlier pool passed
 20/20 but failed +53.0 MiB growth. No pool repair or leak exclusion is supported.
 
-Jack Heart's next bounded read repair shares Session membership within one SQL
-query. All 342 Task candidate-ID sets match; bundled VM steps 30.9M→17.5M.
-Alternating reads passed 84/84 with 39-table preservation; roadmap median/p95
-994/2123→939/1346 ms under high variable load, Git counts unchanged. Session p95
-worsened. Mounted baseline/confirmation passed 20/20 each but memory failed
-+42.6/+44.5 MiB. The first candidate timeout remains: readiness 1.64 s plus
-3.42 s OCR exhausted the unchanged deadline. Lower-load confirmation is not
-causal latency proof. Query-local materialization grants no persistent freshness
-or authority. The report owns exact evidence; every original latency/growth,
-Swift, compositor/input and hour obligation remains. Publication only.
+Session-membership materialization, corrected read-only Git observation and the
+rejected outer-index hint keep their receipts in the matched report and at
+`d688c47fe:wave/infrastructure/MEMORY.md`. Outer CLI success never establishes
+repository-read success; changed input fingerprints reject a comparison.
 
-LOO-304's corrected October 6 runner grants bounded read-only snapshot checkout
-and Git metadata observations, retaining all other sandbox/copy-authority limits.
-All four input manifests match across 84 fresh alternating reads; 39-table and
-42-response-pair preservation passes. Roadmap median/p95 1146/1189→1117/1164 ms
-still misses 300 ms. Each roadmap has 93/94 successful Git children, including
-25 statuses; historical non-Git discovery remains failed and prevents full report
-scoring. Earlier 31/36-failed-child cohorts remain degraded-path evidence. Outer
-CLI success cannot establish repository-read success. Hash content/config/metadata,
-checkout identity and membership; changed inputs reject comparison.
+LOO-304's October 6 gate repair corrects that record: the 559/743 SQLite sample
+was cold-cache I/O after a fresh clone. Warm roadmap time was 90 serial Git
+children. Three repairs: a partial index over the 1,669 of 521,637 Session
+events naming an Exec; four Task-detail workers returning in request order,
+every Git observation still fresh; and a build-embedded draft schema reference.
+A draft-bearing build replayed every migration per process (`lf home id`
+194→35 ms). Installed releases never paid that, so earlier branch CLI timings
+overstate installed cost by about 160 ms. Profile warm and cold separately.
 
-The bounded sample attributes 559/743 main-thread observations to completion-gate
-Exec reads. An outer-index hint preserved 342 Tasks but showed no benefit and
-was rejected. Full-query/page attribution remains open; fresh launch
-checks are distinct obligations. Receipts and policy-compilation failures
-live in the matched report. No new rendered/memory/Swift/compositor/hour proof;
-6.6 GiB remains below trace admission. Jack Heart authorized publication only.
+The old fixture files no longer exist. The new pair clones a surviving copy
+whose 39 tables match the prepared manifest; never compare it with earlier
+cohorts. Stable 84/84 reads: roadmap median/p95 971/1008→412/428 ms, Sessions
+259/264→98/100 ms, roadmap CPU +6%. Two runs were rejected when another Task
+committed mid-run. Mounted 84/84 each: cold workspace and native reopen
+improved, Reopen Task worsened 198/240→234/332 ms, growth failed +53.4/+51.1
+MiB, recorder RSS growth rose 47.7→96.6 MiB; both regressions are unexplained.
+Roadmap still misses 300 ms on 23 fresh `git status` reads. Every original
+latency, growth, Swift, compositor/input and hour obligation remains.
+Jack Heart authorized publication only.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

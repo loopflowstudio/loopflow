@@ -1,0 +1,1713 @@
+{
+  "contract": {
+    "base": "50107313717557a1a2d44adbbcd7150b7d16a990",
+    "candidate": "3a5ea2ffe19ce02d4373afecda4f179db14268a7",
+    "rust_build_mode": "cargo release defaults: opt-level=3, debug=false, incremental=false, lto=false, codegen-units=16",
+    "swift_build_mode": "SwiftPM debug -gnone",
+    "scope": "Rust CLI paths only; unchanged candidate Swift, harness, published lf3 and compatible fixture",
+    "binaries": {
+      "candidate-lf": "e1930e817c301d368d1adc68467360e4270821ef316b284c53da14bc00b510e4",
+      "baseline-lf": "035fd34ad65c3d44654fe286628d8a626a413310daa1022eb281bb77489373d9",
+      "repair-lf": "8af3442d43f600353b65800c4f96ef4bc6708df6f5eea97d838db1b3d81dfe32"
+    },
+    "repair": "Explicit execs_unfinished selection in checkout membership; no schema or fixture change",
+    "repair_production_task_work_sha256": "0a29ef4485185794f865c090a23b2d8cd0c0cb2bf43b70408195661a57c96038"
+  },
+  "variants": {
+    "baseline": {
+      "status": "complete",
+      "not_started": 0,
+      "scenarios": [
+        {
+          "scenario": "cold_workspace",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 1419.6015,
+            "p95": null,
+            "max": 1419.6015
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 1211.72575,
+            "p95": null,
+            "max": 1211.72575
+          },
+          "bitmap_ms": {
+            "n": 2,
+            "median": 3.8144375000000004,
+            "p95": null,
+            "max": 4.725042
+          },
+          "ocr_ms": {
+            "n": 2,
+            "median": 271.0669165,
+            "p95": null,
+            "max": 334.328583
+          }
+        },
+        {
+          "scenario": "warm_task",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 351.46275,
+            "p95": null,
+            "max": 351.46275
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 136.667041,
+            "p95": null,
+            "max": 136.667041
+          },
+          "bitmap_ms": {
+            "n": 1,
+            "median": 6.107458,
+            "p95": null,
+            "max": 6.107458
+          },
+          "ocr_ms": {
+            "n": 1,
+            "median": 214.725834,
+            "p95": null,
+            "max": 214.725834
+          }
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 248.559334,
+            "p95": null,
+            "max": 248.559334
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 36.074459,
+            "p95": null,
+            "max": 36.074459
+          },
+          "bitmap_ms": {
+            "n": 1,
+            "median": 5.154959,
+            "p95": null,
+            "max": 5.154959
+          },
+          "ocr_ms": {
+            "n": 1,
+            "median": 212.410875,
+            "p95": null,
+            "max": 212.410875
+          }
+        },
+        {
+          "scenario": "cold_workspace",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 1443.2418125,
+            "p95": 2222.476,
+            "max": 2648.927875
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 1169.3323540000001,
+            "p95": 1688.309833,
+            "max": 2151.112625
+          },
+          "bitmap_ms": {
+            "n": 54,
+            "median": 3.4862495,
+            "p95": 7.066416,
+            "max": 8.446667
+          },
+          "ocr_ms": {
+            "n": 54,
+            "median": 245.7493125,
+            "p95": 519.452959,
+            "max": 837.108667
+          }
+        },
+        {
+          "scenario": "warm_task",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 418.84527149999997,
+            "p95": 919.73425,
+            "max": 2630.794666
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 150.9433545,
+            "p95": 212.372458,
+            "max": 222.565542
+          },
+          "bitmap_ms": {
+            "n": 20,
+            "median": 7.3126875,
+            "p95": 9.567375,
+            "max": 10.069958
+          },
+          "ocr_ms": {
+            "n": 20,
+            "median": 264.3110215,
+            "p95": 737.225,
+            "max": 2418.316208
+          }
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 323.95466650000003,
+            "p95": 734.926542,
+            "max": 3253.64575
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 39.747958499999996,
+            "p95": 54.983292,
+            "max": 55.479125
+          },
+          "bitmap_ms": {
+            "n": 20,
+            "median": 5.973083000000001,
+            "p95": 7.955958,
+            "max": 8.516
+          },
+          "ocr_ms": {
+            "n": 20,
+            "median": 282.509125,
+            "p95": 687.74075,
+            "max": 3199.693208
+          }
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 9248.586458,
+            "p95": null,
+            "max": 9248.586458
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 8923.675583,
+            "p95": null,
+            "max": 8923.675583
+          },
+          "bitmap_ms": {
+            "n": 3,
+            "median": 93.768791,
+            "p95": null,
+            "max": 102.124292
+          },
+          "ocr_ms": {
+            "n": 3,
+            "median": 292.562584,
+            "p95": null,
+            "max": 316.700958
+          }
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 1277.9033545,
+            "p95": 1479.412834,
+            "max": 1644.153084
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 974.8816039999999,
+            "p95": 1141.691542,
+            "max": 1261.235792
+          },
+          "bitmap_ms": {
+            "n": 60,
+            "median": 93.083021,
+            "p95": 102.240791,
+            "max": 103.441667
+          },
+          "ocr_ms": {
+            "n": 60,
+            "median": 291.2520835,
+            "p95": 361.628791,
+            "max": 456.345833
+          }
+        }
+      ],
+      "reads": [
+        {
+          "verb": "activity",
+          "outcome": "passed",
+          "n": 10,
+          "median": 228.33912500000002,
+          "p95": null,
+          "max": 625.403917
+        },
+        {
+          "verb": "activity",
+          "outcome": "unavailable",
+          "n": 20,
+          "median": 0.686917,
+          "p95": 100.605833,
+          "max": 114.101416
+        },
+        {
+          "verb": "flow list",
+          "outcome": "passed",
+          "n": 42,
+          "median": 400.9578125,
+          "p95": 925.22025,
+          "max": 3281.513208
+        },
+        {
+          "verb": "home id",
+          "outcome": "passed",
+          "n": 21,
+          "median": 466.992208,
+          "p95": 628.287333,
+          "max": 873.572
+        },
+        {
+          "verb": "roadmap",
+          "outcome": "passed",
+          "n": 52,
+          "median": 3891.355958,
+          "p95": 7230.547292,
+          "max": 13438.317292
+        },
+        {
+          "verb": "session connect",
+          "outcome": "passed",
+          "n": 21,
+          "median": 404.266542,
+          "p95": 448.519917,
+          "max": 482.625
+        },
+        {
+          "verb": "session list",
+          "outcome": "passed",
+          "n": 74,
+          "median": 1733.0715624999998,
+          "p95": 3099.3045,
+          "max": 7443.143083
+        },
+        {
+          "verb": "task comment",
+          "outcome": "unavailable",
+          "n": 43,
+          "median": 65.675708,
+          "p95": 456.711917,
+          "max": 764.792791
+        },
+        {
+          "verb": "task file",
+          "outcome": "passed",
+          "n": 22,
+          "median": 251.4438545,
+          "p95": 275.288375,
+          "max": 334.375667
+        },
+        {
+          "verb": "task files",
+          "outcome": "passed",
+          "n": 21,
+          "median": 255.259792,
+          "p95": 302.04425,
+          "max": 316.13875
+        },
+        {
+          "verb": "task status",
+          "outcome": "passed",
+          "n": 43,
+          "median": 1124.645791,
+          "p95": 2571.062041,
+          "max": 5923.086541
+        },
+        {
+          "verb": "wave list",
+          "outcome": "passed",
+          "n": 30,
+          "median": 862.318146,
+          "p95": 1440.326875,
+          "max": 1455.815875
+        }
+      ],
+      "read_paths": [
+        {
+          "verb": "activity --since",
+          "outcome": "passed",
+          "n": 10,
+          "median": 228.33912500000002,
+          "p95": null,
+          "max": 625.403917
+        },
+        {
+          "verb": "activity --since",
+          "outcome": "unavailable",
+          "n": 20,
+          "median": 0.686917,
+          "p95": 100.605833,
+          "max": 114.101416
+        },
+        {
+          "verb": "flow list",
+          "outcome": "passed",
+          "n": 42,
+          "median": 400.9578125,
+          "p95": 925.22025,
+          "max": 3281.513208
+        },
+        {
+          "verb": "home id",
+          "outcome": "passed",
+          "n": 21,
+          "median": 466.992208,
+          "p95": 628.287333,
+          "max": 873.572
+        },
+        {
+          "verb": "roadmap --all",
+          "outcome": "passed",
+          "n": 30,
+          "median": 4799.9274375,
+          "p95": 11725.949583,
+          "max": 13438.317292
+        },
+        {
+          "verb": "roadmap --task",
+          "outcome": "passed",
+          "n": 22,
+          "median": 516.3665625000001,
+          "p95": 927.672334,
+          "max": 1018.321875
+        },
+        {
+          "verb": "session connect",
+          "outcome": "passed",
+          "n": 21,
+          "median": 404.266542,
+          "p95": 448.519917,
+          "max": 482.625
+        },
+        {
+          "verb": "session list",
+          "outcome": "passed",
+          "n": 74,
+          "median": 1733.0715624999998,
+          "p95": 3099.3045,
+          "max": 7443.143083
+        },
+        {
+          "verb": "task comment",
+          "outcome": "unavailable",
+          "n": 43,
+          "median": 65.675708,
+          "p95": 456.711917,
+          "max": 764.792791
+        },
+        {
+          "verb": "task file",
+          "outcome": "passed",
+          "n": 22,
+          "median": 251.4438545,
+          "p95": 275.288375,
+          "max": 334.375667
+        },
+        {
+          "verb": "task files",
+          "outcome": "passed",
+          "n": 21,
+          "median": 255.259792,
+          "p95": 302.04425,
+          "max": 316.13875
+        },
+        {
+          "verb": "task status",
+          "outcome": "passed",
+          "n": 43,
+          "median": 1124.645791,
+          "p95": 2571.062041,
+          "max": 5923.086541
+        },
+        {
+          "verb": "wave list",
+          "outcome": "passed",
+          "n": 30,
+          "median": 862.318146,
+          "p95": 1440.326875,
+          "max": 1455.815875
+        }
+      ],
+      "cli_volume": {
+        "errors": [],
+        "limits": [
+          "Only instrumented lf processes; excludes Git, providers and other executables",
+          "SQLite statement starts (including PRAGMAs, writes and triggers), not only SELECTs",
+          "Rows emitted by SQLite, not underlying rows scanned; main store connections only",
+          "Cumulative one-second samples; missing end means counts are lower bounds",
+          "Counters and a writer add overhead; use the same instrumentation in both builds"
+        ],
+        "observed_totals": {
+          "connections": 2887,
+          "rows": 3017860,
+          "statements": 251304
+        },
+        "processes_ended": 509,
+        "processes_started": 509,
+        "status": "complete"
+      },
+      "cpu": {
+        "max_percent": 88.7,
+        "p50_percent": 0.7,
+        "p95_percent": 21.6,
+        "samples": 150
+      },
+      "memory": {
+        "end_mib": 291.8,
+        "growth_mib": 54.7,
+        "max_mib": 355.0,
+        "samples": 150,
+        "start_mib": 237.0
+      },
+      "round4_growth_mib": 60.9375,
+      "rounds": 21,
+      "soak_elapsed_seconds": 184,
+      "requested_resource_seconds": 150,
+      "hitches": {
+        "count": null,
+        "hangs": null,
+        "hitch_ms_per_second": null,
+        "recorded": false,
+        "worst_hang_ms": null,
+        "worst_ms": null
+      },
+      "idle": {
+        "covered_seconds": null,
+        "hangs": null,
+        "hitch_ms_per_second": null,
+        "requested_seconds": 132.43662571907043
+      },
+      "host_load_1min": {
+        "n": 158,
+        "median": 20.59033203125,
+        "p95": 43.07861328125,
+        "max": 46.48095703125
+      },
+      "min_free_gib": 45.19169235229492,
+      "window_counts": {
+        "1": 84
+      },
+      "key_window_unknown": 84,
+      "source_stable": true,
+      "cli_stable": true,
+      "test_binary_sha256": "18f10a5b2b72a7ee49b5f6bf41ecaf7f5ffa2c4a9cf271e5d74aed1b00c7f3f5",
+      "measurement_source": "38d59d8f8d1aa1ce480a63bbc85eaec790678559e43fc6bc74f6605d6bd9f855",
+      "repository_configs_unchanged": true,
+      "receipt_hashes": {
+        "run.json": "f6536c246bed61aaec673f29e79710f7484aec6c93a7f90e4f837bc3c542cdb3",
+        "report.json": "af8245231c6257526569839f6928b73d8e7e443c05bdc7cdb04cf6a6f2adbff3",
+        "attempts.jsonl": "2283b9acff044fb8db6a88e1ed0f8af99e53ca7d8c5200d134b47715f6c8e9d1",
+        "soak-resources/report.json": "52420cd3726156fc411843c2a1a9ea8fdfb2b6e0bbf28605b2e9fec070da1313"
+      }
+    },
+    "candidate": {
+      "status": "complete",
+      "not_started": 0,
+      "scenarios": [
+        {
+          "scenario": "cold_workspace",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 1590.331041,
+            "p95": null,
+            "max": 1590.331041
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 1371.306333,
+            "p95": null,
+            "max": 1371.306333
+          },
+          "bitmap_ms": {
+            "n": 2,
+            "median": 4.086583,
+            "p95": null,
+            "max": 4.81025
+          },
+          "ocr_ms": {
+            "n": 2,
+            "median": 277.538021,
+            "p95": null,
+            "max": 336.124792
+          }
+        },
+        {
+          "scenario": "warm_task",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 394.965791,
+            "p95": null,
+            "max": 394.965791
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 146.453708,
+            "p95": null,
+            "max": 146.453708
+          },
+          "bitmap_ms": {
+            "n": 1,
+            "median": 7.182208,
+            "p95": null,
+            "max": 7.182208
+          },
+          "ocr_ms": {
+            "n": 1,
+            "median": 248.438833,
+            "p95": null,
+            "max": 248.438833
+          }
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 265.3695,
+            "p95": null,
+            "max": 265.3695
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 39.47075,
+            "p95": null,
+            "max": 39.47075
+          },
+          "bitmap_ms": {
+            "n": 1,
+            "median": 5.560958,
+            "p95": null,
+            "max": 5.560958
+          },
+          "ocr_ms": {
+            "n": 1,
+            "median": 225.818167,
+            "p95": null,
+            "max": 225.818167
+          }
+        },
+        {
+          "scenario": "cold_workspace",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 1542.774625,
+            "p95": 1718.962458,
+            "max": 1766.782458
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 1276.9742919999999,
+            "p95": 1435.632958,
+            "max": 1503.0675
+          },
+          "bitmap_ms": {
+            "n": 56,
+            "median": 3.532146,
+            "p95": 6.273083,
+            "max": 6.636125
+          },
+          "ocr_ms": {
+            "n": 56,
+            "median": 217.31297899999998,
+            "p95": 299.270458,
+            "max": 306.215375
+          }
+        },
+        {
+          "scenario": "warm_task",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 414.119562,
+            "p95": 476.698458,
+            "max": 507.49475
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 154.1371875,
+            "p95": 172.225167,
+            "max": 175.746083
+          },
+          "bitmap_ms": {
+            "n": 20,
+            "median": 7.165625,
+            "p95": 8.157708,
+            "max": 8.2095
+          },
+          "ocr_ms": {
+            "n": 20,
+            "median": 258.9346455,
+            "p95": 308.331291,
+            "max": 331.656708
+          }
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 342.0104375,
+            "p95": 407.790458,
+            "max": 408.872208
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 56.6782915,
+            "p95": 82.186542,
+            "max": 84.001041
+          },
+          "bitmap_ms": {
+            "n": 20,
+            "median": 6.424208500000001,
+            "p95": 7.424667,
+            "max": 7.684792
+          },
+          "ocr_ms": {
+            "n": 20,
+            "median": 280.29308349999997,
+            "p95": 323.686959,
+            "max": 332.771458
+          }
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 1585.812,
+            "p95": null,
+            "max": 1585.812
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 1307.069,
+            "p95": null,
+            "max": 1307.069
+          },
+          "bitmap_ms": {
+            "n": 3,
+            "median": 111.54075,
+            "p95": null,
+            "max": 116.726083
+          },
+          "ocr_ms": {
+            "n": 3,
+            "median": 258.000958,
+            "p95": null,
+            "max": 277.373125
+          }
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 1245.8212290000001,
+            "p95": 1502.318542,
+            "max": 1577.242709
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 946.2487495,
+            "p95": 1148.070875,
+            "max": 1233.807042
+          },
+          "bitmap_ms": {
+            "n": 60,
+            "median": 89.9681665,
+            "p95": 108.740917,
+            "max": 113.861209
+          },
+          "ocr_ms": {
+            "n": 60,
+            "median": 291.90747899999997,
+            "p95": 348.714625,
+            "max": 405.085917
+          }
+        }
+      ],
+      "reads": [
+        {
+          "verb": "activity",
+          "outcome": "passed",
+          "n": 11,
+          "median": 247.820083,
+          "p95": null,
+          "max": 297.818584
+        },
+        {
+          "verb": "activity",
+          "outcome": "unavailable",
+          "n": 20,
+          "median": 1.5475625000000002,
+          "p95": 1.8525,
+          "max": 98.02975
+        },
+        {
+          "verb": "flow list",
+          "outcome": "passed",
+          "n": 42,
+          "median": 384.9569585,
+          "p95": 457.654292,
+          "max": 514.620875
+        },
+        {
+          "verb": "home id",
+          "outcome": "passed",
+          "n": 21,
+          "median": 461.503042,
+          "p95": 540.216041,
+          "max": 544.402875
+        },
+        {
+          "verb": "roadmap",
+          "outcome": "passed",
+          "n": 53,
+          "median": 2966.263417,
+          "p95": 4507.472542,
+          "max": 4681.856542
+        },
+        {
+          "verb": "session connect",
+          "outcome": "passed",
+          "n": 21,
+          "median": 382.1515,
+          "p95": 471.393417,
+          "max": 530.97825
+        },
+        {
+          "verb": "session list",
+          "outcome": "passed",
+          "n": 90,
+          "median": 539.0716045,
+          "p95": 1028.266958,
+          "max": 1133.274042
+        },
+        {
+          "verb": "task comment",
+          "outcome": "unavailable",
+          "n": 43,
+          "median": 54.710166,
+          "p95": 394.018791,
+          "max": 434.653125
+        },
+        {
+          "verb": "task file",
+          "outcome": "passed",
+          "n": 22,
+          "median": 266.231938,
+          "p95": 292.86625,
+          "max": 313.165708
+        },
+        {
+          "verb": "task files",
+          "outcome": "passed",
+          "n": 21,
+          "median": 271.74525,
+          "p95": 309.756875,
+          "max": 313.923959
+        },
+        {
+          "verb": "task status",
+          "outcome": "passed",
+          "n": 43,
+          "median": 1084.128583,
+          "p95": 1229.09775,
+          "max": 1279.201959
+        },
+        {
+          "verb": "wave list",
+          "outcome": "passed",
+          "n": 31,
+          "median": 970.423708,
+          "p95": 1336.602084,
+          "max": 1357.471041
+        }
+      ],
+      "read_paths": [
+        {
+          "verb": "activity --since",
+          "outcome": "passed",
+          "n": 11,
+          "median": 247.820083,
+          "p95": null,
+          "max": 297.818584
+        },
+        {
+          "verb": "activity --since",
+          "outcome": "unavailable",
+          "n": 20,
+          "median": 1.5475625000000002,
+          "p95": 1.8525,
+          "max": 98.02975
+        },
+        {
+          "verb": "flow list",
+          "outcome": "passed",
+          "n": 42,
+          "median": 384.9569585,
+          "p95": 457.654292,
+          "max": 514.620875
+        },
+        {
+          "verb": "home id",
+          "outcome": "passed",
+          "n": 21,
+          "median": 461.503042,
+          "p95": 540.216041,
+          "max": 544.402875
+        },
+        {
+          "verb": "roadmap --all",
+          "outcome": "passed",
+          "n": 31,
+          "median": 3781.590583,
+          "p95": 4594.69025,
+          "max": 4681.856542
+        },
+        {
+          "verb": "roadmap --task",
+          "outcome": "passed",
+          "n": 22,
+          "median": 613.1400835,
+          "p95": 817.406792,
+          "max": 915.450125
+        },
+        {
+          "verb": "session connect",
+          "outcome": "passed",
+          "n": 21,
+          "median": 382.1515,
+          "p95": 471.393417,
+          "max": 530.97825
+        },
+        {
+          "verb": "session list",
+          "outcome": "passed",
+          "n": 90,
+          "median": 539.0716045,
+          "p95": 1028.266958,
+          "max": 1133.274042
+        },
+        {
+          "verb": "task comment",
+          "outcome": "unavailable",
+          "n": 43,
+          "median": 54.710166,
+          "p95": 394.018791,
+          "max": 434.653125
+        },
+        {
+          "verb": "task file",
+          "outcome": "passed",
+          "n": 22,
+          "median": 266.231938,
+          "p95": 292.86625,
+          "max": 313.165708
+        },
+        {
+          "verb": "task files",
+          "outcome": "passed",
+          "n": 21,
+          "median": 271.74525,
+          "p95": 309.756875,
+          "max": 313.923959
+        },
+        {
+          "verb": "task status",
+          "outcome": "passed",
+          "n": 43,
+          "median": 1084.128583,
+          "p95": 1229.09775,
+          "max": 1279.201959
+        },
+        {
+          "verb": "wave list",
+          "outcome": "passed",
+          "n": 31,
+          "median": 970.423708,
+          "p95": 1336.602084,
+          "max": 1357.471041
+        }
+      ],
+      "cli_volume": {
+        "errors": [],
+        "limits": [
+          "Only instrumented lf processes; excludes Git, providers and other executables",
+          "SQLite statement starts (including PRAGMAs, writes and triggers), not only SELECTs",
+          "Rows emitted by SQLite, not underlying rows scanned; main store connections only",
+          "Cumulative one-second samples; missing end means counts are lower bounds",
+          "Counters and a writer add overhead; use the same instrumentation in both builds"
+        ],
+        "observed_totals": {
+          "connections": 3097,
+          "rows": 3165218,
+          "statements": 264672
+        },
+        "processes_ended": 550,
+        "processes_started": 550,
+        "status": "complete"
+      },
+      "cpu": {
+        "max_percent": 92.8,
+        "p50_percent": 0.8,
+        "p95_percent": 35.3,
+        "samples": 150
+      },
+      "memory": {
+        "end_mib": 295.8,
+        "growth_mib": 57.5,
+        "max_mib": 356.9,
+        "samples": 150,
+        "start_mib": 238.3
+      },
+      "round4_growth_mib": 53.46875,
+      "rounds": 21,
+      "soak_elapsed_seconds": 186,
+      "requested_resource_seconds": 150,
+      "hitches": {
+        "count": null,
+        "hangs": null,
+        "hitch_ms_per_second": null,
+        "recorded": false,
+        "worst_hang_ms": null,
+        "worst_ms": null
+      },
+      "idle": {
+        "covered_seconds": null,
+        "hangs": null,
+        "hitch_ms_per_second": null,
+        "requested_seconds": 140.93480730056763
+      },
+      "host_load_1min": {
+        "n": 139,
+        "median": 15.80126953125,
+        "p95": 27.3115234375,
+        "max": 28.12255859375
+      },
+      "min_free_gib": 43.883697509765625,
+      "window_counts": {
+        "1": 84
+      },
+      "key_window_unknown": 84,
+      "source_stable": true,
+      "cli_stable": true,
+      "test_binary_sha256": "18f10a5b2b72a7ee49b5f6bf41ecaf7f5ffa2c4a9cf271e5d74aed1b00c7f3f5",
+      "measurement_source": "38d59d8f8d1aa1ce480a63bbc85eaec790678559e43fc6bc74f6605d6bd9f855",
+      "repository_configs_unchanged": true,
+      "receipt_hashes": {
+        "run.json": "1d2aeddec15c794f22acac17be71845de1759b09c2912c2905040e61097bf1c3",
+        "report.json": "1d491f28fa19f40c06a119761aa761eb5cb733c80c5a090a21f38101ad64415a",
+        "attempts.jsonl": "aa0a0fd8d5f149f0e0a1db4c6d4f02c7b027fa988e2c2f2ee19d6afb0f4cab0a",
+        "soak-resources/report.json": "b41591381f6fe0d50431bd4a5006bdcdc374a576476642b1d96a208cc9382239"
+      }
+    },
+    "repair": {
+      "status": "incomplete",
+      "not_started": 0,
+      "scenarios": [
+        {
+          "scenario": "cold_workspace",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 2390.262209,
+            "p95": null,
+            "max": 2390.262209
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 2058.737792,
+            "p95": null,
+            "max": 2058.737792
+          },
+          "bitmap_ms": {
+            "n": 2,
+            "median": 5.5854585,
+            "p95": null,
+            "max": 6.675042
+          },
+          "ocr_ms": {
+            "n": 2,
+            "median": 388.9500835,
+            "p95": null,
+            "max": 446.474625
+          }
+        },
+        {
+          "scenario": "warm_task",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 515.807458,
+            "p95": null,
+            "max": 515.807458
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 199.055083,
+            "p95": null,
+            "max": 199.055083
+          },
+          "bitmap_ms": {
+            "n": 1,
+            "median": 9.175042,
+            "p95": null,
+            "max": 9.175042
+          },
+          "ocr_ms": {
+            "n": 1,
+            "median": 316.657708,
+            "p95": null,
+            "max": 316.657708
+          }
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 386.564875,
+            "p95": null,
+            "max": 386.564875
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 47.25825,
+            "p95": null,
+            "max": 47.25825
+          },
+          "bitmap_ms": {
+            "n": 1,
+            "median": 7.418166,
+            "p95": null,
+            "max": 7.418166
+          },
+          "ocr_ms": {
+            "n": 1,
+            "median": 339.195125,
+            "p95": null,
+            "max": 339.195125
+          }
+        },
+        {
+          "scenario": "cold_workspace",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 1944.280083,
+            "p95": 2680.079625,
+            "max": 2766.257875
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 1595.2258124999998,
+            "p95": 2275.710917,
+            "max": 2441.224125
+          },
+          "bitmap_ms": {
+            "n": 61,
+            "median": 4.01125,
+            "p95": 6.876083,
+            "max": 7.678125
+          },
+          "ocr_ms": {
+            "n": 61,
+            "median": 257.546166,
+            "p95": 404.261833,
+            "max": 466.616417
+          }
+        },
+        {
+          "scenario": "warm_task",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 481.12841649999996,
+            "p95": 571.9645,
+            "max": 573.193833
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 181.26850050000002,
+            "p95": 210.099,
+            "max": 213.793041
+          },
+          "bitmap_ms": {
+            "n": 20,
+            "median": 8.304104,
+            "p95": 9.238958,
+            "max": 10.172583
+          },
+          "ocr_ms": {
+            "n": 20,
+            "median": 299.172458,
+            "p95": 359.294375,
+            "max": 384.133125
+          }
+        },
+        {
+          "scenario": "reopen_task",
+          "state": "warm",
+          "outcomes": {
+            "passed": 20
+          },
+          "duration_ms": {
+            "n": 20,
+            "median": 361.57516699999996,
+            "p95": 471.509666,
+            "max": 523.369166
+          },
+          "capture_ready_ms": {
+            "n": 20,
+            "median": 50.1671045,
+            "p95": 88.201125,
+            "max": 93.34675
+          },
+          "bitmap_ms": {
+            "n": 20,
+            "median": 6.9360625,
+            "p95": 7.968417,
+            "max": 7.974125
+          },
+          "ocr_ms": {
+            "n": 20,
+            "median": 311.515125,
+            "p95": 421.266541,
+            "max": 429.9025
+          }
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "first_interaction",
+          "outcomes": {
+            "passed": 1
+          },
+          "duration_ms": {
+            "n": 1,
+            "median": 1855.349125,
+            "p95": null,
+            "max": 1855.349125
+          },
+          "capture_ready_ms": {
+            "n": 1,
+            "median": 1467.966291,
+            "p95": null,
+            "max": 1467.966291
+          },
+          "bitmap_ms": {
+            "n": 3,
+            "median": 136.284458,
+            "p95": null,
+            "max": 138.958416
+          },
+          "ocr_ms": {
+            "n": 3,
+            "median": 408.475792,
+            "p95": null,
+            "max": 434.161667
+          }
+        },
+        {
+          "scenario": "native_session_reopen",
+          "state": "warm",
+          "outcomes": {
+            "passed": 19,
+            "timeout": 1
+          },
+          "duration_ms": {
+            "n": 19,
+            "median": 1979.491208,
+            "p95": null,
+            "max": 3313.82225
+          },
+          "capture_ready_ms": {
+            "n": 19,
+            "median": 1519.998167,
+            "p95": null,
+            "max": 2683.038541
+          },
+          "bitmap_ms": {
+            "n": 59,
+            "median": 143.580333,
+            "p95": 168.827166,
+            "max": 181.570416
+          },
+          "ocr_ms": {
+            "n": 59,
+            "median": 452.2085,
+            "p95": 570.275042,
+            "max": 666.575334
+          }
+        }
+      ],
+      "reads": [
+        {
+          "verb": "activity",
+          "outcome": "passed",
+          "n": 12,
+          "median": 418.7891875,
+          "p95": null,
+          "max": 1745.875625
+        },
+        {
+          "verb": "activity",
+          "outcome": "unavailable",
+          "n": 20,
+          "median": 5.364813,
+          "p95": 7.027542,
+          "max": 10.152791
+        },
+        {
+          "verb": "flow list",
+          "outcome": "passed",
+          "n": 42,
+          "median": 428.5744585,
+          "p95": 573.4635,
+          "max": 581.258791
+        },
+        {
+          "verb": "home id",
+          "outcome": "passed",
+          "n": 21,
+          "median": 567.333875,
+          "p95": 699.651166,
+          "max": 908.926666
+        },
+        {
+          "verb": "roadmap",
+          "outcome": "passed",
+          "n": 53,
+          "median": 1949.919291,
+          "p95": 3801.495084,
+          "max": 5331.306959
+        },
+        {
+          "verb": "session connect",
+          "outcome": "passed",
+          "n": 20,
+          "median": 630.3457080000001,
+          "p95": 675.202792,
+          "max": 750.84175
+        },
+        {
+          "verb": "session list",
+          "outcome": "passed",
+          "n": 88,
+          "median": 989.2772494999999,
+          "p95": 1452.915167,
+          "max": 2061.325333
+        },
+        {
+          "verb": "task comment",
+          "outcome": "unavailable",
+          "n": 43,
+          "median": 297.9595,
+          "p95": 497.455084,
+          "max": 579.2125
+        },
+        {
+          "verb": "task file",
+          "outcome": "passed",
+          "n": 21,
+          "median": 446.283917,
+          "p95": 599.625958,
+          "max": 635.417041
+        },
+        {
+          "verb": "task files",
+          "outcome": "passed",
+          "n": 20,
+          "median": 458.2043125,
+          "p95": 532.61275,
+          "max": 664.128875
+        },
+        {
+          "verb": "task status",
+          "outcome": "passed",
+          "n": 43,
+          "median": 1090.357167,
+          "p95": 1445.577542,
+          "max": 1539.772917
+        },
+        {
+          "verb": "wave list",
+          "outcome": "passed",
+          "n": 32,
+          "median": 1190.6735005,
+          "p95": 1970.96075,
+          "max": 2225.192667
+        }
+      ],
+      "read_paths": [
+        {
+          "verb": "activity --since",
+          "outcome": "passed",
+          "n": 12,
+          "median": 418.7891875,
+          "p95": null,
+          "max": 1745.875625
+        },
+        {
+          "verb": "activity --since",
+          "outcome": "unavailable",
+          "n": 20,
+          "median": 5.364813,
+          "p95": 7.027542,
+          "max": 10.152791
+        },
+        {
+          "verb": "flow list",
+          "outcome": "passed",
+          "n": 42,
+          "median": 428.5744585,
+          "p95": 573.4635,
+          "max": 581.258791
+        },
+        {
+          "verb": "home id",
+          "outcome": "passed",
+          "n": 21,
+          "median": 567.333875,
+          "p95": 699.651166,
+          "max": 908.926666
+        },
+        {
+          "verb": "roadmap --all",
+          "outcome": "passed",
+          "n": 32,
+          "median": 2484.7212499999996,
+          "p95": 4016.667917,
+          "max": 5331.306959
+        },
+        {
+          "verb": "roadmap --task",
+          "outcome": "passed",
+          "n": 21,
+          "median": 793.775667,
+          "p95": 1075.500208,
+          "max": 1523.683959
+        },
+        {
+          "verb": "session connect",
+          "outcome": "passed",
+          "n": 20,
+          "median": 630.3457080000001,
+          "p95": 675.202792,
+          "max": 750.84175
+        },
+        {
+          "verb": "session list",
+          "outcome": "passed",
+          "n": 88,
+          "median": 989.2772494999999,
+          "p95": 1452.915167,
+          "max": 2061.325333
+        },
+        {
+          "verb": "task comment",
+          "outcome": "unavailable",
+          "n": 43,
+          "median": 297.9595,
+          "p95": 497.455084,
+          "max": 579.2125
+        },
+        {
+          "verb": "task file",
+          "outcome": "passed",
+          "n": 21,
+          "median": 446.283917,
+          "p95": 599.625958,
+          "max": 635.417041
+        },
+        {
+          "verb": "task files",
+          "outcome": "passed",
+          "n": 20,
+          "median": 458.2043125,
+          "p95": 532.61275,
+          "max": 664.128875
+        },
+        {
+          "verb": "task status",
+          "outcome": "passed",
+          "n": 43,
+          "median": 1090.357167,
+          "p95": 1445.577542,
+          "max": 1539.772917
+        },
+        {
+          "verb": "wave list",
+          "outcome": "passed",
+          "n": 32,
+          "median": 1190.6735005,
+          "p95": 1970.96075,
+          "max": 2225.192667
+        }
+      ],
+      "cli_volume": {
+        "errors": [],
+        "limits": [
+          "Only instrumented lf processes; excludes Git, providers and other executables",
+          "SQLite statement starts (including PRAGMAs, writes and triggers), not only SELECTs",
+          "Rows emitted by SQLite, not underlying rows scanned; main store connections only",
+          "Cumulative one-second samples; missing end means counts are lower bounds",
+          "Counters and a writer add overhead; use the same instrumentation in both builds"
+        ],
+        "observed_totals": {
+          "connections": 3068,
+          "rows": 3196622,
+          "statements": 267064
+        },
+        "processes_ended": 545,
+        "processes_started": 545,
+        "status": "complete"
+      },
+      "cpu": {
+        "max_percent": 98.1,
+        "p50_percent": 1.1,
+        "p95_percent": 47.7,
+        "samples": 150
+      },
+      "memory": {
+        "end_mib": 289.5,
+        "growth_mib": 11.8,
+        "max_mib": 349.0,
+        "samples": 150,
+        "start_mib": 277.7
+      },
+      "round4_growth_mib": 47.640625,
+      "rounds": 20,
+      "soak_elapsed_seconds": null,
+      "requested_resource_seconds": 150,
+      "hitches": {
+        "count": null,
+        "hangs": null,
+        "hitch_ms_per_second": null,
+        "recorded": false,
+        "worst_hang_ms": null,
+        "worst_ms": null
+      },
+      "idle": {
+        "covered_seconds": null,
+        "hangs": null,
+        "hitch_ms_per_second": null,
+        "requested_seconds": 134.6618230342865
+      },
+      "host_load_1min": {
+        "n": 146,
+        "median": 21.341796875,
+        "p95": 26.3193359375,
+        "max": 28.35498046875
+      },
+      "min_free_gib": 39.793216705322266,
+      "window_counts": {
+        "1": 84
+      },
+      "key_window_unknown": 84,
+      "source_stable": true,
+      "cli_stable": true,
+      "test_binary_sha256": "18f10a5b2b72a7ee49b5f6bf41ecaf7f5ffa2c4a9cf271e5d74aed1b00c7f3f5",
+      "measurement_source": "38d59d8f8d1aa1ce480a63bbc85eaec790678559e43fc6bc74f6605d6bd9f855",
+      "repository_configs_unchanged": true,
+      "receipt_hashes": {
+        "run.json": "f0ff59ecc9224f50b1d8b0bc4df5d7ab605abbefc130459b7f810faa5410ae09",
+        "report.json": "e168d27f171bce891e150172d33096232ec6b5311748923a8270ac5a751eee96",
+        "attempts.jsonl": "62aad531f919fe0c6b3e8e07344123c4bcfcd003bd0ad0bf69334d22469dd89d",
+        "soak-resources/report.json": "c590a9ab83b2e851eda30d34a3d8d0a5fb472262426351d820549a41f3517dac"
+      }
+    }
+  },
+  "comparison": {
+    "available": false,
+    "reason": "Both runs need complete, source-stable observations"
+  },
+  "alternating_direct_reads": {
+    "samples": [
+      {
+        "path": "roadmap",
+        "variant": "repair",
+        "n": 20,
+        "median_ms": 1910.326333498233,
+        "p95_ms": 2873.9871669968124,
+        "max_ms": 5171.989374997793,
+        "failures": 0,
+        "load_median": 34.7607421875,
+        "load_max": 56.30908203125
+      },
+      {
+        "path": "roadmap",
+        "variant": "candidate",
+        "n": 20,
+        "median_ms": 4333.579312486108,
+        "p95_ms": 6777.373249991797,
+        "max_ms": 9593.731540982844,
+        "failures": 0,
+        "load_median": 34.7607421875,
+        "load_max": 57.60693359375
+      },
+      {
+        "path": "sessions",
+        "variant": "repair",
+        "n": 20,
+        "median_ms": 314.511937496718,
+        "p95_ms": 405.7803750038147,
+        "max_ms": 437.52420801320113,
+        "failures": 0,
+        "load_median": 21.01318359375,
+        "load_max": 22.05908203125
+      },
+      {
+        "path": "sessions",
+        "variant": "candidate",
+        "n": 20,
+        "median_ms": 309.26789599470794,
+        "p95_ms": 437.2474169940688,
+        "max_ms": 450.1637500070501,
+        "failures": 0,
+        "load_median": 21.01318359375,
+        "load_max": 22.05908203125
+      }
+    ],
+    "first_observations": [
+      {
+        "path": "roadmap",
+        "variant": "candidate",
+        "sample": 0,
+        "ms": 7478.753208008129,
+        "exit": 0,
+        "load": [
+          34.3017578125,
+          26.87841796875,
+          26.33984375
+        ],
+        "bytes": 263922
+      },
+      {
+        "path": "roadmap",
+        "variant": "repair",
+        "sample": 0,
+        "ms": 4968.121040990809,
+        "exit": 0,
+        "load": [
+          34.357421875,
+          27.01318359375,
+          26.39013671875
+        ],
+        "bytes": 263928
+      },
+      {
+        "path": "sessions",
+        "variant": "candidate",
+        "sample": 0,
+        "ms": 321.51116701425053,
+        "exit": 0,
+        "load": [
+          22.05908203125,
+          28.35595703125,
+          27.3779296875
+        ],
+        "bytes": 64458
+      },
+      {
+        "path": "sessions",
+        "variant": "repair",
+        "sample": 0,
+        "ms": 333.41950000612997,
+        "exit": 0,
+        "load": [
+          22.05908203125,
+          28.35595703125,
+          27.3779296875
+        ],
+        "bytes": 64458
+      }
+    ],
+    "raw_sha256": "7bc003c3499b88a7a594fd3cea21f86be634a9c64d439a5a629ddaaf0e5628c2"
+  }
+}

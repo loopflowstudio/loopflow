@@ -1,0 +1,2083 @@
+{
+  "source_sha256": "d9dc08b5d7d241294b78bf5035d47e8e9069aa58c13808d04d31cd8a0f8230e4",
+  "binaries": {
+    "before": "8af3442d43f600353b65800c4f96ef4bc6708df6f5eea97d838db1b3d81dfe32",
+    "after": "c175464c2289d5f3d7fc92b361abc451893e3ab6a7b9d2d38d57867606958903"
+  },
+  "reads": {
+    "roadmap": {
+      "before": {
+        "first": {
+          "path": "roadmap",
+          "variant": "before",
+          "sample": 0,
+          "ms": 2411.7749590077437,
+          "exit": 0,
+          "load": [
+            18.763671875,
+            32.23974609375,
+            31.6474609375
+          ],
+          "bytes": 263925,
+          "child_cpu_ms": 1055.893,
+          "git_processes": 137,
+          "git_common_dir": 119
+        },
+        "ms": {
+          "n": 20,
+          "median": 1135.2467295073438,
+          "p95": 1921.6211249877233
+        },
+        "child_cpu_ms": {
+          "n": 20,
+          "median": 1067.4665000000005,
+          "p95": 1309.7429999999993
+        },
+        "git_processes": {
+          "n": 20,
+          "median": 137.0,
+          "p95": 137
+        },
+        "git_common_dir": {
+          "n": 20,
+          "median": 119.0,
+          "p95": 119
+        },
+        "load_median": 17.593505859375,
+        "load_max": 18.96044921875
+      },
+      "after": {
+        "first": {
+          "path": "roadmap",
+          "variant": "after",
+          "sample": 0,
+          "ms": 1102.7648329909425,
+          "exit": 0,
+          "load": [
+            18.7021484375,
+            32.0029296875,
+            31.5673828125
+          ],
+          "bytes": 263924,
+          "child_cpu_ms": 545.115,
+          "git_processes": 67,
+          "git_common_dir": 49
+        },
+        "ms": {
+          "n": 20,
+          "median": 601.9658545119455,
+          "p95": 812.0575829816516
+        },
+        "child_cpu_ms": {
+          "n": 20,
+          "median": 575.7304999999994,
+          "p95": 662.6730000000007
+        },
+        "git_processes": {
+          "n": 20,
+          "median": 67.0,
+          "p95": 67
+        },
+        "git_common_dir": {
+          "n": 20,
+          "median": 49.0,
+          "p95": 49
+        },
+        "load_median": 17.593505859375,
+        "load_max": 18.96044921875
+      }
+    },
+    "sessions": {
+      "before": {
+        "first": {
+          "path": "sessions",
+          "variant": "before",
+          "sample": 0,
+          "ms": 239.96658300166018,
+          "exit": 0,
+          "load": [
+            17.65966796875,
+            30.02294921875,
+            30.85791015625
+          ],
+          "bytes": 64458,
+          "child_cpu_ms": 233.91499999999965,
+          "git_processes": 3,
+          "git_common_dir": 1
+        },
+        "ms": {
+          "n": 20,
+          "median": 237.00512500363402,
+          "p95": 245.08970801252872
+        },
+        "child_cpu_ms": {
+          "n": 20,
+          "median": 231.38349999999798,
+          "p95": 236.5940000000073
+        },
+        "git_processes": {
+          "n": 20,
+          "median": 3.0,
+          "p95": 3
+        },
+        "git_common_dir": {
+          "n": 20,
+          "median": 1.0,
+          "p95": 1
+        },
+        "load_median": 17.512939453125,
+        "load_max": 17.65966796875
+      },
+      "after": {
+        "first": {
+          "path": "sessions",
+          "variant": "after",
+          "sample": 0,
+          "ms": 236.3149169832468,
+          "exit": 0,
+          "load": [
+            17.65966796875,
+            30.02294921875,
+            30.85791015625
+          ],
+          "bytes": 64458,
+          "child_cpu_ms": 230.73100000000403,
+          "git_processes": 3,
+          "git_common_dir": 1
+        },
+        "ms": {
+          "n": 20,
+          "median": 239.09958299191203,
+          "p95": 248.46912501379848
+        },
+        "child_cpu_ms": {
+          "n": 20,
+          "median": 233.28799999999816,
+          "p95": 242.47699999999918
+        },
+        "git_processes": {
+          "n": 20,
+          "median": 3.0,
+          "p95": 3
+        },
+        "git_common_dir": {
+          "n": 20,
+          "median": 1.0,
+          "p95": 1
+        },
+        "load_median": 17.3662109375,
+        "load_max": 17.65966796875
+      }
+    }
+  },
+  "baseline_source": "9aa94bfab (Rust/Cargo identical to c12aae56d)",
+  "candidate_base": "c12aae56d4777130c21796216f52d2c78de887d2",
+  "candidate_sources": {
+    "rust/loopflow/src/store/sqlite/task_work.rs": "67ac061041b9ef3fcf64237cc764ff16e226dd1c359ccd01633e4c281da675c2",
+    "rust/loopflow/src/lf/commands/waves.rs": "5069c705394020eac501915c5319e31576295296f84859fdc44440e7b6071874"
+  },
+  "profile": "Cargo release defaults; no profile or Rust flag overrides",
+  "protocol": "Alternating variant order; one first plus twenty warm reads per path; same sandbox, snapshot, CLI counters and Git Trace2 instrumentation. Builds complete before measurement.",
+  "commands": {
+    "roadmap": [
+      "roadmap",
+      "--all",
+      "--json"
+    ],
+    "sessions": [
+      "session",
+      "list",
+      "--all",
+      "--json",
+      "--page",
+      "--limit",
+      "100"
+    ]
+  },
+  "verification": {
+    "source_sha256": "d9dc08b5d7d241294b78bf5035d47e8e9069aa58c13808d04d31cd8a0f8230e4",
+    "configs_unchanged": true,
+    "response_differences": {
+      "roadmap": [
+        ".generated_at",
+        ".waves[1].tasks.items[0].condition.observed_at",
+        ".waves[1].tasks.items[1].condition.observed_at",
+        ".waves[1].tasks.items[2].condition.observed_at",
+        ".waves[1].tasks.items[3].condition.observed_at",
+        ".waves[1].tasks.items[4].condition.observed_at",
+        ".waves[1].tasks.items[5].condition.evidence_age_secs",
+        ".waves[1].tasks.items[5].condition.observed_at",
+        ".waves[3].tasks.items[0].condition.observed_at",
+        ".waves[3].tasks.items[1].condition.observed_at",
+        ".waves[3].tasks.items[2].condition.observed_at",
+        ".waves[3].tasks.items[3].condition.observed_at",
+        ".waves[3].tasks.items[4].condition.observed_at",
+        ".waves[3].tasks.items[5].condition.evidence_age_secs",
+        ".waves[3].tasks.items[5].condition.observed_at",
+        ".waves[43].tasks.items[0].condition.observed_at",
+        ".waves[43].tasks.items[1].condition.observed_at",
+        ".waves[43].tasks.items[2].condition.observed_at",
+        ".waves[43].tasks.items[3].condition.observed_at",
+        ".waves[43].tasks.items[4].condition.observed_at",
+        ".waves[43].tasks.items[5].condition.observed_at",
+        ".waves[43].tasks.items[6].condition.evidence_age_secs",
+        ".waves[43].tasks.items[6].condition.observed_at",
+        ".waves[43].tasks.items[7].condition.evidence_age_secs",
+        ".waves[43].tasks.items[7].condition.observed_at",
+        ".waves[44].tasks.items[0].condition.observed_at",
+        ".waves[44].tasks.items[1].condition.evidence_age_secs",
+        ".waves[44].tasks.items[1].condition.observed_at",
+        ".waves[44].tasks.items[2].condition.observed_at",
+        ".waves[44].tasks.items[3].condition.observed_at",
+        ".waves[4].tasks.items[0].condition.evidence_age_secs",
+        ".waves[4].tasks.items[0].condition.observed_at",
+        ".waves[4].tasks.items[1].condition.observed_at",
+        ".waves[4].tasks.items[2].condition.observed_at",
+        ".waves[4].tasks.items[3].condition.evidence_age_secs",
+        ".waves[4].tasks.items[3].condition.observed_at",
+        ".waves[6].tasks.items[0].condition.observed_at",
+        ".waves[6].tasks.items[10].condition.observed_at",
+        ".waves[6].tasks.items[11].condition.observed_at",
+        ".waves[6].tasks.items[12].condition.observed_at",
+        ".waves[6].tasks.items[1].condition.observed_at",
+        ".waves[6].tasks.items[2].condition.observed_at",
+        ".waves[6].tasks.items[3].condition.observed_at",
+        ".waves[6].tasks.items[4].condition.observed_at",
+        ".waves[6].tasks.items[5].condition.observed_at",
+        ".waves[6].tasks.items[6].condition.evidence_age_secs",
+        ".waves[6].tasks.items[6].condition.observed_at",
+        ".waves[6].tasks.items[7].condition.observed_at",
+        ".waves[6].tasks.items[8].condition.observed_at",
+        ".waves[6].tasks.items[9].condition.evidence_age_secs",
+        ".waves[6].tasks.items[9].condition.observed_at",
+        ".waves[9].tasks.items[0].condition.observed_at",
+        ".waves[9].tasks.items[10].condition.evidence_age_secs",
+        ".waves[9].tasks.items[10].condition.observed_at",
+        ".waves[9].tasks.items[11].condition.evidence_age_secs",
+        ".waves[9].tasks.items[11].condition.observed_at",
+        ".waves[9].tasks.items[12].condition.evidence_age_secs",
+        ".waves[9].tasks.items[12].condition.observed_at",
+        ".waves[9].tasks.items[13].condition.evidence_age_secs",
+        ".waves[9].tasks.items[13].condition.observed_at",
+        ".waves[9].tasks.items[14].condition.evidence_age_secs",
+        ".waves[9].tasks.items[14].condition.observed_at",
+        ".waves[9].tasks.items[15].condition.evidence_age_secs",
+        ".waves[9].tasks.items[15].condition.observed_at",
+        ".waves[9].tasks.items[16].condition.evidence_age_secs",
+        ".waves[9].tasks.items[16].condition.observed_at",
+        ".waves[9].tasks.items[17].condition.evidence_age_secs",
+        ".waves[9].tasks.items[17].condition.observed_at",
+        ".waves[9].tasks.items[18].condition.evidence_age_secs",
+        ".waves[9].tasks.items[18].condition.observed_at",
+        ".waves[9].tasks.items[19].condition.evidence_age_secs",
+        ".waves[9].tasks.items[19].condition.observed_at",
+        ".waves[9].tasks.items[1].condition.observed_at",
+        ".waves[9].tasks.items[20].condition.evidence_age_secs",
+        ".waves[9].tasks.items[20].condition.observed_at",
+        ".waves[9].tasks.items[21].condition.evidence_age_secs",
+        ".waves[9].tasks.items[21].condition.observed_at",
+        ".waves[9].tasks.items[2].condition.observed_at",
+        ".waves[9].tasks.items[3].condition.observed_at",
+        ".waves[9].tasks.items[4].condition.evidence_age_secs",
+        ".waves[9].tasks.items[4].condition.observed_at",
+        ".waves[9].tasks.items[5].condition.evidence_age_secs",
+        ".waves[9].tasks.items[5].condition.observed_at",
+        ".waves[9].tasks.items[6].condition.observed_at",
+        ".waves[9].tasks.items[7].condition.observed_at",
+        ".waves[9].tasks.items[8].condition.evidence_age_secs",
+        ".waves[9].tasks.items[8].condition.observed_at",
+        ".waves[9].tasks.items[9].condition.evidence_age_secs",
+        ".waves[9].tasks.items[9].condition.observed_at"
+      ],
+      "sessions": []
+    },
+    "storage": {
+      "before": {
+        "access_profiles": {
+          "retained_rows": 4,
+          "identical": true,
+          "added_rows": 0
+        },
+        "agent_sessions": {
+          "retained_rows": 604,
+          "identical": true,
+          "added_rows": 0
+        },
+        "auth_browser_bindings": {
+          "retained_rows": 7,
+          "identical": true,
+          "added_rows": 0
+        },
+        "blob_tokens": {
+          "retained_rows": 1401,
+          "identical": true,
+          "added_rows": 0
+        },
+        "ci_incidents": {
+          "retained_rows": 212,
+          "identical": true,
+          "added_rows": 0
+        },
+        "execs": {
+          "retained_rows": 218637,
+          "identical": true,
+          "added_rows": 42
+        },
+        "flow_events": {
+          "retained_rows": 901,
+          "identical": true,
+          "added_rows": 0
+        },
+        "flow_sessions": {
+          "retained_rows": 104,
+          "identical": true,
+          "added_rows": 0
+        },
+        "homes": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_instruments": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_observations": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_issue_changes": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_items": {
+          "retained_rows": 163,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_sync": {
+          "retained_rows": 21,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pr_landings": {
+          "retained_rows": 142,
+          "identical": true,
+          "added_rows": 0
+        },
+        "project_events": {
+          "retained_rows": 30536,
+          "identical": true,
+          "added_rows": 0
+        },
+        "projects": {
+          "retained_rows": 49,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_limits": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_switches": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_accounts": {
+          "retained_rows": 6,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_routes": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_session_accounts": {
+          "retained_rows": 3724,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_tokens": {
+          "retained_rows": 5,
+          "identical": true,
+          "added_rows": 0
+        },
+        "schema_migrations": {
+          "retained_rows": 62,
+          "identical": true,
+          "added_rows": 0
+        },
+        "session_events": {
+          "retained_rows": 521637,
+          "identical": true,
+          "added_rows": 0
+        },
+        "sqlite_sequence": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_deletions": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_events": {
+          "retained_rows": 66836,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_issue_identities": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_ingested_comments": {
+          "retained_rows": 611,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_observations": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_pr_repair_incidents": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_prs": {
+          "retained_rows": 449,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tasks": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tool_responses": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "waves": {
+          "retained_rows": 53,
+          "identical": true,
+          "added_rows": 0
+        },
+        "work_placements": {
+          "retained_rows": 441,
+          "identical": true,
+          "added_rows": 0
+        }
+      },
+      "after": {
+        "access_profiles": {
+          "retained_rows": 4,
+          "identical": true,
+          "added_rows": 0
+        },
+        "agent_sessions": {
+          "retained_rows": 604,
+          "identical": true,
+          "added_rows": 0
+        },
+        "auth_browser_bindings": {
+          "retained_rows": 7,
+          "identical": true,
+          "added_rows": 0
+        },
+        "blob_tokens": {
+          "retained_rows": 1401,
+          "identical": true,
+          "added_rows": 0
+        },
+        "ci_incidents": {
+          "retained_rows": 212,
+          "identical": true,
+          "added_rows": 0
+        },
+        "execs": {
+          "retained_rows": 218637,
+          "identical": true,
+          "added_rows": 42
+        },
+        "flow_events": {
+          "retained_rows": 901,
+          "identical": true,
+          "added_rows": 0
+        },
+        "flow_sessions": {
+          "retained_rows": 104,
+          "identical": true,
+          "added_rows": 0
+        },
+        "homes": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_instruments": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "metric_observations": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_issue_changes": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_items": {
+          "retained_rows": 163,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_projects": {
+          "retained_rows": 35,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pm_wave_sync": {
+          "retained_rows": 21,
+          "identical": true,
+          "added_rows": 0
+        },
+        "pr_landings": {
+          "retained_rows": 142,
+          "identical": true,
+          "added_rows": 0
+        },
+        "project_events": {
+          "retained_rows": 30536,
+          "identical": true,
+          "added_rows": 0
+        },
+        "projects": {
+          "retained_rows": 49,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_limits": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_account_switches": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_accounts": {
+          "retained_rows": 6,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_routes": {
+          "retained_rows": 12,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_session_accounts": {
+          "retained_rows": 3724,
+          "identical": true,
+          "added_rows": 0
+        },
+        "provider_tokens": {
+          "retained_rows": 5,
+          "identical": true,
+          "added_rows": 0
+        },
+        "schema_migrations": {
+          "retained_rows": 62,
+          "identical": true,
+          "added_rows": 0
+        },
+        "session_events": {
+          "retained_rows": 521637,
+          "identical": true,
+          "added_rows": 0
+        },
+        "sqlite_sequence": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_deletions": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_events": {
+          "retained_rows": 66836,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_issue_identities": {
+          "retained_rows": 1,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_ingested_comments": {
+          "retained_rows": 611,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_linear_observations": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_pr_repair_incidents": {
+          "retained_rows": 3,
+          "identical": true,
+          "added_rows": 0
+        },
+        "task_prs": {
+          "retained_rows": 449,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tasks": {
+          "retained_rows": 342,
+          "identical": true,
+          "added_rows": 0
+        },
+        "tool_responses": {
+          "retained_rows": 0,
+          "identical": true,
+          "added_rows": 0
+        },
+        "waves": {
+          "retained_rows": 53,
+          "identical": true,
+          "added_rows": 0
+        },
+        "work_placements": {
+          "retained_rows": 441,
+          "identical": true,
+          "added_rows": 0
+        }
+      }
+    },
+    "counters": {
+      "before": {
+        "starts": 42,
+        "ends": 42,
+        "connections": 315,
+        "statements": 65711,
+        "rows": 1093976
+      },
+      "after": {
+        "starts": 42,
+        "ends": 42,
+        "connections": 315,
+        "statements": 65711,
+        "rows": 1093976
+      }
+    },
+    "freshness_age_checks": 525,
+    "responses_equivalent_except_fresh_timestamps_and_age": true
+  },
+  "samples": [
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 0,
+      "ms": 2411.7749590077437,
+      "exit": 0,
+      "load": [
+        18.763671875,
+        32.23974609375,
+        31.6474609375
+      ],
+      "bytes": 263925,
+      "child_cpu_ms": 1055.893,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 0,
+      "ms": 1102.7648329909425,
+      "exit": 0,
+      "load": [
+        18.7021484375,
+        32.0029296875,
+        31.5673828125
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 545.115,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 1,
+      "ms": 560.0089999788906,
+      "exit": 0,
+      "load": [
+        18.7021484375,
+        32.0029296875,
+        31.5673828125
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 538.1250000000002,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 1,
+      "ms": 1035.0389589730185,
+      "exit": 0,
+      "load": [
+        18.7021484375,
+        32.0029296875,
+        31.5673828125
+      ],
+      "bytes": 263927,
+      "child_cpu_ms": 994.3700000000002,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 2,
+      "ms": 1056.1199999938253,
+      "exit": 0,
+      "load": [
+        18.7021484375,
+        32.0029296875,
+        31.5673828125
+      ],
+      "bytes": 263930,
+      "child_cpu_ms": 1012.8940000000005,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 2,
+      "ms": 589.1717089980375,
+      "exit": 0,
+      "load": [
+        18.7021484375,
+        32.0029296875,
+        31.5673828125
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 551.2839999999992,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 3,
+      "ms": 589.1041249851696,
+      "exit": 0,
+      "load": [
+        17.5244140625,
+        31.53759765625,
+        31.40576171875
+      ],
+      "bytes": 263923,
+      "child_cpu_ms": 561.7740000000002,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 3,
+      "ms": 1102.997250010958,
+      "exit": 0,
+      "load": [
+        17.5244140625,
+        31.53759765625,
+        31.40576171875
+      ],
+      "bytes": 263925,
+      "child_cpu_ms": 1050.2859999999998,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 4,
+      "ms": 1151.4616250060499,
+      "exit": 0,
+      "load": [
+        17.5244140625,
+        31.53759765625,
+        31.40576171875
+      ],
+      "bytes": 263926,
+      "child_cpu_ms": 1064.3950000000002,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 4,
+      "ms": 600.9128750010859,
+      "exit": 0,
+      "load": [
+        17.5244140625,
+        31.53759765625,
+        31.40576171875
+      ],
+      "bytes": 263922,
+      "child_cpu_ms": 574.0149999999998,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 5,
+      "ms": 584.7459579817951,
+      "exit": 0,
+      "load": [
+        17.5244140625,
+        31.53759765625,
+        31.40576171875
+      ],
+      "bytes": 263921,
+      "child_cpu_ms": 558.7420000000001,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 5,
+      "ms": 1099.3612500024028,
+      "exit": 0,
+      "load": [
+        17.5244140625,
+        31.53759765625,
+        31.40576171875
+      ],
+      "bytes": 263921,
+      "child_cpu_ms": 1040.315999999999,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 6,
+      "ms": 1062.159833003534,
+      "exit": 0,
+      "load": [
+        16.92138671875,
+        31.1796875,
+        31.2802734375
+      ],
+      "bytes": 263928,
+      "child_cpu_ms": 1015.7739999999995,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 6,
+      "ms": 573.4152500226628,
+      "exit": 0,
+      "load": [
+        16.92138671875,
+        31.1796875,
+        31.2802734375
+      ],
+      "bytes": 263919,
+      "child_cpu_ms": 550.2619999999996,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 7,
+      "ms": 570.5359170096926,
+      "exit": 0,
+      "load": [
+        16.92138671875,
+        31.1796875,
+        31.2802734375
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 545.5080000000007,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 7,
+      "ms": 1142.4562080064788,
+      "exit": 0,
+      "load": [
+        16.92138671875,
+        31.1796875,
+        31.2802734375
+      ],
+      "bytes": 263930,
+      "child_cpu_ms": 1080.3570000000002,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 8,
+      "ms": 1772.6985000190325,
+      "exit": 0,
+      "load": [
+        16.92138671875,
+        31.1796875,
+        31.2802734375
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 1194.0590000000002,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 8,
+      "ms": 603.0188340228051,
+      "exit": 0,
+      "load": [
+        16.60693359375,
+        30.87744140625,
+        31.1728515625
+      ],
+      "bytes": 263928,
+      "child_cpu_ms": 577.4459999999992,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 9,
+      "ms": 597.9651249945164,
+      "exit": 0,
+      "load": [
+        16.60693359375,
+        30.87744140625,
+        31.1728515625
+      ],
+      "bytes": 263926,
+      "child_cpu_ms": 566.2020000000006,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 9,
+      "ms": 1921.6211249877233,
+      "exit": 0,
+      "load": [
+        16.60693359375,
+        30.87744140625,
+        31.1728515625
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 1309.7429999999993,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 10,
+      "ms": 2054.349291982362,
+      "exit": 0,
+      "load": [
+        16.60693359375,
+        30.87744140625,
+        31.1728515625
+      ],
+      "bytes": 263927,
+      "child_cpu_ms": 1491.2230000000006,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 10,
+      "ms": 812.0575829816516,
+      "exit": 0,
+      "load": [
+        18.96044921875,
+        31.12841796875,
+        31.25927734375
+      ],
+      "bytes": 263930,
+      "child_cpu_ms": 710.8159999999995,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 11,
+      "ms": 719.6663330250885,
+      "exit": 0,
+      "load": [
+        18.96044921875,
+        31.12841796875,
+        31.25927734375
+      ],
+      "bytes": 263925,
+      "child_cpu_ms": 662.6730000000007,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 11,
+      "ms": 1211.246332997689,
+      "exit": 0,
+      "load": [
+        18.96044921875,
+        31.12841796875,
+        31.25927734375
+      ],
+      "bytes": 263928,
+      "child_cpu_ms": 1147.025,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 12,
+      "ms": 1129.0380830178037,
+      "exit": 0,
+      "load": [
+        18.96044921875,
+        31.12841796875,
+        31.25927734375
+      ],
+      "bytes": 263927,
+      "child_cpu_ms": 1076.7960000000007,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 12,
+      "ms": 621.5513749921229,
+      "exit": 0,
+      "load": [
+        18.96044921875,
+        31.12841796875,
+        31.25927734375
+      ],
+      "bytes": 263927,
+      "child_cpu_ms": 592.3589999999992,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 13,
+      "ms": 616.1690000153612,
+      "exit": 0,
+      "load": [
+        18.24267578125,
+        30.77734375,
+        31.13427734375
+      ],
+      "bytes": 263926,
+      "child_cpu_ms": 585.9109999999994,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 13,
+      "ms": 1175.2947909990326,
+      "exit": 0,
+      "load": [
+        18.24267578125,
+        30.77734375,
+        31.13427734375
+      ],
+      "bytes": 263929,
+      "child_cpu_ms": 1112.3999999999992,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 14,
+      "ms": 1112.4877920083236,
+      "exit": 0,
+      "load": [
+        18.24267578125,
+        30.77734375,
+        31.13427734375
+      ],
+      "bytes": 263926,
+      "child_cpu_ms": 1051.0170000000016,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 14,
+      "ms": 617.4602500104811,
+      "exit": 0,
+      "load": [
+        18.24267578125,
+        30.77734375,
+        31.13427734375
+      ],
+      "bytes": 263927,
+      "child_cpu_ms": 579.5019999999997,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 15,
+      "ms": 597.4340419925284,
+      "exit": 0,
+      "load": [
+        18.24267578125,
+        30.77734375,
+        31.13427734375
+      ],
+      "bytes": 263916,
+      "child_cpu_ms": 568.3579999999981,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 15,
+      "ms": 1103.5799579985905,
+      "exit": 0,
+      "load": [
+        18.24267578125,
+        30.77734375,
+        31.13427734375
+      ],
+      "bytes": 263920,
+      "child_cpu_ms": 1041.326999999999,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 16,
+      "ms": 1599.6474999992643,
+      "exit": 0,
+      "load": [
+        17.66259765625,
+        30.44873046875,
+        31.01611328125
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 1084.708000000001,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 16,
+      "ms": 1161.9775420113,
+      "exit": 0,
+      "load": [
+        17.66259765625,
+        30.44873046875,
+        31.01611328125
+      ],
+      "bytes": 263927,
+      "child_cpu_ms": 647.1339999999976,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 17,
+      "ms": 612.6168329792563,
+      "exit": 0,
+      "load": [
+        17.66259765625,
+        30.44873046875,
+        31.01611328125
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 582.5370000000003,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 17,
+      "ms": 1142.1184169885237,
+      "exit": 0,
+      "load": [
+        17.66259765625,
+        30.44873046875,
+        31.01611328125
+      ],
+      "bytes": 263927,
+      "child_cpu_ms": 1086.032999999997,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 18,
+      "ms": 1141.0581250092946,
+      "exit": 0,
+      "load": [
+        17.66259765625,
+        30.44873046875,
+        31.01611328125
+      ],
+      "bytes": 263931,
+      "child_cpu_ms": 1056.9990000000012,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 18,
+      "ms": 687.4864580167923,
+      "exit": 0,
+      "load": [
+        17.369140625,
+        30.17529296875,
+        30.916015625
+      ],
+      "bytes": 263920,
+      "child_cpu_ms": 609.5379999999988,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 19,
+      "ms": 630.2415000100154,
+      "exit": 0,
+      "load": [
+        17.369140625,
+        30.17529296875,
+        30.916015625
+      ],
+      "bytes": 263924,
+      "child_cpu_ms": 598.8540000000029,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 19,
+      "ms": 1129.435334005393,
+      "exit": 0,
+      "load": [
+        17.369140625,
+        30.17529296875,
+        30.916015625
+      ],
+      "bytes": 263927,
+      "child_cpu_ms": 1070.538000000001,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "before",
+      "sample": 20,
+      "ms": 1098.805083980551,
+      "exit": 0,
+      "load": [
+        17.369140625,
+        30.17529296875,
+        30.916015625
+      ],
+      "bytes": 263926,
+      "child_cpu_ms": 1048.0000000000018,
+      "git_processes": 137,
+      "git_common_dir": 119
+    },
+    {
+      "path": "roadmap",
+      "variant": "after",
+      "sample": 20,
+      "ms": 597.8721670107916,
+      "exit": 0,
+      "load": [
+        17.369140625,
+        30.17529296875,
+        30.916015625
+      ],
+      "bytes": 263917,
+      "child_cpu_ms": 571.7680000000005,
+      "git_processes": 67,
+      "git_common_dir": 49
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 0,
+      "ms": 239.96658300166018,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 233.91499999999965,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 0,
+      "ms": 236.3149169832468,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 230.73100000000403,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 1,
+      "ms": 243.78054100088775,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 235.70199999999986,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 1,
+      "ms": 237.09941701963544,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 232.1570000000026,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 2,
+      "ms": 234.34133297996596,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 230.64600000000013,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 2,
+      "ms": 241.64049999671988,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 236.4630000000023,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 3,
+      "ms": 246.2390000000596,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 240.49800000000408,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 3,
+      "ms": 237.597375002224,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 232.3360000000001,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 4,
+      "ms": 234.71187500399537,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 230.414000000005,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 4,
+      "ms": 239.4184999866411,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 228.82599999999974,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 5,
+      "ms": 237.32583300443366,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 233.3969999999983,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 5,
+      "ms": 234.846709005069,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 230.3690000000014,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 6,
+      "ms": 245.08970801252872,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 240.23299999999637,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 6,
+      "ms": 248.46912501379848,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 242.47699999999918,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 7,
+      "ms": 237.23445797804743,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 233.17899999999804,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 7,
+      "ms": 246.05629200232215,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 236.1450000000005,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 8,
+      "ms": 239.90075002075173,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 235.45800000000128,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 8,
+      "ms": 240.02787499921396,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 233.45299999999548,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 9,
+      "ms": 235.47395897912793,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 231.08600000000123,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 9,
+      "ms": 235.13816701597534,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 229.90399999999767,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 10,
+      "ms": 238.82845899788663,
+      "exit": 0,
+      "load": [
+        17.65966796875,
+        30.02294921875,
+        30.85791015625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 233.84900000000107,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 10,
+      "ms": 235.26616700110026,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 231.51099999999582,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 11,
+      "ms": 238.78066599718295,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 235.23299999999736,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 11,
+      "ms": 237.8679160028696,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 232.62799999999828,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 12,
+      "ms": 236.35358299361542,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 230.38899999999884,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 12,
+      "ms": 233.29341699718498,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 228.42299999999761,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 13,
+      "ms": 243.379375024233,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 237.99500000000506,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 13,
+      "ms": 237.0325829833746,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 232.1209999999958,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 14,
+      "ms": 236.97766702389345,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 230.16000000000147,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 14,
+      "ms": 235.58895802125335,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 231.1840000000007,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 15,
+      "ms": 242.90920799830928,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 231.90099999999882,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 15,
+      "ms": 230.57633399730548,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 227.02600000000217,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 16,
+      "ms": 234.65550001128577,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 225.80800000000067,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 16,
+      "ms": 250.54841599194333,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 243.61400000000265,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 17,
+      "ms": 233.2058330066502,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 228.99599999999685,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 17,
+      "ms": 231.88500001560897,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 227.61700000000042,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 18,
+      "ms": 232.46312499395572,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 228.49400000000662,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 18,
+      "ms": 228.4050419984851,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 220.71699999999694,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 19,
+      "ms": 227.59137497632764,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 223.17499999999592,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 19,
+      "ms": 241.2210829788819,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 234.97799999999637,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "before",
+      "sample": 20,
+      "ms": 242.3262080119457,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 236.5940000000073,
+      "git_processes": 3,
+      "git_common_dir": 1
+    },
+    {
+      "path": "sessions",
+      "variant": "after",
+      "sample": 20,
+      "ms": 242.4758749839384,
+      "exit": 0,
+      "load": [
+        17.3662109375,
+        29.7568359375,
+        30.7587890625
+      ],
+      "bytes": 64458,
+      "child_cpu_ms": 236.5709999999943,
+      "git_processes": 3,
+      "git_common_dir": 1
+    }
+  ],
+  "bundled_sqlite": {
+    "version": "3.53.2",
+    "flows": 104,
+    "identical_exec_memberships": true,
+    "exec_ids_returned": 495,
+    "before_vm_steps": 163669123,
+    "after_vm_steps": 1942478,
+    "before_cpu_seconds": 18.365824,
+    "after_cpu_seconds": 0.276473
+  },
+  "receipts": {
+    "query.txt": "5664fa16d10772300105d2a8890fa535a4d59718b54777fd34f46de9e9d1f5a9",
+    "query.c": "22f313bc65ef82eb19c7aca50009e9b85866c167829251b1e840d33a0f5c842f",
+    "before-sample.txt": "5f018091c9f64758c83725f5cec1b3b8e1beaaf9eab5df6cd307cbae17736334",
+    "after-sample.txt": "ee5dcf0b27d6ca10999d8e838824f3caaaf898f16d8c1dcd868f8fc840e87d85",
+    "measure.py": "288acf7623d5f96da42bfe0e95f7596e7a3152ae31a44e6653714979cdce6ba5",
+    "verify.py": "9a1940186bf510f8bd1551fcb6e2bb48b5ca71e9baab01e72b1e77c2b5bd2003",
+    "matched/reads.jsonl": "87d8ee602b1e2675a1f2df1811f6509ac823c43d578d606c0c8cd7556a07966a",
+    "matched/verification.json": "e9110ca1da2e122842ffb27553ea0738da3d79b37861e3da82069489acf66e33",
+    "reads.jsonl": "9bf9ea36bc2b887c601c5e42521da4df5f45c797a6248bc34b80ee44c453a938"
+  },
+  "limits": [
+    "CLI-only timing, not Desktop transport or rendered endpoints",
+    "Host load variable; earlier 1910/2874 ms is a different cohort",
+    "App CPU/RSS, compositor, main-thread stalls, hitches/hangs and full hours unmeasured",
+    "Prior memory failures and historical failed native receipts remain",
+    "Initial noncanonical sandbox launch failed before CLI execution; retained separately"
+  ]
+}

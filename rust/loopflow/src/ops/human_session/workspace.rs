@@ -50,18 +50,11 @@ impl WorkspaceResolver {
     }
 
     fn root(&mut self, path: &Path) -> Option<PathBuf> {
-        // Retired checkouts remain in history. Resolve filesystem existence and
-        // aliases before launching Git, rather than spawning it for every absent
-        // checkout on every Session page.
-        let path = path.canonicalize().ok()?;
+        // The filesystem reader resolves aliases. Cache missing checkouts too:
+        // retained Sessions can share the same retired path within this page.
         self.roots
-            .entry(path.clone())
-            .or_insert_with(|| {
-                crate::engine::git::worktree_root(&path)
-                    .ok()?
-                    .canonicalize()
-                    .ok()
-            })
+            .entry(path.to_path_buf())
+            .or_insert_with(|| crate::engine::git::worktree_root(path).ok())
             .clone()
     }
 

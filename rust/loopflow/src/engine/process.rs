@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use anyhow::{anyhow, Result};
 
@@ -102,7 +103,20 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
     if !crate::store::custom_home_selected() {
         if let Some(cli) = crate::machine_install::installed_cli(&crate::machine_install::root()?)?
         {
-            cli.verify()?;
+            // One read resolves this for every Task; hash unchanged bytes once.
+            static VERIFIED: Mutex<Option<(PathBuf, String, u64, SystemTime)>> = Mutex::new(None);
+            let metadata = std::fs::metadata(&cli.path)?;
+            let observed = Some((
+                cli.path.clone(),
+                cli.sha256.clone(),
+                metadata.len(),
+                metadata.modified()?,
+            ));
+            let mut verified = VERIFIED.lock().expect("verified CLI mutex poisoned");
+            if *verified != observed {
+                cli.verify()?;
+                *verified = observed;
+            }
             return Ok(cli.path);
         }
     }

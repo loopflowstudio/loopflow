@@ -85,7 +85,7 @@ struct TaskCommentsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                         Text(Self.author(comment.author))
-                            .font(Typography.body(12.5).weight(.bold))
+                            .font(Typography.strong(12.5))
                             .foregroundStyle(palette.text)
                         Text(Self.date(comment.createdAt))
                             .font(Typography.caption(12))

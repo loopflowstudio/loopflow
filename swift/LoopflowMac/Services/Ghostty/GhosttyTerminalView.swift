@@ -1246,7 +1246,7 @@ func terminalPasteText(from pasteboard: NSPasteboard) -> String? {
        let tiff = image.tiffRepresentation,
        let bitmap = NSBitmapImageRep(data: tiff),
        let png = bitmap.representation(using: .png, properties: [:]) {
-        let path = FileManager.default.temporaryDirectory
+        let path = terminalTemporaryDirectory()
             .appendingPathComponent("loopflow-image-\(UUID().uuidString.lowercased()).png")
         guard (try? png.write(to: path, options: .atomic)) != nil else { return nil }
         return shellEscape(path.path)
@@ -1430,7 +1430,7 @@ enum LoopflowZshBootstrap {
     /// the system may clear temporary files while the app stays open, and a
     /// ZDOTDIR without a `.zshenv` would skip the user's rc files.
     static func install() -> String? {
-        let directory = FileManager.default.temporaryDirectory
+        let directory = terminalTemporaryDirectory()
             .appendingPathComponent("loopflow-zsh", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

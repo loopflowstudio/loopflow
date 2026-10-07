@@ -10,8 +10,11 @@
 //! audit surface that renders "I could not look" as "nothing happened" is worse
 //! than one that says nothing at all.
 
+use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -524,9 +527,10 @@ pub(crate) async fn wave_snapshots(
         .await
         .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
     let waves = scope_waves_to_repo(waves, all)?;
+    let mut repositories = HashMap::new();
     let mut snapshots = Vec::with_capacity(waves.len());
     for wave in waves {
-        let snapshot = snapshot_wave(store, &wave).await?;
+        let snapshot = snapshot_wave(store, &wave, &mut repositories).await?;
         if !current || current_wave(&snapshot) {
             snapshots.push(snapshot);
         }
@@ -563,8 +567,9 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         .list_waves(Some(wave.repo()))
         .await
         .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
-    validate_pm_portfolio(store, &repository_waves).await?;
-    let snapshot = snapshot_wave(store, wave).await?;
+    let mut repositories = HashMap::new();
+    validate_pm_portfolio(store, &repository_waves, &mut repositories).await?;
+    let snapshot = snapshot_wave(store, wave, &mut repositories).await?;
     let shared = SharedTaskReads::read(store).await?;
     let task_snapshots = wave_tasks(store, wave, true, None, &shared).await?;
     let metric_portfolio = crate::ops::metrics::wave_metric_portfolio(store, wave, now()).await?;
@@ -687,11 +692,12 @@ async fn roadmap_snapshot(
     } else {
         waves.clone()
     };
-    validate_pm_portfolio(store, &ownership_waves).await?;
+    let mut repositories = HashMap::new();
+    validate_pm_portfolio(store, &ownership_waves, &mut repositories).await?;
     let shared = SharedTaskReads::read(store).await?;
     let mut roadmaps = Vec::with_capacity(waves.len());
     for wave in &waves {
-        let snapshot = snapshot_wave(store, wave).await?;
+        let snapshot = snapshot_wave(store, wave, &mut repositories).await?;
         if !include_history && !current_wave(&snapshot) {
             continue;
         }
@@ -926,21 +932,27 @@ fn now() -> time::OffsetDateTime {
     time::OffsetDateTime::now_utc()
 }
 
-/// A Wave's main checkout. A repository that is gone answers for itself:
-/// Git is asked only about directories that exist.
-fn wave_main_repo(repo: &str) -> PathBuf {
-    let repo = Path::new(repo);
-    repo.is_dir()
-        .then(|| crate::engine::worktrees::main_repo_root(repo).ok())
-        .flatten()
-        .unwrap_or_else(|| repo.to_path_buf())
+// Resolve each recorded repository once per read. Sharing across validation and
+// display avoids one Git process per Wave without retaining facts across reads.
+fn wave_repository(wave: &Wave, repositories: &mut HashMap<String, PathBuf>) -> PathBuf {
+    repositories
+        .entry(wave.repo().to_string())
+        .or_insert_with(|| {
+            crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))
+                .unwrap_or_else(|_| Path::new(wave.repo()).to_path_buf())
+        })
+        .clone()
 }
 
 /// Build the registry snapshot for one wave, probing its discovery endpoint
 /// for liveness.
-pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot> {
+pub(crate) async fn snapshot_wave(
+    store: &SharedStore,
+    wave: &Wave,
+    repositories: &mut HashMap<String, PathBuf>,
+) -> Result<WaveSnapshot> {
     let repo = wave.repo().to_string();
-    let goal_repo = wave_main_repo(&repo);
+    let goal_repo = wave_repository(wave, repositories);
     let tasks = store
         .list_tasks(Some(wave.id()))
         .await
@@ -1008,10 +1020,14 @@ fn snapshot_task_runtime(
     }
 }
 
-async fn validate_pm_portfolio(store: &SharedStore, waves: &[Wave]) -> Result<()> {
+async fn validate_pm_portfolio(
+    store: &SharedStore,
+    waves: &[Wave],
+    repositories: &mut HashMap<String, PathBuf>,
+) -> Result<()> {
     let mut ownership = std::collections::HashMap::<_, PmPortfolioValidator>::new();
     for wave in waves {
-        let repo = wave_main_repo(wave.repo());
+        let repo = wave_repository(wave, repositories);
         let repo = std::fs::canonicalize(&repo).unwrap_or(repo);
         let row = match store.pm_snapshot(wave.id()).await {
             Ok(Some(row)) => row,
@@ -1041,30 +1057,24 @@ async fn snapshot_tasks(
     include_retained: bool,
     shared: &SharedTaskReads,
 ) -> Result<(Vec<TaskDetailSnapshot>, Vec<UnavailableTaskEvidence>)> {
-    let mut details = Vec::new();
+    let mut requests = Vec::new();
     let mut unavailable_tasks = Vec::new();
     for item in planning.items {
-        let runtime_task = tasks.iter().find(|task| {
+        let task = tasks.iter().find(|task| {
             task.plan.id.as_str() == item.id || task.plan.identifier == item.identifier
         });
         let recommended = recommended_flow(&planning.projects, item.project_id.as_deref());
-        details.push(
-            snapshot_task_detail(
-                store,
-                item,
-                runtime_task,
-                recommended,
-                probe_pr_empty,
-                shared,
-            )
-            .await?,
-        );
+        requests.push(TaskDetailRequest {
+            item,
+            task,
+            recommended,
+        });
     }
 
     for task in &tasks {
-        if details.iter().any(|detail| {
-            detail.task.id == task.plan.id.as_str()
-                || detail.task.identifier == task.plan.identifier
+        if requests.iter().any(|request| {
+            request.item.id == task.plan.id.as_str()
+                || request.item.identifier == task.plan.identifier
         }) {
             continue;
         }
@@ -1109,11 +1119,13 @@ async fn snapshot_tasks(
         let recommended = current_plan
             .map_or("feature", |plan| plan.workflow.as_str())
             .to_string();
-        details.push(
-            snapshot_task_detail(store, item, Some(task), recommended, probe_pr_empty, shared)
-                .await?,
-        );
+        requests.push(TaskDetailRequest {
+            item,
+            task: Some(task),
+            recommended,
+        });
     }
+    let mut details = snapshot_task_details(store, requests, probe_pr_empty, shared)?;
     details.sort_by(|left, right| {
         left.task
             .completed
@@ -1127,6 +1139,71 @@ async fn snapshot_tasks(
             .then(left.work_id.cmp(&right.work_id))
     });
     Ok((details, unavailable_tasks))
+}
+
+struct TaskDetailRequest<'a> {
+    item: PmItem,
+    task: Option<&'a Task>,
+    recommended: String,
+}
+
+/// Each detail waits on fresh Git observations of its own checkout. Gather
+/// them side by side: one after another, those children are most of a
+/// roadmap read. Details and the first error keep their request order.
+fn snapshot_task_details(
+    store: &SharedStore,
+    requests: Vec<TaskDetailRequest<'_>>,
+    probe_pr_empty: bool,
+    shared: &SharedTaskReads,
+) -> Result<Vec<TaskDetailSnapshot>> {
+    // `git status` is parallel itself: past four, overlapping children cost
+    // more CPU than the wall time they save.
+    const MAX_WORKERS: usize = 4;
+    let runtime = tokio::runtime::Handle::current();
+    let workers = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZero::get)
+        .min(MAX_WORKERS)
+        .min(requests.len());
+    let requests: Vec<_> = requests
+        .into_iter()
+        .map(|request| Mutex::new(Some(request)))
+        .collect();
+    let next = AtomicUsize::new(0);
+    let mut details: Vec<_> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut details = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(request) = requests.get(index) else {
+                            return details;
+                        };
+                        let request = request
+                            .lock()
+                            .expect("Task detail request mutex poisoned")
+                            .take()
+                            .expect("each Task detail request is claimed once");
+                        let detail = runtime.block_on(snapshot_task_detail(
+                            store,
+                            request.item,
+                            request.task,
+                            request.recommended,
+                            probe_pr_empty,
+                            shared,
+                        ));
+                        details.push((index, detail));
+                    }
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().expect("Task detail worker panicked"))
+            .collect()
+    });
+    details.sort_by_key(|(index, _)| *index);
+    details.into_iter().map(|(_, detail)| detail).collect()
 }
 
 fn unavailable_task(task: &Task, status: TaskState) -> UnavailableTaskEvidence {
@@ -2379,6 +2456,26 @@ mod tests {
         assert_eq!(serde_json::to_value(rows).unwrap(), expected);
     }
 
+    #[test]
+    fn repository_resolution_preserves_aliases_missing_paths_and_fresh_reads() {
+        let first = loopflow_test_support::TestRepo::new();
+        let second = loopflow_test_support::TestRepo::new();
+        let directory = tempfile::tempdir().unwrap();
+        let alias = directory.path().join("repo");
+        let wave = Wave::new(
+            crate::id::WaveId::new(),
+            "proof".into(),
+            alias.display().to_string(),
+        );
+        let resolve = || super::wave_repository(&wave, &mut Default::default());
+        assert_eq!(resolve(), alias);
+        std::os::unix::fs::symlink(first.path(), &alias).unwrap();
+        assert_eq!(resolve(), first.path().canonicalize().unwrap());
+        std::fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(second.path(), &alias).unwrap();
+        assert_eq!(resolve(), second.path().canonicalize().unwrap());
+    }
+
     #[tokio::test]
     async fn portfolio_ownership_is_scoped_to_repository() {
         let directory = tempfile::tempdir().unwrap();
@@ -2417,10 +2514,10 @@ mod tests {
                 .unwrap();
             waves.push(wave);
         }
-        super::validate_pm_portfolio(&store, &waves[..2])
+        super::validate_pm_portfolio(&store, &waves[..2], &mut Default::default())
             .await
             .unwrap();
-        let error = super::validate_pm_portfolio(&store, &waves)
+        let error = super::validate_pm_portfolio(&store, &waves, &mut Default::default())
             .await
             .unwrap_err();
         assert!(error.to_string().contains("bound by both"), "{error}");

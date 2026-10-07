@@ -111,8 +111,7 @@ fn is_layout(args: &[String]) -> bool {
 /// an agent working in the checkout.
 fn ask(question: Question) -> std::io::Result<Output> {
     let output = Command::new("git")
-        .arg("-C")
-        .arg(&question.0)
+        .current_dir(&question.0)
         .args(&question.1)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .output()?;
@@ -128,7 +127,7 @@ fn ask(question: Question) -> std::io::Result<Output> {
 /// every checkout side by side.
 pub(crate) fn retained_output(repo: &Path, args: &[&str]) -> std::io::Result<Output> {
     if !retains_reads() {
-        return Command::new("git").arg("-C").arg(repo).args(args).output();
+        return Command::new("git").current_dir(repo).args(args).output();
     }
     let question = (
         repo.to_path_buf(),
@@ -598,17 +597,24 @@ pub fn origin_branch(repo: &Path) -> Result<Option<String>, GitError> {
 }
 
 /// Resolve the root of the working tree containing `repo`.
+///
+/// Reads the filesystem instead of launching Git: Session and Task readers
+/// resolve every recorded checkout on each read.
 pub fn worktree_root(repo: &Path) -> Result<PathBuf, GitError> {
-    let output = run_git(repo, &["rev-parse", "--show-toplevel"])?;
-    if !output.status.success() {
-        return Err(GitError::CommandFailed {
+    let start = repo.canonicalize()?;
+    let root = start.ancestors().find(|dir| {
+        let marker = dir.join(".git");
+        // A linked worktree or submodule has a `.git` file naming its Git dir.
+        marker.join("HEAD").is_file()
+            || std::fs::read(&marker).is_ok_and(|bytes| bytes.starts_with(b"gitdir:"))
+    });
+    match root {
+        Some(root) if !start.starts_with(root.join(".git")) => Ok(root.to_path_buf()),
+        _ => Err(GitError::CommandFailed {
             command: "git rev-parse --show-toplevel".to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
+            stderr: format!("not a git work tree: {}", repo.display()),
+        }),
     }
-    Ok(PathBuf::from(
-        String::from_utf8_lossy(&output.stdout).trim(),
-    ))
 }
 
 /// Return default branch name from origin/HEAD. Falls back to "main".
@@ -1678,6 +1684,46 @@ mod tests {
         fs::write(&path, content).expect("write file");
         git_stdout(repo, &["add", name]).expect("git add");
         git_stdout(repo, &["commit", "-m", &format!("add {}", name)]).expect("git commit");
+    }
+
+    #[test]
+    fn worktree_root_agrees_with_git_without_launching_it() {
+        let repo = init_repo();
+        commit_file(repo.path(), "a.txt", "a");
+        let nested = repo.path().join("src/deep");
+        fs::create_dir_all(&nested).expect("create nested dir");
+        let linked = tempfile::tempdir().expect("create temp dir");
+        let linked_root = linked.path().join("linked");
+        git_stdout(
+            repo.path(),
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "side",
+                linked_root.to_str().unwrap(),
+            ],
+        )
+        .expect("git worktree add");
+        let alias = linked.path().join("alias");
+        std::os::unix::fs::symlink(&nested, &alias).expect("symlink");
+
+        for path in [
+            repo.path(),
+            nested.as_path(),
+            linked_root.as_path(),
+            alias.as_path(),
+        ] {
+            let expected = git_stdout(path, &["rev-parse", "--show-toplevel"]).expect("git root");
+            assert_eq!(
+                worktree_root(path).expect("root"),
+                PathBuf::from(expected.trim())
+            );
+        }
+        // Git's own directory, a plain directory and a retired checkout are not work trees.
+        assert!(worktree_root(&repo.path().join(".git/refs")).is_err());
+        assert!(worktree_root(linked.path()).is_err());
+        assert!(worktree_root(&linked.path().join("retired")).is_err());
     }
 
     #[test]

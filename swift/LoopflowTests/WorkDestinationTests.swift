@@ -1,8 +1,10 @@
 #if os(macOS)
 import AppKit
 import Foundation
+import Observation
 import Testing
 import ViewInspector
+import os
 @testable import Loopflow
 @testable import LoopflowMac
 
@@ -41,7 +43,7 @@ struct WorkDestinationTests {
         }, repoPath: wave.wave.repo)
         // The ordinary outline has already published this planning inventory.
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]),
-                           processActivity: .loading, workActivity: .loading, repos: [])
+                           workActivity: .loading, repos: [])
         model.openTaskDestination(wave: wave, task: task)
         let selectedID = runtimeSelection ? try #require(task.runtime?.workId) : task.id
         model.select(.task(id: selectedID))
@@ -56,6 +58,18 @@ struct WorkDestinationTests {
         #expect(model.taskLinkReading.errorMessage == nil)
         #expect(!model.showsTaskLink)
         #expect(model.containsTaskDestination(try #require(url.url)))
+
+        // Reopening what is already open changes nothing, so nothing redraws.
+        let invalidations = OSAllocatedUnfairLock(initialState: 0)
+        withObservationTracking {
+            _ = (model.repoPath, model.taskLinkURL, model.showsTaskLink, model.linkedSession,
+                 model.navigation.selectedTaskEvidence?.task, model.navigation.recentDestinations)
+        } onChange: {
+            invalidations.withLock { $0 += 1 }
+        }
+        await model.openTaskLink(try #require(url.url))
+        #expect(invalidations.withLock { $0 } == 0)
+        #expect(model.navigation.selectedSessionId == "retained-conversation")
     }
 
     @Test func refreshedPlanningDoesNotReuseAnOldLinkResult() async throws {
@@ -74,7 +88,7 @@ struct WorkDestinationTests {
         url.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo)]
         await model.openTaskLink(try #require(url.url))
         model.applyFixture(roadmap: .available(removed), waves: .available([]),
-                           processActivity: .loading, workActivity: .loading, repos: [])
+                           workActivity: .loading, repos: [])
         await model.openTaskLink(try #require(url.url))
         #expect(model.showsTaskLink)
         #expect(model.taskLinkReading.value?.waves.flatMap { $0.tasks.items }.isEmpty == true)
@@ -97,7 +111,7 @@ struct WorkDestinationTests {
             return #"{"entries":[\#(encoded)],"next":"remaining-history"}"#
         }, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]),
-                           processActivity: .loading, workActivity: .loading, repos: [])
+                           workActivity: .loading, repos: [])
         var url = try #require(URLComponents(string: "loopflow://task/\(task.task.identifier)"))
         url.queryItems = [URLQueryItem(name: "repo", value: wave.wave.repo), URLQueryItem(name: "session", value: record.id)]
         await model.openTaskLink(try #require(url.url))

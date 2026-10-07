@@ -195,7 +195,7 @@ struct TaskCaptureTests {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: fixture))
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected read") }, repoPath: "/src/loopflow")
         model.applyFixture(roadmap: .available(roadmap), waves: .available(roadmap.waves.map { $0.wave.toWave() }),
-                           processActivity: .loading, workActivity: .loading, repos: [])
+                           workActivity: .loading, repos: [])
         return model
     }
 }

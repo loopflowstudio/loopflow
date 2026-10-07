@@ -365,7 +365,7 @@ struct WorkSurfaceView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
                         Text(session.title)
-                            .font(Typography.body(13).weight(.bold))
+                            .font(Typography.strong(13))
                             .foregroundStyle(palette.text)
                         primaryTag(session)
                     }
@@ -552,7 +552,7 @@ struct WorkSurfaceView: View {
     private func surfaceHeader(_ title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             Text(title)
-                .font(Typography.body(14).weight(.bold))
+                .font(Typography.strong(14))
                 .foregroundStyle(palette.text)
             Text(subtitle)
                 .font(Typography.caption(11))
@@ -567,7 +567,7 @@ struct WorkSurfaceView: View {
                 .foregroundStyle(Color.statusWarning)
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(title)
-                    .font(Typography.caption(11).weight(.bold))
+                    .font(Typography.strong(11))
                     .foregroundStyle(palette.text)
                 Text(detail)
                     .font(Typography.caption(10))
@@ -676,7 +676,7 @@ struct TaskDirectiveEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             Text("Edit description · \(task.task.identifier)")
-                .font(Typography.body(14).weight(.bold))
+                .font(Typography.strong(14))
             TextEditor(text: $draft)
                 .font(Typography.body(13))
                 .scrollContentBackground(.hidden)

@@ -6,6 +6,15 @@ import SwiftUI
 import AppKit
 import Darwin
 
+// Foundation can select the account's shared temp directory despite TMPDIR.
+// Honor the process's explicit directory for embedded terminal files.
+func terminalTemporaryDirectory() -> URL {
+    if let path = ProcessInfo.processInfo.environment["TMPDIR"], !path.isEmpty {
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+    return FileManager.default.temporaryDirectory
+}
+
 extension Notification.Name {
     static let ghosttyTerminalBell = Notification.Name("loopflow.ghosttyTerminalBell")
     static let ghosttyTerminalTitle = Notification.Name("loopflow.ghosttyTerminalTitle")
@@ -125,6 +134,7 @@ final class GhosttyManager: ObservableObject {
     // own Ghostty config binds them to.
     static let embeddedConfig = """
     term = xterm-256color
+    macos-login-session = false
     shell-integration = detect
     scrollback-limit = 10000000
     window-padding-x = \(Int(GhosttyTerminalPadding.x))
@@ -140,15 +150,16 @@ final class GhosttyManager: ObservableObject {
 
     private init() {}
 
-    private func writeConfig(_ contents: String, named name: String) -> String? {
-        let tempDir = FileManager.default.temporaryDirectory
-        let configPath = tempDir.appendingPathComponent(name)
+    private func loadConfig(_ contents: String, into config: ghostty_config_t) {
+        let path = terminalTemporaryDirectory().appendingPathComponent("loopflow-ghostty-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: path) }
         do {
-            try contents.write(to: configPath, atomically: true, encoding: .utf8)
-            return configPath.path
+            // The unique file is private until this synchronous load. Atomic
+            // Foundation writes can stage in the account's shared temp directory.
+            try Data(contents.utf8).write(to: path)
+            path.path.withCString { ghostty_config_load_file(config, $0) }
         } catch {
-            print("[GhosttyManager] Failed to write config: \(error)")
-            return nil
+            print("[GhosttyManager] Failed to load embedded config: \(error)")
         }
     }
 
@@ -178,9 +189,7 @@ final class GhosttyManager: ObservableObject {
         }
 
         // Load Loopflow theme first, then user defaults
-        if let path = writeConfig(Self.loopflowConfig, named: "loopflow-ghostty-theme") {
-            path.withCString { ghostty_config_load_file(cfg, $0) }
-        }
+        loadConfig(Self.loopflowConfig, into: cfg)
         ghostty_config_load_default_files(cfg)
         var embeddedConfig = Self.embeddedConfig
         // Ghostty treats a failed CoreVideo display link as an allocation error
@@ -192,9 +201,7 @@ final class GhosttyManager: ObservableObject {
             print("[GhosttyManager] CoreVideo display link unavailable (\(displayLinkStatus)); using timer rendering")
         }
         displayLink = nil
-        if let path = writeConfig(embeddedConfig, named: "loopflow-ghostty-embedded") {
-            path.withCString { ghostty_config_load_file(cfg, $0) }
-        }
+        loadConfig(embeddedConfig, into: cfg)
         ghostty_config_finalize(cfg)
         self.config = cfg
 

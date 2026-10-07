@@ -3,11 +3,8 @@
 // History and explicit lookups are one-shot queries. What a window shows is kept
 // current by one foreground workspace reader per window.
 //
-// This runs `lf wave list`, `lf wave status`, and the roadmap, ps, and activity
-// readers with `--json` as subprocesses and decodes the wire
-// snapshots (mirrors of the Rust types in `lf/commands/waves.rs` and
-// `lf/commands/session_history.rs`) into the app models the stores hold. The subprocess
-// runner is injected: on macOS it execs the `lf` shipped inside the app. There is no
+// Reads run `lf` subprocesses and decode shared wire types into app models.
+// The injected runner on macOS execs the `lf` shipped inside the app. There is no
 // HTTP fallback for reads; remote reads need to become proxied `lf` queries.
 
 import Foundation
@@ -22,7 +19,7 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// Runs an `lf` argv (already including the subcommand, e.g. `["wave", "list","--json"]`)
 /// and returns captured stdout. Throws on a non-zero exit or spawn failure.
 /// `cwd` seeds ambient resolution for verbs that want it (`lf wave status` with no
-/// wave); the machine-wide reads (`lf wave list`, `lf usage --days 0 --task ID --json`) ignore it.
+/// wave); machine-wide reads such as `lf wave list` ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
 /// Starts an `lf` argv that runs as long as its work does and returns once it
@@ -122,12 +119,6 @@ public struct RegistryQuery: Sendable {
         var args = ["roadmap", "--task", issue, "--json"]
         if repo == nil { args.append("--all") }
         return try Self.decode(RoadmapSnapshot.self, from: await run(args, repo))
-    }
-
-    /// Exact OS-live Loopflow process trees and unattributed provider processes.
-    public func processActivity() async throws -> ActivitySnapshot {
-        let stdout = try await run(["ps", "--json"], nil)
-        return try Self.decode(ActivitySnapshot.self, from: stdout)
     }
 
     public func localHomeId() async throws -> String {

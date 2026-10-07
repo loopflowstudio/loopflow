@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -13,6 +14,39 @@ from pathlib import Path
 import pytest
 
 from scripts import desktop_performance as performance
+
+
+@pytest.mark.parametrize("leader_exited", [False, True])
+def test_cleanup_closes_descendant_pipes_even_after_leader_exit(leader_exited: bool) -> None:
+    child = (
+        "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "print('ready', flush=True); time.sleep(60)"
+    )
+    leader = (
+        "import subprocess, sys, time; "
+        f"subprocess.Popen([sys.executable, '-c', {child!r}]); "
+        f"time.sleep({0 if leader_exited else 60})"
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-c", leader],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        assert process.stdout.readline() == "ready\n"
+        if leader_exited:
+            assert process.wait(timeout=5) == 0
+        performance._stop(process)
+        # EOF requires the surviving descendant to close its inherited pipes.
+        assert process.communicate(timeout=5) == ("", "")
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
 
 
 @pytest.mark.parametrize("termination", ["signal", "timeout"])
@@ -89,6 +123,91 @@ def test_snapshot_preserves_committed_wal_history_without_mutating_source(tmp_pa
     assert (output.stat().st_mode & 0o777) == 0o700
 
 
+def test_prepared_snapshot_preserves_rows_triggers_and_sequence(tmp_path: Path) -> None:
+    original = tmp_path / "original.db"
+    template = tmp_path / "schema.db"
+    for path in (original, template):
+        with sqlite3.connect(path) as db:
+            db.executescript("""
+                CREATE TABLE history(id INTEGER PRIMARY KEY AUTOINCREMENT, payload BLOB, value);
+                CREATE TABLE events(message TEXT);
+                CREATE TRIGGER record_insert AFTER INSERT ON history BEGIN
+                    INSERT INTO events VALUES ('inserted');
+                END;
+                CREATE VIEW history_view AS SELECT * FROM history;
+            """)
+    with sqlite3.connect(original) as db:
+        db.executemany(
+            "INSERT INTO history VALUES (?, ?, ?)",
+            [(3, b"\x00\xff", None), (8, b"large" * 10000, 1.5), (20, b"deleted", "text")],
+        )
+        db.execute("DELETE FROM history WHERE id=20")
+        db.execute("INSERT INTO events(rowid,message) VALUES (100,'retained')")
+    with sqlite3.connect(template) as db:
+        db.execute("CREATE INDEX history_payload ON history(payload)")
+        db.execute("INSERT INTO history(payload) VALUES ('must not survive')")
+    retained = tmp_path / "retained"
+    performance._snapshot(original, retained)
+    before = (retained / "loopflow.db").read_bytes()
+    template_before = template.read_bytes()
+    prepared = tmp_path / "prepared"
+    performance._prepare_snapshot(retained, template, prepared)
+    assert (retained / "loopflow.db").read_bytes() == before
+    assert template.read_bytes() == template_before
+    with sqlite3.connect(prepared / "loopflow.db") as db:
+        assert db.execute("SELECT id,value FROM history").fetchall() == [(3, None), (8, 1.5)]
+        assert db.execute("SELECT count(*) FROM events").fetchone() == (4,)
+        assert db.execute("SELECT rowid FROM events WHERE message='retained'").fetchone() == (100,)
+        assert db.execute("SELECT seq FROM sqlite_sequence WHERE name='history'").fetchone() == (
+            20,
+        )
+        db.execute("INSERT INTO history(payload) VALUES ('next')")
+        assert db.execute("SELECT max(id) FROM history_view").fetchone() == (21,)
+        assert db.execute("SELECT count(*) FROM events").fetchone() == (5,)
+    manifest = json.loads((prepared / "snapshot.json").read_text())
+    assert manifest["preparation"]["index_changes"] == {"removed": [], "added": ["history_payload"]}
+    assert manifest["counts"]["history"] == 2
+    with sqlite3.connect(template) as db:
+        db.execute("ALTER TABLE history ADD COLUMN invented TEXT")
+    with pytest.raises(ValueError, match="index-only"):
+        performance._prepare_snapshot(retained, template, tmp_path / "incompatible")
+    assert not (tmp_path / "incompatible").exists()
+
+
+def test_repository_inputs_keep_exact_authored_files_and_missing_evidence(tmp_path: Path) -> None:
+    repo = tmp_path / "repository"
+    (repo / ".lf").mkdir(parents=True)
+    (repo / ".lf/config.yaml").write_text("pm: {}\n")
+    (repo / "wave/current").mkdir(parents=True)
+    (repo / "wave/current/GOAL.md").write_text("Current goal")
+    database = tmp_path / "schema.db"
+    with sqlite3.connect(database) as db:
+        db.execute("CREATE TABLE waves(repo TEXT, name TEXT)")
+        db.executemany(
+            "INSERT INTO waves VALUES (?,?)", [(str(repo), "current"), (str(repo), "missing")]
+        )
+    inputs = performance._repository_configs(database)
+    assert len(inputs) == 3
+    assert {entry["path"]: entry["sha256"] for entry in inputs}[
+        str(repo / "wave/missing/GOAL.md")
+    ] is None
+    assert all(entry["sha256"] for entry in inputs if "missing" not in entry["path"])
+
+
+def test_failed_reads_remain_visible_when_rendered_endpoints_pass() -> None:
+    events = _events()
+    events.append(
+        {
+            "event": "read",
+            "outcome": "unavailable",
+            "args": ["task", "comment"],
+            "reason": "Offline provider",
+        }
+    )
+    summary = performance._summarize(events)
+    assert summary["read_failures"] == [events[-1]]
+
+
 def test_snapshot_comparison_rejects_different_population(tmp_path: Path) -> None:
     baseline = _report(tmp_path, _events())
     current = _report(tmp_path, _events())
@@ -109,6 +228,22 @@ def test_comparison_retains_observed_timeouts(tmp_path: Path) -> None:
     assert comparison["available"]
     assert comparison["deltas"][1]["before_failure_rate"] == 1 / 20
     assert comparison["deltas"][1]["after_failure_rate"] == 0
+
+
+def test_comparison_renders_without_latency_when_every_attempt_times_out(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline"
+    baseline.mkdir()
+    _report(baseline, _events())
+    events = _events()
+    for event in events:
+        if event["event"] == "end":
+            event.update(outcome="timeout", duration_ms=None)
+    _report(tmp_path, events)
+    report = performance._report(tmp_path, baseline)
+    assert report["status"] == "incomplete"
+    assert report["comparison"]["available"]
+    assert all(delta["p50_delta_ms"] is None for delta in report["comparison"]["deltas"])
+    assert "| small | full | warm | — | — |" in (tmp_path / "report.md").read_text()
 
 
 def _events(samples: int = 21) -> list[dict]:
@@ -222,3 +357,416 @@ def test_ambiguous_results_cannot_complete_a_run(tmp_path: Path, defect: str) ->
     result = _report(tmp_path, events)
     assert result["status"] == "incomplete"
     assert result["journal_errors"]
+
+
+def _soak_events() -> list[dict]:
+    events = _events()
+    events[0]["soak_seconds"] = 3600
+    events += [{"event": "soak_begin", "seconds": 3600}]
+    events += [
+        {"event": "soak_round", "round": i, "time": i + 10, "preserved": True} for i in range(4)
+    ]
+    events += [{"event": "soak_end", "elapsed_seconds": 3600, "preserved": True}]
+    return events
+
+
+def test_soak_reports_missing_resources_without_inventing_measurements(tmp_path: Path) -> None:
+    result = _report(tmp_path, _soak_events())
+    assert result["status"] == "complete"
+    assert result["soak"]["resources"] is None
+    assert result["soak"]["memory_after_four_rounds_mib"] is None
+
+
+@pytest.mark.parametrize("failure", ["interrupted", "short", "lost_draft", "no_rounds"])
+def test_soak_cannot_pass_without_duration_and_preservation(tmp_path: Path, failure: str) -> None:
+    events = _soak_events()
+    if failure == "interrupted":
+        events.pop()
+    elif failure == "short":
+        events[-1]["elapsed_seconds"] = 3599
+    elif failure == "lost_draft":
+        events[-2]["preserved"] = False
+    else:
+        events = [event for event in events if event["event"] != "soak_round"]
+    result = _report(tmp_path, events)
+    assert result["status"] == "incomplete"
+    assert result["soak"]["status"] == "incomplete"
+
+
+@pytest.mark.parametrize("outcome", ["passed", "failed", "interrupted"])
+def test_soak_reopens_after_planned_samples_keep_their_outcome(
+    tmp_path: Path, outcome: str
+) -> None:
+    events = _soak_events()
+    events.append({"event": "soak_sample_begin", "id": "reopen-21"})
+    if outcome != "interrupted":
+        events.append({"event": "soak_sample_end", "id": "reopen-21", "outcome": outcome})
+    result = _report(tmp_path, events)
+    assert result["journal_errors"] == []
+    assert result["soak"]["reopen_observations"]
+    assert result["status"] == ("complete" if outcome == "passed" else "incomplete")
+
+
+@pytest.mark.parametrize("missing", [None, "soak_begin", "soak_round"])
+def test_four_round_memory_includes_growth_before_recorder_attaches(
+    tmp_path: Path, missing: str | None
+) -> None:
+    events = _soak_events()
+    for event in events:
+        if event["event"] == "soak_begin":
+            event["rss_bytes"] = 100 * 1024 * 1024
+        elif event["event"] == "soak_round":
+            event["rss_bytes"] = (140 + event["round"]) * 1024 * 1024
+        if event["event"] == missing:
+            event.pop("rss_bytes", None)
+    directory = tmp_path / "soak-resources"
+    directory.mkdir()
+    # The recorder attaches after early allocations, then samples past round four.
+    (directory / "rss.jsonl").write_text(
+        "\n".join(
+            json.dumps(row)
+            for row in [
+                {"t": 9, "rss_kib": 140 * 1024},
+                {"t": 14, "rss_kib": 144 * 1024},
+            ]
+        )
+    )
+    result = _report(tmp_path, events)
+    assert result["soak"]["memory_after_four_rounds_mib"] == (43 if missing is None else None)
+
+
+def test_comparison_rejects_different_recorder_modes(tmp_path: Path) -> None:
+    baseline = _report(tmp_path, _events())
+    current = _report(tmp_path, _events())
+    baseline["metadata"]["xctrace"] = True
+    current["metadata"]["xctrace"] = False
+    assert performance._comparison(current, baseline) == {
+        "available": False,
+        "reason": "Different xctrace",
+    }
+
+
+def test_cli_volume_keeps_partial_counts_and_missing_measurements(tmp_path: Path) -> None:
+    assert performance._cli_volume(tmp_path)["observed_totals"]["statements"] is None
+    start = {
+        "event": "start",
+        "pid": 7,
+        "time": 10,
+        "elapsed_ms": 0,
+        "connections": 0,
+        "statements": 0,
+        "rows": 0,
+    }
+    sample = {
+        **start,
+        "event": "sample",
+        "time": 11,
+        "elapsed_ms": 1000,
+        "connections": 2,
+        "statements": 12,
+        "rows": 41,
+    }
+    path = tmp_path / "lf-7-owned.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in [start, sample]) + '\n{"event":')
+    partial = performance._cli_volume(tmp_path)
+    assert partial["status"] == "partial"
+    assert partial["processes_ended"] == 0
+    assert partial["observed_totals"]["statements"] == 12
+    assert partial["errors"]
+    path.write_text("\n".join(json.dumps(e) for e in [start, sample, {**sample, "event": "end"}]))
+    complete = performance._cli_volume(tmp_path)
+    assert complete["status"] == "complete"
+    assert complete["processes_started"] == complete["processes_ended"] == 1
+    assert complete["observed_totals"]["statements"] == 12  # cumulative, not 24
+
+
+@pytest.mark.parametrize("change", [{"statements": 1}, {"pid": 8}, {"elapsed_ms": -1}])
+def test_cli_volume_rejects_counter_reset_or_identity_change(tmp_path: Path, change: dict) -> None:
+    start = {
+        "event": "start",
+        "pid": 7,
+        "time": 10,
+        "elapsed_ms": 0,
+        "connections": 1,
+        "statements": 12,
+        "rows": 41,
+    }
+    end = {**start, "event": "end", **change}
+    (tmp_path / "lf-7-owned.jsonl").write_text("\n".join(json.dumps(e) for e in [start, end]))
+    result = performance._cli_volume(tmp_path)
+    assert result["status"] == "partial"
+    assert result["errors"]
+    assert result["processes_ended"] == 0
+
+
+def test_changed_cli_binary_invalidates_completed_journey(tmp_path: Path) -> None:
+    _report(tmp_path, _events())
+    metadata = json.loads((tmp_path / "run.json").read_text())
+    metadata.update(cli_sha256="before", cli_sha256_after="after")
+    (tmp_path / "run.json").write_text(json.dumps(metadata))
+    assert performance._report(tmp_path, None)["status"] == "incomplete"
+
+
+def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path, monkeypatch) -> None:
+    cli = tmp_path / "lf"
+    cli.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, pathlib, sys\n"
+        "directory = pathlib.Path(os.environ['LF_PERF_OUTPUT'])\n"
+        "start = dict(event='start', pid=os.getpid(), time=10, elapsed_ms=0, "
+        "connections=0, statements=0, rows=0)\n"
+        "end = dict(start, event='end', elapsed_ms=1, statements=12)\n"
+        "(directory / f'lf-{os.getpid()}.jsonl').write_text("
+        "json.dumps(start) + '\\n' + json.dumps(end))\n"
+        'print(json.dumps({"task_ids":["owned-task"]} if sys.argv[1:3] == ["session", "bind"] '
+        'else [{"id":"retained-session"}]))\n'
+    )
+    cli.chmod(0o755)
+    monkeypatch.setattr(performance, "_seed_native_task", lambda *_: ("owned-task", "PERF-304"))
+    fixture = json.loads(performance._prepare_native_fixture(tmp_path, cli).read_text())
+    assert fixture["environment"]["LF_PERF_OUTPUT"] == str(tmp_path / "cli-volume")
+    report = _report(tmp_path, _events())
+    assert report["fixture_setup_cli_volume"]["processes_started"] == 3
+    assert report["fixture_setup_cli_volume"]["observed_totals"]["statements"] == 36
+    assert report["cli_volume"]["status"] == "unmeasured"
+    assert report["cli_volume"]["observed_totals"]["statements"] is None
+
+
+def test_native_runner_stops_owned_child_after_unexpected_journal_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The child announces a malformed soak start, then waits for its owner to stop it.
+    child = """
+import os
+import signal
+import shutil
+import time
+from pathlib import Path
+
+journal = Path(os.environ["LF_DESKTOP_PERF_OUTPUT"])
+def stopped(*_):
+    journal.with_suffix(".stopped").touch()
+    raise SystemExit(0)
+signal.signal(signal.SIGTERM, stopped)
+journal.write_text('{"event":"soak_begin"}\\n')
+time.sleep(60)
+"""
+    executable = tmp_path / "native-test"
+    executable.write_text(f"#!{sys.executable}\n" + child)
+    executable.chmod(0o755)
+    monkeypatch.setattr(performance, "BUILD_COMMAND", [sys.executable, "-c", "pass"])
+    monkeypatch.setattr(
+        performance,
+        "_native_command",
+        lambda *_: [sys.executable, "-u", str(executable), "--test-bundle-path", str(executable)],
+    )
+    monkeypatch.setattr(
+        performance, "_prepare_native_fixture", lambda output, cli, repo: output / "fixture"
+    )
+
+    with pytest.raises(KeyError, match="pid"):
+        performance._run_native(
+            tmp_path, {}, samples=1, soak_seconds=1, cli=tmp_path / "unused-cli"
+        )
+
+    assert (tmp_path / "attempts.stopped").exists()
+
+
+def test_requested_snapshot_soak_cannot_pass_as_task_open_measurements(tmp_path: Path) -> None:
+    _report(tmp_path, _events())
+    metadata = json.loads((tmp_path / "run.json").read_text())
+    metadata.update(snapshot={"sha256": "same"}, soak_seconds=3600)
+    (tmp_path / "run.json").write_text(json.dumps(metadata))
+    result = performance._report(tmp_path, None)
+    assert result["status"] == "incomplete"
+    assert result["soak"]["status"] == "incomplete"
+    assert result["soak"]["requested_seconds"] == 3600
+
+
+def test_sandbox_paths_do_not_change_test_binary_hash_or_comparison_command(
+    tmp_path: Path, monkeypatch
+) -> None:
+    executable = tmp_path / "native-test"
+    executable.write_text("pass\n")
+    monkeypatch.setattr(performance, "BUILD_COMMAND", [sys.executable, "-c", "pass"])
+    monkeypatch.setattr(
+        performance, "_prepare_native_fixture", lambda output, *_: output / "fixture"
+    )
+    monkeypatch.setattr(
+        performance,
+        "_native_command",
+        lambda _, env, optimized=False: [
+            "/usr/bin/env",
+            f"HOME={env['HOME']}",
+            sys.executable,
+            str(executable),
+            "--test-bundle-path",
+            str(executable),
+        ],
+    )
+    receipts = []
+    for name in ("before", "after"):
+        output = tmp_path / name
+        output.mkdir()
+        receipt = {}
+        performance._run_native(output, receipt, 1, 0, tmp_path / "unused-cli")
+        receipts.append(receipt)
+    assert all(receipt["exit_code"] == 0 for receipt in receipts)
+    assert receipts[0]["command"] == receipts[1]["command"]
+    assert receipts[0]["sandbox_command"] != receipts[1]["sandbox_command"]
+    assert receipts[0]["test_binary_sha256"] == hashlib.sha256(executable.read_bytes()).hexdigest()
+
+
+def test_failed_teardown_cannot_complete_successful_rendered_endpoints(tmp_path: Path) -> None:
+    summary = _report(tmp_path, _events())
+    summary["metadata"].update(outcome="failed", reason="teardown failed")
+    assert not performance._has_complete_observations(summary)
+
+
+def test_failed_recorder_cannot_complete_preserved_soak(tmp_path: Path) -> None:
+    _report(tmp_path, _soak_events())
+    path = tmp_path / "run.json"
+    metadata = json.loads(path.read_text())
+    metadata["recorder_exit_code"] = 1
+    path.write_text(json.dumps(metadata))
+    result = performance._report(tmp_path, None)
+    assert result["status"] == "incomplete"
+    assert len(result["soak"]["rounds"]) == 4
+    assert result["soak"]["resources"] is None
+
+
+@pytest.mark.parametrize("gap", ["none", "start", "end", "table", "failed", "missing"])
+def test_trace_soak_requires_both_tables_across_entire_interval(tmp_path: Path, gap: str) -> None:
+    events = _soak_events()
+    events[-6]["time"] = 1000
+    events[-1]["time"] = 4600
+    _report(tmp_path, events)
+    metadata_path = tmp_path / "run.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata.update(xctrace=True, recorder_exit_code=0)
+    metadata_path.write_text(json.dumps(metadata))
+    resources = tmp_path / "soak-resources"
+    resources.mkdir()
+    if gap != "missing":
+        (resources / "report.json").write_text(
+            json.dumps(
+                {
+                    "run": {"xctrace": "failed" if gap == "failed" else "recorded"},
+                    "trace_bounds": [
+                        1001 if gap == "start" else 999,
+                        4599 if gap == "end" else 4601,
+                    ],
+                    "hitches": {"recorded": True, "hangs": None if gap == "table" else 0},
+                }
+            )
+        )
+    result = performance._report(tmp_path, None)
+    assert result["status"] == ("complete" if gap == "none" else "incomplete")
+    coverage = result["soak"]["trace_coverage"]
+    if gap == "start":
+        assert coverage["start_gap_seconds"] == 1
+    if gap == "end":
+        assert coverage["end_gap_seconds"] == 1
+    assert len(result["soak"]["rounds"]) == 4
+
+
+def test_git_outcomes_keep_failed_and_unfinished_children(tmp_path: Path) -> None:
+    trace = tmp_path / "git.jsonl"
+    events = [
+        {"event": "start", "sid": "a", "argv": ["git", "status"]},
+        {"event": "start", "sid": "b", "argv": ["git", "rev-parse"]},
+        {"event": "exit", "sid": "a", "code": 128},
+    ]
+    trace.write_text("\n".join(json.dumps(event) for event in events))
+    assert performance._git_outcomes(trace) == [
+        {"argv": ["git", "status"], "exit": 128},
+        {"argv": ["git", "rev-parse"], "exit": None},
+    ]
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS sandbox boundary")
+def test_checkout_observation_preserves_read_boundary_and_detects_changes(tmp_path: Path) -> None:
+    tmp_path = tmp_path.resolve()
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    git = performance._benchmark_git()
+    subprocess.run([str(git), "init", str(checkout)], check=True, capture_output=True)
+    tracked = checkout / "tracked"
+    tracked.write_text("original")
+    subprocess.run([str(git), "-C", str(checkout), "add", "tracked"], check=True)
+    secret = tmp_path / "credential-canary"
+    secret.write_text("must remain unreadable")
+    (checkout / "outside").symlink_to(secret)
+    alias = tmp_path / "alias"
+    alias.symlink_to(checkout, target_is_directory=True)
+    missing = tmp_path / "missing"
+    database = tmp_path / "observations.db"
+    with sqlite3.connect(database) as db:
+        db.execute("CREATE TABLE tasks (worktree TEXT)")
+        db.executemany(
+            "INSERT INTO tasks VALUES (?)", [(str(p),) for p in [checkout, alias, missing]]
+        )
+        db.execute("CREATE TABLE waves (repo TEXT, name TEXT)")
+    policy = tmp_path / "policy.sb"
+    base = """(version 1)
+(allow default)
+(deny network*)
+(deny file-write*)
+(allow file-write* (literal "/dev/null"))
+(deny file-read-data)
+(allow file-read-data (vnode-type DIRECTORY) (subpath "/System") (subpath "/usr")
+ (subpath "/bin") (subpath "/dev") (subpath "/Applications/Xcode.app"))
+"""
+    prefix = ["/usr/bin/sandbox-exec", "-f", str(policy)]
+
+    def observe() -> dict:
+        policy.write_text(base)
+        return performance._checkout_inputs(database, prefix, policy, git)
+
+    first = observe()
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", "GIT_OPTIONAL_LOCKS": "0"}
+    result = subprocess.run(
+        prefix + [str(git), "-C", str(alias), "status", "--porcelain"], env=env, capture_output=True
+    )
+    assert result.returncode == 0
+    assert b"tracked" in result.stdout
+    assert subprocess.run(prefix + ["/bin/cat", str(secret)], capture_output=True).returncode != 0
+    assert (
+        subprocess.run(
+            prefix + ["/bin/sh", "-c", 'echo changed > "$1"', "sh", str(tracked)],
+            capture_output=True,
+        ).returncode
+        != 0
+    )
+    assert (
+        subprocess.run(
+            prefix + ["/bin/cat", str(checkout / "outside")], capture_output=True
+        ).returncode
+        != 0
+    )
+    assert observe() == first
+    tracked.write_text("changed")
+    assert observe() != first
+    missing.mkdir()
+    assert observe()["checkouts"] != first["checkouts"]
+    alias.unlink()
+    alias.symlink_to(missing, target_is_directory=True)
+    assert observe()["checkouts"] != first["checkouts"]
+
+    before_recreation = observe()
+    checkout.rename(tmp_path / "retired")
+    shutil.copytree(tmp_path / "retired", checkout, symlinks=True)
+    assert observe()["checkouts"] != before_recreation["checkouts"]
+
+
+def test_changed_repository_inputs_and_failed_git_cannot_compare(tmp_path: Path) -> None:
+    (tmp_path / "baseline").mkdir()
+    (tmp_path / "current").mkdir()
+    baseline = _report(tmp_path / "baseline", _events())
+    current = _report(tmp_path / "current", _events())
+    assert performance._comparison(current, baseline)["available"]
+    current["metadata"]["repository_inputs_unchanged"] = False
+    assert not performance._comparison(current, baseline)["available"]
+    current["metadata"]["repository_inputs_unchanged"] = True
+    current["metadata"]["git_observations_complete"] = False
+    assert not performance._comparison(current, baseline)["available"]

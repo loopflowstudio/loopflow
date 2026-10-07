@@ -426,7 +426,7 @@ struct FlowDiagram: View {
                 shape.strokeBorder(color.opacity(0.30), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
             }
             Text(title)
-                .font(Typography.caption(11).weight(.bold))
+                .font(Typography.strong(11))
                 .foregroundStyle(color)
                 .padding(.horizontal, 10)
                 .padding(.top, 1)

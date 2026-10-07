@@ -15,6 +15,18 @@ use crate::task_work::{TaskSession, TaskWork};
 
 use super::SqliteStore;
 
+// Retirement belongs to the Session, so read it once rather than for every turn.
+// The partial index excludes output/history events from the started-turn scan.
+const SESSION_HAS_PENDING_TURN: &str = "SELECT EXISTS(
+    SELECT 1 FROM session_events start INDEXED BY session_event_input
+    WHERE start.session_id=?1 AND start.kind='started'
+        AND (?2 IS NULL OR start.observed_at>=?2)
+        AND NOT EXISTS(SELECT 1 FROM session_events done
+            WHERE done.session_id=start.session_id AND done.kind='completed'
+                AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn))
+    AND NOT EXISTS(SELECT 1 FROM session_events retired
+        WHERE retired.session_id=?1 AND retired.receipt_key='task_restart:stopped')";
+
 fn tasks(selector: &str) -> String {
     format!("SELECT id,worktree FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
 }
@@ -49,10 +61,13 @@ pub(super) fn session_tasks(session: &str) -> String {
 }
 
 pub(super) fn exec_ids(selector: &str) -> String {
-    format!("SELECT ae.id FROM execs ae JOIN ({}) tw ON ({})
-        UNION SELECT se.exec_id FROM session_events se WHERE se.session_id IN ({}) AND se.exec_id IS NOT NULL
-        UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN ({}) AND a.driver_exec_id IS NOT NULL",
-        tasks(selector), checkout("ae.cwd"), session_ids(selector), session_ids(selector))
+    // History and drivers share one query-local membership; the partial
+    // index skips retained events that name no Exec.
+    format!("WITH members AS MATERIALIZED ({})
+        SELECT ae.id FROM execs ae JOIN ({}) tw ON ({})
+        UNION SELECT se.exec_id FROM session_events se INDEXED BY session_exec_membership WHERE se.session_id IN (SELECT id FROM members) AND se.exec_id IS NOT NULL
+        UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN (SELECT id FROM members) AND a.driver_exec_id IS NOT NULL",
+        session_ids(selector), tasks(selector), checkout("ae.cwd"))
 }
 
 pub(super) fn flows_of_task(
@@ -615,13 +630,11 @@ impl SqliteStore {
     /// machine booted can no longer finish; its missing completion stays in history.
     pub(crate) fn session_has_pending_turn(&self, session: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM session_events start WHERE start.session_id=?1
-            AND start.kind='started' AND (?2 IS NULL OR start.observed_at>=?2)
-            AND NOT EXISTS(SELECT 1 FROM session_events retired WHERE retired.session_id=start.session_id AND retired.receipt_key='task_restart:stopped')
-            AND NOT EXISTS(SELECT 1 FROM session_events done
-                WHERE done.session_id=start.session_id AND done.kind='completed'
-                AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn))",
-            rusqlite::params![session, crate::journal::machine_booted_at()], |row| row.get(0))?)
+        Ok(conn.query_row(
+            SESSION_HAS_PENDING_TURN,
+            rusqlite::params![session, crate::journal::machine_booted_at()],
+            |row| row.get(0),
+        )?)
     }
 }
 
@@ -637,6 +650,168 @@ mod tests {
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
     use crate::task_work::TaskWork;
+
+    #[test]
+    fn pending_turn_preserves_boot_completion_and_retirement_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+            VALUES('session','proof','human',1,0,'/proof')",
+            [],
+        )
+        .unwrap();
+        let read = |boot: Option<i64>| {
+            conn.query_row(
+                super::SESSION_HAS_PENDING_TURN,
+                params!["session", boot],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+        };
+        assert!(!read(None));
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,provider_thread,provider_turn,observed_at,payload)
+            VALUES('session','started','start','thread','turn',10,'{}')", []).unwrap();
+        assert!(read(None));
+        assert!(read(Some(10)));
+        assert!(!read(Some(11)));
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,provider_thread,provider_turn,observed_at,payload)
+            VALUES('session','completed','other-thread','other','turn',11,'{}')", []).unwrap();
+        assert!(read(None));
+        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,provider_thread,provider_turn,observed_at,payload)
+            VALUES('session','completed','done','thread','turn',11,'{}')", []).unwrap();
+        assert!(!read(None));
+        conn.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+            VALUES('session','started','unknown-turn',12,'{}')",
+            [],
+        )
+        .unwrap();
+        assert!(read(None));
+        conn.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+            VALUES('session','observed','task_restart:stopped',13,'{}')",
+            [],
+        )
+        .unwrap();
+        assert!(!read(None));
+        assert!(!read(Some(12)));
+        assert!(!conn
+            .query_row(
+                super::SESSION_HAS_PENDING_TURN,
+                params!["missing", None::<i64>],
+                |row| row.get::<_, bool>(0)
+            )
+            .unwrap());
+    }
+
+    #[test]
+    fn pending_turn_does_not_rescan_retirement_history_for_each_completed_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+            VALUES('session','proof','human',1,0,'/proof')",
+            [],
+        )
+        .unwrap();
+        for n in 0..200 {
+            for kind in ["started", "completed"] {
+                conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,provider_thread,provider_turn,observed_at,payload)
+                    VALUES('session',?1,?2,'thread',?3,10,'{}')",
+                    params![kind, format!("{kind}-{n}"), n.to_string()]).unwrap();
+            }
+        }
+        for n in 0..2_000 {
+            conn.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+                VALUES('session','observed',?1,10,'{}')",
+                [format!("output-{n}")],
+            )
+            .unwrap();
+        }
+        let mut query = conn.prepare(super::SESSION_HAS_PENDING_TURN).unwrap();
+        assert!(!query
+            .query_row(params!["session", None::<i64>], |row| row.get::<_, bool>(0))
+            .unwrap());
+        let steps = query.get_status(rusqlite::StatementStatus::VmStep);
+        assert!(
+            steps < 30_000,
+            "Pending-turn check rescanned history: {steps} VM steps"
+        );
+    }
+
+    #[test]
+    fn exec_membership_does_not_read_events_that_name_no_exec() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        let turn = ExecId::new();
+        let finished = ExecId::new();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+            [&wave],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
+        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1','/repo/task',1)", params![task.as_str(), project.as_str()]).unwrap();
+        // The Session is bound, and its Execs ran elsewhere: only event
+        // history associates them with the Task.
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,task_id,wave_id,cwd)
+            VALUES('bound','bound','human',1,0,?1,?2,'/elsewhere')", params![task.as_str(), wave]).unwrap();
+        for (id, completed) in [(&turn, None), (&finished, Some(2))] {
+            conn.execute(
+                "INSERT INTO execs(id,trace_id,cwd,started_at,completed_at,outcome) VALUES(?1,?2,'/elsewhere',1,?3,?4)",
+                params![id, TraceId::new(), completed, completed.map(|_: i64| "succeeded")],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload)
+                VALUES('bound','started',?1,?1,1,'{}')", [id]).unwrap();
+        }
+        let read = |unfinished: bool, expected: &[&ExecId]| {
+            let mut query = conn
+                .prepare(&format!(
+                    "{} WHERE {} e.id IN ({}) ORDER BY e.started_at DESC,e.id",
+                    super::super::execs::EXEC_SELECT,
+                    if unfinished {
+                        "e.completed_at IS NULL AND"
+                    } else {
+                        ""
+                    },
+                    super::exec_ids("?1")
+                ))
+                .unwrap();
+            let mut ids = query
+                .query_map([task.as_str()], |row| row.get::<_, ExecId>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            let mut expected: Vec<_> = expected.iter().map(|id| (*id).clone()).collect();
+            expected.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            assert_eq!(ids, expected);
+            query.get_status(rusqlite::StatementStatus::VmStep)
+        };
+        let before = (read(true, &[&turn]), read(false, &[&turn, &finished]));
+        for n in 0..2_000 {
+            conn.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+                VALUES('bound','observed',?1,1,'{}')",
+                [n.to_string()],
+            )
+            .unwrap();
+        }
+        let after = (read(true, &[&turn]), read(false, &[&turn, &finished]));
+        assert!(
+            after.0 <= before.0 * 2 && after.1 <= before.1 * 2,
+            "Events naming no Exec increased membership work: {before:?} → {after:?}"
+        );
+    }
 
     #[tokio::test]
     async fn task_and_orphan_filters_resolve_aliases_before_pagination() {

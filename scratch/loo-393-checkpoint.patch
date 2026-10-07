@@ -1,0 +1,728 @@
+From d19a24a199444b9395ad462779113c28b1e57ae6 Mon Sep 17 00:00:00 2001
+From: Jack Heart <jack@loopflow.studio>
+Date: Wed, 7 Oct 2026 10:06:18 -0700
+Subject: [PATCH] Checkpoint remote Task sync design and portable record sketch
+
+---
+ rust/loopflow/src/lib.rs                      |   1 +
+ rust/loopflow/src/pm/linear.rs                |  74 ++++-
+ .../migrations/drafts/task_record_sync.sql    |   8 +
+ rust/loopflow/src/task_record.rs              | 191 ++++++++++++
+ scratch/questions.md                          |  27 ++
+ scratch/sync-task-records-through-linear.md   | 288 ++++++++++++++++++
+ wave/infrastructure/MEMORY.md                 |  32 +-
+ 7 files changed, 593 insertions(+), 28 deletions(-)
+ create mode 100644 rust/loopflow/src/store/migrations/drafts/task_record_sync.sql
+ create mode 100644 rust/loopflow/src/task_record.rs
+ create mode 100644 scratch/questions.md
+ create mode 100644 scratch/sync-task-records-through-linear.md
+
+diff --git a/rust/loopflow/src/lib.rs b/rust/loopflow/src/lib.rs
+index 34b649dbe..21cb5af16 100644
+--- a/rust/loopflow/src/lib.rs
++++ b/rust/loopflow/src/lib.rs
+@@ -10,6 +10,7 @@ pub mod id;
+ pub mod journal;
+ pub mod lf;
+ pub mod machine_install;
++mod task_record;
+ pub mod task_work;
+ // Build-time parsing lives here so its golden tests compile against the exact parser.
+ #[allow(dead_code)]
+diff --git a/rust/loopflow/src/pm/linear.rs b/rust/loopflow/src/pm/linear.rs
+index b3692f254..8a6a2bdb7 100644
+--- a/rust/loopflow/src/pm/linear.rs
++++ b/rust/loopflow/src/pm/linear.rs
+@@ -1544,7 +1544,7 @@ impl LinearClient {
+         Ok(())
+     }
+ 
+-    pub(crate) async fn item_attachment_urls(&self, item_id: &str) -> PmResult<Vec<String>> {
++    async fn item_attachments(&self, item_id: &str) -> PmResult<Vec<(String, Option<Value>)>> {
+         #[derive(Deserialize)]
+         struct Data {
+             issue: Option<Issue>,
+@@ -1562,6 +1562,7 @@ impl LinearClient {
+         #[derive(Deserialize)]
+         struct Attachment {
+             url: String,
++            metadata: Option<Value>,
+         }
+         let mut after = None;
+         let mut urls = Vec::new();
+@@ -1570,7 +1571,7 @@ impl LinearClient {
+                 .graphql(
+                     r#"query IssueAttachments($id: String!, $after: String) {
+                 issue(id: $id) { attachments(first: 100, after: $after) {
+-                    nodes { url } pageInfo { hasNextPage endCursor }
++                    nodes { url metadata } pageInfo { hasNextPage endCursor }
+                 } }
+             }"#,
+                     json!({ "id": item_id, "after": after }),
+@@ -1582,7 +1583,7 @@ impl LinearClient {
+                     PmError::Message(format!("issue {item_id} attachments are unavailable"))
+                 })?
+                 .attachments;
+-            urls.extend(page.nodes.into_iter().map(|node| node.url));
++            urls.extend(page.nodes.into_iter().map(|node| (node.url, node.metadata)));
+             if !page.page_info.has_next_page {
+                 return Ok(urls);
+             }
+@@ -1598,6 +1599,73 @@ impl LinearClient {
+         }
+     }
+ 
++    pub(crate) async fn item_attachment_urls(&self, item_id: &str) -> PmResult<Vec<String>> {
++        Ok(self
++            .item_attachments(item_id)
++            .await?
++            .into_iter()
++            .map(|(url, _)| url)
++            .collect())
++    }
++
++    pub(crate) async fn task_record_revisions(
++        &self,
++        issue_id: &str,
++    ) -> PmResult<Vec<crate::task_record::TaskRecordRevision>> {
++        let mut records = Vec::new();
++        for (url, metadata) in self.item_attachments(issue_id).await? {
++            if !url.starts_with(crate::task_record::RECORD_URL) {
++                continue;
++            }
++            let body = metadata
++                .as_ref()
++                .and_then(|value| value.get("loopflowTaskRecord"))
++                .and_then(Value::as_str)
++                .ok_or_else(|| {
++                    PmError::Message("Linear Task record attachment has no record".into())
++                })?;
++            let revision: crate::task_record::TaskRecordRevision = serde_json::from_str(body)
++                .map_err(|_| PmError::Message("Linear Task record attachment is invalid".into()))?;
++            if revision.url() != url || revision.record.issue_id != issue_id {
++                return Err(PmError::Message(
++                    "Linear Task record digest or issue identity does not match".into(),
++                ));
++            }
++            records.push(revision);
++        }
++        Ok(records)
++    }
++
++    pub(crate) async fn publish_task_record(
++        &self,
++        revision: &crate::task_record::TaskRecordRevision,
++    ) -> PmResult<()> {
++        let response: Value = self
++            .graphql(
++                r#"mutation TaskRecord($input: AttachmentCreateInput!) {
++                attachmentCreate(input: $input) { success }
++            }"#,
++                json!({"input": {
++                    "issueId": revision.record.issue_id,
++                    "url": revision.url(),
++                    "title": "Loopflow Task record",
++                    "metadata": {"loopflowTaskRecord": serde_json::to_string(revision)
++                        .expect("Task record serializes")}
++                }}),
++            )
++            .await?;
++        if response
++            .pointer("/attachmentCreate/success")
++            .and_then(Value::as_bool)
++            != Some(true)
++        {
++            return Err(PmError::Message(
++                "Linear did not confirm Task record publication".into(),
++            ));
++        }
++        Ok(())
++    }
++
+     /// Link an external URL to an issue as a first-class attachment. Returns the
+     /// attachment id for in-place updates on later publishes.
+     pub async fn link_attachment(
+diff --git a/rust/loopflow/src/store/migrations/drafts/task_record_sync.sql b/rust/loopflow/src/store/migrations/drafts/task_record_sync.sql
+new file mode 100644
+index 000000000..be2e8204d
+--- /dev/null
++++ b/rust/loopflow/src/store/migrations/drafts/task_record_sync.sql
+@@ -0,0 +1,8 @@
++-- Accepted shared revision and its local observation health. Local Task/PR rows
++-- retain pending edits when publication fails; no process authority is shared.
++CREATE TABLE task_record_sync (
++    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
++    revision TEXT,
++    observed_at INTEGER,
++    error TEXT
++);
+diff --git a/rust/loopflow/src/task_record.rs b/rust/loopflow/src/task_record.rs
+new file mode 100644
+index 000000000..532517002
+--- /dev/null
++++ b/rust/loopflow/src/task_record.rs
+@@ -0,0 +1,191 @@
++//! Portable Task facts. Execution, placement and delivery requests never cross Homes.
++
++use std::collections::{BTreeMap, BTreeSet};
++
++use serde::{Deserialize, Serialize};
++use sha2::{Digest, Sha256};
++
++use crate::durable::TaskId;
++use crate::work::task::{GithubPr, Task, TaskPr, TaskPrId};
++
++pub(crate) const RECORD_URL: &str = "https://loopflow.studio/task-record/";
++
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub(crate) struct TaskRecord {
++    pub task_id: TaskId,
++    pub issue_id: String,
++    pub workspace_slug: String,
++    pub agent: Option<String>,
++    pub prs: Vec<PrRecord>,
++}
++
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub(crate) struct PrRecord {
++    pub id: TaskPrId,
++    pub sequence: u32,
++    pub slug: String,
++    pub branch: String,
++    pub base_commit: String,
++    pub parent_pr_id: Option<TaskPrId>,
++    pub github: Option<GithubPr>,
++    pub merge_commit: Option<String>,
++    pub abandoned_at: Option<i64>,
++}
++
++impl TaskRecord {
++    pub fn from_task(task: &Task, prs: &[TaskPr]) -> Self {
++        Self {
++            task_id: task.id.clone(),
++            issue_id: task.plan.id.as_str().to_owned(),
++            workspace_slug: task.workspace_slug.clone(),
++            agent: task.agent.clone(),
++            prs: prs
++                .iter()
++                .map(|pr| PrRecord {
++                    id: pr.id.clone(),
++                    sequence: pr.sequence,
++                    slug: pr.slug.clone(),
++                    branch: pr.branch.clone(),
++                    base_commit: pr.base_commit.clone(),
++                    parent_pr_id: pr.parent_pr_id.clone(),
++                    github: pr.github().cloned(),
++                    merge_commit: pr.merge_commit.clone(),
++                    abandoned_at: pr.abandoned_at.map(|at| at.unix_timestamp()),
++                })
++                .collect(),
++        }
++    }
++}
++
++/// Content-addressed Linear attachment. A predecessor orders edits without
++/// trusting workstation clocks or overwriting a concurrent publisher's bytes.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(deny_unknown_fields)]
++pub(crate) struct TaskRecordRevision {
++    pub parent: Option<String>,
++    pub record: TaskRecord,
++}
++
++impl TaskRecordRevision {
++    pub fn digest(&self) -> String {
++        hex::encode(Sha256::digest(
++            serde_json::to_vec(self).expect("Task record serializes"),
++        ))
++    }
++
++    pub fn url(&self) -> String {
++        format!("{RECORD_URL}{}/{}", self.record.issue_id, self.digest())
++    }
++}
++
++/// Require one complete lineage. Divergent edits remain in Linear for explicit
++/// resolution; neither provider order nor wall-clock time chooses a winner.
++pub(crate) fn latest_revision(
++    issue_id: &str,
++    revisions: &[TaskRecordRevision],
++) -> Result<Option<TaskRecordRevision>, String> {
++    let mut by_id = BTreeMap::new();
++    for revision in revisions {
++        if revision.record.issue_id != issue_id {
++            return Err("Task record belongs to another Linear issue".into());
++        }
++        by_id.insert(revision.digest(), revision);
++    }
++    if by_id.is_empty() {
++        return Ok(None);
++    }
++    let mut tips: BTreeSet<_> = by_id.keys().cloned().collect();
++    for revision in by_id.values() {
++        if let Some(parent) = &revision.parent {
++            let ancestor = by_id
++                .get(parent)
++                .ok_or("Task record history is incomplete; retry Linear refresh")?;
++            if ancestor.record.task_id != revision.record.task_id {
++                return Err("Task record changed its stable Task identity".into());
++            }
++            tips.remove(parent);
++        }
++    }
++    if tips.len() != 1 {
++        return Err("Task records conflict in Linear; preserve local work and resolve the competing revisions before retrying".into());
++    }
++    let tip = tips.first().expect("one tip");
++    let mut visited = BTreeSet::new();
++    let mut cursor = Some(tip.as_str());
++    while let Some(id) = cursor {
++        if !visited.insert(id) {
++            return Err("Task record history contains a cycle".into());
++        }
++        cursor = by_id[id].parent.as_deref();
++    }
++    if visited.len() != by_id.len() {
++        return Err("Task record history is disconnected".into());
++    }
++    Ok(Some((*by_id[tip]).clone()))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::{latest_revision, TaskRecord, TaskRecordRevision};
++    use crate::durable::TaskId;
++
++    fn original() -> TaskRecordRevision {
++        TaskRecordRevision {
++            parent: None,
++            record: TaskRecord {
++                task_id: TaskId::new(),
++                issue_id: "issue-1".into(),
++                workspace_slug: "remote-development".into(),
++                agent: None,
++                prs: vec![],
++            },
++        }
++    }
++
++    #[test]
++    fn offline_reader_catches_up_despite_duplicates_and_unordered_delivery() {
++        let first = original();
++        let mut next = TaskRecordRevision {
++            parent: Some(first.digest()),
++            record: first.record.clone(),
++        };
++        next.record.agent = Some("claude".into());
++        assert_eq!(
++            latest_revision(
++                "issue-1",
++                &[next.clone(), first.clone(), next.clone(), first]
++            )
++            .unwrap(),
++            Some(next)
++        );
++    }
++
++    #[test]
++    fn concurrent_edits_do_not_silently_choose_a_winner() {
++        let first = original();
++        let mut left = TaskRecordRevision {
++            parent: Some(first.digest()),
++            record: first.record.clone(),
++        };
++        left.record.agent = Some("claude".into());
++        let mut right = left.clone();
++        right.record.agent = Some("codex".into());
++        assert!(latest_revision("issue-1", &[first, left, right])
++            .unwrap_err()
++            .contains("conflict"));
++    }
++
++    #[test]
++    fn missing_history_cannot_be_mistaken_for_a_new_record() {
++        let first = original();
++        let next = TaskRecordRevision {
++            parent: Some(first.digest()),
++            record: first.record,
++        };
++        assert!(latest_revision("issue-1", &[next])
++            .unwrap_err()
++            .contains("incomplete"));
++    }
++}
+diff --git a/scratch/questions.md b/scratch/questions.md
+new file mode 100644
+index 000000000..684ea8a94
+--- /dev/null
++++ b/scratch/questions.md
+@@ -0,0 +1,27 @@
++# Assumptions — LOO-393
++
++2026-10-06: The exact SSH invocation, Task selector and error from Jack Heart's
++mini attempt are unavailable. Reproduction starts with two isolated Homes and
++must retain this configured acceptance gap.
++
++A receiving machine is assumed to have the repository clone and its definitions.
++Missing Task placement is prepared there; cloning an unrelated repository,
++installation recovery and broad credential provisioning remain outside this Task.
++
++2026-10-07: Jack Heart selected carrying the laptop's chosen account with
++independent renewal, and proposed a detached nohup-like target process holding
++credentials only in memory after the outer process exits. Target-only account
++setup is superseded. Provider-specific renewable grants and simultaneous laptop
++use still need proof; copying rotating refresh credentials is not an established
++solution. If exclusive renewal ownership is necessary, its effect on laptop
++use needs Jack's decision. Credential-owner death requires a fresh handoff;
++the selected design does not persist secrets to survive target reboot.
++
++Jack could not recall the original command/error. Capture a new configured mini
++reproduction rather than asking for the same missing historical detail again.
++
++Legacy bootstrap remains unresolved: absent shared metadata cannot distinguish
++an issue never registered anywhere from an existing Task on an offline Home.
++Preserve old IDs, backfill from their owners, and define admission before
++claiming deterministic IDs alone solve simultaneous first use. This is a
++mechanism gap, not evidence that Jack selected an identity migration.
+diff --git a/scratch/sync-task-records-through-linear.md b/scratch/sync-task-records-through-linear.md
+new file mode 100644
+index 000000000..8d10db2a2
+--- /dev/null
++++ b/scratch/sync-task-records-through-linear.md
+@@ -0,0 +1,288 @@
++# Sync Task records through Linear
++
++Draft, reviewed against source on 2026-10-07; mechanism choices below remain
++proposals. Jack Heart requested portable Task records and remote agents that
++survive loss of the originating laptop. The exact mini invocation and error
++remain unavailable; the reported symptom is not a verified incident diagnosis.
++
++## Intended interaction
++
++Illustrative ordinary syntax, not a reproduction of Jack's command:
++
++```sh
++lf ssh mini --task LOO-393 : "Continue the implementation"
++```
++
++Resolve the issue and shared Task identity, reconcile into the mini's SQLite,
++reach or prepare its checkout, hand off scoped credentials into a detached
++target process's memory, verify independent renewal, then launch there.
++Print the target Home, Task, Session and a reconnect command before attaching.
++Closing the connection detaches. Reconnect attaches to that exact Session and
++shows its retained output; it does not repeat the prompt. An explicit Session
++stop remains a separate operation. If it finished while detached, show its
++result and history without starting another turn.
++
++Proposed reconnect surface: `lf ssh mini session attach <session-id>`. This is
++new syntax to implement on the existing Session command. A repeated launch
++with an unresolved startup acknowledgment first reconciles its saved request;
++a deliberately new launch remains a new contribution, subject to existing
++checkout admission. Task identity alone never chooses or replaces a Session.
++
++Remote Git must contain the intended commits. An unpushed branch or edits that
++exist only on the laptop cannot be recovered through Linear. Report the missing
++branch/commit and the push needed; retain the portable Task even when placement
++cannot finish. No implicit commit, push, reset or transfer of uncommitted edits.
++
++## Outcome and owners
++
++Linear issues remain planning authority; Git carries code. SQLite holds each
++Home's Task identity, placement and execution history. A portable record carries
++Task ID, issue ID, workspace slug, agent preference and the PR chain's IDs,
++sequence, slug, branch, base, parent PR link and published GitHub association.
++PR merge/abandonment facts preserve the chain; they are dated evidence, not
++delivery requests. Reobserve GitHub before an action requiring current state.
++It carries no paths, credentials, process claims, workflow cursor, approval,
++publication/merge request, CI verdict or local history. Project ownership is
++resolved from accepted Linear planning on receipt. A pulled GitHub link must
++not fabricate a local publication request merely because the current Rust type
++nests that link inside `PrPublication`.
++
++Existing Tasks and PRs keep their IDs. Receiving a record registers local
++presence without Started, a workflow move, a launch or execution authority.
++SQLite remains the owner of local presence and execution history. Project
++refresh cannot reopen terminal local work; conflicting lifecycle evidence is
++visible and requires the existing explicit transition.
++
++Propose deterministic IDs from immutable Linear issue UUIDs for newly created
++Tasks, and from Task identity plus chain position for new PR entries. This
++avoids random duplicate identities on simultaneous first use; competing PR
++content at one position is still a conflict. Existing opaque IDs take precedence
++when a shared record exists. Backfill those records from their owning Homes.
++Two already-existing identities for one issue must remain unresolved, without
++rewriting local references. Missing attachments alone cannot prove an issue has
++never had a Task on an offline Home. Legacy first-use admission needs an explicit
++bootstrap rule before implementation; do not promise both automatic inference
++and preservation of unknown IDs. Ordinary remote use of an existing Task must
++pull its record, never ask Jack to register it manually.
++
++## Convergence
++
++Use the existing Linear issue attachment integration without overwriting issue
++prose or publishing comments that become direction. Linear documents string
++metadata and an idempotent issue/URL pair: recreating the pair updates the
++attachment. It does not document compare-and-swap. Source:
++[Linear attachments](https://linear.app/developers/attachments), checked October 7.
++
++Propose a versioned canonical record serialized into attachment metadata, with
++a URL containing its content digest. Loopflow writes each revision once and
++checks the digest on read; Linear itself does not make it immutable. Preserve
++all revisions, paginate reads, and report altered or missing ancestry as
++incomplete evidence. Attachment visibility, size limits and growing history
++cost need a provider contract test; the URL must not pretend to host a public
++record that does not exist.
++
++Revisions name parent digests. Ordinary updates have one parent; deliberate
++conflict resolution names every competing tip and records the selected complete
++content. The initial single-parent sketch cannot express that resolution and
++must change. Resolution retains both original candidates; timestamps never
++choose a winner. Concurrent writers can each briefly observe one tip before a
++fork becomes visible: a successful readback proves that revision exists, not
++exclusive global ownership. Sync grants no cross-machine worker exclusion.
++
++Store the accepted baseline content/digest and exact pending revision in the
++same local transaction as portable Task/PR changes. Keep observation time,
++pending state and last failure separate. A digest alone cannot compare offline
++local edits with a changed remote record when the old content is unavailable.
++On response loss, read back the exact digest before retrying identical bytes.
++Never recreate a Task or discard a successful local edit because publication
++failed. Further edits queue behind the retained pending revision.
++
++| Local state against baseline | Incoming state | Result |
++| --- | --- | --- |
++| Unchanged | Same revision | Update observation health only |
++| Unchanged | Valid descendant | Apply portable fields atomically; retain local facts |
++| Changed | Same revision | Publish retained pending revision |
++| Changed | Descendant or competing tip | Preserve both; expose conflict and resolution |
++| Any | Partial, unavailable or invalid | Keep local facts and original observation age |
++
++Task creation and portable edits attempt publication after their local commit.
++Existing repository planning refresh pulls records for discovered issues and
++retries pending writes; exact Task selection performs targeted reconciliation.
++Catch-up must include retained Tasks outside the current Project and all pages.
++Attachment updates must not depend solely on the issue's `updatedAt` changing.
++Do not add a daemon or use a webhook as the only catch-up mechanism. Status
++reports current, pending, stale/unavailable or conflicted sync separately from
++Task workflow state. Unchanged cached Tasks follow the accepted outage policy;
++missing local identity plus unavailable shared evidence is not an unknown issue.
++
++Opaque Task selectors require resolving their issue from the origin's record
++or the receiving Home's synced inventory. A direct Linear issue selector needs
++neither the origin database nor an origin process once publication succeeds.
++
++## Checkout preparation
++
++Extend the existing Task registration/placement transaction and checkout lease.
++Resolve the clone by repository identity and the selected target repository;
++derive a local path, never copy the origin path. A valid existing placement
++wins. When no local placement exists, reuse an unambiguously matching registered
++branch checkout, including its staged, unstaged and untracked files. Ambiguous
++or occupied placement reports the exact candidate paths without moving bytes.
++
++Fetch and resolve the shared branch before creating a missing checkout. The
++current `restore_task_checkout` permits a base fallback when no local
++`PrStarted` event exists. That inference is invalid on a receiving Home with no
++execution history. Require positive branch/commit evidence there; a missing
++published branch must not silently produce an empty replacement from its base.
++An established local branch is preserved; repeat commands never reset it to a
++new shared tip. Report divergence through existing Git operations.
++
++An incoming chain advance may be accepted as pending shared knowledge while a
++local checkout is busy or dirty. Applying it cannot switch branches or retire
++the current checkout underneath local work. Available target Session/Exec
++evidence controls admission. A matching saved SSH request attaches to its exact
++execution; an independent worker is neither taken over nor duplicated by
++discovery. Unknown local execution remains unknown. Offline evidence from
++another Home cannot establish either liveness or control authority.
++
++## Remote execution
++
++Jack Heart selected a detached target process holding credentials in memory on
++October 7. Implement nohup's lifetime behavior in the existing process launcher:
++start a separate session/process group, survive SIGHUP, disconnect stdin and
++redirect output to the existing target capture. A literal `nohup` wrapper alone
++does not solve credential renewal or inherited pipes. The detached `lf` owns
++the Session driver and an in-memory credential service for its descendants;
++reuse the current broker protocol where appropriate, without a second daemon
++or Work registry. Use the existing Session launch lock and Exec receipts.
++If an interactive terminal needs tmux, it attaches to that same execution and
++receives no secret-bearing shell command or persistent tmux environment.
++Classify agent invocations through the parsed command, covering direct
++prompts, skills, Flow execution and Session continuation; leave foreground
++non-agent commands on their existing transport.
++
++Persist a launch request ID on the origin before SSH, bind it to target Home,
++Task and exact input, and reserve its Session on the target before spawning.
++This request is idempotency metadata on existing execution records, not another
++Work object. Retry the same request under the target launch lock. If a child
++may have started, inspect that exact Session/Exec and preserve uncertainty;
++never allocate another Session because the acknowledgment or PID is missing.
++A startup disconnect before reservation can safely retry; one after reservation
++reuses it. The target must own reservation-to-spawn completion after transport
++loss, including retaining the lock until the child has registered.
++
++Attach only after the target receipt is durable. Capture output on the target,
++independent of the SSH terminal; tmux scrollback is not the history owner.
++Multiple viewers do not gain driver authority. Reconnection uses exact Session
++identity, including from another client with no saved origin receipt. Do not
++silently inject the original prompt again. Explicit interruption follows local
++Session controls; neither an SSH hangup nor a viewer exiting signals the agent.
++The in-memory credential owner survives the outer SSH process exiting. Killing
++that owner or rebooting the target loses its secrets; retain Session/history and
++require a fresh handoff to continue. Do not claim autonomous restart across that
++boundary. Target sleep and installation-state recovery remain LOO-296's scope;
++this Task proves loss of the originating client while the target runs.
++
++## Credentials — selected direction, renewal proof open
++
++Jack Heart chose carrying the selected laptop account to the mini with
++independent renewal, then proposed a nohup-like target process that keeps
++credentials off disk and survives its outer process exiting (2026-10-07).
++This supersedes the recommendation to require a separately configured target
++account. Account selection must preserve the requested identity.
++
++Transfer only the selected provider grant, required GitHub/Linear access and
++explicitly named secrets over SSH into a private pipe/socket consumed by the
++detached owner. Doppler remains the secret source; never send its broad access
++credential. Keep secret bytes out of shell scripts, argv, SQLite, temporary
++files, account homes, tmux configuration, logs and reconnect receipts. Only
++non-secret Session/Exec identity and endpoint location persist. Authenticate
++local IPC by OS ownership/peer identity or an in-memory capability; a reconnect
++client does not need to receive the provider credential. Avoid process dumps
++containing secrets. Application-level no-disk storage does not by itself prove
++that the operating system never swaps memory to disk.
++
++Make the handoff atomic from the launcher's perspective: the target reports
++ready only after all required credential material is received and held by the
++detached owner. Incomplete handoff creates no agent. Lost acknowledgment probes
++the same request and credential owner; it does not launch a second owner or
++replace a live grant. After handoff, the origin broker may exit immediately.
++
++The existing broker lends only access tokens and calls the origin to refresh.
++Moving that broker's process alone therefore cannot meet independent renewal.
++Extend account handling with provider-specific renewal material or an
++independently issued grant for the same account, held only in target memory.
++Resolve its exact scope and expiry before agent launch. Subsequent scoped
++access tokens go to provider children through their existing in-memory channel;
++provider refresh must neither depend on origin connectivity nor write a native
++login file. Updating a child after access-token expiry is part of the proof,
++not satisfied by refreshing a token in an unused broker cache.
++
++Do not assume copying an OAuth refresh token allows two independent writers.
++`provider_account/activation.rs::credential_home` already warns that refreshing
++two copies can invalidate one. Prefer an independent renewable grant for the
++same identity when the provider supports it. Otherwise an exclusive renewal
++handoff changes laptop account availability and needs Jack's decision; it is
++not implied by selecting remote execution. Provider support and concurrent
++laptop/mini renewal remain concrete implementation blockers, not permission
++to weaken disconnect survival to the current access token's lifetime.
++
++Preflight every declared provider/Git/PM capability without the origin broker.
++Missing renewable capability names the account/service and the precise setup
++needed before launch. No silent fallback to another identity. General account
++provisioning is outside scope; the scoped handoff and renewal needed for this
++experience are inside it. Revocation and service outages remain ordinary
++failures. Foreground non-agent commands keep their existing scoped forwarding.
++
++## Delete — do not maintain
++
++- SSH agent execution whose lifetime or credential renewal requires its foreground
++  origin connection; preserve bounded transport and scoped forwarding for commands.
++- The missing-local-Task dead end in remote dispatch; preserve genuinely unknown,
++  stale/unavailable planning and occupied-placement errors.
++- Independent random identity allocation for the same synchronized Task; preserve
++  every existing Task ID and all local references.
++
++## Remaining implementation and acceptance
++
++1. Establish each provider's memory-only renewable handoff, including concurrent
++   laptop use, and settle legacy identity bootstrap. Validate the
++   attachment API and define an explicit conflict-resolution operation on Task
++   sync; the draft is not implementation-ready at those boundaries.
++2. Complete portable records, transactional baseline/pending state and the
++   existing create/update/refresh integration. Prove simultaneous creation,
++   divergent changes, explicit resolution, readback after response loss,
++   multi-page offline catch-up and unavailable/partial provider observations.
++3. Adapt local placement and Session launch/attach through existing operations.
++   Prove imported terminal facts do not replay delivery or workflow authority,
++   and imported PR links do not manufacture publication intent.
++4. Exercise public `lf ssh` with two isolated Homes and a real SSH transport:
++   local Task absent/present; checkout absent/present/dirty/occupied; retained
++   IDs and PR chain; missing branch; newer local work; unknown issue versus
++   unavailable planning; concurrent viewers and independent live workers.
++5. Disconnect before reservation, after reservation, after spawn but before
++   acknowledgment, and mid-turn. Observe target progress after origin/broker
++   death and beyond the origin lease lifetime. Reconnect to the same Session
++   and running Exec, or its terminal history, without another prompt/agent.
++   Exercise target-owned credential renewal and delivery of the renewed token
++   to the running provider, concurrent laptop renewal, partial handoff,
++   credential-owner death, missing setup before launch, explicit stop and
++   absence of secret values in artifacts. Fresh handoff after owner death must
++   preserve the existing Session rather than fabricate continuation success.
++6. Jack could not recall the original command/error on October 7. Retain a new
++   mini reproduction's exact invocation/error when available. Prove actual laptop
++   sleep and reconnection on that path; synthetic transport loss is necessary
++   but does not establish configured mini or laptop-sleep acceptance.
++
++Source evidence: `lf/commands/ssh.rs` currently starts a foreground broker;
++`ops/task.rs` registers random IDs and uses local start events for checkout
++fallback; `ops/human_session.rs` owns Session launch locking;
++`engine/process.rs` already launches detached tmux Sessions. The existing dirty
++`task_record.rs`, Linear attachment methods and migration are an incomplete
++sketch, not an accepted or tested implementation. The single-parent revision,
++digest-only sync row and missing request/placement integration do not yet meet
++this design. Preserve that source work for the implementation step.
++
++Checks: 2026-10-07 source/API inspection only; no builds or behavioral tests for
++this prose review. All implementation and configured acceptance remain pending.
++
++Checkpoint checks: `cargo fmt --all -- --check` passed; `cargo clippy --all-targets -- -D warnings` fails on the sketch's unconnected Task-record APIs (`dead_code`); integration and behavioral verification remain pending.
+diff --git a/wave/infrastructure/MEMORY.md b/wave/infrastructure/MEMORY.md
+index 9895ae89b..8a08af3ca 100644
+--- a/wave/infrastructure/MEMORY.md
++++ b/wave/infrastructure/MEMORY.md
+@@ -682,31 +682,13 @@ verification uses disposable stores; no old branch binary may migrate main.
+ 
+ ## Data model and performance decisions (reconciled 2026-09-30)
+ 
+-Jack's rule, verbatim: "The main user objects should line up with the main
+-tables in the DB and when we see stuff like this where a main record is
+-actually a union over 4 things, we should be suspicious." The trigger was a
+-2026-09-26 product-first review of Session/Run/Task/Wave: a Session was four read-time
+-projections over four stores (Run dir, `task_flow_positions`,
+-`human-sessions/*.json`, `flows/*/position.json`); Run→Task is a `task:`
+-string in a ranked subject list with a two-value source, mirrored into a
+-Task event because the Run could not be queried by Task; every post-launch fact
+-(name, completion, attachment) became a sidecar beside the manifest. Reads
+-reused the launch resolver, so a bound Session became an orphan when its
+-Task's PR merged. The store's `runs` table had the Task FK and no writer.
+-
+-LOO-298 ([PR #1296](https://github.com/loopflowstudio/loopflow/pull/1296)) implements
+-the three-owner model in this branch. Run no longer exists as a product object
+-or table. Current contracts belong in [architecture-reference](../../docs/architecture-reference.md)
+-and [CLI reference](../../docs/lf-reference.md); branch code is not installed acceptance.
+-
+-Jack Heart authorized autonomous landing on 2026-09-30: “try to do this all
+-autonomously, no need to review with me.” Land #1296 as one PR after technical
+-verification, without a demo or review wait. The independent resource-recovery,
+-publication-continuity and resident-Wave cuts already landed as #1358, #1359 and
+-#1360; local main history records them. Exec/Chapter extraction would remove
+-only about 10% and requires manual cutting, so the old decomposition is rejected.
+-Jack selected merging main, not rebasing; `e3a2c7e2c` integrated #1360. Landing
+-authorization is not evidence that #1296 merged or that a release migrated data.
++Jack Heart selected public objects with one SQLite owner, direct skill/operation
++Execs and compiled Flow graphs. The original four-store Session counterexample,
++LOO-298's autonomous single-PR landing authorization, rejected decomposition,
++and merge-not-rebase decision remain at
++`248bfb66c3bfa0cd7b30eab2ae4ea90bf810405b:wave/infrastructure/MEMORY.md`
++under this heading. Current contracts belong in the architecture and CLI references;
++source history does not establish installed conversion or configured acceptance.
+ 
+ **One client, one main Home.** Jack reports only this machine is a client; the
+ pinned dev Home is gone and its active Tasks were moved by hand to `~/.lf`.
+-- 
+2.50.1 (Apple Git-155)
+

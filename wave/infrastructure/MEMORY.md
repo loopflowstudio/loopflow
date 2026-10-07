@@ -556,10 +556,11 @@ Fetch before remote placement decisions, including branches without PRs.
 Keep copied observation ages and target removal evidence. Cold adoption seeds
 only an unselected Wave's exact issue Project; existing selection and rotation
 remain authoritative. Source requirements end at dispatch; descendants must not
-inherit them or the origin's Work declaration. Release's entry-point lesson
-applies: recipient fixtures inject the payload, while the SSH test stops before
-connecting. Neither proves successful transport or installation. Later slices
-own credentials and disconnect survival.
+inherit them or the origin's Work declaration. Following Release's entry-point
+lesson, public SSH dispatch now proves repeated skill execution against pushed
+code and preserves a dirty target behind a later commit. Transport/provider
+fixtures prove no real SSH or installation. Existing Workflow preservation and
+full gate remain unproved. Later slices own credentials and disconnect survival.
 
 ## Synced planning integration (LOO-334)
 

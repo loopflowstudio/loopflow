@@ -55,6 +55,8 @@ without an unlocked Keychain. Existing encrypted tokens must remain decryptable.
 - The hidden account-lease probe and the obsolete bearer-forwarding PM reader.
 - Keychain key writes (which passed key bytes in argv) and truncate-in-place key files.
 - Remaining lease-only selection wrappers, forwarding diagnostics and replay arguments.
+- Dynamic forwarded-secret environment expansion and broker-only fixture setup;
+  retain ordinary Session credential and account-selection isolation.
 - The `lf ssh` command, through LOO-411's global `--machine` selector cutover.
 
 Preserve managed account selection, local/shared account behavior, native identity,
@@ -65,10 +67,9 @@ provider-owned refresh, historical captures, current machine records and routes.
 - Integrate LOO-411's global `--machine` selector before publication, per Jack
   Heart's comment `e332b3bb-603b-4dc4-bee4-1e5b704d5721`. The current base still
   exposes `lf ssh`; its removal belongs to the parent. October 7's fresh GitHub
-  read confirms open PR #1489 still publishes `32607f1d24ad`, already integrated
-  here; `lf sync --plan` reports no change and `lf sync --manual` completes
-  without changes. The parent must publish the selector before this integration
-  can proceed. Adapt resident account
+  read during compression reconfirms open PR #1489 at `32607f1d24ad`, already
+  integrated here; `lf sync --plan` again reports `noop`. The parent must publish
+  the selector before this integration can proceed. Adapt resident account
   selection to the global dispatch and update surviving `lf ssh` examples and
   diagnostics together. Prove selected-account restriction, literal prompt flags
   after `--`, headless missing-login recovery and retired-command rejection through
@@ -97,4 +98,11 @@ the replay API no longer accepts a Session ID used only by the deleted broker.
 Literal account/home flags after `--` remain prompt text. Provider selection's
 ambiguity and duplicate checks are retained on the surviving local path.
 
-Checks: `gh pr view 1489 --json headRefName,headRefOid,state,url` confirms the unchanged published parent; `lf sync --plan` / `lf sync --manual` find nothing to integrate; prose-only reconciliation reuses `61bfe5a6e`'s formatting, clippy and 69 focused passes (exact commands at `7a3f263cb:scratch/work-on-another-machine-name.md`, including the retained-output-handle leak); gate/CI owns broader checks and selector integration still needs its four focused proofs.
+The follow-up compression removes broker socket/token fixtures and the retired
+lease/forwarded-secret environment reader and scrub lists. Session startup uses
+one static list for current credentials and account choices. A shell execution
+test proves those values are absent in the child; local account reporting still
+checks cached/live evidence and successful/failed Process outcomes without a
+provider executable. No old-peer compatibility path is retained.
+
+Checks: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and shell syntax checks passed; with inherited LF_/LOOPFLOW_ authority cleared and LF_BIN pinned to this checkout, `uv run python scripts/test_network.py cargo nextest run -p loopflow --lib --test auth_tests -E 'test(engine::process::tests::) | test(account_status_preserves_local_evidence_without_provider_executables)' --no-fail-fast` passed 9 tests and network-isolated `uv run pytest python/tests/test_materialize_rust_tests.py -q` passed 3; prior 69 focused passes remain recorded at `7a3f263cb:scratch/work-on-another-machine-name.md` (including the retained-output-handle leak); `gh pr view 1489 --json headRefName,headRefOid,state,url` and `lf sync --plan` reconfirm the unchanged parent; gate/CI owns broader checks and selector integration still needs its four public-path proofs.

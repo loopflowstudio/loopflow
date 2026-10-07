@@ -1108,7 +1108,6 @@ mod tests {
                 "LF_RUN_ID",
                 "LF_RUN_DIR",
                 "LF_WAVE_ID",
-                "LF_ACCOUNT_LEASE",
                 "LF_HUMAN_SESSION",
             ];
             let environment = EnvRestore::capture(&names);
@@ -1896,13 +1895,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
-            "LF_ACCOUNT_LEASE",
             "LF_TEST_SESSION_ENV",
             "CLAUDE_CONFIG_DIR",
             "PATH",
         ]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var("LF_ACCOUNT_LEASE");
         let native = temp.path().join("native");
         std::env::set_var("CLAUDE_CONFIG_DIR", &native);
 
@@ -1964,14 +1961,12 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let _restore = EnvRestore::capture(&[
             "LF_HOME",
-            "LF_ACCOUNT_LEASE",
             "LF_TEST_SESSION_ENV",
             "OPENCODE_API_KEY",
             "CODEX_ACCESS_TOKEN",
             "PATH",
         ]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var("LF_ACCOUNT_LEASE");
         std::env::set_var("OPENCODE_API_KEY", "ambient-key");
         std::env::remove_var("CODEX_ACCESS_TOKEN");
 

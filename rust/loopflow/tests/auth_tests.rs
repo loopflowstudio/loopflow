@@ -9,7 +9,7 @@ use loopflow::store::{
 use support::EnvGuard;
 
 #[test]
-fn retired_broker_environment_does_not_change_local_account_status() {
+fn account_status_preserves_local_evidence_without_provider_executables() {
     let home = tempfile::TempDir::new().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -22,23 +22,10 @@ fn retired_broker_environment_does_not_change_local_account_status() {
     runtime
         .block_on(store.upsert_provider_account(&seeded))
         .unwrap();
-    // A listening socket records any attempted broker request without serving
-    // metadata or credentials. Cached inspection must not even connect.
-    let socket = home.path().join("broker.sock");
-    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let handle = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
-        serde_json::to_vec(&serde_json::json!({
-            "socket": socket,
-            "secret": "disposable-broker-secret"
-        }))
-        .unwrap(),
-    );
     let inspect = |json: bool, verify: bool| {
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         command
             .args(["account", "codex"])
-            .env("LF_ACCOUNT_LEASE", &handle)
             .env("PATH", "/nonexistent");
         if json {
             command.arg("--json");
@@ -51,39 +38,23 @@ fn retired_broker_environment_does_not_change_local_account_status() {
             output.status.success(),
             "status should retain the local report"
         );
-        for bytes in [&output.stdout, &output.stderr] {
-            let text = String::from_utf8_lossy(bytes);
-            assert!(!text.contains(&handle));
-            assert!(!text.contains("disposable-broker-secret"));
-            assert!(!text.contains(socket.to_str().unwrap()));
-        }
         String::from_utf8(output.stdout).unwrap()
     };
-    let connected_json = inspect(true, false);
-    let connected_text = inspect(false, false);
-    assert_eq!(
-        listener.accept().unwrap_err().kind(),
-        std::io::ErrorKind::WouldBlock
-    );
-    drop(listener);
-    std::fs::remove_file(&socket).unwrap();
-    assert_eq!(inspect(true, false), connected_json);
-    assert_eq!(inspect(false, false), connected_text);
-    let report: serde_json::Value = serde_json::from_str(&connected_json).unwrap();
+    let cached_json = inspect(true, false);
+    let cached_text = inspect(false, false);
+    let report: serde_json::Value = serde_json::from_str(&cached_json).unwrap();
     let rows = report["accounts"].as_array().unwrap();
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0]["account_id"], "local-account");
     assert_eq!(rows[0]["cached_credential_state"], "missing");
     assert_eq!(rows[1]["scope"], "local");
-    assert!(connected_text.contains("local-account · local-account@example.com"));
+    assert!(cached_text.contains("local-account · local-account@example.com"));
     assert_eq!(
         runtime
             .block_on(store.list_provider_accounts(None))
             .unwrap(),
         vec![seeded]
     );
-    // Default live status can inspect metadata, but a disconnected origin
-    // still cannot suppress the local report or expose the handle in an error.
     let verified: serde_json::Value = serde_json::from_str(&inspect(true, true)).unwrap();
     assert_eq!(verified["accounts"].as_array().unwrap().len(), 2);
 
@@ -97,7 +68,7 @@ fn retired_broker_environment_does_not_change_local_account_status() {
         .unwrap();
     assert_eq!(
         (commands, completed),
-        (5, 5),
+        (3, 3),
         "each actual auth process remains a process"
     );
     let fixture = loopflow_test_support::TestRepo::new();

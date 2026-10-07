@@ -28,7 +28,6 @@ AMBIENT_WORK_AUTHORITY = (
     "LF_AGENT_CALLER",
     "LF_TRACE_ID",
     "LF_WAVE_ID",
-    "LF_ACCOUNT_LEASE",
 )
 
 

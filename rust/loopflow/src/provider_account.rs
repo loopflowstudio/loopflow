@@ -1,5 +1,4 @@
-//! Host-local provider accounts, selection, and process-lifetime credential
-//! leases for Claude and Codex.
+//! Machine-local provider accounts, selection, and launch homes for Claude and Codex.
 
 pub mod activation;
 pub(crate) mod identity;

@@ -30,8 +30,7 @@ Corrected installation fixtures still require disposable OS-account isolation.
 Jack Heart's PR #1489 review adds private OpenSSH sharing, an interactive
 first-install offer (default yes), and distinct connection failures with recovery
 commands. Existing lf is never replaced; status, batch and JSON never install.
-This supersedes the earlier exclusion of all remote installation. Personal SSH
-masters stay separate. Account-forwarding routes must be cancelled on command
+This supersedes the installation exclusion. Personal SSH masters stay separate. Account-forwarding routes must be cancelled on command
 exit because shared masters outlive commands. Fixtures and loopback SSH prove
 local behavior and reuse only; installation, account continuity and migration
 remain unproved. Republish for review.
@@ -80,7 +79,7 @@ LOO-370 delegation, superseding physical relocation. The Task brief and comment
 `3829b49e-2ade-4bee-8850-2ae2297399a8` record that decision. Capture cutover below
 retains current constraints. Earlier cleanup and permission counterevidence:
 `6b4769a974e52e29c076826cd6724e48b89dd6c4:wave/infrastructure/MEMORY.md`.
-This source decision authorizes no installed conversion or live interruption.
+No installed conversion or interruption is authorized.
 
 ## Project configuration and review direction (2026-10-05)
 

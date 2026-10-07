@@ -188,6 +188,8 @@ Every line of code must earn its place. Readable code is not terse code; don't s
 
 Start with minimal data structures and APIs. If the core is right, trimming excess at the edges is straightforward.
 
+A redesign deletes what it replaces. We have usually tried the idea before, and half-built versions remain: an unreachable branch, a hidden command, a second resolver. Find them before designing. If three building blocks exist for one job and none quite works, the change removes all three in the same diff. It does not add a fourth.
+
 ## Flexibility
 
 Meet the caller where they are. When code breaks because it assumed a fixed context—running on `main`, an un-owned worktree, an ambient home—accept the context and adapt to it. Resolve the right thing automatically; don't add a guard, a verification, an allowlist, or a precondition that refuses.

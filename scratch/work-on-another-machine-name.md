@@ -3,9 +3,8 @@
 Status: PR #1484 is published. Jack Heart requested only two review changes on
 2026-10-07 (comment 55a0096b-1a36-4690-bb2e-a1a3a1763989): discard old Desktop
 caches and rename the installation scope. Both are implemented and focused checks pass;
-republication remains. Stop after republication; no landing or later slice
-is authorized. The full affected gate and isolated installation proof remain
-with gate/CI.
+republication remains. Jack authorized no landing or later slice. The full
+affected gate and isolated installation proof remain with gate/CI.
 
 Do not lift code, tests, help text or config from herdr or cmux (Jack Heart,
 2026-10-07). Their behaviour is described here from docs and reading; write
@@ -94,6 +93,7 @@ same panes.
 ## Baseline before the rename (v0.13.9 source)
 
 PR 1 changes the Home names below to machine. The remote-work limitations remain.
+The integrated terminal-recovery changes are distinguished below.
 
 - Home: random id minted with the store, plus a route. No name, no list, no
   remove. `lf home observe <id> <route>` records one unverified; routes must be
@@ -122,6 +122,21 @@ PR 1 changes the Home names below to machine. The remote-work limitations remain
 - Planning refresh has a 5-second deadline that is a hard error with no cache.
 - Mac app: a pane runs `lf session connect <id>`; the app owns the terminal;
   quitting ends the clients. Pane layout is in memory only.
+
+## Integrated recovery foundation (2026-10-07)
+
+PR #1487 (`e0e7a74d4`, integrated at `eb29e002b`) commits provider reservation
+with the driver claim, records native provider identity at spawn and observed
+exit at wait, and preserves native history published between opener probes.
+First opening and native resume share admission checks. A remote client is
+not evidence that its surviving engine exited; a failed spawn proves non-start,
+not engine death. The later disconnect and relay slices can build on these
+existing receipts instead of introducing a second launch-evidence owner.
+
+This repairs terminal recovery in source, not launcher-independent execution.
+The affected legacy Session still lacks exact process evidence; installed
+reconnect and live disconnect continuity remain unproved. The proposed launch
+request id is still needed to deduplicate a remote request whose reply is lost.
 
 ## PR 1: rename — review changes implemented
 
@@ -168,23 +183,13 @@ credential crosses.
 First connect: probe, find `lf`, check capability, offer install (default yes).
 Replacing a running remote `lf` asks first and says what would stop.
 
-Versions across machines (proposal; Jack Heart asked on 2026-10-07 whether to
-keep `lf` versions in sync across machines or make mixed versions compatible).
-Loopflow ships daily and the style guide rules out compatibility layers, so
-skew will be common and supporting arbitrary old versions is the expensive
-answer. Proposed instead: detect skew and make it one step to fix.
-- Connecting asks the remote what it can do through one stable public command,
-  not through whichever command the current release happens to use. PR 1 showed
-  the cost: the identity check runs `lf machine id`, so a remote one release
-  behind fails with an unhelpful message.
-- `lf machine status` shows each machine's version beside the local one.
-- When the remote is behind, say so and offer to update it (default yes).
-  Updating never stops work running there without an explicit yes.
-- Each machine's own scheduled update keeps running; this covers the window
-  between them.
-
-Jack Heart accepted that machines reached by id upgrade together for now;
-nothing outside the repository needs changing.
+Versions across machines: Jack Heart accepted on 2026-10-07 that machines
+reached by id upgrade together for now; nothing outside the repository needs
+changing. PR 1's identity probe uses `lf machine id`, so an older remote that
+only understands `home` cannot serve that probe. Mixed-version compatibility
+and the earlier stable capability-command proposal are not PR 1 requirements.
+Version display and an offered remote update remain later design, not implemented
+behaviour. Updating must preserve running work unless interruption is approved.
 
 ### 2. The Task on a machine that has never seen it
 
@@ -438,6 +443,13 @@ Retained binaries are called through the existing `install` shorthand. The
 promotion lock keeps the same inode path, preventing split exclusion across
 versions. No schema or installation-path migration was added.
 
+Source review found no additional implementation mismatch in the requested
+cache discard or installation ownership. Release is the only immediate child
+Wave in this checkout; its goal and memory were read in full. Its operation-entry
+lesson applies to the renamed installation fixtures: parsing an unknown owner
+cannot prove rejection of a retired option. Gate/CI still owns the corrected
+fixtures that require a disposable OS account.
+
 The prior review walkthrough is historical at
 `56a2677c4:scratch/pr-review.html`. It led to Jack Heart's two accepted changes.
 The command discovery test exposed a pre-existing half-renamed fixture: its
@@ -451,4 +463,13 @@ at `d7a345896:scratch/work-on-another-machine-name.md`; retained installer repai
 are at `327e6e11e`. Release's child memory still requires preserving original job
 ownership and activation; no installed or remote acceptance is inferred here.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; focused `cargo nextest run -p loopflow --lib --bin lf --test cli_discovery --test documented_commands --test global_commands -E 'test(installation::tests::) | test(lf::commands::install::) | test(install_exposes_refresh) | binary(cli_discovery) | binary(documented_commands) | test(scheduled_install) | test(schedule_rejects)'` covers 62 checks (61 passed together, corrected help/discovery and documentation rerun: 4/4); `scripts/test_desktop.sh -Xswiftc -gnone --filter WorkCacheTests` passes (14). Full affected gate and isolated installer proof remain with gate/CI; no installed upgrade or remote continuity is claimed.
+Compression review: one startup exception list now serves installed-CLI dispatch
+and early process observation, removing two repeated matches without changing
+which commands bypass startup. Two isolated installation fixtures still invoked
+`machine install`; four retired-option checks passed for that same wrong command,
+and the installed-CLI fixture still expected `home`. They now address the current
+commands. The installation proofs still require disposable OS isolation.
+Unchanged cache, installation-library and command-documentation evidence remains
+at `133c81599:scratch/work-on-another-machine-name.md`.
+
+Checks (retained; realign changed prose only): `cargo nextest run -p loopflow --bin lf --test cli_discovery --test one_machine_tests --test doctor_tests --test screenshot_tests -E 'binary(lf) | binary(cli_discovery) | test(local_promotion_and_retained_home_commands_are_removed) | test(doctor_does_not_initialize) | test(doctor_reports_execs) | test(doctor_keeps_reporting) | test(screenshot_uses_the_isolated_backend)'` passes (50); `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` pass; realign `git diff --check` passes. Full affected gate and isolated installation proofs remain with gate/CI; no installed upgrade or remote continuity is claimed.

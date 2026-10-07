@@ -32,9 +32,11 @@ promotion lock because released gates, receipts and jobs pin those paths and
 no installed relocation proof exists. These are persisted-data
 contracts, not alternate commands or runtime owners. No installed store is touched.
 
-Context: `lf context --skill implement --json` reports authored memory at
-15,986/16,000 tokens and scratch at 6,325/12,000. The generated launch goal is
-23,644/16,000 (7,644 over), from the broad committed file inventory and stored
-steers. Authored-note edits cannot reduce that generated source; limits remain
-unchanged and submitted input fits. The complete launch source was inspected;
-the archived LOO-393 patch and superseded PR walkthrough remain in Git.
+Context: the realign budget read confirms authored memory and scratch fit their
+16,000- and 12,000-token limits. The generated launch goal remains over its
+16,000-token limit because of the committed file inventory and stored steers;
+authored-note edits cannot reduce that source. Limits are unchanged and submitted
+input fits. The complete launch source was inspected; the archived LOO-393 patch
+and superseded PR walkthrough remain in Git. The post-edit query leaves the
+generated goal 7,619 tokens over; reducing it requires launch-context assembly
+changes outside this slice.

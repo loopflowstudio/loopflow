@@ -18,7 +18,7 @@ Mac app or a phone.
 
 ## Placement
 
-Infrastructure Wave (execution continuity). LOO-394. LOO-393 and LOO-395 are
+Infrastructure Wave (execution continuity). The design belongs to LOO-394; this copy drives LOO-411, the second step, stacked on the first so it does not wait for it to land (Jack Heart, 2026-10-07). LOO-393 and LOO-395 are
 merged into it.
 
 ## The demo
@@ -330,9 +330,9 @@ Decided by Jack Heart, 2026-10-07: "Fine to break things up into multiple
 PRs." Each one deletes what it replaces. Follow-ups are intent only; each gets
 its own plan when started.
 
-1. Rename Home to machine. No behaviour change. `This slice`: source implemented;
-   affected gate, isolated installer proof and publication remain.
-2. Machine record: `lf machine add`, `list`, `status`, `rename`, `remove`;
+1. Rename Home to machine. No behaviour change. PR #1484, under review; this
+   branch is stacked on it.
+2. `This slice` (LOO-411). Machine record: `lf machine add`, `list`, `status`, `rename`, `remove`;
    ssh aliases; identity fetched at add; repository path. Deletes `lf machine
    observe`, the hard-coded repository path and the `user@host` rule.
 3. A Task on a machine that has never seen it: one resolver, fetch whenever

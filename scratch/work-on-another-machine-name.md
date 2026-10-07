@@ -1,6 +1,8 @@
 # Work on another machine
 
-Status: LOO-411 implements step 2, the machine record, stacked on LOO-394 / PR #1484.
+Status: LOO-411 implements step 2, the machine record, in PR #1489.
+Parent PR #1484 merged as `626789dcd`; supported sync integrated main after the
+first republication attempt rejected the stale stacked base.
 Jack Heart authorized implementation and publication on 2026-10-07, then stopping
 for review. The rename is inherited; later remote-work slices remain intent.
 
@@ -18,7 +20,7 @@ stop for review; landing and later remote-work slices remain unauthorized.
   disposable real-SSH sharing proof pass. Affected gate and actual installer
   proof remain with gate/CI; installer verification requires disposable OS-account
   isolation, not host HOME overrides.
-- Republish the same PR, then stop for Jack Heart's review.
+- Jack Heart's review of the same PR is the delivery boundary; no landing is authorized.
 - No product decision is needed. Later slices retain the unresolved Codex holder
   and shell-pane choices below.
 
@@ -458,7 +460,9 @@ so a replacement machine can be added there without deleting the old identity.
 The route's uniqueness index covers the local identity and named connections;
 unnamed history remains intact. An unsupported peer still contributes its version
 when the identity command fails. Machine commands and the command reference are
-implemented. PR #1489 is the review surface; the reviewed additions await republication.
+implemented. PR #1489 is the review surface for these additions.
+Sync preserved the machine changes and adopted upstream Process naming; focused
+checks cover the combined tree.
 
 Review additions preserve the existing identity-before-credential path. The
 simulated installer proves the interactive offer, refusal, default acceptance,
@@ -479,4 +483,4 @@ Earlier migration, command-discovery and Swift fixture results, including the
 two open-output-handle observations, remain at
 `e7cd8050ee3882a71a2374c693d0ef6543b2219c:scratch/work-on-another-machine-name.md`.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo nextest run -p loopflow --lib --test machine_commands -E 'test(lf::commands::ssh::tests::) | test(lf::commands::machine::tests::) | binary(machine_commands)' --no-fail-fast` pass (21 tests; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned); `uv run python /tmp/loo411-real-ssh.py` passes (evidence `/tmp/loo411-ssh-h3in2iav`); affected gate and isolated published-installer proof remain with gate/CI.
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo nextest run -p loopflow --lib --test machine_commands -E 'test(lf::commands::ssh::tests::) | test(lf::commands::machine::tests::) | binary(machine_commands)' --no-fail-fast` pass (21 tests after sync, one nextest output-handle leak warning in the pure exit-classifier test; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned); `uv run python /tmp/loo411-real-ssh.py` passes (evidence `/tmp/loo411-ssh-h3in2iav`); affected gate and isolated published-installer proof remain with gate/CI.

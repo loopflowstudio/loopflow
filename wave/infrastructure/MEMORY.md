@@ -731,8 +731,7 @@ verification uses disposable stores; no old branch binary may migrate main.
 Jack Heart selected one SQLite owner per object, direct Processes and compiled
 Flows. September 30's counterexamples, delivery decisions and draft inventory
 remain at `72c58cac5d2f4f1700186379e0645446341b1373:wave/infrastructure/MEMORY.md`.
-Current contracts live in the architecture and CLI references; source history
-proves no installed conversion.
+Current contracts live in the architecture and CLI references.
 
 **One client, one main Home.** Jack reported manually moving active Tasks to
 `~/.lf` and retiring the pinned development Home; that proves no conversion.

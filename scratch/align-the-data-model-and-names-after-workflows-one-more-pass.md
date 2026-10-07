@@ -10,8 +10,8 @@ Jack proposed no standalone `lf workflow` commands: operations instead belong
 under their owner, such as `lf project workflow set` and
 `lf task workflow restart`. Jack subsequently clarified that restart resets the
 position. Jack then requested moving the work forward into implementation.
-Resolve the remaining command mechanics within this owner-scoped direction;
-the implementation choices below are not separate quotations or approvals.
+The command mechanics below are implementation choices within that direction,
+not separate quotations or approvals.
 
 A Project selects the Workflow definition its Tasks take up. A Task holds its
 captured Workflow and position. Flow stays the independently executable layer,
@@ -46,7 +46,8 @@ Jack Heart's October 6 LOO-386 steers retain these decisions:
   were suggestions, not accepted names.
 
 Jack's October 7 correction and stacking request establish LOO-400 / PR #1483
-as the baseline. Its `e530eb780` head is integrated locally:
+as the baseline. Its landed main commit `e467ea995` is integrated at `7f3169596`;
+the earlier `e530eb780` stack is superseded:
 
 - `Process.lfid` is the durable identifier; optional `pid` is the observed Unix
   PID. References use `process_lfid` and `parent_process_lfid`.
@@ -196,18 +197,18 @@ lf --task ISSUE run pursue # same execution, explicitly associated with the Task
 
 There is no top-level `lf workflow` group. Project commands inspect/change the
 selected definition. Task commands inspect/change the captured instance.
-Jack Heart specified on October 7 that `restart` resets position. Implement it
+Jack Heart specified on October 7 that `restart` resets position. It is implemented
 as a move to `start` on the captured Workflow, retaining move and execution
 history. It neither reloads the source definition nor executes work; subsequent
-`lf task run` chooses the next edge. Reuse the existing move operation and its
-legality rules rather than introducing another reset lifecycle. Existing
+`lf task run` chooses the next edge. It reuses the existing move operation and its
+legality rules. Existing
 `lf task move` and `lf task run` retain their settled meanings.
 
-Implementation choice: put reusable definition discovery and customization under
+Implementation choice: reusable definition discovery and customization live under
 `lf project workflow list` and `lf project workflow customize NAME`. These read
 or customize repository definitions; `show PROJECT` reads the Project selection
-and `set PROJECT NAME` assigns it. Keep Task workflow commands about the Task's
-captured instance rather than duplicating a definition catalog there.
+and `set PROJECT NAME` assigns it. Task workflow commands act on the Task's
+captured instance, with no duplicate definition catalog.
 Jack accepted `customize` copying a builtin only when needed and printing the
 local path, but did not settle its placement under the new command shape. A
 shared source edit must be distinguishable from changing a Task's captured graph.
@@ -215,17 +216,16 @@ shared source edit must be distinguishable from changing a Task's captured graph
 Project selection supplies the Workflow at first use; an explicit Task selection
 wins. Existing Tasks retain their captured graph. Current first-use selection
 through `lf task run ISSUE feature` and outgoing-edge-first resolution remain
-unless a separate accepted change replaces them. Coordinate Project addressing
-and command ownership with LOO-397; the current CLI changes the chapter's workflow
-through `lf wave update-plan --workflow`, rather than a Project command family.
-LOO-397 was read October 7: it has a brief but no execution or checkout. Implement
-the agreed owner paths here and keep the documentation explicit for its later
-command-map pass; it is not a prerequisite for this work.
+unless a separate accepted change replaces them. `lf project workflow set`
+replaces the former `lf wave update-plan --workflow` shortcut and validates the
+selected definition while preserving Project KRs and metric targets. Full-plan
+replacement remains `lf wave update-plan --plan`. LOO-397's later command-map
+pass has these owner paths to consume; its October 7 read showed a brief with
+no execution or checkout, not a prerequisite for this implementation.
 
-The replacement for the current Flow-inspection `--sessions` flag also needs
-command-map agreement. `--processes` is a candidate consistent with LOO-400,
-the implemented flag for process inspection. Keep `.lf/workflows/` and `.lf/flows/` as separate
-definition namespaces; remove obsolete internal aliases at cutover.
+Flow inspection uses `--processes`, replacing `--sessions` consistently with
+LOO-400. This is an implementation choice, not a pending naming candidate.
+`.lf/workflows/` and `.lf/flows/` remain separate definition namespaces.
 
 A local autonomous definition named feature must coexist with the builtin
 Workflow feature. Repository overrides apply only within the same kind.
@@ -270,6 +270,16 @@ unavailable. Flow references in historical capture manifests and append-only
 Task events retain their original serialized fields. Monitor suggestions now use
 `--processes`, matching the renamed inspection flag.
 
+Compression at `b33f812a9` removed Desktop's copied FlowProcessProgress;
+diagrams read FlowProcessDetail directly. Its labels use the recorded Process
+outcome `succeeded`, fixing a successful step drawn as failed after a stopped
+driver. Single-definition JSON inspection shares the catalog entry compiler
+without enumerating the whole catalog; invalid sources retain their diagnostic.
+
+Upstream #1487 is also integrated. Its terminal recovery repairs preserve native
+provider identity and history, but Infrastructure still records failed installed
+reconnect evidence. That does not establish this Task's provider-continuity proof.
+
 Remaining: gate's changed-aware acceptance and packaging/docs checks, followed
 by Jack Heart's demo review. No provider continuity, live Home/Linear mutation,
 rendered/native interaction or chapter KR is established by local fixtures.
@@ -277,8 +287,8 @@ Retry/recovery policy, graph clipping and completion/reopening remain out of sco
 
 ## Proof and limits
 
-Gate should exercise a provider-free path from definitions and public commands
-through SQLite and the watch DTO into Swift:
+Remaining acceptance covers the provider-free path from definitions and public
+commands through SQLite and the watch DTO into Swift:
 
 1. Same-name autonomous and Workflow definitions both list, show, customize and
    open correctly. Overrides stay within kind; invalid source never falls through.
@@ -295,9 +305,9 @@ through SQLite and the watch DTO into Swift:
    historical payloads remain readable. CLI shorthand resolution, builtin
    packaging and documentation match the final commands and owner-scoped command map.
 
-Use existing behavioral harnesses: task_flow_launch_tests, flow_discovery_tests,
-DTO fixtures and documented_commands; affected Swift DTO/TaskFlow/RegistryQuery
-and navigation/view tests. Gate checks the changed-aware suite plan once,
+Existing behavioral harnesses are task_flow_launch_tests, flow_discovery_tests,
+DTO fixtures and documented_commands, plus affected Swift DTO/TaskFlow/RegistryQuery
+and navigation/view tests. Gate owns the changed-aware suite plan once,
 including CLI/Rust, Desktop build and headless views, packaging/docs and website.
 Rust formatting/Clippy and architecture checks apply to code changes.
 Focused implementation checks are recorded below. Real provider continuity and
@@ -313,26 +323,26 @@ in native terminals, completion/reopening, graph clipping, provider transport,
 chapter ownership and live Home/Linear migration. LOO-353's outstanding acceptance
 work remains outstanding.
 
-## Delete — do not maintain
+## Removed implementations
 
-- Remove cross-kind builtin suppression and mixed `workflow::customize`; retain
+- Removed cross-kind builtin suppression and mixed `workflow::customize`; retained
   local override precedence and errors independently for each definition kind.
-- Remove `CatalogKind` and the nullable mixed catalog payload; retain separate
+- Removed `CatalogKind` and the nullable mixed catalog payload; retained separate
   Flow and Workflow entries, including invalid sources.
-- Remove `TaskFlowSnapshot`, `TaskFlowRecord`, and `LatestTaskFlow`; retain
+- Removed `TaskFlowSnapshot`, `TaskFlowRecord`, and `LatestTaskFlow`; retained
   optional latest `FlowProcessDetail`, execution evidence and Task run legality
   as separate Task fields, including completed graph/identity.
-- Replace authored `Flow`, `FlowTemplate` and runtime Flow projection names;
-  preserve persisted graph serialization and LOO-400's schema unchanged.
-- Delete Desktop name-only catalog lookup and destination; retain kind in
-  navigation and customization and keep native Task panes alive.
-- Delete `FlowProcessProgress`, the Desktop copy of a Flow detail; diagrams read
-  `FlowProcessDetail` directly, with computed presentation labels. Remove its
+- Replaced authored `Flow`, `FlowTemplate` and runtime Flow projection names;
+  preserved persisted graph serialization and LOO-400's schema unchanged.
+- Deleted Desktop name-only catalog lookup and destination; kind stays in
+  navigation and customization, with native Task panes retained.
+- Deleted `FlowProcessProgress`, the Desktop copy of a Flow detail; diagrams read
+  `FlowProcessDetail` directly, with computed presentation labels. Removed its
   copy-only identity assertion and synthetic progress-state construction.
   Review also corrected the displayed Process success value from `ok` to
   `succeeded`; success before a stopped driver must not draw as a failed step.
-- Remove full-catalog compilation from single-definition JSON inspection. List
+- Removed full-catalog compilation from single-definition JSON inspection. List
   and show share `flow_catalog_entry`; invalid local sources retain diagnostics,
   and a missing definition never falls through to a skill.
 
-Checks (October 7): implementation build, focused Rust/Swift, docs and architecture checks pass; compression: `cargo test -p loopflow --test flow_discovery_tests` (5), `cargo test -p loopflow --lib engine::flow_graph::tests`, `scripts/test_desktop.sh --filter 'TaskFlowTests|DTOFixtureTests|DesktopHeadlessTests'` (36), `cargo fmt`, and `cargo clippy --all-targets -- -D warnings` pass; affected acceptance, packaging/website and native demo remain with gate/demo.
+Checks (October 7): prior implementation/compression recorded passing build, docs/architecture, `cargo test -p loopflow --test flow_discovery_tests`, `cargo test -p loopflow --lib engine::flow_graph::tests`, `scripts/test_desktop.sh --filter 'TaskFlowTests|DTOFixtureTests|DesktopHeadlessTests'`, `cargo fmt`, and `cargo clippy --all-targets -- -D warnings`; prose-only realign: `git diff --check` passes and `lf context --skill realign --json` fits all budgets; affected acceptance, packaging/website and native demo remain with gate/demo.

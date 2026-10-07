@@ -10,8 +10,9 @@ Settled constraints:
 
 - Keep `lf task run` traversing the Workflow and `lf run` executing independently.
 - Keep nodes/edges and outgoing edges named by the unique Flow or skill they run.
-- LOO-400 supplies Process/FlowProcess and LFID/PID. Its `e530eb780` head is
-  integrated at Jack's request. No competing Exec rename remains.
+- LOO-400 supplies Process/FlowProcess and LFID/PID. Its landed `e467ea995`
+  is integrated at `7f3169596`, superseding the requested `e530eb780` stack.
+  No competing Exec rename remains.
 - Jack accepted `customize` copying a builtin only if needed and printing its
   local path. Its placement follows the implementation choice below.
 - Projects select a definition; Tasks retain their captured Workflow and position.

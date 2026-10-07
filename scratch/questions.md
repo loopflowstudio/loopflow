@@ -19,6 +19,9 @@ already integrated here.
 
 Jack Heart's comment `e332b3bb-603b-4dc4-bee4-1e5b704d5721` replaces `lf ssh`
 with the global `lf --machine <label>` selector, without an alias. LOO-411 owns
-that cutover. Its local and remote-tracking refs still point to `32607f1d24ad`
-at the October 7 reconciliation; selector integration remains required before
-publication. No fresh remote read establishes the parent's published state.
+that cutover. October 7's fresh GitHub read confirms PR #1489 is open with
+published head `32607f1d24ad7e9d931d5572a7def570a0676997`, already integrated here.
+`lf sync --plan` reports `strategy: noop`; `lf sync --manual` completes without
+changes. The required selector is not yet published by its owner. Integration
+and publication remain blocked on that parent change; duplicating it here would
+conflict with Jack Heart's assigned ownership.

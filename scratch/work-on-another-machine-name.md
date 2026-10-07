@@ -64,8 +64,11 @@ provider-owned refresh, historical captures, current machine records and routes.
 
 - Integrate LOO-411's global `--machine` selector before publication, per Jack
   Heart's comment `e332b3bb-603b-4dc4-bee4-1e5b704d5721`. The current base still
-  exposes `lf ssh`; its removal belongs to the parent. Both locally available
-  parent refs remain `32607f1d24ad` at this reconciliation. Adapt resident account
+  exposes `lf ssh`; its removal belongs to the parent. October 7's fresh GitHub
+  read confirms open PR #1489 still publishes `32607f1d24ad`, already integrated
+  here; `lf sync --plan` reports no change and `lf sync --manual` completes
+  without changes. The parent must publish the selector before this integration
+  can proceed. Adapt resident account
   selection to the global dispatch and update surviving `lf ssh` examples and
   diagnostics together. Prove selected-account restriction, literal prompt flags
   after `--`, headless missing-login recovery and retired-command rejection through
@@ -94,4 +97,4 @@ the replay API no longer accepts a Session ID used only by the deleted broker.
 Literal account/home flags after `--` remain prompt text. Provider selection's
 ambiguity and duplicate checks are retained on the surviving local path.
 
-Checks: `git diff --check` passed; `lf context --skill realign` fits all budgets; reused `61bfe5a6e`'s `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings` and `uv run python scripts/test_network.py cargo nextest run -p loopflow --lib -E 'test(provider_account::) | test(lf::commands::account::account_first_tests::) | test(lf::commands::machine_credentials::) | test(lf::commands::ssh::)' --no-fail-fast` (69 passed; retained-output-handle leak in `exhausted_venues_name_every_attempt_and_both_repairs`); gate/CI owns broader checks and selector integration needs its focused proof.
+Checks: `gh pr view 1489 --json headRefName,headRefOid,state,url` confirms the unchanged published parent; `lf sync --plan` / `lf sync --manual` find nothing to integrate; prose-only reconciliation reuses `61bfe5a6e`'s formatting, clippy and 69 focused passes (exact commands at `7a3f263cb:scratch/work-on-another-machine-name.md`, including the retained-output-handle leak); gate/CI owns broader checks and selector integration still needs its four focused proofs.

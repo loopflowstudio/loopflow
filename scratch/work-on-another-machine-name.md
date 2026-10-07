@@ -250,10 +250,26 @@ silently merged. Phone use is LOO-396.
 
 ## Open choices
 
-1. Claude on a machine: `setup-token` is inference-only (may fail loopflow's
-   identity check and usage polling, has no file form, interactive use
-   unverified) versus a normal login with a pasted code (own refresh chain, full
-   scope).
+1. Claude on a machine. Jack Heart asked on 2026-10-07 whether a normal login
+   can be had without typing into the machine's terminal. Three ways, in order
+   of preference:
+   - Mint a fresh login on the laptop and forward it. `lf account connect`
+     already runs a provider login in a private staging directory, apart from
+     the laptop's own login, with the browser callback arriving on the laptop.
+     Do that once per machine and move the resulting credential file into the
+     machine's account directory. One browser approval, no tunnel, no terminal
+     on the machine, full scope, its own refresh chain. The same move works for
+     Codex and matches the second grant already planned for Linear.
+   - Run the login on the machine and tunnel its callback. Claude's callback
+     port is not fixed, so `lf` would read it from the authorization address
+     and add a forward for it. No paste; more moving parts.
+   - Run the login on the machine and relay the pasted code from the laptop's
+     own prompt. One paste, at the laptop.
+   `claude setup-token` remains the fallback only if a full login cannot be
+   forwarded: it is inference-only and may fail loopflow's identity and usage
+   checks.
+   All of these rest on one unverified fact: a second login for the same
+   account does not sign out the first.
 2. Tasks that already exist on two machines with different random ids: backfill
    rule, or leave per-machine?
 3. Shape: one PR, or a keystone (parts 1 and 2) with parts 3 to 6 as follow-ups?

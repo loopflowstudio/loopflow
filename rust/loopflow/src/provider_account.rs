@@ -455,7 +455,7 @@ impl ProviderAccountRoute {
         Ok(())
     }
 
-    pub(crate) fn record_exec_blocking(
+    pub(crate) fn record_process_blocking(
         &self,
         provider_session_id: Option<String>,
         signal: Option<RateLimitSignal>,

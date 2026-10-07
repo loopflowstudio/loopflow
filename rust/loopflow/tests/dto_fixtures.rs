@@ -278,7 +278,7 @@ fn session_history_retains_receipts_and_unknown_driver() {
         events[1].kind,
         loopflow::session::SessionEventKind::Completed
     );
-    assert!(events[1].exec_id.is_none());
+    assert!(events[1].process_lfid.is_none());
     assert_eq!(events[0].payload["total"]["inputTokens"], 40);
     assert_eq!(
         events[2].kind,
@@ -314,33 +314,35 @@ fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
 }
 
 #[test]
-fn exec_page_retains_outcomes_unknowns_and_continuation() {
-    let json = include_str!("../../../tests/fixtures/dto/exec_page.json");
-    let page: loopflow::exec::ExecPage = serde_json::from_str(json).unwrap();
+fn process_page_retains_outcomes_unknowns_and_continuation() {
+    let json = include_str!("../../../tests/fixtures/dto/process_page.json");
+    let page: loopflow::process::ProcessPage = serde_json::from_str(json).unwrap();
     assert_eq!(page.entries[0].exit_code, Some(42));
     assert_eq!(page.entries[0].via_agent, None);
+    assert_eq!(page.entries[0].pid, None);
+    assert_eq!(page.entries[1].pid, Some(4242));
     assert_eq!(
-        page.entries[1].parent_exec_id.as_ref(),
-        Some(&page.entries[0].id)
+        page.entries[1].parent_process_lfid.as_ref(),
+        Some(&page.entries[0].lfid)
     );
     assert_eq!(page.entries[1].outcome, None);
-    assert_eq!(page.next.as_ref().unwrap().id, page.entries[1].id);
+    assert_eq!(page.next.as_ref().unwrap().lfid, page.entries[1].lfid);
     assert_eq!(
         serde_json::to_value(page).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
-    assert!(serde_json::from_str::<loopflow::exec::ExecPage>("{}").is_err());
+    assert!(serde_json::from_str::<loopflow::process::ProcessPage>("{}").is_err());
 }
 
 #[test]
-fn session_input_history_retains_distinct_native_results_and_unknown_exec() {
+fn session_input_history_retains_distinct_native_results_and_unknown_process() {
     let value: loopflow::lf::commands::session_history::SessionHistory = serde_json::from_str(
         include_str!("../../../tests/fixtures/dto/session_history_summary.json"),
     )
     .unwrap();
     assert_eq!(value.providers.len(), 2);
     assert_eq!(value.providers[0].outcome.as_deref(), Some("failed"));
-    assert!(value.providers[0].exec_id.is_none());
+    assert!(value.providers[0].process_lfid.is_none());
     assert_eq!(value.providers[0].usage.input_tokens, None);
     assert_eq!(value.providers[1].usage.input_tokens, Some(0));
     assert_eq!(value.status(), "failed → completed");
@@ -451,13 +453,13 @@ fn task_work_preserves_all_owners() {
     let work: loopflow::task_work::TaskWork = serde_json::from_str(input).unwrap();
     assert_eq!(work.sessions.len(), 2);
     assert_eq!(work.flows.len(), 1);
-    assert!(!work.execs.is_empty());
+    assert!(!work.processes.is_empty());
     let workflow = work.workflow.as_ref().expect("fixture Task has a workflow");
     assert_eq!(
         workflow.position,
         loopflow::ops::workflow::WorkflowPosition::Edge {
             edge: 2,
-            exec_id: work.flows[0].summary.id.clone(),
+            process_lfid: work.flows[0].summary.id.clone(),
             running: true,
         }
     );

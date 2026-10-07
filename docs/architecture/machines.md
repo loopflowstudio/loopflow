@@ -25,8 +25,17 @@ The repository must already exist on the remote.
 
 List reads saved connections. Status checks without prompting and shows remote
 and local versions. Different versions produce an explicit remote update command;
-Loopflow does not maintain old-version compatibility or update a peer automatically.
-SSH key authentication and a known host key must already work. Add and status
+Loopflow does not maintain old-version compatibility or replace an existing peer.
+When `add` finds no `lf`, it offers the published installer with a default of yes,
+then reads the new identity. Batch, JSON and nonterminal commands never install.
+
+SSH key authentication and a known host key must already work. Failures identify
+sign-in, unknown or changed host keys, unreachable hosts, or missing `lf`, with a
+command to resolve each. Host-key repairs require verifying the fingerprint.
+Connections share a private OpenSSH control socket and expire after 60 idle
+seconds. Personal SSH control sockets are never reused or closed. Explicit
+agent forwarding uses a separate connection; account-forwarding routes are
+removed after each command. Add and status
 transfer no credentials. SSH requires an added connection and checks its identity
 before dispatch. `lf machine connect mini <provider> [email]` installs a separate
 login through SSH stdin; account-selected launches connect missing logins in the
@@ -39,7 +48,7 @@ need an explicit add before they can receive forwarded credentials.
 ## Local by default
 
 ```bash
-lf mon list                                # Execs recorded on this Machine
+lf mon list                                # Processes recorded on this Machine
 lf ps --json                           # OS-live processes on this Machine
 lf wave status product                 # current plan, Task conditions and Session evidence
 
@@ -72,7 +81,7 @@ shell / automation / Loopflow.app
                |
         store + repository
                |
-       Flow driver Exec --> step Exec --> AgentSession <--> native engine
+       Flow driver Process --> step Process --> AgentSession <--> native engine
 ```
 
 Wave operations are finite attributed conversations. Each Task Flow
@@ -80,7 +89,7 @@ runs through the common driver. Cron invokes commands on schedule;
 local PR supervision watches and repairs delivery in the invoking process.
 
 The process that directly spawns a child owns its child handle. Cross-process
-recovery requires exact saved process identity and the applicable lock. A PID, tmux name, parent Exec, Work identity or telemetry row alone grants
+recovery requires exact saved process identity and the applicable lock. A PID, tmux name, parent Process, Work identity or telemetry row alone grants
 no signal authority.
 
 ## Observe processes
@@ -97,8 +106,8 @@ the live view. This is observation, not a durable lifecycle model.
 
 `lf mon prune` removes dead command receipts only after their terminal outcome
 is recorded, and may reap only registered orphan OpenCode process groups whose
-ownership is known. Receipts use Exec IDs, so PID reuse cannot overwrite an
-unfinished Exec’s identity. Failed terminal writes and interrupt cleanup retain
+ownership is known. Receipts use Process IDs, so PID reuse cannot overwrite an
+unfinished Process’s identity. Failed terminal writes and interrupt cleanup retain
 that identity without inventing an outcome. An unclaimed provider PID is
 never killed merely because it resembles a Loopflow child.
 

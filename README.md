@@ -114,8 +114,8 @@ lf task run INF-123 --reason "reconcile all scratch first" # publish direction, 
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
 lf --task INF-123 skill task/session               # ongoing conversation that keeps applying task/operate
-lf arm -c                                          # request exact-head auto-merge and return
-lf land -c                                         # hand off delivery; complete the Task after verified merge
+lf arm                                             # request exact-head auto-merge and return
+lf land                                            # complete the Task after verified merge
 lf pr reconcile                                      # check recorded deliveries once and settle merges
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
@@ -180,13 +180,13 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | Object | What it does | Where it lives |
 | --- | --- | --- |
 | **Skill** | Gives the agent reusable instructions and context | `.lf/skills/*.md` |
-| **Flow** | Composes agent work and mechanical operations; a run is one driver Exec and the step Execs it starts | `.lf/flows/*.yaml` |
+| **Flow** | Composes agent work and mechanical operations; a run is one lf process and the step processes it starts | `.lf/flows/*.yaml` |
 | **Workflow** | Gives a Task nodes, where you take part in its conversation, joined by the Flows between them | `.lf/workflows/*.yaml` |
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `wave/<name>/` |
 | **Project** | Holds one Wave's plan, Tasks, KRs, targets and the workflow its Tasks take up | Linear |
 | **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
-| **Task** | Owns concrete work, its checkout, serial PRs and every Flow exec for it | Linear and local SQLite |
-| **Exec** | Records one actual lf process and its observed command outcome | Machine-local SQLite |
+| **Task** | Owns concrete work, its checkout, serial PRs and every Flow process for it | Linear and local SQLite |
+| **Process** | Records one actual lf process and its observed command outcome | Machine-local SQLite |
 | **AgentSession** | Keeps a continuable interactive or headless conversation and native history | Machine-local SQLite and provider-native storage |
 | **Machine** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
 

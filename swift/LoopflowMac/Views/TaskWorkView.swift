@@ -45,6 +45,9 @@ struct TaskWorkflowHeader: View {
                         .disabled(unavailable != nil)
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
                         .accessibilityIdentifier("task-workflow-start")
+                    Button("Complete") { Task { await model.moveTask(to: "end", task: task, wave: wave) } }
+                        .disabled(acting)
+                        .accessibilityIdentifier("task-workflow-end")
                     Spacer()
                 } else {
                     Text(work.errorMessage.map { "Workflow could not be read: \($0)" }
@@ -53,6 +56,12 @@ struct TaskWorkflowHeader: View {
                     Spacer()
                 }
                 if acting { ProgressView().controlSize(.small) }
+            }
+            if task.actions.reason.contains("Remaining work:") {
+                Text(task.actions.reason)
+                    .foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("task-remaining-work")
             }
             // Linear called the Task complete while it is active here.
             if let conflict = task.runtime?.planningConflict {
@@ -94,11 +103,11 @@ struct TaskWorkflowHeader: View {
     }
 }
 
-/// Every Flow exec in the Task's checkout, newest first, whatever started
+/// Every Flow process in the Task's checkout, newest first, whatever started
 /// it: one line each, opening to its launched graph and steps. It is not the
-/// Workflow's history: an exec that carried an edge and one started ad hoc
+/// Workflow's history: a process that carried an edge and one started ad hoc
 /// are the same kind of row. A multiplexer pane on the page surface.
-struct FlowExecLog: View {
+struct FlowProcessLog: View {
     let model: WorkModel
     let taskId: String
     @Environment(\.palette) private var palette
@@ -118,9 +127,9 @@ struct FlowExecLog: View {
                             .accessibilityIdentifier("task-flow-runs-empty")
                     }
                 } else if let error = reading?.errorMessage {
-                    Text("Flow execs could not be read: \(error)").padding(.vertical, 6)
+                    Text("Flow processes could not be read: \(error)").padding(.vertical, 6)
                 } else {
-                    Text(task == nil ? "Task unavailable" : "Reading Flow execs…").padding(.vertical, 6)
+                    Text(task == nil ? "Task unavailable" : "Reading Flow processes…").padding(.vertical, 6)
                 }
             }
             .padding(.horizontal, 14)
@@ -136,9 +145,9 @@ struct FlowExecLog: View {
     }
 }
 
-/// The Task's conversations and mechanical Execs, including headless work and
+/// The Task's conversations and mechanical Processes, including headless work and
 /// conversations without turns: raw records, shown under Debug. Its Flow
-/// execs are listed by `FlowExecLog`.
+/// processes are listed by `FlowProcessLog`.
 struct TaskWorkView: View {
     let model: WorkModel
     let task: RoadmapTask
@@ -154,11 +163,11 @@ struct TaskWorkView: View {
                     row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
                         state: session.completedAt == nil ? "open" : "completed")
                 }
-                ForEach(work.execs) { exec in
-                    row("Exec", id: exec.id, name: exec.command ?? "Unknown command",
-                        state: exec.outcome ?? "unknown")
+                ForEach(work.processes) { process in
+                    row("Process", id: process.id, name: process.command ?? "Unknown command",
+                        state: process.outcome ?? "unknown")
                 }
-                if work.sessions.isEmpty && work.execs.isEmpty {
+                if work.sessions.isEmpty && work.processes.isEmpty {
                     Text("No recorded work.")
                 }
             }
@@ -185,9 +194,9 @@ struct TaskWorkView: View {
     }
 }
 
-/// One Flow exec of the Task: its Flow, state, when it started and how long
+/// One Flow process of the Task: its Flow, state, when it started and how long
 /// it ran, opening to its id, launched graph, where it stands and each step
-/// it started. Every exec reads the same way, whoever started it.
+/// it started. Every process reads the same way, whoever started it.
 struct FlowRunView: View {
     let model: WorkModel
     let flow: TaskFlowMember
@@ -198,7 +207,7 @@ struct FlowRunView: View {
     private var run: FlowDetail? { model.flowRuns[flow.id] }
     private var started: Int64 { run?.steps.first?.startedAt ?? flow.updatedAt }
 
-    /// How long the exec ran; a running one has no length yet.
+    /// How long the process ran; a running one has no length yet.
     static func duration(_ seconds: Int64) -> String {
         let seconds = max(0, seconds)
         if seconds < 60 { return "\(seconds)s" }
@@ -271,8 +280,8 @@ struct FlowRunView: View {
                             .frame(minWidth: 52, alignment: .trailing)
                     }
                 }
-                .help(step.execId)
-                .accessibilityIdentifier("flow-run-step-\(step.execId)")
+                .help(step.processLfid)
+                .accessibilityIdentifier("flow-run-step-\(step.processLfid)")
             }
         } else {
             Text("Reading Flow…")

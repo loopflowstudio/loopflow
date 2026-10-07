@@ -744,12 +744,12 @@ fn print_task_snapshot(
                 flow.summary.id, flow.summary.name, flow.summary.state,
             );
         }
-        for exec in &snapshot.work.execs {
+        for process in &snapshot.work.processes {
             println!(
-                "  Exec: {}  {}  {}",
-                exec.id,
-                exec.command.as_deref().unwrap_or("unknown command"),
-                exec.outcome.as_deref().unwrap_or("unknown")
+                "  Process: {}  {}  {}",
+                process.lfid,
+                process.command.as_deref().unwrap_or("unknown command"),
+                process.outcome.as_deref().unwrap_or("unknown")
             );
         }
         println!("  project: {}", snapshot.project_id);
@@ -932,6 +932,39 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
+        TaskCommand::FollowUp {
+            issue,
+            outcome,
+            evidence,
+            check_at,
+            clear,
+        } => {
+            let remaining = match (outcome, evidence, check_at) {
+                (Some(outcome), Some(evidence), Some(at)) => {
+                    Some(loopflow::work::task::TaskFollowUp {
+                        outcome: outcome.clone(),
+                        evidence: evidence.clone(),
+                        check_at: time::OffsetDateTime::parse(
+                            at,
+                            &time::format_description::well_known::Rfc3339,
+                        )?
+                        .unix_timestamp(),
+                    })
+                }
+                _ => None,
+            };
+            println!(
+                "{}",
+                loopflow::ops::task::task_follow_up(
+                    issue,
+                    remaining,
+                    clear
+                        .as_deref()
+                        .unwrap_or("Accepted work remains after delivery")
+                )?
+            );
+            Ok(())
+        }
         TaskCommand::Automate { issue, state } => Ok(loopflow::ops::task_automation::select(
             issue,
             state == "on",
@@ -963,7 +996,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             node,
             reason,
             force,
-            accept_unknown_exec,
         } => {
             println!(
                 "{}",
@@ -972,10 +1004,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     issue,
                     node,
                     reason.as_deref(),
-                    &loopflow::ops::task::EndOptions {
-                        force: *force,
-                        accept_unknown_exec: accept_unknown_exec.clone(),
-                    },
+                    &loopflow::ops::task::EndOptions { force: *force },
                 )?
             );
             Ok(())
@@ -1275,7 +1304,7 @@ fn main() -> std::process::ExitCode {
     let code = journal::command_exit_code(&result);
     if let Err(error) = result {
         if error
-            .downcast_ref::<loopflow::exec::CommandExit>()
+            .downcast_ref::<loopflow::process::CommandExit>()
             .is_none()
         {
             eprintln!("Error: {error:?}");
@@ -1308,7 +1337,7 @@ fn run() -> anyhow::Result<()> {
         loopflow::lf::navigation::normalize_args(std::env::args().collect()).map_err(|error| {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
-            loopflow::exec::CommandExit(code)
+            loopflow::process::CommandExit(code)
         })?;
     let args = reorder_args(normalize_ssh_args(normalized));
 
@@ -1317,7 +1346,7 @@ fn run() -> anyhow::Result<()> {
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
-            return Err(loopflow::exec::CommandExit(code).into());
+            return Err(loopflow::process::CommandExit(code).into());
         }
     };
     if cli.task.is_none() && cli.wt.is_none() {
@@ -1425,7 +1454,7 @@ fn run() -> anyhow::Result<()> {
         };
     }
 
-    // Exec admission records this process's cwd. Each operation resolves the
+    // Process admission records this process's cwd. Each operation resolves the
     // repository it needs after dispatch; machine inspection needs no Git.
     let directory = std::env::current_dir()?;
     journal::admit_process(&directory, &args);
@@ -1506,16 +1535,13 @@ fn dispatch(
             },
     }) = &cli.command
     {
-        let end = loopflow::ops::task::EndOptions {
-            force: *force,
-            accept_unknown_exec: Vec::new(),
-        };
+        let end = loopflow::ops::task::EndOptions { force: *force };
         let directory = loopflow::repo::working_directory()?;
         let repo = loopflow::ops::task::task_repository(&directory, Some(issue))?;
         let (task, flow) = loopflow::ops::task::task_place(
             &repo,
             issue,
-            loopflow::ops::task::TaskExecOptions {
+            loopflow::ops::task::TaskProcessOptions {
                 wave: cli.wave.clone(),
                 reason: reason.clone(),
                 agent: cli.model.clone(),
@@ -1672,7 +1698,7 @@ fn execute_command(
             loopflow::lf::RepoCommand::Release { .. } => {
                 in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd))
             }
-            // The watcher admits repairs, which needs a recorded Exec.
+            // The watcher admits repairs, which needs a recorded Process.
             loopflow::lf::RepoCommand::Ci {
                 cmd:
                     Some(loopflow::lf::CiCommand::Watch {
@@ -1682,7 +1708,7 @@ fn execute_command(
                     }),
                 ..
             } => {
-                // It runs from the main checkout so its long-lived Exec never
+                // It runs from the main checkout so its long-lived Process never
                 // counts as live work in a Task's worktree.
                 let root = loopflow::engine::worktrees::main_repo_root(
                     &loopflow::lf::commands::util::find_repo_root()?,
@@ -1706,7 +1732,7 @@ fn execute_command(
                 | loopflow::lf::MachineCommand::Remove { .. }
                 | loopflow::lf::MachineCommand::Connect { .. }
                 | loopflow::lf::MachineCommand::Credentials { .. }),
-        }) => loopflow::lf::commands::machine::run(cmd),
+        }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
         Some(Commands::Installation {
             cmd: loopflow::lf::InstallationCommand::SyncSkills { yes, no_prune },
         }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune),
@@ -1879,7 +1905,7 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
         if let Some(error) = error.downcast_ref::<clap::Error>() {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
-            return Err(loopflow::exec::CommandExit(code).into());
+            return Err(loopflow::process::CommandExit(code).into());
         }
         if matches!(
             error.downcast_ref::<loopflow::engine::LoadError>(),
@@ -1893,7 +1919,7 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
                 clap::Error::raw(clap::error::ErrorKind::InvalidSubcommand, error.to_string());
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
-            return Err(loopflow::exec::CommandExit(code).into());
+            return Err(loopflow::process::CommandExit(code).into());
         }
     }
     result
@@ -2089,7 +2115,7 @@ mod tests {
     /// `serve` is retired. The parser can't reject it outright — the
     /// `external_subcommand` catch-all claims any unmatched verb — so the
     /// property that actually holds is that it no longer names a built-in
-    /// command. The exec door denies `External` on top of that.
+    /// command. The process door denies `External` on top of that.
     #[test]
     fn old_serve_surface_is_no_longer_a_builtin_command() {
         let cli = Cli::try_parse_from(["lf", "serve", "goals"]).expect("falls through to external");

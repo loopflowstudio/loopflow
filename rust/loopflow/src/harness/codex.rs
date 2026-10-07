@@ -617,7 +617,7 @@ pub struct CodexHarness {
     session_driver: Option<(
         crate::store::sqlite::SqliteStore,
         String,
-        crate::exec::SessionDriver,
+        crate::process::SessionDriver,
     )>,
 }
 
@@ -1540,20 +1540,20 @@ mod tests {
                 .unwrap();
         store.test_session("saved", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
-        let exec = crate::id::ExecId::new();
+        let process = crate::id::ProcessLfid::new();
         sql.execute(
-            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-            [exec.as_str()],
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [process.as_str()],
         )
         .unwrap();
         let old = store
-            .claim_session_driver("saved", None, &exec, true)
+            .claim_session_driver("saved", None, &process, true)
             .unwrap();
         store
             .record_session_connection("saved", &old, "/missing.sock", "saved-thread")
             .unwrap();
         let driver = store
-            .claim_session_driver("saved", Some(&old), &exec, true)
+            .claim_session_driver("saved", Some(&old), &process, true)
             .unwrap();
         store
             .record_session_provider_launch("saved", &driver, false)
@@ -1578,7 +1578,7 @@ mod tests {
         assert!(!crate::session_record::conversation_engine_exited(&store, "saved").unwrap());
         let released = store.release_session_driver("saved", &driver).unwrap();
         let retry = store
-            .claim_session_driver("saved", Some(&released), &exec, true)
+            .claim_session_driver("saved", Some(&released), &process, true)
             .unwrap();
         store
             .record_session_provider_launch("saved", &retry, false)

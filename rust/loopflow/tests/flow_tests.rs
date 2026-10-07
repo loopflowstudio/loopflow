@@ -143,8 +143,8 @@ PYTHON
         assert_eq!(steps.len(), if upgrade { 1 } else { 2 });
         let executables: Vec<String> = conn
             .prepare(
-                "SELECT json_extract(e.command,'$[0]') FROM execs e
-                 JOIN flow_exec_steps s ON s.exec_id=e.id WHERE e.outcome='succeeded'",
+                "SELECT json_extract(e.command,'$[0]') FROM processes e
+                 JOIN flow_process_steps s ON s.process_lfid=e.lfid WHERE e.outcome='succeeded'",
             )
             .unwrap()
             .query_map([], |row| row.get(0))
@@ -175,7 +175,9 @@ PYTHON
             String::from_utf8_lossy(&output.stderr)
         );
         let driver: String = conn
-            .query_row("SELECT exec_id FROM flow_execs", [], |row| row.get(0))
+            .query_row("SELECT process_lfid FROM flow_processes", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         let inspection = run_lf(
             repo.path(),
@@ -671,7 +673,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             .block_on(child.store.get_task(&parent.id))
             .unwrap()
             .unwrap();
-        // A Flow exec from the checkout is this Task's work, never its upstream's.
+        // A Flow process from the checkout is this Task's work, never its upstream's.
         let ran = run_lf(
             repo.path(),
             home.path(),
@@ -1805,7 +1807,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
-    // A Task's Flows are those whose Execs ran in its checkout, as Execs name it.
+    // A Task's Flows are those whose Processes ran in its checkout, as Processes name it.
     let checkout = repo.path().canonicalize().unwrap();
     let task =
         support::register_unrun_task(home.path(), &checkout, "task-flow-read", &repo.head_sha());
@@ -1884,7 +1886,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
         String::from_utf8_lossy(&ran.stderr)
     );
 
-    // Read back from Execs alone: where it stopped and each edge's returns.
+    // Read back from Processes alone: where it stopped and each edge's returns.
     let execution = task_flow();
     let flows = execution["work"]["flows"].as_array().unwrap();
     assert_eq!(flows.len(), 1, "{execution}");
@@ -1930,7 +1932,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
             ])
         );
     }
-    // Every pass is its own step Exec at the node and return counts it ran with.
+    // Every pass is its own step Process at the node and return counts it ran with.
     assert_eq!(
         step_fields(&shown, "key"),
         [0, 1, 2, 1, 2, 1, 2, 3, 4, 6, 1, 2, 3, 4, 6, 7]

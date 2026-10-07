@@ -18,7 +18,7 @@ pub fn run(
 ) -> anyhow::Result<()> {
     reject_nested_ssh(lf_args)?;
     let runtime = tokio::runtime::Runtime::new()?;
-    let target = runtime.block_on(resolve_target(target))?;
+    let target = runtime.block_on(resolve_target(target, forward_agent))?;
     let selection = runtime.block_on(super::machine_credentials::prepare_launch(
         &target, selection, lf_args,
     ))?;
@@ -51,14 +51,7 @@ pub fn run(
         &cmd,
         &extra_env,
     );
-    match run_ssh(&target.route, forward_agent, &preamble)? {
-        SshOutcome::Success => Ok(()),
-        SshOutcome::CommandFailure(code) => Err(crate::exec::CommandExit(
-            u8::try_from(code).expect("SSH exit status fits a byte"),
-        )
-        .into()),
-        SshOutcome::ConnectionFailure => unreachable!("transport errors are returned by run_ssh"),
-    }
+    run_ssh(&target.route, forward_agent, &preamble)
 }
 
 fn resident_args(args: &[String]) -> anyhow::Result<Vec<String>> {
@@ -111,12 +104,15 @@ fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(super) async fn resolve_target(target: &str) -> anyhow::Result<crate::durable::Machine> {
+pub(super) async fn resolve_target(
+    target: &str,
+    forward_agent: bool,
+) -> anyhow::Result<crate::durable::Machine> {
     let store = crate::store::open_existing_store()
         .await
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
     let machine = super::machine::find_machine(&store, target).await?;
-    let probe = super::machine::probe(&machine.route).await?;
+    let probe = super::machine::probe(&machine.route, forward_agent).await?;
     super::machine::report_version(&machine.route, &probe.version);
     let reached = probe.id?;
     if reached != machine.id {
@@ -173,89 +169,59 @@ pub(super) fn sh_quote(value: &str) -> String {
     quoted
 }
 
-/// What the remote process's exit status means for the caller.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SshOutcome {
-    /// Remote command succeeded.
-    Success,
-    /// SSH transport/connection failure (its reserved code `255`, or death by
-    /// signal): unreachable host, unknown key, auth refusal, or a bounded
-    /// timeout firing. Actionable and host-named; never a real remote code.
-    ConnectionFailure,
-    /// The remote command itself exited nonzero — propagate its code verbatim.
-    CommandFailure(i32),
-}
-
-fn ssh_args(dest: &str, forward_agent: bool) -> Vec<String> {
-    let mut args = Vec::new();
-    if forward_agent {
-        args.push("-A".to_string());
-    }
-    args.extend(crate::engine::machine_route::bounded_ssh_args(dest));
-    args.push("bash -s".to_string());
-    args
-}
-
 /// Classify an ssh exit code. `255` is ssh's reserved transport-error code;
 /// `None` means death by signal — both are connection-phase failures, distinct
 /// from a real remote command code we must propagate.
-fn classify_exit(code: Option<i32>) -> SshOutcome {
+fn command_result(dest: &str, code: Option<i32>) -> anyhow::Result<()> {
     match code {
-        Some(0) => SshOutcome::Success,
-        Some(255) | None => SshOutcome::ConnectionFailure,
-        Some(other) => SshOutcome::CommandFailure(other),
+        Some(0) => Ok(()),
+        Some(255) | None => Err(super::machine::transport_failure(
+            dest,
+            "SSH transport closed; see the SSH error above",
+        )),
+        Some(code) => Err(crate::process::CommandExit(
+            u8::try_from(code).expect("SSH command exit status fits a byte"),
+        )
+        .into()),
     }
-}
-
-/// A sanitized, host-named error for a transport-phase failure. Carries no
-/// credential value; ssh's own reason is already on the inherited stderr.
-fn connection_error(host: &str) -> anyhow::Error {
-    anyhow!(
-        "lf machine ssh could not reach '{host}': ssh failed during connection/transport \
-         (bounded by BatchMode + ConnectTimeout={}s). See the ssh error above; check \
-         the host is reachable, its key is known, and key auth works.",
-        crate::engine::machine_route::SSH_CONNECT_TIMEOUT_SECS
-    )
 }
 
 /// Pipe the preamble into `ssh [-A] <host> bash -s`, streaming stdout/stderr and
 /// classifying the remote exit code. Agent forwarding (`-A`) is opt-in. Bounded
 /// so an unreachable or misconfigured host fails fast instead of hanging.
-fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<SshOutcome> {
+fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()> {
     let mut child = Command::new("ssh")
-        .args(ssh_args(dest, forward_agent))
+        .args(crate::engine::machine_route::bounded_ssh_args(
+            dest,
+            forward_agent,
+        )?)
+        .arg("bash -s")
         .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
         .context("failed to spawn ssh")?;
 
-    child
+    let written = child
         .stdin
         .take()
         .ok_or_else(|| anyhow!("ssh stdin unavailable"))?
-        .write_all(preamble.as_bytes())
-        .context("failed to write preamble to ssh")?;
-
-    let status = child.wait().context("ssh did not complete")?;
-    match classify_exit(status.code()) {
-        outcome @ (SshOutcome::Success | SshOutcome::CommandFailure(_)) => Ok(outcome),
-        SshOutcome::ConnectionFailure => Err(connection_error(dest)),
+        .write_all(preamble.as_bytes());
+    if written.is_err() {
+        let _ = child.kill();
     }
+    let status = child.wait().context("ssh did not complete");
+    written.context("failed to write preamble to ssh")?;
+    command_result(dest, status?.code())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_preamble, classify_exit, reject_nested_ssh, resident_args, sh_quote, ssh_args,
-        SshOutcome,
-    };
+    use super::{build_preamble, command_result, reject_nested_ssh, resident_args, sh_quote};
 
     #[test]
-    fn quotes_shell_data_and_preserves_remote_exit() {
+    fn quotes_shell_data_without_forwarding_credentials() {
         assert_eq!(sh_quote("it's here"), "'it'\\''s here'");
-        assert_eq!(classify_exit(Some(42)), SshOutcome::CommandFailure(42));
-        assert_eq!(classify_exit(Some(255)), SshOutcome::ConnectionFailure);
         let script = build_preamble(
             "mini",
             "~/project's checkout",
@@ -265,7 +231,6 @@ mod tests {
         assert!(script.contains("machine identity changed"));
         assert!(!script.contains("TOKEN"));
         assert!(!script.contains("LEASE"));
-        assert!(ssh_args("mini", false).contains(&"StrictHostKeyChecking=yes".into()));
     }
 
     #[test]
@@ -279,5 +244,49 @@ mod tests {
             resident_args(&args).unwrap(),
             ["--isolate", "skill", "implement"]
         );
+    }
+    #[test]
+    fn ssh_args_bound_the_connection() {
+        let args =
+            crate::engine::machine_route::bounded_ssh_args("jack@mini-heart", false).unwrap();
+        // Primary hang killer: never block on an interactive prompt.
+        assert!(args.iter().any(|a| a == "BatchMode=yes"));
+        // Connect handshake and stalled-session bounds.
+        assert!(args.iter().any(|a| a == "ConnectTimeout=10"));
+        assert!(args.iter().any(|a| a == "ServerAliveInterval=10"));
+        assert!(args.iter().any(|a| a == "ServerAliveCountMax=3"));
+        assert_eq!(args.last().unwrap(), "jack@mini-heart");
+        // Agent forwarding stays opt-in; OpenSSH parses destination ports.
+        assert!(!args.iter().any(|a| a == "-A"));
+        assert!(!args.iter().any(|a| a == "-p"));
+    }
+
+    #[test]
+    fn ssh_args_opt_in_agent_forwarding() {
+        let args = crate::engine::machine_route::bounded_ssh_args("host", true).unwrap();
+        assert_eq!(args.first().unwrap(), "-A");
+    }
+
+    #[test]
+    fn command_result_preserves_remote_exit_codes_and_reports_transport_failure() {
+        assert!(command_result("mini", Some(0)).is_ok());
+        for code in [Some(255), None] {
+            let error = command_result("mini", code).unwrap_err();
+            assert!(error
+                .downcast_ref::<crate::process::CommandExit>()
+                .is_none());
+            assert!(error.to_string().contains("unreachable"));
+            assert!(error.to_string().contains("mini"));
+        }
+        for code in [1, 42, 254] {
+            let error = command_result("mini", Some(code)).unwrap_err();
+            assert_eq!(
+                error
+                    .downcast_ref::<crate::process::CommandExit>()
+                    .unwrap()
+                    .0,
+                code as u8
+            );
+        }
     }
 }

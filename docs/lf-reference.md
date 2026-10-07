@@ -35,10 +35,10 @@ lf flow show FLOW_ID --sessions --json
 lf task interrupt EXP-12
 ```
 
-Each start is a new Flow: one driver Exec and the step Execs it starts. Its ID
-is the driver Exec's. `--state` selects `current` (the driver has no recorded
+Each start is a new Flow: one lf process and the step processes it starts. Its ID
+is the Flow process's. `--state` selects `current` (the driver has no recorded
 exit), `completed` (it succeeded) or `stopped` (it exited before the last
-step). A stopped Flow's Execs are its history; nothing resumes it. Inspect
+step). A stopped Flow's Processes are its history; nothing resumes it. Inspect
 them, then launch the work that remains.
 
 ## lf
@@ -138,7 +138,7 @@ Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Not
 |---|---|
 | `--strict` | strict Default: false. |
 | `--create-pr / -p` | create pr Default: false. |
-| `--complete / -c` | complete Default: false. |
+| `--complete / -c` | Complete after verified merge (the default unless --next is supplied) Default: false. |
 | `--next` | next |
 | `--worktree / -w` | worktree |
 | `--message / -m` | message |
@@ -154,7 +154,7 @@ Prepare a PR, request exact-head auto-merge, and return without watching
 |---|---|
 | `--strict` | strict Default: false. |
 | `--local` | local Default: false. |
-| `--complete / -c` | complete Default: false. |
+| `--complete / -c` | Complete after verified merge (the default unless --next is supplied) Default: false. |
 | `--next` | next |
 | `--worktree / -w` | worktree |
 | `--message / -m` | message |
@@ -170,7 +170,7 @@ Request auto-merge, retain settlement intent, and return
 |---|---|
 | `--strict` | strict Default: false. |
 | `--local` | local Default: false. |
-| `--complete / -c` | complete Default: false. |
+| `--complete / -c` | Complete after verified merge (the default unless --next is supplied) Default: false. |
 | `--next` | next |
 | `--worktree / -w` | worktree |
 | `--message / -m` | message |
@@ -300,7 +300,7 @@ List a bounded page of recorded commands, newest first
 | `--all` | Include all repositories Default: false. |
 | `--limit` | limit Default: 100. |
 | `--after` | Continue with the previous page's next object, encoded as JSON |
-| `--parent` | Direct children of an exact or unambiguous parent Exec |
+| `--parent` | Direct children of an exact or unambiguous parent Process |
 | `--caller` | Commands issued by this AgentSession |
 | `--search` | Literal command text, ignoring ASCII case |
 | `--outcome` | outcome |
@@ -310,7 +310,7 @@ List a bounded page of recorded commands, newest first
 
 ## lf monitor show
 
-Inspect an Exec or Session by identity
+Inspect a process or Session by identity
 
 | Argument | What it does |
 |---|---|
@@ -959,7 +959,7 @@ Capture a URL or local HTML file without claiming the user's browser
 
 ## lf machine doctor
 
-Diagnose installation, storage, Exec integrity and scheduled receipts
+Diagnose installation, storage, Process integrity and scheduled receipts
 
 | Argument | What it does |
 |---|---|
@@ -1338,6 +1338,19 @@ Check authorized deliveries once, then exit
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
+## lf task follow-up
+
+Record accepted work remaining after merge, or resolve it with evidence
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--outcome` | outcome |
+| `--evidence` | evidence |
+| `--check-at` | Next observation or decision, as an RFC 3339 timestamp |
+| `--clear` | Evidence that the remaining work is satisfied or no longer needed |
+| `--help / -h` | Print help |
+
 ## lf task automate
 
 Enable or hold CI repair for a Task without interrupting running work
@@ -1398,7 +1411,6 @@ Put a Task at a node of its workflow without running anything; `end` completes i
 | `<node>` | `start`, `end` or one of the workflow's nodes |
 | `--reason` | Why, kept in the Task's workflow history |
 | `--force` | Reach `end` although Linear already calls the active Task complete Default: false. |
-| `--accept-unknown-exec` | Accept one historical Exec's unknown outcome when reaching `end`; retain its checkout |
 | `--help / -h` | Print help |
 
 ## lf task create
@@ -1650,7 +1662,7 @@ List authored flows, or Flows that ran
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--sessions` | List or show Flows that ran, from their Execs, instead of reusable templates Default: false. |
+| `--sessions` | List or show Flows that ran, from their Processes, instead of reusable templates Default: false. |
 | `--all` | Include every repository and flows with unknown repository evidence Default: false. |
 | `--limit` | Page size (default 100) |
 | `--after` | Previous page's next identity; retain the same filters |

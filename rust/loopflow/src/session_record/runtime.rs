@@ -1,7 +1,7 @@
 //! The current driver closes its runtime on exit. A transferred driver can
 //! settle its own capture but cannot close the new owner's provider.
 
-use crate::exec::SessionDriver;
+use crate::process::SessionDriver;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 

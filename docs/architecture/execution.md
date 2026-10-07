@@ -10,14 +10,13 @@ These commands use the current parser. This guide specifies the accepted
 lifecycle; [cutover status](../architecture-reference.md#cutover-status) records
 which owners and proofs remain unfinished.
 
-The command has an Exec. The agent has an AgentSession. A Flow is one driver
-Exec and the step Execs it starts. Their completion and authority are different
+The command has a process. The agent has an AgentSession. A Flow is one lf process and the step processes it starts. Their completion and authority are different
 facts.
 
 ## Request flow
 
 ```text
-argv -> Exec admission -> Skill discovery -> prompt -> provider route
+argv -> Process admission -> Skill discovery -> prompt -> provider route
                                                         |
                                                         v
                                      AgentSession reservation + input capture
@@ -52,23 +51,23 @@ not evidence that old captured intent changed.
 
 ## Record actual processes
 
-Exec admission records one actual lf process and immutable causal ancestry.
+Process admission records one actual lf process and immutable causal ancestry.
 Nested wrappers reuse the process identity and cannot finish the outer command
-early. Direct child commands name their invoking Exec. Agent-issued commands
+early. Direct child commands name their invoking Process. Agent-issued commands
 record the incoming agent bit plus stable Session/provider-generation provenance,
 then resolve the current matching driver once at admission.
 
-The provider and shell do not become fake Execs. After driver handoff, new
+The provider and shell do not become fake Processes. After driver handoff, new
 commands from the continuing provider name the new driver; delayed commands from
 a replaced provider retain their historical origin. A parent exiting never
 rewrites existing descendants. These causal links grant neither signaling nor
 Flow authority.
 
-Exec completion records the observed command result, end time and known exit
+Process completion records the observed command result, end time and known exit
 code or signal. Missing terminal evidence stays unknown. Installation/bootstrap
 commands must reach their exact-store authority checks before any logging-induced
 store open; unavailable-store coverage is reported explicitly. An inspection
-Exec does not reserve agent work or mark a Task Started.
+Process does not reserve agent work or mark a Task Started.
 
 ## Publish before spawn
 
@@ -78,7 +77,7 @@ Exec does not reserve agent work or mark a Task Started.
 4. Start or connect the native provider and retain exact engine/thread/client
    evidence, distinct from the conversation driver.
 5. Append correlated provider outcomes and usage; settle command completion
-   under its Exec lifetime.
+   under its Process lifetime.
 
 Prepared rows without publication are recoverable preparation failures. A missing
 spawn receipt is uncertainty, not permission to duplicate a possibly live engine.
@@ -109,22 +108,22 @@ authority, and recovery never authorizes killing a shared engine for one thread.
 
 ## Outcomes, retries and usage
 
-AgentSession history owns provider outcomes. Exec owns command completion. A
+AgentSession history owns provider outcomes. Process owns command completion. A
 provider can succeed before the command fails later, and a stopped Flow's history
 outlives its command. Failed or interrupted conversation work remains history;
 continuation appends a new result to the same conversation.
 
 The driver holds the cursor and starts each step as a child `lf` process: the
 plain command, `lf -b skill <name> [message]` or the operation's own. A step
-knows nothing of its Flow. The driver appends the step's Exec, graph node and
-iteration counts to FlowExec, beside the Flow's name and launched graph. A
+knows nothing of its Flow. The driver appends the step's Process, graph node and
+iteration counts to FlowProcess, beside the Flow's name and launched graph. A
 step's result is how its process exited. A deciding or routing step gets its
 answer contract in its message and the driver reads the final answer of the
-Session turn that step Exec captured; an invalid answer is corrected by
+Session turn that step Process captured; an invalid answer is corrected by
 resuming the same conversation (`lf -b session resume ID MESSAGE`), at most
-twice, then the Flow fails. A mechanical step is its own child Exec and invents
+twice, then the Flow fails. A mechanical step is its own child Process and invents
 no AgentSession. After an operation the driver stops the Flow when a landing of
-its checkout is still being watched; neither failed. A killed driver leaves its Execs
+its checkout is still being watched; neither failed. A killed driver leaves its Processes
 as history; nothing resumes it. The caller inspects them before launching fresh
 work. Unknown liveness stays unknown. Cursor movement cannot prove exactly-once
 external effects.
@@ -139,8 +138,8 @@ once; never add checkpoints as independent consumption. Retries retain separate
 outcomes and measurements. Missing counters and unknown finality stay missing.
 The shared typed history reader selects captured events and unlinked native turns
 before decoding payloads. Native receipts without a start stay discoverable with
-unknown Exec/Work ownership and partial usage coverage. Recorder outcomes remain
-separate from provider completion and Exec exit.
+unknown Process/Work ownership and partial usage coverage. Recorder outcomes remain
+separate from provider completion and Process exit.
 Binding affects later work and preserves earlier usage ownership. The history
 reader owns this single attribution choice. Active-turn allocation uses recorded
 start/assignment evidence; uncertainty never becomes an invented token split.

@@ -19,9 +19,9 @@ pub struct ContextSourceOverrides {
     pub clipboard: Option<bool>,
 }
 
-/// Canonical Exec preparation input shared by CLI and Work-runner call sites.
+/// Canonical Process preparation input shared by CLI and Work-runner call sites.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ExecPromptInput {
+pub struct ProcessPromptInput {
     pub repo_root: PathBuf,
     pub skill: Option<String>,
     pub resolved_skill: Option<Skill>,
@@ -41,9 +41,9 @@ pub struct ExecPromptInput {
     pub related_repos: Vec<RelatedRepoContext>,
 }
 
-/// Canonical Exec preparation output.
+/// Canonical Process preparation output.
 #[derive(Debug, Clone)]
-pub struct PreparedExecPrompt {
+pub struct PreparedProcessPrompt {
     pub budget_report: crate::engine::context_budget::ContextBudgetReport,
     pub config: AgentConfig,
     pub components: PromptComponents,
@@ -51,12 +51,12 @@ pub struct PreparedExecPrompt {
     pub prompt: String,
 }
 
-/// Build context + Exec config from canonical Exec preparation input.
-pub fn prepare_exec_prompt(
+/// Build context + Process config from canonical Process preparation input.
+pub fn prepare_process_prompt(
     config: &Config,
-    input: ExecPromptInput,
-) -> Result<PreparedExecPrompt, CoreError> {
-    let prepared = preview_exec_prompt(config, input)?;
+    input: ProcessPromptInput,
+) -> Result<PreparedProcessPrompt, CoreError> {
+    let prepared = preview_process_prompt(config, input)?;
     crate::engine::context_budget::check_input(
         &crate::engine::agent::system_prompt_with_structured_replies(&prepared.config),
         &prepared.config.task_prompt,
@@ -66,16 +66,16 @@ pub fn prepare_exec_prompt(
 }
 
 /// Assemble a preview even when its total input would prevent launch.
-pub(crate) fn preview_exec_prompt(
+pub(crate) fn preview_process_prompt(
     config: &Config,
-    input: ExecPromptInput,
-) -> Result<PreparedExecPrompt, CoreError> {
+    input: ProcessPromptInput,
+) -> Result<PreparedProcessPrompt, CoreError> {
     let budgets = crate::engine::context_budget::ContextBudgets::resolve(
         config,
         &input.repo_root,
         input.wave.as_deref(),
     )?;
-    let ExecPromptInput {
+    let ProcessPromptInput {
         repo_root,
         skill,
         resolved_skill,
@@ -189,7 +189,7 @@ pub(crate) fn preview_exec_prompt(
     // The source snapshot is stable; the total includes this notice and provider guidance.
     // The notice labels its pre-feedback total; the report measures submitted bytes.
 
-    Ok(PreparedExecPrompt {
+    Ok(PreparedProcessPrompt {
         budget_report,
         config: launch,
         components,
@@ -294,9 +294,9 @@ Test skill body.
         fs::create_dir(tmp.path().join("scratch")).unwrap();
         fs::write(tmp.path().join("scratch/guide.md"), "A shared document.").unwrap();
         std::os::unix::fs::symlink("scratch/guide.md", tmp.path().join("alias.md")).unwrap();
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &default_test_config(),
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 docs: vec!["STYLE.md".into(), "AGENTS.md".into(), "alias.md".into()],
                 ..Default::default()
@@ -332,9 +332,9 @@ Test skill body.
             fs::write(directory.join("MEMORY.md"), "Keep rollback available.").unwrap();
         }
         for no_loopflow in [false, true] {
-            let prepared = prepare_exec_prompt(
+            let prepared = prepare_process_prompt(
                 &default_test_config(),
-                ExecPromptInput {
+                ProcessPromptInput {
                     repo_root: tmp.path().to_path_buf(),
                     docs: vec![
                         "LOOPFLOW.md".into(),
@@ -401,9 +401,9 @@ Test skill body.
                 .collect::<String>()
         );
         assert!(message.len() > 1_048_576);
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &default_test_config(),
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".into()),
                 wave: Some("infrastructure/release".into()),
@@ -506,9 +506,9 @@ Test skill body.
             .into(),
             ..default_test_config()
         };
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &config,
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 wave: Some("infrastructure/delivery/release".into()),
                 ..Default::default()
@@ -556,9 +556,9 @@ Test skill body.
         let tmp = create_repo_fixture();
         let memory = "Repository decisions and observations.\n".repeat(8_000);
         fs::write(tmp.path().join("MEMORY.md"), &memory).unwrap();
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &default_test_config(),
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 ..Default::default()
             },
@@ -582,9 +582,9 @@ Test skill body.
     #[test]
     fn oversized_explicit_instructions_report_local_input_budget() {
         let tmp = create_repo_fixture();
-        let error = prepare_exec_prompt(
+        let error = prepare_process_prompt(
             &default_test_config(),
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 resolved_skill: Some(Skill {
                     content: Some("Follow this instruction. ".repeat(100_000)),
@@ -601,7 +601,7 @@ Test skill body.
     fn structured_reply_guidance_counts_toward_the_launch_budget() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let input = |content: String, has_ui| ExecPromptInput {
+        let input = |content: String, has_ui| ProcessPromptInput {
             repo_root: tmp.path().to_path_buf(),
             resolved_skill: Some(Skill {
                 content: Some(content),
@@ -613,14 +613,14 @@ Test skill body.
             },
             ..Default::default()
         };
-        let baseline = prepare_exec_prompt(&config, input(String::new(), false)).unwrap();
+        let baseline = prepare_process_prompt(&config, input(String::new(), false)).unwrap();
         let overhead = crate::engine::prompt::count_tokens(&baseline.config.system_prompt)
             + crate::engine::prompt::count_tokens(&baseline.config.task_prompt);
         let content = " x".repeat(
             crate::engine::context_budget::BudgetKey::InputTokens.default_limit() - overhead - 32,
         );
-        prepare_exec_prompt(&config, input(content.clone(), false)).unwrap();
-        let Err(error) = prepare_exec_prompt(&config, input(content, true)) else {
+        prepare_process_prompt(&config, input(content.clone(), false)).unwrap();
+        let Err(error) = prepare_process_prompt(&config, input(content, true)) else {
             panic!("structured reply guidance exceeded the launch budget without rejection");
         };
         assert!(error.to_string().contains("exceeds the input budget"));
@@ -640,9 +640,9 @@ Test skill body.
             "Jack previously invoked $kickoff.",
         )
         .unwrap();
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &default_test_config(),
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("implement".into()),
                 agent: Some("codex".into()),
@@ -690,9 +690,9 @@ Test skill body.
                 Surface::Iphone,
                 Surface::Headless,
             ] {
-                let prepared = prepare_exec_prompt(
+                let prepared = prepare_process_prompt(
                     &default_test_config(),
-                    ExecPromptInput {
+                    ProcessPromptInput {
                         repo_root: tmp.path().to_path_buf(),
                         surface,
                         agent: Some(agent.into()),
@@ -726,53 +726,53 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_exec_prompt_prefers_skill_agent_when_no_override() {
+    fn prepare_process_prompt_prefers_skill_agent_when_no_override() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &config,
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 surface: Surface::Headless,
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
-        .expect("prepare Exec prompt");
+        .expect("prepare Process prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
     }
 
     #[test]
-    fn prepare_exec_prompt_prefers_explicit_agent_override() {
+    fn prepare_process_prompt_prefers_explicit_agent_override() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &config,
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 agent: Some("claude:sonnet".to_string()),
                 surface: Surface::Headless,
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
-        .expect("prepare Exec prompt");
+        .expect("prepare Process prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
     }
 
     #[test]
-    fn prepare_exec_prompt_includes_loopflow_by_default() {
+    fn prepare_process_prompt_includes_loopflow_by_default() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
 
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &config,
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 surface: Surface::Headless,
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
         .expect("prepare prompt");
@@ -785,17 +785,17 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_exec_prompt_omits_loopflow_when_disabled() {
+    fn prepare_process_prompt_omits_loopflow_when_disabled() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
 
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &config,
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 surface: Surface::Headless,
                 no_loopflow: true,
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
         .expect("prepare prompt");
@@ -807,7 +807,7 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_exec_prompt_uses_default_agent_when_no_user_config() {
+    fn prepare_process_prompt_uses_default_agent_when_no_user_config() {
         let tmp = tempdir().expect("tempdir");
         fs::create_dir_all(tmp.path().join(".lf/skills")).expect("skills dir");
         fs::write(
@@ -822,16 +822,16 @@ Test skill body.
 
         let mut config = default_test_config();
         config.agent = None;
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &config,
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 surface: Surface::Headless,
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
-        .expect("prepare Exec prompt");
+        .expect("prepare Process prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
     }
@@ -839,16 +839,16 @@ Test skill body.
     #[test]
     fn unmarked_builtin_skill_defaults_to_codex() {
         let tmp = tempdir().expect("tempdir");
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &Config::default(),
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("implement".to_string()),
                 surface: Surface::Headless,
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
-        .expect("prepare Exec prompt");
+        .expect("prepare Process prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("codex"));
     }
@@ -856,22 +856,22 @@ Test skill body.
     #[test]
     fn marked_builtin_skill_keeps_claude_default() {
         let tmp = tempdir().expect("tempdir");
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &Config::default(),
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("kickoff".to_string()),
                 surface: Surface::Headless,
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
-        .expect("prepare Exec prompt");
+        .expect("prepare Process prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("claude"));
     }
 
     #[test]
-    fn prepare_exec_prompt_user_config_overrides_default_agent() {
+    fn prepare_process_prompt_user_config_overrides_default_agent() {
         let tmp = tempdir().expect("tempdir");
         fs::create_dir_all(tmp.path().join(".lf/skills")).expect("skills dir");
         fs::write(
@@ -886,22 +886,22 @@ Test skill body.
 
         let mut config = default_test_config();
         config.agent = Some("codex:o3".to_string());
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &config,
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 surface: Surface::Headless,
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
-        .expect("prepare Exec prompt");
+        .expect("prepare Process prompt");
 
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
     }
 
     #[test]
-    fn prepare_exec_prompt_uses_config_docs() {
+    fn prepare_process_prompt_uses_config_docs() {
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("docs")).expect("docs dir");
         fs::write(tmp.path().join("docs/README.md"), "docs content").expect("write docs");
@@ -910,14 +910,14 @@ Test skill body.
             ..default_test_config()
         };
 
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &config,
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
-        .expect("prepare Exec prompt");
+        .expect("prepare Process prompt");
 
         assert!(prepared
             .components
@@ -927,22 +927,22 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_exec_prompt_injects_structured_replies_for_ui_context() {
+    fn prepare_process_prompt_injects_structured_replies_for_ui_context() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &config,
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("test".to_string()),
                 client_context: ClientContext {
                     has_ui: true,
                     compact: true,
                 },
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
-        .expect("prepare Exec prompt");
+        .expect("prepare Process prompt");
 
         assert_eq!(prepared.config.structured_replies.len(), 1);
         assert_eq!(
@@ -964,12 +964,12 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_exec_prompt_uses_resolved_skill_skill_without_loading_by_name() {
+    fn prepare_process_prompt_uses_resolved_skill_skill_without_loading_by_name() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &config,
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("npx/skill-creator".to_string()),
                 resolved_skill: Some(Skill {
@@ -980,10 +980,10 @@ Test skill body.
                     content: Some("Skill body".to_string()),
                 }),
                 surface: Surface::Headless,
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
-        .expect("prepare Exec prompt");
+        .expect("prepare Process prompt");
 
         assert_eq!(
             prepared
@@ -997,16 +997,16 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_exec_prompt_rejects_unsupported_opencode_variants() {
+    fn prepare_process_prompt_rejects_unsupported_opencode_variants() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let err = prepare_exec_prompt(
+        let err = prepare_process_prompt(
             &config,
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 agent: Some("opencode:anthropic/claude-sonnet-4-5".to_string()),
                 surface: Surface::Headless,
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
         .expect_err("unsupported OpenCode model should fail");
@@ -1017,15 +1017,15 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_exec_prompt_rejects_unknown_harnesses() {
+    fn prepare_process_prompt_rejects_unknown_harnesses() {
         let tmp = create_repo_fixture();
-        let err = prepare_exec_prompt(
+        let err = prepare_process_prompt(
             &default_test_config(),
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 agent: Some("retired-agent".to_string()),
                 surface: Surface::Headless,
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
         .expect_err("unknown harness should fail");
@@ -1036,16 +1036,16 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_exec_prompt_accepts_supported_opencode_variants() {
+    fn prepare_process_prompt_accepts_supported_opencode_variants() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &config,
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 agent: Some("opencode:moonshotai/kimi-k2".to_string()),
                 surface: Surface::Headless,
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
         .expect("supported OpenCode model should pass");
@@ -1057,16 +1057,16 @@ Test skill body.
     }
 
     #[test]
-    fn prepare_exec_prompt_accepts_the_users_opencode_default() {
+    fn prepare_process_prompt_accepts_the_users_opencode_default() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
-        let prepared = prepare_exec_prompt(
+        let prepared = prepare_process_prompt(
             &config,
-            ExecPromptInput {
+            ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 agent: Some("opencode".to_string()),
                 surface: Surface::Headless,
-                ..ExecPromptInput::default()
+                ..ProcessPromptInput::default()
             },
         )
         .expect("bare OpenCode should defer to the user's default");
@@ -1081,7 +1081,9 @@ mod budget_tests {
 
     use crate::engine::config::Config;
     use crate::engine::context_budget::BudgetKey;
-    use crate::engine::exec::{prepare_exec_prompt, preview_exec_prompt, ExecPromptInput};
+    use crate::engine::process_prompt::{
+        prepare_process_prompt, preview_process_prompt, ProcessPromptInput,
+    };
     use crate::engine::prompt::count_tokens;
 
     #[test]
@@ -1098,9 +1100,9 @@ mod budget_tests {
             ..Default::default()
         };
         for skill in ["realign", "compress", "kickoff", "implement"] {
-            let prepared = prepare_exec_prompt(
+            let prepared = prepare_process_prompt(
                 &config,
-                ExecPromptInput {
+                ProcessPromptInput {
                     repo_root: repo.path().to_owned(),
                     skill: Some(skill.into()),
                     ..Default::default()
@@ -1127,14 +1129,14 @@ mod budget_tests {
             context_budgets: [(BudgetKey::InputTokens, 100)].into(),
             ..Default::default()
         };
-        let input = ExecPromptInput {
+        let input = ProcessPromptInput {
             repo_root: repo.path().to_owned(),
             skill: Some("realign".into()),
             ..Default::default()
         };
-        let preview = preview_exec_prompt(&config, input.clone()).unwrap();
+        let preview = preview_process_prompt(&config, input.clone()).unwrap();
         assert!(preview.budget_report.usage.last().unwrap().submitted_tokens > 100);
-        assert!(prepare_exec_prompt(&config, input)
+        assert!(prepare_process_prompt(&config, input)
             .unwrap_err()
             .to_string()
             .contains("exceeds the input budget"));

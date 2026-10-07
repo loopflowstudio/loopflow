@@ -28,7 +28,7 @@ struct TaskSessionLaunchProofTests {
             try FileManager.default.copyItem(at: executable, to: owned)
             try JSONSerialization.data(withJSONObject: ["lf_path": host.appendingPathComponent("fixture/lf").path])
                 .write(to: host.appendingPathComponent("LoopflowDevControl.json"))
-            let process = Process()
+            let process = Foundation.Process()
             process.executableURL = owned
             process.arguments = ["--test-bundle-path", try #require(Bundle(for: SessionLaunchBundleMarker.self).executablePath),
                                  "--testing-library", "swift-testing",

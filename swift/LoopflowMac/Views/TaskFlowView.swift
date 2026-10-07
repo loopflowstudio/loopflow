@@ -1,4 +1,4 @@
-// Flow diagrams: a definition's template and one Flow exec's launched graph
+// Flow diagrams: a definition's template and one Flow process's launched graph
 // with where it stands. Topology, occurrence keys and return counts come
 // from Rust; these views draw them.
 

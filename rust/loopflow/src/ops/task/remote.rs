@@ -13,14 +13,16 @@ use super::{fetch_task_refs, find_task, task_error};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct TaskSource {
-    pub issue: String,
     pub branch: String,
     pub commit: String,
     pub planning: PmTaskRecord,
 }
 
 impl TaskSource {
-    pub async fn from_task(store: &SharedStore, task: &Task) -> OpsResult<Self> {
+    pub async fn resolve(store: &SharedStore, selector: &str) -> OpsResult<Option<Self>> {
+        let Some(task) = find_task(store, selector).await? else {
+            return Ok(None);
+        };
         let pr = store
             .active_task_pr(&task.id)
             .await
@@ -31,8 +33,7 @@ impl TaskSource {
         }
         let commit = rev_parse(&task.worktree, "HEAD")?;
         require_pushed_code(&task.worktree, &task.plan.identifier, &pr.branch, &commit)?;
-        Ok(Self {
-            issue: task.plan.identifier.clone(),
+        Ok(Some(Self {
             branch: pr.branch,
             commit,
             planning: crate::ops::pm::read_task_planning_async(
@@ -41,13 +42,14 @@ impl TaskSource {
                 crate::ops::pm::PmRefresh::Auto,
             )
             .await?,
-        })
+        }))
+    }
+
+    pub fn issue(&self) -> &str {
+        &self.planning.item.identifier
     }
 
     pub async fn accept_planning(&self, repo: &Path, store: &SharedStore) -> OpsResult<()> {
-        if self.planning.item.identifier != self.issue {
-            return Err(task_error("SSH Task source names a different issue"));
-        }
         let scope = crate::repository::CanonicalRepo::discover(repo)
             .map_err(task_error)?
             .to_string();
@@ -101,7 +103,7 @@ impl TaskSource {
     }
 
     pub fn require_pushed(&self, repo: &Path) -> OpsResult<()> {
-        require_pushed_code(repo, &self.issue, &self.branch, &self.commit)
+        require_pushed_code(repo, self.issue(), &self.branch, &self.commit)
     }
 
     pub fn require_checkout(&self, task: &Task) -> OpsResult<()> {
@@ -109,7 +111,7 @@ impl TaskSource {
         if branch.as_deref() != Some(&self.branch)
             || !is_ancestor(&task.worktree, &self.commit, "HEAD")?
         {
-            return Err(task_error(format!("Task {} needs branch {} at commit {}; run `lf sync` in {} before continuing; existing work is preserved", self.issue, self.branch, self.commit, task.worktree.display())));
+            return Err(task_error(format!("Task {} needs branch {} at commit {}; run `lf sync` in {} before continuing; existing work is preserved", self.issue(), self.branch, self.commit, task.worktree.display())));
         }
         Ok(())
     }
@@ -121,17 +123,7 @@ pub(crate) fn source_for_issue(issue: &str) -> OpsResult<Option<TaskSource>> {
     };
     let source: TaskSource = serde_json::from_str(&value.to_string_lossy())
         .map_err(|error| OpsError::Message(format!("invalid SSH Task source: {error}")))?;
-    Ok((source.issue == issue).then_some(source))
-}
-
-pub(crate) async fn resolve_source(
-    store: &SharedStore,
-    selector: &str,
-) -> OpsResult<Option<TaskSource>> {
-    match find_task(store, selector).await? {
-        Some(task) => TaskSource::from_task(store, &task).await.map(Some),
-        None => Ok(None),
-    }
+    Ok((source.issue() == issue).then_some(source))
 }
 
 fn require_pushed_code(repo: &Path, issue: &str, branch: &str, commit: &str) -> OpsResult<()> {

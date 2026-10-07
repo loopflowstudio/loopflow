@@ -26,7 +26,7 @@ fn git(repo: &Path, args: &[&str]) {
 
 fn source(branch: &str, commit: &str) -> String {
     json!({
-        "issue": "FIX-1", "branch": branch, "commit": commit,
+        "branch": branch, "commit": commit,
         "planning": {
             "observed_at": 1791360000,
             "item": {"id":"issue-1", "identifier":"FIX-1", "branch_name":"outdated-linear-name",

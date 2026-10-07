@@ -179,7 +179,7 @@ fn task_source_args(lf_args: &[String]) -> anyhow::Result<(Vec<String>, Option<S
         let Some(store) = crate::store::open_existing_store().await else {
             return Ok(None);
         };
-        crate::ops::task::remote::resolve_source(&std::sync::Arc::new(store), &selector)
+        crate::ops::task::remote::TaskSource::resolve(&std::sync::Arc::new(store), &selector)
             .await
             .map_err(anyhow::Error::from)
     })?;
@@ -193,10 +193,10 @@ fn task_source_args(lf_args: &[String]) -> anyhow::Result<(Vec<String>, Option<S
             break;
         }
         if args[index] == "--task" && args.get(index + 1) == Some(&selector) {
-            args[index + 1] = source.issue.clone();
+            args[index + 1] = source.issue().to_string();
             index += 1;
         } else if args[index] == format!("--task={selector}") {
-            args[index] = format!("--task={}", source.issue);
+            args[index] = format!("--task={}", source.issue());
         }
         index += 1;
     }

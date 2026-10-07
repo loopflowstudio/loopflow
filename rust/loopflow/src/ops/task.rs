@@ -860,7 +860,8 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult
         Ok(existing)
     })?;
     if let Some(existing) = existing {
-        if let Some(source) = remote::source_for_issue(&existing.plan.identifier)? {
+        let source = remote::source_for_issue(&existing.plan.identifier)?;
+        if let Some(source) = &source {
             source.require_pushed(repo)?;
         }
         if let Some(parent) = stack_on.as_deref() {
@@ -872,7 +873,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult
             let store = task_store().await?;
             restore_task_checkout(&store, &existing).await
         })?;
-        if let Some(source) = remote::source_for_issue(&existing.plan.identifier)? {
+        if let Some(source) = source {
             source.require_checkout(&existing)?;
         }
         return Ok(existing);
@@ -1151,12 +1152,6 @@ async fn prepare_new_task(
     };
     let mut base_commit = match &stack_parent {
         Some(parent) => {
-            fetch(main_repo, "origin", &parent.branch).map_err(|error| {
-                task_error(format!(
-                    "failed to fetch parent branch {}: {error}",
-                    parent.branch
-                ))
-            })?;
             let base_ref = format!("origin/{}", parent.branch);
             rev_parse(main_repo, &base_ref).map_err(|error| {
                 task_error(format!("failed to resolve task base {base_ref}: {error}"))
@@ -1280,12 +1275,11 @@ fn create_prepared_task(
             }
         }
         let now = time::OffsetDateTime::now_utc();
+        let issue_id = LinearIssueId::new(resolved.item.id.clone()).map_err(task_error)?;
         let mut task = Task {
-            id: crate::work::task::TaskId::from_issue(
-                &LinearIssueId::new(resolved.item.id.clone()).map_err(task_error)?,
-            ),
+            id: crate::work::task::TaskId::from_issue(&issue_id),
             plan: TaskPlan {
-                id: LinearIssueId::new(resolved.item.id.clone()).map_err(task_error)?,
+                id: issue_id,
                 identifier: resolved.item.identifier.clone(),
                 title: resolved.item.name.clone(),
                 description: resolved.item.description.clone(),

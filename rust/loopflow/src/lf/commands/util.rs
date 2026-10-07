@@ -282,9 +282,8 @@ pub(crate) fn resume_session_with_env(
             let session = store
                 .session_for_artifact(artifact_key)?
                 .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
-            let expected = store.session_driver(&session.id)?;
             let driver =
-                store.claim_session_driver(&session.id, expected.as_ref(), &process, true)?;
+                crate::session_record::claim_provider_driver(&store, &session.id, &process, false)?;
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&driver.caller(session.id.clone()))?,
@@ -672,6 +671,31 @@ fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<(
     Ok(())
 }
 
+fn native_provider_driver(
+    environment: &BTreeMap<String, String>,
+) -> Result<Option<(SqliteStore, String, crate::process::SessionDriver)>> {
+    let Some(caller) = environment.get(crate::process::AGENT_CALLER_ENV) else {
+        return Ok(None);
+    };
+    let caller: crate::process::AgentCaller = serde_json::from_str(caller)?;
+    let Some(process) = crate::journal::current_process_lfid() else {
+        return Ok(None);
+    };
+    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let driver = store
+        .session_driver(&caller.session_id)?
+        .ok_or_else(|| anyhow!("Session has no admitted driver"))?;
+    if driver.process_lfid.as_ref() != Some(&process)
+        || driver.caller(caller.session_id.clone()) != caller
+    {
+        bail!("Session driver changed before provider launch");
+    }
+    if driver.provider_process_lfid != process {
+        return Ok(None);
+    }
+    Ok(Some((store, caller.session_id, driver)))
+}
+
 fn session_command_status_with_env(
     command: &SessionCommand,
     environment: &BTreeMap<String, String>,
@@ -758,7 +782,35 @@ fn session_command_status_with_env(
                 .map(|route| route.account_id().clone()),
         )?;
     }
-    let mut child = process.spawn()?;
+    // A remote terminal is only a client of the surviving engine. A local
+    // terminal owns the provider generation created by this exact Process.
+    let owned = native_provider_driver(environment)?;
+    if let Some((store, session, driver)) = &owned {
+        store.record_session_provider_launch(session, driver, true)?;
+    }
+    let mut child = match process.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            if let Some((store, session, driver)) = &owned {
+                store.record_native_provider_exit(session, driver, false)?;
+            }
+            return Err(error.into());
+        }
+    };
+    if let Some((store, session, driver)) = &owned {
+        let recorded = (|| -> Result<()> {
+            if let Some(started) = crate::journal::process_started_at(child.id())? {
+                store.record_session_provider_process(session, driver, child.id(), started)?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = recorded {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    }
+
     drop(activation);
     let client = match ProviderClientGuard::publish(capture_dir.as_deref(), child.id()) {
         Ok(client) => client,
@@ -784,6 +836,9 @@ fn session_command_status_with_env(
         std::thread::spawn(move || observe_opencode_session(&capture_dir, stderr))
     });
     let status = child.wait()?;
+    if let Some((store, session, driver)) = &owned {
+        store.record_native_provider_exit(session, driver, true)?;
+    }
     if let Some(observer) = observer {
         observer
             .join()

@@ -182,6 +182,42 @@ mod tests {
     }
 
     #[test]
+    fn native_admission_preserves_live_owners_and_interrupted_startup() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let store = SqliteStore::open_ephemeral(&ledger.home().join("loopflow.db")).unwrap();
+        store.test_session("native", &crate::session_record::new_artifact_key());
+        let command = vec!["lf".into(), "session".into(), "resume".into()];
+        crate::journal::with_runtime(ledger.home(), &command, || {
+            let exec = crate::journal::current_exec_id().unwrap();
+            let driver = super::super::claim_provider_driver(&store, "native", &exec, false)?;
+            // Reservation and admission commit together, before any spawn call.
+            assert!(store.session_provider_unstarted("native")?);
+            assert!(super::super::claim_provider_driver(&store, "native", &exec, false).is_err());
+            store.release_session_driver("native", &driver)?;
+            let retry = super::super::claim_provider_driver(&store, "native", &exec, false)?;
+            store.record_session_provider_launch("native", &retry, true)?;
+            let unknown = store.release_session_driver("native", &retry)?;
+            assert!(super::super::claim_provider_driver(&store, "native", &exec, false).is_err());
+            assert_eq!(store.session_driver("native")?, Some(unknown.clone()));
+            // Only the owner can record a known spawn failure, never a stale driver.
+            assert!(store
+                .record_native_provider_exit("native", &retry, false)
+                .is_err());
+            let owner = store.claim_session_driver("native", Some(&unknown), &exec, false)?;
+            store.record_session_provider_process(
+                "native",
+                &owner,
+                std::process::id(),
+                crate::journal::process_started_at(std::process::id())?.unwrap(),
+            )?;
+            store.release_session_driver("native", &owner)?;
+            assert!(super::super::claim_provider_driver(&store, "native", &exec, false).is_err());
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn historical_unknown_engine_requires_same_host_restart_and_exact_driver() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
@@ -221,6 +257,7 @@ mod tests {
         let driver = store
             .claim_session_driver("stranded", Some(&initial), &process, true)
             .unwrap();
+        sql.execute("DELETE FROM session_events WHERE session_id='stranded' AND receipt_key LIKE 'provider:%'", []).unwrap();
         let boot = HostBoot {
             host: "fixture-host".into(),
             machine: "machine-a".into(),

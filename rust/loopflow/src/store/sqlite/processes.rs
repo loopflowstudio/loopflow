@@ -168,6 +168,23 @@ fn driver_in(conn: &rusqlite::Connection, session: &str) -> StoreResult<Option<S
     }))
 }
 
+fn record_provider_launch(
+    tx: &rusqlite::Transaction<'_>,
+    session: &str,
+    expected: &SessionDriver,
+    phase: &str,
+) -> StoreResult<()> {
+    tx.execute(
+            "INSERT OR IGNORE INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1",
+            params![session, format!("provider:{}:{phase}", expected.provider_generation),
+                expected.process_lfid, time::OffsetDateTime::now_utc().unix_timestamp(),
+                serde_json::json!({"type":"provider_launch", "phase":phase,
+                    "provider_generation":expected.provider_generation}).to_string()],
+        )?;
+    Ok(())
+}
+
 impl SqliteStore {
     pub fn processes_since(&self, since: i64) -> StoreResult<Vec<Process>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -381,16 +398,45 @@ impl SqliteStore {
         } else {
             "reserved"
         };
-        tx.execute(
-            "INSERT OR IGNORE INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload,captured_event)
-             SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1",
-            params![session, format!("provider:{}:{phase}", expected.provider_generation),
-                expected.process_lfid, time::OffsetDateTime::now_utc().unix_timestamp(),
-                serde_json::json!({"type":"provider_launch", "phase":phase,
-                    "provider_generation":expected.provider_generation}).to_string()],
+        record_provider_launch(&tx, session, expected, phase)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Only the terminal launcher that owns this generation may report its
+    /// spawn failure or the exit it actually waited for.
+    pub(crate) fn record_native_provider_exit(
+        &self,
+        session: &str,
+        expected: &SessionDriver,
+        spawned: bool,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.process_lfid.is_none() {
+            return Err(StoreError::InvalidAuthority(
+                "Session driver changed".into(),
+            ));
+        }
+        record_provider_launch(
+            &tx,
+            session,
+            expected,
+            if spawned { "exited" } else { "spawn_failed" },
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    pub(crate) fn native_provider_exited(&self, session: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
+                AND e.receipt_key='provider:' || s.provider_generation || ':exited')
+             FROM agent_sessions s WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )?)
     }
 
     pub(crate) fn session_provider_unstarted(&self, session: &str) -> StoreResult<bool> {
@@ -399,8 +445,10 @@ impl SqliteStore {
             "SELECT provider_pid IS NULL AND provider_endpoint IS NULL
              AND EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
                 AND e.receipt_key='provider:' || s.provider_generation || ':reserved')
-             AND NOT EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
+             AND (NOT EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
                 AND e.receipt_key='provider:' || s.provider_generation || ':spawn_requested')
+              OR EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
+                AND e.receipt_key='provider:' || s.provider_generation || ':spawn_failed'))
              FROM agent_sessions s WHERE id=?1",
             [session],
             |row| row.get(0),
@@ -715,6 +763,9 @@ impl SqliteStore {
                 replace_provider
             ],
         )?;
+        if current.is_none() || replace_provider {
+            record_provider_launch(&tx, session, &driver, "reserved")?;
+        }
         tx.commit()?;
         Ok(driver)
     }

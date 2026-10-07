@@ -278,6 +278,7 @@ mod tests {
     use super::{native_receipts, record_receipts, History};
 
     use crate::id::ProcessLfid;
+    use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
 
@@ -368,7 +369,10 @@ mod tests {
         );
         assert!(rows
             .iter()
-            .filter(|row| row.kind != crate::session::SessionEventKind::Captured)
+            .filter(|row| !matches!(
+                row.kind,
+                SessionEventKind::Captured | SessionEventKind::Observed
+            ))
             .all(|row| row.process_lfid.as_deref() == Some(process.as_str())));
     }
 }

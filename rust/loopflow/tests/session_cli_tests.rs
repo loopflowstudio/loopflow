@@ -767,6 +767,82 @@ fn resume_shorthand_help_and_empty_worktree() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let (id, _, _) = prepare_conversation(home.path(), home.path(), "opencode", "Retained request");
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let provider = bin.join("opencode");
+    // Removing the fixture executable must never fall through to a real provider.
+    let path = std::env::join_paths([bin, "/usr/bin".into(), "/bin".into()]).unwrap();
+    let open = |args: &[&str]| {
+        command(home.path(), args)
+            .current_dir(home.path())
+            .env("PATH", &path)
+            .env("HOME", home.path())
+            .output()
+            .unwrap()
+    };
+    let write_provider = |body: &str| {
+        std::fs::write(&provider, body).unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    // The terminal exits before publishing native history. OpenCode reports
+    // that failure; retry must still reach the provider in the same Session.
+    write_provider("#!/bin/sh\nexit 0\n");
+    let first = open(&["session", "connect", &id]);
+    assert!(!first.status.success());
+    assert!(String::from_utf8_lossy(&first.stderr).contains("did not report a resumable session"));
+    write_provider("#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s\\n' 'message=created id=ses_retained' >&2\n");
+    let retry = open(&["session", "resume"]);
+    assert!(retry.status.success(), "{retry:?}");
+
+    // --version succeeds, then the executable disappears before the actual spawn.
+    write_provider(
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then /bin/rm -- \"$0\"; exit 0; fi\nexit 93\n",
+    );
+    let failed = open(&["session", "connect", &id, "--replace"]);
+    assert!(!failed.status.success());
+    assert!(!String::from_utf8_lossy(&failed.stderr).contains("no confirmed engine exit"));
+    write_provider("#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s\\n' 'message=created id=ses_retained' >&2\n");
+    for args in [
+        vec!["session", "resume"],
+        vec!["session", "connect", &id, "--replace"],
+    ] {
+        let result = open(&args);
+        assert!(result.status.success(), "{result:?}");
+    }
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let session = store.session(&id).unwrap().unwrap();
+    assert_eq!(session.id, id);
+    let history = store.session_history(&id, 0, 1000).unwrap();
+    assert!(history
+        .iter()
+        .any(|event| event.payload["phase"] == "spawn_failed"));
+    assert!(history
+        .iter()
+        .any(|event| event.payload["phase"] == "exited"));
+    assert!(
+        history
+            .iter()
+            .filter(|event| event.kind == loopflow::session::SessionEventKind::Captured)
+            .count()
+            >= 2
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let count: i64 = db
+        .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 1);
+    assert!(history
+        .iter()
+        .any(|event| event.payload["evidence"]["provider_session_id"] == "ses_retained"));
+}
+
 fn record_native(home: &std::path::Path, id: &str, input: &str, native: &str) {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     db.execute(

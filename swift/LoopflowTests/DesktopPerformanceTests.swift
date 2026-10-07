@@ -1174,6 +1174,7 @@ extension DesktopPerformanceTests {
                     "state": attempt == 0 ? "first_interaction" : "warm"]
                 try journal.write(record)
                 var transitions: [[String: Any]] = []
+                var steps: [[String: Any]] = []
                 var lastState = ""
                 do {
                     if scenario == "cold_workspace" {
@@ -1191,8 +1192,17 @@ extension DesktopPerformanceTests {
                     var ready = false
                     var blocked = "workspace model not found"
                     repeat {
+                        // Where the main actor spent the wait: resuming this
+                        // observer, laying out, or drawing invalidated views.
+                        let woke = milliseconds(start)
                         window.contentView?.layoutSubtreeIfNeeded()
+                        let laidOut = milliseconds(start)
                         window.displayIfNeeded()
+                        if steps.count < 8 {
+                            steps.append(["woke_ms": woke, "layout_ms": laidOut - woke,
+                                          "display_ms": milliseconds(start) - laidOut,
+                                          "planned_tasks": model?.roadmap.value?.waves.reduce(0) { $0 + $1.tasks.items.count } ?? -1])
+                        }
                         if model == nil { model = try? view.inspect().find(SessionsView.self).actualView().model }
                         let visible = NSApp.windows.filter(\.isVisible)
                         let sheet = model?.showsTaskLink ?? false
@@ -1231,7 +1241,8 @@ extension DesktopPerformanceTests {
                 record["event"] = "end"
                 record["captures"] = window.captureObservations
                 record["duration_ms"] = milliseconds(start)
-                record["observation"] = ["transitions": transitions, "selected_session": model?.navigation.selectedSessionId as Any? ?? NSNull(),
+                record["observation"] = ["transitions": transitions, "steps": steps,
+                                         "selected_session": model?.navigation.selectedSessionId as Any? ?? NSNull(),
                                          "session_usable_ms": NSNull()]
                 try journal.write(record)
             }

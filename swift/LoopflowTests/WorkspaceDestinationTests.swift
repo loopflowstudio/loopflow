@@ -1,8 +1,10 @@
 #if os(macOS)
 import AppKit
 import Foundation
+import Observation
 import Testing
 import ViewInspector
+import os
 @testable import Loopflow
 @testable import LoopflowMac
 
@@ -56,6 +58,18 @@ struct WorkspaceDestinationTests {
         #expect(model.taskLinkReading.errorMessage == nil)
         #expect(!model.showsTaskLink)
         #expect(model.containsTaskDestination(try #require(url.url)))
+
+        // Reopening what is already open changes nothing, so nothing redraws.
+        let invalidations = OSAllocatedUnfairLock(initialState: 0)
+        withObservationTracking {
+            _ = (model.repoPath, model.taskLinkURL, model.showsTaskLink, model.linkedSession,
+                 model.navigation.selectedTaskEvidence?.task, model.navigation.recentDestinations)
+        } onChange: {
+            invalidations.withLock { $0 += 1 }
+        }
+        await model.openTaskLink(try #require(url.url))
+        #expect(invalidations.withLock { $0 } == 0)
+        #expect(model.navigation.selectedSessionId == "retained-conversation")
     }
 
     @Test func taskLinkRetainsLaterPagesAndReusesTheConversation() async throws {

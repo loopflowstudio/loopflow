@@ -101,9 +101,11 @@ final class PodiumModel {
     func openTaskLink(_ url: URL, expectedTaskID: String? = nil) async {
         destinationGeneration &+= 1
         let generation = destinationGeneration
-        taskLinkURL = url
+        // Observation invalidates on every write, changed or not. Reopening
+        // what is already open must not redraw the window.
+        if taskLinkURL != url { taskLinkURL = url }
         taskLinkExpectedID = expectedTaskID
-        showsTaskLink = false
+        if showsTaskLink { showsTaskLink = false }
         do {
             let link = try TaskLink(url: url)
             // Already observed planning opens directly, like the outline and palette.
@@ -140,8 +142,8 @@ final class PodiumModel {
 
     func dismissTaskLink() {
         destinationGeneration &+= 1
-        showsTaskLink = false
-        linkedSession = nil
+        if showsTaskLink { showsTaskLink = false }
+        if linkedSession != nil { linkedSession = nil }
     }
 
     func chooseLinkedTask(wave: WaveRoadmap, task: RoadmapTask) async {
@@ -212,7 +214,9 @@ final class PodiumModel {
 
     func openTaskDestination(wave: WaveRoadmap, task: RoadmapTask) {
         setRepoPath(wave.wave.repo)
-        navigation.selectedTaskEvidence = (wave, task)
+        if navigation.selectedTaskEvidence.map({ $0.wave != wave || $0.task != task }) ?? true {
+            navigation.selectedTaskEvidence = (wave, task)
+        }
         // Reopening a Task must not clear its focused Session or retrigger entry.
         let isSelected = selection?.kind == .task
             && (selection?.id == task.id || selection?.id == task.runtime?.workId)
@@ -222,9 +226,8 @@ final class PodiumModel {
 
     func remember(_ destination: WorkspaceDestination) {
         guard let row = paletteRows.first(where: { $0.id == destination }) else { return }
-        navigation.recentDestinations.removeAll { $0.id == destination }
-        navigation.recentDestinations.insert(row, at: 0)
-        navigation.recentDestinations = Array(navigation.recentDestinations.prefix(20))
+        let recent = Array(([row] + navigation.recentDestinations.filter { $0.id != destination }).prefix(20))
+        if navigation.recentDestinations != recent { navigation.recentDestinations = recent }
     }
 
     func openPaletteTask(_ id: String) async {
@@ -764,7 +767,7 @@ final class PodiumModel {
         }
         // Navigation is already scoped to this repository. A partial planning
         // read cannot invalidate its saved selection merely because we return.
-        repoPath = path
+        if repoPath != path { repoPath = path }
     }
 
 

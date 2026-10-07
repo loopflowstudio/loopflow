@@ -96,6 +96,19 @@ struct TaskHistoryFilterTests {
         #expect(visible(try task("canceled", date: nil, runtime: "ready", missing: true), TaskHistoryFilter()))
     }
 
+    @Test func locallySettledWorkLeavesTheSidebarBeforePlanningCatchesUp() throws {
+        func sidebar(_ row: RoadmapTask) -> Bool {
+            TaskProjection(id: WorkNodeKey(repo: "/repo", work: .task(id: row.id)), task: row, sessions: []).inWorkingSet
+        }
+        for runtime in ["done", "abandoned"] {
+            let row = try task("unstarted", date: nil, runtime: runtime, missing: true)
+            #expect(!sidebar(row))
+            // The Wave plan still lists what planning calls open.
+            #expect(visible(row, TaskHistoryFilter()))
+        }
+        #expect(sidebar(try task("unstarted", date: nil, runtime: "ready", missing: true)))
+    }
+
     @Test func unresolvedFlowAndRetainedSessionSurviveHiddenHistory() throws {
         let row = try task("canceled", date: nil, runtime: "done", missing: true)
         #expect(visible(try task("canceled", date: nil, runtime: "done", missing: true, review: true), TaskHistoryFilter()))

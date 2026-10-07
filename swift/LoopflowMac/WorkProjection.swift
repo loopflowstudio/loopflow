@@ -18,11 +18,11 @@ struct TaskProjection: Identifiable {
     var started: Bool { task.runtime?.started == true }
 
     /// The started working set. A Task with open Sessions stays reachable even
-    /// when its start predates recorded evidence.
+    /// when its start predates recorded evidence. Locally done or abandoned
+    /// Work has left it even while planning has not caught up.
     var inWorkingSet: Bool {
         if !sessions.isEmpty { return true }
-        guard started else { return false }
-        return !task.task.isTerminal || task.condition.unresolvedExecution
+        return started && task.condition.unresolvedExecution
     }
 }
 

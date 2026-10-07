@@ -2849,7 +2849,7 @@ pub(crate) fn claim_provider_driver(
         replace_provider = recovery::prepare_after_restart(store, session, expected.as_ref())?;
         if !replace_provider {
             return Err(StoreError::InvalidAuthority(
-                    "Conversation has no connection and no confirmed engine exit; retry requires exact process evidence or an observed restart of the same host".into(),
+                    "Conversation has no usable connection and no confirmed engine exit; retry requires exact process evidence or an observed restart of the same host".into(),
                 ));
         }
     }

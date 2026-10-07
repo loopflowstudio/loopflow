@@ -15,8 +15,8 @@ driver claim. Native fallback must use the same ownership checks as first launch
 remote clients cannot stand in for their surviving engine. Fast terminal exit
 must preserve successfully published native history between opener probes.
 LOO-408 owns completion, LOO-324 native/account discovery, LOO-400 terminology.
-No migration or live repair is implied. The affected legacy Session still lacks
-exact process evidence; do not infer its provider's death from driver success.
+CLI/PTY proofs pass; installed reconnect still fails. No migration. The legacy
+Session lacks exact process evidence; driver success proves no provider exit.
 
 ## Storage footprint (LOO-390, 2026-10-06)
 

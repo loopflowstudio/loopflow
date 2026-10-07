@@ -50,8 +50,7 @@ merges completing Tasks by default. Explicit remaining work carries its outcome,
 evidence condition and next check; overdue calls for a decision, never invented
 success. Task state changes must preserve Session turns, reservations, process
 outcomes, ancestry and live controls. Historical uncertainty can retain a checkout,
-but cannot veto an authorized completion or cancellation. The old per-Exec
-acceptance ritual is superseded; its recorded decisions remain history.
+but cannot veto an authorized completion or cancellation. Per-Exec acceptance is superseded; decisions remain history.
 
 Installed 0.13.9 reproduces LOO-353's five pending turns, one reserved input and
 two unknown processes despite its merged PR's completion intent. Source fixtures
@@ -394,8 +393,7 @@ supersede the earlier status-selection and automatic-expiration proposals.
 Jack Heart selected one shared local binding across checkouts on October 5
 (`f092d63a-a152-4920-af81-d676a576f694`). October 6's SQLite decision below
 supersedes its file layout; stale files and settled receipts never select a Project.
-The earlier review remains at
-`e04c83513573cc09883fb2b92ebdb63e06a22c95:scratch/keep-every-wave-ready-for.md`.
+Review: `e04c83513573cc09883fb2b92ebdb63e06a22c95:scratch/keep-every-wave-ready-for.md`.
 
 October 5: Jack Heart authorized one historical name-only correction
 (`5419b87c-bfec-4f42-8914-021483249895`), preserving evidence and later conflicts.
@@ -403,8 +401,7 @@ Empty Flow is permitted. Atomic ingestion retains ages, accepted Initiative
 ownership and foreign/unmapped plans; cold detail resolves configured ownership.
 Rotation accepts confirmed readbacks; reteam requires exact Team/full issue
 readbacks and preserves newer facts. Deleted identity shortcuts and generic
-writers stay deleted. Detailed source evidence, not installed acceptance:
-`d4d77d8e22f4244ad83027ba9c85bb8644a622e6`.
+writers stay deleted. Source-only evidence: `d4d77d8e22f4244ad83027ba9c85bb8644a622e6`.
 
 October 5: queued SQLite workers own Wave guards through commit, including after
 caller cancellation; one shared writer preserves that lifetime. Multi-Wave
@@ -586,8 +583,7 @@ It changes neither recorded usage attribution nor process/Flow authority.
 Every Flow naming the Task is equally its work; the earlier marked-worker model
 is superseded. Membership grants no process or settlement authority. LOO-408
 separates Task decisions from execution and retains conservative checkout cleanup.
-Earlier branch details remain at
-`6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`.
+Earlier details: `6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`.
 
 ## Synced planning integration (LOO-334, 2026-09-30)
 

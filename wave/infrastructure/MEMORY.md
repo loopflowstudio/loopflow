@@ -2,23 +2,24 @@
 
 ## Machines (LOO-394 / LOO-411, 2026-10-07)
 
-Jack Heart authorized rename PR #1484 and stacked machine-record PR LOO-411,
-publication then review; no landing or later remote-work slice. A machine is one
-OS user and Loopflow data directory. `LF_HOME`, provider/account homes, opaque
-`home_…` IDs, cron plist and Desktop selection keys retain their meanings/bytes.
-Jack later chose to discard version-1 Desktop caches instead of translating them
-and renamed install scope to `installation`, which owns artifact updates and
-skill exports; short commands stay. Retain `~/.lf-machine/install` and the
-promotion lock path because released gates, receipts and jobs pin them; no
-relocation is proved. Installer recovery uses the shared `install` shorthand for
-retained binaries. Cron reads released JSON keys; historical payloads survive.
+Jack Heart authorized rename PR #1484 and stacked machine-record LOO-411 through
+publication and review; LOO-411 has no landing or later-slice authority. A machine
+is one OS user and Loopflow data directory. `LF_HOME`, provider/account homes,
+opaque `home_…` IDs, cron plist and Desktop selection keys retain their meanings/bytes.
+Jack chose to discard version-1 Desktop caches and name install scope `installation`
+(artifact updates and skill exports); short commands stay. Released gates,
+receipts and jobs pin `~/.lf-machine/install` and the promotion lock path; no
+relocation is proved. Recovery uses `install` for retained binaries. Cron reads
+released JSON keys; historical payloads survive.
 Rename evidence: `06e88761d:wave/infrastructure/MEMORY.md`.
 
 Jack explicitly rejected a stable cross-version API, negotiation and old-peer
-support. Read existing version/identity commands; report different versions and
-the remote update command. Named connections live on existing Machine rows;
-removal forgets connection fields without deleting placements/history or touching
-remote work. Only explicitly added machines may receive foreground credentials.
+support. Read existing version/identity commands; retain a reported version even
+when identity fails, report differences and name the remote update command. Named connections live
+on Machine rows. Removal clears label/repo and releases destination uniqueness;
+identity, route and placements survive so a replacement can be added at that
+destination without deleting history or touching remote work. Only explicitly
+added machines may receive foreground credentials.
 OpenSSH owns destination syntax. Exact-frontier fixtures seed released
 SQL. Local source proofs establish no installed migration or configured remote
 continuity. Release schedules retain original ownership and activation.

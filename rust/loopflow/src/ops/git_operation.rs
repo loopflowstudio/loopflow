@@ -48,6 +48,7 @@ pub(crate) struct GitOperationOwner {
     // Released sequencer receipts retain these field names on disk.
     #[serde(rename = "run_id")]
     trace_id: Option<String>,
+    #[serde(rename = "process_id")]
     process_lfid: Option<String>,
     pub(crate) worktree: PathBuf,
     pub(crate) branch: String,
@@ -391,4 +392,27 @@ fn validate_id(value: &str, label: &str) -> OpsResult<()> {
         return Err(OpsError::Message(format!("invalid {label} id")));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GitOperationOwner;
+
+    #[test]
+    fn sequencer_receipt_preserves_released_process_reference() {
+        let receipt = serde_json::json!({
+            "id": "gitop_retained",
+            "root_pid": 4242,
+            "run_id": "retained-trace",
+            "process_id": "retained-process",
+            "worktree": "/repo/task",
+            "branch": "feature",
+            "head": "retained-head",
+            "target_ref": "origin/main",
+            "target_sha": null,
+        });
+        let owner: GitOperationOwner = serde_json::from_value(receipt.clone()).unwrap();
+        assert_eq!(owner.process_lfid.as_deref(), Some("retained-process"));
+        assert_eq!(serde_json::to_value(owner).unwrap(), receipt);
+    }
 }

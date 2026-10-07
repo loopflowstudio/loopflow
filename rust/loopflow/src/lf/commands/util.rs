@@ -55,19 +55,19 @@ pub(crate) struct SessionCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct SessionProcess {
+struct SessionLaunch {
     command: SessionCommand,
     ide_url: Option<String>,
 }
 
-pub fn process_session(
+pub fn launch_session(
     target: ProcessTarget,
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
     prompt: &str,
 ) -> Result<()> {
-    process_session_with_env(
+    launch_session_with_env(
         target,
         harness,
         model,
@@ -78,7 +78,7 @@ pub fn process_session(
     )
 }
 
-pub(crate) fn process_session_with_env(
+pub(crate) fn launch_session_with_env(
     target: ProcessTarget,
     harness: &str,
     model: Option<&str>,
@@ -87,7 +87,7 @@ pub(crate) fn process_session_with_env(
     environment: &BTreeMap<String, String>,
     provider_session_id: Option<&str>,
 ) -> Result<()> {
-    let launch = build_session_process(
+    let launch = build_session_launch(
         target,
         harness,
         model,
@@ -116,14 +116,14 @@ pub(crate) fn process_session_with_env(
     )
 }
 
-fn build_session_process(
+fn build_session_launch(
     target: ProcessTarget,
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
     prompt: &str,
     provider_session_id: Option<&str>,
-) -> Result<SessionProcess> {
+) -> Result<SessionLaunch> {
     let worktree = absolute_path(worktree);
     let command = build_session_command(harness, model, &worktree, prompt, provider_session_id)?;
     let ide_url = if target == ProcessTarget::Ide {
@@ -132,7 +132,7 @@ fn build_session_process(
         None
     };
 
-    Ok(SessionProcess { command, ide_url })
+    Ok(SessionLaunch { command, ide_url })
 }
 
 fn build_ide_url(harness: &str, worktree: &Path, prompt: &str) -> Option<String> {
@@ -1493,7 +1493,7 @@ mod tests {
 
     #[test]
     fn session_launch_tui_codex_sets_worktree_model_and_prompt() {
-        let launch = build_session_process(
+        let launch = build_session_launch(
             ProcessTarget::Tui,
             "codex",
             Some("o3"),
@@ -1527,7 +1527,7 @@ mod tests {
     fn bare_tui_harnesses_do_not_select_a_model() {
         for agent in ["claude", "codex", "opencode"] {
             let (harness, model) = crate::engine::parse_agent(agent);
-            let launch = build_session_process(
+            let launch = build_session_launch(
                 ProcessTarget::Tui,
                 &harness,
                 model.as_deref(),
@@ -1553,7 +1553,7 @@ mod tests {
         let (_tmp, main, worktree) = git_worktree_fixture();
 
         let launch =
-            build_session_process(ProcessTarget::Tui, "codex", None, &worktree, "fix it", None)
+            build_session_launch(ProcessTarget::Tui, "codex", None, &worktree, "fix it", None)
                 .expect("build launch");
 
         let idx = launch
@@ -1572,7 +1572,7 @@ mod tests {
 
     #[test]
     fn session_launch_tui_claude_runs_in_worktree_with_model_and_prompt() {
-        let launch = build_session_process(
+        let launch = build_session_launch(
             ProcessTarget::Tui,
             "claude",
             Some("sonnet"),
@@ -1595,7 +1595,7 @@ mod tests {
 
     #[test]
     fn session_launch_tui_claude_assigns_a_resumable_provider_session() {
-        let launch = build_session_process(
+        let launch = build_session_launch(
             ProcessTarget::Tui,
             "claude",
             None,
@@ -1809,7 +1809,7 @@ mod tests {
     fn session_launch_tui_claude_adds_main_repo_for_worktree_metadata() {
         let (_tmp, main, worktree) = git_worktree_fixture();
 
-        let launch = build_session_process(
+        let launch = build_session_launch(
             ProcessTarget::Tui,
             "claude",
             Some("sonnet"),
@@ -1890,7 +1890,7 @@ mod tests {
         crate::provider_account::identity::tests::write_claude_identity(&mut account);
         store.upsert_provider_account(&account).await.unwrap();
 
-        process_session(ProcessTarget::Tui, "claude", None, temp.path(), "review it").unwrap();
+        launch_session(ProcessTarget::Tui, "claude", None, temp.path(), "review it").unwrap();
 
         assert_eq!(
             std::fs::read_to_string(capture).unwrap(),
@@ -1963,7 +1963,7 @@ mod tests {
             .await
             .unwrap();
 
-        process_session(
+        launch_session(
             ProcessTarget::Tui,
             "opencode",
             None,
@@ -1997,12 +1997,12 @@ mod tests {
             })
             .await
             .unwrap();
-        process_session(ProcessTarget::Tui, "codex", None, temp.path(), "review it").unwrap();
+        launch_session(ProcessTarget::Tui, "codex", None, temp.path(), "review it").unwrap();
     }
 
     #[test]
     fn session_launch_tui_opencode_sets_worktree_prompt_and_model() {
-        let launch = build_session_process(
+        let launch = build_session_launch(
             ProcessTarget::Tui,
             "opencode",
             Some("moonshotai/kimi-k2"),
@@ -2031,7 +2031,7 @@ mod tests {
 
     #[test]
     fn session_launch_ide_codex_builds_scheme_with_encoded_path_and_prompt() {
-        let launch = build_session_process(
+        let launch = build_session_launch(
             ProcessTarget::Ide,
             "codex",
             None,
@@ -2050,7 +2050,7 @@ mod tests {
 
     #[test]
     fn session_launch_ide_claude_builds_code_scheme_with_encoded_folder_and_prompt() {
-        let launch = build_session_process(
+        let launch = build_session_launch(
             ProcessTarget::Ide,
             "claude",
             None,
@@ -2069,7 +2069,7 @@ mod tests {
 
     #[test]
     fn session_launch_ide_opencode_falls_back_to_cli_shape() {
-        let launch = build_session_process(
+        let launch = build_session_launch(
             ProcessTarget::Ide,
             "opencode",
             None,

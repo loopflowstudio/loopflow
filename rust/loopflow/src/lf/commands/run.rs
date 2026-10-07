@@ -4,7 +4,7 @@ use crate::engine::{
     ProcessConfig, ProcessPromptInput, ProcessTarget, PromptComponents, SkillSyncOptions,
     StreamFormat, Surface,
 };
-use crate::lf::commands::util::process_session_with_env;
+use crate::lf::commands::util::launch_session_with_env;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
 use crate::session_record::{
@@ -32,7 +32,7 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
         if bound.model.is_none() {
             bound.model = binding.agent.clone();
         }
-        return process_bound(skill, message, &bound, &binding).map(|_| ());
+        return run_bound_prompt(skill, message, &bound, &binding).map(|_| ());
     }
     let mut built = build_prompt(skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
@@ -47,7 +47,7 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
     });
 
     print_context_header(&built, cli);
-    process_prompt(&built, cli).map(|_| ())
+    run_prompt(&built, cli).map(|_| ())
 }
 
 /// `lf -b session resume ID MESSAGE`: one more headless turn of a conversation,
@@ -75,7 +75,7 @@ pub fn run_bound(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
 ) -> Result<()> {
-    process_bound(skill, message, cli, binding).map(|_| ())
+    run_bound_prompt(skill, message, cli, binding).map(|_| ())
 }
 
 /// Run a channel request through the ordinary attributed launch and settlement path.
@@ -84,10 +84,11 @@ pub(crate) fn answer_bound(
     cli: &Cli,
     binding: &crate::ops::WorkBinding,
 ) -> Result<Option<String>> {
-    process_bound(None, Some(message), cli, binding).map(|answer| answer.map(|answer| answer.text))
+    run_bound_prompt(None, Some(message), cli, binding)
+        .map(|answer| answer.map(|answer| answer.text))
 }
 
-fn process_bound(
+fn run_bound_prompt(
     skill: Option<&str>,
     message: Option<&str>,
     cli: &Cli,
@@ -141,7 +142,7 @@ fn process_bound(
     });
 
     print_context_header(&built, cli);
-    process_prompt(&built, cli)
+    run_prompt(&built, cli)
 }
 
 /// An `lf` launch inside a registered Task's checkout binds to that Task unless
@@ -413,7 +414,7 @@ fn build_prompt_at(
         if is_interactive
             && process_target == ProcessTarget::Ide
             && use_native_skill_process
-            && should_process_via_skill(skill_name)
+            && should_run_via_skill(skill_name)
             // Wave seeds refer to assembled documents, including GOAL.md.
             // The short vendor seed carries no document section.
             && !prepared
@@ -430,7 +431,7 @@ fn build_prompt_at(
             );
             let wave_context =
                 crate::engine::prompt::format_wave_sections(&prepared.components).join("\n\n");
-            prompt = skill_process_seed(
+            prompt = skill_invocation_seed(
                 &harness,
                 surface,
                 skill_name,
@@ -511,7 +512,7 @@ fn is_interactive_run_with_tty(
     cli.interactive || cli.tui || cli.ide || attached_tty || (skill.is_none() && message.is_none())
 }
 
-fn should_process_via_skill(skill_name: &str) -> bool {
+fn should_run_via_skill(skill_name: &str) -> bool {
     !skill_name.starts_with("npx/") && !skill_name.starts_with("rams/")
 }
 
@@ -525,7 +526,7 @@ fn should_process_via_skill(skill_name: &str) -> bool {
 /// The invocation sigil is harness-specific: Codex's interactive composer
 /// reserves `/` for built-in commands, so skills fire with `$name` there (and
 /// `$` works in `codex exec` too). Claude uses `/name` everywhere.
-fn skill_process_seed(
+fn skill_invocation_seed(
     harness: &str,
     surface: Surface,
     skill_name: &str,
@@ -598,7 +599,7 @@ fn forced_launch_target(cli: &Cli, skill: Option<&str>) -> Option<ProcessTarget>
     }
 }
 
-fn process_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
+fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
     let forced_target = forced_launch_target(cli, built.skill_name.as_deref());
 
     if forced_target.is_some() || !built.process.auto {
@@ -627,7 +628,7 @@ fn process_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>>
         let mut environment = built.agent_config.env.clone();
         environment.extend(capture.environment());
         capture.begin_provider_spawn()?;
-        let result = process_session_with_env(
+        let result = launch_session_with_env(
             target,
             &built.harness,
             built.model.as_deref(),
@@ -671,7 +672,7 @@ fn process_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>>
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
     let capture = begin_capture(built, "headless", &agent_config, cli.resume.as_deref())?;
 
-    let result = process_headless_prompt(built, &capture, &effective_system, &agent_config);
+    let result = run_headless_prompt(built, &capture, &effective_system, &agent_config);
     let outcome = if result.is_ok() {
         "completed"
     } else {
@@ -688,7 +689,7 @@ fn process_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>>
     }
 }
 
-fn process_headless_prompt(
+fn run_headless_prompt(
     built: &PromptBuild,
     capture: &CaptureHandle,
     effective_system: &str,
@@ -1139,9 +1140,8 @@ pub fn split_skill_args(args: &[String]) -> Result<(String, Vec<String>)> {
 mod tests {
     use super::{
         attributed_context, begin_capture, build_bound_prompt_at, build_prompt_at,
-        forced_launch_target, is_interactive_run, is_interactive_run_with_tty,
-        process_headless_prompt, process_prompt, should_process_via_skill, skill_process_seed,
-        split_skill_args, PromptBuild,
+        forced_launch_target, is_interactive_run, is_interactive_run_with_tty, run_headless_prompt,
+        run_prompt, should_run_via_skill, skill_invocation_seed, split_skill_args, PromptBuild,
     };
 
     use crate::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
@@ -1332,7 +1332,7 @@ mod tests {
     #[test]
     fn preferred_name_reaches_native_skill_handoffs() {
         for harness in ["codex", "claude", "opencode"] {
-            let seed = skill_process_seed(
+            let seed = skill_invocation_seed(
                 harness,
                 Surface::Ide,
                 "design",
@@ -1438,8 +1438,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         assert!(!run_dir.join("terminal.json").exists());
         let effective_system =
             crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config);
-        let result =
-            process_headless_prompt(&built, &capture, &effective_system, &built.agent_config);
+        let result = run_headless_prompt(&built, &capture, &effective_system, &built.agent_config);
         capture
             .finish(if result.is_ok() {
                 "completed"
@@ -1604,8 +1603,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let cli = Cli::default();
 
         std::thread::scope(|scope| {
-            let first = scope.spawn(|| process_prompt(&first, &cli));
-            let second = scope.spawn(|| process_prompt(&second, &cli));
+            let first = scope.spawn(|| run_prompt(&first, &cli));
+            let second = scope.spawn(|| run_prompt(&second, &cli));
             first.join().unwrap().unwrap();
             second.join().unwrap().unwrap();
         });
@@ -1815,8 +1814,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn skill_process_seed_starts_with_slash_skill_and_message() {
-        let seed = skill_process_seed(
+    fn skill_invocation_seed_starts_with_slash_skill_and_message() {
+        let seed = skill_invocation_seed(
             "claude",
             Surface::Cli,
             "implement",
@@ -1832,32 +1831,32 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn skill_process_seed_uses_dollar_sigil_for_codex() {
+    fn skill_invocation_seed_uses_dollar_sigil_for_codex() {
         // Codex's interactive composer reserves `/` for built-in commands, so
         // skills fire with `$name`.
-        let seed = skill_process_seed("codex", Surface::Cli, "gate", None, false, None, None);
+        let seed = skill_invocation_seed("codex", Surface::Cli, "gate", None, false, None, None);
         assert!(seed.starts_with("$gate\n\n"));
     }
 
     #[test]
-    fn skill_process_seed_interactive_surfaces_have_no_preamble() {
+    fn skill_invocation_seed_interactive_surfaces_have_no_preamble() {
         for surface in [Surface::Cli, Surface::Ide, Surface::Mac] {
-            let seed = skill_process_seed("claude", surface, "gate", None, false, None, None);
+            let seed = skill_invocation_seed("claude", surface, "gate", None, false, None, None);
             assert!(seed.starts_with("/gate\n\n"));
             assert!(!seed.contains("Run mode"), "surface {surface:?}");
         }
     }
 
     #[test]
-    fn skill_process_seed_omits_message_when_absent() {
-        let seed = skill_process_seed("claude", Surface::Cli, "gate", None, false, None, None);
+    fn skill_invocation_seed_omits_message_when_absent() {
+        let seed = skill_invocation_seed("claude", Surface::Cli, "gate", None, false, None, None);
         assert!(!seed.contains("<lf:message>"));
         assert!(!seed.contains("<lf:orientation>"));
     }
 
     #[test]
-    fn skill_process_seed_headless_includes_preamble() {
-        let seed = skill_process_seed(
+    fn skill_invocation_seed_headless_includes_preamble() {
+        let seed = skill_invocation_seed(
             "claude",
             Surface::Headless,
             "implement",
@@ -1870,8 +1869,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn skill_process_seed_omits_loopflow_when_disabled() {
-        let seed = skill_process_seed(
+    fn skill_invocation_seed_omits_loopflow_when_disabled() {
+        let seed = skill_invocation_seed(
             "claude",
             Surface::Headless,
             "implement",
@@ -1885,8 +1884,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn skill_process_seed_includes_loopflow_when_enabled() {
-        let seed = skill_process_seed(
+    fn skill_invocation_seed_includes_loopflow_when_enabled() {
+        let seed = skill_invocation_seed(
             "claude",
             Surface::Headless,
             "implement",
@@ -1906,7 +1905,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn skill_process_seed_carries_wave_files_before_the_message() {
+    fn skill_invocation_seed_carries_wave_files_before_the_message() {
         let components = PromptComponents {
             wave: Some("infrastructure/release".into()),
             docs: vec![
@@ -1929,7 +1928,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ..Default::default()
         };
         let context = crate::engine::prompt::format_wave_sections(&components).join("\n\n");
-        let seed = skill_process_seed(
+        let seed = skill_invocation_seed(
             "claude",
             Surface::Headless,
             "implement",
@@ -1952,7 +1951,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn skill_launch_seed_activates_only_the_selected_skill_from_references() {
-        let seed = skill_process_seed(
+        let seed = skill_invocation_seed(
             "codex",
             Surface::Headless,
             "implement",
@@ -2063,9 +2062,9 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn external_skill_skills_keep_assembled_prompt_fallback() {
-        assert!(!should_process_via_skill("npx/vercel-labs/deep-research"));
-        assert!(!should_process_via_skill("rams/rams"));
-        assert!(should_process_via_skill("implement"));
+        assert!(!should_run_via_skill("npx/vercel-labs/deep-research"));
+        assert!(!should_run_via_skill("rams/rams"));
+        assert!(should_run_via_skill("implement"));
     }
 
     #[test]

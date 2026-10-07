@@ -301,7 +301,7 @@ impl ActiveSessionReader {
             };
             let parts: Vec<_> = relative.iter().collect();
             if parts.len() <= 1
-                || relative == Path::new("runtime/exec-processes")
+                || relative == Path::new(PROCESS_RECEIPT_ROOT)
                 || (parts[0] == "runs" && parts.len() == 2)
             {
                 self.rescan = true;

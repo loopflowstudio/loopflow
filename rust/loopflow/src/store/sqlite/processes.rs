@@ -457,9 +457,10 @@ impl SqliteStore {
         let previous = previous
             .map(|payload| serde_json::from_str::<serde_json::Value>(&payload))
             .transpose()?;
+        // Boot witnesses are append-only history; keep the released JSON encoding.
         let recovered = previous.as_ref().is_some_and(|payload| {
             payload["provider_generation"].as_i64() == Some(expected.provider_generation)
-                && payload["provider_process_id"].as_str()
+                && payload["provider_exec_id"].as_str()
                     == Some(expected.provider_process_id.as_str())
                 && payload["host"]["machine"].as_str() == Some(boot.machine.as_str())
                 && payload["host"]["boot"]
@@ -478,7 +479,7 @@ impl SqliteStore {
                 time::OffsetDateTime::now_utc().unix_timestamp(),
                 serde_json::json!({"type":phase, "host":boot,
                     "provider_generation":expected.provider_generation,
-                    "provider_process_id":expected.provider_process_id,
+                    "provider_exec_id":expected.provider_process_id,
                     "previous":if recovered { previous } else { None }}).to_string()],
         )?;
         tx.commit()?;

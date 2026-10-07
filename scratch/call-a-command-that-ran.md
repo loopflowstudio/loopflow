@@ -25,6 +25,9 @@ A single draft renames live SQL tables/columns, indexes/triggers and revision
 domain while preserving every row, identity, parent, exit and ownership fence.
 Historical JSON/capture formats must remain readable where persisted outside SQL;
 inspect those boundaries explicitly before changing their encoding.
+Delete the unused `Runner`/`DefaultRunner` abstraction; `run_agent` owns launches.
+Let SQLite rewrite references in unchanged indexes/triggers instead of copying
+their definitions into the rename draft.
 
 ## Preservation and acceptance
 
@@ -46,19 +49,30 @@ existing on-disk directory and encoding. Foundation.Process is explicit wherever
 Swift launches an OS process, distinct from Loopflow's durable Process DTO.
 
 Review found persisted manifest `exec`, receipt `exec_id`, AgentCaller
-`origin_exec_id`, trace node `exec` and Task decision `exec_ids` outside renamed
-SQL columns. These historical formats remain readable; the first three retain
-one write encoding and the last two accept old history while emitting process
+`origin_exec_id`, boot witness `provider_exec_id`, trace node `exec` and Task
+decision `exec_ids` outside renamed SQL columns. These historical formats remain
+readable; the first four retain one write encoding and the last two accept old history while emitting process
 names. Public process DTOs have only the new names. Task acceptance's SQL reader
 recognizes the two dated event spellings without modifying append-only bytes.
 Unix shell exec, pre_exec and external provider commands are unchanged.
 Jack Heart's October 7 cleanup steer is satisfied by replacing the existing owners;
 no alternate execution model, alias command or new ps surface is introduced.
 
+Compression reproduced a lost boot witness: the renamed JSON reader could not
+recover after a restart from released evidence. Retaining its encoding fixes
+that boundary without rewriting history or adding another format. The regression
+checks the saved witness, provider generation and native thread. Launch functions
+now say `run` or `launch`; `SessionLaunch` describes a command and optional app URL.
+The unused runner abstraction and redundant migration definitions are removed.
+
 ## Remaining work
 
-Publish for review and prepare the pr-review HTML walkthrough. Full gate/CI,
-installation-container checks, installed migration and interactive judgment remain
-later boundaries. No rendering environment is available for the walkthrough.
+PR #1483 is published at `51c409ab86e49c0a3f172abb9a4d8b4673335895`;
+`scratch/pr-review.html` remains pinned to that head. This compression diff is
+local and needs publication and a walkthrough refresh before review. `lf commit`
+returned an empty error; the preexisting review note is preserved at
+`/tmp/loo400-pr-review-note.md`. Reviewer assessment, full gate/CI, installation
+container checks and installed migration remain later boundaries. Rendering is
+unavailable; no landing is authorized.
 
-Checks: Rust populated migration, discovery, Flow inventory, journal, retained acceptance/capture, DTO, process ownership and observation checks passed (installation-only proofs deferred to isolated CI); cargo check, fmt, Clippy, architecture and docs sync passed; 42 headless Desktop tests passed; disposable CLI help/show proof passed.
+Checks: `cargo test -p loopflow --lib` with filters `process_names_preserves_released_history_and_constraints`, `session_record::recovery::tests`, `skill_invocation_seed`, `session_launch_` passed 25 tests with LF_* cleared; `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all -- --check` passed; published-head checks remain at `51c409ab8:scratch/call-a-command-that-ran.md`; broader acceptance belongs to gate/CI.

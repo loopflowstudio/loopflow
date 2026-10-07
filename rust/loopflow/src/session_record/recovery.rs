@@ -232,6 +232,18 @@ mod tests {
         let released = store.release_session_driver("stranded", &driver).unwrap();
         assert!(!store.session_provider_unstarted("stranded").unwrap());
         assert!(!crate::session_record::conversation_engine_exited(&store, "stranded").unwrap());
+        // Retain the released witness encoding across the Process rename.
+        let witness = serde_json::json!({
+            "type": "recovery_boot", "host": boot,
+            "provider_generation": released.provider_generation,
+            "provider_exec_id": released.provider_process_id,
+            "previous": null,
+        });
+        sql.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+             SELECT id,'observed',?1,1,?2,current_capture FROM agent_sessions WHERE id='stranded'",
+            rusqlite::params![format!("driver:{}:recovery_boot", released.generation), witness.to_string()],
+        ).unwrap();
         for _ in 0..2 {
             assert!(!store
                 .observe_session_recovery_boot("stranded", &released, &boot)
@@ -252,6 +264,12 @@ mod tests {
         assert!(store
             .observe_session_recovery_boot("stranded", &released, &restarted)
             .unwrap());
+        let history = store.session_history("stranded", 0, 100).unwrap();
+        assert!(history.iter().any(|event| event.payload == witness));
+        assert!(history
+            .iter()
+            .any(|event| event.payload["type"] == "recovered_after_restart"
+                && event.payload["previous"] == witness));
         let replacement = store
             .claim_session_driver("stranded", Some(&released), &process, true)
             .unwrap();

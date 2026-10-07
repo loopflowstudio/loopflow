@@ -1,4 +1,5 @@
 -- Rename recorded commands in place; IDs, outcomes and provenance remain unchanged.
+-- SQLite updates references in surviving indexes and triggers during each rename.
 
 DROP INDEX "execs_parent";
 
@@ -7,8 +8,6 @@ DROP INDEX "execs_trace";
 DROP INDEX "execs_recent";
 
 DROP INDEX "session_driver_exec";
-
-DROP INDEX "session_unknown_engine_origin";
 
 DROP INDEX "execs_unfinished";
 
@@ -27,8 +26,6 @@ DROP TRIGGER "flow_execs_are_append_only";
 DROP TRIGGER "flow_exec_steps_are_append_only";
 
 DROP TRIGGER "validate_flow_exec_step";
-
-DROP TRIGGER "validate_task_started_update";
 
 DROP TRIGGER "store_revision_flow_execs_insert";
 
@@ -93,8 +90,6 @@ CREATE INDEX processes_recent ON processes(started_at DESC, id);
 
 CREATE INDEX session_driver_process ON agent_sessions(driver_process_id) WHERE driver_process_id IS NOT NULL;
 
-CREATE INDEX session_unknown_engine_origin ON agent_sessions(provider_process_id) WHERE provider_pid IS NULL;
-
 CREATE INDEX processes_unfinished ON processes(started_at, id) WHERE completed_at IS NULL;
 
 CREATE INDEX session_events_process ON session_events(process_id, session_id) WHERE process_id IS NOT NULL;
@@ -128,19 +123,6 @@ CREATE TRIGGER validate_flow_process_step BEFORE INSERT ON flow_process_steps BE
     SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM processes step
         WHERE step.id=NEW.process_id AND step.parent_process_id=NEW.flow_process_id
     ) THEN RAISE(ABORT,'A Flow step is a process its driver started') END;
-END;
-
-CREATE TRIGGER validate_task_started_update BEFORE UPDATE OF started_at ON tasks BEGIN
-    SELECT CASE WHEN OLD.started_at IS NOT NULL AND NEW.started_at IS NOT OLD.started_at
-        THEN RAISE(ABORT,'Task first assignment time cannot change') END;
-    SELECT CASE WHEN NEW.started_at IS NOT NULL AND NOT (
-        EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=NEW.id) OR
-        EXISTS(SELECT 1 FROM session_events WHERE kind='started' AND task_id=NEW.id) OR
-        EXISTS(SELECT 1 FROM flow_processes f JOIN processes driver ON driver.id=f.process_id WHERE NEW.worktree!=''
-            AND (driver.cwd=rtrim(NEW.worktree,'/') OR instr(driver.cwd,rtrim(NEW.worktree,'/')||'/')=1)) OR
-        EXISTS(SELECT 1 FROM task_events e WHERE e.task_id=NEW.id
-            AND json_extract(e.kind_json,'$.kind')='started')
-    ) THEN RAISE(ABORT,'Started requires recorded Task work') END;
 END;
 
 CREATE TRIGGER store_revision_flow_processes_insert AFTER INSERT ON flow_processes

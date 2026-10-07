@@ -2337,31 +2337,6 @@ pub fn check_cli_available(cli: &str) -> bool {
     available
 }
 
-/// Agent runner trait for dependency injection in tests.
-pub trait Runner: Send + Sync {
-    fn exec(
-        &self,
-        launch: &AgentConfig,
-        process: &ProcessConfig,
-        capabilities: &AgentCapabilities,
-    ) -> Result<AgentProcessResult, CoreError>;
-}
-
-/// Default agent runner that spawns actual processes.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct DefaultRunner;
-
-impl Runner for DefaultRunner {
-    fn exec(
-        &self,
-        launch: &AgentConfig,
-        process: &ProcessConfig,
-        capabilities: &AgentCapabilities,
-    ) -> Result<AgentProcessResult, CoreError> {
-        run_agent(launch, process, capabilities)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

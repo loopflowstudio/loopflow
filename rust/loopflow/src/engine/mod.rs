@@ -34,7 +34,7 @@ pub use agent::{
     build_opencode_command, check_cli_available, codex_permission_args, missing_agent_message,
     run_agent, workspace_add_dirs, AgentCapabilities, AgentCapture, AgentConfig,
     AgentExecutionBoundary, AgentFailure, AgentProcessResult, AgentWriteScope, ClaudeArgs,
-    DefaultRunner, ProcessConfig, Runner,
+    ProcessConfig,
 };
 pub use command::{run_command, CommandError};
 pub use config::{

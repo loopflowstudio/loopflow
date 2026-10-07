@@ -132,7 +132,7 @@ struct DesktopPerformanceTests {
                            "gaps": ["Compositor presentation and frame hitches are not measured.",
                                     "A Task created without a Run is not in the outline; task_created ends at its Wave's Task list.",
                                     "The interval starts when the writing process has exited, after its commit.",
-                                    "Rows are written with sqlite3, not lf: no Foundation.Process, sync or provider is involved.",
+                                    "Rows are written with sqlite3, not lf: no lf process, sync or provider is involved.",
                                     "Each write waits for the reader to be idle; overlapping writes are not sampled.",
                                     "Forced bitmap capture and OCR are intrusive observer costs."]])
         let navigator = try view.inspect().find(WorkNavigator.self).actualView()

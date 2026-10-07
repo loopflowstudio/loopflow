@@ -83,11 +83,7 @@ pub(super) fn flows_of_task(
 
 /// The Task's workflow row: its definition, the node it waits at or left,
 /// and the edge it is on with the Process carrying it.
-type WorkflowRow = (
-    WorkflowDefinition,
-    String,
-    Option<(u32, crate::process::Process)>,
-);
+type WorkflowRow = (WorkflowDefinition, String, Option<(u32, Process)>);
 
 fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<WorkflowRow>> {
     use rusqlite::OptionalExtension;
@@ -498,7 +494,7 @@ impl SqliteStore {
         })
     }
 
-    /// Whether a process with no recorded exit may still have its process.
+    /// Whether a command with no recorded exit may still be running.
     /// Unknown is not stopped.
     pub(crate) fn process_may_run(&self, process: &crate::process::Process) -> bool {
         crate::journal::process_evidence(self, &process.id)

@@ -4,7 +4,7 @@
 // current by one foreground workspace reader per window.
 //
 // Reads run `lf` subprocesses and decode shared wire types into app models.
-// The injected runner on macOS processes the `lf` shipped inside the app. There is no
+// The injected runner on macOS launches the `lf` shipped inside the app. There is no
 // HTTP fallback for reads; remote reads need to become proxied `lf` queries.
 
 import Foundation

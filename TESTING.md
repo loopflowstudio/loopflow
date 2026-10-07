@@ -732,7 +732,7 @@ toolchain explicitly.
 CLI owner-tree changes must include `cargo test -p loopflow --lib engine::flow_graph::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.
-Task status reads a Flow from its Processes and their processes. Run
+Task status reads a Flow from recorded command outcomes and OS liveness. Run
 `cargo test -p loopflow --lib ops::task_execution::tests` for running, between
 steps, stopped and failed.
 Managed Task fixtures must bind the checkout's Team and Initiative before

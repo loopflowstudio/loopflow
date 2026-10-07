@@ -653,7 +653,7 @@ advances it from each step's exit; the position a step ran at is on that step
 Process's argv.
 
 A driver that dies leaves dead Processes as history. Nothing restarts or resumes
-it. Liveness is Process process evidence, and missing evidence stays uncertain.
+it. Liveness comes from OS process evidence, and missing evidence stays uncertain.
 Only live or unresolved execution, a live Process or an unresolved provider turn,
 holds Task completion, cleanup and landing. The caller inspects that history
 before launching fresh work, which starts another Flow.

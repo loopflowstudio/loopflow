@@ -518,7 +518,7 @@ fn execute_target(
     cli: &Cli,
     args: &[String],
     binding: Option<&loopflow::ops::WorkBinding>,
-    account_selection: &loopflow::provider_account::lease::AccountSelection,
+    account_selection: &loopflow::provider_account::selection::AccountSelection,
 ) -> anyhow::Result<()> {
     use loopflow::engine::target::Target;
 
@@ -1453,22 +1453,20 @@ fn run() -> anyhow::Result<()> {
             .or(cli.shared.then_some(false))
             .map(loopflow::provider_account::activation::isolation_env)
             .map(|(name, mode)| EnvGuard::set(name, mode));
-        let account_selection = loopflow::provider_account::lease::AccountSelection::from_flags(
-            &preferred_accounts,
-            &restricted_accounts,
-        )?;
+        let account_selection =
+            loopflow::provider_account::selection::AccountSelection::from_flags(
+                &preferred_accounts,
+                &restricted_accounts,
+            )?;
         let _account_selection = if !account_selection.is_default() {
             Some(EnvGuard::set(
-                loopflow::provider_account::lease::ACCOUNT_SELECTION_ENV,
+                loopflow::provider_account::selection::ACCOUNT_SELECTION_ENV,
                 account_selection.env_value()?,
             ))
         } else {
             None
         };
-        if cli.account_lease_probe {
-            return loopflow::provider_account::lease::probe_forwarded_authority()
-                .map_err(anyhow::Error::from);
-        }
+
         debug!(?cli, "parsed CLI arguments");
 
         dispatch(cli, &args, account_selection)
@@ -1478,7 +1476,7 @@ fn run() -> anyhow::Result<()> {
 fn dispatch(
     mut cli: Cli,
     args: &[String],
-    account_selection: loopflow::provider_account::lease::AccountSelection,
+    account_selection: loopflow::provider_account::selection::AccountSelection,
 ) -> anyhow::Result<()> {
     // Every MachineId-addressed SSH hop proves it reached the intended authority
     // before reads or mutations dispatch. Raw-host bootstrap carries no
@@ -1623,7 +1621,7 @@ fn execute_command(
     cli: &Cli,
     args: &[String],
     binding: Option<&loopflow::ops::WorkBinding>,
-    account_selection: &loopflow::provider_account::lease::AccountSelection,
+    account_selection: &loopflow::provider_account::selection::AccountSelection,
 ) -> anyhow::Result<()> {
     let parsed = Cli::try_parse_from(command.argv())?;
     match &parsed.command {
@@ -1705,7 +1703,9 @@ fn execute_command(
                 | loopflow::lf::MachineCommand::List { .. }
                 | loopflow::lf::MachineCommand::Status { .. }
                 | loopflow::lf::MachineCommand::Rename { .. }
-                | loopflow::lf::MachineCommand::Remove { .. }),
+                | loopflow::lf::MachineCommand::Remove { .. }
+                | loopflow::lf::MachineCommand::Connect { .. }
+                | loopflow::lf::MachineCommand::Credentials { .. }),
         }) => loopflow::lf::commands::machine::run(cmd),
         Some(Commands::Installation {
             cmd: loopflow::lf::InstallationCommand::SyncSkills { yes, no_prune },
@@ -1844,7 +1844,6 @@ fn execute_command(
                 loopflow::lf::MachineCommand::Ssh {
                     target,
                     repo,
-                    secret,
                     forward_agent,
                     origin_account: _,
                     origin_only_account: _,
@@ -1853,7 +1852,6 @@ fn execute_command(
         }) => loopflow::lf::commands::ssh::run(
             target,
             repo.as_deref(),
-            secret,
             *forward_agent,
             account_selection,
             lf_args,

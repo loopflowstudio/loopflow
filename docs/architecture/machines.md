@@ -28,7 +28,9 @@ and local versions. Different versions produce an explicit remote update command
 Loopflow does not maintain old-version compatibility or update a peer automatically.
 SSH key authentication and a known host key must already work. Add and status
 transfer no credentials. SSH requires an added connection and checks its identity
-before forwarding the existing foreground credentials through stdin.
+before dispatch. `lf machine connect mini <provider> [email]` installs a separate
+login through SSH stdin; account-selected launches connect missing logins in the
+foreground. See [subscriptions](../subscriptions.md#use-subscriptions-over-ssh).
 
 Remove forgets the connection without contacting the remote. Historical machine
 identity, routes and Work placements remain in SQLite. Previously observed routes

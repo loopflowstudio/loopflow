@@ -27,6 +27,14 @@ Release's operation-entry lesson also applies to command removal: reject the ret
 option beneath a valid current owner; an unknown owner can produce a false pass.
 Corrected installation fixtures still require disposable OS-account isolation.
 
+## Resident machine logins (LOO-413, 2026-10-07)
+
+Jack Heart authorized publication for review, forbidding real credential experiments.
+Transfer only over stdin to added machines. Preserve received logins across
+registration failure; remote preferences cannot relax selected identity. Retain
+the encryption key in a private file; locked Keychain never proves absence.
+Independent refresh chains, rebooted Mac access and installed acceptance remain unproved.
+
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 
 Jack Heart authorized autonomous repair through landing. Installed v0.13.9
@@ -549,21 +557,13 @@ names drive shell/tmux clearing. Earlier branch evidence remains at
 LOO-370's October 6 completion above supersedes this section's pending-delivery
 claim; it establishes no physical capture conversion.
 
-## Task worktree membership (LOO-358, branch evidence 2026-09-30)
+## Task worktree membership (LOO-358)
 
-Jack Heart selected the Task's checkout as its general work set: every
-AgentSession, FlowSession and Exec there, plus explicit binds. The shared Rust
-SQLite reader supplies Task status and Desktop membership; the app does not
-reconstruct ownership from paths. Membership is additive, includes descendants
-at component boundaries and closed history, and survives a missing checkout.
-It changes neither recorded usage attribution nor process/Flow authority.
-
-The managed Flow remains one marked member for worker progression, claims,
-Task review settlement and worker delivery authority. Independent unfinished
-Flows, pending Ask/review Sessions and live or unresolved Execs preserve work
-during completion, recovery and cleanup. General membership cannot settle or
-signal them. Current mechanics live in the architecture reference; this branch
-entry is not evidence of shipment or configured Desktop acceptance.
+Jack Heart selected a Task's checkout as its general work set, including descendants
+and explicit binds. Membership preserves history and grants no execution authority.
+The dated single-managed-Flow claims are superseded by the current all-Flow contract;
+source evidence and unresolved acceptance remain at
+`6b4769a974e52e29c076826cd6724e48b89dd6c4:wave/infrastructure/MEMORY.md` under this heading.
 
 ## Synced planning integration (LOO-334, 2026-09-30)
 

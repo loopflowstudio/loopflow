@@ -31,7 +31,7 @@ use crate::provider_account::{
 use crate::provider_auth::{
     capture_claude_profile_credentials, disconnect_provider_account_auth,
     import_ambient_claude_profile_credentials, prepare_provider_account_access_token,
-    start_provider_account_auth, AuthCompletion, AuthError, AuthFlowResponse, Provider,
+    start_provider_account_auth, AuthBroker, AuthCompletion, AuthError, AuthFlowResponse, Provider,
     ProviderAuthService,
 };
 use crate::store::{
@@ -540,6 +540,35 @@ async fn connect_managed_account(
         .prefix(".login-")
         .tempdir_in(parent)
         .context("create private provider login home")?;
+    authorize_managed_login(provider, account, &login_home, profile, chrome_profile).await?;
+    let _identity_lock =
+        crate::provider_account::identity::acquire_identity_install_lock(&account_home)?;
+    let (identity, plan) =
+        verify_managed_identity(store, provider, account, login_home.path()).await?;
+    let account_home = ensure_account_home(provider, account_id)?;
+    match provider {
+        Provider::Claude => install_claude_login(login_home.path(), &account_home)?,
+        Provider::Codex => install_codex_login(login_home.path(), &account_home)?,
+        _ => return Err(anyhow!("unsupported managed provider '{provider}'")),
+    }
+    register_managed_account(store, provider, account_id, account_home, identity, plan).await?;
+    println!(
+        "Connected {} login '{}' through profile '{}'",
+        provider.display_name(),
+        account_login(account),
+        profile.id
+    );
+    Ok(())
+}
+
+async fn authorize_managed_login(
+    provider: Provider,
+    account: &ProviderAccount,
+    login_home: &tempfile::TempDir,
+    profile: &AccessProfile,
+    chrome_profile: LocalChromeProfile,
+) -> Result<()> {
+    let account_id = &account.account_id;
     let auth_home = login_home.path().to_path_buf();
     let handle = start_provider_account_auth(
         provider,
@@ -594,23 +623,65 @@ async fn connect_managed_account(
         Provider::Codex => {}
         _ => return Err(anyhow!("unsupported managed provider '{provider}'")),
     }
-    let _identity_lock =
-        crate::provider_account::identity::acquire_identity_install_lock(&account_home)?;
-    let (identity, plan) = verify_managed_identity(store, provider, account, &auth_home).await?;
-    let account_home = ensure_account_home(provider, account_id)?;
-    match provider {
-        Provider::Claude => install_claude_login(login_home.path(), &account_home)?,
-        Provider::Codex => install_codex_login(login_home.path(), &account_home)?,
-        _ => return Err(anyhow!("unsupported managed provider '{provider}'")),
-    }
-    register_managed_account(store, provider, account_id, account_home, identity, plan).await?;
-    println!(
-        "Connected {} login '{}' through profile '{}'",
-        provider.display_name(),
-        account_login(account),
-        profile.id
-    );
     Ok(())
+}
+
+/// Mint a separate refresh chain without installing it in the origin account.
+pub(super) async fn fresh_machine_login(
+    store: &SharedStore,
+    provider: Provider,
+    account: &ProviderAccount,
+    chrome_profile: Option<&str>,
+) -> Result<tempfile::TempDir> {
+    let (profiles, _) = browser_profiles(store, provider, Some(account), chrome_profile).await?;
+    let profile = profiles
+        .first()
+        .ok_or_else(|| anyhow!("no browser profile available"))?;
+    let chrome = verified_chrome_profile(profile)?;
+    let login_home = tempfile::Builder::new()
+        .prefix("lf-machine-login-")
+        .tempdir()?;
+    authorize_managed_login(provider, account, &login_home, profile, chrome).await?;
+    let (identity, _) =
+        verify_managed_identity(store, provider, account, login_home.path()).await?;
+    if account
+        .observed_subject
+        .as_ref()
+        .is_some_and(|subject| subject != &identity.subject)
+    {
+        bail!("fresh login belongs to a different provider identity; credential discarded");
+    }
+    Ok(login_home)
+}
+
+pub(super) async fn fresh_linear_login(
+    store: &SharedStore,
+    chrome_profile: Option<&str>,
+) -> Result<ProviderToken> {
+    let (profiles, _) = browser_profiles(store, Provider::Linear, None, chrome_profile).await?;
+    let profile = profiles
+        .first()
+        .ok_or_else(|| anyhow!("no browser profile available"))?;
+    let chrome = verified_chrome_profile(profile)?;
+    let broker = crate::provider_auth::LinearOAuthBroker::new();
+    let handle = broker.start_auth().await?;
+    let flow = handle.response.clone();
+    let url = flow
+        .verification_uri_complete
+        .as_deref()
+        .unwrap_or(&flow.verification_uri);
+    open_chrome_profile(&chrome, url)?;
+    wait_for_browser_confirmation(
+        handle.wait(),
+        flow.expires_in,
+        Provider::Linear,
+        "remote machine",
+    )
+    .await?;
+    broker
+        .extract_token()
+        .await
+        .ok_or_else(|| anyhow!("Linear login completed without a credential"))
 }
 
 async fn wait_for_browser_confirmation<F>(
@@ -762,7 +833,7 @@ fn install_claude_login(login_home: &Path, account_home: &Path) -> Result<()> {
         .context("install verified Claude credential")
 }
 
-async fn verify_managed_identity(
+pub(super) async fn verify_managed_identity(
     store: &SharedStore,
     provider: Provider,
     account: &ProviderAccount,
@@ -795,7 +866,7 @@ async fn verify_managed_identity(
     Ok((identity, plan))
 }
 
-async fn register_managed_account(
+pub(super) async fn register_managed_account(
     store: &SharedStore,
     provider: Provider,
     account_id: &ProviderAccountId,
@@ -1540,7 +1611,7 @@ mod account_first_tests {
         TEST_OPENED_CHROME_PROFILES,
     };
     use crate::profile::{AccessProfile, EmailAddress, ProfileId};
-    use crate::provider_account::lease::ACCOUNT_LEASE_ENV;
+    const ACCOUNT_LEASE_ENV: &str = "LF_ACCOUNT_LEASE";
     use crate::provider_account::{account_home_path, parse_account_id};
     use crate::provider_auth::Provider;
     use crate::store::{CredentialState, ProviderAccount, RoutingState, StorageConfig};
@@ -1824,6 +1895,60 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
             created_at: position,
             updated_at: position,
         }
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn fresh_machine_login_does_not_replace_the_laptop_login() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(CONNECT_ENV);
+        configure_connect_test(temp.path(), "operator@example.com", false);
+        write_chrome_profiles(
+            temp.path(),
+            &[("Profile 3", "Work", "operator@example.com")],
+        );
+        let store = Arc::new(
+            crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+                temp.path().join("loopflow.db"),
+            ))
+            .await
+            .unwrap(),
+        );
+        let home = temp.path().join("laptop-login");
+        fs::create_dir(&home).unwrap();
+        fs::write(home.join("auth.json"), "unchanged-laptop-refresh-chain").unwrap();
+        let original = account(Some(&home), "operator@example.com");
+        store.upsert_provider_account(&original).await.unwrap();
+        let profile = access_profile("Profile 3", "operator@example.com", 1);
+        store.upsert_access_profile(&profile).await.unwrap();
+        store
+            .set_auth_browser_profiles(
+                Provider::Codex,
+                Some(&original.account_id),
+                std::slice::from_ref(&profile.id),
+            )
+            .await
+            .unwrap();
+        let staging = super::fresh_machine_login(&store, Provider::Codex, &original, None)
+            .await
+            .unwrap();
+        assert_ne!(staging.path(), home);
+        assert!(staging.path().join("auth.json").is_file());
+        assert_eq!(
+            fs::read_to_string(home.join("auth.json")).unwrap(),
+            "unchanged-laptop-refresh-chain"
+        );
+        assert_eq!(
+            store
+                .get_provider_account("codex", &original.account_id)
+                .await
+                .unwrap(),
+            Some(original)
+        );
+        let path = staging.path().to_path_buf();
+        drop(staging);
+        assert!(!path.exists());
     }
 
     #[allow(clippy::await_holding_lock)]

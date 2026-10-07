@@ -81,148 +81,48 @@ configured publisher workflow and credentials.
 
 ## Understand account authority over SSH
 
-### Do I have to be logged in on the remote machine?
-
-No—not for foreground work. The machine where you type `lf ssh` is the
-**origin**; the named machine is the **target**. The target `lf` can choose from
-subscription accounts installed on either one:
-
 ```bash
-# Offer the origin's accounts and include accounts installed on the target.
-lf ssh my-company implement
-
-# Prefer an account installed on the origin.
-lf ssh --account jack@personal my-company implement
-
-# Select from the target lf's combined local and forwarded catalog.
-lf ssh my-company --account jack@company implement
+lf machine add mini --repo '~/src/project'
+lf machine connect mini github
+lf machine connect mini codex work@example.com
+lf machine connect mini linear
+lf ssh --account codex=work@ mini implement
 ```
 
-The target does not need its own Claude or Codex login for the first two
-commands. The account can exist only on your laptop and still run an agent on a
-credential-free build box.
+Only explicitly added machines receive credentials. OpenSSH checks the known host
+key and Loopflow checks the saved machine identity before transfer. Adding or
+checking a machine does not sign it in. Connecting runs in the foreground; a
+headless caller needing browser approval stops with the connect command.
 
-Detached work must use credentials and repository routes installed on the
-machine where it continues. A foreground `--account` preference is not durable
-configuration. Wave placement and enablement guide execution; they are not an
-authorization boundary for a person who can write the repository or registry.
+Claude and Codex receive a fresh login minted in a private laptop directory,
+not the laptop's existing refresh credential. Linear receives a fresh OAuth grant.
+Each login is checked against the intended provider identity before installation.
+GitHub receives gh's selected token through `gh auth login --with-token
+--insecure-storage`; gh configures its HTTPS Git credential helper. Existing
+matching logins are retained and unrelated accounts remain.
 
-See [Subscription Management](/docs/subscriptions) for connecting identities,
-repository routes, account selectors, and the exact merged selection order.
+Credential bytes travel through SSH stdin. They never enter command arguments,
+exported environment variables, command records or diagnostic output. Native files
+are installed atomically with owner-only permissions. The target and other code
+running as that OS user can read them, just as after a normal login. Trust the
+remote OS account with the account's refresh authority.
 
-### Where subscription credentials live
+SSH provider launches use isolated account homes under
+`~/.lf/accounts/<provider>/<account-id>`. They keep file-backed credentials even
+on a Mac without an unlocked login Keychain. Provider-owned refresh continues on
+the target; it does not depend on an origin broker or SSH-forwarded socket.
+Local shared-account behavior remains described in [subscriptions](subscriptions.md).
 
-Each managed Claude or Codex identity has an owner-only provider home on the
-machine where it was connected:
+Linear credentials in SQLite are encrypted. The encryption key lives in an
+owner-only `provider-token.key` file. An existing platform key is retained before
+use; a locked or denied Keychain read cannot replace a key needed by existing
+encrypted credentials. Unlock that Keychain once to retain its key. Subsequent
+SSH use reads the private file. A fresh credential-free machine can create its
+own file key without an unlocked Keychain.
 
-```text
-~/.lf/accounts/claude/<account-id>/
-~/.lf/accounts/codex/<account-id>/
-```
-
-That home holds the identity's stored login. By default it is not where
-conversations run: Loopflow signs the provider's ordinary home (`~/.claude`,
-`~/.codex`, or the caller's own `CLAUDE_CONFIG_DIR` / `CODEX_HOME`) in as one
-stored identity at a time, and launches there.
-
-| Launch | Provider home | What Loopflow sets on the provider child |
-|---|---|---|
-| Shared (default) | the provider's ordinary home | no home and no credential variable; inherited ones are removed, except a home the caller chose |
-| `--isolate` | the identity's own home | `CLAUDE_CONFIG_DIR` or `CODEX_HOME`; credential variables removed |
-| Forwarded over `lf ssh` | shared or isolated, as the target launch chooses; an isolated one runs in a home for that identity under the target's `~/.lf/accounts` | the leased access token (Claude: environment; Codex: handed to its engine in memory), and the home when isolated; no login is written to disk |
-
-Switching the shared identity writes one login into the provider's own store:
-Codex's `auth.json`, replaced by atomic rename, or Claude's Keychain item on
-macOS (`Claude Code-credentials`, suffixed for a non-default home) and
-`.credentials.json` elsewhere. The login being replaced is first saved back to
-its identity's stored home, or kept as a new one, so it is never discarded.
-The Keychain write goes through `security` on standard input, not its
-arguments. The provider's ordinary home therefore holds a login Loopflow
-manages; your own `claude` and `codex` run as whichever identity is active.
-
-`LF_ACCOUNT_ISOLATION` (`isolated` or `shared`) carries `--isolate` /
-`--shared` to child `lf` processes. It selects a home and carries no secret.
-
-In an isolated home, shared settings, skills, and plugins may be linked from
-the normal `~/.claude` or `~/.codex` home; credentials and session state
-remain isolated by account.
-
-`~/.lf/loopflow.db` stores non-secret account metadata: verified login,
-routing and credential state, health signals, repository routes,
-access-profile bindings, and provider-session pins. These files and rows stay
-on the machine that owns the identity. Loopflow has no central subscription
-account service.
-
-### What crosses SSH for a subscription account
-
-`lf ssh` does not copy an account home, refresh credential, browser profile,
-or database row. The origin runs a short-lived broker for the foreground SSH
-process:
-
-1. The broker advertises account identities, health facts, route preferences,
-   and explicit outer selections. Advertising the catalog refreshes no OAuth
-   credential.
-2. The target combines that catalog with accounts installed locally.
-3. When a provider launch chooses a forwarded account, the target asks the
-   origin broker for that account.
-4. The origin refreshes only the selected credential when necessary and sends
-   one access token through an SSH-forwarded, owner-only socket.
-5. The target hands that access token to the selected child without writing
-   it to disk. Claude receives it as `CLAUDE_CODE_OAUTH_TOKEN`. Codex has no
-   variable for a ChatGPT login, so Loopflow signs its Codex engine in over
-   the app-server protocol and the token stays in that process's memory. That
-   sign-in is an experimental Codex interface OpenAI marks as unstable. A
-   launch that starts Codex directly, outside Loopflow's engine, refuses a
-   forwarded identity.
-6. Health results and session pins return to the origin database that owns the
-   identity. Pins retain the shared/isolated home mode so reopening uses the
-   original home even after the target's default changes.
-
-The access token really does enter the target's process boundary. It is not put
-in argv, logs, a remote account home, or a durable Loopflow store, but the
-target `lf`, the provider child, and other code running as the same remote OS
-user are inside the trust boundary while the broker lives. Use a dedicated
-user, container, or VM when same-user code should not receive that authority.
-
-The broker closes with the foreground SSH process. Its handle stops working,
-temporary sockets are removed, and a surviving child cannot request another
-token. Broker failure, an expired handle, a missing credential, an incompatible
-remote `lf`, and a failed Machine identity check all fail closed.
-
-Nested `lf ssh` is rejected so borrowed authority cannot cross a second SSH
-hop. Obvious detached forms such as `tmux`, `screen`, `nohup`, `systemd-run`,
-and `--detach` are rejected when they would retain borrowed authority. Durable
-Loopflow spawns scrub forwarded handles and singleton credentials before the
-child starts.
-
-### What crosses SSH for other credentials
-
-GitHub, Linear, and OpenCode Zen each have one effective credential for an
-launch rather than a routable catalog. `lf ssh` forwards the origin
-credential automatically when one is available. If the origin does not provide
-one, the target can use its native credential.
-
-These singleton credentials are process-environment capabilities. Same-user
-code on the target can read or retain them while present; they do not have the
-subscription broker's lazy, per-account boundary. Loopflow-managed singleton
-tokens in `~/.lf/loopflow.db` are encrypted at rest. The encryption key uses
-the macOS Keychain or Linux secret service when available, with an owner-only
-local file fallback.
-
-SSH agent forwarding remains off unless requested:
-
-```bash
-lf ssh --forward-agent build-vm implement
-```
-
-Forward one Doppler secret by name:
-
-```bash
-lf ssh --secret SENTRY_AUTH_TOKEN build-vm release check
-```
-
-The Doppler CLI resolves the value on the origin. Only the requested value
-crosses SSH. The Doppler master credential never does.
+SSH agent forwarding remains opt-in with `lf ssh --forward-agent`. Arbitrary
+Doppler secret exports and automatic ambient-token forwarding are removed. Set up
+other services on the target explicitly. No Doppler master credential is sent.
 
 ## Account for stored and transmitted data
 

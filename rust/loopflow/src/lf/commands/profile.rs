@@ -125,21 +125,9 @@ async fn show_routes(
             }
             None => vec![],
         };
-        let forwarded_client = crate::provider_account::lease::AccountLeaseClient::from_env()?;
         let mut candidates = Vec::new();
-        for (account, forwarded) in accounts.unwrap_or_default() {
-            let remote_limits = if forwarded {
-                Some(
-                    forwarded_client
-                        .as_ref()
-                        .expect("forwarded candidate has a lease")
-                        .account_facts(provider, &account.account_id)?
-                        .limits,
-                )
-            } else {
-                None
-            };
-            let limits = remote_limits.as_ref().unwrap_or(&local_limits);
+        for account in accounts.unwrap_or_default() {
+            let limits = &local_limits;
             let demotion = crate::provider_account::active_account_strain(
                 provider.as_str(),
                 &account.account_id,
@@ -150,12 +138,7 @@ async fn show_routes(
             candidates.push(RouteAccount {
                 account_id: account.account_id,
                 login: account.login_email.map(|email| email.to_string()),
-                source: if forwarded {
-                    "forwarded_origin"
-                } else {
-                    "local"
-                }
-                .into(),
+                source: "local".into(),
                 credential_state: account.credential_state.as_str().into(),
                 routing: account.routing_state.as_str().into(),
                 cooldown_until: account.cooldown_until,

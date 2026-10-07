@@ -77,10 +77,6 @@ pub struct Cli {
     #[arg(long, conflicts_with = "isolate")]
     pub shared: bool,
 
-    /// Internal SSH compatibility and broker-connectivity probe.
-    #[arg(long = "__account-lease-probe", hide = true)]
-    pub account_lease_probe: bool,
-
     /// Skip permission prompts
     #[arg(long)]
     pub yolo: bool,
@@ -236,7 +232,6 @@ impl Cli {
             only_account: self.only_account.clone(),
             isolate: self.isolate,
             shared: self.shared,
-            account_lease_probe: self.account_lease_probe,
             yolo: self.yolo,
             interactive: self.interactive,
             batch: self.batch,
@@ -360,7 +355,7 @@ pub enum Commands {
         cmd: Option<AccountCommand>,
         /// Limit observations to one provider
         provider: Option<crate::provider_auth::Provider>,
-        /// Inspect cached evidence without contacting providers or the origin broker
+        /// Inspect cached evidence without contacting providers
         #[arg(long)]
         cached: bool,
         /// Include credential sources, browser choices, and timestamps
@@ -1412,14 +1407,9 @@ pub enum MachineCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run lf on an added machine carrying your local credentials.
-    ///
-    /// Resolves local credentials and forwards a foreground account lease over
-    /// SSH; Loopflow writes no managed provider credential on the remote. The
-    /// Doppler token is never forwarded — name specific secrets with `--secret`
-    /// to resolve them locally. Example: `lf ssh mini pr open`.
+    /// Run lf on an added machine, connecting missing selected accounts first.
     Ssh {
-        /// Prefer this origin account when the remote lf chooses a provider.
+        /// Install and use this laptop login on the remote machine.
         #[arg(
             id = "ssh_preferred_provider_account",
             long = "account",
@@ -1427,7 +1417,7 @@ pub enum MachineCommand {
             conflicts_with = "ssh_restricted_provider_account"
         )]
         origin_account: Vec<String>,
-        /// Restrict remote provider launches to these origin accounts.
+        /// Restrict remote provider launches to these laptop logins.
         #[arg(
             id = "ssh_restricted_provider_account",
             long = "only-account",
@@ -1440,18 +1430,26 @@ pub enum MachineCommand {
         /// Override the saved repository path on the remote
         #[arg(long = "repo")]
         repo: Option<String>,
-        /// Doppler secret to resolve locally and forward as an env var
-        /// (repeatable). The Doppler token itself is never forwarded.
-        #[arg(long = "secret")]
-        secret: Vec<String>,
-        /// Forward the ssh-agent (`ssh -A`). Off by default: git pushes use the
-        /// forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk.
+        /// Forward the ssh-agent (`ssh -A`), off by default.
         #[arg(long = "forward-agent")]
         forward_agent: bool,
         /// Arguments for the remote lf. The target is the boundary: every
         /// argument after it belongs to the remote invocation.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         lf_args: Vec<String>,
+    },
+    /// Install a separate login on an added machine using this laptop's browser.
+    Connect {
+        target: String,
+        provider: crate::provider_auth::Provider,
+        email: Option<String>,
+        #[arg(long)]
+        chrome_profile: Option<String>,
+    },
+    /// Inspect or receive a machine credential (credential bytes use stdin only).
+    Credentials {
+        #[command(subcommand)]
+        cmd: MachineCredentialCommand,
     },
     /// Print the configured participant display name.
     User {
@@ -1490,6 +1488,17 @@ pub enum MachineCommand {
     Rename { label: String, name: String },
     /// Forget a connection without touching remote work
     Remove { label: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MachineCredentialCommand {
+    /// Report whether this account is installed, without logging in.
+    Inspect {
+        provider: crate::provider_auth::Provider,
+        login: String,
+    },
+    /// Receive a fresh login as JSON on stdin; preserve existing accounts.
+    Receive,
 }
 
 #[derive(Debug, Subcommand)]
@@ -2014,17 +2023,6 @@ mod tests {
             "implement",
         ])
         .is_err());
-    }
-
-    #[test]
-    fn account_lease_probe_is_parseable_but_hidden() {
-        let cli = Cli::try_parse_from(["lf", "--__account-lease-probe"])
-            .expect("parse internal account lease probe");
-        assert!(cli.account_lease_probe);
-        assert!(!Cli::command()
-            .render_long_help()
-            .to_string()
-            .contains("__account-lease-probe"));
     }
 
     #[test]

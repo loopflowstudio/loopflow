@@ -12,6 +12,7 @@ pub mod flow_inventory;
 pub mod install;
 pub mod list;
 pub mod machine;
+mod machine_credentials;
 pub mod monitor;
 pub mod ops;
 pub mod placement;

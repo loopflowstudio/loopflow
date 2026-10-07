@@ -22,8 +22,8 @@ limits this launch and its children. A Flow retains its provider selections;
 children check their destination's access before starting a provider.
 Account observations distinguish unavailable, expired and measured capacity.
 
-JSON readers emit one document; `monitor active --watch --json` and
-`monitor work --watch --json` emit NDJSON until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
+JSON readers emit one document; `monitor active --watch --json` emits NDJSON
+until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
 operation succeeded; 1 denotes an operational failure, 2 a syntax or lookup
 failure, and 130 interruption. A successful auto-merge request is not a merge.
 
@@ -54,7 +54,6 @@ Open Loopflow or run its CLI
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
 | `--shared` | Run in the provider's ordinary home despite an `isolate: true` default Default: false. |
-| `--__account-lease-probe` | Internal SSH compatibility and broker-connectivity probe Default: false. Internal. |
 | `--yolo` | Skip permission prompts Default: false. |
 | `--interactive / -i` | Run interactively Default: false. |
 | `--batch / -b` | Run headless: print the output and return when the work ends Default: false. |
@@ -340,7 +339,7 @@ Stream planning and activity for the selected Work, each part again only when it
 
 | Argument | What it does |
 |---|---|
-| `--json` | json |
+| `--json` | json Default: false. |
 | `--watch` | Stream NDJSON until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
@@ -562,7 +561,7 @@ Refresh account access and capacity, or manage logins and routing
 | Argument | What it does |
 |---|---|
 | `<provider>` | Limit observations to one provider |
-| `--cached` | Inspect cached evidence without contacting providers or the origin broker Default: false. |
+| `--cached` | Inspect cached evidence without contacting providers Default: false. |
 | `--details` | Include credential sources, browser choices, and timestamps Default: false. |
 | `--json` | Emit the account overview as one JSON document Default: false. |
 | `--help / -h` | Print help |
@@ -686,12 +685,12 @@ Refresh shared planning from Linear
 
 ## lf repo new-chapter
 
-Rotate selected Waves using exact destinations and KRs in a retained plan
+Advance every Wave to the named Project plan
 
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
-| `--plan <path>` | Required retained JSON plan with exact Wave and successor IDs |
+| `--plan` | plan |
 | `--dry-run` | dry run Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -970,18 +969,55 @@ Diagnose installation, storage, Exec integrity and scheduled receipts
 
 ## lf machine ssh
 
-Run lf on an added machine carrying your local credentials
+Run lf on an added machine, connecting missing selected accounts first
 
 | Argument | What it does |
 |---|---|
-| `--account` | Prefer this origin account when the remote lf chooses a provider |
-| `--only-account` | Restrict remote provider launches to these origin accounts |
+| `--account` | Install and use this laptop login on the remote machine |
+| `--only-account` | Restrict remote provider launches to these laptop logins |
 | `<target>` | Saved machine label (or its stable MachineId) |
 | `--repo` | Override the saved repository path on the remote |
-| `--secret` | Doppler secret to resolve locally and forward as an env var (repeatable). The Doppler token itself is never forwarded |
-| `--forward-agent` | Forward the ssh-agent (`ssh -A`). Off by default: git pushes use the forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk Default: false. |
+| `--forward-agent` | Forward the ssh-agent (`ssh -A`), off by default Default: false. |
 | `<lf_args>` | Arguments for the remote lf. The target is the boundary: every argument after it belongs to the remote invocation |
-| `--help / -h` | Print help (see more with '--help') |
+| `--help / -h` | Print help |
+
+## lf machine connect
+
+Install a separate login on an added machine using this laptop's browser
+
+| Argument | What it does |
+|---|---|
+| `<target>` | target |
+| `<provider>` | provider |
+| `<email>` | email |
+| `--chrome-profile` | chrome profile |
+| `--help / -h` | Print help |
+
+## lf machine credentials
+
+Inspect or receive a machine credential (credential bytes use stdin only)
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf machine credentials inspect
+
+Report whether this account is installed, without logging in
+
+| Argument | What it does |
+|---|---|
+| `<provider>` | provider |
+| `<login>` | login |
+| `--help / -h` | Print help |
+
+## lf machine credentials receive
+
+Receive a fresh login as JSON on stdin; preserve existing accounts
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
 
 ## lf machine user
 
@@ -1079,14 +1115,16 @@ Manage Wave identity, placement and planning
 
 ## lf wave new-chapter
 
-Rotate one Wave through the repository rotation operation.
+Rotate this Wave using its exact destination in a retained chapter plan
 
 | Argument | What it does |
 |---|---|
-| `<wave> <name>` | Select the Wave and chapter name |
-| `--plan <path>` | Required retained JSON plan; consumes this Wave's exact entry |
-| `--dry-run` | Preview without provider writes |
-| `--json` | Emit the rotation result as JSON |
+| `<wave>` | wave |
+| `<name>` | name |
+| `--plan` | plan |
+| `--dry-run` | dry run Default: false. |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
 
 ## lf wave ensure
 

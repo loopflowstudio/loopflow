@@ -593,24 +593,6 @@ async fn pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers
     assert!(fixture.resolve(&url).await.unwrap().as_deref() == Some("A2"));
 }
 
-#[tokio::test]
-async fn linear_oauth_ssh_forwards_only_a_current_optional_bearer() {
-    let fixture = Fixture::new().await;
-    let (url, _) = test_server::spawn(vec![rotated(), rejected("invalid_grant")]).await;
-    let forward = || crate::lf::commands::ssh::resolve_pm_token_for_test();
-    assert!(scoped(fixture.context(""), &url, forward()).await.is_none());
-    fixture.seed(now() - 1).await;
-    assert!(
-        scoped(fixture.context(""), &url, forward())
-            .await
-            .as_deref()
-            == Some("A2")
-    );
-    let original = fixture.seed(now() - 1).await;
-    assert!(scoped(fixture.context(""), &url, forward()).await.is_none());
-    fixture.assert_token(&original).await;
-}
-
 #[derive(Clone)]
 struct TraceBuffer(Arc<std::sync::Mutex<Vec<u8>>>);
 

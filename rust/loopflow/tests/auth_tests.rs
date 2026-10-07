@@ -9,7 +9,7 @@ use loopflow::store::{
 use support::EnvGuard;
 
 #[test]
-fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() {
+fn retired_broker_environment_does_not_change_local_account_status() {
     let home = tempfile::TempDir::new().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -70,17 +70,12 @@ fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() 
     assert_eq!(inspect(true, false), connected_json);
     assert_eq!(inspect(false, false), connected_text);
     let report: serde_json::Value = serde_json::from_str(&connected_json).unwrap();
-    assert!(report["forwarded_accounts_diagnostic"]
-        .as_str()
-        .unwrap()
-        .contains("uninspected"));
     let rows = report["accounts"].as_array().unwrap();
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0]["account_id"], "local-account");
     assert_eq!(rows[0]["cached_credential_state"], "missing");
     assert_eq!(rows[1]["scope"], "local");
     assert!(connected_text.contains("local-account · local-account@example.com"));
-    assert!(connected_text.contains("forwarded account identities uninspected"));
     assert_eq!(
         runtime
             .block_on(store.list_provider_accounts(None))
@@ -90,10 +85,6 @@ fn cached_status_keeps_local_evidence_without_contacting_the_inherited_broker() 
     // Default live status can inspect metadata, but a disconnected origin
     // still cannot suppress the local report or expose the handle in an error.
     let verified: serde_json::Value = serde_json::from_str(&inspect(true, true)).unwrap();
-    assert!(verified["forwarded_accounts_diagnostic"]
-        .as_str()
-        .unwrap()
-        .contains("unavailable"));
     assert_eq!(verified["accounts"].as_array().unwrap().len(), 2);
 
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();

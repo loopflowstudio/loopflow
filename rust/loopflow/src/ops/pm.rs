@@ -422,14 +422,6 @@ pub(crate) async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmCont
 /// Linear authenticates via OAuth: the access token and refresh grant live in
 /// store, and PM access refreshes the grant before the access token expires.
 async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
-    // A forwarded token wins over the local store: `lf machine ssh` resolves the PM
-    // credential on the caller's machine (where store lives) and hands it to the
-    // remote through the environment. The remote store holds no PM credential, so
-    // without this hook remote `lf repo refresh` could never authenticate.
-    if let Some(token) = forwarded_pm_token(provider) {
-        return Ok(token);
-    }
-
     resolve_local_pm_token(provider)
         .await?
         .ok_or_else(missing_linear_credential)
@@ -586,31 +578,6 @@ async fn resolve_pm_token_from_store(
         }
     }
     unreachable!("both refresh attempts return or retry")
-}
-
-/// Env var carrying a PM access token forwarded by `lf machine ssh`.
-pub(crate) const FORWARDED_PM_TOKEN_ENV: &str = "LF_FORWARDED_PM_TOKEN";
-/// Env var naming the provider the forwarded token belongs to (e.g. `linear`).
-pub(crate) const FORWARDED_PM_PROVIDER_ENV: &str = "LF_FORWARDED_PM_PROVIDER";
-
-/// A forwarded PM token from the environment, if present and matching `provider`.
-/// When `LF_FORWARDED_PM_PROVIDER` is set it must name `provider`; when it is
-/// absent the token is accepted for whatever provider the wave resolves to.
-fn forwarded_pm_token(provider: PmProviderKind) -> Option<String> {
-    #[cfg(test)]
-    if PM_TEST_CONTEXT.try_with(|_| ()).is_ok() {
-        return None;
-    }
-    let token = std::env::var(FORWARDED_PM_TOKEN_ENV)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())?;
-    match std::env::var(FORWARDED_PM_PROVIDER_ENV) {
-        Ok(name) if !name.trim().is_empty() => {
-            (name.trim().eq_ignore_ascii_case(provider.as_str())).then_some(token)
-        }
-        _ => Some(token),
-    }
 }
 
 fn storage_config_from_env() -> OpsResult<crate::store::StorageConfig> {
@@ -4282,47 +4249,6 @@ mod tests {
         assert!(requests
             .iter()
             .any(|req| req.body.contains("commentCreate")));
-    }
-
-    // Env vars are process-global; serialize the forwarded-token tests so a
-    // concurrent test never observes a half-set environment.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    #[test]
-    fn resolve_pm_token_prefers_forwarded_env() {
-        let _guard = ENV_LOCK.lock().expect("env lock");
-        std::env::set_var(FORWARDED_PM_TOKEN_ENV, "forwarded-secret");
-        std::env::remove_var(FORWARDED_PM_PROVIDER_ENV);
-
-        // Returns the forwarded token without ever opening the store store.
-        let token = block_on_pm(resolve_pm_token(PmProviderKind::Linear)).expect("token");
-        assert_eq!(token, "forwarded-secret");
-
-        std::env::remove_var(FORWARDED_PM_TOKEN_ENV);
-    }
-
-    #[test]
-    fn forwarded_pm_token_matches_provider_and_skips_blank() {
-        let _guard = ENV_LOCK.lock().expect("env lock");
-
-        std::env::set_var(FORWARDED_PM_TOKEN_ENV, "tok");
-        std::env::set_var(FORWARDED_PM_PROVIDER_ENV, "linear");
-        assert_eq!(
-            forwarded_pm_token(PmProviderKind::Linear).as_deref(),
-            Some("tok")
-        );
-
-        // A provider that doesn't match falls through to the store.
-        std::env::set_var(FORWARDED_PM_PROVIDER_ENV, "github");
-        assert_eq!(forwarded_pm_token(PmProviderKind::Linear), None);
-
-        // A blank token is treated as absent.
-        std::env::set_var(FORWARDED_PM_TOKEN_ENV, "   ");
-        std::env::remove_var(FORWARDED_PM_PROVIDER_ENV);
-        assert_eq!(forwarded_pm_token(PmProviderKind::Linear), None);
-
-        std::env::remove_var(FORWARDED_PM_TOKEN_ENV);
-        std::env::remove_var(FORWARDED_PM_PROVIDER_ENV);
     }
 
     #[test]

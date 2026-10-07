@@ -169,7 +169,7 @@ fn execute(
     repo: &Path,
     binding: Option<&WorkBinding>,
 ) -> Result<()> {
-    let accounts = crate::provider_account::lease::AccountSelection::from_flags_or_env(
+    let accounts = crate::provider_account::selection::AccountSelection::from_flags_or_env(
         &cli.account,
         &cli.only_account,
     )?;
@@ -256,7 +256,7 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
 /// A driver that dies leaves its Execs as history; nothing resumes it.
 async fn drive(
     driver: &Driver<'_>,
-    accounts: crate::provider_account::lease::AccountSelection,
+    accounts: crate::provider_account::selection::AccountSelection,
 ) -> Result<FlowOutcome> {
     let fields = |extra: LfEventFields| LfEventFields {
         flow: Some(driver.flow.to_owned()),

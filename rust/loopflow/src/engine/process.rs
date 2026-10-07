@@ -384,11 +384,11 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
 
 /// Credentials and account authority forwarded to one process, never onward.
 const FORWARDED_AUTHORITY_ENV: &[&str] = &[
-    crate::provider_account::lease::ACCOUNT_LEASE_ENV,
-    crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+    "LF_ACCOUNT_LEASE",
+    crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
     crate::provider_account::activation::ACCOUNT_ISOLATION_ENV,
-    crate::ops::pm::FORWARDED_PM_TOKEN_ENV,
-    crate::ops::pm::FORWARDED_PM_PROVIDER_ENV,
+    "LF_FORWARDED_PM_TOKEN",
+    "LF_FORWARDED_PM_PROVIDER",
     "LF_FORWARDED_SECRET_NAMES",
     DISCORD_TOKEN_ENV,
     "GH_TOKEN",

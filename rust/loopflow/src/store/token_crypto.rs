@@ -4,15 +4,13 @@ use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::Engine;
 use once_cell::sync::OnceCell;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 const KEY_BYTES: usize = 32;
 const NONCE_BYTES: usize = 12;
 const KEYCHAIN_SERVICE: &str = "loopflow.provider-token-key";
 const KEYCHAIN_ACCOUNT: &str = "default";
-#[cfg(target_os = "linux")]
-const SECRET_TOOL_LABEL: &str = "Loopflow Provider Token Key";
 
 static CACHED_KEY: OnceCell<[u8; KEY_BYTES]> = OnceCell::new();
 
@@ -83,44 +81,90 @@ fn encryption_key() -> Result<[u8; KEY_BYTES], TokenCryptoError> {
 }
 
 fn load_or_create_key() -> Result<[u8; KEY_BYTES], TokenCryptoError> {
-    if let Some(value) = load_key_from_platform()? {
+    let path = fallback_key_path();
+    if let Some(value) = load_key_from_file()? {
         return parse_key(&value);
     }
-
-    let mut key = [0u8; KEY_BYTES];
-    OsRng.fill_bytes(&mut key);
+    // An explicit file belongs to an isolated store; never inspect the OS keyring.
+    let retained = if cfg!(test) || env_key_path_override().is_some() {
+        None
+    } else {
+        match load_key_from_platform() {
+            Ok(key) => key,
+            Err(_) if !has_encrypted_tokens()? => {
+                // No credential in this Machine depends on the inaccessible key.
+                // Its first credential gets an independent file-backed key.
+                None
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    let key = match retained {
+        Some(value) => parse_key(&value)?,
+        None => {
+            if !cfg!(test) && has_encrypted_tokens()? {
+                return Err(TokenCryptoError::KeyRetrieval("existing encrypted credentials have no readable key; restore the retained key file or unlock the original keyring".into()));
+            }
+            let mut key = [0u8; KEY_BYTES];
+            OsRng.fill_bytes(&mut key);
+            key
+        }
+    };
     let encoded = base64::engine::general_purpose::STANDARD_NO_PAD.encode(key);
+    let parent = path
+        .parent()
+        .ok_or_else(|| TokenCryptoError::KeyRetrieval("key path has no parent".into()))?;
+    std::fs::create_dir_all(parent)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(encoded.as_bytes())?;
+    temporary.as_file().sync_all()?;
+    match temporary.persist_noclobber(&path) {
+        Ok(_) => Ok(key),
+        Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+            parse_key(&std::fs::read_to_string(path)?)
+        }
+        Err(error) => Err(TokenCryptoError::Io(error.error)),
+    }
+}
 
-    store_key_on_platform(&encoded)?;
-    Ok(key)
+fn has_encrypted_tokens() -> Result<bool, TokenCryptoError> {
+    let path = crate::store::lf_home_dir().join("loopflow.db");
+    if !path.exists() {
+        return Ok(false);
+    }
+    let connection =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|_| {
+                TokenCryptoError::KeyRetrieval(
+                    "could not inspect existing encrypted credentials".into(),
+                )
+            })?;
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM provider_tokens WHERE encrypted = 1)",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| {
+            TokenCryptoError::KeyRetrieval(
+                "could not inspect existing encrypted credentials".into(),
+            )
+        })
 }
 
 fn load_key_from_platform() -> Result<Option<String>, TokenCryptoError> {
     #[cfg(target_os = "macos")]
-    if let Some(value) = load_key_from_macos_keychain()? {
-        return Ok(Some(value));
+    {
+        load_key_from_macos_keychain()
     }
-
     #[cfg(target_os = "linux")]
-    if let Some(value) = load_key_from_secret_tool()? {
-        return Ok(Some(value));
+    {
+        load_key_from_secret_tool()
     }
-
-    load_key_from_file()
-}
-
-fn store_key_on_platform(encoded: &str) -> Result<(), TokenCryptoError> {
-    #[cfg(target_os = "macos")]
-    if store_key_in_macos_keychain(encoded)? {
-        return Ok(());
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        Ok(None)
     }
-
-    #[cfg(target_os = "linux")]
-    if store_key_in_secret_tool(encoded)? {
-        return Ok(());
-    }
-
-    store_key_in_file(encoded)
 }
 
 #[cfg(target_os = "macos")]
@@ -137,32 +181,21 @@ fn load_key_from_macos_keychain() -> Result<Option<String>, TokenCryptoError> {
         .output()
         .map_err(TokenCryptoError::Io)?;
     if !output.status.success() {
-        return Ok(None);
+        // errSecItemNotFound (-25300) is security(1)'s exit 44. Locked,
+        // denied or unavailable Keychain is unknown, never an absent key.
+        if output.status.code() == Some(44) {
+            return Ok(None);
+        }
+        return Err(TokenCryptoError::KeyRetrieval(
+            "Keychain unavailable; unlock it once to retain the existing token key in its private file".into(),
+        ));
     }
     let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if value.is_empty() {
-        Ok(None)
+        Err(TokenCryptoError::InvalidKey("stored key is empty".into()))
     } else {
         Ok(Some(value))
     }
-}
-
-#[cfg(target_os = "macos")]
-fn store_key_in_macos_keychain(encoded: &str) -> Result<bool, TokenCryptoError> {
-    let status = Command::new("security")
-        .args([
-            "add-generic-password",
-            "-U",
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-a",
-            KEYCHAIN_ACCOUNT,
-            "-w",
-            encoded,
-        ])
-        .status()
-        .map_err(TokenCryptoError::Io)?;
-    Ok(status.success())
 }
 
 #[cfg(target_os = "linux")]
@@ -185,42 +218,10 @@ fn load_key_from_secret_tool() -> Result<Option<String>, TokenCryptoError> {
     }
     let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if value.is_empty() {
-        Ok(None)
+        Err(TokenCryptoError::InvalidKey("stored key is empty".into()))
     } else {
         Ok(Some(value))
     }
-}
-
-#[cfg(target_os = "linux")]
-fn store_key_in_secret_tool(encoded: &str) -> Result<bool, TokenCryptoError> {
-    if !command_available("secret-tool") {
-        return Ok(false);
-    }
-
-    let mut child = Command::new("secret-tool")
-        .args([
-            "store",
-            "--label",
-            SECRET_TOOL_LABEL,
-            "service",
-            KEYCHAIN_SERVICE,
-            "account",
-            KEYCHAIN_ACCOUNT,
-        ])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(TokenCryptoError::Io)?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(encoded.as_bytes())
-            .map_err(TokenCryptoError::Io)?;
-    }
-
-    let status = child.wait().map_err(TokenCryptoError::Io)?;
-    Ok(status.success())
 }
 
 #[cfg(target_os = "linux")]
@@ -240,39 +241,9 @@ fn load_key_from_file() -> Result<Option<String>, TokenCryptoError> {
     }
     let value = std::fs::read_to_string(path)?.trim().to_string();
     if value.is_empty() {
-        Ok(None)
+        Err(TokenCryptoError::InvalidKey("stored key is empty".into()))
     } else {
         Ok(Some(value))
-    }
-}
-
-fn store_key_in_file(encoded: &str) -> Result<(), TokenCryptoError> {
-    let path = fallback_key_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    write_with_private_permissions(&path, encoded.as_bytes())?;
-    Ok(())
-}
-
-fn write_with_private_permissions(path: &Path, content: &[u8]) -> Result<(), TokenCryptoError> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .mode(0o600)
-            .open(path)?;
-        file.write_all(content)?;
-        Ok(())
-    }
-
-    #[cfg(not(unix))]
-    {
-        std::fs::write(path, content)?;
-        Ok(())
     }
 }
 
@@ -313,7 +284,7 @@ fn parse_key(encoded: &str) -> Result<[u8; KEY_BYTES], TokenCryptoError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{decrypt_token, encrypt_token, parse_key, KEY_BYTES};
+    use super::{decrypt_token, encrypt_token, load_or_create_key, parse_key, KEY_BYTES};
     use base64::Engine;
 
     #[test]
@@ -332,5 +303,47 @@ mod tests {
         assert!(err
             .to_string()
             .contains(&format!("expected {KEY_BYTES} bytes")));
+    }
+    #[test]
+    fn private_file_key_survives_reload_and_invalid_bytes_are_not_replaced() {
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::journal::test_env_lock();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("key");
+        let previous = std::env::var_os("LF_PROVIDER_TOKEN_KEY_PATH");
+        std::env::set_var("LF_PROVIDER_TOKEN_KEY_PATH", &path);
+        let key = load_or_create_key().unwrap();
+        assert_eq!(load_or_create_key().unwrap(), key);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        std::fs::write(&path, "unreadable-key").unwrap();
+        assert!(load_or_create_key().is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "unreadable-key");
+        match previous {
+            Some(value) => std::env::set_var("LF_PROVIDER_TOKEN_KEY_PATH", value),
+            None => std::env::remove_var("LF_PROVIDER_TOKEN_KEY_PATH"),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn locked_keychain_is_unknown_and_only_item_not_found_is_absence() {
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::journal::test_env_lock();
+        let directory = tempfile::tempdir().unwrap();
+        let security = directory.path().join("security");
+        let previous = std::env::var_os("PATH");
+        std::env::set_var("PATH", directory.path());
+        std::fs::write(&security, "#!/bin/sh\nexit 36\n").unwrap();
+        std::fs::set_permissions(&security, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(super::load_key_from_macos_keychain().is_err());
+        std::fs::write(&security, "#!/bin/sh\nexit 44\n").unwrap();
+        assert_eq!(super::load_key_from_macos_keychain().unwrap(), None);
+        match previous {
+            Some(value) => std::env::set_var("PATH", value),
+            None => std::env::remove_var("PATH"),
+        }
     }
 }

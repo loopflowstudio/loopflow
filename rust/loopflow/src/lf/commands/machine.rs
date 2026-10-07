@@ -24,6 +24,27 @@ async fn run_async(cmd: &MachineCommand) -> anyhow::Result<()> {
         }
         return Ok(());
     }
+    match cmd {
+        MachineCommand::Connect {
+            target,
+            provider,
+            email,
+            chrome_profile,
+        } => {
+            let machine = super::ssh::resolve_target(target).await?;
+            return super::machine_credentials::connect(
+                &machine,
+                *provider,
+                email.as_deref(),
+                chrome_profile.as_deref(),
+            )
+            .await;
+        }
+        MachineCommand::Credentials { cmd } => {
+            return super::machine_credentials::receive(cmd).await
+        }
+        _ => {}
+    }
     let store = crate::store::open_existing_store()
         .await
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;

@@ -284,8 +284,8 @@ lf account route set codex work@ personal@
 
 A preference permits fallback; a restriction limits spending. A Flow takes
 one selection per provider and carries it through its child steps. Remote
-launches check destination access with the inherited restrictions. A foreground
-credential lease cannot authorize a detached remote process after it expires.
+launches install missing selected logins in the foreground and use the same
+account on the target. Credentials remain resident there.
 Missing or expired capacity remains unknown, never zero or unlimited.
 
 ## Discover commands
@@ -383,6 +383,7 @@ and survive automatic pruning. Memory updates do not require PRs or a schedule.
 ```bash
 lf machine add mini --repo '~/src/project'
 lf machine status mini
+lf machine connect mini codex work@example.com
 lf ssh mini session list
 ```
 

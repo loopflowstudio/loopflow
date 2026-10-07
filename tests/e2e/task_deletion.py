@@ -307,6 +307,18 @@ def main() -> None:
                     '{"name":"unplanned","nodes":[],"edges":[{"from":"start","to":"end","flow":null}]}',
                 ),
             )
+            db.commit()
+            # Accept the provider's planning facts before checking that deletion
+            # preserves them and the Task's independent execution history.
+            refreshed = subprocess.run(
+                [fixture["lf"], "repo", "refresh", "task-pr-tests"],
+                cwd=repo,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert refreshed.returncode == 0, refreshed.stderr
             db.execute(
                 "UPDATE tasks SET pm_snapshot_synced_at=1 WHERE id=?",
                 (fixture["task"],),
@@ -336,7 +348,11 @@ def main() -> None:
                 )
             assert server.state["deletes"] == 1 and issue["trashed"]
             assert issue["state"]["type"] == "completed"
-            assert db.execute(history_query).fetchall() == before
+            assert db.execute(history_query).fetchall() == before, (
+                history_columns,
+                before,
+                db.execute(history_query).fetchall(),
+            )
             assert db.execute("SELECT pm_snapshot_synced_at FROM tasks").fetchone()[0] > 1
             assert db.execute("SELECT * FROM task_prs").fetchall() == prs
             assert db.execute("SELECT issue_id FROM task_deletions").fetchall() == [

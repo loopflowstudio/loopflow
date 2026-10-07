@@ -44,7 +44,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Credentials and provider-native conversation files | The selected provider account's native Machine |
 | Current local liveness | OS process evidence matched to exact recorded PID/start identity |
 | Live exclusion | Kernel-held locks and fenced database mutations |
-| Selected executable and installation progress | Machine-install receipts |
+| Selected executable and installation progress | Installation receipts |
 
 A Machine owns its local store and payloads. Linear and GitHub remain shared truth;
 a local snapshot cannot authorize a provider mutation when a fresh observation

@@ -1201,6 +1201,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             println!("{}: updated task {}", result.wave, result.id);
             Ok(())
         }
+        TaskCommand::Refile { issue, wave } => {
+            let result = loopflow::ops::task::task_refile(repo, issue, wave)?;
+            println!("{}: filed task {}", result.wave, result.id);
+            Ok(())
+        }
         TaskCommand::Comment {
             issue,
             message,
@@ -1322,45 +1327,24 @@ fn run() -> anyhow::Result<()> {
     }
     // Installation owns its promotion/recovery authority. In particular,
     // read-only candidate preflight must work before a first install settles.
-    let bypasses_machine_startup_gate = matches!(
+    let bypasses_installation_startup_gate = matches!(
         &cli.command,
-        Some(Commands::Machine {
-            cmd: loopflow::lf::MachineCommand::Install { .. }
-                | loopflow::lf::MachineCommand::Doctor {
-                    planning: false,
-                    ..
-                }
-        })
+        Some(Commands::Installation {
+            cmd: loopflow::lf::InstallationCommand::Install { .. }
+        }) | Some(Commands::Machine {
+            cmd: loopflow::lf::MachineCommand::Doctor {
+                planning: false,
+                ..
+            } | loopflow::lf::MachineCommand::Screenshot { .. }
+        }) | Some(Commands::ScreenshotSupervisor { .. })
     );
-    if !bypasses_machine_startup_gate
-        && !matches!(
-            &cli.command,
-            Some(
-                Commands::Machine {
-                    cmd: loopflow::lf::MachineCommand::Screenshot { .. }
-                } | Commands::ScreenshotSupervisor { .. }
-            )
-        )
-    {
+    if !bypasses_installation_startup_gate {
         loopflow::installation::dispatch_default_cli()?;
     }
     ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
         .expect("failed to set Ctrl+C handler");
 
-    if matches!(
-        &cli.command,
-        Some(
-            Commands::Machine {
-                cmd: loopflow::lf::MachineCommand::Install { .. }
-                    | loopflow::lf::MachineCommand::Doctor {
-                        planning: false,
-                        ..
-                    }
-            } | Commands::Machine {
-                cmd: loopflow::lf::MachineCommand::Screenshot { .. }
-            } | Commands::ScreenshotSupervisor { .. }
-        )
-    ) {
+    if bypasses_installation_startup_gate {
         journal::observe_process(&args);
     }
 
@@ -1395,10 +1379,10 @@ fn run() -> anyhow::Result<()> {
     // Global-promotion commands dispatch before home routing, journal emission,
     // and any ordinary store open: a candidate that does not know the live
     // migration frontier must reach the preflight refusal, not fail in
-    // trace/store capture. `lf machine install` opens the store only read-only, inside
+    // trace/store capture. `lf install` opens the store only read-only, inside
     // its own preflight.
-    if let Some(Commands::Machine {
-        cmd: loopflow::lf::MachineCommand::Install { cmd },
+    if let Some(Commands::Installation {
+        cmd: loopflow::lf::InstallationCommand::Install { cmd },
     }) = &cli.command
     {
         return match cmd.as_ref() {
@@ -1723,8 +1707,8 @@ fn execute_command(
                 | loopflow::lf::MachineCommand::Rename { .. }
                 | loopflow::lf::MachineCommand::Remove { .. }),
         }) => loopflow::lf::commands::machine::run(cmd),
-        Some(Commands::Machine {
-            cmd: loopflow::lf::MachineCommand::SyncSkills { yes, no_prune },
+        Some(Commands::Installation {
+            cmd: loopflow::lf::InstallationCommand::SyncSkills { yes, no_prune },
         }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune),
         Some(Commands::Wave {
             cmd:
@@ -1842,8 +1826,8 @@ fn execute_command(
         }) => in_repo_runtime(args, |repo| {
             loopflow::lf::commands::discord::serve(repo, wave)
         }),
-        Some(Commands::Machine {
-            cmd: loopflow::lf::MachineCommand::Install { .. },
+        Some(Commands::Installation {
+            cmd: loopflow::lf::InstallationCommand::Install { .. },
         }) => {
             unreachable!("install dispatches before home routing")
         }

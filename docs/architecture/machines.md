@@ -146,9 +146,15 @@ repairs, restores or promotes its contents.
 
 Published installation verifies immutable artifacts, validates the candidate on
 a temporary database snapshot, and advances only the main database under the
-machine promotion lock. The snapshot is validation input, never a second live
+installation promotion lock. The snapshot is validation input, never a second live
 Machine. Published switch receipts support interrupted release installation;
 they do not choose ordinary command data directories.
+
+`lf installation` owns published updates and skill exports; `lf install`
+remains the short update command. Its directory retains the stored
+spelling `~/.lf-machine/install`: released entry gates, receipts and scheduled
+jobs pin that path. The installation promotion lock likewise stays at
+`~/.lf/promotion.lock`. Neither path is relocated.
 
 Artifact switching lives in
 [`installation.rs`](../../rust/loopflow/src/installation.rs) and the

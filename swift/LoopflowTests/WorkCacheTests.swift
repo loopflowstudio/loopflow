@@ -10,21 +10,8 @@ import ViewInspector
 struct WorkCacheTests {
     private static let repo = "/src/loopflow"
 
-    @Test("The existing workspace cache file retains Machine and selection after the naming change")
-    func readsExistingCacheBytes() throws {
-        let directory = try temporaryDirectory()
-        let url = directory.appendingPathComponent("workspace.json")
-        let bytes = Data(#"{"version":1,"snapshot":{"homeId":"home-a","repositories":{"/src/loopflow":{"selection":{"kind":"task","id":"issue-now"},"savedAt":0}}}}"#.utf8)
-        try bytes.write(to: url)
-
-        let saved = try #require(WorkCache(directory: directory).load())
-        #expect(saved.machineId == "home-a")
-        #expect(saved.repositories[Self.repo]?.selection == .task(id: "issue-now"))
-        #expect(try Data(contentsOf: url) == bytes)
-    }
-
-    @Test("A returning launch restores current and released caches before any read finishes", arguments: [1, WorkCache.version])
-    func returningLaunchRestores(version: Int) async throws {
+    @Test("A returning launch restores its cache before any read finishes")
+    func returningLaunchRestores() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
         let cache = WorkCache(directory: directory)
@@ -37,14 +24,6 @@ struct WorkCacheTests {
         cache.flush()
 
         let cacheURL = directory.appendingPathComponent("workspace.json")
-        if version == 1 {
-            let current = try String(contentsOf: cacheURL, encoding: .utf8)
-            let released = current.replacingOccurrences(of: "machine_id", with: "home_id")
-                .replacingOccurrences(of: #"\"machine\":"#, with: #"\"home\":"#)
-            var envelope = try #require(JSONSerialization.jsonObject(with: Data(released.utf8)) as? [String: Any])
-            envelope["version"] = version
-            try JSONSerialization.data(withJSONObject: envelope).write(to: cacheURL)
-        }
         let savedBytes = try Data(contentsOf: cacheURL)
 
         let offline = RegistryQuery { _, _ in throw RegistryQueryError("offline") }
@@ -131,7 +110,8 @@ struct WorkCacheTests {
         let file = directory.appendingPathComponent("workspace.json")
         #expect(WorkCache(directory: directory).load() == nil)
 
-        for text in ["{ not json", #"{"version":0,"snapshot":{"repositories":{}}}"#] {
+        for text in ["{ not json", #"{"version":0,"snapshot":{"repositories":{}}}"#,
+                     #"{"version":1,"snapshot":{"homeId":"home-a","repositories":{}}}"#] {
             try Data(text.utf8).write(to: file)
             #expect(WorkCache(directory: directory).load() == nil)
             #expect(!FileManager.default.fileExists(atPath: file.path))

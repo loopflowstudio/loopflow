@@ -1,7 +1,7 @@
-//! `lf machine install` — authorize global `lf` promotion against the shared migration
+//! `lf install` — authorize global `lf` promotion against the shared migration
 //! frontier.
 //!
-//! A branch-local build must never silently become the Machine-global command:
+//! A branch-local build must never silently become the installed command:
 //! on 2026-07-17 a `--use` promotion repointed `~/.local/bin/lf` at a binary
 //! whose migration registry ended at `0.11.026` while the shared store was at
 //! `0.11.027`, and subsequent invocations hit a store their binary could not
@@ -11,7 +11,7 @@
 //! applied frontier and its own migration registry, applies its migrations to
 //! an isolated snapshot, resolves every placed open Work's
 //! executable lifecycle, and renders a verdict. `promote` consumes that verdict
-//! under the machine-global promotion lock, retains immutable rollback bytes,
+//! under the installation promotion lock, retains immutable rollback bytes,
 //! and activates the candidate before any migration advances the frontier.
 //!
 //! Compatibility is not re-derived: `classify_compatibility` calls the exact
@@ -40,7 +40,7 @@ use crate::store::migrations;
 mod published;
 pub use published::{latest, schedule};
 
-/// The candidate binary's identity. The process running `lf machine install` *is* the
+/// The candidate binary's identity. The process running `lf install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CandidateIdentity {
@@ -801,12 +801,12 @@ mod compatibility_tests {
 // -- Promotion publication (PR2) ---------------------------------------------
 //
 // The mutating half consumes the merged `decide()` verdict and performs every
-// machine-global install mutation under the same exclusive promotion lock.
+// installation mutation under the same exclusive promotion lock.
 // Python stages
 // branch-local artifacts only; Rust owns CLI activation, app replacement,
 // migration advancement, rollback validation, and post-commit skill sync.
 
-/// The machine-global, content-addressed binary store.
+/// The installation’s content-addressed binary store.
 fn lf_bin_dir() -> PathBuf {
     crate::installation::account_home()
         .expect("resolve OS account home directory for immutable install artifacts")
@@ -1021,7 +1021,7 @@ fn verify_entry_gate_targets(
         .with_context(|| format!("resolve public CLI target {}", target.display()))?;
     if actual != expected {
         return Err(anyhow!(
-            "public CLI target {} bypasses machine entry gate {}",
+            "public CLI target {} bypasses installation entry gate {}",
             target.display(),
             expected.display()
         ));
@@ -1061,7 +1061,7 @@ fn verify_selected_app_bundle(
     Ok(())
 }
 
-fn activate_prepared_machine_switch(
+fn activate_prepared_installation_switch(
     root: &Path,
     receipt: &crate::installation::SwitchReceipt,
     prepared: &PreparedArtifacts,
@@ -1586,7 +1586,7 @@ fn resume_switch_app(_receipt: &crate::installation::SwitchReceipt) -> Result<()
     Ok(())
 }
 
-fn required_machine_artifact_roles(has_app: bool) -> Vec<crate::installation::ArtifactRole> {
+fn required_installation_artifact_roles(has_app: bool) -> Vec<crate::installation::ArtifactRole> {
     let mut roles = vec![crate::installation::ArtifactRole::Cli];
     if has_app {
         roles.extend([
@@ -1680,7 +1680,7 @@ fn verify_matching_bundles(source: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
-fn machine_artifact_set(
+fn installation_artifact_set(
     root: &Path,
     source: crate::installation::InstallSource,
     candidate: &CandidateIdentity,
@@ -1706,7 +1706,7 @@ fn machine_artifact_set(
         content_sha256: digest,
         artifacts,
     };
-    set.verify(&required_machine_artifact_roles(app.is_some()))?;
+    set.verify(&required_installation_artifact_roles(app.is_some()))?;
     Ok(set)
 }
 
@@ -1714,7 +1714,7 @@ fn bootstrap_published_install(
     root: &Path,
     artifacts: &PromotionArtifacts<'_>,
 ) -> Result<crate::installation::ActiveInstall> {
-    let repair = "run `lf machine install`";
+    let repair = "run `lf install`";
     let store = crate::store::production_database_path();
     if !store.is_file() {
         return Err(anyhow!(
@@ -1734,7 +1734,7 @@ fn bootstrap_published_install(
     validate_rollback_verdict(&preflight.verdict).with_context(|| {
         format!("the published fallback does not recognize its store; {repair}")
     })?;
-    let fallback = machine_artifact_set(
+    let fallback = installation_artifact_set(
         root,
         crate::installation::InstallSource::Published,
         &preflight.candidate,
@@ -1834,7 +1834,7 @@ fn active_install_matches_candidate(
     if set.content_sha256 != digest {
         return Ok(false);
     }
-    set.verify(&required_machine_artifact_roles(
+    set.verify(&required_installation_artifact_roles(
         artifacts.app_source.is_some(),
     ))?;
     let activation = crate::installation::ActivationTargets {
@@ -2037,7 +2037,7 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
     }
     match receipt.target.source {
         crate::installation::InstallSource::Development => {
-            return Err(anyhow!("development installations are retired; install a published release with `lf machine install`"));
+            return Err(anyhow!("development installations are retired; install a published release with `lf install`"));
         }
         crate::installation::InstallSource::Published => {
             if candidate.authority != MigrationAuthority::Published {
@@ -2305,7 +2305,7 @@ fn promote_published_from_installation(
     let preview = read_binary_preview(candidate_binary)?;
     if preview.candidate.authority != MigrationAuthority::Published {
         return Err(anyhow!(
-            "only a published candidate may advance a machine-managed install"
+            "only a published candidate may advance a receipt-managed installation"
         ));
     }
     render_human(&preview);
@@ -2355,7 +2355,7 @@ fn promote_published_from_installation(
     }
     let switch_id = format!("switch-{}", Uuid::new_v4().simple());
     let prepared = prepare_artifacts(&artifacts, candidate_binary, &preview, &switch_id, None)?;
-    let target_set = machine_artifact_set(
+    let target_set = installation_artifact_set(
         &root,
         crate::installation::InstallSource::Published,
         &preview.candidate,
@@ -2387,7 +2387,7 @@ fn promote_published_from_installation(
             .unwrap_or(&target)
             .artifact_set
             .artifact(&crate::installation::ArtifactRole::Cli)
-            .expect("validated machine install has a CLI")
+            .expect("validated installation has a CLI")
             .clone(),
         candidate: target
             .artifact_set
@@ -2416,7 +2416,7 @@ fn promote_published_from_installation(
         return Err(restore_before_advance(&root, &switch, lock, error));
     }
     switch = advance_switch_store(&root, switch, &preview.verdict)?;
-    activate_prepared_machine_switch(
+    activate_prepared_installation_switch(
         &root,
         &switch,
         &prepared,
@@ -2482,7 +2482,7 @@ pub fn rollback(cli_target: &Path, candidate: &Path) -> Result<()> {
         crate::installation::InstallationState::Legacy => {}
         crate::installation::InstallationState::Settled(active) => {
             return Err(anyhow!(
-                "machine installation {} is receipt-managed; use published promotion or switch recovery instead of legacy rollback",
+                "installation {} is receipt-managed; use published promotion or switch recovery instead of legacy rollback",
                 active.selection.installation_id
             ))
         }

@@ -1095,7 +1095,7 @@ impl CodexHarness {
         command.process_group(0);
         super::configure_vendor_std_env(command.as_std_mut())?;
         // A login shell/snapshot can replace the launcher's PATH with the
-        // machine installation, losing a development Session's executable/Machine.
+        // installation, losing a development Session's executable/Machine.
         command.args([
             "-c",
             "allow_login_shell=false",

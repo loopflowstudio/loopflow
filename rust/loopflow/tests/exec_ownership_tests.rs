@@ -334,7 +334,7 @@ async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
     let output = command(
         home.path(),
         home.path(),
-        &["machine", "install", "preflight", "--json"],
+        &["installation", "install", "preflight", "--json"],
     )
     .output()
     .unwrap();

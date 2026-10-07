@@ -1,4 +1,4 @@
-//! Machine authority for published artifact installation.
+//! Authority for published artifact installation.
 //!
 //! Release receipts live outside the data directory. Ordinary commands share
 //! the main Machine; explicit experiments never change installed artifact selection.
@@ -639,6 +639,7 @@ pub enum InstallationState {
     Switching(Box<SwitchReceipt>),
 }
 
+// Retain the published path: entry gates, receipts and scheduled jobs pin it.
 pub fn root_for_home(home: &Path) -> PathBuf {
     home.join(".lf-machine/install")
 }
@@ -699,7 +700,11 @@ pub fn root() -> Result<PathBuf> {
 pub fn entry_gate_path(root: &Path, role: &ArtifactRole) -> Result<PathBuf> {
     let name = match role {
         ArtifactRole::Cli => "lf",
-        other => return Err(anyhow!("artifact role {other:?} has no machine entry gate")),
+        other => {
+            return Err(anyhow!(
+                "artifact role {other:?} has no installation entry gate"
+            ))
+        }
     };
     Ok(root.join(GATE_DIRECTORY).join(name))
 }
@@ -710,20 +715,20 @@ pub fn install_entry_gate(root: &Path, role: &ArtifactRole, source: &Path) -> Re
     let target = entry_gate_path(root, role)?;
     let parent = target
         .parent()
-        .expect("machine entry gate has a versioned parent");
+        .expect("installation entry gate has a versioned parent");
     prepare_directory(parent)?;
     let temporary = parent.join(format!(
         ".{}.{}",
         target
             .file_name()
-            .expect("machine entry gate has a file name")
+            .expect("installation entry gate has a file name")
             .to_string_lossy(),
         Uuid::new_v4().simple()
     ));
     let result: Result<()> = (|| {
         fs::copy(&source, &temporary).with_context(|| {
             format!(
-                "stage {:?} machine entry gate {} from {}",
+                "stage {:?} installation entry gate {} from {}",
                 role,
                 temporary.display(),
                 source.display()
@@ -733,7 +738,7 @@ pub fn install_entry_gate(root: &Path, role: &ArtifactRole, source: &Path) -> Re
         fs::set_permissions(&temporary, fs::Permissions::from_mode(0o755))?;
         File::open(&temporary)?.sync_all()?;
         fs::rename(&temporary, &target)
-            .with_context(|| format!("commit machine entry gate {}", target.display()))?;
+            .with_context(|| format!("commit installation entry gate {}", target.display()))?;
         sync_directory(parent)?;
         Ok(())
     })();
@@ -794,14 +799,15 @@ pub fn dispatch_default_cli() -> Result<()> {
 pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
     let root = root()?;
     let gate = entry_gate_path(&root, role)?;
-    let current =
-        fs::canonicalize(std::env::current_exe().context("resolve running machine entry gate")?)?;
+    let current = fs::canonicalize(
+        std::env::current_exe().context("resolve running installation entry gate")?,
+    )?;
     let gate = match fs::canonicalize(&gate) {
         Ok(gate) => gate,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
         Err(error) => {
             return Err(error)
-                .with_context(|| format!("resolve machine entry gate {}", gate.display()))
+                .with_context(|| format!("resolve installation entry gate {}", gate.display()))
         }
     };
     if current != gate {
@@ -812,7 +818,7 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
     let selection = match read_state(&root)? {
         InstallationState::Legacy => {
             return Err(anyhow!(
-                "machine entry gate {} has no settled install receipt",
+                "installation entry gate {} has no settled install receipt",
                 gate.display()
             ))
         }
@@ -1166,7 +1172,7 @@ pub fn authorize_current_for_switch(
     if let Some(existing) = AUTHORIZED_CURRENT.get() {
         if existing != &selection {
             return Err(anyhow!(
-                "machine install selection changed after process startup"
+                "installation selection changed after process startup"
             ));
         }
     } else {
@@ -1227,7 +1233,7 @@ pub fn selection_for_current_executable() -> Result<Option<InstallSelection>> {
 fn require_schema(schema_version: u32) -> Result<()> {
     if schema_version != SCHEMA_VERSION {
         return Err(anyhow!(
-            "unsupported machine install schema {schema_version}; expected {SCHEMA_VERSION}"
+            "unsupported installation schema {schema_version}; expected {SCHEMA_VERSION}"
         ));
     }
     Ok(())
@@ -1337,7 +1343,7 @@ fn write_atomic_json<T: Serialize>(root: &Path, path: &Path, value: &T) -> Resul
     let temporary = parent.join(format!(".{}.tmp", Uuid::new_v4().simple()));
     write_private_file(&temporary, &bytes, false)?;
     fs::rename(&temporary, path)
-        .with_context(|| format!("commit machine install receipt {}", path.display()))?;
+        .with_context(|| format!("commit installation receipt {}", path.display()))?;
     sync_directory(parent)
 }
 
@@ -1522,7 +1528,7 @@ mod tests {
     #[test]
     fn first_installation_can_cancel_without_inventing_a_prior_install() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("machine");
+        let root = directory.path().join("installation");
         let target = selection(directory.path(), "published", InstallSource::Published);
         let mut receipt = switch(target.clone(), target.clone(), target.artifact_set.clone());
         receipt.prior = None;
@@ -1545,7 +1551,7 @@ mod tests {
     #[test]
     fn first_installation_handoff_requires_candidate_recovery_until_settlement() {
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("machine");
+        let root = directory.path().join("installation");
         let target = selection(directory.path(), "published", InstallSource::Published);
         let mut receipt = switch(target.clone(), target.clone(), target.artifact_set.clone());
         receipt.prior = None;
@@ -2110,7 +2116,7 @@ mod tests {
         assert!(read_state(&root)
             .unwrap_err()
             .to_string()
-            .contains("unsupported machine install schema 99"));
+            .contains("unsupported installation schema 99"));
     }
 
     #[test]

@@ -179,7 +179,7 @@ fn guard_development_database(
 /// Advancing `~/.lf/loopflow.db` past the frontier the installed `lf` knows must
 /// never be a side effect of an ordinary command: on 2026-07-17 a published
 /// candidate at `target/release/lf` did exactly that and stranded the installed
-/// binary. Only `lf machine install promote`, under the exclusive promotion lock, opens
+/// binary. Only `lf install promote`, under the exclusive promotion lock, opens
 /// the store as `Authorized`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FrontierAdvance {

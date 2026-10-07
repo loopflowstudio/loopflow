@@ -175,3 +175,5 @@ working → explicit unanswered question → working → done in a supporting te
 or a PTY byte capture if no consumer is available.
 
 Check: focused Rust Program Status/CLI and Swift Program Status/DTO tests, Python artifact packaging, Clippy and headless Xcode build pass; Ghostty patch checks pass (267, four platform skips), public lf2 download matches and SwiftPM links it; live emission, composed native-pane/Task proof and detached relay acceptance remain unproved.
+
+Sync check (October 7): `cargo test -p loopflow --lib --test session_cli_tests program_status` — 6 passed after reconciling main's Process rename; `cargo fmt` passed; broader checks remain with gate/CI.

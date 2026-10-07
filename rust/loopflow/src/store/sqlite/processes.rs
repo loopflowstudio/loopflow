@@ -8,25 +8,26 @@ use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
 
-use crate::exec::{
-    AgentCaller, Exec, ExecCursor, ExecFilter, ExecOutcomeFilter, ExecPage, ExecWorkFilter,
-    SessionDriver,
+use crate::id::ProcessLfid;
+use crate::process::{
+    AgentCaller, Process, ProcessCursor, ProcessFilter, ProcessOutcomeFilter, ProcessPage,
+    ProcessWorkFilter, SessionDriver,
 };
-use crate::id::ExecId;
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
 
-pub(super) const EXEC_SELECT: &str =
-    "SELECT e.id,e.trace_id,e.parent_exec_id,e.via_agent,e.caller_session_id,
+pub(super) const PROCESS_SELECT: &str =
+    "SELECT e.lfid,e.trace_id,e.parent_process_lfid,e.via_agent,e.caller_session_id,
     e.caller_provider_generation,e.command,e.repo,e.cwd,
-    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error FROM execs e";
+    e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid FROM processes e";
 
-pub(super) fn read_exec(row: &rusqlite::Row<'_>) -> rusqlite::Result<Exec> {
-    Ok(Exec {
-        id: row.get(0)?,
+pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<Process> {
+    Ok(Process {
+        lfid: row.get(0)?,
+        pid: row.get(15)?,
         trace_id: row.get(1)?,
-        parent_exec_id: row.get(2)?,
+        parent_process_lfid: row.get(2)?,
         via_agent: row.get(3)?,
         caller_session_id: row.get(4)?,
         caller_provider_generation: row.get(5)?,
@@ -42,23 +43,23 @@ pub(super) fn read_exec(row: &rusqlite::Row<'_>) -> rusqlite::Result<Exec> {
     })
 }
 
-fn exec_query(
-    filter: &ExecFilter,
-    after: Option<&ExecCursor>,
+fn process_query(
+    filter: &ProcessFilter,
+    after: Option<&ProcessCursor>,
     limit: NonZeroU32,
 ) -> (String, Vec<Value>) {
-    let mut sql = String::from("WITH page AS MATERIALIZED (SELECT e.id FROM execs e WHERE 1");
+    let mut sql = String::from("WITH page AS MATERIALIZED (SELECT e.lfid FROM processes e WHERE 1");
     let mut values = Vec::new();
     let mut bind = |value| {
         values.push(value);
         format!("?{}", values.len())
     };
     for (column, value) in [
-        ("id", filter.id.as_ref().map(ExecId::as_str)),
+        ("lfid", filter.lfid.as_ref().map(ProcessLfid::as_str)),
         ("repo", filter.repo.as_deref()),
         (
-            "parent_exec_id",
-            filter.parent_exec_id.as_ref().map(ExecId::as_str),
+            "parent_process_lfid",
+            filter.parent_process_lfid.as_ref().map(ProcessLfid::as_str),
         ),
         ("caller_session_id", filter.caller_session_id.as_deref()),
     ] {
@@ -82,22 +83,22 @@ fn exec_query(
     }
     if let Some(value) = &filter.identity_contains {
         sql.push_str(&format!(
-            " AND instr(e.id,{})>0",
+            " AND instr(e.lfid,{})>0",
             bind(Value::Text(value.clone()))
         ));
     }
     if let Some(outcome) = filter.outcome {
         sql.push_str(match outcome {
-            ExecOutcomeFilter::Succeeded => " AND e.outcome='succeeded'",
-            ExecOutcomeFilter::Failed => " AND e.outcome='failed'",
-            ExecOutcomeFilter::Interrupted => " AND e.outcome='interrupted'",
-            ExecOutcomeFilter::Unknown => " AND e.outcome IS NULL",
+            ProcessOutcomeFilter::Succeeded => " AND e.outcome='succeeded'",
+            ProcessOutcomeFilter::Failed => " AND e.outcome='failed'",
+            ProcessOutcomeFilter::Interrupted => " AND e.outcome='interrupted'",
+            ProcessOutcomeFilter::Unknown => " AND e.outcome IS NULL",
         });
     }
     if let Some(work) = &filter.performed_work {
         let (column, value, tasks, close) = match work {
-            ExecWorkFilter::Task(id) => ("task_id", id.as_str(), "tw.id=", ""),
-            ExecWorkFilter::Wave(id) => (
+            ProcessWorkFilter::Task(id) => ("task_id", id.as_str(), "tw.id=", ""),
+            ProcessWorkFilter::Wave(id) => (
                 "wave_id",
                 id.as_str(),
                 "tw.project_id IN (SELECT id FROM projects WHERE wave_id=",
@@ -107,13 +108,13 @@ fn exec_query(
         let value = bind(Value::Text(value.into()));
         // Native starts retain their original assignment. A Flow's steps ran
         // in their Task's checkout. Neither a current Session bind nor
-        // another Exec's command context establishes performed work.
+        // another Process's command context establishes performed work.
         sql.push_str(&format!(
-            " AND e.id IN (
-            SELECT exec_id FROM session_events
-            WHERE kind='started' AND {column}={value} AND exec_id IS NOT NULL
+            " AND e.lfid IN (
+            SELECT process_lfid FROM session_events
+            WHERE kind='started' AND {column}={value} AND process_lfid IS NOT NULL
             UNION
-            SELECT op.id FROM flow_exec_steps fs JOIN execs op ON op.id=fs.exec_id
+            SELECT op.lfid FROM flow_process_steps fs JOIN processes op ON op.lfid=fs.process_lfid
             JOIN tasks tw ON {tasks}{value}{close}
             WHERE tw.worktree!=''
               AND (op.cwd=rtrim(tw.worktree,'/') OR instr(op.cwd,rtrim(tw.worktree,'/')||'/')=1)
@@ -122,15 +123,15 @@ fn exec_query(
     }
     if let Some(after) = after {
         let time = bind(Value::Integer(after.started_at));
-        let id = bind(Value::Text(after.id.to_string()));
+        let id = bind(Value::Text(after.lfid.to_string()));
         sql.push_str(&format!(
-            " AND e.started_at<={time} AND (e.started_at<{time} OR e.id>{id})"
+            " AND e.started_at<={time} AND (e.started_at<{time} OR e.lfid>{id})"
         ));
     }
     let limit = bind(Value::Integer(i64::from(limit.get()) + 1));
     sql.push_str(&format!(
-        " ORDER BY e.started_at DESC,e.id ASC LIMIT {limit})
-         {EXEC_SELECT} JOIN page ON page.id=e.id ORDER BY e.started_at DESC,e.id ASC"
+        " ORDER BY e.started_at DESC,e.lfid ASC LIMIT {limit})
+         {PROCESS_SELECT} JOIN page ON page.lfid=e.lfid ORDER BY e.started_at DESC,e.lfid ASC"
     ));
     (sql, values)
 }
@@ -138,7 +139,7 @@ fn exec_query(
 fn driver_in(conn: &rusqlite::Connection, session: &str) -> StoreResult<Option<SessionDriver>> {
     let row = conn
         .query_row(
-            "SELECT driver_exec_id,driver_generation,provider_generation,provider_exec_id
+            "SELECT driver_process_lfid,driver_generation,provider_generation,provider_process_lfid
          FROM agent_sessions WHERE id=?1",
             [session],
             |row| {
@@ -156,25 +157,42 @@ fn driver_in(conn: &rusqlite::Connection, session: &str) -> StoreResult<Option<S
         return Ok(None);
     }
     let parse =
-        |value: &str| ExecId::parse(value).map_err(|e| StoreError::InvalidData(e.to_string()));
+        |value: &str| ProcessLfid::parse(value).map_err(|e| StoreError::InvalidData(e.to_string()));
     Ok(Some(SessionDriver {
-        exec_id: row.0.as_deref().map(parse).transpose()?,
+        process_lfid: row.0.as_deref().map(parse).transpose()?,
         generation: row.1,
         provider_generation: row.2,
-        provider_exec_id: parse(row.3.as_deref().ok_or_else(|| {
+        provider_process_lfid: parse(row.3.as_deref().ok_or_else(|| {
             StoreError::InvalidData("Session driver has no provider origin".into())
         })?)?,
     }))
 }
 
+fn record_provider_launch(
+    tx: &rusqlite::Transaction<'_>,
+    session: &str,
+    expected: &SessionDriver,
+    phase: &str,
+) -> StoreResult<()> {
+    tx.execute(
+            "INSERT OR IGNORE INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1",
+            params![session, format!("provider:{}:{phase}", expected.provider_generation),
+                expected.process_lfid, time::OffsetDateTime::now_utc().unix_timestamp(),
+                serde_json::json!({"type":"provider_launch", "phase":phase,
+                    "provider_generation":expected.provider_generation}).to_string()],
+        )?;
+    Ok(())
+}
+
 impl SqliteStore {
-    pub fn execs_since(&self, since: i64) -> StoreResult<Vec<Exec>> {
+    pub fn processes_since(&self, since: i64) -> StoreResult<Vec<Process>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "{EXEC_SELECT} WHERE e.started_at>=?1 ORDER BY e.started_at,e.id"
+            "{PROCESS_SELECT} WHERE e.started_at>=?1 ORDER BY e.started_at,e.lfid"
         ))?;
         let records = query
-            .query_map([since], read_exec)?
+            .query_map([since], read_process)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(records)
     }
@@ -233,71 +251,76 @@ impl SqliteStore {
     }
 
     /// Read one command without decoding its event history or provider payloads.
-    pub fn exec(&self, id: &ExecId) -> StoreResult<Option<Exec>> {
+    pub fn process(&self, id: &ProcessLfid) -> StoreResult<Option<Process>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
-            .query_row(&format!("{EXEC_SELECT} WHERE e.id=?1"), [id], read_exec)
+            .query_row(
+                &format!("{PROCESS_SELECT} WHERE e.lfid=?1"),
+                [id],
+                read_process,
+            )
             .optional()?)
     }
 
     /// Exact identity wins; otherwise require a unique literal, case-sensitive prefix.
-    pub fn resolve_exec(&self, selector: &str) -> StoreResult<Option<Exec>> {
+    pub fn resolve_process(&self, selector: &str) -> StoreResult<Option<Process>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if let Some(exec) = conn
+        if let Some(process) = conn
             .query_row(
-                &format!("{EXEC_SELECT} WHERE e.id=?1"),
+                &format!("{PROCESS_SELECT} WHERE e.lfid=?1"),
                 [selector],
-                read_exec,
+                read_process,
             )
             .optional()?
         {
-            return Ok(Some(exec));
+            return Ok(Some(process));
         }
-        // Exec IDs are UUID text. This range seeks the existing identity index;
+        // Process IDs are UUID text. This range seeks the existing identity index;
         // '%' and '_' have no wildcard meaning, unlike LIKE/GLOB.
         let upper = format!("{selector}\u{10ffff}");
-        let mut query =
-            conn.prepare("SELECT id FROM execs WHERE id>=?1 AND id<?2 ORDER BY id LIMIT 2")?;
+        let mut query = conn.prepare(
+            "SELECT lfid FROM processes WHERE lfid>=?1 AND lfid<?2 ORDER BY lfid LIMIT 2",
+        )?;
         let ids = query
-            .query_map(params![selector, upper], |row| row.get::<_, ExecId>(0))?
+            .query_map(params![selector, upper], |row| row.get::<_, ProcessLfid>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         match ids.as_slice() {
             [] => Ok(None),
             [id] => Ok(Some(conn.query_row(
-                &format!("{EXEC_SELECT} WHERE e.id=?1"),
+                &format!("{PROCESS_SELECT} WHERE e.lfid=?1"),
                 [id],
-                read_exec,
+                read_process,
             )?)),
             _ => Err(StoreError::InvalidData(format!(
-                "Ambiguous Exec prefix {selector:?}"
+                "Ambiguous Process prefix {selector:?}"
             ))),
         }
     }
 
     /// Filter/deduplicate in SQL; decode only a bounded page plus one lookahead.
     /// Missing payloads do not remove rows. No history body is read for discovery.
-    pub fn execs(
+    pub fn processes(
         &self,
-        filter: &ExecFilter,
-        after: Option<&ExecCursor>,
+        filter: &ProcessFilter,
+        after: Option<&ProcessCursor>,
         limit: NonZeroU32,
-    ) -> StoreResult<ExecPage> {
-        let (sql, values) = exec_query(filter, after, limit);
+    ) -> StoreResult<ProcessPage> {
+        let (sql, values) = process_query(filter, after, limit);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&sql)?;
         let mut entries = query
-            .query_map(params_from_iter(values), read_exec)?
+            .query_map(params_from_iter(values), read_process)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let next = if entries.len() > limit.get() as usize {
             entries.pop();
-            entries.last().map(|exec| ExecCursor {
-                started_at: exec.started_at,
-                id: exec.id.clone(),
+            entries.last().map(|process| ProcessCursor {
+                started_at: process.started_at,
+                lfid: process.lfid.clone(),
             })
         } else {
             None
         };
-        Ok(ExecPage { entries, next })
+        Ok(ProcessPage { entries, next })
     }
 
     pub(crate) fn make_session_interactive(
@@ -307,7 +330,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.exec_id.is_none() {
+        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.process_lfid.is_none() {
             return Err(StoreError::InvalidAuthority(
                 "Session driver changed".into(),
             ));
@@ -365,7 +388,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.exec_id.is_none() {
+        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.process_lfid.is_none() {
             return Err(StoreError::InvalidAuthority(
                 "Session driver changed".into(),
             ));
@@ -375,16 +398,45 @@ impl SqliteStore {
         } else {
             "reserved"
         };
-        tx.execute(
-            "INSERT OR IGNORE INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload,captured_event)
-             SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1",
-            params![session, format!("provider:{}:{phase}", expected.provider_generation),
-                expected.exec_id, time::OffsetDateTime::now_utc().unix_timestamp(),
-                serde_json::json!({"type":"provider_launch", "phase":phase,
-                    "provider_generation":expected.provider_generation}).to_string()],
+        record_provider_launch(&tx, session, expected, phase)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Only the terminal launcher that owns this generation may report its
+    /// spawn failure or the exit it actually waited for.
+    pub(crate) fn record_native_provider_exit(
+        &self,
+        session: &str,
+        expected: &SessionDriver,
+        spawned: bool,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.process_lfid.is_none() {
+            return Err(StoreError::InvalidAuthority(
+                "Session driver changed".into(),
+            ));
+        }
+        record_provider_launch(
+            &tx,
+            session,
+            expected,
+            if spawned { "exited" } else { "spawn_failed" },
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    pub(crate) fn native_provider_exited(&self, session: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
+                AND e.receipt_key='provider:' || s.provider_generation || ':exited')
+             FROM agent_sessions s WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )?)
     }
 
     pub(crate) fn session_provider_unstarted(&self, session: &str) -> StoreResult<bool> {
@@ -393,8 +445,10 @@ impl SqliteStore {
             "SELECT provider_pid IS NULL AND provider_endpoint IS NULL
              AND EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
                 AND e.receipt_key='provider:' || s.provider_generation || ':reserved')
-             AND NOT EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
+             AND (NOT EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
                 AND e.receipt_key='provider:' || s.provider_generation || ':spawn_requested')
+              OR EXISTS(SELECT 1 FROM session_events e WHERE e.session_id=s.id
+                AND e.receipt_key='provider:' || s.provider_generation || ':spawn_failed'))
              FROM agent_sessions s WHERE id=?1",
             [session],
             |row| row.get(0),
@@ -412,7 +466,7 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.exec_id.is_some() {
+        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.process_lfid.is_some() {
             return Err(StoreError::InvalidAuthority(
                 "Session driver changed".into(),
             ));
@@ -425,11 +479,11 @@ impl SqliteStore {
             return Ok(false);
         }
         // A copied Home cannot witness the death of a provider on its origin
-        // host. Establish locality from the provider Exec's retained capture,
+        // host. Establish locality from the provider Process's retained capture,
         // then bind the witness to the machine's OS identity across restarts.
         let local: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM session_events c JOIN session_events m ON m.captured_event=c.seq
-             WHERE c.session_id=?1 AND c.kind='captured' AND c.exec_id=?2
+             WHERE c.session_id=?1 AND c.kind='captured' AND c.process_lfid=?2
              AND m.session_id=c.session_id AND m.kind='observed'
              AND m.receipt_key=c.receipt_key || ':manifest.json'
              AND json_extract(m.payload,'$.input_id')=c.receipt_key
@@ -437,7 +491,7 @@ impl SqliteStore {
              AND json_extract(m.payload,'$.evidence.schema_version')=1
              AND json_extract(m.payload,'$.evidence.artifact_key')=c.receipt_key
              AND json_extract(m.payload,'$.evidence.host')=?3)",
-            params![session, expected.provider_exec_id, boot.host], |row| row.get(0),
+            params![session, expected.provider_process_lfid, boot.host], |row| row.get(0),
         )?;
         if !local {
             return Ok(false);
@@ -453,9 +507,11 @@ impl SqliteStore {
         let previous = previous
             .map(|payload| serde_json::from_str::<serde_json::Value>(&payload))
             .transpose()?;
+        // Boot witnesses are append-only history; keep the released JSON encoding.
         let recovered = previous.as_ref().is_some_and(|payload| {
             payload["provider_generation"].as_i64() == Some(expected.provider_generation)
-                && payload["provider_exec_id"].as_str() == Some(expected.provider_exec_id.as_str())
+                && payload["provider_exec_id"].as_str()
+                    == Some(expected.provider_process_lfid.as_str())
                 && payload["host"]["machine"].as_str() == Some(boot.machine.as_str())
                 && payload["host"]["boot"]
                     .as_str()
@@ -473,7 +529,7 @@ impl SqliteStore {
                 time::OffsetDateTime::now_utc().unix_timestamp(),
                 serde_json::json!({"type":phase, "host":boot,
                     "provider_generation":expected.provider_generation,
-                    "provider_exec_id":expected.provider_exec_id,
+                    "provider_exec_id":expected.provider_process_lfid,
                     "previous":if recovered { previous } else { None }}).to_string()],
         )?;
         tx.commit()?;
@@ -489,7 +545,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.exec_id.is_none() {
+        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.process_lfid.is_none() {
             return Err(StoreError::InvalidAuthority(
                 "Session driver changed".into(),
             ));
@@ -511,7 +567,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.exec_id.is_none() {
+        if driver_in(&tx, session)?.as_ref() != Some(expected) || expected.process_lfid.is_none() {
             return Err(StoreError::InvalidAuthority(
                 "Session driver changed".into(),
             ));
@@ -580,7 +636,9 @@ impl SqliteStore {
         let _dispatch = self.lock_session_driver(session)?;
         {
             let conn = self.conn.lock().expect("store mutex poisoned");
-            if expected.exec_id.is_none() || driver_in(&conn, session)?.as_ref() != Some(expected) {
+            if expected.process_lfid.is_none()
+                || driver_in(&conn, session)?.as_ref() != Some(expected)
+            {
                 return Err(StoreError::InvalidAuthority(
                     "Session driver changed".into(),
                 ));
@@ -594,29 +652,29 @@ impl SqliteStore {
     pub(crate) fn session_process_ownership(
         &self,
         inputs: &[String],
-        execs: &[String],
+        processes: &[String],
         pids: &[u32],
-    ) -> StoreResult<crate::exec::SessionProcessOwnership> {
+    ) -> StoreResult<crate::process::SessionProcessOwnership> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let input_json = serde_json::to_string(inputs)?;
-        let exec_json = serde_json::to_string(execs)?;
+        let process_json = serde_json::to_string(processes)?;
         let pid_json = serde_json::to_string(pids)?;
         let sessions = {
             let mut statement = tx.prepare(
-                "SELECT s.id,s.title,s.task_id,s.wave_id,s.driver_exec_id,e.trace_id,
-                    s.driver_generation,s.provider_pid,s.provider_started_at,s.provider_exec_id
-                 FROM agent_sessions s LEFT JOIN execs e ON e.id=s.driver_exec_id
+                "SELECT s.id,s.title,s.task_id,s.wave_id,s.driver_process_lfid,e.trace_id,
+                    s.driver_generation,s.provider_pid,s.provider_started_at,s.provider_process_lfid
+                 FROM agent_sessions s LEFT JOIN processes e ON e.lfid=s.driver_process_lfid
                  WHERE s.id IN (
-                    SELECT id FROM agent_sessions WHERE driver_exec_id IN (SELECT value FROM json_each(?2))
+                    SELECT id FROM agent_sessions WHERE driver_process_lfid IN (SELECT value FROM json_each(?2))
                     UNION SELECT id FROM agent_sessions WHERE provider_pid IN (SELECT value FROM json_each(?3))
                     UNION SELECT id FROM agent_sessions WHERE provider_pid IS NULL
-                        AND provider_exec_id IN (SELECT value FROM json_each(?2))
+                        AND provider_process_lfid IN (SELECT value FROM json_each(?2))
                     UNION SELECT session_id FROM session_events
                         WHERE kind='captured' AND receipt_key IN (SELECT value FROM json_each(?1)))
                  ORDER BY s.id",
             )?;
-            let mut rows = statement.query(params![input_json, exec_json, pid_json])?;
+            let mut rows = statement.query(params![input_json, process_json, pid_json])?;
             let mut sessions = Vec::new();
             while let Some(row) = rows.next()? {
                 let task = row
@@ -626,18 +684,18 @@ impl SqliteStore {
                     .transpose()
                     .map_err(|error| StoreError::InvalidData(error.to_string()))?;
                 let wave: Option<crate::id::WaveId> = row.get(3)?;
-                sessions.push(crate::exec::SessionProcessObservation {
+                sessions.push(crate::process::SessionProcessObservation {
                     id: row.get(0)?,
                     title: row.get(1)?,
                     work: task
                         .map(crate::durable::WorkRef::Task)
                         .or_else(|| wave.map(crate::durable::WorkRef::Wave)),
-                    driver_exec_id: row.get(4)?,
+                    driver_process_lfid: row.get(4)?,
                     driver_trace_id: row.get(5)?,
                     driver_generation: row.get(6)?,
                     provider_pid: row.get(7)?,
                     provider_started_at: row.get(8)?,
-                    provider_exec_id: row.get(9)?,
+                    provider_process_lfid: row.get(9)?,
                 });
             }
             sessions
@@ -654,7 +712,7 @@ impl SqliteStore {
             rows
         };
         tx.commit()?;
-        Ok(crate::exec::SessionProcessOwnership { sessions, inputs })
+        Ok(crate::process::SessionProcessOwnership { sessions, inputs })
     }
 
     pub fn session_driver(&self, session: &str) -> StoreResult<Option<SessionDriver>> {
@@ -666,7 +724,7 @@ impl SqliteStore {
         &self,
         session: &str,
         expected: Option<&SessionDriver>,
-        exec: &ExecId,
+        process: &ProcessLfid,
         replace_provider: bool,
     ) -> StoreResult<SessionDriver> {
         let _dispatch = self.lock_session_driver(session)?;
@@ -679,32 +737,35 @@ impl SqliteStore {
             ));
         }
         let driver = SessionDriver {
-            exec_id: Some(exec.clone()),
+            process_lfid: Some(process.clone()),
             generation: current.as_ref().map_or(1, |value| value.generation + 1),
             provider_generation: current.as_ref().map_or(1, |value| {
                 value.provider_generation + i64::from(replace_provider)
             }),
-            provider_exec_id: current
-                .as_ref()
-                .filter(|_| !replace_provider)
-                .map_or_else(|| exec.clone(), |value| value.provider_exec_id.clone()),
+            provider_process_lfid: current.as_ref().filter(|_| !replace_provider).map_or_else(
+                || process.clone(),
+                |value| value.provider_process_lfid.clone(),
+            ),
         };
         tx.execute(
-            "UPDATE agent_sessions SET driver_exec_id=?2,driver_generation=?3,
-                provider_generation=?4,provider_exec_id=?5,
+            "UPDATE agent_sessions SET driver_process_lfid=?2,driver_generation=?3,
+                provider_generation=?4,provider_process_lfid=?5,
                 provider_endpoint=CASE WHEN ?6 THEN NULL ELSE provider_endpoint END,
                 provider_pid=CASE WHEN ?6 THEN NULL ELSE provider_pid END,
                 provider_started_at=CASE WHEN ?6 THEN NULL ELSE provider_started_at END
              WHERE id=?1",
             params![
                 session,
-                driver.exec_id,
+                driver.process_lfid,
                 driver.generation,
                 driver.provider_generation,
-                driver.provider_exec_id,
+                driver.provider_process_lfid,
                 replace_provider
             ],
         )?;
+        if current.is_none() || replace_provider {
+            record_provider_launch(&tx, session, &driver, "reserved")?;
+        }
         tx.commit()?;
         Ok(driver)
     }
@@ -723,10 +784,10 @@ impl SqliteStore {
                 "Session driver changed".into(),
             ));
         }
-        current.exec_id = None;
+        current.process_lfid = None;
         current.generation += 1;
         tx.execute(
-            "UPDATE agent_sessions SET driver_exec_id=NULL,driver_generation=?2 WHERE id=?1",
+            "UPDATE agent_sessions SET driver_process_lfid=NULL,driver_generation=?2 WHERE id=?1",
             params![session, current.generation],
         )?;
         tx.commit()?;
@@ -756,9 +817,9 @@ impl SqliteStore {
             "type": "driver_exit", "outcome": outcome, "generation": expected.generation
         });
         tx.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,exec_id,observed_at,payload,captured_event)
+            "INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload,captured_event)
              SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1",
-            params![session, format!("driver:{}:exit", expected.generation), expected.exec_id,
+            params![session, format!("driver:{}:exit", expected.generation), expected.process_lfid,
                 now, payload.to_string()],
         )?;
         // Ordinary disposable conversations retire on an observed exit. Primary
@@ -768,7 +829,7 @@ impl SqliteStore {
                 "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1
              AND s.completed_at IS NULL AND s.primary_scope IS NULL
              AND s.wave_id IS NULL AND {} IS NULL
-             AND s.driver_exec_id=s.provider_exec_id
+             AND s.driver_process_lfid=s.provider_process_lfid
              AND NOT EXISTS({}) AND ?3 IN ('completed','interrupted')",
                 super::sessions::SESSION_FLOW,
                 super::task_work::session_tasks("s")
@@ -776,7 +837,7 @@ impl SqliteStore {
             params![session, now, outcome],
         )?;
         tx.execute(
-            "UPDATE agent_sessions SET driver_exec_id=NULL,driver_generation=driver_generation+1,
+            "UPDATE agent_sessions SET driver_process_lfid=NULL,driver_generation=driver_generation+1,
                 provider_endpoint=CASE WHEN ?2 THEN NULL ELSE provider_endpoint END WHERE id=?1",
             params![session, closed],
         )?;
@@ -785,20 +846,22 @@ impl SqliteStore {
     }
 
     /// Stale providers retain their historical caller, never the new driver.
-    pub fn agent_parent(&self, caller: &AgentCaller) -> StoreResult<Option<(ExecId, String)>> {
+    pub fn agent_parent(&self, caller: &AgentCaller) -> StoreResult<Option<(ProcessLfid, String)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let driver = driver_in(&conn, &caller.session_id)?;
         let parent = driver
             .as_ref()
             .filter(|driver| {
                 driver.provider_generation == caller.provider_generation
-                    && driver.provider_exec_id == caller.origin_exec_id
+                    && driver.provider_process_lfid == caller.origin_process_lfid
             })
-            .and_then(|driver| driver.exec_id.as_ref())
-            .unwrap_or(&caller.origin_exec_id);
-        conn.query_row("SELECT trace_id FROM execs WHERE id=?1", [parent], |row| {
-            row.get::<_, String>(0)
-        })
+            .and_then(|driver| driver.process_lfid.as_ref())
+            .unwrap_or(&caller.origin_process_lfid);
+        conn.query_row(
+            "SELECT trace_id FROM processes WHERE lfid=?1",
+            [parent],
+            |row| row.get::<_, String>(0),
+        )
         .optional()
         .map(|trace| trace.map(|trace| (parent.clone(), trace)))
         .map_err(StoreError::from)
@@ -812,19 +875,19 @@ mod discovery_tests {
     use rusqlite::params;
 
     use crate::durable::{ProjectId, TaskId};
-    use crate::exec::{ExecFilter, ExecOutcomeFilter, ExecWorkFilter};
-    use crate::id::{ExecId, TraceId, WaveId};
+    use crate::id::{ProcessLfid, TraceId, WaveId};
+    use crate::process::{ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter};
     use crate::store::sqlite::SqliteStore;
     use crate::store::StoreError;
 
-    fn insert_exec(store: &SqliteStore, number: u32, started_at: i64) -> ExecId {
-        let id = ExecId::parse(&format!("00000000-0000-0000-0000-{number:012x}")).unwrap();
+    fn insert_process(store: &SqliteStore, number: u32, started_at: i64) -> ProcessLfid {
+        let id = ProcessLfid::parse(&format!("00000000-0000-0000-0000-{number:012x}")).unwrap();
         store
             .conn
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO execs(id,trace_id,started_at,command,repo,cwd)
+                "INSERT INTO processes(lfid,trace_id,started_at,command,repo,cwd)
              VALUES(?1,?2,?3,?4,'/repo','/missing-checkout')",
                 params![
                     id,
@@ -838,32 +901,56 @@ mod discovery_tests {
     }
 
     #[test]
+    fn durable_identity_keeps_reused_and_unknown_pids_distinct() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let historical = insert_process(&store, 1, 1);
+        let retained = store.process(&historical).unwrap().unwrap();
+        assert_eq!(retained.pid, None);
+        let mut first = retained.clone();
+        first.lfid = ProcessLfid::new();
+        first.pid = Some(4242);
+        store.record_process(&first).unwrap();
+        let mut second = first.clone();
+        second.lfid = ProcessLfid::new();
+        second.parent_process_lfid = Some(first.lfid.clone());
+        store.record_process(&second).unwrap();
+        first.completed_at = Some(3);
+        first.outcome = Some("failed".into());
+        first.exit_code = Some(42);
+        store.record_process(&first).unwrap();
+        assert_eq!(store.process(&first.lfid).unwrap(), Some(first));
+        assert_eq!(store.process(&second.lfid).unwrap(), Some(second));
+        assert_eq!(store.process(&historical).unwrap(), Some(retained));
+    }
+
+    #[test]
     fn active_ownership_filters_dense_retained_history_before_materializing() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
-        let old = insert_exec(&store, 1, 1);
-        let live = insert_exec(&store, 2, 2);
+        let old = insert_process(&store, 1, 1);
+        let live = insert_process(&store, 2, 2);
         let input = crate::session_record::new_artifact_key();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
                 "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000)
                 INSERT INTO agent_sessions(id,title,title_source,created_at,completed_at,
-                    input_published,cwd,provider_exec_id,provider_pid,provider_started_at)
+                    input_published,cwd,provider_process_lfid,provider_pid,provider_started_at)
                 SELECT 'retained-'||x,'Retained','human',1,2,1,'/fixture',?1,
                     CASE WHEN x%2=0 THEN x+100000 END,1 FROM n",
                 [&old],
             )
             .unwrap();
-            conn.execute("UPDATE agent_sessions SET driver_exec_id=?1,completed_at=NULL WHERE id='retained-1'", [&live]).unwrap();
+            conn.execute("UPDATE agent_sessions SET driver_process_lfid=?1,completed_at=NULL WHERE id='retained-1'", [&live]).unwrap();
             conn.execute(
-                "UPDATE agent_sessions SET provider_exec_id=?1 WHERE id='retained-3'",
+                "UPDATE agent_sessions SET provider_process_lfid=?1 WHERE id='retained-3'",
                 [&live],
             )
             .unwrap();
             super::super::sessions::test_capture(&conn, "retained-5", &input);
         }
-        for (execs, pids, inputs, expected) in [
+        for (processes, pids, inputs, expected) in [
             (vec![], vec![], vec![], vec![]),
             (
                 vec![live.to_string()],
@@ -875,7 +962,7 @@ mod discovery_tests {
             let started = std::time::Instant::now();
             for _ in 0..5 {
                 let result = store
-                    .session_process_ownership(&inputs, &execs, &pids)
+                    .session_process_ownership(&inputs, &processes, &pids)
                     .unwrap();
                 assert_eq!(
                     result
@@ -896,41 +983,45 @@ mod discovery_tests {
     }
 
     #[test]
-    fn exec_discovery_retains_command_evidence_without_payloads() {
+    fn process_discovery_retains_command_evidence_without_payloads() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
-        let parent = insert_exec(&store, 1, 1);
-        let direct = insert_exec(&store, 2, 2);
-        let agent = insert_exec(&store, 3, 3);
-        let interrupted = insert_exec(&store, 4, 4);
+        let parent = insert_process(&store, 1, 1);
+        let direct = insert_process(&store, 2, 2);
+        let agent = insert_process(&store, 3, 3);
+        let interrupted = insert_process(&store, 4, 4);
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "UPDATE execs SET parent_exec_id=?2,via_agent=0,outcome='failed',
-                completed_at=5,exit_code=42 WHERE id=?1",
+                "UPDATE processes SET parent_process_lfid=?2,via_agent=0,outcome='failed',
+                completed_at=5,exit_code=42 WHERE lfid=?1",
                 params![direct, parent],
             )
             .unwrap();
-            conn.execute("UPDATE execs SET parent_exec_id=?2,via_agent=1,caller_session_id='retained-caller',
+            conn.execute("UPDATE processes SET parent_process_lfid=?2,via_agent=1,caller_session_id='retained-caller',
                 caller_provider_generation=7,outcome='succeeded',
-                completed_at=6,exit_code=0 WHERE id=?1", params![agent,direct]).unwrap();
+                completed_at=6,exit_code=0 WHERE lfid=?1", params![agent,direct]).unwrap();
             conn.execute(
-                "UPDATE execs SET outcome='interrupted',completed_at=7,exit_code=130
-                WHERE id=?1",
+                "UPDATE processes SET outcome='interrupted',completed_at=7,exit_code=130
+                WHERE lfid=?1",
                 [&interrupted],
             )
             .unwrap();
         }
         let page = store
-            .execs(&ExecFilter::default(), None, NonZeroU32::new(10).unwrap())
+            .processes(
+                &ProcessFilter::default(),
+                None,
+                NonZeroU32::new(10).unwrap(),
+            )
             .unwrap();
         assert_eq!(
-            page.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
+            page.entries.iter().map(|e| &e.lfid).collect::<Vec<_>>(),
             vec![&interrupted, &agent, &direct, &parent]
         );
         assert_eq!(page.next, None);
         for entry in &page.entries {
-            assert_eq!(store.exec(&entry.id).unwrap().as_ref(), Some(entry));
+            assert_eq!(store.process(&entry.lfid).unwrap().as_ref(), Some(entry));
         }
         let old = &page.entries[3];
         assert_eq!(
@@ -940,7 +1031,7 @@ mod discovery_tests {
         assert_eq!(old.outcome, None);
         assert_eq!(old.signal, None);
         let failed = &page.entries[2];
-        assert_eq!(failed.parent_exec_id.as_ref(), Some(&parent));
+        assert_eq!(failed.parent_process_lfid.as_ref(), Some(&parent));
         assert_eq!(failed.via_agent, Some(false));
         assert_eq!(failed.exit_code, Some(42));
         let success = &page.entries[1];
@@ -952,37 +1043,37 @@ mod discovery_tests {
         assert_eq!(success.via_agent, Some(true));
         assert_eq!(page.entries[0].signal, None);
         for (outcome, expected) in [
-            (ExecOutcomeFilter::Unknown, &parent),
-            (ExecOutcomeFilter::Failed, &direct),
-            (ExecOutcomeFilter::Succeeded, &agent),
-            (ExecOutcomeFilter::Interrupted, &interrupted),
+            (ProcessOutcomeFilter::Unknown, &parent),
+            (ProcessOutcomeFilter::Failed, &direct),
+            (ProcessOutcomeFilter::Succeeded, &agent),
+            (ProcessOutcomeFilter::Interrupted, &interrupted),
         ] {
-            let filter = ExecFilter {
+            let filter = ProcessFilter {
                 outcome: Some(outcome),
                 ..Default::default()
             };
             let selected = store
-                .execs(&filter, None, NonZeroU32::new(1).unwrap())
+                .processes(&filter, None, NonZeroU32::new(1).unwrap())
                 .unwrap();
-            assert_eq!(&selected.entries[0].id, expected);
+            assert_eq!(&selected.entries[0].lfid, expected);
             assert_eq!(selected.next, None);
         }
         assert!(!dir.path().join("runs").exists());
     }
 
     #[test]
-    fn exec_discovery_separates_literal_search_from_identity_resolution() {
+    fn process_discovery_separates_literal_search_from_identity_resolution() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
-        let first = insert_exec(&store, 1, 1);
-        let second = insert_exec(&store, 16, 2);
+        let first = insert_process(&store, 1, 1);
+        let second = insert_process(&store, 16, 2);
         store
             .conn
             .lock()
             .unwrap()
             .execute(
-                "UPDATE execs SET command=?3,parent_exec_id=?2,
-                caller_session_id='caller' WHERE id=?1",
+                "UPDATE processes SET command=?3,parent_process_lfid=?2,
+                caller_session_id='caller' WHERE lfid=?1",
                 params![
                     first,
                     second,
@@ -990,9 +1081,9 @@ mod discovery_tests {
                 ],
             )
             .unwrap();
-        let filter = ExecFilter {
+        let filter = ProcessFilter {
             repo: Some("/repo".into()),
-            parent_exec_id: Some(second.clone()),
+            parent_process_lfid: Some(second.clone()),
             caller_session_id: Some("caller".into()),
             command_contains: Some("PR LAND --strict %_".into()),
             identity_contains: Some("000000000001".into()),
@@ -1000,37 +1091,37 @@ mod discovery_tests {
         };
         assert_eq!(
             store
-                .execs(&filter, None, NonZeroU32::new(1).unwrap())
+                .processes(&filter, None, NonZeroU32::new(1).unwrap())
                 .unwrap()
                 .entries[0]
-                .id,
+                .lfid,
             first
         );
         assert_eq!(
-            store.resolve_exec(first.as_str()).unwrap().unwrap().id,
+            store.resolve_process(first.as_str()).unwrap().unwrap().lfid,
             first
         );
         assert_eq!(
             store
-                .resolve_exec(&second.as_str()[..35])
+                .resolve_process(&second.as_str()[..35])
                 .unwrap()
                 .unwrap()
-                .id,
+                .lfid,
             second
         );
         assert!(matches!(
-            store.resolve_exec("00000000"),
+            store.resolve_process("00000000"),
             Err(StoreError::InvalidData(_))
         ));
-        assert_eq!(store.resolve_exec("%_").unwrap(), None);
-        assert_eq!(store.exec(&ExecId::new()).unwrap(), None);
-        let miss = ExecFilter {
+        assert_eq!(store.resolve_process("%_").unwrap(), None);
+        assert_eq!(store.process(&ProcessLfid::new()).unwrap(), None);
+        let miss = ProcessFilter {
             command_contains: Some("%_".into()),
-            id: Some(second),
+            lfid: Some(second),
             ..Default::default()
         };
         assert!(store
-            .execs(&miss, None, NonZeroU32::new(1).unwrap())
+            .processes(&miss, None, NonZeroU32::new(1).unwrap())
             .unwrap()
             .entries
             .is_empty());
@@ -1040,14 +1131,14 @@ mod discovery_tests {
                 .lock()
                 .unwrap()
                 .execute(
-                    "UPDATE execs SET command=?2 WHERE id=?1",
+                    "UPDATE processes SET command=?2 WHERE lfid=?1",
                     params![first, command],
                 )
                 .unwrap();
             let page = store
-                .execs(
-                    &ExecFilter {
-                        id: Some(first.clone()),
+                .processes(
+                    &ProcessFilter {
+                        lfid: Some(first.clone()),
                         command_contains: Some("pr land".into()),
                         ..Default::default()
                     },
@@ -1057,19 +1148,19 @@ mod discovery_tests {
                 .unwrap();
             assert_eq!(page.entries.len(), usize::from(command.is_some()));
             assert_eq!(
-                store.exec(&first).unwrap().unwrap().command.as_deref(),
+                store.process(&first).unwrap().unwrap().command.as_deref(),
                 command
             );
         }
     }
 
     #[test]
-    fn exec_discovery_pages_fixed_data_after_filtering_with_timestamp_ties() {
+    fn process_discovery_pages_fixed_data_after_filtering_with_timestamp_ties() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
         let mut expected = Vec::new();
         for number in 1..=12 {
-            let id = insert_exec(&store, number, i64::from(number / 5));
+            let id = insert_process(&store, number, i64::from(number / 5));
             if number % 2 == 0 {
                 expected.push((i64::from(number / 5), id));
             } else {
@@ -1077,12 +1168,12 @@ mod discovery_tests {
                     .conn
                     .lock()
                     .unwrap()
-                    .execute("UPDATE execs SET repo='/other' WHERE id=?1", [id])
+                    .execute("UPDATE processes SET repo='/other' WHERE lfid=?1", [id])
                     .unwrap();
             }
         }
         expected.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.as_str().cmp(b.1.as_str())));
-        let filter = ExecFilter {
+        let filter = ProcessFilter {
             repo: Some("/repo".into()),
             ..Default::default()
         };
@@ -1090,10 +1181,10 @@ mod discovery_tests {
         let mut found = Vec::new();
         loop {
             let page = store
-                .execs(&filter, after.as_ref(), NonZeroU32::new(2).unwrap())
+                .processes(&filter, after.as_ref(), NonZeroU32::new(2).unwrap())
                 .unwrap();
             assert!(page.entries.len() <= 2);
-            found.extend(page.entries.into_iter().map(|entry| entry.id));
+            found.extend(page.entries.into_iter().map(|entry| entry.lfid));
             after = page.next;
             if after.is_none() {
                 break;
@@ -1107,17 +1198,17 @@ mod discovery_tests {
     }
 
     #[test]
-    fn exec_discovery_deduplicates_performed_work_without_rebinding_history() {
+    fn process_discovery_deduplicates_performed_work_without_rebinding_history() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
         let wave = WaveId::new();
         let project = ProjectId::new();
         let first = TaskId::new();
         let second = TaskId::new();
-        let shared = insert_exec(&store, 1, 3);
-        let mechanical = insert_exec(&store, 2, 2);
-        let unbound = insert_exec(&store, 3, 1);
-        let observer = insert_exec(&store, 4, 4);
+        let shared = insert_process(&store, 1, 3);
+        let mechanical = insert_process(&store, 2, 2);
+        let unbound = insert_process(&store, 3, 1);
+        let observer = insert_process(&store, 4, 4);
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -1146,89 +1237,89 @@ mod discovery_tests {
                     &format!("session-{index}"),
                     &format!("run_{index:032x}"),
                 );
-                conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,exec_id,task_id,wave_id,observed_at,payload)
+                conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,process_lfid,task_id,wave_id,observed_at,payload)
                     VALUES(?1,'thread','work','started','',?2,?3,?4,1,'unreadable payload')",
                     params![format!("session-{index}"),shared,task.as_str(),wave]).unwrap();
             }
-            // Same Exec drove both Tasks, two turns and a mechanical boundary.
-            conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,exec_id,task_id,wave_id,observed_at,payload)
+            // Same Process drove both Tasks, two turns and a mechanical boundary.
+            conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,process_lfid,task_id,wave_id,observed_at,payload)
                 VALUES('session-0','thread','retry','started','',?1,?2,?3,2,'{}')",params![shared,first.as_str(),wave]).unwrap();
             // Session is bound now; the earlier turn remains unassigned.
-            conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,exec_id,observed_at,payload)
+            conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,process_lfid,observed_at,payload)
                 VALUES('session-0','thread','before-bind','started','',?1,1,'{}')",[&unbound]).unwrap();
             // Known Task, unknown original process: neither current driver nor observer is its owner.
             conn.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload)
                 VALUES('session-0','thread','unmapped','started','',?1,?2,1,'{}')",params![first.as_str(),wave]).unwrap();
-            conn.execute("UPDATE agent_sessions SET driver_exec_id=?1,provider_exec_id=?1 WHERE id='session-0'",[&observer]).unwrap();
+            conn.execute("UPDATE agent_sessions SET driver_process_lfid=?1,provider_process_lfid=?1 WHERE id='session-0'",[&observer]).unwrap();
             conn.execute(
-                "UPDATE execs SET caller_session_id='session-0',via_agent=1 WHERE id=?1",
+                "UPDATE processes SET caller_session_id='session-0',via_agent=1 WHERE lfid=?1",
                 [&observer],
             )
             .unwrap();
-            // A Flow's driver recorded both Execs as steps in the first Task's checkout.
+            // A Flow's driver recorded both Processes as steps in the first Task's checkout.
             conn.execute(
                 "UPDATE tasks SET worktree='/repo.first' WHERE id=?1",
                 [first.as_str()],
             )
             .unwrap();
             conn.execute(
-                "INSERT INTO flow_execs(exec_id,flow,graph) VALUES(?1,'proof','{}')",
+                "INSERT INTO flow_processes(process_lfid,flow,graph) VALUES(?1,'proof','{}')",
                 [&observer],
             )
             .unwrap();
-            for exec in [&shared, &mechanical] {
+            for process in [&shared, &mechanical] {
                 conn.execute(
-                    "UPDATE execs SET cwd='/repo.first',parent_exec_id=?2 WHERE id=?1",
-                    params![exec, observer],
+                    "UPDATE processes SET cwd='/repo.first',parent_process_lfid=?2 WHERE lfid=?1",
+                    params![process, observer],
                 )
                 .unwrap();
                 conn.execute(
-                    "INSERT INTO flow_exec_steps(flow_exec_id,exec_id,node,iterations) VALUES(?2,?1,0,'[]')",
-                    params![exec, observer],
+                    "INSERT INTO flow_process_steps(flow_process_lfid,process_lfid,node,iterations) VALUES(?2,?1,0,'[]')",
+                    params![process, observer],
                 )
                 .unwrap();
             }
         }
-        let filter = ExecFilter {
-            performed_work: Some(ExecWorkFilter::Task(first.clone())),
+        let filter = ProcessFilter {
+            performed_work: Some(ProcessWorkFilter::Task(first.clone())),
             ..Default::default()
         };
         let page = store
-            .execs(&filter, None, NonZeroU32::new(1).unwrap())
+            .processes(&filter, None, NonZeroU32::new(1).unwrap())
             .unwrap();
         assert_eq!(
-            page.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
+            page.entries.iter().map(|e| &e.lfid).collect::<Vec<_>>(),
             vec![&shared]
         );
         let page = store
-            .execs(&filter, page.next.as_ref(), NonZeroU32::new(1).unwrap())
+            .processes(&filter, page.next.as_ref(), NonZeroU32::new(1).unwrap())
             .unwrap();
-        assert_eq!(page.entries[0].id, mechanical);
+        assert_eq!(page.entries[0].lfid, mechanical);
         assert_eq!(page.next, None);
-        let second_filter = ExecFilter {
-            performed_work: Some(ExecWorkFilter::Task(second)),
+        let second_filter = ProcessFilter {
+            performed_work: Some(ProcessWorkFilter::Task(second)),
             ..Default::default()
         };
         let page = store
-            .execs(&second_filter, None, NonZeroU32::new(10).unwrap())
+            .processes(&second_filter, None, NonZeroU32::new(10).unwrap())
             .unwrap();
         assert_eq!(
-            page.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
+            page.entries.iter().map(|e| &e.lfid).collect::<Vec<_>>(),
             vec![&shared]
         );
-        let wave_filter = ExecFilter {
-            performed_work: Some(ExecWorkFilter::Wave(wave)),
+        let wave_filter = ProcessFilter {
+            performed_work: Some(ProcessWorkFilter::Wave(wave)),
             ..Default::default()
         };
         let page = store
-            .execs(&wave_filter, None, NonZeroU32::new(10).unwrap())
+            .processes(&wave_filter, None, NonZeroU32::new(10).unwrap())
             .unwrap();
         assert_eq!(
-            page.entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
+            page.entries.iter().map(|e| &e.lfid).collect::<Vec<_>>(),
             vec![&shared, &mechanical]
         );
-        assert_eq!(store.exec(&unbound).unwrap().unwrap().outcome, None);
-        assert_eq!(store.exec(&observer).unwrap().unwrap().outcome, None);
+        assert_eq!(store.process(&unbound).unwrap().unwrap().outcome, None);
+        assert_eq!(store.process(&observer).unwrap().unwrap().outcome, None);
         assert!(store
             .conn
             .lock()

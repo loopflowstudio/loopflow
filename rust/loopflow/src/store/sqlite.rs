@@ -24,11 +24,11 @@ mod chapters;
 mod children;
 mod ci_incidents;
 mod durable;
-mod execs;
 mod flow_inventory;
 mod metrics;
 mod planning;
 mod pr_landings;
+mod processes;
 pub(crate) mod project_selection;
 mod project_transitions;
 mod revisions;
@@ -40,7 +40,7 @@ mod task_work;
 pub(crate) use durable::task_state_sql;
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
-pub(crate) use task_work::{EndMove, OpenExecs};
+pub(crate) use task_work::{EndMove, OpenProcesses};
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable
@@ -553,31 +553,31 @@ impl SqliteStore {
         })
     }
 
-    /// Open only the Exec rows without schema or token writes.
+    /// Open only the Process rows without schema or token writes.
     /// Observability commands use this when a source build may be older than
     /// the machine's release-owned database.
-    pub(crate) fn open_execs_read_only(path: &Path) -> StoreResult<Self> {
+    pub(crate) fn open_processes_read_only(path: &Path) -> StoreResult<Self> {
         let store = Self::open_read_only(path)?;
         {
             let conn = store.conn.lock().expect("store mutex poisoned");
-            validate_exec_schema(&conn)?;
+            validate_process_schema(&conn)?;
         }
         Ok(store)
     }
 
     /// Append process evidence to an existing compatible store, never initialize it.
-    pub(crate) fn open_existing_execs(path: &Path) -> StoreResult<Self> {
+    pub(crate) fn open_existing_processes(path: &Path) -> StoreResult<Self> {
         let conn = Connection::open_with_flags(
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         crate::performance::observe_sqlite(&conn);
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
-        validate_exec_schema(&conn)?;
+        validate_process_schema(&conn)?;
         // An older ledger without the current process owner is not a writable
         // observation destination. Leave upgrade decisions to ordinary admission.
         conn.prepare(
-            "SELECT id, trace_id, started_at, completed_at, outcome, exit_code FROM execs LIMIT 0",
+            "SELECT lfid, trace_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
         )?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -639,7 +639,7 @@ impl SqliteStore {
     /// the same connection lock while the connection-level transaction stays
     /// open. Observability callers create a private read-only store for this
     /// operation, so no unrelated reader can join the transaction.
-    pub(crate) fn read_exec_snapshot<T>(
+    pub(crate) fn read_process_snapshot<T>(
         &self,
         read: impl FnOnce(&Self) -> StoreResult<T>,
     ) -> StoreResult<T> {
@@ -865,9 +865,9 @@ fn validate_wave_parent(
     Ok(())
 }
 
-fn validate_exec_schema(conn: &Connection) -> StoreResult<()> {
+fn validate_process_schema(conn: &Connection) -> StoreResult<()> {
     conn.prepare(
-        "SELECT id,trace_id,parent_exec_id,started_at,completed_at,outcome FROM execs LIMIT 0",
+        "SELECT lfid,trace_id,parent_process_lfid,started_at,completed_at,outcome,pid FROM processes LIMIT 0",
     )?;
     Ok(())
 }
@@ -2137,27 +2137,27 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn record_exec(&self, exec: &crate::exec::Exec) -> StoreResult<()> {
+    pub fn record_process(&self, process: &crate::process::Process) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO execs(id,trace_id,parent_exec_id,command,repo,cwd,started_at,
-                via_agent,caller_session_id,caller_provider_generation,completed_at,outcome,exit_code,signal,error)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
-             ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
+            "INSERT INTO processes(lfid,trace_id,parent_process_lfid,command,repo,cwd,started_at,
+                via_agent,caller_session_id,caller_provider_generation,completed_at,outcome,exit_code,signal,error,pid)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+             ON CONFLICT(lfid) DO UPDATE SET completed_at=excluded.completed_at,
                 outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
-             WHERE execs.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
-            params![exec.id,exec.trace_id,exec.parent_exec_id,exec.command,exec.repo,exec.cwd,
-                exec.started_at,exec.via_agent,exec.caller_session_id,exec.caller_provider_generation,
-                exec.completed_at,exec.outcome,exec.exit_code,exec.signal,exec.error],
+             WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
+            params![process.lfid,process.trace_id,process.parent_process_lfid,process.command,process.repo,process.cwd,
+                process.started_at,process.via_agent,process.caller_session_id,process.caller_provider_generation,
+                process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid],
         )?;
         Ok(())
     }
 
-    /// Record an Exec, waiting at most `wait` for another writer; a zero wait
+    /// Record a process, waiting at most `wait` for another writer; a zero wait
     /// is one attempt.
-    pub(crate) fn record_exec_within(
+    pub(crate) fn record_process_within(
         &self,
-        exec: &crate::exec::Exec,
+        process: &crate::process::Process,
         wait: Duration,
     ) -> StoreResult<()> {
         let previous: u32 = {
@@ -2166,7 +2166,7 @@ impl SqliteStore {
             conn.busy_timeout(wait)?;
             previous
         };
-        let result = self.record_exec(exec);
+        let result = self.record_process(process);
         self.conn
             .lock()
             .expect("store mutex poisoned")
@@ -2174,10 +2174,10 @@ impl SqliteStore {
         result
     }
 
-    pub fn process_is_recorded(&self, process_id: &str) -> StoreResult<bool> {
+    pub fn process_is_recorded(&self, process_lfid: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT 1 FROM execs WHERE id=?1")?;
-        Ok(query.exists([process_id])?)
+        let mut query = conn.prepare("SELECT 1 FROM processes WHERE lfid=?1")?;
+        Ok(query.exists([process_lfid])?)
     }
 }
 

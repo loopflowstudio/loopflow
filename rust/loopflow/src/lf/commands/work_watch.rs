@@ -4,7 +4,7 @@
 //! part is projected again only then, on a read-only connection, and sent only
 //! when its content differs from the last frame. Bodies are the same wire types
 //! the one-shot `--json` reads print. The reader commits nothing, so it never
-//! wakes itself, and it records one Exec for its whole lifetime.
+//! wakes itself, and it records one Process for its whole lifetime.
 
 mod checkouts;
 
@@ -190,17 +190,17 @@ impl Part {
 
     /// Whether a commit that moved revisions from `old` to `new` can change
     /// this part. Planning conditions read Sessions, Flows and unfinished
-    /// Execs; the Session list reads no Exec, and only a Wave's Session
+    /// Processes; the Session list reads no Process, and only a Wave's Session
     /// history shows token totals.
     fn changed(self, mut old: StoreRevisions, new: StoreRevisions) -> bool {
         if self == Part::Activity {
-            return old.execs != new.execs;
+            return old.processes != new.processes;
         }
         if self != Part::Wave {
             old.usage = new.usage;
         }
         if self == Part::Sessions {
-            old.execs = new.execs;
+            old.processes = new.processes;
         }
         old != new
     }
@@ -574,11 +574,11 @@ impl Reader {
                     let mut flow_runs = Vec::with_capacity(work.flows.len());
                     for flow in &work.flows {
                         let id = flow.summary.id.as_str();
-                        let (exec, entry) = store
+                        let (process, entry) = store
                             .sqlite
-                            .flow_exec(id)?
+                            .flow_process(id)?
                             .ok_or_else(|| anyhow!("Flow {id} has no driver record"))?;
-                        flow_runs.push(exec.detail(entry));
+                        flow_runs.push(process.detail(entry));
                     }
                     WorkContent::Task(Some(TaskPart {
                         task: selector,
@@ -889,18 +889,18 @@ mod tests {
     use super::{fingerprint, Part, PartState, StoreRevisions, WorkContent};
     use crate::lf::commands::top::ActivitySnapshot;
 
-    fn revisions(planning: i64, sessions: i64, flows: i64, execs: i64) -> StoreRevisions {
+    fn revisions(planning: i64, sessions: i64, flows: i64, processes: i64) -> StoreRevisions {
         StoreRevisions {
             planning,
             sessions,
             flows,
-            execs,
+            processes,
             usage: 0,
         }
     }
 
     #[test]
-    fn an_exec_alone_does_not_reread_sessions() {
+    fn an_process_alone_does_not_reread_sessions() {
         let old = revisions(1, 1, 1, 1);
         assert!(!Part::Sessions.changed(old, revisions(1, 1, 1, 2)));
         assert!(Part::Planning.changed(old, revisions(1, 1, 1, 2)));

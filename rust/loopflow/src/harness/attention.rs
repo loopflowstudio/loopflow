@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use crate::exec::SessionDriver;
+use crate::process::SessionDriver;
 use crate::session::SessionActivity;
 use crate::store::sqlite::SqliteStore;
 
@@ -270,8 +270,8 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{claude, codex, opencode, Attention, Signal};
-    use crate::exec::SessionDriver;
-    use crate::id::ExecId;
+    use crate::id::ProcessLfid;
+    use crate::process::SessionDriver;
     use crate::store::sqlite::SqliteStore;
 
     /// A conversation whose driver saves what a recorded stream says, one
@@ -294,16 +294,16 @@ mod tests {
             let store = SqliteStore::open_ephemeral(&path).unwrap();
             store.test_session("conversation", "run_00000000000000000000000000000001");
             let conn = rusqlite::Connection::open(&path).unwrap();
-            let exec = ExecId::new();
+            let process = ProcessLfid::new();
             conn.execute(
-                "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [&exec],
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&process],
             )
             .unwrap();
             conn.execute("UPDATE agent_sessions SET interactive=?1", [interactive])
                 .unwrap();
             let driver = store
-                .claim_session_driver("conversation", None, &exec, false)
+                .claim_session_driver("conversation", None, &process, false)
                 .unwrap();
             Self {
                 _home: home,

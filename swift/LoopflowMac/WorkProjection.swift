@@ -406,7 +406,7 @@ final class WorkNavigation {
     var expandedHistory: Set<String> = []
     /// Wave planning notices whose Details are open, keyed by Task ID.
     var expandedNotices: Set<String> = []
-    /// Flow execs whose graph and steps are open, keyed by driver Exec.
+    /// Flow processes whose graph and steps are open, keyed by driver Process.
     var expandedFlowRuns: Set<String> = []
     var repositoryCollapsed = false
     /// The orphan Session section's disclosure. `nil` follows the default:

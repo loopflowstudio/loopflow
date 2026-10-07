@@ -101,9 +101,9 @@ struct ProjectActivationTests {
         #expect(model.roadmap.value == roadmap)
     }
 
-    @Test("an unfinished persisted Exec without a live command remains unknown")
-    func unfinishedExec() throws {
-        let readiness = try JSONDecoder().decode(ProjectReadiness.self, from: Data(#"{"state":"unconfigured","activation":{"exec_id":"exec","completed_at":null,"outcome":null,"error":null}}"#.utf8))
+    @Test("an unfinished persisted Process without a live command remains unknown")
+    func unfinishedProcess() throws {
+        let readiness = try JSONDecoder().decode(ProjectReadiness.self, from: Data(#"{"state":"unconfigured","activation":{"process_lfid":"process","completed_at":null,"outcome":null,"error":null}}"#.utf8))
         let view = ProjectReadinessView(readiness: readiness, isPending: false, transportError: nil, retry: {})
         #expect(try view.inspect().find(text: "Project activation has no recorded outcome yet.").string()
             == "Project activation has no recorded outcome yet.")

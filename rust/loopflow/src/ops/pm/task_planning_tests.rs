@@ -299,6 +299,43 @@ async fn planning_graphql(
 }
 
 #[tokio::test]
+async fn refile_leaves_a_task_already_in_the_wave_and_refuses_an_unknown_wave() {
+    let fixture = Fixture::new().await;
+    fixture.seed(now() + 86_400).await;
+    let (repo, _wave) = planning_repo(&fixture).await;
+    let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
+    let (url, server) = serve(state.clone()).await;
+    PM_TEST_CONTEXT
+        .scope(fixture.context(&url), async {
+            super::pm_create_task_idempotent(
+                &repo,
+                "product",
+                "Misfiled",
+                "Report",
+                "<!-- loopflow-task-start:refile -->",
+                |_, _| async { Ok(()) },
+            )
+            .await
+            .unwrap();
+
+            // The fixture rejects any mutation it does not know, so an Ok here
+            // also proves no move was sent.
+            let kept = super::pm_refile_async(&repo, "FIX-1", "product")
+                .await
+                .unwrap();
+            assert_eq!(kept.wave, "product");
+            assert_eq!(state.lock().await.issues[0]["project"]["id"], "project-1");
+
+            assert!(super::pm_refile_async(&repo, "FIX-1", "nowhere")
+                .await
+                .is_err());
+            assert_eq!(state.lock().await.issues[0]["project"]["id"], "project-1");
+        })
+        .await;
+    server.abort();
+}
+
+#[tokio::test]
 async fn task_creation_refusal_preserves_inventory_and_marker_retry_reuses_provider_title() {
     let fixture = Fixture::new().await;
     fixture.seed(now() + 86_400).await;
@@ -1565,7 +1602,7 @@ esac
             .is_empty());
             assert!(git(&repo, &["branch", "--list", "cancel-me"]).is_empty());
             assert!(repo.join(".git/pr-closed").exists());
-            // The Flow's Execs remain as history; abandonment retires nothing.
+            // The Flow's Processes remain as history; abandonment retires nothing.
             assert_eq!(fixture.store.sqlite.task_flows(&task.id).unwrap().len(), 1);
             assert_eq!(
                 runtime

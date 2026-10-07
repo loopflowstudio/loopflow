@@ -3,9 +3,9 @@
   "observed_at": 1784606400,
   "nodes": [
     {
-      "id": "exec:exec-loopflow",
+      "id": "process:process-loopflow",
       "parent_id": null,
-      "kind": "exec",
+      "kind": "process",
       "label": "lf task pursue",
       "repo": "/src/loopflow",
       "wave": "product",
@@ -16,7 +16,7 @@
     },
     {
       "id": "provider:4101",
-      "parent_id": "exec:exec-loopflow",
+      "parent_id": "process:process-loopflow",
       "kind": "provider_process",
       "label": "codex 4101",
       "repo": "/src/loopflow",
@@ -28,7 +28,7 @@
     },
     {
       "id": "provider:4201",
-      "parent_id": "exec:exec-loopflow",
+      "parent_id": "process:process-loopflow",
       "kind": "provider_process",
       "label": "claude 4201",
       "repo": "/src/loopflow",

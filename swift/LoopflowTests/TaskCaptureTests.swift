@@ -147,10 +147,10 @@ struct TaskCaptureTests {
         model.select(.task(id: task.id))
         let repo = "/src/loopflow"
         let taskPath = task.reference.workspace?.worktree ?? "/src/task-checkout"
-        let homeId = "capture-test-home"
-        let repoIdentity = WorkspaceIdentity(homeId: homeId, worktree: repo)
-        let taskIdentity = WorkspaceIdentity(homeId: homeId, worktree: taskPath)
-        let registry = SessionsWorkspaceRegistry(localHomeId: homeId)
+        let machineId = "capture-test-home"
+        let repoIdentity = WorkspaceIdentity(machineId: machineId, worktree: repo)
+        let taskIdentity = WorkspaceIdentity(machineId: machineId, worktree: taskPath)
+        let registry = SessionsWorkspaceRegistry(localMachineId: machineId)
         let repoPanes = registry.workspace(for: repoIdentity).multiplexer
         repoPanes.newShell(command: ["retained-shell"])
         repoPanes.load(sessionId: "existing-conversation")

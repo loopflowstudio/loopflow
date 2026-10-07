@@ -1,28 +1,28 @@
-# Maintained cron Home
+# Maintained cron Machine
 
-Run the infrastructure Wave's declared telemetry and release jobs on the Home
+Run the infrastructure Wave's declared telemetry and release jobs on the Machine
 that owns its durable placement. Placement is the authority; a hostname in a
 document is not.
 
 ```bash
-lf home id
-lf wave status infrastructure --json | jq -r '.wave.home.id'
+lf machine id
+lf wave status infrastructure --json | jq -r '.wave.machine.id'
 scripts/bootstrap-cron-host.sh infrastructure
 lf cron history --wave infrastructure --days 35
 ```
 
-The two Home ids must match. `bootstrap-cron-host.sh` fails before changing
+The two Machine ids must match. `bootstrap-cron-host.sh` fails before changing
 launchd when they differ.
 
 ## Host prerequisites
 
 - Promote an installed release `lf`; cron installation rejects development and
   task-worktree binaries.
-- Keep the repository's authoritative checkout on the placed Home.
-- Configure at least one managed Claude or Codex account in the Home store.
+- Keep the repository's authoritative checkout on the placed Machine.
+- Configure at least one managed Claude or Codex account in the Machine store.
 - Install `uv`, `gh`, `cargo`, `flyctl`, `security`, `swift`, `xcrun`, and
   `jq` on the host path.
-- Install an executable named `loopflow-release-publisher` on the Home's PATH.
+- Install an executable named `loopflow-release-publisher` on the Machine's PATH.
   It must inject the host's private publisher authority, then execute the argv
   it receives. Keep its implementation and provider selectors outside the
   checkout.
@@ -30,7 +30,7 @@ launchd when they differ.
   R2, notarization, and Fly authority required by the release publisher.
 
 The bootstrap reconstructs a minimal environment containing only host paths,
-Home/store paths, and basic locale/temp settings. It verifies a managed provider
+Machine/store paths, and basic locale/temp settings. It verifies a managed provider
 account live, then runs the publisher's read-only check through:
 
 ```bash
@@ -38,7 +38,7 @@ loopflow-release-publisher \
   uv run python scripts/publish_release.py check
 ```
 
-The logical command is the public contract; its Home-local implementation owns
+The logical command is the public contract; its Machine-local implementation owns
 the private provider binding. The bootstrap never reads or prints a secret and
 never forwards a Task lease, provider lease, GitHub token, PM token, or
 invocation context. A missing command or failed check stops before cron sync.
@@ -66,7 +66,7 @@ target with this Flow target, then inspect `lf cron list --wave infrastructure`.
 daily schedules before it writes a plist. A declared `flow` must resolve to a
 flow; missing or malformed repository content cannot fall back to a same-named
 skill. Repository flows take precedence over reusable skills. Sync captures the
-non-secret host path, Home id, Home/store paths, authoritative checkout, installed binary, exact
+non-secret host path, Machine id, Machine/store paths, authoritative checkout, installed binary, exact
 schedule, and log path. Scheduled execution repeats the placement check and
 fails with a receipt instead of running after ownership moves.
 
@@ -76,7 +76,7 @@ the bootstrap runs it before any credential probe.
 
 launchd uses host-local time and coalesces missed calendar firings after wake.
 Receipts record the actual start; declarations alone never count as evidence of
-a nightly run. Place the Wave on an always-on Home when uninterrupted wall-clock
+a nightly run. Place the Wave on an always-on Machine when uninterrupted wall-clock
 cadence matters.
 
 ## Durable evidence
@@ -88,7 +88,7 @@ lf cron trigger --wave infrastructure --flow release-run --wait --timeout 3h
 lf cron history --wave infrastructure --days 35 --json
 ```
 
-`list` reports the exact schedule, loaded state, installed Home, repo, binary,
+`list` reports the exact schedule, loaded state, installed Machine, repo, binary,
 and latest receipt. `trigger` exercises launchd rather than invoking the target
 directly. Every firing writes a private, versioned receipt under
 `<LF_HOME>/cron/receipts/<wave>/<flow>/`; receipts contain identity, timing,
@@ -138,7 +138,7 @@ reason and continuation; failed attempts survive later recovery.
 
 Each release attempt freezes `telemetry` observations for its covered due times.
 Original prerequisite intervals retain their receipt ids and `obligation_id`,
-which names the retained telemetry schedule, timezone and Home segment in
+which names the retained telemetry schedule, timezone and Machine segment in
 `obligations`. Sync and removal preserve those segments before replacing the
 installed job. Telemetry segments contain no release opportunities. Unobserved
 history, installation gaps and dues before the segment's first scheduled check
@@ -165,9 +165,9 @@ a later wake can run a fresh check. An unobserved late exit does not retroactive
 pass the original receipt. Ordinary scheduled/manual targets retain their
 existing wait behavior.
 
-Release overlap records the exact next configured due time, obligation and Home
+Release overlap records the exact next configured due time, obligation and Machine
 observed by the contender. The active execution keeps its frozen coverage.
-If closure is already observed, the continuation points to the original Home's
+If closure is already observed, the continuation points to the original Machine's
 opportunity disposition command. A later schedule change can supersede a saved
 retry time; history retains it as an observation, not a reservation. History
 keeps physical attempt and overlap receipts linked to retained opportunities,
@@ -178,20 +178,20 @@ repair ownership. It does not start work, assign a remote issue, or erase the
 failure. The earliest disposition timestamp determines whether ownership was
 recorded within a day. Pending external handoffs remain pending.
 
-Closed schedules retain unfinished opportunities on their original Home.
+Closed schedules retain unfinished opportunities on their original Machine.
 `release history` lists their execution owners under `summary.closed_unsettled`,
 even outside `--days`, and prints the retained candidate and disposition command.
-Use the opportunity id on that Home to assign its repair; ownership is late if
+Use the opportunity id on that Machine to assign its repair; ownership is late if
 first recorded more than a day after closure. Collapsed dues share their owner's
 blocker. Disposition leaves the blocker, attempts and candidate intact: it neither
-settles a release nor moves execution to a replacement Home. An already running
+settles a release nor moves execution to a replacement Machine. An already running
 operation can still record its exact settlement; closure does not prove its exit.
 Saved waits show their previously expected firing as history after closure.
-A replacement schedule on the same Home resumes the original candidate owner
+A replacement schedule on the same Machine resumes the original candidate owner
 and freezes all outstanding predecessor and successor dues in one execution.
 `attempts[].execution_obligation` identifies the segment that fired; original due
 identities and historical telemetry stay on their own segments. Collapse links
-in history are derived from the frozen `covered` set. A changed Home breaks the
+in history are derived from the frozen `covered` set. A changed Machine breaks the
 continuation chain. A removed schedule requires repair because it cannot fire.
 
 Ordinary `cron trigger` records intervention before asking launchd to kickstart;

@@ -25,7 +25,7 @@ public enum SessionActionKind: String, Codable, Sendable, Hashable {
 
 /// Who chose a Session's title. Rust never lets a generated suggestion
 /// replace a human-assigned name. `unavailable` means the canonical name lives
-/// on another Home; the title is only a local label.
+/// on another Machine; the title is only a local label.
 public enum SessionTitleSource: String, Codable, Sendable, Hashable {
     case generated
     case human
@@ -137,15 +137,15 @@ public struct SessionAction: Codable, Sendable, Hashable {
 }
 
 public struct SessionWorkspace: Codable, Sendable, Hashable {
-    public var identity: WorkspaceIdentity { WorkspaceIdentity(homeId: homeId, worktree: worktree) }
-    public let homeId: String
+    public var identity: WorkspaceIdentity { WorkspaceIdentity(machineId: machineId, worktree: worktree) }
+    public let machineId: String
     public let worktree: String
     public let taskId: String?
     public let unavailable: String?
 
     enum CodingKeys: String, CodingKey {
         case worktree, unavailable
-        case homeId = "home_id"
+        case machineId = "machine_id"
         case taskId = "task_id"
     }
 }
@@ -170,7 +170,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let flowMembership: SessionFlowMembership
     public let detail: String
     /// Provider harness recorded on the Session's capture manifest; nil when the
-    /// capture is on another Home or its manifest is unreadable.
+    /// capture is on another Machine or its manifest is unreadable.
     public let provider: String?
     public let cwd: String
     public let state: SessionState

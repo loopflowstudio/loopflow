@@ -1,7 +1,7 @@
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Home, HomeId, Placement, Steer, SteerComment, TaskId, ToolResponseReceipt,
-    ToolResponseWrite, WorkRef, WorkStatus,
+    AbandonReceipt, Machine, MachineId, Placement, Steer, SteerComment, TaskId,
+    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 
 use super::{run_sqlite, Store, StoreResult};
@@ -26,20 +26,24 @@ impl Store {
         .await
     }
 
-    pub async fn home_by_id(&self, home_id: &HomeId) -> StoreResult<Option<Home>> {
-        let home_id = home_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.home_by_id(&home_id)).await
+    pub async fn machine_by_id(&self, machine_id: &MachineId) -> StoreResult<Option<Machine>> {
+        let machine_id = machine_id.clone();
+        run_sqlite(&self.sqlite, move |store| store.machine_by_id(&machine_id)).await
     }
 
-    pub async fn local_home(&self) -> StoreResult<Home> {
-        run_sqlite(&self.sqlite, move |store| store.local_home()).await
+    pub async fn local_machine(&self) -> StoreResult<Machine> {
+        run_sqlite(&self.sqlite, move |store| store.local_machine()).await
     }
 
-    pub async fn observe_home(&self, home_id: &HomeId, route: &str) -> StoreResult<Home> {
-        let home_id = home_id.clone();
+    pub async fn observe_machine(
+        &self,
+        machine_id: &MachineId,
+        route: &str,
+    ) -> StoreResult<Machine> {
+        let machine_id = machine_id.clone();
         let route = route.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.observe_home(&home_id, &route)
+            store.observe_machine(&machine_id, &route)
         })
         .await
     }
@@ -52,11 +56,14 @@ impl Store {
     pub(crate) async fn place_work(
         &self,
         work: &WorkRef,
-        home_id: &HomeId,
+        machine_id: &MachineId,
     ) -> StoreResult<Placement> {
         let work = work.clone();
-        let home_id = home_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.place_work(&work, &home_id)).await
+        let machine_id = machine_id.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.place_work(&work, &machine_id)
+        })
+        .await
     }
 
     pub async fn abandon(&self, work: &WorkRef, reason: &str) -> StoreResult<AbandonReceipt> {
@@ -166,31 +173,35 @@ mod tests {
     #[tokio::test]
     async fn placement_preserves_the_selected_home() {
         let (store, work) = wave_work().await;
-        let local = store.local_home().await.unwrap();
+        let local = store.local_machine().await.unwrap();
 
         let remote = store
-            .observe_home(&crate::durable::HomeId::new(), "ssh://jack@buildbox")
+            .observe_machine(&crate::durable::MachineId::new(), "ssh://jack@buildbox")
             .await
             .unwrap();
         assert_eq!(
-            store.place_work(&work, &remote.id).await.unwrap().home_id,
+            store
+                .place_work(&work, &remote.id)
+                .await
+                .unwrap()
+                .machine_id,
             remote.id
         );
         assert_eq!(
-            store.place_work(&work, &local.id).await.unwrap().home_id,
+            store.place_work(&work, &local.id).await.unwrap().machine_id,
             local.id
         );
     }
 
     #[tokio::test]
-    async fn local_home_route_cannot_be_observed_as_remote() {
+    async fn local_machine_route_cannot_be_observed_as_remote() {
         let (store, _) = wave_work().await;
-        let local = store.local_home().await.unwrap();
+        let local = store.local_machine().await.unwrap();
 
         assert!(matches!(
-            store.observe_home(&local.id, "ssh://jack@elsewhere").await,
-            Err(StoreError::InvalidData(message)) if message.contains("cannot replace local Home")
+            store.observe_machine(&local.id, "ssh://jack@elsewhere").await,
+            Err(StoreError::InvalidData(message)) if message.contains("cannot replace local Machine")
         ));
-        assert_eq!(store.local_home().await.unwrap(), local);
+        assert_eq!(store.local_machine().await.unwrap(), local);
     }
 }

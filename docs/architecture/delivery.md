@@ -94,7 +94,7 @@ GitHub squash-merges the final PR tree into one commit on main. `arm` and `land`
 GitHub auto-merge, record the landing, and return. Success means handoff;
 `lf task reconcile` checks recorded repository landings once;
 `lf pr reconcile` uses its delivery-only path. `lf cron sync --repo` installs the
-finite minute check on this Home. Neither repairs CI; `lf ci watch` does. `submit` performs the
+finite minute check on this Machine. Neither repairs CI; `lf ci watch` does. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
 commands inspect Task delivery state when present; they do not require a running
 Task Flow or certify that a particular Flow ran.
@@ -316,7 +316,7 @@ serial chain to a new branch from fetched main.
 ## Next
 
 [Planning →](planning.md) separates the Task objective from exact Flow positions.
-[Homes and processes →](homes.md) owns the machine and process boundaries around
+[Machines and processes →](machines.md) owns the machine and process boundaries around
 delivery.
 
 

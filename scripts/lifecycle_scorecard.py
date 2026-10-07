@@ -37,7 +37,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--database",
         type=Path,
         required=True,
-        help="read this Rust-resolved Loopflow Home database",
+        help="read this Rust-resolved Loopflow Machine database",
     )
     parser.add_argument(
         "--history",

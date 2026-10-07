@@ -99,7 +99,7 @@ pub struct TaskControlResult {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskSnapshot {
-    pub home_id: Option<crate::durable::HomeId>,
+    pub machine_id: Option<crate::durable::MachineId>,
     pub issue_id: String,
     pub issue_identifier: String,
     pub task_id: String,
@@ -274,10 +274,10 @@ fn file_context(issue: &str) -> OpsResult<crate::store::sqlite::TaskCheckout> {
             "multiple stable Tasks resolve to {issue:?}"
         )));
     }
-    if let Some(home) = &checkout.home_id {
-        if *home != store.local_home().map_err(task_error)?.id {
+    if let Some(home) = &checkout.machine_id {
+        if *home != store.local_machine().map_err(task_error)?.id {
             return Err(task_error(format!(
-                "Task checkout belongs to Home {home}; read its files on that Home"
+                "Task checkout belongs to Machine {home}; read its files on that Machine"
             )));
         }
     }
@@ -1682,16 +1682,16 @@ fn task_registry_error(err: RegistryUnavailable) -> OpsError {
     task_error(match err {
         RegistryUnavailable::MissingFile { path } => format!(
             "Task PR authority refused: the shared Loopflow registry {} is missing. \
-             Start the owning Wave (it creates the registry) or run `lf home doctor`.",
+             Start the owning Wave (it creates the registry) or run `lf machine doctor`.",
             path.display()
         ),
         RegistryUnavailable::Unresolved { error } => format!(
             "Task PR authority refused: the shared Loopflow registry path is not usable: {error}. \
-             Fix LF_HOME or run `lf home doctor`."
+             Fix LF_HOME or run `lf machine doctor`."
         ),
         RegistryUnavailable::Incompatible { path, error } => format!(
             "Task PR authority refused: the shared Loopflow registry {} is present but \
-             inaccessible or schema-incompatible: {error}. Run `lf home doctor`.",
+             inaccessible or schema-incompatible: {error}. Run `lf machine doctor`.",
             path.display()
         ),
     })
@@ -4250,15 +4250,15 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
         };
         let agent = resolve_task_agent(&task.worktree, task.agent.as_deref(), None);
         let (provider, _) = parse_agent(&agent);
-        let home_id = store
+        let machine_id = store
             .task_checkouts()
             .await
             .map_err(task_error)?
             .into_iter()
             .find(|row| row.task_id == task.id)
-            .and_then(|row| row.home_id);
-        let local_home = store.local_home().await.map_err(task_error)?;
-        let worktree = if home_id.as_ref() == Some(&local_home.id) {
+            .and_then(|row| row.machine_id);
+        let local_machine = store.local_machine().await.map_err(task_error)?;
+        let worktree = if machine_id.as_ref() == Some(&local_machine.id) {
             crate::engine::git::worktree_root(&task.worktree)
                 .ok()
                 .and_then(|root| root.canonicalize().ok())
@@ -4268,7 +4268,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
         };
         let planning_conflict = planning_conflict(&store, &task).await?;
         Ok(TaskSnapshot {
-            home_id,
+            machine_id,
             issue_id: task.plan.id.as_str().to_string(),
             issue_identifier: task.plan.identifier,
             task_id: task.id.to_string(),

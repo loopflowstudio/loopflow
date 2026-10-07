@@ -136,7 +136,7 @@ local service credentials have separate sections: an expired local token says
 nothing about a managed account. Missing local tokens leave ambient auth
 uninspected. Cached inspection reads account state without starting a provider,
 decrypting local tokens or creating an encryption key. The CLI records the
-command's Exec in its Home; this can initialize an empty store, but creates no
+command's Exec in its Machine; this can initialize an empty store, but creates no
 account, route or conversation. An inherited account lease carries no cached identity catalog:
 `--cached` reports forwarded identities as uninspected without contacting the
 origin broker. Local token metadata is cached evidence, not server acceptance;
@@ -202,7 +202,7 @@ and connect save that binding. Routing checks expected email, user UUID and
 duplicate logins, requesting a profile observation when the credential changed.
 Recorded Claude and Codex launches both require their owning account catalog.
 
-Account state remains in the Home database.
+Account state remains in the Machine database.
 
 Control automatic routing per account:
 
@@ -255,7 +255,7 @@ lf mon list <run-id> --events
 headless Task steps before a provider session ID is available. Later attempts
 retain earlier account evidence; a null account means ambient execution. Once
 the provider reports its native identity, continuation must retain that identity
-and selected account/native Home. Requested account and actual selection are
+and selected account/native Machine. Requested account and actual selection are
 different evidence. The event command above remains a transitional launch
 interface; [cutover status](architecture-reference.md#cutover-status) records the
 remaining history/account conversion.
@@ -288,7 +288,7 @@ lf --account claude=personal@ --account codex=work@ task run LOO-123
 A Flow carries these choices to its steps. `--account` keeps fallback routing;
 `--only-account` restricts the entire Flow. Run a fresh Flow to choose again.
 Steps have no account overrides. Native Session affinity remains authoritative within that selection.
-Local choices use the Home's catalog directly and survive the initiating CLI's
+Local choices use the Machine's catalog directly and survive the initiating CLI's
 exit; a forwarded SSH credential still needs its origin broker.
 
 ## Switch the shared account
@@ -392,7 +392,7 @@ lf ssh my-company --account work@ implement
 
 There is no explicit `-- lf`. `lf ssh` does not run arbitrary remote programs;
 use ordinary `ssh` for those. The target can be an SSH hostname or a Loopflow
-Home ID. A Home ID resolves its current SSH address and makes the reached
+Machine ID. A Machine ID resolves its current SSH address and makes the reached
 machine prove its identity.
 
 Without an outer selector, the origin offers every connected managed identity,

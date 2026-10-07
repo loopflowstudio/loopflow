@@ -1,4 +1,4 @@
-//! Replay one self-contained Home-local capture request through the ordinary harness.
+//! Replay one self-contained Machine-local capture request through the ordinary harness.
 
 use anyhow::{anyhow, Context, Result};
 use std::io::Write;
@@ -38,7 +38,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         ));
     }
     if !check_cli_available(&harness) {
-        return Err(anyhow!("'{harness}' CLI is unavailable on this Home"));
+        return Err(anyhow!("'{harness}' CLI is unavailable on this Machine"));
     }
     let mut config = AgentConfig {
         system_prompt: request.system_prompt.clone(),

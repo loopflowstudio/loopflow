@@ -1,5 +1,19 @@
 # infrastructure wave memory
 
+## Machine terminology (LOO-394, 2026-10-07)
+
+Jack Heart authorized the Home-to-machine rename as PR 1, publication and then
+stop; later remote-work slices are not authorized in this pass. A machine means
+one OS user and Loopflow data directory. `LF_HOME` and provider/account homes
+retain their filesystem meanings. Preserve opaque `home_…` IDs, installed cron
+plist keys, saved Desktop selection keys and historical capture payloads.
+Source renames commands, Rust/Swift DTOs and SQLite placement; the single draft
+renames tables/columns without relocating data. Cron readers retain released
+JSON field compatibility. Installation remains separate, with its lock path
+unchanged. Local source checks do not establish installed migration or remote
+continuity. Release's retained-schedule evidence reinforces that a naming change
+must not invent another activation or lose original cron ownership.
+
 ## Storage footprint (LOO-390, 2026-10-06)
 
 Jack Heart authorized autonomous investigation, cleanup and delivery. Findings,
@@ -450,7 +464,7 @@ Flow steps and agent tools use the installed CLI and `~/.lf`; an explicit
 changes. [PR #1381](https://github.com/loopflowstudio/loopflow/pull/1381) merged
 at `6c73356074c4`; installed routing acceptance passed on v0.12.31 and the Task
 reads done (see the 2026-10-04 entry above). Current behavior belongs in
-[CLI docs](../../docs/lf.md#use-one-home) and [Homes](../../docs/architecture/homes.md#one-main-home).
+[CLI docs](../../docs/lf.md#use-one-machine) and [Homes](../../docs/architecture/machines.md#one-main-machine).
 The dated cleanup receipts, v0.12.29–v0.12.31 release recovery and the exact
 configured checks are in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/cd344891b611914adf44eeb53844193d7a987d2c/wave/infrastructure/MEMORY.md#one-main-home-loo-342-branch-evidence-2026-09-30).
 
@@ -589,7 +603,7 @@ app acceptance or remote app transport. Home placement is distinct from a data
 directory, and database isolation does not isolate provider or checkout effects.
 Restore saved Task/PR/checkout identity; explicit replacement owns new definitions.
 Authored command removals must cover runtime, app and DTO consumers. Current
-mechanics belong to docs/lf.md and docs/architecture/homes.md; superseded command
+mechanics belong to docs/lf.md and docs/architecture/machines.md; superseded command
 names and store-selection policies are historical evidence, not instructions.
 
 ## Managed account identity (LOO-339, branch evidence 2026-09-30)
@@ -682,31 +696,13 @@ verification uses disposable stores; no old branch binary may migrate main.
 
 ## Data model and performance decisions (reconciled 2026-09-30)
 
-Jack's rule, verbatim: "The main user objects should line up with the main
-tables in the DB and when we see stuff like this where a main record is
-actually a union over 4 things, we should be suspicious." The trigger was a
-2026-09-26 product-first review of Session/Run/Task/Wave: a Session was four read-time
-projections over four stores (Run dir, `task_flow_positions`,
-`human-sessions/*.json`, `flows/*/position.json`); Run→Task is a `task:`
-string in a ranked subject list with a two-value source, mirrored into a
-Task event because the Run could not be queried by Task; every post-launch fact
-(name, completion, attachment) became a sidecar beside the manifest. Reads
-reused the launch resolver, so a bound Session became an orphan when its
-Task's PR merged. The store's `runs` table had the Task FK and no writer.
-
-LOO-298 ([PR #1296](https://github.com/loopflowstudio/loopflow/pull/1296)) implements
-the three-owner model in this branch. Run no longer exists as a product object
-or table. Current contracts belong in [architecture-reference](../../docs/architecture-reference.md)
-and [CLI reference](../../docs/lf-reference.md); branch code is not installed acceptance.
-
-Jack Heart authorized autonomous landing on 2026-09-30: “try to do this all
-autonomously, no need to review with me.” Land #1296 as one PR after technical
-verification, without a demo or review wait. The independent resource-recovery,
-publication-continuity and resident-Wave cuts already landed as #1358, #1359 and
-#1360; local main history records them. Exec/Chapter extraction would remove
-only about 10% and requires manual cutting, so the old decomposition is rejected.
-Jack selected merging main, not rebasing; `e3a2c7e2c` integrated #1360. Landing
-authorization is not evidence that #1296 merged or that a release migrated data.
+Jack Heart selected public objects with one SQLite owner, direct skill/operation
+Execs and compiled Flow graphs. The four-store Session counterexample, LOO-298's
+autonomous single-PR landing authorization, rejected decomposition and merge-not-rebase
+decision remain at
+`08191d19269af96e15d79918689a04b4fa44dc30:wave/infrastructure/MEMORY.md`
+under this heading. Current contracts belong in the architecture and CLI references;
+source history does not establish installed conversion or configured acceptance.
 
 **One client, one main Home.** Jack reports only this machine is a client; the
 pinned dev Home is gone and its active Tasks were moved by hand to `~/.lf`.

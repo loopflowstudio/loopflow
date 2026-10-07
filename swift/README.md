@@ -8,13 +8,13 @@ uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
 
 The development app bundles this checkout's CLI. Ordinary launches use the
-installed CLI and main Home. For a branch demo, launch with an explicit private
-`LF_HOME`; that uses the matching source CLI on disposable data. A copied Home
+installed CLI and main Machine. For a branch demo, launch with an explicit private
+`LF_HOME`; that uses the matching source CLI on disposable data. A copied Machine
 retains real checkout paths, so file edits still affect those checkouts.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
-A returning launch opens on the workspace saved at `<Home>/desktop-cache/workspace.json`
+A returning launch opens on the workspace saved at `<Machine>/desktop-cache/workspace.json`
 and shows **Updating…** until this launch's reads replace it. Saved rows open
 and navigate; Flow state, Task condition, Session state and every action except
 opening a Session wait for the fresh read. The Portfolio window opens from the
@@ -29,11 +29,11 @@ uv run python scripts/benchmarks/desktop-performance/timings.py   # how long you
 
 Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
-the Home. Durations and command names only; the files stay on this machine.
+the Machine. Durations and command names only; the files stay on this machine.
 
 Choose **Background progress** in the repository toolbar to enable minute
 checks, enroll or hold Tasks, and inspect the last check and blockers. Checks
-continue with the app closed on the selected Home. Disabling stops scheduled
+continue with the app closed on the selected Machine. Disabling stops scheduled
 admission; already-running work and requested GitHub merges continue.
 
 While a repository is open, the app runs `lf ci watch` for it and stops it on
@@ -185,7 +185,7 @@ Wave → Task → Session: Wave and Task crumbs return to their details; the Tas
 issue ID links to Linear. With several Sessions, the final crumb chooses among
 them by name. The pencil renames the Session in place through `lf session
 rename`; the shown name is the shared readback, and a rejected name stays in the
-field with its error. A remote Flow Session's name lives on its Home and is not
+field with its error. A remote Flow Session's name lives on its Machine and is not
 renamed here. Beside the name, the Session shows its Flow step and iteration as
 quiet mono text, **Independent**, or why membership is unknown. On the right sit
 the Task's read-only worktree location and the Activity glyph.
@@ -406,13 +406,13 @@ so macOS permissions survive rebuilds. The app queries `lf` directly and starts
 only the selected Wave's `lf wave` process; it has no machine-wide service or
 remote-connection mode.
 
-The dev app uses the installed CLI and main `~/.lf` Home. Its bundled source
+The dev app uses the installed CLI and main `~/.lf` Machine. Its bundled source
 CLI forwards ordinary commands to that installation. Explicit `LF_HOME`
 experiments remain disposable and never become the app's default.
 
 For a branch UI demo, select a private `LF_HOME` explicitly so the bundled CLI
 and UI use this checkout’s wire protocol. Its recorded checkout paths still
-refer to real files. A copied Home does not prove live provider continuation.
+refer to real files. A copied Machine does not prove live provider continuation.
 
 | Command | What it does |
 | --- | --- |

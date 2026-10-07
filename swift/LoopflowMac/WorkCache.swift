@@ -1,4 +1,4 @@
-// WorkCache — the last workspace a refresh showed, kept inside the Home it
+// WorkCache — the last workspace a refresh showed, kept inside the Machine it
 // describes so a returning launch renders before any `lf` read.
 //
 // It holds the wire text of successful reads, restored through the decoder
@@ -12,6 +12,11 @@ import Foundation
 import Loopflow
 
 struct WorkSnapshot: Codable, Equatable, Sendable {
+    enum CodingKeys: String, CodingKey {
+        case machineId = "homeId"
+        case roadmap, waves, repositories
+    }
+
     struct Repository: Codable, Equatable, Sendable {
         /// The default interactive Session listing, one wire page each.
         var sessionPages: [String]?
@@ -19,8 +24,8 @@ struct WorkSnapshot: Codable, Equatable, Sendable {
         var savedAt: Date
     }
 
-    /// The Home these reads came from. A different Home invalidates everything.
-    var homeId: String?
+    /// The Machine these reads came from. A different Machine invalidates everything.
+    var machineId: String?
     /// Wire text of the last successful planning reads.
     var roadmap: String?
     var waves: String?
@@ -29,7 +34,7 @@ struct WorkSnapshot: Codable, Equatable, Sendable {
 }
 
 final class WorkCache: @unchecked Sendable {
-    static let version = 1
+    static let version = 2
     /// Most-recently saved repositories kept; older ones are dropped.
     static let maxRepositories = 8
     /// One read larger than this is not kept; the launch reads it instead.
@@ -54,11 +59,11 @@ final class WorkCache: @unchecked Sendable {
         url = directory.appendingPathComponent("workspace.json", isDirectory: false)
     }
 
-    /// The cache of the Home this process's `lf` reads resolve to. Every window
+    /// The cache of the Machine this process's `lf` reads resolve to. Every window
     /// shares it, so one window's save never drops another's repository.
     static let home = WorkCache(directory: homeDirectory)
 
-    /// Where Desktop keeps what it saves inside the Home.
+    /// Where Desktop keeps what it saves inside the Machine.
     static var homeDirectory: URL {
         let home = ProcessInfo.processInfo.environment["LF_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".lf", isDirectory: true)
@@ -74,13 +79,42 @@ final class WorkCache: @unchecked Sendable {
             loaded = true
             guard let data = try? Data(contentsOf: url) else { return nil }
             guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
-                  envelope.version == Self.version else {
+                  (1...Self.version).contains(envelope.version) else {
                 try? FileManager.default.removeItem(at: url)
                 return nil
             }
             snapshot = envelope.snapshot
+            if envelope.version == 1 {
+                snapshot.roadmap = snapshot.roadmap.map(Self.renameMachineFields)
+                snapshot.waves = snapshot.waves.map(Self.renameMachineFields)
+                for repo in snapshot.repositories.keys {
+                    let pages = snapshot.repositories[repo]?.sessionPages?.map(Self.renameMachineFields)
+                    snapshot.repositories[repo]?.sessionPages = pages
+                }
+            }
             return snapshot
         }
+    }
+
+    // Version 1 cached wire documents predate the machine rename. Migrate only
+    // structured keys, preserving titles, paths, IDs and the original file bytes.
+    private static func renameMachineFields(_ text: String) -> String {
+        func renamed(_ value: Any) -> Any {
+            if let items = value as? [Any] { return items.map(renamed) }
+            guard let object = value as? [String: Any] else { return value }
+            var result: [String: Any] = [:]
+            for (key, value) in object {
+                let identity = value as? [String: Any]
+                let machineKey = key == "home_id" ? "machine_id"
+                    : (key == "home" && identity?["route"] != nil && identity?["id"] != nil ? "machine" : key)
+                result[machineKey] = renamed(value)
+            }
+            return result
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)),
+              let data = try? JSONSerialization.data(withJSONObject: renamed(object)),
+              let migrated = String(data: data, encoding: .utf8) else { return text }
+        return migrated
     }
 
     func saveRoadmap(_ text: String) {
@@ -110,15 +144,15 @@ final class WorkCache: @unchecked Sendable {
         }
     }
 
-    /// Record the Home fresh reads come from. Text saved under another Home is discarded.
-    func confirmHome(_ id: String) {
+    /// Record the Machine fresh reads come from. Text saved under another Machine is discarded.
+    func confirmMachine(_ id: String) {
         queue.async { [self] in
-            guard snapshot.homeId != id else { return }
-            if snapshot.homeId != nil {
+            guard snapshot.machineId != id else { return }
+            if snapshot.machineId != nil {
                 snapshot = WorkSnapshot()
                 lastInput = [:]
             }
-            snapshot.homeId = id
+            snapshot.machineId = id
             write()
         }
     }

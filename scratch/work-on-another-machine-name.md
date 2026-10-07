@@ -1,8 +1,8 @@
 # Work on another machine
 
-Status: draft for review, 2026-10-07. The items under "Decided by Jack Heart"
-are accepted. Everything else is proposal: mechanisms, command names, the
-sequence's ordering and the acceptance checks have not been reviewed.
+Status: rename slice authorized for implementation and publication by Jack Heart,
+2026-10-07 (comment 43c8a308-9009-42ab-9c35-0955902c6480). Publish PR 1 and stop.
+Later slices remain intent, with their own plans when started.
 
 Do not lift code, tests, help text or config from herdr or cmux (Jack Heart,
 2026-10-07). Their behaviour is described here from docs and reading; write
@@ -133,21 +133,21 @@ credential crosses.
 First connect: probe, find `lf`, check capability, offer install (default yes).
 Replacing a running remote `lf` asks first and says what would stop.
 
-Rename, in its own commit with no behaviour change (decided above): commands,
-help, errors, docs, builtin skills, Rust and Swift identifiers, wire fields and
-fixtures, tables and columns. Points the commit must settle:
-- `LF_HOME` names the data directory, a different thing; it keeps its name.
-- "Provider home" and "account home" are also different things and stay.
-- "machine" already names the install scope in code (`machine_install.rs`, the
-  machine promotion lock). Rename or absorb that use so one word has one
-  meaning.
-- A Home is per data directory and OS user, so two users on one box are two
-  machines in this vocabulary. Say so in the glossary.
-- The `home_` id prefix is stored in every database and scheduled job. Either
-  migrate stored ids or keep the stored value and rename everything around it;
-  the second avoids rewriting identifiers already written to launchd plists.
-- Rough size: `home_id` about 240 and `HomeId` about 83 in Rust, about 167
-  `homeId` in Swift, about 72 SQL occurrences, about 158 doc mentions.
+Rename slice: commands, help, errors, docs, builtin skills, Rust/Swift types and
+DTO fixtures use machine. One migration renames the identity table and placement
+columns without rewriting IDs, routes, timestamps or historical payloads.
+
+- `LF_HOME`, provider homes and account homes retain their filesystem meanings.
+- Opaque `home_…` IDs stay unchanged, including scheduled-job references.
+- Saved cron JSON accepts its released `home_id` key and writes `machine_id`.
+  The installed `LoopflowHomeId` plist key and Desktop selection's `homeId` key
+  remain stable; changing them would drop existing schedules or selections.
+  Desktop upgrades version-1 cached DTO keys on read, preserving the source file.
+- The retired landing discriminator and JSON retain their historical spelling
+  and fence. Released SQL and historical benchmark captures are immutable.
+- Installation code is `installation.rs`; its existing promotion lock stays at
+  the same path. Installation command ownership is LOO-401's separate work.
+- A machine is one OS user and data directory, documented in the glossary.
 
 ### 2. The Task on a machine that has never seen it
 
@@ -333,8 +333,9 @@ headless launch replace them, so they go in the same change:
   the laptop's raw provider tokens over ssh.
 - `lf home observe`; the hard-coded `~/src/loopflow`; the `user@host` rule.
 - Random Task id minting for new Tasks.
-- `capture_home_command` (no callers); the `home:` GOAL key (no reader); the
-  `/detach` tmux leftover.
+- Rename slice removes `capture_home_command`, its unused capture subprocess and
+  error type. The `home:` GOAL key is already ignored by config parsing; its
+  rejection fixture stays. `/detach` remains with the later relay slice.
 
 ## Forbidden outcomes
 
@@ -371,12 +372,17 @@ headless launch replace them, so they go in the same change:
 
 ## Evidence
 
-- LOO-393's one commit (`d19a24a19`) is saved as
-  `scratch/loo-393-checkpoint.patch`. `TaskRecord`, `PrRecord` and `from_task`
+- LOO-393's one commit (`d19a24a19`) is retained in Git as
+  `08191d19269af96e15d79918689a04b4fa44dc30:scratch/loo-393-checkpoint.patch`. `TaskRecord`, `PrRecord` and `from_task`
   in its `task_record.rs` fit any store; the revision and attachment code fits
   only the option set aside. Its `wave/infrastructure/MEMORY.md` hunk is
   unrelated memory curation and is not carried.
 - Comparison guides: https://claude.ai/artifact/1xpMiizmX3od7pYpqBTdcQ and
   https://claude.ai/artifact/MsYW6XqaKpJoUzcx5oRxfS
 
-Checks: source and docs inspection on 2026-10-07; no builds or tests run.
+Review: preserve stored identities and historical bytes; one schema owner and no
+new runtime. Version-1 Desktop wire caches needed an explicit key migration.
+The telemetry Flow uses the existing `doctor` shorthand so its authored definition
+works across the command-group rename. No later slice was started.
+
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, focused `cargo nextest run` groups (migration/storage/DTO 133, CLI/doctor/prompt 122, earlier route/cron checks), headless `scripts/test_desktop.sh` groups (52 and 47), four affected Python suites (66), and disposable CLI identity/route/refusal smoke pass. Installed migration and later-slice acceptance remain unproved; full affected gate and isolated installation proof belong to CI/gate.

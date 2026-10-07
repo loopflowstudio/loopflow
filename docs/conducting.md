@@ -30,7 +30,7 @@ lf roadmap                             # tasks in this project, sorted by what t
 lf roadmap --all                       # every project on this computer
 lf top                                 # what is running right now
 lf usage --days 0 --wave infra                   # the record of each time the AI was started
-lf ssh <home-id> roadmap               # ask another computer the same question
+lf ssh <machine-id> roadmap               # ask another computer the same question
 ```
 
 Each command reads the computer it runs on. Nothing watches every machine

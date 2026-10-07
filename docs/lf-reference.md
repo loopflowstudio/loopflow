@@ -799,7 +799,7 @@ Measure this codebase: lines and tokens per directory (tracked files only)
 
 ## lf repo ci
 
-Show how failed CI is detected, repaired, and landed across this Home
+Show how failed CI is detected, repaired, and landed across this Machine
 
 | Argument | What it does |
 |---|---|
@@ -832,15 +832,15 @@ Reconcile linked Waves to the repository's Linear Team
 | `--apply` | apply Default: false. |
 | `--help / -h` | Print help |
 
-## lf home
+## lf machine
 
-Inspect this Home and observe routes to other Homes
+Inspect this Machine and observe routes to other Machines
 
 | Argument | What it does |
 |---|---|
 | `--help / -h` | Print help |
 
-## lf home desktop
+## lf machine desktop
 
 Open or focus Loopflow.app
 
@@ -848,7 +848,7 @@ Open or focus Loopflow.app
 |---|---|
 | `--help / -h` | Print help |
 
-## lf home screenshot
+## lf machine screenshot
 
 Capture a URL or local HTML file without claiming the user's browser
 
@@ -860,7 +860,7 @@ Capture a URL or local HTML file without claiming the user's browser
 | `--height` | Viewport height in pixels Default: 900. |
 | `--help / -h` | Print help |
 
-## lf home install
+## lf machine install
 
 Install the latest published Loopflow release from any directory
 
@@ -868,7 +868,7 @@ Install the latest published Loopflow release from any directory
 |---|---|
 | `--help / -h` | Print help |
 
-## lf home install schedule
+## lf machine install schedule
 
 Install the latest Loopflow at login and weekly by default (macOS launchd)
 
@@ -877,7 +877,7 @@ Install the latest Loopflow at login and weekly by default (macOS launchd)
 | `<frequency>` | Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time) Default: weekly. |
 | `--help / -h` | Print help |
 
-## lf home install recover-switch
+## lf machine install recover-switch
 
 Continue one interrupted machine install switch from its pinned candidate
 
@@ -888,7 +888,7 @@ Internal command; invoked by the owning operation.
 | `--switch` | The fixed machine switch receipt to continue |
 | `--help / -h` | Print help |
 
-## lf home install preflight
+## lf machine install preflight
 
 Preview whether this build may replace the global lf (read-only). Reads the shared store's migration frontier and validates executable planning references against this binary without changing that frontier. Exits non-zero on refusal so a caller can gate on it
 
@@ -899,7 +899,7 @@ Internal command; invoked by the owning operation.
 | `--json` | Emit the structured PromotionPreview as JSON Default: false. |
 | `--help / -h` | Print help |
 
-## lf home install advance-switch
+## lf machine install advance-switch
 
 Advance the receipt-selected store with this exact candidate's registry
 
@@ -910,7 +910,7 @@ Internal command; invoked by the owning operation.
 | `--switch` | switch |
 | `--help / -h` | Print help |
 
-## lf home install promote
+## lf machine install promote
 
 Promote this build to the global CLI: content-address it into ~/.lf/bin and atomically repoint the target symlink, under the exclusive promotion lock. Refuses — leaving every target unchanged — on incompatible schema or persisted executable evidence
 
@@ -926,7 +926,7 @@ Internal command; invoked by the owning operation.
 | `--preview` | Validate and print the preview but change nothing Default: false. |
 | `--help / -h` | Print help |
 
-## lf home install rollback
+## lf machine install rollback
 
 Repoint the global CLI at retained prior bytes only after that binary's own preflight proves it recognizes the current store frontier
 
@@ -938,7 +938,7 @@ Internal command; invoked by the owning operation.
 | `--candidate` | The immutable content-addressed prior executable to activate |
 | `--help / -h` | Print help |
 
-## lf home sync-skills
+## lf machine sync-skills
 
 Compile loopflow skills into your home vendor Skills directories
 
@@ -950,7 +950,7 @@ Internal command; invoked by the owning operation.
 | `--no-prune` | Keep stale loopflow-generated skills Default: false. |
 | `--help / -h` | Print help |
 
-## lf home doctor
+## lf machine doctor
 
 Diagnose installation, storage, Exec integrity and scheduled receipts
 
@@ -960,22 +960,22 @@ Diagnose installation, storage, Exec integrity and scheduled receipts
 | `--json` | Emit the audit as JSON Default: false. |
 | `--help / -h` | Print help |
 
-## lf home ssh
+## lf machine ssh
 
-Run lf on a Home or SSH host carrying your local credentials
+Run lf on a Machine or SSH host carrying your local credentials
 
 | Argument | What it does |
 |---|---|
 | `--account` | Prefer this origin account when the remote lf chooses a provider |
 | `--only-account` | Restrict remote provider launches to these origin accounts |
-| `<target>` | HomeId (preferred), SSH alias, or user@host |
+| `<target>` | MachineId (preferred), SSH alias, or user@host |
 | `--repo` | Repository path on the remote, relative to $HOME |
 | `--secret` | Doppler secret to resolve locally and forward as an env var (repeatable). The Doppler token itself is never forwarded |
 | `--forward-agent` | Forward the ssh-agent (`ssh -A`). Off by default: git pushes use the forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk Default: false. |
 | `<lf_args>` | Arguments for the remote lf. The target is the boundary: every argument after it belongs to the remote invocation |
 | `--help / -h` | Print help (see more with '--help') |
 
-## lf home user
+## lf machine user
 
 Print the configured participant display name
 
@@ -984,22 +984,22 @@ Print the configured participant display name
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf home id
+## lf machine id
 
-Print this machine's stable local Home identity
+Print this machine's stable local Machine identity
 
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf home observe
+## lf machine observe
 
-Record the current route for a known Home identity
+Record the current route for a known Machine identity
 
 | Argument | What it does |
 |---|---|
-| `<home_id>` | home id |
+| `<machine_id>` | machine id |
 | `<route>` | route |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1104,7 +1104,7 @@ List installed loopflow cron jobs
 
 ## lf wave cron preflight
 
-Validate Home authority and declared jobs without changing launchd
+Validate Machine authority and declared jobs without changing launchd
 
 | Argument | What it does |
 |---|---|
@@ -1118,7 +1118,7 @@ Reconcile installed launchd jobs to match a wave's declared `crons:`
 | Argument | What it does |
 |---|---|
 | `--wave / -w` | wave |
-| `--repo` | Install the finite repository Task check on this Home Default: false. |
+| `--repo` | Install the finite repository Task check on this Machine Default: false. |
 | `--disable` | Remove the repository schedule; running work retains its authority Default: false. |
 | `--help / -h` | Print help |
 
@@ -1193,12 +1193,12 @@ Show one Wave's current plan, Task details, and execution evidence
 
 ## lf wave place
 
-Set the Home for Wave schedules and newly created work
+Set the Machine for Wave schedules and newly created work
 
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
-| `<home_id>` | home id |
+| `<machine_id>` | machine id |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

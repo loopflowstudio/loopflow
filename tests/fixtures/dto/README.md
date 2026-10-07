@@ -15,12 +15,12 @@ This CLI-only contract is tested in Rust. The Mac app receives its derived
 condition, reason, and actions through the existing Wave Task row.
 
 `session.json` pins `lf session connect --json`: one unresolved Task FlowStep
-session, its explicit readiness state, and its exact Home-local attach route.
+session, its explicit readiness state, and its exact Machine-local attach route.
 
 `session_memberships.json` pins each Session's required `flow_membership`:
 the current Flow step, an earlier step, an independent conversation, a Session that
 predates recorded membership (unknown, never independent), and a remote Flow
-Session whose canonical name lives on its Home (`title_source: unavailable`).
+Session whose canonical name lives on its Machine (`title_source: unavailable`).
 
 `task_condition_states.json` pins the Rust-owned Task condition fold for clean
 backlog, completion, external and review waits, local recovery blockers, and
@@ -58,7 +58,7 @@ rename paths, scratch listing, and lossless content with a byte revision and
 explicit file state, Save outcome, recovery access and late-change disclosure.
 Rust round-trips the same fixture Swift decodes.
 
-`task_checkout.json` pins the prepared Task receipt, including owning Home and
+`task_checkout.json` pins the prepared Task receipt, including owning Machine and
 resolved checkout. Rust round-trips the full Task snapshot; Swift reads the
 workspace identity used before the next roadmap refresh. Flow graph fixtures
 include the derived interaction stages and route references alongside steps.

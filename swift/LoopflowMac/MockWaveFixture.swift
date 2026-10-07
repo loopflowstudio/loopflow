@@ -141,7 +141,7 @@ enum MockWaveFixture {
             "retired_at": null,
             "superseded_by_wave_id": null,
             "retirement_reason": null,
-            "home": {
+            "machine": {
               "id": "home_00000000000000000000000000000001",
               "route": "ssh://jack@mini-heart",
               "created_at": "2026-07-01T00:00:00Z",

@@ -232,7 +232,7 @@ pub(crate) fn live_exec_providers(
         .collect();
     if unclaimed > 0 {
         gaps.push(format!(
-            "{unclaimed} Home-owned provider processes have no verified Session attribution"
+            "{unclaimed} Machine-owned provider processes have no verified Session attribution"
         ));
     }
     gaps.sort();
@@ -729,7 +729,7 @@ fn command_label(command: Option<&str>) -> String {
         return "lf".to_string();
     };
     let grouped = [
-        "home", "repo", "pm", "pr", "project", "radio", "task", "wave", "work",
+        "machine", "repo", "pm", "pr", "project", "radio", "task", "wave", "work",
     ];
     let operation = grouped
         .contains(&command.as_str())
@@ -975,7 +975,7 @@ fn render_snapshot(snapshot: &ActivitySnapshot) -> String {
     ));
     output.push_str("  ELAPSED       PID  STATE      CALL\n");
     if snapshot.nodes.is_empty() {
-        output.push_str("  no live call trees recorded in this Home\n");
+        output.push_str("  no live call trees recorded in this Machine\n");
     } else {
         let index = snapshot
             .nodes

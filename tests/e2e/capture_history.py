@@ -1,7 +1,7 @@
 """Prove capture preservation with published v0.13.3 and a source candidate.
 
 Only ordinary commands run, in a temporary LF_HOME with stub providers. No
-installation, account import, production Home access or layout conversion.
+installation, account import, production Machine access or layout conversion.
 """
 
 import argparse

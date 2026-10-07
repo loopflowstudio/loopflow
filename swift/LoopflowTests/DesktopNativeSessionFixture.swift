@@ -6,7 +6,7 @@ import Testing
 @testable import LoopflowMac
 
 /// Owned synthetic native history and executable, prepared by desktop_performance.py.
-/// The public CLI supplies Session identity and launch commands; no live Home is copied.
+/// The public CLI supplies Session identity and launch commands; no live Machine is copied.
 struct DesktopNativeSessionFixture: Decodable, Sendable {
     let cli: String
     let home: String
@@ -42,7 +42,7 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
             record["open_argv"] = isolatedCommand(argv)
             return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
         }
-        guard ["roadmap", "activity"].contains(args.first ?? "") || ["wave list", "home id", "session list", "session history", "task status", "task files", "task file", "task diff", "flow list"].contains(args.prefix(2).joined(separator: " ")) else {
+        guard ["roadmap", "activity"].contains(args.first ?? "") || ["wave list", "machine id", "session list", "session history", "task status", "task files", "task file", "task diff", "flow list"].contains(args.prefix(2).joined(separator: " ")) else {
             throw RegistryQueryError("Fixture does not execute this command")
         }
         return try await Task.detached { try capture([cli] + args) }.value
@@ -207,7 +207,7 @@ struct DesktopNativeSessionTests {
             args: ["session", "list", "--all", "--history", "--json"], cwd: fixture.repo, fixture: fixture).get()
         #expect(try JSONDecoder().decode([SessionRecord].self, from: Data(history.utf8)).count == copiedRecords.count + 1)
         let owned = try #require(try await fixture.records().first)
-        let registry = SessionsWorkspaceRegistry(localHomeId: try await query.localHomeId())
+        let registry = SessionsWorkspaceRegistry(localMachineId: try await query.localMachineId())
         let workspace = registry.workspace(for: try #require(owned.workspace).identity)
         let store = workspace.sessionStore(repoPath: fixture.repo, query: query)
         workspace.multiplexer.load(sessionId: fixture.sessionId)

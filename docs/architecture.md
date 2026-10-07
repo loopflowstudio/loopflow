@@ -40,7 +40,7 @@ lf CLI --> Skill discovery --> prompt --> provider route --> harness
                                                + immutable input/output artifacts
 ```
 
-Before the provider starts, the current Home has the conversation reservation
+Before the provider starts, the current Machine has the conversation reservation
 and its immutable input. SQLite owns identity, attribution, driver authority and
 history references; payload files retain large captured inputs and output.
 Admission failure stops before provider launch. General command logging has a
@@ -84,7 +84,7 @@ one Skill run
     |
     +-- Controllers: pursue Work end to end using the layers above
     |
-    +-- Home: place execution, credentials, services, files, and locks
+    +-- Machine: place execution, credentials, services, files, and locks
     |
     `-- Views: project planning, command, conversation, provider, Git, and OS evidence
 ```
@@ -94,7 +94,7 @@ one Skill run
 | Execution | Skill discovery, prompt assembly, provider routing, harnesses, command and conversation history | [Execution](architecture/execution.md) |
 | Planning | Flow composition, Wave/Task Work, Steer, questions, review FlowSteps | [Planning](architecture/planning.md) |
 | Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
-| Homes | Placement, SSH routing, machine install | [Homes and processes](architecture/homes.md) |
+| Machines | Placement, SSH routing, machine install | [Machines and processes](architecture/machines.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](architecture/data.md) |
 | Codebase | Source territories, public surfaces, processes, extension points | [Codebase map](architecture/codebase.md) |
 
@@ -172,10 +172,10 @@ user / agent --> lf CLI --------+----------+-----------+
                               v
                   status / roadmap / usage / app
 
-another machine is another Home; cross it explicitly with `lf ssh`
+another machine is another Machine; cross it explicitly with `lf ssh`
 ```
 
-There is no central Loopflow server. A Home owns its processes, credentials,
+There is no central Loopflow server. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
 definitions and memory. Linear and GitHub keep shared planning and delivery
 truth. Readers join those sources; they do not replace them with a universal
@@ -208,8 +208,8 @@ Flow                          one driver Exec; cursor in its memory, graph in Fl
 | Project | A Wave's plan, KRs, targets and workflow | Linear Project and its synchronized `projects` row |
 | Task | A concrete change, investigation or document | `tasks`, Linear Issue, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
-| Home | A machine's store, credentials and exact process authority | Home identity and observed route |
-| Placement | Where a Work executes | `(WorkRef, HomeId)` |
+| Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |
+| Placement | Where a Work executes | `(WorkRef, MachineId)` |
 
 An AgentSession keeps its ID, name, feedback and native conversation when its
 command process changes. Its `interactive` field is independent of purpose,
@@ -314,7 +314,7 @@ lf ssh build-home session list --json
 lf ssh build-home --wave product wave/operate
 ```
 
-The origin transports one command. The target resolves its own Home state and
+The origin transports one command. The target resolves its own Machine state and
 runs the same `lf`. Reads are local unless this hop is explicit.
 
 ## How to read the code
@@ -328,7 +328,7 @@ the behavior.
 | provider launch, retries, usage, or telemetry | [Execution](architecture/execution.md) |
 | Flow semantics, Work state, Steer, questions, review FlowSteps, chapter rotation and Task advancement | [Planning](architecture/planning.md) |
 | worktrees, commits, PR ranges, checks, or landing | [Delivery](architecture/delivery.md) |
-| remote execution, placement, process control, promotion | [Homes and processes](architecture/homes.md) |
+| remote execution, placement, process control, promotion | [Machines and processes](architecture/machines.md) |
 | schema, files, projections, DTOs, or consistency | [Data and persistence](architecture/data.md) |
 | module ownership, APIs, binaries, routes, or code size | [Codebase map](architecture/codebase.md) |
 

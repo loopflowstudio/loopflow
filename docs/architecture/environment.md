@@ -1,24 +1,24 @@
 # Environment
 
 Environment configures a process; it never decides what the process is. A
-variable that names a Home or an Exec is checked against the store or
+variable that names a Machine or an Exec is checked against the store or
 the filesystem before it grants anything, and a new session starts without it.
 
 ```bash
-LF_HOME="$(mktemp -d)" target/debug/lf wave list --json   # the only Home selector
+LF_HOME="$(mktemp -d)" target/debug/lf wave list --json   # the only Machine selector
 env | grep -E '^(LF|LOOPFLOW)_'                            # what this process inherited
 tmux show-environment -g | grep -E '^(LF|LOOPFLOW)_'       # what new tmux sessions inherit
 ```
 
-## Home and binary
+## Machine and binary
 
 | Variable | Set by | Read by | Policy |
 |---|---|---|---|
 | `LF_HOME` | A person, for an experiment; every lf launch path for its children; cron and CI-watch launchd plists; test fixtures | `store::lf_home_dir`, Desktop's observation client | Selects the data directory. Unset means `~/.lf`. The database is always `$LF_HOME/loopflow.db`. |
-| `LF_BIN` | lf launch paths, test fixtures | `engine::process::resolve_lf_binary`, only when `LF_HOME` selects an experiment | Names the experiment's binary. Under the main Home lf ignores it and uses the installed CLI, so a stale value cannot choose the wrong binary for ordinary work. |
+| `LF_BIN` | lf launch paths, test fixtures | `engine::process::resolve_lf_binary`, only when `LF_HOME` selects an experiment | Names the experiment's binary. Under the main Machine lf ignores it and uses the installed CLI, so a stale value cannot choose the wrong binary for ordinary work. |
 
 A source build with no explicit `LF_HOME` forwards to the installed CLI and
-main Home before opening a store. Development builds refuse the main database.
+main Machine before opening a store. Development builds refuse the main database.
 
 ## Exec context
 
@@ -28,7 +28,7 @@ drops it too, so sessions a person opens by hand inherit none of it.
 
 | Variable | Set by | Read by | Policy |
 |---|---|---|---|
-| `LF_CAPTURE_KEY` | Session capture and native resume | Capture lookup, provider callbacks, Task comments | Selects subordinate captured history in the resolved Home. SQLite must record its owning Session; a present manifest must agree. It grants neither Task nor Flow authority. |
+| `LF_CAPTURE_KEY` | Session capture and native resume | Capture lookup, provider callbacks, Task comments | Selects subordinate captured history in the resolved Machine. SQLite must record its owning Session; a present manifest must agree. It grants neither Task nor Flow authority. |
 | `LF_TRACE_ID`, `LF_PROCESS_ID` | Journal, agent and session launch | Journal, git operations | Joins a child's events to its caller's trace. |
 | `LF_AGENT_CALLER` | Session capture and native resume | Journal, once, then resolved process context | Carries Session identity, provider generation and origin Exec for nested command ancestry and checkpoint composition. |
 | `LF_AS` | `--as` | Run and Task commands | Declares the Work a command contributes to; resolved against the registry. |
@@ -37,8 +37,8 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LF_HUMAN_SESSION`, `LF_PREPARED_CAPTURE` | Conversation launch | `ops::human_session`, removed on use | Identify the prepared conversation a new terminal opens. |
 | `LF_GIT_OPERATION_ID` | `ops::git_operation` | Nested lf commands inside an owned git operation | Lets recovery continue its own operation; checked against the worktree's record. |
 | `LF_PROVIDER_ACCOUNT_ID` | Provider launch | provider callback | Records which account a provider child used. |
-| `LF_INSTALL_SWITCH` | Published install | `machine_install` | One-shot capability; must equal the id of the switch receipt in progress. |
-| `LF_EXPECTED_HOME_ID` | `lf ssh` | `lf home`, the remote preamble | Refuses a Home-addressed command that reached a different Home. |
+| `LF_INSTALL_SWITCH` | Published install | `installation` | One-shot capability; must equal the id of the switch receipt in progress. |
+| `LF_EXPECTED_MACHINE_ID` | `lf ssh` | `lf machine`, the remote preamble | Refuses a Machine-addressed command that reached a different Machine. |
 | `LF_TERMINAL_ID`, `LF_TERMINAL_TTY` | Desktop's terminal | Session capture | Attach a Session to the terminal showing it. |
 | `LF_USER_NAME` | lf launch paths | `engine::config::participant_name` | The participant's display name. Presentation only. |
 | `LOOPFLOW_DIRECTIVE_FILE` | Shell integration, agent launch with a relay | `lf` commands that ask the parent shell to act | Removed for agents unless a scoped relay is supplied. |

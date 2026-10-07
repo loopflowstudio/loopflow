@@ -97,7 +97,7 @@ fn is_current(directory: &Path, tag: &str, applications: Option<&Path>) -> bool 
     }
     let published = inspect(
         &directory.join("lf"),
-        &["home", "install", "preflight", "--json"],
+        &["machine", "install", "preflight", "--json"],
     )
     .filter(|output| output.status.success())
     .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
@@ -178,7 +178,7 @@ fn run_verified_installer(
         .context("start the published installer")?;
     if !status.success() {
         bail!(
-            "published installation failed ({status}); fix the error above and rerun `lf home install`"
+            "published installation failed ({status}); fix the error above and rerun `lf machine install`"
         );
     }
     Ok(())
@@ -186,7 +186,7 @@ fn run_verified_installer(
 
 pub fn schedule(frequency: InstallFrequency) -> Result<()> {
     if !cfg!(target_os = "macos") {
-        bail!("automatic installation currently uses macOS launchd; run `lf home install` to update manually");
+        bail!("automatic installation currently uses macOS launchd; run `lf machine install` to update manually");
     }
     let home = dirs::home_dir().context("cannot determine the installation home")?;
     let binary = install_dir()?.join("lf");
@@ -220,7 +220,7 @@ pub fn schedule(frequency: InstallFrequency) -> Result<()> {
             .success()
     {
         bail!(
-            "could not unload the previous installation schedule; rerun `lf home install schedule`"
+            "could not unload the previous installation schedule; rerun `lf machine install schedule`"
         );
     }
     fs::write(&path, payload)?;
@@ -230,7 +230,7 @@ pub fn schedule(frequency: InstallFrequency) -> Result<()> {
         .status()?
         .success()
     {
-        bail!("could not load the installation schedule; rerun `lf home install schedule`");
+        bail!("could not load the installation schedule; rerun `lf machine install schedule`");
     }
     let cadence = match frequency {
         InstallFrequency::Weekly => "weekly (Monday at 09:00 local time)",

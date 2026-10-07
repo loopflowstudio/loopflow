@@ -459,7 +459,7 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     );
     assert_eq!(
         normalized(&["lf", "ssh", "somewhere", "show", "--help"]),
-        ["lf", "home", "ssh", "somewhere", "show", "--help"]
+        ["lf", "machine", "ssh", "somewhere", "show", "--help"]
     );
     assert_eq!(
         normalized(&["lf", "run", "land", "--", "--help"]),
@@ -513,7 +513,7 @@ fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
     assert!(resolve("p").is_err());
     let collision = tree.clone().subcommand(clap::Command::new("money"));
     assert!(loopflow::lf::navigation::resolve_child(&collision, "mon", &[]).is_err());
-    assert_eq!(resolve("id").unwrap().unwrap(), ["home", "id"]);
+    assert_eq!(resolve("id").unwrap().unwrap(), ["machine", "id"]);
 }
 
 #[test]
@@ -632,7 +632,7 @@ fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(error.contains(expected), "{error}");
     }
-    for args in [vec!["home", "user", "name"], vec!["pr", "status"]] {
+    for args in [vec!["machine", "user", "name"], vec!["pr", "status"]] {
         let output = run(repo.path(), home.path(), &args);
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());

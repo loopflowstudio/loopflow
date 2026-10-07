@@ -67,7 +67,7 @@ wait "$descendant"
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
         command
             .args([
-                "home",
+                "machine",
                 "screenshot",
                 self.source.to_str().unwrap(),
                 "--output",

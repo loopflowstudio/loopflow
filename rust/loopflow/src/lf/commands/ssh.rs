@@ -1,4 +1,4 @@
-//! `lf home ssh <HomeId|host> <lf-args...>` — run `lf` on a remote machine.
+//! `lf machine ssh <MachineId|host> <lf-args...>` — run `lf` on a remote machine.
 //!
 //! Foreground commands bring narrowly resolved local credentials. Managed
 //! Claude/Codex accounts stay behind a foreground Unix-socket broker; the
@@ -6,15 +6,15 @@
 //! only its selected token. Durable work sheds all forwarded authority before
 //! it detaches and uses credentials installed on the target machine.
 //!
-//! A `HomeId` target resolves through the locally observed route and makes the
-//! remote process prove that it is the addressed Home before dispatch.
+//! A `MachineId` target resolves through the locally observed route and makes the
+//! remote process prove that it is the addressed Machine before dispatch.
 //!
 //! Forwarded authority: GitHub (`gh`), Claude/Codex agent OAuth, and — the
 //! capability beyond the shell prototype — the PM/Linear token, which lives in
 //! store rather than the environment. The remote `resolve_pm_token` reads
 //! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf repo refresh` works.
 //!
-//! Secrets policy: `lf home ssh` forwards specific resolved secrets, never the
+//! Secrets policy: `lf machine ssh` forwards specific resolved secrets, never the
 //! Doppler token that could fetch them all. The Doppler login/CLI token is a
 //! master key to the whole secret estate and never leaves this machine. When a
 //! remote command needs a Doppler-backed secret, name it with `--secret NAME`:
@@ -29,7 +29,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context};
 
-use crate::durable::HomeId;
+use crate::durable::MachineId;
 use crate::pm::PmProviderKind;
 use crate::provider_account::lease::{
     self, AccountLeaseBroker, AccountLeaseHandle, AccountSelection, PreparedAccountLease,
@@ -38,7 +38,7 @@ use crate::provider_auth::{
     extract_claude_token, extract_codex_access_token, extract_opencode_zen_token,
 };
 
-pub const EXPECTED_HOME_ID_ENV: &str = "LF_EXPECTED_HOME_ID";
+pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 
 /// Default repository path (relative to `$HOME`) the remote command runs in.
 pub const DEFAULT_REPO: &str = "src/loopflow";
@@ -142,8 +142,8 @@ pub fn run(
         .chain(lf_args.iter().cloned())
         .collect::<Vec<_>>();
     let mut extra_env = Vec::new();
-    if let Some(home_id) = target.home_id.as_ref().map(HomeId::as_str) {
-        extra_env.push((EXPECTED_HOME_ID_ENV, home_id));
+    if let Some(machine_id) = target.machine_id.as_ref().map(MachineId::as_str) {
+        extra_env.push((EXPECTED_MACHINE_ID_ENV, machine_id));
     }
     run_with_env(
         &target.dest,
@@ -160,7 +160,7 @@ pub fn run(
 fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
     if lf_args.first().is_some_and(|arg| arg == "lf") {
         return Err(anyhow!(
-            "the remote `lf` is implicit; use `lf home ssh <target> <args...>` without `-- lf`"
+            "the remote `lf` is implicit; use `lf machine ssh <target> <args...>` without `-- lf`"
         ));
     }
     let args = std::iter::once("lf".to_string())
@@ -169,14 +169,14 @@ fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
     if matches!(
         crate::lf::Cli::try_parse_from(crate::lf::navigation::normalize_args(args)?),
         Ok(crate::lf::Cli {
-            command: Some(crate::lf::Commands::Home {
-                cmd: crate::lf::HomeCommand::Ssh { .. }
+            command: Some(crate::lf::Commands::Machine {
+                cmd: crate::lf::MachineCommand::Ssh { .. }
             }),
             ..
         })
     ) {
         return Err(anyhow!(
-            "nested `lf home ssh` is not supported; connect directly from the origin machine"
+            "nested `lf machine ssh` is not supported; connect directly from the origin machine"
         ));
     }
     Ok(())
@@ -186,86 +186,39 @@ fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
 struct SshTarget {
     dest: String,
     port: Option<u16>,
-    home_id: Option<HomeId>,
+    machine_id: Option<MachineId>,
 }
 
 fn resolve_target(target: &str) -> anyhow::Result<SshTarget> {
-    let Ok(home_id) = HomeId::parse(target) else {
+    let Ok(machine_id) = MachineId::parse(target) else {
         return Ok(SshTarget {
             dest: target.to_string(),
             port: None,
-            home_id: None,
+            machine_id: None,
         });
     };
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
     let home = runtime
         .block_on(async {
             let store = crate::store::open_existing_store().await?;
-            store.home_by_id(&home_id).await.ok().flatten()
+            store.machine_by_id(&machine_id).await.ok().flatten()
         })
-        .ok_or_else(|| anyhow!("Home {home_id} was not found in the local store"))?;
-    let route = crate::engine::wave_home::HomeRoute::parse(&home.route).ok_or_else(|| {
-        anyhow!(
-            "Home {home_id} route {:?} is not a remote SSH route",
-            home.route
-        )
-    })?;
+        .ok_or_else(|| anyhow!("Machine {machine_id} was not found in the local store"))?;
+    let route =
+        crate::engine::machine_route::MachineRoute::parse(&home.route).ok_or_else(|| {
+            anyhow!(
+                "Machine {machine_id} route {:?} is not a remote SSH route",
+                home.route
+            )
+        })?;
     Ok(SshTarget {
-        dest: route
-            .ssh_destination()
-            .ok_or_else(|| anyhow!("Home {home_id} is local; lf home ssh needs a remote Home"))?,
+        dest: route.ssh_destination().ok_or_else(|| {
+            anyhow!("Machine {machine_id} is local; lf machine ssh needs a remote Machine")
+        })?,
         port: route.ssh_port(),
-        home_id: Some(home_id),
+        machine_id: Some(machine_id),
     })
 }
-
-pub fn capture_home_command(
-    home_id: &HomeId,
-    repo: &str,
-    cmd: &[String],
-) -> Result<String, SshCaptureError> {
-    let target = resolve_target(home_id.as_str())
-        .map_err(|error| SshCaptureError::Local(error.to_string()))?;
-    let preamble = build_preamble(
-        &Credentials::default(),
-        None,
-        &target.dest,
-        repo,
-        cmd,
-        &[(EXPECTED_HOME_ID_ENV, home_id.as_str())],
-    );
-    run_ssh_capture(&target.dest, target.port, None, &preamble)
-}
-
-/// Why a captured SSH command did not yield usable stdout.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SshCaptureError {
-    /// The SSH transport failed (unreachable host, refused auth, timeout).
-    Unreachable(String),
-    /// The remote command ran but exited nonzero.
-    Command { code: i32, stderr: String },
-    /// A local failure before ssh (runtime, credential resolution).
-    Local(String),
-}
-
-impl std::fmt::Display for SshCaptureError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Unreachable(reason) | Self::Local(reason) => formatter.write_str(reason),
-            Self::Command { code, stderr } if stderr.is_empty() => {
-                write!(formatter, "remote command exited with status {code}")
-            }
-            Self::Command { code, stderr } => {
-                write!(
-                    formatter,
-                    "remote command exited with status {code}: {stderr}"
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for SshCaptureError {}
 
 #[allow(clippy::too_many_arguments)]
 fn run_with_env(
@@ -280,7 +233,7 @@ fn run_with_env(
 ) -> anyhow::Result<()> {
     if lease::account_lease_active() {
         return Err(anyhow!(
-            "an inherited account lease cannot be re-forwarded over SSH; put `lf home ssh` on the outer account-selected invocation"
+            "an inherited account lease cannot be re-forwarded over SSH; put `lf machine ssh` on the outer account-selected invocation"
         ));
     }
     let repo = repo.unwrap_or(DEFAULT_REPO);
@@ -507,17 +460,17 @@ fn build_preamble(
     }
     if extra_env
         .iter()
-        .any(|(name, _)| *name == EXPECTED_HOME_ID_ENV)
+        .any(|(name, _)| *name == EXPECTED_MACHINE_ID_ENV)
     {
         lines.push(
-            "LF_REACHED_HOME_ID=$(lf home id) || { echo 'remote lf could not read its HomeId' >&2; exit 1; }"
+            "LF_REACHED_MACHINE_ID=$(lf machine id) || { echo 'remote lf could not read its MachineId' >&2; exit 1; }"
                 .to_string(),
         );
         lines.push(
-            "[ \"$LF_REACHED_HOME_ID\" = \"$LF_EXPECTED_HOME_ID\" ] || { echo \"remote Home identity mismatch: expected $LF_EXPECTED_HOME_ID, reached $LF_REACHED_HOME_ID\" >&2; exit 1; }"
+            "[ \"$LF_REACHED_MACHINE_ID\" = \"$LF_EXPECTED_MACHINE_ID\" ] || { echo \"remote Machine identity mismatch: expected $LF_EXPECTED_MACHINE_ID, reached $LF_REACHED_MACHINE_ID\" >&2; exit 1; }"
                 .to_string(),
         );
-        lines.push("unset LF_REACHED_HOME_ID".to_string());
+        lines.push("unset LF_REACHED_MACHINE_ID".to_string());
     }
 
     if let Some(token) = nonempty(&credentials.gh_token) {
@@ -719,7 +672,7 @@ fn ssh_connection_args(
         args.push("-o".to_string());
         args.push("ExitOnForwardFailure=yes".to_string());
     }
-    args.extend(crate::engine::wave_home::bounded_ssh_args(dest, port));
+    args.extend(crate::engine::machine_route::bounded_ssh_args(dest, port));
     args
 }
 
@@ -738,10 +691,10 @@ fn classify_exit(code: Option<i32>) -> SshOutcome {
 /// credential value; ssh's own reason is already on the inherited stderr.
 fn connection_error(host: &str) -> anyhow::Error {
     anyhow!(
-        "lf home ssh could not reach '{host}': ssh failed during connection/transport \
+        "lf machine ssh could not reach '{host}': ssh failed during connection/transport \
          (bounded by BatchMode + ConnectTimeout={}s). See the ssh error above; check \
          the host is reachable, its key is known, and key auth works.",
-        crate::engine::wave_home::SSH_CONNECT_TIMEOUT_SECS
+        crate::engine::machine_route::SSH_CONNECT_TIMEOUT_SECS
     )
 }
 
@@ -774,44 +727,6 @@ fn run_ssh(
     match classify_exit(status.code()) {
         outcome @ (SshOutcome::Success | SshOutcome::CommandFailure(_)) => Ok(outcome),
         SshOutcome::ConnectionFailure => Err(connection_error(dest)),
-    }
-}
-
-/// Like [`run_ssh`] but captures stdout (the preamble on stdin, stdout to a
-/// buffer, stderr still inherited so ssh's own diagnostics stay visible).
-/// Classifies transport failure vs. a nonzero remote command so the Home probe
-/// can tell "unreachable" from "answered oddly".
-fn run_ssh_capture(
-    dest: &str,
-    port: Option<u16>,
-    broker: Option<&AccountLeaseBroker>,
-    preamble: &str,
-) -> Result<String, SshCaptureError> {
-    let mut child = Command::new("ssh")
-        .args(ssh_args(dest, port, false, broker))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| SshCaptureError::Local(format!("failed to spawn ssh: {error}")))?;
-
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| SshCaptureError::Local("ssh stdin unavailable".to_string()))?
-        .write_all(preamble.as_bytes())
-        .map_err(|error| SshCaptureError::Local(format!("failed to write preamble: {error}")))?;
-
-    let output = child
-        .wait_with_output()
-        .map_err(|error| SshCaptureError::Local(format!("ssh did not complete: {error}")))?;
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    match classify_exit(output.status.code()) {
-        SshOutcome::Success => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
-        SshOutcome::ConnectionFailure => Err(SshCaptureError::Unreachable(
-            connection_error(dest).to_string(),
-        )),
-        SshOutcome::CommandFailure(code) => Err(SshCaptureError::Command { code, stderr }),
     }
 }
 
@@ -884,7 +799,7 @@ mod tests {
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("nested `lf home ssh` is not supported"));
+            .contains("nested `lf machine ssh` is not supported"));
     }
 
     #[test]
@@ -957,16 +872,15 @@ mod tests {
             "src/loopflow",
             &cmd,
             &[(
-                EXPECTED_HOME_ID_ENV,
+                EXPECTED_MACHINE_ID_ENV,
                 "home_00000000000000000000000000000001",
             )],
         );
 
-        assert!(
-            preamble.contains("export LF_EXPECTED_HOME_ID='home_00000000000000000000000000000001'")
-        );
-        assert!(preamble.contains("LF_REACHED_HOME_ID=$(lf home id)"));
-        assert!(preamble.contains("remote Home identity mismatch"));
+        assert!(preamble
+            .contains("export LF_EXPECTED_MACHINE_ID='home_00000000000000000000000000000001'"));
+        assert!(preamble.contains("LF_REACHED_MACHINE_ID=$(lf machine id)"));
+        assert!(preamble.contains("remote Machine identity mismatch"));
         for secret in [
             "GH_TOKEN",
             "CLAUDE_CODE_OAUTH_TOKEN",
@@ -1073,7 +987,7 @@ mod tests {
 
     #[test]
     fn ssh_probe_reuses_connection_bounds_without_a_stdin_command() {
-        let args = crate::engine::wave_home::bounded_ssh_args("jack@host", Some(2222));
+        let args = crate::engine::machine_route::bounded_ssh_args("jack@host", Some(2222));
 
         assert!(args.iter().any(|arg| arg == "BatchMode=yes"));
         assert!(args.iter().any(|arg| arg == "ConnectTimeout=10"));

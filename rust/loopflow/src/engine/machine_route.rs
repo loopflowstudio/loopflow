@@ -1,4 +1,4 @@
-//! Parse the mutable route observed for a stable Home identity.
+//! Parse the mutable route observed for a stable Machine identity.
 //!
 //! A route is either this process's machine (`local`) or one SSH destination:
 //!
@@ -6,8 +6,8 @@
 //! - `ssh://jack@host[:port]` — the canonical remote form, reachable over SSH.
 //! - `jack@host` — readable shorthand that normalizes to `ssh://jack@host`.
 //!
-//! The route is observation, never identity; `HomeId` remains stable when it
-//! changes. Reachability is operational evidence (see [`HomeState`]).
+//! The route is observation, never identity; `MachineId` remains stable when it
+//! changes. Reachability is operational evidence.
 
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -42,7 +42,7 @@ pub(crate) fn resolve_home_relative_repo(repo: &Path) -> Result<String, String> 
     repo.strip_prefix(&home)
         .map_err(|_| {
             format!(
-                "repo {} is outside {}; remote Home routing needs a home-relative path",
+                "repo {} is outside {}; remote Machine routing needs a home-relative path",
                 repo.display(),
                 home.display()
             )
@@ -52,13 +52,13 @@ pub(crate) fn resolve_home_relative_repo(repo: &Path) -> Result<String, String> 
         .ok_or_else(|| format!("repo path {} is not UTF-8", repo.display()))
 }
 
-/// The current transport route to one Home.
+/// The current transport route to one Machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HomeRoute {
+pub enum MachineRoute {
     Local,
     Ssh {
         user: String,
-        host: HomeHost,
+        host: MachineHost,
         port: Option<u16>,
     },
 }
@@ -66,12 +66,12 @@ pub enum HomeRoute {
 /// A remote location's host: a DNS name or a numeric IP. IPv6 is stored numeric
 /// and always rendered bracketed in the canonical URI.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HomeHost {
+pub enum MachineHost {
     Name(String),
     Ip(IpAddr),
 }
 
-impl HomeHost {
+impl MachineHost {
     /// The bare host as `ssh` wants it in a `user@host` destination — no
     /// brackets, since the ssh CLI takes an unbracketed IPv6 there.
     fn as_ssh_host(&self) -> String {
@@ -91,7 +91,7 @@ impl HomeHost {
     }
 }
 
-impl HomeRoute {
+impl MachineRoute {
     /// Parse a durable route or SSH shorthand. `None` for anything unrecognized, so a
     /// typo fails loudly at the read site rather than silently routing wrong.
     pub fn parse(raw: &str) -> Option<Self> {
@@ -146,7 +146,7 @@ fn valid_user(user: &str) -> Option<String> {
 /// Parse the `host[:port]` (or `[ipv6][:port]`) location tail. Bracketed IPv6 is
 /// the only accepted IPv6 form — an unbracketed multi-colon token is ambiguous
 /// with a port and is rejected.
-fn parse_host_port(rest: &str) -> Option<(HomeHost, Option<u16>)> {
+fn parse_host_port(rest: &str) -> Option<(MachineHost, Option<u16>)> {
     if let Some(inner) = rest.strip_prefix('[') {
         let (v6, after) = inner.split_once(']')?;
         let ip: Ipv6Addr = v6.parse().ok()?;
@@ -154,7 +154,7 @@ fn parse_host_port(rest: &str) -> Option<(HomeHost, Option<u16>)> {
             "" => None,
             _ => Some(after.strip_prefix(':')?.parse::<u16>().ok()?),
         };
-        return Some((HomeHost::Ip(IpAddr::V6(ip)), port));
+        return Some((MachineHost::Ip(IpAddr::V6(ip)), port));
     }
     match rest.matches(':').count() {
         0 => Some((parse_host(rest)?, None)),
@@ -169,21 +169,21 @@ fn parse_host_port(rest: &str) -> Option<(HomeHost, Option<u16>)> {
 
 /// A host token: an IPv4 literal or a DNS name. (Bracketed IPv6 is handled by
 /// the caller.)
-fn parse_host(token: &str) -> Option<HomeHost> {
+fn parse_host(token: &str) -> Option<MachineHost> {
     let token = token.trim();
     if token.is_empty() {
         return None;
     }
     if let Ok(v4) = token.parse::<Ipv4Addr>() {
-        return Some(HomeHost::Ip(IpAddr::V4(v4)));
+        return Some(MachineHost::Ip(IpAddr::V4(v4)));
     }
     let ok = token
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_'));
-    ok.then(|| HomeHost::Name(token.to_string()))
+    ok.then(|| MachineHost::Name(token.to_string()))
 }
 
-impl fmt::Display for HomeRoute {
+impl fmt::Display for MachineRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Local => f.write_str("local"),
@@ -198,11 +198,11 @@ impl fmt::Display for HomeRoute {
     }
 }
 
-impl FromStr for HomeRoute {
+impl FromStr for MachineRoute {
     type Err = String;
 
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
-        Self::parse(raw).ok_or_else(|| format!("invalid Home route: {raw:?}"))
+        Self::parse(raw).ok_or_else(|| format!("invalid Machine route: {raw:?}"))
     }
 }
 
@@ -210,8 +210,8 @@ impl FromStr for HomeRoute {
 mod tests {
     use super::*;
 
-    fn home(raw: &str) -> HomeRoute {
-        HomeRoute::parse(raw).unwrap_or_else(|| panic!("parse {raw:?}"))
+    fn home(raw: &str) -> MachineRoute {
+        MachineRoute::parse(raw).unwrap_or_else(|| panic!("parse {raw:?}"))
     }
 
     #[test]
@@ -241,11 +241,11 @@ mod tests {
 
     #[test]
     fn ssh_user_is_required() {
-        assert_eq!(home("local"), HomeRoute::Local);
-        assert_eq!(HomeRoute::parse("ssh://mini-heart"), None);
-        assert_eq!(HomeRoute::parse("mini-heart"), None);
-        assert_eq!(HomeRoute::parse("@host"), None);
-        assert_eq!(HomeRoute::parse(""), None);
+        assert_eq!(home("local"), MachineRoute::Local);
+        assert_eq!(MachineRoute::parse("ssh://mini-heart"), None);
+        assert_eq!(MachineRoute::parse("mini-heart"), None);
+        assert_eq!(MachineRoute::parse("@host"), None);
+        assert_eq!(MachineRoute::parse(""), None);
     }
 
     #[test]
@@ -253,10 +253,10 @@ mod tests {
         // bracketed ok
         assert!(home("ssh://jack@[fe80::1]").is_remote());
         // unbracketed ipv6 is ambiguous with a port and is rejected
-        assert_eq!(HomeRoute::parse("ssh://jack@2001:db8::1"), None);
+        assert_eq!(MachineRoute::parse("ssh://jack@2001:db8::1"), None);
         // bad port
-        assert_eq!(HomeRoute::parse("ssh://jack@host:notaport"), None);
-        assert_eq!(HomeRoute::parse("ssh://jack@host:99999"), None);
+        assert_eq!(MachineRoute::parse("ssh://jack@host:notaport"), None);
+        assert_eq!(MachineRoute::parse("ssh://jack@host:99999"), None);
     }
 
     #[test]

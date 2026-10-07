@@ -119,7 +119,7 @@ mod macos {
             let root = home
                 .ancestors()
                 .find(|path| path.is_dir())
-                .ok_or_else(|| anyhow::anyhow!("no existing Home ancestor to observe"))?;
+                .ok_or_else(|| anyhow::anyhow!("no existing Machine ancestor to observe"))?;
             let changes = Arc::new(Mutex::new(Changes::default()));
             let (sink, home) = (changes.clone(), home.to_owned());
             let stream = Stream::start(&[root], 0.05, true, move |path| {

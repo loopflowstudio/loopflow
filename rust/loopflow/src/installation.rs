@@ -1,7 +1,7 @@
 //! Machine authority for published artifact installation.
 //!
 //! Release receipts live outside the data directory. Ordinary commands share
-//! the main Home; explicit experiments never change installed artifact selection.
+//! the main Machine; explicit experiments never change installed artifact selection.
 
 use std::collections::HashSet;
 #[cfg(unix)]
@@ -633,7 +633,7 @@ impl SwitchReceipt {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum MachineInstallState {
+pub enum InstallationState {
     Legacy,
     Settled(Box<ActiveInstall>),
     Switching(Box<SwitchReceipt>),
@@ -750,7 +750,7 @@ fn _switch_capability(_role: &ArtifactRole) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// Run ordinary commands through the installed CLI before opening any Home state.
+/// Run ordinary commands through the installed CLI before opening any Machine state.
 pub fn dispatch_default_cli() -> Result<()> {
     if crate::store::custom_home_selected() {
         let home = crate::store::canonicalize_with_missing_tail(&crate::store::lf_home_dir())?;
@@ -810,13 +810,13 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
 
     let switch_capability = _switch_capability(role);
     let selection = match read_state(&root)? {
-        MachineInstallState::Legacy => {
+        InstallationState::Legacy => {
             return Err(anyhow!(
                 "machine entry gate {} has no settled install receipt",
                 gate.display()
             ))
         }
-        MachineInstallState::Switching(receipt)
+        InstallationState::Switching(receipt)
             if switch_capability.as_deref() == Some(receipt.id.as_str())
                 && receipt.phase.order() >= SwitchPhase::Activated.order()
                 && receipt.target_store_advanced =>
@@ -826,8 +826,8 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
         // A switch this process is not driving (typically one that failed or was
         // abandoned mid-flight) must not brick ordinary startup: dispatch through
         // the last good install instead of refusing.
-        MachineInstallState::Switching(receipt) => startup_selection_during_switch(&receipt)?,
-        MachineInstallState::Settled(active) => active.selection,
+        InstallationState::Switching(receipt) => startup_selection_during_switch(&receipt)?,
+        InstallationState::Settled(active) => active.selection,
     };
     let artifact = selection
         .artifact_set
@@ -874,29 +874,29 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
     }
 }
 
-pub fn read_state(root: &Path) -> Result<MachineInstallState> {
+pub fn read_state(root: &Path) -> Result<InstallationState> {
     let switch_path = root.join(SWITCH_FILE);
     if path_exists(&switch_path)? {
         let receipt: SwitchReceipt = read_json(&switch_path)?;
         receipt.validate()?;
-        return Ok(MachineInstallState::Switching(Box::new(receipt)));
+        return Ok(InstallationState::Switching(Box::new(receipt)));
     }
     let active_path = root.join(ACTIVE_FILE);
     if path_exists(&active_path)? {
         let active: ActiveInstall = read_json(&active_path)?;
         active.validate()?;
-        return Ok(MachineInstallState::Settled(Box::new(active)));
+        return Ok(InstallationState::Settled(Box::new(active)));
     }
-    Ok(MachineInstallState::Legacy)
+    Ok(InstallationState::Legacy)
 }
 
 /// Ordinary launches use published artifacts even if an old development
 /// installation is still selected. Its store never participates in routing.
 pub(crate) fn installed_cli(root: &Path) -> Result<Option<ArtifactIdentity>> {
     let active = match read_state(root)? {
-        MachineInstallState::Legacy => return Ok(None),
-        MachineInstallState::Settled(active) => *active,
-        MachineInstallState::Switching(receipt) => startup_active_during_switch(&receipt)?,
+        InstallationState::Legacy => return Ok(None),
+        InstallationState::Settled(active) => *active,
+        InstallationState::Switching(receipt) => startup_active_during_switch(&receipt)?,
     };
     let artifacts = match active.selection.source {
         InstallSource::Published => active.selection.artifact_set,
@@ -968,15 +968,15 @@ pub fn write_switch(root: &Path, receipt: &SwitchReceipt) -> Result<()> {
 pub fn write_active(root: &Path, active: &ActiveInstall) -> Result<()> {
     active.validate()?;
     match read_state(root)? {
-        MachineInstallState::Legacy => {}
-        MachineInstallState::Settled(existing) if *existing == *active => return Ok(()),
-        MachineInstallState::Settled(existing) => {
+        InstallationState::Legacy => {}
+        InstallationState::Settled(existing) if *existing == *active => return Ok(()),
+        InstallationState::Settled(existing) => {
             return Err(anyhow!(
                 "active installation {} may change only through an install switch",
                 existing.selection.installation_id
             ))
         }
-        MachineInstallState::Switching(_) => {
+        InstallationState::Switching(_) => {
             return Err(anyhow!(
                 "an install switch is unsettled; refusing to replace active selection"
             ))
@@ -1071,8 +1071,8 @@ fn authorize_for_switch(
     switch_id: Option<&str>,
 ) -> Result<Option<InstallSelection>> {
     let active = match read_state(root)? {
-        MachineInstallState::Legacy => return Ok(None),
-        MachineInstallState::Switching(receipt) => {
+        InstallationState::Legacy => return Ok(None),
+        InstallationState::Switching(receipt) => {
             if switch_id == Some(receipt.id.as_str())
                 && receipt.phase.order() >= SwitchPhase::Advancing.order()
                 && receipt.target_store_advance_started
@@ -1105,7 +1105,7 @@ fn authorize_for_switch(
             // install so a failed or in-flight switch cannot brick ordinary startup.
             startup_active_during_switch(&receipt)?
         }
-        MachineInstallState::Settled(active) => *active,
+        InstallationState::Settled(active) => *active,
     };
     let actual = fs::canonicalize(executable)
         .with_context(|| format!("resolve running executable {}", executable.display()))?;
@@ -1180,11 +1180,11 @@ pub fn selection_for_executable(
     executable: &Path,
 ) -> Result<Option<InstallSelection>> {
     let active = match read_state(root)? {
-        MachineInstallState::Legacy => return Ok(None),
+        InstallationState::Legacy => return Ok(None),
         // A failed or in-flight switch resolves through the last good install so
         // ordinary startup keeps working instead of refusing every command.
-        MachineInstallState::Switching(receipt) => startup_active_during_switch(&receipt)?,
-        MachineInstallState::Settled(active) => *active,
+        InstallationState::Switching(receipt) => startup_active_during_switch(&receipt)?,
+        InstallationState::Settled(active) => *active,
     };
     let actual = fs::canonicalize(executable)
         .with_context(|| format!("resolve running executable {}", executable.display()))?;
@@ -1511,7 +1511,7 @@ mod tests {
     }
 
     #[test]
-    fn machine_install_root_is_outside_every_loopflow_home() {
+    fn installation_root_is_outside_every_loopflow_home() {
         let account_home = Path::new("/Users/example");
         assert_eq!(
             root_for_home(account_home),
@@ -1537,7 +1537,7 @@ mod tests {
         clear_switch(&root, &receipt.id).unwrap();
         assert!(matches!(
             read_state(&root).unwrap(),
-            MachineInstallState::Legacy
+            InstallationState::Legacy
         ));
         assert!(!target.store.exists());
     }
@@ -1728,7 +1728,7 @@ mod tests {
         // The switch is still surfaced so install operations can recover it...
         assert!(matches!(
             read_state(&root).unwrap(),
-            MachineInstallState::Switching(found) if found.id == receipt.id
+            InstallationState::Switching(found) if found.id == receipt.id
         ));
         // ...but a failed or in-flight switch must not brick the CLI: ordinary
         // startup resolves through the prior (last good) install instead of
@@ -1936,7 +1936,7 @@ mod tests {
 
         assert!(matches!(
             read_state(&root).unwrap(),
-            MachineInstallState::Settled(found) if found.selection == development
+            InstallationState::Settled(found) if found.selection == development
         ));
         assert!(!root.join(SWITCH_FILE).exists());
         assert!(root.join("receipts/switch-test.json").is_file());
@@ -1983,7 +1983,7 @@ mod tests {
         assert!(error.to_string().contains("cannot be cleared"));
         assert!(matches!(
             read_state(&root).unwrap(),
-            MachineInstallState::Switching(found) if found.id == receipt.id
+            InstallationState::Switching(found) if found.id == receipt.id
         ));
     }
 
@@ -2046,7 +2046,7 @@ mod tests {
             .contains("cannot regress"));
         assert!(matches!(
             read_state(&root).unwrap(),
-            MachineInstallState::Switching(found) if *found == receipt
+            InstallationState::Switching(found) if *found == receipt
         ));
     }
 
@@ -2066,7 +2066,7 @@ mod tests {
             .contains("may change only through an install switch"));
         assert!(matches!(
             read_state(&root).unwrap(),
-            MachineInstallState::Settled(found) if *found == published_active
+            InstallationState::Settled(found) if *found == published_active
         ));
     }
 
@@ -2094,7 +2094,7 @@ mod tests {
             .contains("was never persisted"));
         assert!(matches!(
             read_state(&root).unwrap(),
-            MachineInstallState::Legacy
+            InstallationState::Legacy
         ));
     }
 

@@ -1,7 +1,7 @@
 // LaunchJournal — timings of real launches and their `lf` reads, kept in the
-// Home so a report needs no trace and no staged benchmark.
+// Machine so a report needs no trace and no staged benchmark.
 //
-// Two bounded NDJSON files under `<Home>/desktop-cache/timings/`: `launches`
+// Two bounded NDJSON files under `<Machine>/desktop-cache/timings/`: `launches`
 // holds one line per launch milestone, `reads` one line per `lf` read and per
 // workspace refresh. Lines carry durations, verbs and the app version; never
 // arguments, output or error text. Each append is one write on a utility queue.
@@ -40,7 +40,7 @@ final class LaunchJournal: @unchecked Sendable {
         self.directory = directory
     }
 
-    /// The journal of the Home this process's `lf` reads resolve to. It writes
+    /// The journal of the Machine this process's `lf` reads resolve to. It writes
     /// nothing until the app calls `begin`, so tests and fixture runs stay silent.
     static let home = LaunchJournal(
         directory: WorkCache.homeDirectory.appendingPathComponent("timings", isDirectory: true))

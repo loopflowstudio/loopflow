@@ -49,7 +49,7 @@ A pending transition or unfinished Exec is unresolved evidence, not proof of liv
 Watchers and status reads never provision or import.
 
 The first explicit ensure, binding setup or applied rotation imports an existing
-`<Home>/waves/<WaveId>/config.yaml` selection once, after exact provider ownership
+`<Machine>/waves/<WaveId>/config.yaml` selection once, after exact provider ownership
 validation. SQLite commits the selected Project and original YAML bytes together in
 `project_binding_imports`; absent files are recorded too. Malformed files or failed
 provider reads leave import retryable and prohibit creation. After import, the file
@@ -345,7 +345,7 @@ review feedback remains Session evidence. No Ready/Complete operation closes the
 conversation or releases a Flow. The caller inspects outcomes and effects
 before selecting further work; pane closure and provider exit grant no authority.
 
-Saved handoffs retain executable, Home and database together. Renaming, binding
+Saved handoffs retain executable, Machine and database together. Renaming, binding
 and driver replacement retain conversation identity and feedback. Desktop reads
 the same record and keys its terminal surface on AgentSession identity.
 

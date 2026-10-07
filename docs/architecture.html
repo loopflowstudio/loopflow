@@ -2009,7 +2009,7 @@ h3:hover .anchor-link,
                 <li class="docs-nav-child">
 <a href="https://loopflow.studio/architecture/delivery">Delivery</a>                </li>
                 <li class="docs-nav-child">
-<a href="https://loopflow.studio/architecture/homes">Homes and processes</a>                </li>
+<a href="https://loopflow.studio/architecture/machines">Machines and processes</a>                </li>
                 <li class="docs-nav-child">
 <a href="https://loopflow.studio/architecture/data">Data and persistence</a>                </li>
                 <li class="docs-nav-child">
@@ -2055,7 +2055,7 @@ lf CLI --&gt; Skill discovery --&gt; prompt --&gt; provider route --&gt; harness
                                                AgentSession history
                                                + immutable input/output artifacts
 </code></pre>
-<p>Before the provider starts, the current Home has the conversation reservation
+<p>Before the provider starts, the current Machine has the conversation reservation
 and its immutable input. SQLite owns identity, attribution, driver authority and
 history references; payload files retain large captured inputs and output.
 Admission failure stops before provider launch. General command logging has a
@@ -2124,7 +2124,7 @@ operations available to helpers without becoming standing Work identities.</p>
     |
     +-- Controllers: pursue Work end to end using the layers above
     |
-    +-- Home: place execution, credentials, services, files, and locks
+    +-- Machine: place execution, credentials, services, files, and locks
     |
     `-- Views: project planning, command, conversation, provider, Git, and OS evidence
 </code></pre>
@@ -2153,9 +2153,9 @@ operations available to helpers without becoming standing Work identities.</p>
 <td><a href="https://loopflow.studio/architecture/delivery">Delivery</a></td>
 </tr>
 <tr>
-<td>Homes</td>
+<td>Machines</td>
 <td>Placement, SSH routing, machine install</td>
-<td><a href="https://loopflow.studio/architecture/homes">Homes and processes</a></td>
+<td><a href="https://loopflow.studio/architecture/machines">Machines and processes</a></td>
 </tr>
 <tr>
 <td>Data</td>
@@ -2232,9 +2232,9 @@ user / agent --&gt; lf CLI --------+----------+-----------+
                               v
                   status / roadmap / usage / app
 
-another machine is another Home; cross it explicitly with `lf ssh`
+another machine is another Machine; cross it explicitly with `lf ssh`
 </code></pre>
-<p>There is no central Loopflow server. A Home owns its processes, credentials,
+<p>There is no central Loopflow server. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
 definitions and memory. Linear and GitHub keep shared planning and delivery
 truth. Readers join those sources; they do not replace them with a universal
@@ -2311,14 +2311,14 @@ Flow                          one driver Exec; cursor in its memory, graph in Fl
 <td>Ordered Work input</td>
 </tr>
 <tr>
-<td>Home</td>
+<td>Machine</td>
 <td>A machine's store, credentials and exact process authority</td>
-<td>Home identity and observed route</td>
+<td>Machine identity and observed route</td>
 </tr>
 <tr>
 <td>Placement</td>
 <td>Where a Work executes</td>
-<td><code>(WorkRef, HomeId)</code></td>
+<td><code>(WorkRef, MachineId)</code></td>
 </tr>
 </tbody>
 </table>
@@ -2402,7 +2402,7 @@ conversation.</p>
 <pre tabindex="0"><code class="language-bash">lf ssh build-home session list --json
 lf ssh build-home --wave product wave/operate
 </code></pre>
-<p>The origin transports one command. The target resolves its own Home state and
+<p>The origin transports one command. The target resolves its own Machine state and
 runs the same <code>lf</code>. Reads are local unless this hop is explicit.</p>
 <h2 id="how-to-read-the-code">How to read the code<a class="anchor-link" href="#how-to-read-the-code" title="Link to this section">#</a></h2>
 <p>Start with the area that owns the behavior, then follow the object passed to
@@ -2430,7 +2430,7 @@ the behavior.</p>
 </tr>
 <tr>
 <td>remote execution, placement, process control, promotion</td>
-<td><a href="https://loopflow.studio/architecture/homes">Homes and processes</a></td>
+<td><a href="https://loopflow.studio/architecture/machines">Machines and processes</a></td>
 </tr>
 <tr>
 <td>schema, files, projections, DTOs, or consistency</td>

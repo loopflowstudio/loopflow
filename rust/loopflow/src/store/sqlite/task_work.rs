@@ -828,7 +828,7 @@ mod tests {
             .await
             .unwrap(),
         );
-        let home = store.local_home().await.unwrap().id;
+        let home = store.local_machine().await.unwrap().id;
         let task = TaskId::new();
         let wave = WaveId::new();
         let project = ProjectId::new();
@@ -842,7 +842,7 @@ mod tests {
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
             conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1',?3,1)",params![task.as_str(),project.as_str(),repo.path().to_str().unwrap()]).unwrap();
             conn.execute(
-                "INSERT INTO work_placements(task_id,home_id,placed_at) VALUES(?1,?2,1)",
+                "INSERT INTO work_placements(task_id,machine_id,placed_at) VALUES(?1,?2,1)",
                 params![task.as_str(), home.as_str()],
             )
             .unwrap();

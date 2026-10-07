@@ -228,7 +228,7 @@ def collect_snapshot(repo: Path, policy: ResourcePolicy) -> ResourceSnapshot:
         _measure_source(
             id="session-captures:home",
             kind="session-captures",
-            owner="Loopflow Home",
+            owner="Loopflow Machine",
             root=authority_home,
             paths=(capture_root,),
             budget=policy.maximum_session_capture_bytes,

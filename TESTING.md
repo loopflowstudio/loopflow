@@ -144,7 +144,7 @@ uv run python scripts/resource_envelope.py --recover
 ```
 
 The resource preflight names the owner and budget for every worktree build,
-gate-artifact root, the Home-local Session artifact store, uv cache, Cargo cache, and
+gate-artifact root, the Machine-local Session artifact store, uv cache, Cargo cache, and
 free disk. `performance/budgets.json` sets a 64 GiB cleanup target, a 32 GiB
 emergency disk reserve, and four
 low-priority verification workers. Total build size is measured, not capped.
@@ -326,7 +326,7 @@ output stops after compilation, inspect `events.jsonl` for the last started test
 without a matching end event. SwiftPM buffers console output, so silence alone
 does not establish that test execution never began.
 
-The Swift transport suite launches `target/debug/lf` against a temporary Home.
+The Swift transport suite launches `target/debug/lf` against a temporary Machine.
 Build the current CLI before running it; an existing developer build can hide
 a missing prerequisite in a clean checkout. CI and `scripts/test.py --swift`
 include this build.
@@ -458,7 +458,7 @@ cargo test -p loopflow --lib task_stop_waits_for_selected_step_after_driver_deat
 The proof covers retained and released driver claims, child exit, interrupted
 Exec history, and an unresolved mechanical outcome. Linux also holds interrupt
 cleanup after the effect exits to exercise settlement ordering. It uses no
-configured provider or installed Home.
+configured provider or installed Machine.
 
 For shared repository discovery or CLI dispatch changes, include the PM and
 Wave consumers in the focused check:
@@ -540,11 +540,11 @@ logins and a local endpoint: a Claude started after a switch sends the login
 Loopflow installed, a shared launch gets no account home or credential
 variable, and an isolated launch stays in its account's home. On macOS it
 writes and removes one Keychain item scoped to its temporary config directory.
-The fixture copies the candidate, uses private Homes and stops only its identified
+The fixture copies the candidate, uses private Machines and stops only its identified
 engine children. Native execution uses synthetic Responses, not configured
 accounts or installed data. Ordinary retry, usage, binding and review behavior
 belong in `session_lifecycle_tests`; Chapter convergence belongs in
-`ops::chapter::tests`, including interrupted rotation and second-Home sync.
+`ops::chapter::tests`, including interrupted rotation and second-Machine sync.
 
 Task-planning fixtures also need an explicit `LF_BIN`: Task status validates
 launch authority before reconciling a user merge. Pin the test executable when
@@ -561,8 +561,8 @@ uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow
 Every CLI fixture must select an explicit disposable `LF_HOME` and pin
 `LF_BIN` to the compiled test CLI. Clear inherited `LF_*` execution authority.
 Without an explicit experiment a source CLI forwards to the installed CLI and
-main Home. Children use the same Home and executable; PATH cannot choose a
-second store. A Home's database is always `$LF_HOME/loopflow.db`.
+main Machine. Children use the same Machine and executable; PATH cannot choose a
+second store. A Machine's database is always `$LF_HOME/loopflow.db`.
 
 When editing the repeated Task body, exercise every step on two passes and
 saved-decision recovery. Keep loop-or-next after work and review so navigation
@@ -658,8 +658,8 @@ test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,
 include Task consumers: durable work reservation retains Started after
 failure. Use CI's materialized migration graph for trigger
-changes; an ordinary draft build may omit the trigger. Experimental Homes hold
-this build's exact schema: use a fresh Home after changing it. Preserve
+changes; an ordinary draft build may omit the trigger. Experimental Machines hold
+this build's exact schema: use a fresh Machine after changing it. Preserve
 populated historical fixtures for published migration coverage. A Task's draft is
 edited in place, so test the released frontier against the finished draft and
 write no test for a schema that existed only between two edits.
@@ -668,7 +668,7 @@ For manual migration check in a shared checkout, materialize only in a disposabl
 source copy that includes the current tracked and untracked inputs. Materialization
 can change package versions, the lockfile, registry and migration files; another
 execution can commit those temporary changes before cleanup. Keep the assigned checkout
-on its authoring schema and leave the live Home untouched. A copy without Git
+on its authoring schema and leave the live Machine untouched. A copy without Git
 metadata must set `LOOPFLOW_BUILD_PROVENANCE=development` when exercising
 source behavior; otherwise the build defaults to release provenance. It also
 cannot prove fixtures that require `git rev-parse HEAD`: run those in
@@ -703,16 +703,16 @@ has already blocked the completed incident. Use fixture synchronization to prove
 the ordering without timing-dependent sleeps.
 
 Run CLI-backed Python tests only after the Rust build finishes; replacing their
-binary mid-test mixes migration frontiers in a single temporary Home.
+binary mid-test mixes migration frontiers in a single temporary Machine.
 
 Fresh-store coverage exercises the live SQLite schema. Populated historical
 fixtures exercise the migration chain and verify retained facts. A fresh-store
-pass alone does not prove that an existing Home can upgrade without losing work.
+pass alone does not prove that an existing Machine can upgrade without losing work.
 
-Prove explicit experimental Home continuity with `global_commands` and
-`one_home_tests`. Use a fresh `LF_HOME` for each schema version: source binaries
-without an explicit experiment forward to the installed CLI and main Home.
-Never run candidate mutation checks against the main Home.
+Prove explicit experimental Machine continuity with `global_commands` and
+`one_machine_tests`. Use a fresh `LF_HOME` for each schema version: source binaries
+without an explicit experiment forward to the installed CLI and main Machine.
+Never run candidate mutation checks against the main Machine.
 
 Run the real CLI resume regressions with isolated installation authority:
 
@@ -758,12 +758,12 @@ retain the PR identity, and leave an earlier Flow's Execs untouched after source
 changes. Linear planning and GitHub reads are fixtures; Git and CLI paths are real.
 
 The disposable OS account authors fixture installation records for routing proofs;
-Task adoption uses an explicit experimental Home. No host Home, credentials or installation
+Task adoption uses an explicit experimental Machine. No host Machine, credentials or installation
 is mounted. Default executable routing uses two real source CLI processes and
 a simulated installed executable. It runs in this disposable account because
 `HOME` and `LF_HOME` cannot isolate machine installation records. The ordinary
 `pr_tests` suite covers Task continuation's auto-merge revocation and review
-continuity in an explicit experimental Home.
+continuity in an explicit experimental Machine.
 
 The separate planning CLI proof (`cargo test -p loopflow --test planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against
 normalized local planning, proving that inspection creates no execution or worktree.
@@ -775,9 +775,9 @@ The mechanical Flow proof uses that disposable account without an installation
 selection. A claim followed by admission failure/release leaves Started absent;
 the real worker records operation history and Started together. It retains the
 captured Flow after the template disappears and records an ordinary child Exec without creating an AgentSession.
-The default-Home proof sends two nested source CLI processes through a simulated
-installed executable and checks that both select the main Home despite stale
-control pins. The explicit-Home Flow proof runs locally in `one_home_tests`. The declaration proof starts Task Y
+The default-Machine proof sends two nested source CLI processes through a simulated
+installed executable and checks that both select the main Machine despite stale
+control pins. The explicit-Machine Flow proof runs locally in `one_machine_tests`. The declaration proof starts Task Y
 from Task X's agent and checks Y attribution while retaining X as the causal parent.
 
 The harness keeps Docker build/registry caches, serializes use of its build
@@ -797,7 +797,7 @@ alongside the provider's unit tests. Keep trace expectations aligned with the
 event contract, including durable final-answer receipts and usage checkpoints.
 
 After Session-history or schema changes, run `lf monitor list --json`, `lf usage --json`, and
-`lf doctor --json` against a disposable Home with inherited `LF_*` and
+`lf doctor --json` against a disposable Machine with inherited `LF_*` and
 `LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
 Never use the installed store to prove a draft migration.
 
@@ -822,7 +822,7 @@ Exercise Task deletion through the real CLI on Linux:
 cargo test -p loopflow --test task_deletion_tests
 ```
 
-Requires `uv`, Python and OpenSSL. The test creates an isolated Home/store and a
+Requires `uv`, Python and OpenSSL. The test creates an isolated Machine/store and a
 local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
 only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
 setting, so this test is Linux-only. It verifies native removal, local retirement,
@@ -838,7 +838,7 @@ LF_HOME="$(mktemp -d)" uv run tests/e2e/linear_oauth.py --lf target/debug/lf
 ```
 
 Give the container `--add-host api.linear.app:127.0.0.1`, Python, Git, and
-`uv`. The experiment needs a registered repository. Never mount a real Home
+`uv`. The experiment needs a registered repository. Never mount a real Machine
 or credentials into this container: the fixture replaces its Linear row
 and seeds planning data in the explicit disposable store.
 
@@ -862,7 +862,7 @@ CLI to `/fixture/install_bootstrap.py`, `/fixture/install.sh`, and
 after `canonicalize_migrations.py --materialize-for-tests`, using release
 provenance and published migration authority only in that isolated build.
 The runtime container needs curl, OpenSSL, CA certificates, Git, useradd,
-runuser, and uv; run the check as root without host Home mounts. Optionally copy
+runuser, and uv; run the check as root without host Machine mounts. Optionally copy
 a checksum-verified older released pair into `/fixture/prior` to exercise the
 external-installer transition.
 
@@ -881,7 +881,7 @@ uv run python tests/e2e/capture_history.py \
 ```
 
 Supply the matching v0.13.3 CLI archive from its published release. The fixture
-checks its pinned SHA256 before extraction, creates a temporary Home with stub
+checks its pinned SHA256 before extraction, creates a temporary Machine with stub
 providers, and exercises ordinary public commands with both binaries. It preserves
 capture paths/bytes, native identity, usage and released review feedback through
 candidate reads, replay, resume, review settlement and nested Exec ancestry.
@@ -932,7 +932,7 @@ cargo test -p loopflow --lib project_status_adoption_preserves_current_identity_
 
 They check retained review identity/capture and the current Project's custom Flow
 default. Synthetic migration success does not authorize conversion of an installed
-Home or prove configured-provider resumption.
+Machine or prove configured-provider resumption.
 
 When changing how a Flow step is described or read back, include the step
 argument and Exec inventory tests and the public Session lifecycle proofs. A
@@ -968,7 +968,7 @@ fixture, restore it afterward, and serialize environment changes with
 `test_env_lock`. Reuse `TestLfBinGuard` in Task controller tests and `SessionHome`
 in conversation tests; keep Session spawning mocked. Listing waiting Sessions
 also resolves the executable for their open command, even with spawning mocked.
-Enter `journal::with_runtime` after selecting the fixture Home so its Exec and
+Enter `journal::with_runtime` after selecting the fixture Machine so its Exec and
 the Session driver references share the same database. Simulated finite-provider
 harnesses must record their owned child exit; an absent endpoint is not exit
 evidence.
@@ -989,12 +989,12 @@ Session association changes also require the full `session_lifecycle_tests` suit
 explicit Task bindings retain membership even from a sibling checkout. Wave label
 changes require `DesktopHeadlessTests` alongside `WaveTests` to verify rendered titles.
 
-Fixture Homes must set `LF_HOME` explicitly, including when overriding `HOME`.
+Fixture Machines must set `LF_HOME` explicitly, including when overriding `HOME`.
 Open fixture stores at `$LF_HOME/loopflow.db`; no variable selects another file.
 
-When changing Home selection, run the affected fixtures with `LF_HOME` unset in
-the test runner; the materialization wrapper's shared test Home can mask missing
-fixture setup. CLI fixtures must select their own disposable Home. Upgrade proofs
+When changing Machine selection, run the affected fixtures with `LF_HOME` unset in
+the test runner; the materialization wrapper's shared test Machine can mask missing
+fixture setup. CLI fixtures must select their own disposable Machine. Upgrade proofs
 must use published migration authority against a temporary shared store; opening
 an existing experiment intentionally validates its schema without upgrading it.
 
@@ -1012,7 +1012,7 @@ installation harness for default-runtime proofs; never replace the machine's
 selection to make tests pass. Flow/Session tests with an explicit experimental
 `LF_HOME` and source `LF_BIN` stay within that experiment.
 
-`lf home install preflight` and `promote` read the OS account's store and take
+`lf machine install preflight` and `promote` read the OS account's store and take
 its promotion lock; `HOME` and `LF_HOME` do not redirect them. Tests that run
 either command are installation proofs: ignored in the regular suite and listed
 in `scripts/test_task_installation.py`. On a developer machine they would copy
@@ -1037,7 +1037,7 @@ can expose an empty file between creation and the first write.
 ### Project readiness fixtures
 
 Task fixtures must create their Wave and Project, select the Project in SQLite,
-and retain Home placement before creating work. YAML binding imports belong to
+and retain Machine placement before creating work. YAML binding imports belong to
 explicit activation tests; passive status reads do not import them. Keep readiness
 fields in inline Swift responses as well as shared DTO fixtures.
 
@@ -1054,7 +1054,7 @@ types. A Swift String round trip alone cannot prove that a Rust producer accepts
 an identity value.
 
 Session fixtures share `AMBIENT_TASK_ENV` in
-`rust/loopflow/tests/support/ambient.rs`. Its guard clears inherited control Home,
+`rust/loopflow/tests/support/ambient.rs`. Its guard clears inherited control Machine,
 captured-input identity/directory, Task authority, and review Session identity under the
 suite's environment lock and restores them afterward. Prove isolation from a
 live Session without shell-level scrubbing:

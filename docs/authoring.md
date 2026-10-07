@@ -309,7 +309,7 @@ pm:
 Do not copy provider or Team bindings into Wave frontmatter. Every Wave reuses
 the repository Team and owns only its Initiative.
 
-Execution placement is durable state: use `lf wave place <wave-id> <home-id>`.
+Execution placement is durable state: use `lf wave place <wave-id> <machine-id>`.
 Placement does not edit the goal, launch work or stop existing conversations.
 
 ### Writing KRs

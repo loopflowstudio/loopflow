@@ -44,7 +44,7 @@ struct RegistryQueryTests {
             "active_tasks": 1,
             "created_at": null,
             "parent_wave_id": null,
-            "home": {
+            "machine": {
               "id": "home_00000000000000000000000000000001",
               "route": "local",
               "created_at": "1970-01-01T00:00:00Z",
@@ -60,7 +60,7 @@ struct RegistryQueryTests {
             "active_tasks": 0,
             "created_at": null,
             "parent_wave_id": null,
-            "home": {
+            "machine": {
               "id": "home_00000000000000000000000000000001",
               "route": "local",
               "created_at": "1970-01-01T00:00:00Z",
@@ -93,7 +93,7 @@ struct RegistryQueryTests {
             "active_tasks": 1,
             "created_at": null,
             "parent_wave_id": null,
-            "home": {
+            "machine": {
               "id": "home_00000000000000000000000000000001",
               "route": "local",
               "created_at": "1970-01-01T00:00:00Z",
@@ -109,7 +109,7 @@ struct RegistryQueryTests {
             "active_tasks": 0,
             "created_at": null,
             "parent_wave_id": null,
-            "home": {
+            "machine": {
               "id": "home_00000000000000000000000000000001",
               "route": "local",
               "created_at": "1970-01-01T00:00:00Z",
@@ -143,7 +143,7 @@ struct RegistryQueryTests {
     "active_tasks": 1,
     "created_at": null,
     "parent_wave_id": null,
-    "home": {
+    "machine": {
       "id": "home_00000000000000000000000000000001",
       "route": "local",
       "created_at": "1970-01-01T00:00:00Z",
@@ -364,7 +364,7 @@ struct RegistryQueryTests {
             "active_tasks": 0,
             "created_at": null,
             "parent_wave_id": null,
-            "home": {
+            "machine": {
               "id": "home_00000000000000000000000000000001",
               "route": "local",
               "created_at": "1970-01-01T00:00:00Z",

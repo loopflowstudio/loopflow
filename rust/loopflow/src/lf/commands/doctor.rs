@@ -115,7 +115,7 @@ pub fn run(json: bool) -> Result<()> {
     }
     let rows = events.as_ref().map_or(0, Vec::len);
     // Binary freshness remains useful when the store cannot open.
-    checks.extend(check_machine_install(&database_path));
+    checks.extend(check_installation(&database_path));
     checks.push(check_binary_freshness());
     if json {
         println!(
@@ -147,7 +147,7 @@ fn check_binary_freshness() -> Check {
             FRESHNESS,
             format!(
                 "cannot compare build revision {}: no git checkout at this binary's source root \
-                 or working directory. Run `lf home doctor` from a loopflow checkout to learn whether \
+                 or working directory. Run `lf machine doctor` from a loopflow checkout to learn whether \
                  the running binary is current",
                 crate::build_info::short_revision(revision)
             ),
@@ -180,7 +180,7 @@ fn check_binary_freshness() -> Check {
                 FRESHNESS,
                 format!(
                     "running lf is built from {} and is {} merged commit(s) behind cached {UPSTREAM} (not refreshed); \
-                     latest merged changes: {commits}. Run `lf home install` to install the latest published release",
+                     latest merged changes: {commits}. Run `lf machine install` to install the latest published release",
                     crate::build_info::short_revision(&revision),
                     missing.len(),
                 ),
@@ -235,7 +235,7 @@ fn inspect_store(path: &Path) -> StoreReport {
                     crate::store::migrations::validate_sqlite(&connection).and_then(|()| {
                         if let Some(pending) = crate::store::migrations::pending_shared_migration(&connection)? {
                             return Err(crate::store::StoreError::InvalidData(format!(
-                                "selected database is missing {pending}; run `lf home install` to install a published release"
+                                "selected database is missing {pending}; run `lf machine install` to install a published release"
                             )));
                         }
                         Ok(())
@@ -249,7 +249,7 @@ fn inspect_store(path: &Path) -> StoreReport {
         }
     }
     if !path.exists() {
-        migration_error = Some(format!("selected database {} does not exist; run `lf home install` to initialize a published installation", path.display()));
+        migration_error = Some(format!("selected database {} does not exist; run `lf machine install` to initialize a published installation", path.display()));
     }
     StoreReport {
         build_provenance: crate::build_info::provenance(),
@@ -268,8 +268,8 @@ fn inspect_store(path: &Path) -> StoreReport {
     }
 }
 
-fn check_machine_install(database_path: &Path) -> Vec<Check> {
-    let root = match crate::machine_install::root() {
+fn check_installation(database_path: &Path) -> Vec<Check> {
+    let root = match crate::installation::root() {
         Ok(root) => root,
         Err(error) => {
             return vec![Check::fail(
@@ -278,8 +278,8 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
             )]
         }
     };
-    match crate::machine_install::read_state(&root) {
-        Ok(crate::machine_install::MachineInstallState::Legacy) => vec![
+    match crate::installation::read_state(&root) {
+        Ok(crate::installation::InstallationState::Legacy) => vec![
             Check::warn(
                 "install-selection",
                 "no versioned machine install receipt; the next promotion will initialize it",
@@ -289,15 +289,15 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
                 "published fallback has not been retained by the machine install path yet",
             ),
         ],
-        Ok(crate::machine_install::MachineInstallState::Switching(receipt)) => vec![Check::fail(
+        Ok(crate::installation::InstallationState::Switching(receipt)) => vec![Check::fail(
             "install-switch",
             format!(
                 "install switch {} is unsettled at {:?}; ordinary startup falls back to the prior install — recover or rerun the promotion to finish it",
                 receipt.id, receipt.phase
             ),
         )],
-        Ok(crate::machine_install::MachineInstallState::Settled(active)) => {
-            let selected = crate::machine_install::selection_for_current_executable();
+        Ok(crate::installation::InstallationState::Settled(active)) => {
+            let selected = crate::installation::selection_for_current_executable();
             let selection = match &selected {
                 Ok(Some(selection)) => Check::ok(
                     "install-selection",
@@ -322,7 +322,7 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
             } else if crate::store::custom_home_selected() {
                 Check::ok(
                     "install-store",
-                    "explicit disposable Home; no upgrade or recovery contract",
+                    "explicit disposable Machine; no upgrade or recovery contract",
                 )
             } else {
                 Check::fail(
@@ -335,18 +335,18 @@ fn check_machine_install(database_path: &Path) -> Vec<Check> {
                 )
             };
             let mut fallback_roles = vec![
-                crate::machine_install::ArtifactRole::Cli,
+                crate::installation::ArtifactRole::Cli,
 
             ];
             if active
                 .selection
                 .artifact_set
-                .artifact(&crate::machine_install::ArtifactRole::App)
+                .artifact(&crate::installation::ArtifactRole::App)
                 .is_some()
             {
                 fallback_roles.extend([
-                    crate::machine_install::ArtifactRole::App,
-                    crate::machine_install::ArtifactRole::AppHelper("lf".to_string()),
+                    crate::installation::ArtifactRole::App,
+                    crate::installation::ArtifactRole::AppHelper("lf".to_string()),
 
                 ]);
             }
@@ -416,7 +416,7 @@ fn check_continuity(events: &[Exec], obligations: &[CronObligation], now: i64) -
             receipt.source == CronSource::Scheduled
                 && receipt.wave == obligation.wave
                 && receipt.flow == obligation.flow
-                && receipt.home_id == obligation.home_id
+                && receipt.machine_id == obligation.machine_id
                 && receipt.schedule == obligation.schedule.expression()
                 && receipt.started_at >= interval.start
                 && receipt.started_at < interval.end
@@ -436,12 +436,12 @@ fn check_continuity(events: &[Exec], obligations: &[CronObligation], now: i64) -
             format!("lf wave cron sync --wave {wave}")
         };
         missing.push(format!(
-            "{}/{} on Home {} expected interval {} ({}) has no scheduled receipt; \
+            "{}/{} on Machine {} expected interval {} ({}) has no scheduled receipt; \
              inspect `lf wave cron history --wave {wave} --flow {} --days 2`; \
              configured executable {}; inspect log {}; reconcile with `{sync}` from repository {}",
             obligation.wave,
             obligation.flow,
-            obligation.home_id,
+            obligation.machine_id,
             format_interval(interval),
             obligation.schedule.expression(),
             obligation.flow,
@@ -685,7 +685,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{audit, check_continuity, inspect_store, latest_due_interval, Status};
-    use crate::durable::{CronReceiptId, HomeId};
+    use crate::durable::{CronReceiptId, MachineId};
     use crate::exec::Exec;
     use crate::ops::{
         parse_schedule, CronObligation, CronOutcome, CronReceipt, CronSource, CronTargetKind,
@@ -764,7 +764,7 @@ mod tests {
             wave: "infrastructure".to_string(),
             flow: "telemetry-daily".to_string(),
             schedule: parse_schedule("0 0 9 * * *").unwrap(),
-            home_id: HomeId::parse("home_11111111111111111111111111111111").unwrap(),
+            machine_id: MachineId::parse("home_11111111111111111111111111111111").unwrap(),
             activated_at,
             repo: PathBuf::from("/src/loopflow"),
             lf_path: PathBuf::from("/usr/local/bin/lf"),
@@ -779,7 +779,7 @@ mod tests {
             id: CronReceiptId::new(),
             runner_pid: 123,
             runner_started_at: None,
-            home_id: obligation.home_id.clone(),
+            machine_id: obligation.machine_id.clone(),
             wave: obligation.wave.clone(),
             flow: obligation.flow.clone(),
             target_kind: CronTargetKind::Flow,
@@ -848,7 +848,7 @@ mod tests {
         assert_eq!(check.status, Status::Fail, "{}", check.detail);
         for expected in [
             "infrastructure/telemetry-daily",
-            "Home home_11111111111111111111111111111111",
+            "Machine home_11111111111111111111111111111111",
             "expected interval [",
             "0 0 9 * * *",
             "has no scheduled receipt",

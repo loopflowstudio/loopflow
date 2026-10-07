@@ -1649,7 +1649,7 @@ pub(crate) fn remove_provider_client(dir: &Path, pid: u32) -> std::io::Result<()
 
 /// Who chose a Session's current title. A human name is never replaced by a
 /// generated suggestion. `Unavailable` is never stored: the canonical name
-/// lives on another Home and the reader only has a local display label.
+/// lives on another Machine and the reader only has a local display label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionTitleSource {
@@ -2892,7 +2892,7 @@ fn row_database(dir: &Path) -> StoreResult<PathBuf> {
     let home = dir
         .ancestors()
         .nth(3)
-        .ok_or_else(|| record_error(std::io::Error::other("Session capture has no Home")))?;
+        .ok_or_else(|| record_error(std::io::Error::other("Session capture has no Machine")))?;
     database_in(home)
 }
 
@@ -2926,7 +2926,7 @@ pub(crate) fn inherited_capture_key() -> StoreResult<Option<String>> {
     Ok(Some(key))
 }
 
-/// A capture is subordinate to its recorded Session in the selected Home.
+/// A capture is subordinate to its recorded Session in the selected Machine.
 pub(crate) fn capture_dir(key: &str) -> StoreResult<PathBuf> {
     resolve_capture(key).map(|(dir, _)| dir)
 }
@@ -2938,7 +2938,7 @@ fn resolve_capture(key: &str) -> StoreResult<(PathBuf, crate::session::AgentSess
     let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database_in(&home)?)?;
     let owner = store.session_for_artifact(key)?.ok_or_else(|| {
         record_error(std::io::Error::other(
-            "capture does not belong to a recorded Session in this Home",
+            "capture does not belong to a recorded Session in this Machine",
         ))
     })?;
     match read_manifest(&dir) {
@@ -3147,13 +3147,13 @@ fn runtime_identity() -> (Option<PathBuf>, Option<String>) {
         .ok()
         .and_then(|path| fs::canonicalize(path).ok());
     let digest = path.as_ref().and_then(|path| {
-        crate::machine_install::selection_for_current_executable()
+        crate::installation::selection_for_current_executable()
             .ok()
             .flatten()
             .and_then(|selection| {
                 selection
                     .artifact_set
-                    .artifact(&crate::machine_install::ArtifactRole::Cli)
+                    .artifact(&crate::installation::ArtifactRole::Cli)
                     .filter(|artifact| &artifact.path == path)
                     .map(|artifact| artifact.sha256.clone())
             })

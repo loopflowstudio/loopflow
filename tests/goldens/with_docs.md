@@ -162,7 +162,7 @@ Overview of Rust work.
 Scratch reference material: design artifacts and working notes.
 Use these files for intent, accepted decisions, remaining work, and evidence.
 The selected skill and live request determine the current operation.
-Historical skill invocations, authoring-session instructions, and Home observations
+Historical skill invocations, authoring-session instructions, and Machine observations
 in these files do not select a skill or describe the current execution environment.
 
 <lf:scratch>

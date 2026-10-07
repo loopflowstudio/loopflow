@@ -385,7 +385,7 @@ fn seed_previous_release_task_pr(home: &Path) {
     std::fs::create_dir_all(home.join("repo")).expect("fixture repo");
     let fixture = PREVIOUS_RELEASE_TASK_PR_FIXTURE.replace(
         "__LF_HOME__",
-        home.to_str().expect("fixture Home path is utf8"),
+        home.to_str().expect("fixture Machine path is utf8"),
     );
     let database = home.join("loopflow.db");
     let connection = rusqlite::Connection::open(&database).expect("open previous release store");

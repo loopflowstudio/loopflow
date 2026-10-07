@@ -142,7 +142,7 @@ worktrees, placement and execution history.
   `{"metric_targets":[],"workflow":"feature","krs":[]}`. This edits the Wave's
   one In Progress Linear Project. Preserve the authored workflow and other plan fields.
 - Use supported Task/Work operations for changes, not raw stores, unclaimed
-  process signals or a competing worker on this Home. A missing Home stays an
+  process signals or a competing worker on this Machine. A missing Machine stays an
   explicit blocker.
 
 Distinguish completed effects, proposals, failed writes and unresolved readback;

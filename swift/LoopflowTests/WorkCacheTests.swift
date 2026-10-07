@@ -10,7 +10,7 @@ import ViewInspector
 struct WorkCacheTests {
     private static let repo = "/src/loopflow"
 
-    @Test("The existing workspace cache file retains Home and selection after the naming change")
+    @Test("The existing workspace cache file retains Machine and selection after the naming change")
     func readsExistingCacheBytes() throws {
         let directory = try temporaryDirectory()
         let url = directory.appendingPathComponent("workspace.json")
@@ -18,7 +18,7 @@ struct WorkCacheTests {
         try bytes.write(to: url)
 
         let saved = try #require(WorkCache(directory: directory).load())
-        #expect(saved.homeId == "home-a")
+        #expect(saved.machineId == "home-a")
         #expect(saved.repositories[Self.repo]?.selection == .task(id: "issue-now"))
         #expect(try Data(contentsOf: url) == bytes)
     }
@@ -33,18 +33,28 @@ struct WorkCacheTests {
         await first.refresh()
         #expect(first.workStatus == .current)
         first.select(.task(id: "issue-now"))
-        first.confirmHome("home-a")
+        first.confirmMachine("home-a")
         cache.flush()
+
+        let cacheURL = directory.appendingPathComponent("workspace.json")
+        let current = try String(contentsOf: cacheURL, encoding: .utf8)
+        let released = current.replacingOccurrences(of: "machine_id", with: "home_id")
+            .replacingOccurrences(of: #"\"machine\":"#, with: #"\"home\":"#)
+        var envelope = try #require(JSONSerialization.jsonObject(with: Data(released.utf8)) as? [String: Any])
+        envelope["version"] = 1
+        let releasedBytes = try JSONSerialization.data(withJSONObject: envelope)
+        try releasedBytes.write(to: cacheURL)
 
         let offline = RegistryQuery { _, _ in throw RegistryQueryError("offline") }
         let returning = WorkModel(query: offline, repoPath: Self.repo, cache: WorkCache(directory: directory))
 
         #expect(returning.workStatus == .updating)
-        #expect(returning.savedHomeId == "home-a")
+        #expect(returning.savedMachineId == "home-a")
         #expect(returning.roadmap.value?.waves.map(\.wave.id) == first.roadmap.value?.waves.map(\.wave.id))
         #expect(returning.sessions.value?.map(\.id) == first.sessions.value?.map(\.id))
         #expect(returning.selection == .task(id: "issue-now"))
         #expect(returning.task(id: "issue-now") != nil)
+        #expect(try Data(contentsOf: cacheURL) == releasedBytes)
     }
 
     @Test("Saved text never claims a live process or a legal mutation")
@@ -131,21 +141,21 @@ struct WorkCacheTests {
         #expect(model.workStatus == .loading)
     }
 
-    @Test("A workspace saved under another Home is dropped")
-    func anotherHomeInvalidates() async throws {
+    @Test("A workspace saved under another Machine is dropped")
+    func anotherMachineInvalidates() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
         let saving = WorkCache(directory: directory)
         let first = WorkModel(query: source.query, repoPath: Self.repo, cache: saving)
         await first.refresh()
         first.select(.task(id: "issue-now"))
-        first.confirmHome("home-a")
+        first.confirmMachine("home-a")
         saving.flush()
 
         let cache = WorkCache(directory: directory)
         let returning = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("offline") },
                                     repoPath: Self.repo, cache: cache)
-        returning.confirmHome("home-b")
+        returning.confirmMachine("home-b")
         cache.flush()
 
         #expect(returning.workStatus == .loading)
@@ -153,7 +163,7 @@ struct WorkCacheTests {
         #expect(returning.selection == nil)
         #expect(returning.task(id: "issue-now") == nil)
         let saved = try #require(WorkCache(directory: directory).load())
-        #expect(saved == WorkSnapshot(homeId: "home-b"))
+        #expect(saved == WorkSnapshot(machineId: "home-b"))
     }
 
     @Test("A Session read that finishes after a repository switch saves nothing")

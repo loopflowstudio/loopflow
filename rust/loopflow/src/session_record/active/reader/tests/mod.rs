@@ -171,7 +171,7 @@ async fn native_feed_discovers_old_resumes_replacement_and_removal() {
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
-async fn missing_roots_and_replaced_home_never_become_false_empty() {
+async fn missing_roots_and_replaced_machine_never_become_false_empty() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);

@@ -205,7 +205,7 @@ Bring the plan and the implementation into agreement with what the work has taug
    block the Flow on it. Human judgment belongs to demo/review.
 
 Keep named, dated decisions, draft/accepted status and remaining work in the
-plan. Record one check-result line. Omit session instructions and ambient Home
+plan. Record one check-result line. Omit session instructions and ambient Machine
 facts; the plan must not direct its next reader. Keep transcripts separate and
 historical skill names unprefixed.
 

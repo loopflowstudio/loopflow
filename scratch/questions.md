@@ -1,8 +1,7 @@
 # Assumptions — LOO-394
 
 2026-10-07. Written from research and a conversation with Jack Heart that
-settled the holder and the credential rules. Jack has not reviewed the design
-in `work-on-another-machine-name.md` as a whole.
+settled the holder and the credential rules. Jack authorized only the rename slice and publication; later slices remain intent.
 
 - Jack Heart's original mini command and error from 2026-10-06 were never
   captured. The design assumes `lf ssh mini --task <ISSUE> <skill>`, which fails
@@ -25,3 +24,12 @@ in `work-on-another-machine-name.md` as a whole.
   knowledge of terminals, not from testing Claude Code or Codex.
 - LOO-393's worktree and Task were removed on 2026-10-07 after its commit was
   saved as a patch here. LOO-395 was cancelled as merged the same day.
+
+2026-10-07 rename preservation: keep opaque IDs and installed plist/cache keys;
+read released cron JSON via an explicit field alias. These are persisted-data
+contracts, not alternate commands or runtime owners. No installed store is touched.
+
+Context: authored memory is 15,983/16,000 tokens and scratch is within budget.
+The generated launch goal exceeds 16,000 tokens because it includes this broad
+rename diff; that generated input is not an authored source to compress. Limits
+remain unchanged; the archived LOO-393 patch is retained in Git.

@@ -286,7 +286,7 @@ struct TaskFilesTests {
         }
         let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.refresh()
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let generic = registry.layout(for: fixtureWorkspace("/src/loopflow"))
         generic.select(fixtureWorkspace("/another-checkout"))
         generic.split(generic.focusedSlotId, axis: .vertical)
@@ -307,7 +307,7 @@ struct TaskFilesTests {
     }
 
     @Test func finishingSessionKeepsOtherRepositoryPanes() {
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let first = registry.workspace(for: fixtureWorkspace("/repo-one/task")).multiplexer
         let other = registry.workspace(for: fixtureWorkspace("/repo-two/task")).multiplexer
         first.load(sessionId: "finished")
@@ -488,7 +488,7 @@ struct TaskFilesTests {
     @Test(.requiresDisplay) func draftsKeepUndoSelectionExternalChangesAndGhostty() async throws {
         _ = NSApplication.shared
         GhosttyManager.shared.initialize()
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace(NSTemporaryDirectory()))
         workspace.multiplexer.newShell()
         let identity = TerminalIdentity.shell(workspace.multiplexer.focusedPaneId)

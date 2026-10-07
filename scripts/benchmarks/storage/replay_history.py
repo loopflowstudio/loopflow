@@ -1,6 +1,6 @@
 """Measure what SQLite history keeps of retained capture events.
 
-Replays every `runs/*/*/events.jsonl` under a Home through the recorder's
+Replays every `runs/*/*/events.jsonl` under a Machine through the recorder's
 increment rule and prints rows and bytes before and after. Read-only.
 
     python3 scripts/benchmarks/storage/replay_history.py [HOME]

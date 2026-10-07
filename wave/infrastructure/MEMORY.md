@@ -2,14 +2,14 @@
 
 ## Process vocabulary (LOO-400, 2026-10-07)
 
-Jack Heart selected Process and authorized PR #1483's LFID/PID refinement and
-landing (comment `32c00054-4c60-4b96-bdf4-4d5f142ab881`).
-`process.lfid` names durable identity; `pid` names a reusable Unix PID.
-`process_lfid` and `parent_process_lfid` name references. One draft retains IDs,
-parents, outcomes and unknown PIDs. LOO-397 owns command placement.
-A lost boot witness proved schema renames cannot rename
-append-only JSON. Captures, receipts and retained provider environments likewise
-keep their decoding. Release's retained-landing incident requires this distinction.
+Jack Heart approved Process, LFID/PID and PR #1483 landing
+(comment `32c00054-4c60-4b96-bdf4-4d5f142ab881`).
+`process.lfid` is durable identity; optional `pid` is a reusable Unix PID.
+References use `process_lfid`/`parent_process_lfid`. One draft preserves IDs,
+parents, outcomes and unknown PIDs; LOO-397 owns command placement.
+SQL renames preserve JSON, captures, receipts and provider environments
+(boot-witness loss; Release's landing incident). Sequencer receipts retain
+`process_id` for Rust's `process_lfid`; round-trip tested.
 Fixtures prove neither installation nor control authority.
 
 ## Storage footprint (LOO-390, 2026-10-06)

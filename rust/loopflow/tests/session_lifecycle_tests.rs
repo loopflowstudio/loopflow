@@ -218,6 +218,50 @@ const PATIENCE: Duration = Duration::from_secs(180);
 const LAUNCH: [&str; 5] = ["--tui", "--model", "opencode", ":", "Review the parser"];
 
 #[test]
+fn task_conversation_reopens_after_terminal_startup_failure() {
+    let fixture = Fixture::new(false);
+    let task = support::register_unrun_task(
+        fixture.home.path(),
+        &fixture.repo.path().canonicalize().unwrap(),
+        "reopen",
+        &fixture.repo.head_sha(),
+    );
+    let provider = fixture.home.path().join("bin/opencode");
+    let original = std::fs::read(&provider).unwrap();
+    std::fs::write(&provider, "#!/bin/sh\nexit 0\n").unwrap();
+    let failed = fixture.run(&LAUNCH);
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("did not report a resumable session"));
+    let sessions = fixture.sessions();
+    assert_eq!(sessions.len(), 1);
+    let id = sessions[0]["id"].as_str().unwrap();
+    std::fs::write(&provider, original).unwrap();
+    for args in [
+        vec!["session", "resume"],
+        vec!["session", "connect", id, "--replace"],
+    ] {
+        let result = fixture.run(&args);
+        assert!(result.status.success(), "{result:?}");
+    }
+    assert_eq!(fixture.count("agent_sessions"), 1);
+    assert_eq!(fixture.sessions()[0]["id"], id);
+    assert!(fixture.sessions()[0]["task_ids"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|id| id == task.task.id.as_str()));
+    let history: i64 = fixture
+        .db()
+        .query_row(
+            "SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='captured'",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(history, 2);
+}
+
+#[test]
 fn conversation_keeps_its_name_and_identity_until_completed() {
     let fixture = Fixture::new(true);
 

@@ -2271,51 +2271,7 @@ impl CaptureHandle {
             }
             return Ok(());
         };
-        let expected = store.session_driver(&session.id)?;
-        if let Some(exec) = expected.as_ref().and_then(|driver| driver.exec_id.as_ref()) {
-            let receipt =
-                crate::journal::read_exec_process_receipts_at(&crate::store::lf_home_dir())
-                    .ok()
-                    .and_then(|receipts| {
-                        receipts
-                            .into_iter()
-                            .find(|receipt| receipt.exec_id == exec.as_str())
-                    });
-            let dead = receipt.is_some_and(|receipt| {
-                match crate::journal::process_started_at(receipt.pid) {
-                    Ok(Some(current)) => (current - receipt.started_at).abs() > 3,
-                    Ok(None) => true,
-                    Err(_) => false,
-                }
-            });
-            if !dead {
-                return Err(StoreError::InvalidAuthority(
-                    "Conversation already has a driver; connect to it".into(),
-                ));
-            }
-        }
-        let mut replace_provider = expected.is_none()
-            || store.session_provider_unstarted(&session.id)?
-            || conversation_engine_exited(&store, &session.id)?;
-        let connection = store.session_connection(&session.id)?;
-        if !replace_provider && connection.is_none() {
-            replace_provider =
-                recovery::prepare_after_restart(&store, &session.id, expected.as_ref())?;
-            if !replace_provider {
-                return Err(StoreError::InvalidAuthority(
-                    "Conversation has no connection and no confirmed engine exit; retry requires exact process evidence or an observed restart of the same host".into(),
-                ));
-            }
-        }
-        let driver = store.claim_session_driver(
-            &session.id,
-            expected.as_ref(),
-            &exec_id,
-            replace_provider,
-        )?;
-        if replace_provider {
-            store.record_session_provider_launch(&session.id, &driver, false)?;
-        }
+        let driver = claim_provider_driver(&store, &session.id, &exec_id, true)?;
         capture.driver = Some((session.id, driver));
         drop(capture);
         let capture = Arc::downgrade(&self.0);
@@ -2854,6 +2810,52 @@ impl SessionCapture {
     }
 }
 
+/// Admit a driver using retained process evidence. Native terminals cannot attach
+/// to a surviving engine; only the managed harness can reuse its connection.
+pub(crate) fn claim_provider_driver(
+    store: &crate::store::sqlite::SqliteStore,
+    session: &str,
+    exec_id: &crate::id::ExecId,
+    can_connect: bool,
+) -> StoreResult<crate::exec::SessionDriver> {
+    let expected = store.session_driver(session)?;
+    if let Some(exec) = expected.as_ref().and_then(|driver| driver.exec_id.as_ref()) {
+        let receipt = crate::journal::read_exec_process_receipts_at(&crate::store::lf_home_dir())
+            .ok()
+            .and_then(|receipts| {
+                receipts
+                    .into_iter()
+                    .find(|receipt| receipt.exec_id == exec.as_str())
+            });
+        let dead =
+            receipt.is_some_and(
+                |receipt| match crate::journal::process_started_at(receipt.pid) {
+                    Ok(Some(current)) => (current - receipt.started_at).abs() > 3,
+                    Ok(None) => true,
+                    Err(_) => false,
+                },
+            );
+        if !dead {
+            return Err(StoreError::InvalidAuthority(
+                "Conversation already has a driver; connect to it".into(),
+            ));
+        }
+    }
+    let mut replace_provider = expected.is_none()
+        || store.session_provider_unstarted(session)?
+        || conversation_engine_exited(store, session)?;
+    let connection = store.session_connection(session)?;
+    if !replace_provider && (connection.is_none() || !can_connect) {
+        replace_provider = recovery::prepare_after_restart(store, session, expected.as_ref())?;
+        if !replace_provider {
+            return Err(StoreError::InvalidAuthority(
+                    "Conversation has no usable connection and no confirmed engine exit; retry requires exact process evidence or an observed restart of the same host".into(),
+                ));
+        }
+    }
+    store.claim_session_driver(session, expected.as_ref(), exec_id, replace_provider)
+}
+
 /// The store that holds the conversation for the capture recorded at `dir`.
 /// An absent socket alone says nothing about an engine. Require its recorded
 /// process to have exited; a surviving endpoint wins over launcher death.
@@ -2861,13 +2863,13 @@ pub(crate) fn conversation_engine_exited(
     store: &crate::store::sqlite::SqliteStore,
     session: &str,
 ) -> StoreResult<bool> {
-    let Some((pid, started)) = store.session_provider_process(session)? else {
-        return Ok(false);
-    };
-    let exited = match crate::journal::process_started_at(pid) {
-        Ok(Some(current)) => (current - started).abs() > 3,
-        Ok(None) => true,
-        Err(_) => false,
+    let exited = match store.session_provider_process(session)? {
+        Some((pid, started)) => match crate::journal::process_started_at(pid) {
+            Ok(Some(current)) => (current - started).abs() > 3,
+            Ok(None) => true,
+            Err(_) => false,
+        },
+        None => store.native_provider_exited(session)?,
     };
     if !exited {
         return Ok(false);

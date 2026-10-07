@@ -99,7 +99,7 @@ fn local_promotion_and_retained_home_commands_are_removed() {
     let home = tempfile::tempdir().unwrap();
     for args in [
         vec![
-            "machine",
+            "installation",
             "install",
             "local-preflight",
             "--store",
@@ -107,7 +107,7 @@ fn local_promotion_and_retained_home_commands_are_removed() {
             "--json",
         ],
         vec![
-            "machine",
+            "installation",
             "install",
             "promote",
             "--from-build",
@@ -116,7 +116,7 @@ fn local_promotion_and_retained_home_commands_are_removed() {
             "/unused",
         ],
         vec![
-            "machine",
+            "installation",
             "install",
             "promote",
             "--fresh",
@@ -124,7 +124,7 @@ fn local_promotion_and_retained_home_commands_are_removed() {
             "/unused",
         ],
         vec![
-            "machine",
+            "installation",
             "install",
             "promote",
             "--reuse-home",
@@ -158,7 +158,7 @@ fn default_and_nested_commands_use_the_installed_cli_and_main_home() {
     let files = tempfile::tempdir().unwrap();
     let cli = files.path().join("lf");
     // Simulate only the installed boundary; both incoming processes are the real source CLI.
-    fs::write(&cli, "#!/bin/sh\nif [ \"$1\" = home ]; then exec \"$SOURCE_CLI\" monitor list --json; fi\nprintf '%s\\n' \"$LF_HOME\" \"$LF_BIN\" \"$*\"\n").unwrap();
+    fs::write(&cli, "#!/bin/sh\nif [ \"$1\" = machine ]; then exec \"$SOURCE_CLI\" monitor list --json; fi\nprintf '%s\\n' \"$LF_HOME\" \"$LF_BIN\" \"$*\"\n").unwrap();
     fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
     let artifact = ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap();
     let set = ArtifactSet {

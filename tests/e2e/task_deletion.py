@@ -113,7 +113,7 @@ def _abandon_retains_execution(
 ) -> None:
     process = str(uuid.uuid4())
     db.execute(
-        "INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?,?,?,?)",
+        "INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES(?,?,?,?)",
         (process, process, str(repo), int(time.time())),
     )
     db.execute(
@@ -131,7 +131,7 @@ def _abandon_retains_execution(
         "UPDATE agent_sessions SET current_capture=? WHERE id='retained-session'", (capture,)
     )
     db.commit()
-    processes = db.execute("SELECT * FROM execs WHERE id=?", (process,)).fetchall()
+    processes = db.execute("SELECT * FROM processes WHERE lfid=?", (process,)).fetchall()
     sessions = db.execute("SELECT * FROM agent_sessions WHERE id='retained-session'").fetchall()
     prs = db.execute("SELECT * FROM task_prs").fetchall()
     for _ in range(2):
@@ -146,7 +146,7 @@ def _abandon_retains_execution(
         assert result.returncode == 0, result.stderr
         assert issue["state"]["type"] == "canceled"
         assert db.execute("SELECT abandoned_at IS NOT NULL FROM tasks").fetchone() == (1,)
-        assert db.execute("SELECT * FROM execs WHERE id=?", (process,)).fetchall() == processes
+        assert db.execute("SELECT * FROM processes WHERE lfid=?", (process,)).fetchall() == processes
         assert (
             db.execute("SELECT * FROM agent_sessions WHERE id='retained-session'").fetchall()
             == sessions

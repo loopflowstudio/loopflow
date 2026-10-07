@@ -755,7 +755,7 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let exec = uuid::Uuid::new_v4().to_string();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    db.execute("INSERT INTO execs(id,trace_id,cwd,started_at,command) VALUES(?1,?1,?2,?3,'historical inspection')",
+    db.execute("INSERT INTO processes(lfid,trace_id,cwd,started_at,command) VALUES(?1,?1,?2,?3,'historical inspection')",
         rusqlite::params![exec, task.repo.path().canonicalize().unwrap().to_str().unwrap(), now]).unwrap();
     db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,interactive,task_id,wave_id,cwd)
         VALUES('retained-input','retained input','generated',?1,0,0,?2,?3,?4)",
@@ -776,7 +776,7 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
     assert_eq!(sessions, after);
     let unfinished: bool = db
         .query_row(
-            "SELECT completed_at IS NULL AND outcome IS NULL FROM execs WHERE id=?1",
+            "SELECT completed_at IS NULL AND outcome IS NULL FROM processes WHERE lfid=?1",
             [&exec],
             |row| row.get(0),
         )

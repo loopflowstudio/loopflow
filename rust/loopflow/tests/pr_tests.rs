@@ -1988,7 +1988,7 @@ fn repository_reconciliation_completes_delivery_and_preserves_explicit_remaining
         let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         let unknown = uuid::Uuid::new_v4().to_string();
         db.execute(
-            "INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?1,?1,?2,?3)",
+            "INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES(?1,?1,?2,?3)",
             rusqlite::params![
                 unknown,
                 repo.path().canonicalize().unwrap().to_str().unwrap(),
@@ -2025,7 +2025,7 @@ fn repository_reconciliation_completes_delivery_and_preserves_explicit_remaining
         }
         let unknown_unchanged: bool = db
             .query_row(
-                "SELECT completed_at IS NULL AND outcome IS NULL FROM execs WHERE id=?1",
+                "SELECT completed_at IS NULL AND outcome IS NULL FROM processes WHERE lfid=?1",
                 [&unknown],
                 |row| row.get(0),
             )

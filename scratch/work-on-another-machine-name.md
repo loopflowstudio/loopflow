@@ -48,10 +48,10 @@ checkout lacking the requested commit reports the needed branch/commit and
 
 ## Remaining
 
-Sync the changed parent and publish. Gate owns affected suites and the real SSH
+Parent `76b4b28e6` is merged without conflicts. Publication remains. Gate owns affected suites and the real SSH
 transport acceptance; no installed machine or provider credential was exercised.
 Review kept SQLite admission intact, moved missing-code checks before planning
 reads, preserved checkout-recovery ordering, and stopped forwarding machine-local
 Work declarations and SSH source data to descendant invocations.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, and network-isolated Rust tests pass (4 remote adoption/public-dispatch, 8 binding, 5 preparation); checkout-recovery ordering repair pending focused rerun; full affected suites and real SSH transport remain with gate.
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, and network-isolated Rust tests pass (4 remote adoption/public-dispatch, 8 binding, 5 preparation); the four remote tests and static checks also pass after parent sync and the recovery-order repair; full affected suites and real SSH transport remain with gate.

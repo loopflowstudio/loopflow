@@ -31,7 +31,7 @@ struct SessionsStoreTests {
             query: RegistryQuery { args, _ in
                 #expect(args.first == "session")
                 #expect(args.dropFirst().first == "connect")
-                return session(id: args[2], state: "active")
+                return session(id: args[2], state: "waiting")
             }
         )
         store.reconcile(try records([
@@ -43,6 +43,20 @@ struct SessionsStoreTests {
 
         #expect(item(store, "first")?.state == .pending)
         #expect(item(store, "second")?.surface?.openArgv.suffix(3) == ["session", "connect", "second"])
+    }
+
+    @Test("A Session opened elsewhere during selection is not prepared locally")
+    func selectionHonorsFreshClientOwnership() async throws {
+        let store = SessionsStore(
+            repoPath: "/tmp/repo",
+            query: RegistryQuery { _, _ in session(id: "native", state: "active") }
+        )
+        store.reconcile(try records([session(id: "native", state: "waiting")]))
+
+        await store.select("native")
+
+        #expect(item(store, "native")?.surface == nil)
+        #expect(item(store, "native")?.error?.contains("active in another terminal") == true)
     }
 
     @Test("Selecting an active Session leaves its other terminal running until Move here")

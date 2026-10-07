@@ -286,9 +286,15 @@ A PR closed without merging ends its landing unsettled. Merge evidence is
 recorded before Task settlement; a failed local or Linear settlement keeps the
 landing pending and the next check retries it.
 
-After verified merge, bare `lf land` settles that PR and leaves the Task open.
-`lf land -c` completes the Task. `lf land --next <slug>` rotates the
-serial chain to a new branch from fetched main.
+After verified merge, `lf land` normally completes its Task. `lf task follow-up`
+records an explicit remaining outcome, evidence condition and next check in Task
+history; reconciliation keeps it open until that work is resolved. Overdue checks
+surface the unresolved decision, never success. `lf land --next <slug>` retains
+unfinished PR work and rotates the serial chain from fetched main.
+
+Task decisions never settle Session turns or process exits. Checkout cleanup and
+process control keep their own evidence and authority. Historical uncertainty
+cannot veto completion or cancellation; it can require retaining the checkout.
 
 ## Failure and recovery
 

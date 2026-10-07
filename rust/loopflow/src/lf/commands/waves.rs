@@ -25,7 +25,6 @@ use crate::lf::output::Colors;
 use crate::ops::task_execution::TaskExecutionState;
 use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot};
 use crate::session_record::SessionHistory;
-use crate::store::sqlite::OpenExecs;
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
 use crate::work::task::{
@@ -747,7 +746,6 @@ async fn roadmap_snapshot(
 struct SharedTaskReads {
     checkouts: Vec<crate::store::sqlite::TaskCheckout>,
     local_home: crate::durable::HomeId,
-    open: OpenExecs,
 }
 
 impl SharedTaskReads {
@@ -757,7 +755,6 @@ impl SharedTaskReads {
         Ok(Self {
             checkouts,
             local_home: store.local_home().await?.id,
-            open: store.sqlite.open_execs()?,
         })
     }
 }
@@ -1321,7 +1318,7 @@ async fn snapshot_task_detail(
         task_local_progress(task, runtime.as_ref(), active, worktree_blocker.as_ref());
     let completion_refusal = match (task, runtime.as_ref()) {
         (Some(task), Some(runtime)) if !runtime.status.is_terminal() => {
-            crate::ops::task::task_completion_gate_among(store, task, &shared.open)
+            crate::ops::task::task_completion_gate(store, task)
                 .await?
                 .refusal(&task.plan.identifier)
         }

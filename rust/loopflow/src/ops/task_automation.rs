@@ -94,7 +94,7 @@ pub(crate) fn session_engine_unresolved(
         }))
 }
 
-async fn repository_tasks(
+pub(crate) async fn repository_tasks(
     store: &SharedStore,
     repo: &crate::repository::RepoId,
 ) -> OpsResult<Vec<Task>> {

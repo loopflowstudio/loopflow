@@ -1042,7 +1042,7 @@ fn serial_task_pr_publication_restores_task_context() {
     assert_eq!(prs.len(), 1);
     assert_eq!(prs[0].phase(), PrPhase::Merged);
     let publication = prs[0].publication.as_ref().expect("adopted publication");
-    assert_eq!(prs[0].after_merge(), AfterMerge::ContinueTask);
+    assert_eq!(prs[0].after_merge(), AfterMerge::CompleteTask);
     assert_eq!(publication.github.as_ref().map(|pr| pr.number), Some(912));
     let work = runtime
         .block_on(
@@ -1189,7 +1189,7 @@ fn completing_land_discards_an_empty_successor_without_a_controller() {
         strict: false,
         local: false,
         create_pr: true,
-        complete: true,
+        complete: false,
         next_slug: None,
         worktree: None,
         commit_message: None,
@@ -1284,7 +1284,7 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
         .expect("active PR");
     assert_eq!(persisted.head_sha(), Some("new-head"));
     assert!(persisted.merge_request().is_none());
-    assert_eq!(persisted.after_merge(), AfterMerge::ContinueTask);
+    assert_eq!(persisted.after_merge(), AfterMerge::CompleteTask);
     let log = std::fs::read_to_string(log_path).expect("read gh log");
     assert!(log.contains("pr merge 912 --disable-auto"));
 }
@@ -1930,4 +1930,122 @@ fn persistent_publication_pushes_committed_docs_and_preserves_local_files() {
     );
     assert!(persistent.path.join("scratch/design.md").exists());
     assert!(persistent.path.join("unrelated.md").exists());
+}
+
+#[test]
+fn repository_reconciliation_completes_delivery_and_preserves_explicit_remaining_work() {
+    for remaining in ["none", "production", "empty-next-pr", "committed-next-pr"] {
+        let home = tempfile::tempdir().unwrap();
+        let _env = EnvGuard::with_lf_home(&[("gh", "#!/bin/sh\nexit 1\n")], home.path());
+        let repo = TestRepo::new();
+        repo.create_branch("delivered");
+        let registered = register_task(home.path(), repo.path(), "delivered", &repo.head_sha());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut pr = registered.pr.clone();
+        let now = time::OffsetDateTime::now_utc();
+        pr.publication = Some(PrPublication {
+            requested_at: now,
+            presentation: None,
+            github: Some(GithubPr {
+                number: 912,
+                url: "https://example.com/pr/912".into(),
+                head_sha: Some(repo.head_sha()),
+            }),
+            merge: None,
+        });
+        pr.merge_commit = Some(repo.head_sha());
+        let next = if remaining.ends_with("next-pr") {
+            let mut next = registered.pr.clone();
+            next.id = loopflow::work::task::TaskPrId::new();
+            next.sequence += 1;
+            next.branch = "remaining-work".into();
+            next.parent_pr_id = None;
+            repo.create_branch(&next.branch);
+            if remaining == "committed-next-pr" {
+                repo.create_file("remaining.txt", "unfinished work\n");
+                repo.stage_all();
+                repo.commit("Unfinished additional work");
+            }
+            Some(next)
+        } else {
+            None
+        };
+        runtime
+            .block_on(registered.store.settle_task_pr(&pr, next.as_ref()))
+            .unwrap();
+        if remaining == "production" {
+            loopflow::ops::task::task_follow_up(
+                "INF-123",
+                Some(loopflow::work::task::TaskFollowUp {
+                    outcome: "Installed latency meets budget".into(),
+                    evidence: "20 warm samples below 1s p95".into(),
+                    check_at: now.unix_timestamp() + 3600,
+                }),
+                "Accepted installed observation",
+            )
+            .unwrap();
+        }
+        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        let unknown = uuid::Uuid::new_v4().to_string();
+        db.execute(
+            "INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?1,?1,?2,?3)",
+            rusqlite::params![
+                unknown,
+                repo.path().canonicalize().unwrap().to_str().unwrap(),
+                now.unix_timestamp()
+            ],
+        )
+        .unwrap();
+        let work = loopflow::durable::WorkRef::Task(registered.task.id.clone());
+        for _ in 0..2 {
+            let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
+            let state = runtime
+                .block_on(registered.store.work_status(&work))
+                .unwrap();
+            assert_eq!(
+                state == WorkStatus::Done,
+                remaining == "none",
+                "{remaining}: {report:?}"
+            );
+            assert!(repo.path().exists());
+        }
+        if remaining == "production" {
+            loopflow::ops::task::task_follow_up(
+                "INF-123",
+                None,
+                "Installed measurements meet the budget",
+            )
+            .unwrap();
+            assert_eq!(
+                runtime
+                    .block_on(registered.store.work_status(&work))
+                    .unwrap(),
+                WorkStatus::Done
+            );
+        }
+        let unknown_unchanged: bool = db
+            .query_row(
+                "SELECT completed_at IS NULL AND outcome IS NULL FROM execs WHERE id=?1",
+                [&unknown],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(unknown_unchanged);
+        let events = runtime
+            .block_on(registered.store.task_events_after(&registered.task.id, 0))
+            .unwrap();
+        let completions = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.kind,
+                    loopflow::work::task::TaskEventKind::Completed { .. }
+                )
+            })
+            .count();
+        assert_eq!(
+            completions,
+            usize::from(remaining == "none" || remaining == "production")
+        );
+    }
 }

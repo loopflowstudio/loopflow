@@ -9,7 +9,6 @@ use crate::engine::worktrees::main_repo_root;
 use crate::ops::pm::PmResolvedTask;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
-use crate::store::sqlite::OpenExecs;
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
 use crate::work::task::{PrPhase, Task, TaskPr};
 
@@ -205,9 +204,30 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
             resolved.item.identifier
         )));
     }
-    let deletions =
-        prepare_abandon(repo, &store, task.as_ref(), &resolved.item.id, force, false).await?;
-    apply_abandon(repo, &store, task.as_ref(), &resolved, deletions).await
+    if let Some(task) = &task {
+        if super::task_work_status(&store, task).await? == WorkStatus::Done {
+            return Err(task_error("completed Tasks cannot be abandoned"));
+        }
+    }
+    let outcome = apply_abandon(repo, &store, task.as_ref(), &resolved, Vec::new()).await?;
+    // The decision is durable before cleanup. A retained checkout or PR never
+    // turns cancellation into a failed decision or authorizes process control.
+    let cleanup = async {
+        for deletion in
+            prepare_abandon(repo, &store, task.as_ref(), &resolved.item.id, force, false).await?
+        {
+            crate::ops::abandon::abandon_prepared(deletion, &NullProgress).await?;
+        }
+        Ok::<(), crate::ops::OpsError>(())
+    }
+    .await;
+    if let Err(error) = cleanup {
+        eprintln!(
+            "{} is canceled; retained checkout/PR: {error}",
+            resolved.item.identifier
+        );
+    }
+    Ok(outcome)
 }
 
 /// Trash the issue after its placed work has been canceled or completed.
@@ -223,7 +243,6 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
                 .is_some();
             if !deleted {
                 if super::task_work_status(&store, &task).await? == WorkStatus::Done {
-                    require_idle(&store, &task).await?;
                     cleanup_completed_task(&store, &task).await?;
                 } else {
                     abandon(&repo, issue, false).await?;
@@ -239,8 +258,8 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
     })
 }
 
-// Preview and apply share every exclusion. Preparation never retires a sweep's
-// live execution.
+// Cleanup preparation is separate from explicit cancellation. A sweep uses
+// it before choosing work, so uncertain or live work is never swept.
 async fn prepare_abandon(
     repo: &Path,
     store: &SharedStore,
@@ -310,7 +329,6 @@ async fn apply_abandon(
     if let Some(task) = task {
         let work = WorkRef::Task(task.id.clone());
         if store.work_status(&work).await.map_err(task_error)? != WorkStatus::Abandoned {
-            // This transaction refuses concurrently started work.
             store
                 .abandon(&work, "explicit Task abandonment")
                 .await
@@ -464,139 +482,6 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
     crate::repo::discover_repo_root(directory)
         .map_err(task_error)?
         .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
-}
-
-/// A Task decision, never an Exec outcome or process-control receipt.
-pub(super) fn accept_historical_uncertainty(
-    store: &SharedStore,
-    task: &Task,
-    exec_ids: &[crate::id::ExecId],
-    reason: &str,
-) -> OpsResult<()> {
-    if exec_ids.is_empty() {
-        return Ok(());
-    }
-    let work = store.sqlite.task_work(&task.id).map_err(task_error)?;
-    for id in exec_ids {
-        if !historical_unknown_exec(store, &work, id)? {
-            return Err(task_error(format!(
-                "Exec {id} is not an unowned historical unknown in Task {}; retained all execution protection",
-                task.plan.identifier
-            )));
-        }
-    }
-    let accepted = store
-        .sqlite
-        .task_accepted_unknown_execs(&task.id)
-        .map_err(task_error)?;
-    let mut new_ids: Vec<_> = exec_ids
-        .iter()
-        .filter(|id| !accepted.contains(*id))
-        .cloned()
-        .collect();
-    new_ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-    new_ids.dedup();
-    if !new_ids.is_empty() {
-        store
-            .sqlite
-            .append_task_event(
-                &task.id,
-                &crate::work::task::TaskEventKind::HistoricalUncertaintyAccepted {
-                    exec_ids: new_ids,
-                    reason: reason.to_string(),
-                },
-            )
-            .map_err(task_error)?;
-    }
-    Ok(())
-}
-
-fn historical_unknown_exec(
-    store: &SharedStore,
-    work: &crate::task_work::TaskWork,
-    id: &crate::id::ExecId,
-) -> OpsResult<bool> {
-    let Some(exec) = work.execs.iter().find(|exec| &exec.id == id) else {
-        return Ok(false);
-    };
-    // Any process receipt disqualifies acceptance, regardless of liveness.
-    // Without a receipt, completion or a previous boot already proves exit.
-    if crate::journal::current_exec_id().as_ref() == Some(id)
-        || exec.completed_at.is_some()
-        || crate::journal::began_before_boot(exec.started_at)
-        || crate::journal::read_exec_process_receipts_at(&crate::store::lf_home_dir())
-            .map_err(task_error)?
-            .iter()
-            .any(|receipt| receipt.exec_id == id.as_str())
-    {
-        return Ok(false);
-    }
-    if let Some(caller) = &exec.caller_session_id {
-        if !store
-            .sqlite
-            .session(caller)
-            .map_err(task_error)?
-            .is_some_and(|session| session.completed_at.is_some())
-        {
-            return Ok(false);
-        }
-    }
-    for session in work
-        .sessions
-        .iter()
-        .filter(|session| session.completed_at.is_none())
-    {
-        if let Some(driver) = store
-            .sqlite
-            .session_driver(&session.id)
-            .map_err(task_error)?
-        {
-            if driver.exec_id.as_ref() == Some(id) || &driver.provider_exec_id == id {
-                return Ok(false);
-            }
-        }
-    }
-    for flow in work
-        .flows
-        .iter()
-        .filter(|flow| flow.summary.state == crate::session::FlowSummaryState::Current)
-    {
-        if store
-            .sqlite
-            .flow_exec(&flow.summary.id)
-            .map_err(task_error)?
-            .is_some_and(|(flow, _)| {
-                &flow.driver.id == id || flow.steps.iter().any(|step| &step.exec.id == id)
-            })
-        {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-pub(super) fn completion_work_blockers(
-    store: &SharedStore,
-    task: &Task,
-    open: &OpenExecs,
-) -> OpsResult<Vec<String>> {
-    let mut work = store
-        .sqlite
-        .task_open_work(&task.id, open)
-        .map_err(task_error)?;
-    let mut accepted = HashSet::new();
-    for id in store
-        .sqlite
-        .task_accepted_unknown_execs(&task.id)
-        .map_err(task_error)?
-    {
-        // Acceptance cannot hide a newly observed process or current owner.
-        if historical_unknown_exec(store, &work, &id)? {
-            accepted.insert(id);
-        }
-    }
-    work.execs.retain(|exec| !accepted.contains(&exec.id));
-    execution_blockers(store, &work)
 }
 
 /// A Flow whose driver died is history; only live or unresolved execution waits.

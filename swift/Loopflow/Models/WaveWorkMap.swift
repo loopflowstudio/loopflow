@@ -221,7 +221,6 @@ public enum TaskAction: String, Decodable, Sendable, Hashable {
     case resume
     case openPr = "open_pr"
     case startNextPr = "start_next_pr"
-    case complete
     case noAction = "no_action"
 }
 

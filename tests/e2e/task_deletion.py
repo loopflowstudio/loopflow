@@ -7,6 +7,8 @@ import ssl
 import subprocess
 import sys
 import threading
+import time
+import uuid
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -55,6 +57,12 @@ class Handler(BaseHTTPRequestHandler):
             data = {"issue": {"trashed": issue["trashed"]}}
         elif "query IssueAttachments" in query:
             data = {"issue": {"attachments": {"nodes": [], "pageInfo": page}}}
+        elif "query CanceledWorkflowStates" in query:
+            data = {"workflowStates": {"nodes": [{"id": "canceled", "position": 0}]}}
+        elif "mutation SetIssueState" in query:
+            issue["state"]["type"] = variables["stateId"]
+            issue["updatedAt"] = _next_revision(issue["updatedAt"])
+            data = {"issueUpdate": {"success": True}}
         elif "mutation DeleteIssue" in query:
             assert variables["id"] == issue["id"]
             issue["trashed"] = True
@@ -98,6 +106,50 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+
+def _abandon_retains_execution(
+    fixture: dict, repo: Path, env: dict, db: sqlite3.Connection, issue: dict, authored: Path
+) -> None:
+    process = str(uuid.uuid4())
+    db.execute(
+        "INSERT INTO execs(id,trace_id,cwd,started_at) VALUES(?,?,?,?)",
+        (process, process, str(repo), int(time.time())),
+    )
+    db.execute(
+        "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,interactive,task_id,wave_id,cwd) VALUES('retained-session','retained','generated',1,0,0,?,?,?)",
+        (fixture["task"], fixture["wave"], str(repo)),
+    )
+    capture = db.execute(
+        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('retained-session','captured',?,1,'{}')",
+        (uuid.uuid4().hex,),
+    ).lastrowid
+    db.execute(
+        "UPDATE agent_sessions SET current_capture=? WHERE id='retained-session'", (capture,)
+    )
+    db.commit()
+    processes = db.execute("SELECT * FROM execs WHERE id=?", (process,)).fetchall()
+    sessions = db.execute("SELECT * FROM agent_sessions WHERE id='retained-session'").fetchall()
+    prs = db.execute("SELECT * FROM task_prs").fetchall()
+    for _ in range(2):
+        result = subprocess.run(
+            [fixture["lf"], "task", "abandon", "INF-123"],
+            cwd=repo,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert issue["state"]["type"] == "canceled"
+        assert db.execute("SELECT abandoned_at IS NOT NULL FROM tasks").fetchone() == (1,)
+        assert db.execute("SELECT * FROM execs WHERE id=?", (process,)).fetchall() == processes
+        assert (
+            db.execute("SELECT * FROM agent_sessions WHERE id='retained-session'").fetchall()
+            == sessions
+        )
+        assert db.execute("SELECT * FROM task_prs").fetchall() == prs
+        assert authored.read_text() == "preserve authored work\n"
 
 
 def main() -> None:
@@ -241,23 +293,10 @@ def main() -> None:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            # Cancel-before-trash must preserve an unfinished primary checkout.
-            prs = db.execute("SELECT * FROM task_prs").fetchall()
-            result = subprocess.run(
-                [fixture["lf"], "task", "delete", "INF-123"],
-                cwd=repo,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            assert result.returncode != 0
-            assert "primary checkout or default branch" in result.stderr, result.stderr
-            assert not issue["trashed"] and issue["state"]["type"] == "unstarted"
-            assert db.execute("SELECT abandoned_at FROM tasks").fetchone() == (None,)
-            assert db.execute("SELECT * FROM task_workflows").fetchall() == []
-            assert db.execute("SELECT * FROM task_prs").fetchall() == prs
-            assert authored.read_text() == "preserve authored work\n"
+            if fixture["abandon"]:
+                _abandon_retains_execution(fixture, repo, env, db, issue, authored)
+                return
+            # Trash preserves a completed Task's outcome and occupied checkout.
             issue["state"]["type"] = "completed"
             issue["updatedAt"] = _next_revision(issue["updatedAt"])
             # Ownership refresh may advance its observation time, not Task history.

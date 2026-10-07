@@ -197,7 +197,7 @@ lf pr publish                         # push a ready PR
 lf submit                          # prepare for a reviewer's merge click
 lf arm                             # prepare and request auto-merge; return
 lf land                            # record delivery and return
-lf --task EXP-12 land -c            # also request completion after merge
+lf --task EXP-12 land               # complete after verified merge
 lf sync --plan                     # preview integration with main or stack parent
 lf wt create csv-export
 lf check                   # inspect release eligibility
@@ -205,23 +205,30 @@ lf check                   # inspect release eligibility
 
 Choose one delivery operation for the desired endpoint. Submit, arm, and land
 own preparation and integration; publish does not sync. PR operations work
-on ordinary branches without creating a Task. Bare `land` keeps a Task open. Arm and land return after recording delivery;
+on ordinary branches without creating a Task. Verified merge normally completes its Task. Arm and land return after recording delivery;
 `lf pr reconcile` checks it once and settles verified merges. In a Task checkout,
 it also recovers an existing PR whose GitHub identity is missing from the Task,
-without publishing, rotating the branch, or completing the Task. Multiple PRs
+without publishing or rotating the branch. Multiple PRs
 for the recorded branch remain unresolved. `lf ci watch`
 starts a ci-fix when a recorded landing fails its required checks.
 
 ```bash
-lf task move EXP-12 end --accept-unknown-exec EXEC_ID --reason 'Accepted historical uncertainty; delivery verified'
+lf task follow-up EXP-12 --outcome 'Installed latency meets the budget' --evidence 'Warm p95 below 1s over 20 samples' --check-at 2026-10-09T17:00:00Z
+lf land
+lf task follow-up EXP-12 --clear 'Published v0.14: 20 samples, p95 0.8s'
 ```
 
-Explicit acceptance records the named Exec's unknown outcome in Task history
-without changing that outcome. Repeat the flag for multiple Execs. Completion
-still requires settled PRs and protects current Session/Flow owners and observed
-processes. Acceptance applies only to completion; the checkout remains retained
-while execution is unresolved. A refused completion may retain the acceptance
-for retry. Ordinary completion never infers acceptance.
+Record accepted remaining work before delivery. Its outcome, evidence condition
+and next check stay visible in Task status and Desktop. An overdue check calls
+for evidence or a scope decision; time and green CI never establish production
+success. `--next <slug>` keeps genuinely unfinished PR work open. Older keep-open
+requests without a stated outcome surface for an explicit scope decision.
+
+`lf task move EXP-12 end` records an explicit completion. Old Session turns,
+reserved inputs and unknown process exits cannot veto it. Execution history and
+live process controls remain intact; uncertain or occupied checkouts are retained.
+Cancellation follows the same separation. Open PRs and additional committed work
+still need delivery or explicit abandonment.
 
 ## Check authorized deliveries in the background
 

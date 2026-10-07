@@ -461,13 +461,6 @@ pub fn task_place(
         end,
         ..
     } = options.clone();
-    // An unknown name is refused before any worktree is placed for it.
-    // `end` may name an edge that runs nothing; the Task's node decides.
-    if let Some(flow) = flow.as_deref().filter(|flow| *flow != END) {
-        if load_workflow_definition(repo, flow)?.is_none() {
-            load_task_flow(repo, flow)?;
-        }
-    }
     let mut task = prepare_task(repo, issue, options)?;
     block_on_task(async {
         let store = task_store().await?;
@@ -846,6 +839,13 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult
             restore_task_checkout(&store, &existing).await
         })?;
         return Ok(existing);
+    }
+    // Existing Tasks resolve names in their own checkout during traversal.
+    // For a new Task, reject an unknown name before placing its worktree.
+    if let Some(flow) = requested_flow.as_deref().filter(|flow| *flow != END) {
+        if load_workflow_definition(repo, flow)?.is_none() {
+            load_task_flow(repo, flow)?;
+        }
     }
     let main_repo = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
     let resolved =

@@ -26,7 +26,12 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             "wave/product/GOAL.md",
             "---\npm:\n  linear_initiative: initiative-1\n---\nKeep working.\n",
         );
-        repo.create_file(".lf/flows/adoption.yaml", "- step:\n    id: design\n    name: design\n    human: true\n- step:\n    id: demo\n    name: demo\n    human: true\n");
+        repo.create_file(".lf/flows/adoption.yaml", "- cmd: sync --plan\n");
+        // The Project names a workflow; its planning is what the launches below test.
+        repo.create_file(
+            ".lf/workflows/adoption.yaml",
+            "nodes:\n  demo: demo\nedges:\n  - { from: start, to: demo, flow: adoption }\n  - { from: demo, to: end }\n",
+        );
         repo.stage_all();
         repo.commit("Fixture planning");
         repo.push();

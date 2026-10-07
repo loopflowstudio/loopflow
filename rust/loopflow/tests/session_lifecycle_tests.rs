@@ -1012,6 +1012,12 @@ fn declared_agent_can_start_another_tasks_flow() {
         "- cmd: sync --plan\n",
     )
     .unwrap();
+    std::fs::create_dir_all(y.join(".lf/workflows")).unwrap();
+    std::fs::write(
+        y.join(".lf/workflows/switch-proof.yaml"),
+        "nodes:\n  demo: demo\nedges:\n  - { from: start, to: demo, flow: switch-proof }\n  - { from: demo, to: end }\n",
+    )
+    .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
         .unwrap();
     // Y needs a harness that supports the checkout boundary. Its mechanical
@@ -1061,7 +1067,8 @@ fn declared_agent_can_start_another_tasks_flow() {
     // The step ran in Y's checkout under a driver X's conversation started.
     let observed: (String, String) = fixture.db().query_row(
         "SELECT step.cwd,s.task_id FROM execs step JOIN execs driver ON driver.id=step.parent_exec_id
-         JOIN agent_sessions s ON s.id=driver.caller_session_id
+         JOIN execs launch ON launch.id=driver.parent_exec_id
+         JOIN agent_sessions s ON s.id=launch.caller_session_id
          JOIN flow_exec_steps recorded ON recorded.exec_id=step.id",
         [],
         |row| Ok((row.get(0)?, row.get(1)?)),

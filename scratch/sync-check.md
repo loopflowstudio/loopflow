@@ -1,1 +1,0 @@
-Process integration: clean-authority Task unit (39), PR (32), CLI (15), golden and documented-command suites PASS; fmt/clippy and Python fixture lint PASS. Hosted CI owns the final integrated matrix and Linux proxy proof.

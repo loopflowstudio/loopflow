@@ -20,3 +20,13 @@ cost. This reversible implementation choice does not revise Jack Heart's budgets
   CPU; "quiet" won. Revisit if checkout observation becomes change-driven.
 - The embedded draft schema changes development builds only. It is included
   because every branch measurement and every test process paid the replay.
+
+# LOO-304 attribution assumptions — October 6, 2026
+
+- The four-round growth budget is measured from before the first native Session
+  exists, so it includes first-open cost and the observer's first terminal
+  capture. The metric is unchanged and still fails. Whether first-open cost
+  belongs in a growth budget is Jack Heart's call, not a measurement finding.
+- The journey keeps OCR on the main actor and keeps its scenario order. Moving
+  either would change what earlier cohorts measured; the new `steps` fields
+  attribute the deferred work instead.

@@ -1222,3 +1222,80 @@ with change-driven refresh. Every original obligation stays open: 100 ms
 interactions, 300 ms roadmap, growth under 32 MiB, independent Swift
 attribution, compositor and input proof, recorder readiness and both full
 hours. No trace ran. Nothing touched the installed Home.
+
+## Reopen Task and growth attribution — October 6
+
+Jack Heart requested the cause of the two mounted results the previous section
+left unexplained. [Summary](reopen-attribution-summary.json) holds every cohort;
+raw receipts are `/tmp/loo304-reopen-20261006/`. Same host, fixtures and CLI
+binaries as the pair above. No budget, deadline or capture changed.
+
+**Reopen Task did not get slower. Planning got faster and now lands inside it.**
+The observer's OCR holds the main actor for about 170 ms at the end of each
+scenario. Every read that returns meanwhile queues behind it and publishes when
+the next scenario starts. Reopen Task follows Warm Task, so it has always
+absorbed Warm Task's deferred work: one Flow catalogue publication, about 47 ms
+of redraw in this unoptimized build. With the old CLI the all-repository
+roadmap returned after Reopen Task had been captured. The faster roadmap returns
+during Warm Task and publishes in the same window: a second redraw.
+
+The journey now records, per polling step, when the observer resumed, how long
+layout and display took, and whether planning had been published.
+
+| Reopen Task, bitmap-ready median, warm | Planning published first | Not yet published |
+| --- | ---: | ---: |
+| Before CLI, two runs (40 observations) | none | 53–54 ms |
+| After CLI, run 1 | 110 ms (10) | 59 ms (10) |
+| After CLI, run 2 | 109 ms (9) | 53 ms (11) |
+
+Alternating before/after/after/before, 84/84 endpoints each. Three of the four
+ran on unchanged repository inputs; the first before run and the later cohorts
+did not, because another Task committed mid-run. They agree and are kept
+unscored. In the pair above the same split reads 28/65 ms bitmap-ready before and
+53/108 ms after, under about 170–180 ms of OCR on both sides.
+
+A diagnostic scenario, not committed, reopened the Task after the main actor
+had drained: 23–29 ms to bitmap-ready, no layout or display pass, 44 samples
+with and 44 without the repair below. That is the cost of reopening.
+
+**One repair.** Reopening the Task that is already open rewrote its link,
+repository, evidence and recents. Observation notifies on every write, changed
+or not. Those writes now happen only on change; a headless regression counts
+zero invalidations and fails without the repair. Settled, the observer resumed
+at a median 9–10 ms with the repair and 11–16 ms without. It does not move the
+table: the sequenced delay is deferred publication, not reopening.
+
+**Growth is the first native Session, then a plateau.** The four-round figure
+starts before the first Session terminal exists.
+
+| RSS, MiB | Soak begin | First open, before capture | After bitmap | After OCR | After round 0 | Round 3 | Round 20 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pair above, before | 275.8 | 289.4 | 339.0 | 367.9 | 320.2 | 329.2 | 326.1 |
+| Pair above, after | 279.5 | 293.2 | 343.0 | 376.2 | 328.3 | 330.7 | 333.0 |
+| This change, before CLI | 236.1 | 248.2 | 299.2 | 319.9 | 278.0 | 282.9 | 298.8 |
+| This change, after CLI | 249.8 | 260.1 | 310.9 | 342.8 | 295.9 | 293.9 | 298.7 |
+
+Opening the Session costs 10–14 MiB before any capture. The first capture of a
+window holding a terminal adds about 50 MiB for the bitmap and 21–33 for OCR,
+of which 30–36 stays resident. Rounds 1–20 moved −3.7, −1.5 and −1.7 MiB in
+three runs and +15.9 in the fourth, which climbed until round 7 and then held
+for thirteen rounds. Both runs at this change ended at 298.7–298.8 MiB from
+starting points 13.7 MiB apart. Four-round growth still **fails**: +46.8 and
++44.1 MiB here, +53.4 and +51.1 above. Nothing is subtracted. This shows where
+the bytes arrive, not that the observer alone owns them, and 21 rounds are not
+an hour.
+
+**Recorder growth 47.7→96.6 MiB was a sampling endpoint.** The recorder reports
+last sample minus first. Both last samples fell inside a native capture; the
+after run's caught the OCR peak at 383.6 MiB while its preceding samples read
+325–331. At this change the last-twenty medians are 286.8 and 293.2 MiB.
+
+**Remaining.** Each planning or catalogue publication costs about 47–50 ms of
+main-actor redraw in a SwiftPM debug build. Whether an optimized build pays
+that is unmeasured, and is the next Swift attribution: same journey, release
+configuration, both variants. The journey's sequenced scenarios will keep
+absorbing deferred publication while OCR runs on the main actor; Warm Task's
+97–110 ms bitmap-ready is about 32 ms of wake, 52 of layout and 9 of display. Every
+original obligation stays open: 100 ms interactions, 300 ms roadmap, growth
+under 32 MiB, compositor and input proof, recorder readiness and both full
+hours. No trace ran. Nothing touched the installed Home.

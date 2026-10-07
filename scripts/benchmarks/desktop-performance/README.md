@@ -80,7 +80,10 @@ requires fresh baselines for comparisons.
 
 The endpoint is a native bitmap with recognized Task identity, not OS application
 launch, compositor presentation or usable Session input. Read timings and sampled
-window/focus/sheet transitions are in `attempts.jsonl`. The
+window/focus/sheet transitions are in `attempts.jsonl`. Each observation's
+`steps` split its wait into observer wake, layout and display, and record
+whether planning had been published: OCR holds the main actor, so one
+scenario's deferred publication lands in the next. The
 [October 4 evidence](20261004-task-open/README.md) records failed attempts,
 overlapping-run discovery and the budgets' origin; it establishes no speedup.
 The [October 5 evidence](20261005-task-open/README.md) compares base and branch

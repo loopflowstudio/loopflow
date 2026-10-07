@@ -776,26 +776,15 @@ No observer subtraction or budget change is accepted. The report owns receipts.
 Git cwd selection now avoids 31 absent-checkout launches (67→36); matched mounted
 preservation passed, memory still failed +43.8/+41.1 MiB. Publication only.
 
-Bundled SQLite 3.53.2 needed indexed Exec/Flow selection; Python's plan differed.
-Earlier matched repairs and all preservation evidence remain in the report above.
-Jack Heart's next authorized repair selects started-turn history and checks Session
-retirement once: all 604 answers match; boot-aware VM steps 3.55M→58,480.
-Matched roadmap median/p95 was 586/611→570/1033 ms; tail improvement is unproved.
-Same-observer Desktop passed 84/84 each, but native p95 worsened 914→976 ms and
-CLI count rose 407→415. Baseline early navigation overlapped the preservation audit.
-Repository discovery and Task-work reads remain measured costs; aliases, config
-validation, freshness, history and authority are unchanged. Original latency,
-failed growth, compositor and both hour obligations remain. Publication only.
+Bundled SQLite 3.53.2, not Python's, decides query plans. Indexed Exec/Flow
+selection and started-turn history repairs preserved all 604 answers; their
+matched cohorts, worsened native p95 and higher CLI counts are in the report and
+at `13883fa15:wave/infrastructure/MEMORY.md`. Publication only.
 
-Reopening history retains 83/84, 5/21 and 20/21 failures, nineteen-warm cohorts
-without p95, and failed growth (+60.9/+53.5/+47.6 MiB). Jack Heart requested repair.
-Selection now revalidates cached unavailable-client observations through connect,
-preserving fresh refusal and explicit takeover. The observer then waits for native
-readiness before capture/OCR, retaining its five-second deadline and preservation
-checks. Focused 21/21 and full 84/84 passed; the historical failed predicate remains
-unknown. The report retains exact evidence; observation repair proves no product
-latency improvement. Swift attribution, latency/growth, both hours and compositor
-proof remain open; publication only is authorized.
+Reopen-rejection and observer-readiness repairs, with their retained 83/84,
+5/21 and 20/21 failures and failed growth, are in the matched report and at
+`13883fa15:wave/infrastructure/MEMORY.md`. Observation repair proves no product
+latency improvement; publication only.
 
 October 6 bounded capture work retains its receipts in the matched report.
 Hitches/Hangs project 13.2/103.0 GiB/hour; neither supplies both tables. The 2 GiB
@@ -826,9 +815,21 @@ whose 39 tables match the prepared manifest; never compare it with earlier
 cohorts. Stable 84/84 reads: roadmap median/p95 971/1008→412/428 ms, Sessions
 259/264→98/100 ms, roadmap CPU +6%. Two runs were rejected when another Task
 committed mid-run. Mounted 84/84 each: cold workspace and native reopen
-improved, Reopen Task worsened 198/240→234/332 ms, growth failed +53.4/+51.1
-MiB, recorder RSS growth rose 47.7→96.6 MiB; both regressions are unexplained.
-Roadmap still misses 300 ms on 23 fresh `git status` reads. Every original
+improved; Reopen Task read 198/240→234/332 ms; growth failed +53.4/+51.1 MiB.
+Roadmap still misses 300 ms on 23 fresh `git status` reads.
+
+Attribution (report's final section): Reopen Task did not slow down. The
+observer's OCR holds the main actor ~170 ms, so reads returning meanwhile
+publish in the next scenario; the faster roadmap now publishes inside Reopen
+Task (~109 ms bitmap-ready) instead of after it (53 ms). Settled, a reopen is
+23–29 ms. A scenario's number includes its predecessor's deferred work: read
+the `steps` fields before calling a change a regression. Growth arrives at the
+first native Session open (10–14 MiB before capture, 30–36 resident after the
+first terminal capture); rounds 1–20 were flat in three runs, +15.9 MiB in one.
+The budget still fails and nothing is subtracted; whether first-open cost
+belongs in it is Jack Heart's undecided call. Recorder 47.7→96.6 MiB was a last
+sample on an OCR peak. Each publication costs ~47–50 ms of redraw in the debug
+test build; release-configuration Swift attribution is next. Every original
 latency, growth, Swift, compositor/input and hour obligation remains.
 Jack Heart authorized publication only.
 

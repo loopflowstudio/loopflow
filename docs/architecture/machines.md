@@ -9,10 +9,30 @@ Opaque `home_…` IDs, existing scheduled-job keys and historical evidence retai
 their stored spelling. Live commands and DTOs use `machine` and `machine_id`.
 
 ```bash
-lf id
-lf wave place product <machine-id>
-lf ssh <machine-id> --wave product wave/operate
+lf machine add mini --repo '~/src/project'
+lf machine list
+lf machine status mini
+lf ssh mini session list
+lf machine rename mini builder
+lf machine remove builder
 ```
+
+Quote a remote `~/` path (`--repo '~/src/project'`) to avoid local shell expansion.
+Without `--repo`, add uses the local checkout's path relative to the local home.
+Absolute paths are accepted too. SSH aliases, `user@host` and SSH URIs are passed
+to OpenSSH. Add reads the remote identity itself; `--label` overrides the host name.
+The repository must already exist on the remote.
+
+List reads saved connections. Status checks without prompting and shows remote
+and local versions. Different versions produce an explicit remote update command;
+Loopflow does not maintain old-version compatibility or update a peer automatically.
+SSH key authentication and a known host key must already work. Add and status
+transfer no credentials. SSH requires an added connection and checks its identity
+before forwarding the existing foreground credentials through stdin.
+
+Remove forgets the connection without contacting the remote. Historical machine
+identity, routes and Work placements remain in SQLite. Previously observed routes
+need an explicit add before they can receive forwarded credentials.
 
 ## Local by default
 

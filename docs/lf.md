@@ -372,3 +372,16 @@ Run `lf sync --plan` and `lf sync` at a deliberate maintenance boundary and afte
 merged document PR. Network failures leave local work usable; conflicts stay visible
 and use `lf sync --continue` or `lf sync --abort`. Persistent branches remain reusable
 and survive automatic pruning. Memory updates do not require PRs or a schedule.
+
+## Work on another machine
+
+```bash
+lf machine add mini --repo '~/src/project'
+lf machine status mini
+lf ssh mini session list
+```
+
+Save an SSH destination once, then use its label. List, rename and remove saved
+connections with `lf machine list`, `lf machine rename mini builder` and
+`lf machine remove builder`. Removing a connection leaves remote work running.
+See [machine connections](architecture/machines.md) for repository paths and version checks.

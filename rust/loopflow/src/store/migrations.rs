@@ -2383,6 +2383,27 @@ mod tests {
     }
 
     #[test]
+    fn machine_connections_preserve_released_records() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "rename_home_to_machine");
+        conn.execute_batch("INSERT INTO homes (id, route, created_at, observed_at)
+            VALUES ('home_11111111111111111111111111111111', 'ssh://jack@mini', 9, 10);
+            INSERT INTO waves (id, name, repo, created_at) VALUES ('machine-wave', 'machine', '/repo', 7);
+            INSERT INTO work_placements (wave_id, home_id, placed_at)
+            VALUES ('machine-wave', 'home_11111111111111111111111111111111', 8);").unwrap();
+        conn.execute_batch(&current_draft_sql("rename_home_to_machine"))
+            .unwrap();
+        conn.execute_batch(&current_draft_sql("machine_connections"))
+            .unwrap();
+        let row: (String, i64, i64, Option<String>, Option<String>, i64) = conn.query_row(
+            "SELECT m.route, m.created_at, m.observed_at, m.label, m.repo, p.placed_at
+             FROM machines m JOIN work_placements p ON p.machine_id=m.id WHERE p.wave_id='machine-wave'",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))).unwrap();
+        assert_eq!(row, ("ssh://jack@mini".into(), 9, 10, None, None, 8));
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn machine_rename_preserves_released_identity_and_placement() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_current_draft(&conn, "rename_home_to_machine");

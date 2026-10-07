@@ -18,7 +18,9 @@
           "id": "home_00000000000000000000000000000001",
           "route": "local",
           "created_at": "1970-01-01T00:00:00Z",
-          "observed_at": "1970-01-01T00:00:00Z"
+          "observed_at": "1970-01-01T00:00:00Z",
+          "label": null,
+          "repo": null
         }
       },
       "metric_portfolio": {
@@ -859,7 +861,7 @@
             "task": {
               "id": "issue-later",
               "identifier": "W2-141",
-              "name": "Now + Available work views — research",
+              "name": "Now + Available work views \u2014 research",
               "description": "Research delivered in merged PR.",
               "rank": 0,
               "completed": true,
@@ -993,7 +995,9 @@
           "id": "home_00000000000000000000000000000002",
           "route": "ssh://jack@mini-heart",
           "created_at": "1970-01-01T00:00:00Z",
-          "observed_at": "1970-01-01T00:00:00Z"
+          "observed_at": "1970-01-01T00:00:00Z",
+          "label": "mini",
+          "repo": "src/project"
         }
       },
       "metric_portfolio": {

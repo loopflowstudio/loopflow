@@ -1717,7 +1717,11 @@ fn execute_command(
             cmd:
                 cmd @ (loopflow::lf::MachineCommand::User { .. }
                 | loopflow::lf::MachineCommand::Id { .. }
-                | loopflow::lf::MachineCommand::Observe { .. }),
+                | loopflow::lf::MachineCommand::Add { .. }
+                | loopflow::lf::MachineCommand::List { .. }
+                | loopflow::lf::MachineCommand::Status { .. }
+                | loopflow::lf::MachineCommand::Rename { .. }
+                | loopflow::lf::MachineCommand::Remove { .. }),
         }) => loopflow::lf::commands::machine::run(cmd),
         Some(Commands::Machine {
             cmd: loopflow::lf::MachineCommand::SyncSkills { yes, no_prune },

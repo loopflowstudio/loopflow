@@ -1,10 +1,8 @@
 # Work on another machine
 
-Status: rename slice authorized for implementation and publication by Jack Heart,
-2026-10-07 (comment 43c8a308-9009-42ab-9c35-0955902c6480), superseding the Task
-brief's earlier unreviewed-draft status. Source rename and preservation repairs
-are implemented; affected gate, isolated installation proof and PR 1 publication
-remain. Publication is the authorized stopping point. Later slices remain intent.
+Status: LOO-411 builds step 2, the machine record, stacked on LOO-394 / PR #1484.
+Jack Heart authorized implementation and publication on 2026-10-07, then stopping
+for review. The rename is inherited; later remote-work slices remain intent.
 
 Do not lift code, tests, help text or config from herdr or cmux (Jack Heart,
 2026-10-07). Their behaviour is described here from docs and reading; write
@@ -147,9 +145,9 @@ survive the rename. Existing focused checks cover these source boundaries.
 The affected gate and isolated installer proof remain with gate/CI. Publication
 does not establish installed migration or any remote-work acceptance below.
 
-## Later design — not started
+## Machine record and later design
 
-### 1. Machine record
+### This slice: machine record (LOO-411)
 
 `lf machine add <ssh-target> [--label NAME] [--repo PATH]`, `list`, `status`,
 `rename`, `remove`. Stored: label (default: the ssh host), target (anything
@@ -159,23 +157,14 @@ never touches remote work. `status` never prompts. `lf ssh <label>` stays the
 one way to run a command there and requires an added machine before any
 credential crosses.
 
-First connect: probe, find `lf`, check capability, offer install (default yes).
-Replacing a running remote `lf` asks first and says what would stop.
+First connect probes the installed `lf` and reads its machine identity. Missing
+or incompatible commands produce an explicit update instruction.
 
-Versions across machines (proposal; Jack Heart asked on 2026-10-07 whether to
-keep `lf` versions in sync across machines or make mixed versions compatible).
-Loopflow ships daily and the style guide rules out compatibility layers, so
-skew will be common and supporting arbitrary old versions is the expensive
-answer. Proposed instead: detect skew and make it one step to fix.
-- Connecting asks the remote what it can do through one stable public command,
-  not through whichever command the current release happens to use. PR 1 showed
-  the cost: the identity check runs `lf machine id`, so a remote one release
-  behind fails with an unhelpful message.
-- `lf machine status` shows each machine's version beside the local one.
-- When the remote is behind, say so and offer to update it (default yes).
-  Updating never stops work running there without an explicit yes.
-- Each machine's own scheduled update keeps running; this covers the window
-  between them.
+Versions across machines (Jack Heart, 2026-10-07, comment
+1958673f-baba-470e-b73a-1a544007dd86): no stable cross-version interface,
+capability negotiation or support for older remotes. Status shows both versions;
+connecting reports differences and names the remote update command. This
+supersedes the earlier proposal. No automatic peer installation or replacement.
 
 Review decisions on PR 1 (Jack Heart, 2026-10-07): drop the Desktop cache
 translation and discard old cache files; rename the install scope so "machine"
@@ -424,21 +413,27 @@ Codex's disposition remains unresolved as noted above:
 - Comparison guides: https://claude.ai/artifact/1xpMiizmX3od7pYpqBTdcQ and
   https://claude.ai/artifact/MsYW6XqaKpJoUzcx5oRxfS
 
-Review: preserve stored identities and historical bytes; one schema owner and no
-new runtime. Version-1 Desktop wire caches needed an explicit key migration.
-The telemetry Flow uses the existing `doctor` shorthand so its authored definition
-works across the command-group rename. Installer calls likewise use the existing
-`install` shorthand: receipt-pinned recovery may execute a pre-rename binary.
-Installed v0.13.9 resolves preflight, recovery and advancement help through it;
-this is parser evidence, not installation. The exact-store test now seeds the
-canonical schema directly: the experiment initializer had added drafts, making
-its claimed exact release frontier false. No later slice was started.
+Parent rename evidence remains at
+`06e88761d:scratch/work-on-another-machine-name.md`. PR #1484 owns its gate,
+installation proof and changing cache/install-scope decisions. This slice does
+not claim installed migration or later remote-work acceptance.
 
-Rename source is checkpointed at `d7a345896`; installer/cache repairs at
-`327e6e11e`. Prior rename checks remain at
-`d7a345896:scratch/work-on-another-machine-name.md`; unchanged migration, DTO,
-routing and Python evidence still applies. October 7 reconciliation changed
-only notes and memory; Release was the sole child Wave and its top-level goal
-and memory were read. No new implementation mismatch was found.
+LOO-411 implementation choices (2026-10-07): extend the existing Machine row
+with optional label and repository path. Removal clears those connection fields,
+preserving identity, route history and placements. Legacy observed routes require
+an explicit add before forwarding credentials. Probe uses existing `lf --version`
+and `lf machine id`; no provider login participates in it.
+An omitted repository uses the local checkout's home-relative path; outside a
+checkout, `--repo` is required. Absolute remote paths and `~/` paths are accepted.
+Remote installation/version replacement remains explicit: unsupported peers get
+an actionable upgrade error, never an unattended replacement of running work.
+Delete: `observe` and its writer, raw-host SSH fallback, DEFAULT_REPO, and the
+custom SSH user/host/port parser. Preserve exact machine checks and credential
+transport via stdin. Prove label lifecycle, nonprompting probe failures, quoting,
+version reporting and preservation from released SQL in disposable stores.
 
-Checks: `git diff --check` passes; unchanged-code passes reused for `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo nextest run -p loopflow --lib --test cli_discovery -E 'test(lf::commands::install::) | test(inspection_is_identical_across_spellings)'` (16), and `scripts/test_desktop.sh -Xswiftc -gnone --filter WorkCacheTests` (15); full affected gate and isolated installation proof remain with CI/gate, and installed migration and later-slice acceptance remain unproved.
+Review finding: removal must release the active destination as well as the label,
+so a replacement machine can be added there without deleting the old identity.
+The route's uniqueness index covers the local identity and named connections;
+unnamed history remains intact. An unsupported peer still contributes its version
+when the identity command fails. Required checks are running; publication remains.

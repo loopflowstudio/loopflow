@@ -29,8 +29,8 @@ settled the holder and the credential rules. Jack authorized only the rename sli
 read released cron JSON via an explicit field alias. These are persisted-data
 contracts, not alternate commands or runtime owners. No installed store is touched.
 
-Context: authored memory is 15,994/16,000 tokens and scratch is within budget.
-`lf context --skill realign --json` reports the generated launch goal at about
-23,200/16,000 tokens (about 7,200 over) because of the broad rename's file inventory. Editing authored
-notes cannot reduce that generated inventory; limits remain unchanged. Total
-submitted input fits. The archived LOO-393 patch is retained in Git.
+LOO-411, 2026-10-07: the migration helper mistakes the stacked parent's draft for
+this Task's. Keep the parent's rename immutable and add this Task's one draft,
+dependent on it; the parent renames an existing released table, not a new owner.
+Jack Heart's later scope reduction explicitly requires version diagnosis, not remote installation. This slice
+reports how to update an unsupported/older peer and does not replace it itself.

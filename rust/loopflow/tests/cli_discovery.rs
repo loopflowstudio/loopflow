@@ -515,7 +515,7 @@ fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
         .subcommand(clap::Command::new("monitor"))
         .subcommand(clap::Command::new("landing"))
         .subcommand(clap::Command::new("__internal").hide(true))
-        .subcommand(clap::Command::new("home").subcommand(clap::Command::new("id")));
+        .subcommand(clap::Command::new("machine").subcommand(clap::Command::new("id")));
     let resolve = |name| loopflow::lf::navigation::resolve_child(&tree, name, &[]);
     assert_eq!(resolve("land").unwrap().unwrap(), ["task", "pr", "land"]);
     assert!(resolve("pr").is_err());

@@ -375,7 +375,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: RepoCommand,
     },
-    /// Inspect this Machine and observe routes to other Machines
+    /// Name and connect to machines
     Machine {
         #[command(subcommand)]
         cmd: MachineCommand,
@@ -1394,12 +1394,12 @@ pub enum MachineCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run lf on a Machine or SSH host carrying your local credentials.
+    /// Run lf on an added machine carrying your local credentials.
     ///
     /// Resolves local credentials and forwards a foreground account lease over
     /// SSH; Loopflow writes no managed provider credential on the remote. The
     /// Doppler token is never forwarded — name specific secrets with `--secret`
-    /// to resolve them locally. Example: `lf machine ssh <machine-id> pr open`.
+    /// to resolve them locally. Example: `lf ssh mini pr open`.
     Ssh {
         /// Prefer this origin account when the remote lf chooses a provider.
         #[arg(
@@ -1417,9 +1417,9 @@ pub enum MachineCommand {
             conflicts_with = "ssh_preferred_provider_account"
         )]
         origin_only_account: Vec<String>,
-        /// MachineId (preferred), SSH alias, or user@host
+        /// Saved machine label (or its stable MachineId)
         target: String,
-        /// Repository path on the remote, relative to $HOME
+        /// Override the saved repository path on the remote
         #[arg(long = "repo")]
         repo: Option<String>,
         /// Doppler secret to resolve locally and forward as an env var
@@ -1445,13 +1445,32 @@ pub enum MachineCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Record the current route for a known Machine identity.
-    Observe {
-        machine_id: crate::durable::MachineId,
-        route: String,
+    /// Discover a remote machine and save its SSH destination
+    Add {
+        target: String,
+        #[arg(long)]
+        label: Option<String>,
+        /// Remote repository path; defaults to this checkout's home-relative path
+        #[arg(long)]
+        repo: Option<String>,
         #[arg(long)]
         json: bool,
     },
+    /// List saved machines without connecting
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check reachability and version without prompting
+    Status {
+        label: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Change a saved machine's label
+    Rename { label: String, name: String },
+    /// Forget a connection without touching remote work
+    Remove { label: String },
 }
 
 #[derive(Debug, Subcommand)]

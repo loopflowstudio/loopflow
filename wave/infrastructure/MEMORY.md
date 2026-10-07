@@ -1,19 +1,23 @@
 # infrastructure wave memory
 
-## Machine terminology (LOO-394, 2026-10-07)
+## Machines (LOO-394 / LOO-411, 2026-10-07)
 
-Jack Heart authorized only the Home-to-machine rename, PR 1 publication and then
-stop. A machine means one OS user and Loopflow data directory. `LF_HOME` and
-provider/account homes retain filesystem meanings. Commands, Rust/Swift DTOs and
-one SQLite draft rename the authority without relocating data. Opaque `home_…`
-IDs, cron plist keys, Desktop selection keys and historical payloads survive.
-Cron accepts released JSON keys; Desktop translates version-1 cached DTO keys
-on read without rewriting the file. Installation keeps its separate owner and
-lock path. Retained binaries may predate a command rename: installer recovery
-uses the shared `install` shorthand. Exact-frontier fixtures must seed released
-SQL, not the experiment initializer that adds drafts. Local checks prove no
-installed migration or remote continuity. Release's schedule evidence requires
-preserving original ownership and activation through a naming change.
+Jack Heart authorized rename PR #1484 and stacked machine-record PR LOO-411,
+publication then review; no landing or later remote-work slice. A machine is one
+OS user and Loopflow data directory. `LF_HOME`, provider/account homes, opaque
+`home_…` IDs, cron plist and Desktop selection keys retain their meanings/bytes.
+Jack later removed Desktop cache translation and renamed install scope to
+installation. Installer recovery uses the shared `install` shorthand for retained
+binaries. Rename evidence: `06e88761d:wave/infrastructure/MEMORY.md`.
+
+Jack explicitly rejected a stable cross-version API, negotiation and old-peer
+support. Read existing version/identity commands; report different versions and
+the remote update command. Named connections live on existing Machine rows;
+removal forgets connection fields without deleting placements/history or touching
+remote work. Only explicitly added machines may receive foreground credentials.
+OpenSSH owns destination syntax. Exact-frontier fixtures seed released
+SQL. Local source proofs establish no installed migration or configured remote
+continuity. Release schedules retain original ownership and activation.
 
 ## Storage footprint (LOO-390, 2026-10-06)
 
@@ -996,12 +1000,10 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
   Linear moves an issue, historical Task Runs retain their evidence but lose
   automated PR and completion authority; fail closed before side effects and
   preserve the full Work, Run, Steer, and PR history for remediation.
-- **Historical continuity currently short-circuits daily telemetry** (observed
-  2026-08-23). `telemetry-daily` stops in `doctor` on the same eight 2026-08-04
-  through 2026-08-11 gap days before its scorecard runs. LOO-241 owns making
-  continuity obligation-aware. Fresh receipts are new evidence for that Task,
-  not grounds for duplicate daily Tasks; retry its Work only from a Turn with
-  valid Run execution context.
+- **Telemetry's historical short-circuit** (2026-08-23) is retained at
+  `06e88761d:wave/infrastructure/MEMORY.md` under Gotchas. LOO-241 owned the
+  obligation-aware repair; current observations and Scheduled evidence govern
+  acceptance, not replaying that old failure.
 - **Release orchestration and product publication are separate evidence**
   (observed 2026-08-23). A cron receipt proves only the scheduled target's
   terminal state. `lf release status` remained at tag `v0.12.14` with a

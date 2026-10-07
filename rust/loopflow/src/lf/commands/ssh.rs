@@ -1,4 +1,4 @@
-//! `lf machine ssh <MachineId|host> <lf-args...>` — run `lf` on a remote machine.
+//! `lf ssh <label> <lf-args...>` — run `lf` on a remote machine.
 //!
 //! Foreground commands bring narrowly resolved local credentials. Managed
 //! Claude/Codex accounts stay behind a foreground Unix-socket broker; the
@@ -6,7 +6,7 @@
 //! only its selected token. Durable work sheds all forwarded authority before
 //! it detaches and uses credentials installed on the target machine.
 //!
-//! A `MachineId` target resolves through the locally observed route and makes the
+//! An added label or `MachineId` resolves through its saved route and makes the
 //! remote process prove that it is the addressed Machine before dispatch.
 //!
 //! Forwarded authority: GitHub (`gh`), Claude/Codex agent OAuth, and — the
@@ -29,7 +29,6 @@ use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context};
 
-use crate::durable::MachineId;
 use crate::pm::PmProviderKind;
 use crate::provider_account::lease::{
     self, AccountLeaseBroker, AccountLeaseHandle, AccountSelection, PreparedAccountLease,
@@ -39,9 +38,6 @@ use crate::provider_auth::{
 };
 
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
-
-/// Default repository path (relative to `$HOME`) the remote command runs in.
-pub const DEFAULT_REPO: &str = "src/loopflow";
 
 /// The local credential bundle forwarded to the remote. Absent credentials are
 /// simply not exported — the remote falls back to whatever it can resolve.
@@ -141,19 +137,20 @@ pub fn run(
     let cmd = std::iter::once("lf".to_string())
         .chain(lf_args.iter().cloned())
         .collect::<Vec<_>>();
-    let mut extra_env = Vec::new();
-    if let Some(machine_id) = target.machine_id.as_ref().map(MachineId::as_str) {
-        extra_env.push((EXPECTED_MACHINE_ID_ENV, machine_id));
-    }
+    let machine_id = target.id.as_str();
     run_with_env(
-        &target.dest,
-        target.port,
-        repo,
+        &target.route,
+        repo.unwrap_or(
+            target
+                .repo
+                .as_deref()
+                .expect("added machines have a repository"),
+        ),
         secret_names,
         forward_agent,
         selection,
         &cmd,
-        &extra_env,
+        &[(EXPECTED_MACHINE_ID_ENV, machine_id)],
     )
 }
 
@@ -182,49 +179,26 @@ fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SshTarget {
-    dest: String,
-    port: Option<u16>,
-    machine_id: Option<MachineId>,
-}
-
-fn resolve_target(target: &str) -> anyhow::Result<SshTarget> {
-    let Ok(machine_id) = MachineId::parse(target) else {
-        return Ok(SshTarget {
-            dest: target.to_string(),
-            port: None,
-            machine_id: None,
-        });
-    };
+fn resolve_target(target: &str) -> anyhow::Result<crate::durable::Machine> {
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    let home = runtime
-        .block_on(async {
-            let store = crate::store::open_existing_store().await?;
-            store.machine_by_id(&machine_id).await.ok().flatten()
-        })
-        .ok_or_else(|| anyhow!("Machine {machine_id} was not found in the local store"))?;
-    let route =
-        crate::engine::machine_route::MachineRoute::parse(&home.route).ok_or_else(|| {
-            anyhow!(
-                "Machine {machine_id} route {:?} is not a remote SSH route",
-                home.route
-            )
-        })?;
-    Ok(SshTarget {
-        dest: route.ssh_destination().ok_or_else(|| {
-            anyhow!("Machine {machine_id} is local; lf machine ssh needs a remote Machine")
-        })?,
-        port: route.ssh_port(),
-        machine_id: Some(machine_id),
+    runtime.block_on(async {
+        let store = crate::store::open_existing_store().await
+            .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
+        let machine = super::machine::find_machine(&store, target).await?;
+        let probe = super::machine::probe(&machine.route).await?;
+        super::machine::report_version(&machine.route, &probe.version);
+        let reached = probe.id?;
+        if reached != machine.id {
+            return Err(anyhow!("remote machine identity changed: expected {}, reached {reached}; remove and add the connection again", machine.id));
+        }
+        Ok(machine)
     })
 }
 
 #[allow(clippy::too_many_arguments)]
 fn run_with_env(
     dest: &str,
-    port: Option<u16>,
-    repo: Option<&str>,
+    repo: &str,
     secret_names: &[String],
     forward_agent: bool,
     selection: &AccountSelection,
@@ -236,7 +210,6 @@ fn run_with_env(
             "an inherited account lease cannot be re-forwarded over SSH; put `lf machine ssh` on the outer account-selected invocation"
         ));
     }
-    let repo = repo.unwrap_or(DEFAULT_REPO);
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
     let mut credentials = runtime.block_on(resolve_credentials(secret_names, selection))?;
     if let ProviderAuthority::Lease(prepared) = &credentials.provider_authority {
@@ -261,7 +234,7 @@ fn run_with_env(
         cmd,
         &extra_env,
     );
-    let outcome = run_ssh(dest, port, forward_agent, broker.as_ref(), &preamble)?;
+    let outcome = run_ssh(dest, forward_agent, broker.as_ref(), &preamble)?;
     // Release the broker before reporting the remote command's result.
     drop(broker);
     match outcome {
@@ -448,10 +421,7 @@ fn build_preamble(
 
     // Give the remote a sane PATH so `lf`, `gh` resolve under a
     // non-interactive `bash -s`.
-    lines.push(
-        "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\""
-            .to_string(),
-    );
+    lines.push(super::machine::REMOTE_PATH.to_string());
 
     // Transport-supplied identity markers are exported before credentials so
     // the remote can verify them during its earliest dispatch checks.
@@ -573,11 +543,17 @@ fn build_preamble(
         ));
     }
 
-    // cd into the repo; `$HOME` expands on the remote, the path stays quoted.
+    let path = if repo.starts_with('/') {
+        sh_quote(repo)
+    } else {
+        format!(
+            "\"$HOME\"/{}",
+            sh_quote(repo.strip_prefix("~/").unwrap_or(repo))
+        )
+    };
     lines.push(format!(
-        "cd \"$HOME\"/{} || {{ echo {} >&2; exit 1; }}",
-        sh_quote(repo),
-        sh_quote(&format!("no repo ~/{repo} on {host}"))
+        "cd -- {path} || {{ echo {} >&2; exit 1; }}",
+        sh_quote(&format!("no repo {repo} on {host}"))
     ));
 
     let remote_cmd = cmd
@@ -604,7 +580,7 @@ fn nonempty(value: &Option<String>) -> Option<&str> {
 
 /// POSIX single-quote escaping: wrap in `'…'`, and render any embedded single
 /// quote as `'\''`. Safe for arbitrary bytes including secrets.
-fn sh_quote(value: &str) -> String {
+pub(super) fn sh_quote(value: &str) -> String {
     let mut quoted = String::with_capacity(value.len() + 2);
     quoted.push('\'');
     for ch in value.chars() {
@@ -637,20 +613,14 @@ enum SshOutcome {
 /// `BatchMode=yes` is the primary hang killer: it refuses every interactive
 /// prompt (password, passphrase, unknown host key) rather than blocking on the
 /// tty forever. The timeouts bound the connect handshake and a stalled session.
-fn ssh_args(
-    dest: &str,
-    port: Option<u16>,
-    forward_agent: bool,
-    broker: Option<&AccountLeaseBroker>,
-) -> Vec<String> {
-    let mut args = ssh_connection_args(dest, port, forward_agent, broker);
+fn ssh_args(dest: &str, forward_agent: bool, broker: Option<&AccountLeaseBroker>) -> Vec<String> {
+    let mut args = ssh_connection_args(dest, forward_agent, broker);
     args.push("bash -s".to_string());
     args
 }
 
 fn ssh_connection_args(
     dest: &str,
-    port: Option<u16>,
     forward_agent: bool,
     broker: Option<&AccountLeaseBroker>,
 ) -> Vec<String> {
@@ -672,7 +642,7 @@ fn ssh_connection_args(
         args.push("-o".to_string());
         args.push("ExitOnForwardFailure=yes".to_string());
     }
-    args.extend(crate::engine::machine_route::bounded_ssh_args(dest, port));
+    args.extend(crate::engine::machine_route::bounded_ssh_args(dest));
     args
 }
 
@@ -703,13 +673,12 @@ fn connection_error(host: &str) -> anyhow::Error {
 /// so an unreachable or misconfigured host fails fast instead of hanging.
 fn run_ssh(
     dest: &str,
-    port: Option<u16>,
     forward_agent: bool,
     broker: Option<&AccountLeaseBroker>,
     preamble: &str,
 ) -> anyhow::Result<SshOutcome> {
     let mut child = Command::new("ssh")
-        .args(ssh_args(dest, port, forward_agent, broker))
+        .args(ssh_args(dest, forward_agent, broker))
         .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -839,7 +808,7 @@ mod tests {
         assert!(preamble.contains("export GIT_CONFIG_KEY_1='credential.https://github.com.helper'"));
         assert!(preamble.contains("password=$GH_TOKEN"));
         // cd into the repo and run under the cleanup trap.
-        assert!(preamble.contains("cd \"$HOME\"/'src/loopflow'"));
+        assert!(preamble.contains("cd -- \"$HOME\"/'src/loopflow'"));
         assert!(preamble.trim_end().ends_with("'lf' 'pr'"));
     }
 
@@ -959,7 +928,7 @@ mod tests {
 
     #[test]
     fn ssh_args_bound_the_connection() {
-        let args = ssh_args("jack@mini-heart", None, false, None);
+        let args = ssh_args("jack@mini-heart", false, None);
         // Primary hang killer: never block on an interactive prompt.
         assert!(args.iter().any(|a| a == "BatchMode=yes"));
         // Connect handshake and stalled-session bounds.
@@ -979,25 +948,8 @@ mod tests {
     }
 
     #[test]
-    fn ssh_args_pass_an_explicit_port() {
-        let args = ssh_args("jack@host", Some(2222), false, None);
-        let p = args.iter().position(|a| a == "-p").expect("-p present");
-        assert_eq!(args[p + 1], "2222");
-    }
-
-    #[test]
-    fn ssh_probe_reuses_connection_bounds_without_a_stdin_command() {
-        let args = crate::engine::machine_route::bounded_ssh_args("jack@host", Some(2222));
-
-        assert!(args.iter().any(|arg| arg == "BatchMode=yes"));
-        assert!(args.iter().any(|arg| arg == "ConnectTimeout=10"));
-        assert_eq!(args.last().map(String::as_str), Some("jack@host"));
-        assert!(!args.iter().any(|arg| arg == "bash -s"));
-    }
-
-    #[test]
     fn ssh_args_opt_in_agent_forwarding() {
-        let args = ssh_args("host", None, true, None);
+        let args = ssh_args("host", true, None);
         assert_eq!(args.first().unwrap(), "-A");
     }
 

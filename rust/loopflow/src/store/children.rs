@@ -79,26 +79,25 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn restart_task_flow(
+    pub(crate) async fn complete_task(
         &self,
         task: &Task,
-        expected: Option<&crate::durable::FlowSession>,
-        checkpoint_head: &str,
-    ) -> StoreResult<()> {
-        let expected = expected.cloned();
-        let task = task.clone();
-        let checkpoint_head = checkpoint_head.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.restart_task_flow(&task, expected.as_ref(), &checkpoint_head)
-        })
-        .await
-    }
-
-    pub async fn complete_task(&self, task: &Task, skipped_pr: Option<&TaskPr>) -> StoreResult<()> {
+        skipped_pr: Option<&TaskPr>,
+        how: crate::store::sqlite::EndMove,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
         let task = task.clone();
         let skipped_pr = skipped_pr.cloned();
+        let by = crate::journal::current_exec_id();
+        let note = note.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
-            store.complete_task(&task, skipped_pr.as_ref())
+            store.complete_task(
+                &task,
+                skipped_pr.as_ref(),
+                &how,
+                by.as_ref(),
+                note.as_deref(),
+            )
         })
         .await
     }

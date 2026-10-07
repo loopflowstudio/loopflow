@@ -27,7 +27,7 @@ run_lf() {
 case "${1:-claude}" in
   claude|codex|opencode)
     agent="${1:-claude}"
-    run_lf --mode tui -m "$agent" : "test"
+    run_lf --tui -m "$agent" : "test"
     echo
     echo "Session saved. List it with:"
     echo "  scripts/launch-resumable-ux-demo.sh list"
@@ -44,15 +44,8 @@ case "${1:-claude}" in
     fi
     run_lf session connect "${@:2}"
     ;;
-  complete)
-    if [[ -z "${2:-}" ]]; then
-      echo "usage: scripts/launch-resumable-ux-demo.sh complete <SESSION>" >&2
-      exit 2
-    fi
-    run_lf session complete "$2"
-    ;;
   *)
-    echo "usage: scripts/launch-resumable-ux-demo.sh [claude|codex|opencode|list|open <SESSION> [--replace|--try]|complete <SESSION>]" >&2
+    echo "usage: scripts/launch-resumable-ux-demo.sh [claude|codex|opencode|list|open <SESSION> [--replace|--try]]" >&2
     exit 2
     ;;
 esac

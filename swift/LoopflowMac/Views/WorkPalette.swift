@@ -42,18 +42,12 @@ extension WorkModel {
                               key: session.title))
         }
         for flow in flowCatalog.value ?? [] {
-            rows.append(.init(id: .flow(flow.name), title: flow.name, detail: "Flow template", key: flow.name))
+            rows.append(.init(id: .flow(flow.name), title: flow.name,
+                              detail: flow.kind == .workflow ? "Workflow" : "Flow template", key: flow.name))
         }
         if let selection, selection.kind == .task, let found = task(id: selection.id) {
-            let flowIsVisible: Bool
-            if case .pinned = found.task.flow.record { flowIsVisible = true }
-            else { flowIsVisible = !found.wave.unavailableTasks.contains { $0.taskId == found.task.id } }
-            if flowIsVisible {
-                rows.append(.init(id: .chooseFlow(selection.id), title: "Choose Flow for \(found.task.task.identifier)",
-                                  detail: "Action · Review selection before starting", key: "Choose Flow"))
-            }
-            rows.append(.init(id: .monitor(selection.id), title: "Monitor \(found.task.task.identifier)",
-                              detail: "Action · Inspect Runs", key: "Monitor"))
+            rows.append(.init(id: .flowLog(selection.id), title: "Flow execs of \(found.task.task.identifier)",
+                              detail: "Action · Open the log", key: "Flow execs"))
         }
         if let id = navigation.selectedSessionId, let session = sessions.value?.first(where: { $0.id == id }) {
             if session.titleSource != .unavailable {
@@ -233,6 +227,8 @@ struct FlowCatalogInspector: View {
             Text(entry?.name ?? "Flow unavailable").font(Typography.sectionTitle(26))
             if let graph = entry?.graph, let template = entry?.template {
                 FlowTemplateView(graph: graph, template: template, navigation: navigation)
+            } else if let workflow = entry?.workflow {
+                WorkflowGraph(nodes: workflow.nodes, edges: workflow.edges)
             } else { Text(entry?.unavailable ?? "Refresh the Flow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)

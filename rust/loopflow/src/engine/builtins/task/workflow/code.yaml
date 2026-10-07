@@ -1,0 +1,7 @@
+# Build and land. The demo happens in the Task conversation.
+nodes:
+  demo: { skill: demo, description: you try the change }
+edges:
+  - { from: start, to: demo, flow: pursue }
+  - { from: demo, to: demo, flow: pursue }
+  - { from: demo, to: end, flow: ship }

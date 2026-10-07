@@ -1,3 +1,4 @@
+mod attention;
 pub mod claude;
 mod claude_history;
 mod claude_mapping;

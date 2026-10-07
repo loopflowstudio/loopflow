@@ -43,6 +43,20 @@ public enum WorkStatus: Codable, Sendable, Hashable {
     }
 }
 
+/// A Task's state, read from where it stands on its Workflow. Abandoned is
+/// the Task's own mark and outranks its position.
+public enum TaskState: String, Codable, Sendable, Hashable {
+    /// The Task has taken up no Workflow.
+    case notReady = "not_ready"
+    case ready
+    case active
+    case done
+    case abandoned
+
+    public var label: String { rawValue.replacingOccurrences(of: "_", with: " ") }
+    public var isTerminal: Bool { self == .done || self == .abandoned }
+}
+
 public struct WorkReference: Codable, Sendable, Hashable {
     public enum Kind: String, Codable, Sendable, Hashable {
         case wave

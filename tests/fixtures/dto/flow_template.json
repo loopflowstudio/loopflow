@@ -1,5 +1,7 @@
 {
   "name": "study",
+  "kind": "flow",
+  "source": null,
   "graph": {
     "name": "study",
     "steps": [
@@ -78,7 +80,7 @@
       {
         "key": 5,
         "id": null,
-        "label": "loop-decide",
+        "label": "loop-or-next",
         "kind": "skill",
         "human": false,
         "returns_to": 4,
@@ -102,7 +104,7 @@
       {
         "key": 7,
         "id": null,
-        "label": "loop-decide",
+        "label": "loop-or-next",
         "kind": "skill",
         "human": false,
         "returns_to": 4,
@@ -277,5 +279,6 @@
       }
     ]
   },
-  "unavailable": null
+  "unavailable": null,
+  "workflow": null
 }

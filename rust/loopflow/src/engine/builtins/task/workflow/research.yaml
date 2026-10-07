@@ -1,0 +1,7 @@
+# Investigate and report. The Task ends on accepted findings, with no PR.
+nodes:
+  findings: { skill: research, description: you read the findings }
+edges:
+  - { from: start, to: findings, flow: research }
+  - { from: findings, to: findings, flow: research }
+  - { from: findings, to: end }

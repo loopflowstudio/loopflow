@@ -63,7 +63,7 @@ config files.
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Model | `-m claude:opus` | `agent: claude:opus` |
-| Interactive TUI | direct TTY or `--mode interactive` | `session.launch: tui` |
+| Interactive TUI | direct TTY or `-i` | `session.launch: tui` |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
 | Include branch files | `--diff files` | `diff_files: true` |
 | Include raw diff | `--diff patch` | `diff: true` |
@@ -73,7 +73,7 @@ config files.
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 | Account's own provider home | `--isolate` / `--shared` | `isolate: true` |
-| Claude/Codex/OpenCode launch surface | `--mode tui` / `--mode ide` | `session.launch: tui` |
+| Claude/Codex/OpenCode launch surface | `--tui` / `--ide` | `session.launch: tui` |
 | Review FlowStep terminal | — | global-only `session.terminal: Ghostty` |
 
 ## Context budgets
@@ -397,16 +397,16 @@ This list is additive across global and repo config.
 ### Run Mode
 
 Direct named invocations use an interactive session when stdin or stdout is a
-TTY. Automated flow nodes and `--mode batch` invocations run headlessly. Skill
+TTY. Automated flow nodes and `-b` invocations run headlessly. Skill
 frontmatter never changes scheduling.
 
 | | |
 |---|---|
-| **CLI** | `--mode interactive` (interactive), `--mode batch` (batch/headless) |
+| **CLI** | `-i` (interactive), `-b` (batch/headless) |
 | **Default** | interactive for a direct TTY; headless otherwise |
 
-Flows declare a required User gate on the exact skill occurrence with a stable
-`id` and `human: true`; see [Authoring](authoring.md#flows).
+Flows hold autonomous steps only; a `human: true` step is rejected at launch.
+See [Authoring](authoring.md#flows).
 
 ### Chrome
 
@@ -468,7 +468,7 @@ session:
 
 `tui` opens Claude, Codex, or OpenCode in the current terminal. `ide` opens the
 Codex or Claude app by URL scheme and falls back to `tui` if no app handles the
-link. OpenCode is terminal-only. The per-run flags `--mode tui` / `--mode ide` override
+link. OpenCode is terminal-only. The per-run flags `--tui` / `--ide` override
 this default.
 
 ### Summaries

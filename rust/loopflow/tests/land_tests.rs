@@ -1917,7 +1917,7 @@ fi"#;
         };
         let handed_off = if flow {
             command()
-                .args(["flow", "repair-proof", "--mode", "batch", "--no-loopflow"])
+                .args(["flow", "repair-proof", "--batch", "--no-loopflow"])
                 .output()
                 .unwrap()
         } else {
@@ -1941,8 +1941,7 @@ fi"#;
             String::from_utf8_lossy(&handed_off.stderr)
         );
         if flow {
-            assert!(String::from_utf8_lossy(&handed_off.stderr)
-                .contains("waiting for human input or delivery"));
+            assert!(String::from_utf8_lossy(&handed_off.stderr).contains("still being watched"));
         }
         assert!(!repair_launches.exists());
         let conn = rusqlite::Connection::open(&database).unwrap();
@@ -1953,7 +1952,8 @@ fi"#;
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(initial.1, i64::from(flow));
+        // A Flow stopped short of its end exits 3, which no caller retries.
+        assert_eq!(initial.1, if flow { 3 } else { 0 });
         let state: String = conn
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
             .unwrap();
@@ -2153,36 +2153,23 @@ fi"#;
             .unwrap();
         assert_eq!(state, "merged");
         if flow {
-            assert!(
-                worktree.exists(),
-                "saved Flow retains its checkout after merge"
-            );
-            let id: String = conn
-                .query_row("SELECT id FROM flow_sessions", [], |row| row.get(0))
+            // The Flow stopped at its watched landing: the step's command
+            // handed off and returned, and its driver exited without running
+            // further steps. The merge resumes nothing.
+            let (step, driver): (i64, String) = conn
+                .query_row(
+                    "SELECT step.exit_code,driver.outcome FROM execs step
+                     JOIN flow_exec_steps recorded ON recorded.exec_id=step.id
+                     JOIN execs driver ON driver.id=recorded.flow_exec_id",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
                 .unwrap();
-            let output = command().args(["flow", "resume", &id]).output().unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let state: String = conn
-                .query_row("SELECT state FROM flow_sessions", [], |row| row.get(0))
-                .unwrap();
-            assert_eq!(state, "completed");
-            let events: Vec<String> = conn
-                .prepare("SELECT kind FROM flow_events ORDER BY seq")
-                .unwrap()
-                .query_map([], |row| row.get(0))
-                .unwrap()
-                .collect::<Result<_, _>>()
-                .unwrap();
-            assert_eq!(events, ["operation_started", "operation_completed"]);
-        } else {
-            assert!(!worktree.exists());
-            assert!(!local_branch_exists(&repo, "watched-land"));
-            assert!(!remote_branch_exists(&repo, "watched-land"));
+            assert_eq!((step, driver.as_str()), (0, "failed"));
         }
+        assert!(!worktree.exists());
+        assert!(!local_branch_exists(&repo, "watched-land"));
+        assert!(!remote_branch_exists(&repo, "watched-land"));
         if repair {
             let repaired_head = fs::read_to_string(&repair_proof).unwrap();
             let merged_head: String = conn

@@ -9,10 +9,9 @@ enum WorkDestination: Hashable {
     case task(String)
     case session(String)
     case flow(String)
-    case chooseFlow(String)
     case rename(String)
     case bind(String)
-    case monitor(String)
+    case flowLog(String)
 }
 
 struct TaskLink: Equatable, Sendable {

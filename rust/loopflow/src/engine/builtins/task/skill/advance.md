@@ -10,27 +10,22 @@ never select a different Task merely because it is the only waiting session.
 
 ## A review is ready
 
-When the User asks to finish a review, save the agreed design and feedback first.
-Mark the exact Session ready with its feedback and remaining work, then run:
-
-```sh
-lf session complete <session-id>
-```
-
-Completion returns feedback to the next Flow step. A following loop-decide
-interprets it and chooses Advance or Iterate through an authored edge. If the
-User requests design revisions, clarify and save them before completing review.
-Readiness alone leaves the conversation waiting. An unbound interactive conversation
-does not become a Task by being closed.
+When the User asks to finish a review, save the agreed design, feedback and
+remaining work. Continue the discussion in the same conversation. Feedback is
+not a command to close a Session or launch a Flow. Inspect work and effect
+history before launching explicitly selected next work; ambiguous feedback
+starts nothing.
 
 ## An existing Task needs to continue
 
-Read `lf task status <issue> --json`, then use `lf --task <issue> flow start`.
-It continues the saved Flow or reports the current driver. An interactive review
-waits for its Session's completion. A blocker needs its stated recovery,
-and completed work is not restarted. If there is no active Flow, select one using
-`lf --task <issue> flow start <flow>` only when the current request identifies the
-next work—for example, implementation after an accepted design. A finished Flow
+Read `lf task status <issue> --json`. Leave a Flow with a live driver running.
+A stopped or failed Flow is history: inspect what it finished and the effects it
+recorded; historical review boundaries remain evidence. Launch fresh work with
+`lf task run <issue>` only when the current request identifies the
+next work—for example, implementation after an accepted design. On a
+workflow that is an edge leaving the Task's node; name its Flow when the
+node has more than one. A blocker needs
+its stated recovery first, completed work is not repeated, and a finished Flow
 alone is not a request to run it again.
 
 ## An approved design has no Task
@@ -43,10 +38,13 @@ scope, constraints, and proof into its directive.
 
 Choose the next Flow from the actual catalog. An approved design can proceed
 directly to the `pursue` Flow (implement → compress → refresh
-→ loop-decide, repeated on Iterate, then pr-publish). `code` adds a human
-PR walkthrough after pursuit. Do not repeat initial
+→ loop-or-next, repeated on Iterate, then pr-publish): `lf task run <issue> code`
+takes up the `code` workflow, whose first edge is that Flow. Its PR review
+happens in the Task conversation, not as a Flow step. Do not repeat initial
 design work merely to launch implementation. For work that still
-needs design, use the complete feature Flow. Preserve any explicit User choice
+needs design, take up the `feature` workflow, whose first edge drafts the
+design. A Task on a workflow takes only the edges leaving its current node;
+`lf task run <issue>` names them. Preserve any explicit User choice
 to perform implement → compress → refresh directly in this conversation.
 Ask only when intent or placement cannot be resolved from available evidence.
 
@@ -58,6 +56,6 @@ commands only when they express the same action. Do not claim an old
 finite Flow will repeat automatically. Never upgrade the installation as a hidden
 prerequisite.
 
-After completing a Session, refresh `lf session list --json` and the Task status.
-Report the Task link, actual running step or wait, and the next human boundary.
+After launching, refresh `lf session list --json` and the Task status.
+Report the Task link, actual running step or wait, and what next needs the User.
 Follow the selected delivery policy through its review and merge steps.

@@ -1367,7 +1367,7 @@ pub(crate) async fn complete_planning_task(
     )
     .await
     .map_err(|cause| OpsError::Message(format!(
-        "Task {issue} completion was not confirmed: {cause}. Retry `lf task complete {issue} --summary <original-summary>`."
+        "Task {issue} completion was not confirmed: {cause}. Retry `lf task move {issue} end --reason <original-reason>`."
     )))?;
     let publish_summary = async {
         let client = issue_client(repo).await?;
@@ -1391,7 +1391,7 @@ pub(crate) async fn complete_planning_task(
         Ok::<(), OpsError>(())
     };
     publish_summary.await.map_err(|cause| OpsError::Message(format!(
-        "Task {issue} is complete, but its summary was not confirmed: {cause}. Retry `lf task complete {issue} --summary <original-summary>`."
+        "Task {issue} is complete, but its summary was not confirmed: {cause}. Retry `lf task move {issue} end --reason <original-reason>`."
     )))
 }
 
@@ -3280,7 +3280,7 @@ mod tests {
             "id": id,
             "name": name,
             "description": "",
-            "content": "flow: feature\n\n## Definition\n\nA measured bet.\n\n## KRs\n",
+            "content": "workflow: feature\n\n## Definition\n\nA measured bet.\n\n## KRs\n",
             "status": {"type":"started"},
             "initiatives": { "nodes": [{ "id": "initiative-123" }] },
             "teams": { "nodes": [{ "id": "team-123" }] }
@@ -3902,7 +3902,7 @@ mod tests {
             summary: String::new(),
 
             metric_targets: Vec::new(),
-            flow: "feature".into(),
+            workflow: "feature".into(),
             status: crate::pm::ProjectStatus::Started,
             krs: Vec::new(),
             initiative_ids: vec!["initiative-1".to_string()],

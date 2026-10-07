@@ -13,7 +13,7 @@ struct WorkNavigationTests {
         let snapshot = try roadmap()
         var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(session("review", work: .task(id: "ts_review00000000000000000000000000")))) as? [String: Any])
         value["kind"] = "flow"
-        value["state"] = "waiting"
+        value["state"] = "unknown"
         let review = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         let idle = try session("idle", work: .task(id: "ts_review00000000000000000000000000"))
         let projection = WorkProjection(roadmaps: snapshot.waves, sessions: [idle, review])
@@ -84,7 +84,7 @@ struct WorkNavigationTests {
             row["id"] = id
             row["interactive"] = id != "background"
             row["attention"] = NSNull()
-            row["state"] = id == "completed" ? "closed" : id == "active" ? "active" : id == "review" ? "ready" : "waiting"
+            row["state"] = id == "completed" ? "closed" : id == "active" ? "active" : "unknown"
             row["kind"] = id == "review" ? "flow" : "conversation"
             return row
         }
@@ -259,7 +259,8 @@ struct WorkNavigationTests {
         #expect(throws: (any Error).self) { try view.inspect().find(text: "Repository or unavailable ancestry") }
 
         // Zero orphans hides the section entirely.
-        model.sessionResolved("demo", repo: "/src/loopflow")
+        await source.replaceSessions(String(decoding: try JSONEncoder().encode([attached]), as: UTF8.self))
+        await model.refreshSessions()
         #expect(model.projection.unmatchedSessions.isEmpty)
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "work-orphans-open") }
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "work-session-count-issue-review")
@@ -312,7 +313,8 @@ struct WorkNavigationTests {
 
     @Test("The sidebar holds started work; inspection, a prepared checkout or a Session gap never changes it")
     func startedWorkingSet() async throws {
-        let model = try model()
+        let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
+        let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
         await model.refresh()
         func sidebar() -> [String] {
             model.projection.outline(presentation: .full, collapsed: [], search: "", planningReadable: true)
@@ -323,8 +325,9 @@ struct WorkNavigationTests {
         #expect(sidebar() == ["issue-review"])
         model.select(.task(id: "issue-available"))
         #expect(sidebar() == ["issue-review"])
-        // Started work survives its Session resolving and any process exit.
-        model.sessionResolved("human", repo: "/src/loopflow")
+        // Started work survives an inventory gap.
+        await source.replaceSessions("[]")
+        await model.refreshSessions()
         #expect(sidebar() == ["issue-review"])
         // All planned Tasks remain reachable in the Wave plan.
         #expect(model.projection.waves[0].tasks.count == 4)
@@ -471,9 +474,8 @@ struct WorkNavigationTests {
         #expect(model.sessions.errorMessage == "offline")
         #expect(model.sessions.value?.map(\.id) == ["human"])
         model.setRepoPath("/src/context")
-        model.sessionResolved("human", repo: "/src/loopflow")
         model.setRepoPath("/src/loopflow")
-        #expect(model.sessions.value == [])
+        #expect(model.sessions.value?.map(\.id) == ["human"])
         #expect(model.sessions.errorMessage == "offline")
     }
 
@@ -502,20 +504,6 @@ struct WorkNavigationTests {
         #expect(model.projection.unmatchedSessions.map(\.id) == ["human"])
     }
 
-    @Test("Completing a Session removes its link without completing its Task")
-    func resolutionKeepsTask() async throws {
-        let model = try model()
-        await model.refresh()
-        model.select(.task(id: "issue-review"))
-        model.navigation.selectedSessionId = "human"
-        model.sessionResolved("human", repo: "/src/context")
-        #expect(model.projection.subject(for: "human") == model.selection)
-        model.sessionResolved("human", repo: "/src/loopflow")
-        #expect(model.projection.subject(for: "human") == nil)
-        #expect(model.task(id: "issue-review")?.task.task.completed == false)
-        #expect(model.selection == .task(id: "issue-review"))
-        #expect(model.navigation.selectedSessionId == nil)
-    }
 
     @Test("Task details expose directive and current chapter proof from the same snapshot")
     func inspectorShowsPlanning() async throws {
@@ -723,7 +711,7 @@ struct WorkNavigationTests {
         #expect(crumb.siblings.map(\.id) == ["first", "second"])
         #expect(model.projection.subject(for: "first") == work)
         #expect(model.projection.orphanSessions(search: "").isEmpty)
-        let bar = WorkBreadcrumbBar(model: model, crumb: crumb, onOpenSession: { _ in }, onMonitor: { _ in })
+        let bar = WorkBreadcrumbBar(model: model, crumb: crumb, onOpenSession: { _ in })
         #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "breadcrumb-task").text().string() == "Task \(work.id)")
         for presentation in WorkPresentation.allCases {
             let rows = model.projection.outline(presentation: presentation, collapsed: [], search: work.id, planningReadable: false)
@@ -809,11 +797,11 @@ struct WorkNavigationTests {
         let taskIdsJSON = String(decoding: try JSONEncoder().encode(taskIds), as: UTF8.self)
         let waveJSON = String(decoding: try JSONEncoder().encode(waveId ?? (id == "project" ? "wave-1" : nil)), as: UTF8.self)
         return try JSONDecoder().decode(SessionRecord.self, from: Data("""
-        {"id":"\(id)", "run_id": "\(id)", "interactive": true,"kind":"conversation","work":\(workJSON),"title":"\(id)",
+        {"id":"\(id)", "run_id": "\(id)", "interactive": true,"work":\(workJSON),"title":"\(id)",
          "workspace":{"home_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
-         "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(kind: "conversation", state: state.rawValue)),
-         "ready_summary":null,"title_source":"generated","flow_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
+         "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(state: state.rawValue)),
+         "ready_summary":null,"title_source":"generated","task_primary":false, "flow_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
         """.utf8))
     }
 }
@@ -837,11 +825,12 @@ private actor PlanningGate {
 
 private actor ReadingSource {
     var roadmap: String
-    let sessions: String
+    var sessions: String
     var failed = false
     init(roadmap: String, sessions: String) { self.roadmap = roadmap; self.sessions = sessions }
     func fail() { failed = true }
     func replaceRoadmap(_ value: String) { roadmap = value }
+    func replaceSessions(_ value: String) { sessions = value }
     func read(_ args: [String]) throws -> String {
         if failed { throw RegistryQueryError("offline") }
         switch args.first {

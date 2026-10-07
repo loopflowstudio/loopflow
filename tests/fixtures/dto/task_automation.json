@@ -6,8 +6,23 @@
   "last_failure_at": 1790812100,
   "last_error": "GitHub unavailable",
   "tasks": [
-    {"task_id":"task_example","issue":"LOO-332","enabled":true,"exec_id":null,"retry_key":null,"retries":0,"checked_at":1790812000,"detail":"waiting for review"},
-    {"task_id":"task_held","issue":"LOO-333","enabled":false,"exec_id":null,"retry_key":null,"retries":0,"checked_at":1790812000,"detail":"held"}
+    {
+      "task_id": "task_example",
+      "issue": "LOO-332",
+      "enabled": true
+    },
+    {
+      "task_id": "task_held",
+      "issue": "LOO-333",
+      "enabled": false
+    }
   ],
-  "deliveries": [{"pr_number":42,"task_id":"task_example","state":"blocked","detail":"waiting for changed evidence"}]
+  "deliveries": [
+    {
+      "pr_number": 42,
+      "task_id": "task_example",
+      "state": "blocked",
+      "detail": "waiting for changed evidence"
+    }
+  ]
 }

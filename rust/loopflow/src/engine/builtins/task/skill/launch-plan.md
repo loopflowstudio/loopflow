@@ -19,7 +19,7 @@ When no useful change remains, record that decision and finish.
 
 A standalone invocation need not already have a Task. Use the existing-design
 handoff below for selected work, retaining unresolved ownership or direction
-as an explicit next decision. Never launch a competing worker into active work.
+as an explicit next decision. Never launch a competing Flow into active work.
 
 ## Decide what stays here
 
@@ -35,13 +35,15 @@ For each remaining independently shippable outcome, choose one of two actions:
 - If it can safely start against the current contract, create and launch it now
   when no local artifact needs staging:
   ```bash
-  lf task create --run --wave <wave> --title "<desired experience>" --flow <chosen-flow> <<'BRIEF'
+  lf task create --wave <wave> --title "<desired experience>" <<'BRIEF'
   <short user-problem brief; durable design reference>
   BRIEF
+  lf task run <issue>   # its workflow's first edge, or its Project's Flow
   ```
-  Stdin files the Task description; `--directive` supplies worker direction,
-  not that durable brief. Use `--stack-on <current-task>` when it must build
-  on this Task's branch.
+  Stdin files the Task description; `--directive` on `task run` supplies
+  direction, not that durable brief. Use `--stack-on <current-task>` when it
+  must build on this Task's branch. `task run` returns when its Flow ends; run
+  it with your own background tool to keep planning.
 - If it depends on decisions this core has not settled, leave it in the design
   as a named follow-up. Create it after this PR settles; do not invent durable
   staging state inside Loopflow.
@@ -92,9 +94,16 @@ Keep the design and its evidence available in each execution context before
 launch; use staged preparation below when artifacts must cross contexts.
 
 For an approved design, `--flow pursue` enters implement → compress → refresh
-→ loop-decide. Refresh runs sync → realign. Iterate returns to implementation;
-Advance publishes and ends the pursuit. `code` adds a human PR walkthrough;
-`feature` adds the initial design review, then a demo and landing after pursuit. Preserve intent, constraints, and done-when
+→ loop-or-next. Refresh runs sync → realign. Iterate returns to implementation;
+Advance publishes and ends the pursuit. The `code` workflow starts with that
+pursuit; `feature` drafts the design first; both land an accepted PR through
+`ship`. Design review and the demo are workflow nodes in the Task
+conversation, never Flow steps. A Task on a workflow takes only an edge
+leaving its current node: bare `lf task run <issue>` takes the only one or
+names the choices, `lf task run <issue> <flow>` picks one, and naming a
+workflow takes it up from its start. `lf --task <issue> run <flow>` runs any
+Flow without moving the Task.
+Preserve intent, constraints, and done-when
 proof in durable records so the Task remains useful after `scratch/` is cleared.
 
 Finish with a short accounting of the selected work and its design/evidence
@@ -111,18 +120,18 @@ its maturity, and open questions. Do not invent ownership.
 lf task create --wave <wave> --title "<desired experience>" --notes "<brief; design reference and maturity>"
 lf checkout <issue> --json
 # Copy the selected design and required evidence into the returned worktree's scratch/.
-lf --task <issue> flow start <chosen-flow>
+lf task run <issue>
 ```
 
 Inspect the current context first: a design already in the Task worktree needs
 no transfer. For a separate source, copy the actual documents and supporting
 files before launch, preserve relative references, and check their contents in
 the destination. A path alone does not supply context. Preparation launches no
-worker. Do not overwrite newer destination work.
+Flow. Do not overwrite newer destination work.
 
 The destination becomes the working design; retain source provenance without
 maintaining competing active copies. Markdown under its recursive `scratch/`
-tree enters worker context; other assets remain on disk. Preserve material
+tree enters each step's context; other assets remain on disk. Preserve material
 needed after scratch cleanup in durable documentation or existing records.
 Do not pipe the design into Task creation: stdin becomes the Task description.
 
@@ -130,7 +139,7 @@ Use the Flow the user selected and inspect its contents when explaining where it
 begins; otherwise use the Wave chapter recommendation. Continue the design already
 present without treating its draft choices as approved. Report the Task link,
 destination design path, selected Flow, and observed launch result. Verify
-supplied context separately from worker startup.
+supplied context separately from the launch.
 
 If implementation already exists in the source checkout, preserve it and its
 writer. Document transfer does not adopt a checkout; current preparation does

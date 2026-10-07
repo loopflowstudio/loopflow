@@ -39,17 +39,15 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
         let cancel: @Sendable () async -> Void
     }
 
-    /// `name` labels failures ("Active Session", "Work").
+    /// `name` labels failures ("Workspace"). Every frame is kept.
     static func start(
         name: String,
         process: Process,
         frameLimit: Int,
-        buffering: AsyncThrowingStream<Frame, any Error>.Continuation.BufferingPolicy,
         configurationChanged: @escaping @Sendable () throws -> Bool,
         decode: @escaping (Data) throws -> Frame
     ) throws -> Handle {
-        let (stream, continuation) = AsyncThrowingStream<Frame, any Error>
-            .makeStream(bufferingPolicy: buffering)
+        let (stream, continuation) = AsyncThrowingStream<Frame, any Error>.makeStream()
         let reader = LocalLineObservation(name, process, frameLimit, continuation, configurationChanged, decode)
         // Stream cancellation also covers a consumer disappearing without an explicit stop.
         continuation.onTermination = { [weak reader] _ in
@@ -201,7 +199,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
             if now - lastConfigurationCheck >= 2 {
                 lastConfigurationCheck = now
                 if try configurationChanged() {
-                    fail(ActiveSessionsObservationError.configurationChanged)
+                    fail(WorkObservationError.configurationChanged)
                     return
                 }
             }
@@ -254,35 +252,6 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
     }
 }
 
-enum LocalActiveSessionsObservation {
-    static func start(
-        process: Process,
-        configurationChanged: @escaping @Sendable () throws -> Bool
-    ) throws -> ActiveSessionsObservation {
-        func resolved(_ path: String) -> String {
-            URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
-        }
-        let environment = process.environment ?? ProcessInfo.processInfo.environment
-        var home = environment["LF_HOME"].flatMap { $0.isEmpty ? nil : resolved($0) }
-        // A full queue keeps only the newest snapshot.
-        let reader = try LocalLineObservation<ActiveSessionsSnapshot>.start(
-            name: "Active Session", process: process, frameLimit: 16 * 1024 * 1024,
-            buffering: .bufferingNewest(1), configurationChanged: configurationChanged
-        ) { line in
-            let snapshot = try JSONDecoder().decode(ActiveSessionsSnapshot.self, from: line)
-            let observed = resolved(snapshot.home)
-            guard home == nil || home == observed, snapshot.task == nil else {
-                throw RegistryQueryError("Active Session reader changed Home or returned a Task-scoped frame")
-            }
-            home = observed
-            return snapshot
-        }
-        return ActiveSessionsObservation(snapshots: reader.frames, request: { request in
-            reader.send(Data("{\"action\":\"\(request.rawValue)\"}\n".utf8))
-        }, cancel: reader.cancel)
-    }
-}
-
 enum LocalWorkObservation {
     /// Every frame is kept: the reader already holds at most one per part.
     static func start(
@@ -290,9 +259,8 @@ enum LocalWorkObservation {
         configurationChanged: @escaping @Sendable () throws -> Bool
     ) throws -> WorkObservation {
         let reader = try LocalLineObservation<WorkFrame>.start(
-            name: "Work", process: process, frameLimit: 64 * 1024 * 1024,
-            buffering: .unbounded, configurationChanged: configurationChanged,
-            decode: WorkFrame.decode(line:))
+            name: "Workspace", process: process, frameLimit: 64 * 1024 * 1024,
+            configurationChanged: configurationChanged, decode: WorkFrame.decode(line:))
         return WorkObservation(frames: reader.frames, request: { request in
             reader.send(request.line)
         }, cancel: reader.cancel)

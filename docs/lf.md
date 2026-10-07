@@ -3,7 +3,7 @@
 ```bash
 mkdir first-project && cd first-project
 git init
-lf --mode batch : "Write a README explaining this project"
+lf -b : "Write a README explaining this project"
 lf monitor                         # waiting, blocked, active, finished
 lf account                         # live access and capacity by account
 ```
@@ -43,7 +43,7 @@ for the input format.
 
 ## Use one Home
 
-Ordinary commands, Task workers and agent tools use the installed `lf` and
+Ordinary commands, Task Flows and agent tools use the installed `lf` and
 `~/.lf`. Source builds forward there too. For an explicit disposable experiment:
 
 ```bash
@@ -59,34 +59,56 @@ repair or preserve them. Use a fresh directory when its schema changes.
 lf --task EXP-12 skill design       # contribute in the Task's checkout
 lf --wt csv-export : "Add CSV export"
 lf --wave exports : "Review the goal" # add context in the current directory
-lf --task EXP-12 flow start          # start or continue its managed Flow
-lf --task EXP-12 flow start incident # choose a template for new work
+lf -b task run EXP-12       # place the Task, run its default
+lf -b task run EXP-12 pursue # take the workflow edge that runs pursue
+lf task run EXP-12 end       # take an edge that runs nothing
+lf task move EXP-12 demo     # put the Task at a node, running nothing
+lf --task EXP-12 run incident # run a Flow without moving the Task
+lf task run EXP-12 --reason "take the smaller approach"
 ```
 
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
-it cannot override a Task's owning Wave. A named direct Flow creates an
-independent FlowSession. `flow start` preserves the Task's selected Flow and
-saved progress. `flow resume ID --retry` retries a saved boundary; `task restart`
-explicitly replaces the Task's workflow. A waiting review is retired with its
-history intact; its exact service, driver and provider execution must exit before
-the replacement starts. Retirement does not approve the review. If interruption
-leaves restart incomplete, repeat `lf task restart ISSUE`; unrelated reviews and
-unresolved process ownership still block admission. `flow end ID` ends a stopped
-Flow without running its remaining steps; it lists as `replaced` and keeps its
-failure and history.
+it cannot override a Task's owning Wave. `task run` places the Task's
+worktree, defaults to its Project's Flow, then starts
+`lf --task ISSUE run FLOW`: it prints the Flow's output and returns when the
+Flow ends. A Flow that fails is started again from its first step, three
+times at most; one that is blocked, interrupted or waiting on a landing is
+not. Background it yourself when you will not wait. It never continues
+an earlier Flow. `--reason` publishes direction to the Task first. Every
+Flow exec for a Task is equally its work.
+
+A Task takes up its Project's workflow and moves through its nodes.
+Each `task run` takes one edge leaving the current node: the only one, or the
+one whose Flow you name. At a node the Task waits on you in its conversation;
+no command approves a node. A Flow that does not leave the node is refused
+with the edges that do. A Flow that stops, or fails every attempt, leaves the Task on its edge until
+you choose again or `lf task move EXP-12 <node>` puts it at a node outright. `lf task run EXP-12 code` takes up another workflow from
+its start. See [workflows](authoring.md#workflows).
+
+```bash
+lf flow list                   # Flows and workflows, with source and validity
+lf flow customize feature      # write the builtin to .lf/ and print its path
+lf update-plan --wave exports --workflow code   # change only the Project's workflow
+```
+
+A Flow whose driver died leaves its Execs as history. No command resumes it. To change direction or recover:
+
+```bash
+lf task interrupt EXP-12             # end the active provider turn
+lf task status EXP-12                # the latest Flow and all Task work
+lf flow show ID --sessions --json    # one Flow's steps, by its driver Exec ID
+lf -b task run EXP-12       # run fresh work
+```
 
 Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
 requests for the same document do not repeat its contents; distinct memory files
 remain separate even when their text matches. IDE launches with Wave documents
 use the assembled prompt so those references reach the provider.
 
-Existing Task restart and continuation use valid cached planning regardless of age.
+Launching a Flow for an existing Task uses valid cached planning regardless of age.
 Known invalidation, removal, terminal state or ownership changes still block.
-`lf task restart ISSUE` works without Linear; adding advice requires successful
-Linear publication before replacing the worker. Failed advice publication preserves
-the old Flow but may already have checkpointed local edits. Status retains the
-planning observation's original age.
-
+`--reason` requires successful Linear publication before the launch. Status
+retains the planning observation's original age.
 
 ## Connect planning and create work
 
@@ -96,7 +118,7 @@ lf account connect linear
 lf repo connect --all --team-key EXP # connect goals and choose the Task prefix
 lf task create --wave exports --title "Add CSV export"
 lf checkout EXP-12                  # prepare its checkout without execution
-lf --task EXP-12 flow start
+lf task run EXP-12
 lf roadmap --json                   # plans and Tasks across Waves
 lf wave status exports --json       # one Wave's detailed evidence
 ```
@@ -123,10 +145,10 @@ lf usage --task LOO-265 --context   # each step's input by source, flagged over 
 lf mon show SESSION --context       # one step: instructions, memory, scratch, goal, steers, carried, tools
 lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
-lf --task EXP-12 skill task/session # an ongoing conversation about one Task
+lf session ensure --task EXP-12     # a Task's primary conversation
+lf --task EXP-12 skill task/session # another conversation about that Task
 lf session connect SESSION         # continue a conversation
 lf session replace SESSION         # fresh conversation for the same scope
-lf session complete SESSION         # return review feedback
 lf context --task EXP-12 --json     # effective context limits, sources and usage
 lf wt timing                        # how long real `lf wt list` runs took here
 ```
@@ -136,6 +158,11 @@ finds it or starts it, a Wave's with its goal and memory, and repeats return the
 same Session. `replace`
 stops that conversation, keeps it as history, and starts a fresh one.
 
+A Task's primary is one of its own conversations: the one named with
+`--choose SESSION`, else its only unfinished interactive conversation, else the
+most recently used. A Task with none gets a new one in its checkout. The others
+stay open, and listing Sessions never picks or starts one.
+
 Session connect, rename, bind and complete take the durable Session ID shown by
 `lf session list`. Capture keys and history prefixes select retained inputs for
 inspection and replay; they do not select these Session actions.
@@ -144,13 +171,14 @@ inspection and replay; they do not select these Session actions.
 | --- | --- | --- |
 | Repository | `lf operate` | `lf session ensure` |
 | Wave | `lf --wave growth wave/operate` | `lf session ensure -w growth` |
-| Task | `lf task/operate EXP-12` | `lf --task EXP-12 skill task/session` |
+| Task | `lf task/operate EXP-12` | `lf session ensure --task EXP-12` |
 
 Each conversation is its scope's operator and carries the matching operate
-procedure. It continues every started Task that has Flow steps left and no live
-worker, reads failures before retrying them, and names what waits on you.
-Unstarted backlog stays unstarted. A conversation acts only during a turn:
-between turns, Task workers and any installed background checks run on their own.
+procedure. It leaves running Flows alone, reads a stopped or failed Flow before
+running its remaining work fresh, and names what waits on you, including a Task
+at a workflow node. Unstarted backlog stays unstarted. A conversation acts
+only during a turn: between turns, running Flows and any installed background
+checks continue on their own.
 An open conversation keeps the instructions it launched with; `replace` it
 after an upgrade.
 
@@ -185,7 +213,7 @@ for the recorded branch remain unresolved. `lf ci watch`
 starts a ci-fix when a recorded landing fails its required checks.
 
 ```bash
-lf task complete EXP-12 --accept-unknown-exec EXEC_ID --summary 'Accepted historical uncertainty; delivery verified'
+lf task move EXP-12 end --accept-unknown-exec EXEC_ID --reason 'Accepted historical uncertainty; delivery verified'
 ```
 
 Explicit acceptance records the named Exec's unknown outcome in Task history
@@ -195,21 +223,18 @@ processes. Acceptance applies only to completion; the checkout remains retained
 while execution is unresolved. A refused completion may retain the acceptance
 for retry. Ordinary completion never infers acceptance.
 
-## Keep Tasks progressing in the background
+## Check authorized deliveries in the background
 
 ```bash
-lf cron sync --repo                 # install this Home's minute check
-lf --task EXP-12 flow start                  # new launches enroll automatically
-lf task automate EXP-12 off         # hold future automatic work
-lf task automate EXP-12 on          # enroll or clear its retry hold
-lf task automation --json           # schedule coverage and Task blockers
-lf task reconcile --json            # run one check now
+lf cron sync --repo                 # install this Home's minute delivery check
+lf task reconcile --json            # check recorded deliveries once
+lf task automation --json           # schedule coverage and CI repair holds
 lf cron sync --repo --disable       # remove the schedule
 ```
 
 Checks continue with Desktop closed while the placed Home's user is logged in.
-They resume captured Flows, respect reviews and holds, record CI failures, and
-settle verified merges. They do not repair CI.
+They record CI failures and settle verified merges. Flow recovery belongs to its
+caller: inspect execution and effect history before launching fresh work.
 
 ## Repair failed CI
 
@@ -233,11 +258,13 @@ continue when the schedule is disabled or a Task is held.
 Set repository defaults in `.lf/config.yaml`:
 
 ```yaml
-automation: {enroll_new_tasks: true, retries: 1, timeout_reruns: 1}
+automation: {retries: 1, timeout_reruns: 1}
 ```
 
-Historical Tasks stay unenrolled until selected. One unchanged launch/runtime
-failure may retry; a completed blocked repair waits for changed evidence.
+Use `lf task automate EXP-12 off` to hold future CI repair, and
+`lf task automate EXP-12 on` to enable it again. These settings never resume a
+Flow. One failed repair startup may retry; a completed blocked repair waits for
+changed evidence.
 Pending or missing CI checks allow one timeout diagnosis/rerun after 30 minutes.
 Use an always-available Home for progress through laptop logout or shutdown.
 
@@ -250,8 +277,8 @@ lf --only-account codex=work@ run code
 lf account route set codex work@ personal@
 ```
 
-A preference permits fallback; a restriction limits spending. Saved Flows capture
-one selection per provider and carry it through background children. Remote
+A preference permits fallback; a restriction limits spending. A Flow takes
+one selection per provider and carries it through its child steps. Remote
 launches check destination access with the inherited restrictions. A foreground
 credential lease cannot authorize a detached remote process after it expires.
 Missing or expired capacity remains unknown, never zero or unlimited.
@@ -293,15 +320,20 @@ lf task status LOO-358 --json
 lf session list --task LOO-358 --interactive all --history
 ```
 
-`lf session list` defaults to unfinished interactive conversations and current
-Flow reviews. `--needs-me` narrows that selection to immediate attention;
+`lf session list` defaults to unfinished interactive conversations.
+`--waiting` narrows that selection to conversations waiting on you: one that
+asked a question, handed its turn back, or went quiet for two minutes with no
+tool call outstanding. A long silent step can show up there. Waiting is read
+from a provider stream `lf` drives: a conversation in a native `claude` or
+`opencode` terminal never shows it.
 `--all` changes repository scope, `--interactive all` includes background work,
 and `--history` includes completed conversations and historical reviews.
 
 Task status lists Sessions, Flows and Execs from the checkout and explicit binds,
-including headless and completed work. Managed marks the Flow advanced by
-`lf --task … flow start`; the managed execution line describes only that worker. Independent
-work remains visible and preserves the checkout while unfinished or unresolved.
+including headless and completed work. A Task on a workflow also shows its
+nodes, edges, position and the edges it has taken. No Flow is privileged; the execution
+line observes the most recently launched one. Live or unresolved work preserves
+the checkout. A stopped Flow is history and blocks nothing.
 
 ## Keep a document workspace
 

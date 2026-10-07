@@ -1,7 +1,6 @@
 [
   {
     "id": "task_00000000000000000000000000000001:task-design:review_kickoff:0",
-    "kind": "flow",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -30,13 +29,13 @@
         "kind": "open",
         "label": "Open here",
         "help": "Open this Session in a terminal",
-        "unavailable_reason": null
+        "unavailable_reason": "This Session is active in another terminal; use Move here to transfer it"
       },
       {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the review and return feedback to the next Flow step",
-        "unavailable_reason": "The session agent has not marked this ready"
+        "kind": "move_here",
+        "label": "Move here",
+        "help": "Stop the other client and resume here; unsent text there is lost",
+        "unavailable_reason": null
       }
     ],
     "flow_membership": {
@@ -58,11 +57,11 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": "review"
+    "attention": "waiting",
+    "task_primary": false
   },
   {
     "id": "run_00000000000000000000000000000002",
-    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -92,12 +91,6 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
       }
     ],
     "flow_membership": {
@@ -125,11 +118,11 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": null
+    "attention": null,
+    "task_primary": false
   },
   {
     "id": "run_00000000000000000000000000000003",
-    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -165,12 +158,6 @@
         "label": "Move here",
         "help": "Stop the other client and resume here; unsent text there is lost",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
       }
     ],
     "flow_membership": {
@@ -184,11 +171,11 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": null
+    "attention": null,
+    "task_primary": false
   },
   {
     "id": "run_00000000000000000000000000000004",
-    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -218,12 +205,6 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
       }
     ],
     "flow_membership": {
@@ -238,11 +219,11 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": null
+    "attention": null,
+    "task_primary": false
   },
   {
     "id": "run_00000000000000000000000000000006",
-    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -272,12 +253,6 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
       }
     ],
     "flow_membership": {
@@ -302,11 +277,11 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": null
+    "attention": null,
+    "task_primary": false
   },
   {
     "id": "run_00000000000000000000000000000007",
-    "kind": "conversation",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -336,12 +311,6 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Stop the provider and remove this Session; native history remains resumable",
-        "unavailable_reason": null
       }
     ],
     "flow_membership": {
@@ -361,11 +330,11 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": null
+    "attention": null,
+    "task_primary": false
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
-    "kind": "flow",
     "work": {
       "kind": "task",
       "id": "task_00000000000000000000000000000001"
@@ -375,7 +344,7 @@
     "detail": "demo",
     "provider": null,
     "cwd": "/src/loopflow.task",
-    "state": "waiting",
+    "state": "unknown",
     "ready_summary": null,
     "open_argv": [
       "lf",
@@ -397,12 +366,6 @@
         "label": "Open here",
         "help": "Open this Session in a terminal",
         "unavailable_reason": null
-      },
-      {
-        "kind": "complete",
-        "label": "Complete",
-        "help": "Complete the review and return feedback to the next Flow step",
-        "unavailable_reason": "The session agent has not marked this ready"
       }
     ],
     "flow_membership": {
@@ -427,6 +390,7 @@
     },
     "interactive": true,
     "primary_scope": null,
-    "attention": "review"
+    "attention": "waiting",
+    "task_primary": false
   }
 ]

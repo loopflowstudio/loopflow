@@ -75,10 +75,11 @@ struct RepoView: View {
             TaskLinkView(model: model)
         }
         .onAppear { LaunchJournal.home.markAfterCommit(.firstFrame) }
-        .task { await model.activeSessionsLifetime() }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
             model.rescanWork()
-            Task { await model.rescanActiveSessions() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await model.rereadDefinitions() }
         }
         .task {
             await model.refreshPortfolio(

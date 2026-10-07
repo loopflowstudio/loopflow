@@ -6,8 +6,8 @@ lf init
 lf debug -c
 ```
 
-A software instrument. Give an agent a task, keep its conversation, and resume
-captured work when a command stops. Loopflow keeps the command's result, the
+A software instrument. Give an agent a task, keep its conversation, and inspect
+captured work after a command stops. Loopflow keeps the command's result, the
 agent's history and the Flow's progress separate, so each answers one question.
 
 Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
@@ -105,11 +105,12 @@ Delegate durable work — the same verbs whether the caller is you or the wave:
 
 ```bash
 lf checkout INF-123                               # durable Task Work + worktree, no controller
-lf --task INF-123 flow start                                   # start end-to-end Task automation
-lf comment INF-123 "take the smaller approach"   # post a Linear comment for the Task advancer
+lf -b task run INF-123                            # place the Task, then run its Flow here until it ends
+lf task run INF-123 pursue                        # on a workflow: take the edge that runs pursue
+lf comment INF-123 "take the smaller approach"   # post a Linear comment for the Task's running Flow
 lf interrupt INF-123                             # end this turn so fresh direction is read now
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
-lf restart INF-123 "reconcile all scratch first" # checkpoint and begin a new kickoff
+lf task run INF-123 --reason "reconcile all scratch first" # publish direction, then run fresh work
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
 lf --task INF-123 skill task/session               # ongoing conversation that keeps applying task/operate
@@ -119,8 +120,9 @@ lf pr reconcile                                      # check recorded deliveries
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
 
-Task comments in Linear also reach the advancing worker. Steering never starts
-an idle Task or broadcasts to independent conversations.
+Task comments in Linear also reach the Task's running Flow. Steering never starts
+an idle Task or broadcasts to independent conversations. A stopped Flow is
+history: `task run` never continues it, so inspect `lf task status` first.
 
 Turn a reviewed design into work without another planning subsystem:
 
@@ -159,22 +161,18 @@ lf session connect SESSION
 lf session history SESSION --json
 lf session rename SESSION "Release notes"
 lf session bind SESSION --task INF-123
-lf ready "Ready for review"  # inside an Ask or review
-lf session complete SESSION        # return its saved feedback
 ```
 
 A Session keeps the conversation's identity, name, feedback and native history
 across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed
-ones. `--all` means all repositories.
+ones, and `--waiting` keeps those waiting on you. `--all` means all repositories.
 
 `lf resume` is short for `lf session resume`. It selects the latest human message
 in this worktree, falling back per Session to its last opening when native input
 history is unavailable. Assistant output and background work do not change that
-order. Use `lf flow resume` to resume a Flow.
+order. A Flow is never resumed; `lf task run ISSUE` runs a fresh one.
 
-Ready saves feedback. Complete ends an Ask or review; a Flow's following decision
-chooses navigation. Closing a pane or exiting a provider does not complete a review.
 Bind assigns an unbound conversation to one Task permanently, including a done Task.
 
 ## The model
@@ -182,14 +180,14 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | Object | What it does | Where it lives |
 | --- | --- | --- |
 | **Skill** | Gives the agent reusable instructions and context | `.lf/skills/*.md` |
-| **Flow** | Composes agent work, mechanical operations and reviews | `.lf/flows/*.yaml` |
+| **Flow** | Composes agent work and mechanical operations; a run is one driver Exec and the step Execs it starts | `.lf/flows/*.yaml` |
+| **Workflow** | Gives a Task nodes, where you take part in its conversation, joined by the Flows between them | `.lf/workflows/*.yaml` |
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `wave/<name>/` |
-| **Project** | Holds one Wave's plan, Tasks, KRs, targets and default Flow | Linear |
+| **Project** | Holds one Wave's plan, Tasks, KRs, targets and the workflow its Tasks take up | Linear |
 | **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
-| **Task** | Owns concrete work, its checkout, serial PRs and managed Flow selection | Linear and local SQLite |
+| **Task** | Owns concrete work, its checkout, serial PRs and every Flow exec for it | Linear and local SQLite |
 | **Exec** | Records one actual lf process and its observed command outcome | Home-local SQLite |
 | **AgentSession** | Keeps a continuable interactive or headless conversation and native history | Home-local SQLite and provider-native storage |
-| **FlowSession** | Keeps a captured Flow and consumes exact boundary completions | Home-local SQLite |
 | **Home** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
 
 The [execution contract and cutover status](docs/architecture-reference.md#cutover-status)

@@ -2025,6 +2025,204 @@ mod tests {
     }
 
     #[test]
+    fn task_flow_observations_removes_scheduling_and_worker_control_and_preserves_history() {
+        let conn = open();
+        apply_before_current_draft(&conn, "task_flow_observations");
+        conn.execute_batch(r#"
+            INSERT INTO execs(id,trace_id,started_at,outcome) VALUES('old-exec','trace',1,'interrupted');
+            INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at,flow) VALUES('p','w','linear-p',1,'custom');
+            INSERT INTO pm_projects(repo,provider,id,observed_at,body)
+            VALUES('/repo','linear','linear-p',1,'{"id":"linear-p","flow":"custom"}');
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,worktree,
+              automation_enabled,automation_exec_id,automation_retry_key,automation_retries,
+              automation_checked_at,automation_detail)
+            VALUES('t','p','linear-t','LOO-1',1,'/repo/task',0,'old-exec','old-position',3,20,'stopped');
+            INSERT INTO task_events(task_id,kind_json,created_at) VALUES('t','{"kind":"started"}',17);
+            INSERT INTO agent_sessions(id,title,title_source,created_at,ready_summary,completed_at,input_published,cwd,kind,task_id,wave_id)
+            VALUES('review','Review','human',3,'Retained exact feedback',NULL,0,'/repo/task','flow_review','t','w'),
+                  ('closed','Closed','human',4,'Historical result',7,0,'/repo/task','flow_review','t','w');
+            INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,worker_generation,claim_json,updated_at,state,pending_session_id)
+            VALUES('legacy-flow','t','w','{"id":"legacy-flow","flow":"feature"}',2,3,4,7,'{"generation":7}',5,'current','review');
+            UPDATE tasks SET current_invocation_id='legacy-flow' WHERE id='t';
+            UPDATE agent_sessions SET flow_session_id='legacy-flow' WHERE id='review';
+            INSERT INTO flow_events(flow_id,version,node,iterations,kind,observed_at,payload)
+            VALUES('legacy-flow',4,2,'[]','operation_started',5,'{"command":"pr publish"}');
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,worktree)
+            VALUES('flow-only','p','linear-f','LOO-2',1,'/repo/flow-only');
+            INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state)
+            VALUES('only','flow-only','w','{"id":"only","flow":"code"}',0,0,1,0,9,'current');
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,updated_at,worktree,work_state,work_terminal_at)
+            VALUES('finished','p','linear-d','LOO-3',1,30,'/repo/finished','done',25),
+                  ('dropped','p','linear-a','LOO-4',1,30,'/repo/dropped','abandoned',26);
+        "#).unwrap();
+        conn.execute_batch(&current_draft_sql("task_flow_observations"))
+            .unwrap();
+        // A Task's state is now its Workflow position. A done Task stands at
+        // the end of a workflow with nothing between, placed by a move no
+        // process made; abandoned keeps its own mark; the rest have no
+        // Workflow until they next run.
+        let states: Vec<(String, String)> = conn
+            .prepare(&format!(
+                "SELECT t.id,{} FROM tasks t ORDER BY t.id",
+                crate::store::sqlite::task_state_sql("t")
+            ))
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            states,
+            [
+                ("dropped", "abandoned"),
+                ("finished", "done"),
+                ("flow-only", "not_ready"),
+                ("t", "not_ready")
+            ]
+            .map(|(id, state)| (id.to_string(), state.to_string()))
+        );
+        let placed: (String, i64, Option<String>, i64, i64) = conn
+            .query_row(
+                "SELECT w.graph,w.updated_at,m.exec_id,m.at,t.abandoned_at IS NULL
+                 FROM task_workflows w JOIN task_workflow_moves m ON m.task_id=w.task_id
+                 JOIN tasks t ON t.id=w.task_id WHERE w.task_id='finished'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<crate::engine::workflow::WorkflowDefinition>(&placed.0).unwrap(),
+            crate::engine::workflow::unplanned()
+        );
+        assert_eq!((placed.1, placed.2, placed.3, placed.4), (25, None, 25, 1));
+        assert_eq!(
+            conn.query_row(
+                "SELECT abandoned_at FROM tasks WHERE id='dropped'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            26
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM pragma_table_info('tasks') WHERE name IN ('work_state','work_terminal_at')",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        let feedback: (String, Option<i64>) = conn
+            .query_row(
+                "SELECT json_extract(e.payload,'$.summary'),s.completed_at FROM agent_sessions s
+             JOIN session_events e ON e.session_id=s.id AND e.receipt_key='legacy_review_feedback'
+             WHERE s.id='review'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(feedback, ("Retained exact feedback".into(), None));
+        let boundary: (String, i64, Option<i64>) = conn.query_row(
+            "SELECT json_extract(e.payload,'$.flow_id'),json_extract(e.payload,'$.pending'),s.completed_at FROM agent_sessions s JOIN session_events e ON e.session_id=s.id AND e.receipt_key='legacy_flow_review' WHERE s.id='review'",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(boundary, ("legacy-flow".into(), 1, None));
+        // The saved Flow's name, state and last position stay on the
+        // conversation it opened; nothing else of the Flow record remains.
+        let history: (String, String, i64, i64) = conn.query_row(
+            "SELECT json_extract(e.payload,'$.flow'),json_extract(e.payload,'$.state'),
+                json_extract(e.payload,'$.step_index'),json_extract(e.payload,'$.iteration')
+             FROM session_events e WHERE e.session_id='review' AND e.receipt_key='legacy_flow:legacy-flow'",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap();
+        assert_eq!(history, ("feature".into(), "current".into(), 2, 3));
+        let control: i64 = conn.query_row(
+            "SELECT (SELECT count(*) FROM pragma_table_info('tasks') WHERE name='current_invocation_id')
+                + (SELECT count(*) FROM pragma_table_info('agent_sessions') WHERE name='flow_session_id')
+                + (SELECT count(*) FROM sqlite_master WHERE name IN ('flow_sessions','flow_events')
+                    OR sql LIKE '%flow_sessions%' OR sql LIKE '%flow_events%')",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(control, 0);
+        // A Project's stored name for its Tasks' workflow keeps its value.
+        let workflow: (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT p.workflow,json_extract(m.body,'$.workflow'),json_extract(m.body,'$.flow')
+                 FROM projects p JOIN pm_projects m ON m.id=p.external_project_id",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(workflow, ("custom".into(), "custom".into(), None));
+        // No saved Flow becomes a Flow exec: the driver-written record starts empty.
+        let flows: i64 = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM flow_execs)+(SELECT count(*) FROM flow_exec_steps)",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(flows, 0);
+        // A conversation still cannot leave its Task, and Started is still set once.
+        assert!(conn
+            .execute(
+                "UPDATE agent_sessions SET task_id=NULL WHERE id='review'",
+                []
+            )
+            .is_err());
+        assert_eq!(
+            conn.query_row(
+                "SELECT started_at FROM tasks WHERE id='flow-only'",
+                [],
+                |row| row.get::<_, Option<i64>>(0)
+            )
+            .unwrap(),
+            Some(9),
+            "a Task whose only start evidence was its Flow row keeps it"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT completed_at FROM agent_sessions WHERE id='closed'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            7
+        );
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM pragma_table_info('agent_sessions') WHERE name='ready_summary'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        let retained: (String, bool, String) = conn.query_row(
+            "SELECT worktree,automation_enabled,kind_json FROM tasks JOIN task_events ON tasks.id=task_events.task_id WHERE tasks.id='t'",
+            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            retained,
+            ("/repo/task".into(), false, r#"{"kind":"started"}"#.into())
+        );
+        let retired: i64 = conn.query_row(
+            "SELECT count(*) FROM pragma_table_info('tasks') WHERE name IN ('automation_exec_id','automation_retry_key','automation_retries','automation_checked_at','automation_detail')",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT outcome FROM execs WHERE id='old-exec'", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+            "interrupted"
+        );
+        assert_eq!(retired, 0);
+    }
+
+    #[test]
     fn task_agent_migration_preserves_existing_tasks() {
         let conn = open();
         apply_before_current_draft(&conn, "task_agent");
@@ -2400,26 +2598,6 @@ mod tests {
         assert_eq!(read_landing(), before);
         assert!(!columns(&conn, "pr_landings").contains(&"repair_count".to_string()));
         validate_foreign_keys(&conn).unwrap();
-    }
-
-    fn apply_current_work_schema(conn: &rusqlite::Connection) {
-        if columns(conn, "tasks").contains(&"work_state".to_string()) {
-            return;
-        }
-        let foreign_keys: bool = conn
-            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
-            .unwrap();
-        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
-        for draft in [
-            "opaque_steer_run_provenance",
-            "stable_work_state",
-            "obsolete_sql_lifecycle",
-        ] {
-            conn.execute_batch(&current_draft_sql(draft)).unwrap();
-        }
-        if foreign_keys {
-            conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        }
     }
 
     #[test]
@@ -3865,19 +4043,23 @@ mod tests {
             conn.execute_batch(&migration_sql_for_test(COMPLETED_TASK_WORK_REPAIR_NAME))
                 .unwrap();
         }
-        apply_current_work_schema(&conn);
+        if !_draft_is_canonical("task_flow_observations") {
+            conn.execute_batch(&current_draft_sql("task_flow_observations"))
+                .unwrap();
+        }
 
         let task: (String, String, String, String) = conn
             .query_row(
-                "SELECT id, issue_identifier, workspace_slug, work_state
-                 FROM tasks WHERE external_issue_id='issue-1'",
+                "SELECT t.id, t.issue_identifier, t.workspace_slug, w.node
+                 FROM tasks t JOIN task_workflows w ON w.task_id=t.id
+                 WHERE t.external_issue_id='issue-1'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
         assert_eq!(task.1, "INF-123");
         assert_eq!(task.2, "inf-123");
-        assert_eq!(task.3, "done");
+        assert_eq!(task.3, "end");
         let pr: (
             i64,
             String,
@@ -4805,13 +4987,12 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .unwrap();
-        let plan: crate::engine::invocation::QueuedInvocation =
-            serde_json::from_str(&plan).unwrap();
-        assert_eq!(plan.id, "saved");
-        assert!(
-            matches!(&plan.steps[0], crate::engine::ConcreteStep::Skill(step)
-            if step.human && step.skill.content.as_deref() == Some("Saved instructions") && step.sources == ["custom"])
-        );
+        let plan: serde_json::Value = serde_json::from_str(&plan).unwrap();
+        assert_eq!(plan["id"], "saved");
+        let step = &plan["steps"][0]["Skill"];
+        assert_eq!(step["human"], true);
+        assert_eq!(step["skill"]["content"], "Saved instructions");
+        assert_eq!(step["sources"], serde_json::json!(["custom"]));
         assert_eq!(feedback, "Keep this feedback");
         assert_eq!(started, 17);
         assert_eq!(worktree, "/repo/task");
@@ -4890,17 +5071,12 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let snapshot: crate::pm::PmSnapshot = serde_json::from_str(&payload).unwrap();
-        assert_eq!(snapshot.projects[0].id, "old");
-        assert_eq!(snapshot.projects[0].flow, "custom");
-        assert_eq!(
-            snapshot.projects[0].status,
-            crate::pm::ProjectStatus::Started
-        );
-        assert_eq!(
-            snapshot.projects[1].status,
-            crate::pm::ProjectStatus::Planned
-        );
+        // This release's shape; the Project key is renamed by a later one.
+        let snapshot: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(snapshot["projects"][0]["id"], "old");
+        assert_eq!(snapshot["projects"][0]["flow"], "custom");
+        assert_eq!(snapshot["projects"][0]["status"], "started");
+        assert_eq!(snapshot["projects"][1]["status"], "planned");
         assert!(!user_tables(&conn)
             .unwrap()
             .iter()

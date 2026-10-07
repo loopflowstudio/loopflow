@@ -1121,6 +1121,20 @@ fn squash_parent_conflict_retains_real_target_and_can_abort_or_continue() {
     }
 }
 
+/// Run an operation step the way a Flow's driver does: as its own `lf` command.
+fn run_flow_command(repo: &std::path::Path, command: &loopflow::engine::flow::Command) {
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(&command.argv()[1..])
+        .current_dir(repo)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn saved_flow_command_migrates_and_merges_through_the_cli_path() {
     let _env = EnvGuard::new(&[]);
@@ -1139,7 +1153,7 @@ fn saved_flow_command_migrates_and_merges_through_the_cli_path() {
     repo.checkout("feature");
     let command: loopflow::engine::flow::Command =
         serde_json::from_str(r#"{"command":"rebase","args":["origin/main"]}"#).unwrap();
-    loopflow::ops::execute_flow_command(repo.path(), &command, &NullProgress).unwrap();
+    run_flow_command(repo.path(), &command);
     assert_eq!(
         git(repo.path(), &["show", "-s", "--format=%P", "HEAD"]),
         format!("{original} {target}")
@@ -1228,8 +1242,7 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
     repo.push();
     let main_head = repo.head_sha();
     let command = serde_json::from_str(r#"{"command":"sync","args":[]}"#).unwrap();
-    let sync =
-        || loopflow::ops::execute_flow_command(&child_path, &command, &NullProgress).unwrap();
+    let sync = || run_flow_command(&child_path, &command);
     assert_eq!(
         plan_sync(&child_path, Some("origin/parent"), Some(fork.clone()))
             .unwrap()

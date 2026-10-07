@@ -356,9 +356,9 @@ struct GhosttyTerminalInputTests {
             views.append(view)
             _ = try #require(view.surface)
             let data = try JSONSerialization.data(withJSONObject: [
-                "id": id, "run_id": id, "interactive": true, "kind": "conversation", "work": NSNull(), "title": id,
+                "id": id, "run_id": id, "interactive": true, "work": NSNull(), "title": id,
                 "detail": "test", "cwd": NSTemporaryDirectory(), "state": "active",
-                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(kind: "conversation", state: "active"), "title_source": "generated", "flow_membership": ["kind": "independent"], "task_ids": [], "terminal_ids": [pane], "open_argv": ["unused"],
+                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": [], "terminal_ids": [pane], "open_argv": ["unused"],
             ])
             records.append(try JSONDecoder().decode(SessionRecord.self, from: data))
         }

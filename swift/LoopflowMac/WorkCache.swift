@@ -163,13 +163,13 @@ final class WorkCache: @unchecked Sendable {
         return String(decoding: quiet, as: UTF8.self)
     }
 
-    /// Every pinned Flow and Task condition becomes `unknown` and every Flow
+    /// Every latest Flow and Task condition becomes `unknown` and every Flow
     /// control unavailable.
     static func quietRoadmap(_ text: String) -> String? {
         func quiet(_ value: Any) -> Any {
             if let array = value as? [Any] { return array.map(quiet) }
             guard var object = value as? [String: Any] else { return value }
-            if object["kind"] as? String == "pinned", object["execution"] != nil {
+            if object["kind"] as? String == "latest", object["execution"] != nil {
                 object["execution"] = TaskFlowExecution.unknown.rawValue
                 object["reason"] = savedReason
             }

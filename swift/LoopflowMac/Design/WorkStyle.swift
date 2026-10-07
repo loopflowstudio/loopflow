@@ -106,7 +106,6 @@ extension TaskFlowExecution {
     var presentation: (label: String?, tone: WorkTone) {
         switch self {
         case .running, .starting: ("Running", .running)
-        case .human: ("Your review", .human)
         case .blocked: ("Blocked", .blocked)
         case .stalled: ("Stalled", .blocked)
         case .idle, .unknown: (nil, .stopped)

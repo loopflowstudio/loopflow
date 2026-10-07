@@ -125,6 +125,7 @@
         "runtime": {
           "work_id": "ts_22222222222222222222222222222222",
           "status": "ready",
+          "planning_conflict": null,
           "reason": "ready",
           "updated_at": "2026-07-13T19:00:00Z",
           "provider": "codex",
@@ -182,7 +183,7 @@
         "flow": {
           "recommended": "feature",
           "record": {
-            "kind": "pinned",
+            "kind": "latest",
             "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
             "graph": {
               "name": "feature",
@@ -228,7 +229,7 @@
                 {
                   "key": 3,
                   "id": "decide",
-                  "label": "loop-decide",
+                  "label": "loop-or-next",
                   "kind": "skill",
                   "human": false,
                   "returns_to": 1,
@@ -254,7 +255,7 @@
                 {
                   "key": 5,
                   "id": "decide_delivery",
-                  "label": "loop-decide",
+                  "label": "loop-or-next",
                   "kind": "skill",
                   "human": false,
                   "returns_to": 1,
@@ -463,9 +464,8 @@
                 "traversals": 1
               }
             ],
-            "execution": "human",
+            "execution": "idle",
             "reason": "Waiting for your review at demo",
-            "restart_required": false,
             "iterations": [
               [
                 1,
@@ -476,14 +476,6 @@
           "controls": [
             {
               "kind": "start",
-              "unavailable": "A Flow is already pinned; resume it or stop and restart with another"
-            },
-            {
-              "kind": "resume",
-              "unavailable": "Waiting for your review at demo; continue it through its Session"
-            },
-            {
-              "kind": "restart",
               "unavailable": null
             }
           ]
@@ -541,14 +533,6 @@
             {
               "kind": "start",
               "unavailable": null
-            },
-            {
-              "kind": "resume",
-              "unavailable": "No pinned Flow to resume; start one"
-            },
-            {
-              "kind": "restart",
-              "unavailable": "Task has no Work yet; start a Flow instead"
             }
           ]
         },
@@ -590,7 +574,7 @@
         "work_id": null,
         "slug": "release-feedback",
         "name": "current",
-        "flow": "task-design",
+        "workflow": "task-design",
         "status": "started",
         "current": true,
         "metric_targets": [

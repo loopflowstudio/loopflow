@@ -77,9 +77,10 @@ homepage:
   definition:
     heading: "What is a loopflow?"
     diagram_alt: >-
-      The default flow, step by step: kickoff, review plan, implement,
+      The default workflow, step by step: kickoff, review plan, implement,
       compress, review, decide, review demo, decide, done. Review plan and
-      review demo need a person. Each decide step can return to implement.
+      review demo are nodes where a person takes part; the steps between
+      them are flows. Each decide step can return to implement.
     paragraphs:
       - >-
         A flow is a directed graph of steps. Each step gives an agent one
@@ -112,33 +113,30 @@ homepage:
           3. Verify with tests and done-when checks
 
       - label: "A flow"
-        filename: ".lf/flows/feature.yaml"
+        filename: ".lf/flows/pursue.yaml"
         content: |
-          - kickoff
-          - step:
-              id: review_plan
-              name: review-design
-              human: true
-          - step:
-              id: implement
-              name: implement
+          - implement
           - compress
           - flow: refresh
-          - step:
-              id: decide
-              name: loop-decide
-              repeat:
-                from: implement
+          - loop: implement
           - pr-publish
-          - step:
-              id: review_demo
-              name: demo
-              human: true
+      - label: "A workflow"
+        filename: ".lf/workflows/feature.yaml"
+        content: |
+          nodes:
+            design: review-design
+            demo: demo
+          edges:
+            - { from: start,  to: design, flow: task-design }
+            - { from: design, to: demo,   flow: pursue }
+            - { from: demo,   to: demo,   flow: pursue }
+            - { from: demo,   to: end,    flow: ship }
       - label: "A task"
         filename: "terminal"
         content: |
-          lf task create --run --wave auth \
+          lf task create --wave auth \
             --title "Unify token validation"
+          lf -b task run AUTH-12
           lf comment AUTH-12 \
             "prefer the middleware approach"
           lf task status AUTH-12 --json

@@ -5,7 +5,7 @@ produces: retained exact-ID chapter plan, rotation result, separate Task-candida
 Open a new chapter from accepted direction. Waves retain their objective, memory
 and instruments. Each Wave's shared local binding selects its current Project;
 chapters coordinate optional rotation. Ordinary Projects need neither chapter
-names nor a default Flow. Linear retains Project content, status and history.
+names nor a workflow. Linear retains Project content, status and history.
 
 ## Review and plan
 
@@ -22,7 +22,7 @@ return proposals, never mutate planning. Reconcile them into one retained
 `scratch/chapter-plan.json` with this shape:
 
 ```json
-{"name":"October","waves":[{"wave_id":"<Wave UUID>","successor_id":"<Project UUID>","create":true,"project_name":"October — reliability","content":{"metric_targets":[],"flow":"","krs":[{"text":"Observable improvement","holds":false}]}}]}
+{"name":"October","waves":[{"wave_id":"<Wave UUID>","successor_id":"<Project UUID>","create":true,"project_name":"October — reliability","content":{"metric_targets":[],"workflow":"","krs":[{"text":"Observable improvement","holds":false}]}}]}
 ```
 
 Allocate each new successor UUID v4 once and retain it. For an explicitly selected

@@ -6,8 +6,8 @@ lf init
 lf debug -c
 ```
 
-A software instrument. Give an agent a task, keep its conversation, and resume
-captured work when a command stops. Loopflow keeps the command's result, the
+A software instrument. Give an agent a task, keep its conversation, and inspect
+captured work after a command stops. Loopflow keeps the command's result, the
 agent's history and the Flow's progress separate, so each answers one question.
 
 Free and open source. Needs [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
@@ -19,17 +19,17 @@ or [Codex](https://github.com/openai/codex), which have their own cost.
 lf -b implement
 lf session list --interactive false --json
 lf session connect SESSION
-lf --task INF-123 flow start
+lf task run INF-123
 ```
 
-A Skill supplies instructions; a Flow composes skills, mechanical operations and
-reviews. A Task owns one change, its checkout and PRs. A Wave keeps the objective
-and memory; its current Linear Project holds the plan and default Flow.
+A Skill supplies instructions; a Flow composes skills and mechanical operations.
+A Task owns one change, its checkout and PRs. A Wave keeps the objective
+and memory; its current Linear Project holds the plan and its Tasks' workflow.
 
 Exec records an actual lf command process. AgentSession keeps the conversation,
-including headless work. FlowSession preserves a captured Flow and consumes its
-exact boundary results. A conversation can outlive its command, and a completed
-command can leave a Flow waiting for review.
+including headless work. A running Flow is one driver Exec and the step Execs
+it starts. A conversation can outlive its command. A Flow whose
+command stopped stays as history; fresh work is launched explicitly.
 
 Read the [contract and cutover status](architecture-reference.md#cutover-status)
 for the accepted model and remaining implementation, or the [Glossary](glossary.md)

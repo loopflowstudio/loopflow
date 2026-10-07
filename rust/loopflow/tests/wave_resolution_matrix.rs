@@ -352,7 +352,7 @@ fn seed(home: &Path, repo: &Path) -> Wave {
         repo.join("plan.json"),
         serde_json::to_vec(&loopflow::pm::ProjectContent {
             metric_targets: vec![],
-            flow: "feature".into(),
+            workflow: "feature".into(),
             krs: vec![],
         })
         .unwrap(),

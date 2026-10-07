@@ -6,6 +6,7 @@ use super::{
     serve_fixture, task_started_at, Arc, Mutex, PmTestContext, PM_TEST_CONTEXT,
 };
 use crate::ops::chapter::{rotate, ChapterPlan, WaveChapterPlan};
+use crate::ops::project::{write_plan, PlanChange};
 use crate::pm::{PmKr, ProjectContent};
 use crate::work::wave::WaveLocator;
 use serde_json::json;
@@ -50,7 +51,7 @@ async fn plan(context: &PmTestContext, repo: &Path, waves: &[&str]) -> ChapterPl
             create: true,
             project_name: "Shared display name".into(),
             content: ProjectContent {
-                flow: String::new(),
+                workflow: String::new(),
                 metric_targets: Vec::new(),
                 krs: vec![PmKr {
                     text: "Retain work across the switch".into(),
@@ -134,10 +135,7 @@ async fn rotation_recovers_every_mutation_and_partial_repository_settlement() {
                 let retained = context.store.get_task(&task.id).await.unwrap().unwrap();
                 assert_eq!(retained.worktree, task.worktree);
                 assert_eq!(context.store.task_prs(&task.id).await.unwrap(), vec![pr]);
-                assert_eq!(
-                    context.store.task_flow(&task.id).await.unwrap().unwrap(),
-                    flow
-                );
+                assert_eq!(context.store.sqlite.task_flows(&task.id).unwrap(), flow);
                 assert_eq!(task_started_at(&context.path, &task.id), started);
                 let state = provider.lock().await;
                 for wave in ["a", "b"] {
@@ -302,10 +300,7 @@ async fn rotation_after_switch_retains_selected_membership_and_external_moves() 
                 old_id("a")
             );
             assert_eq!(context.store.task_prs(&task.id).await.unwrap(), vec![pr]);
-            assert_eq!(
-                context.store.task_flow(&task.id).await.unwrap().unwrap(),
-                flow
-            );
+            assert_eq!(context.store.sqlite.task_flows(&task.id).unwrap(), flow);
         })
         .await;
     server.abort();
@@ -353,10 +348,7 @@ async fn rotation_before_switch_reclassifies_new_work_after_lost_transfer_readba
                 target.successor_id
             );
             assert_eq!(context.store.task_prs(&task.id).await.unwrap(), vec![pr]);
-            assert_eq!(
-                context.store.task_flow(&task.id).await.unwrap().unwrap(),
-                flow
-            );
+            assert_eq!(context.store.sqlite.task_flows(&task.id).unwrap(), flow);
         })
         .await;
     server.abort();
@@ -439,10 +431,9 @@ async fn rotation_excludes_checkout_starts_and_failed_reset_retries_preserving_s
             iterations: None,
             task_id: None,
             wave_id: None,
-            flow_session_id: None,
+            flow_id: None,
             work_source: None,
             bound_at: None,
-            kind: crate::session::SessionKind::Conversation,
             interactive: false,
             repo: None,
             title: "Independent conversation".into(),
@@ -454,7 +445,7 @@ async fn rotation_excludes_checkout_starts_and_failed_reset_retries_preserving_s
         };
         let store = context.store.clone();
         if start_first {
-            store.create_session(session.clone(), None).await.unwrap();
+            store.create_session(session.clone()).await.unwrap();
         }
         let input = PM_TEST_CONTEXT
             .scope(copy_context(&context), plan(&context, &repo, &["a"]))
@@ -474,10 +465,7 @@ async fn rotation_excludes_checkout_starts_and_failed_reset_retries_preserving_s
             .await
             .unwrap();
         if !start_first {
-            let error = store
-                .create_session(session.clone(), None)
-                .await
-                .unwrap_err();
+            let error = store.create_session(session.clone()).await.unwrap_err();
             assert!(
                 error.to_string().contains("checkout admission unavailable"),
                 "{error}"
@@ -493,7 +481,7 @@ async fn rotation_excludes_checkout_starts_and_failed_reset_retries_preserving_s
             .to_string()
             .contains("fixture interrupted connection"));
         if !start_first {
-            store.create_session(session.clone(), None).await.unwrap();
+            store.create_session(session.clone()).await.unwrap();
         }
         let saved = store.session(&session.id).await.unwrap().unwrap();
         assert!(saved.task_id.is_none());
@@ -787,5 +775,38 @@ async fn wave_rotation_uses_its_entry_when_an_unselected_plan_is_invalid() {
                 .is_none());
         })
         .await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn changing_the_workflow_keeps_the_projects_krs() {
+    let directory = tempfile::tempdir().unwrap();
+    let repo = fixture_repo(directory.path());
+    let provider = Arc::new(Mutex::new(provider_fixture()));
+    let (url, server) = serve_fixture(provider.clone()).await;
+    let context = context(&directory.path().join("registry.db"), &repo, &url).await;
+    PM_TEST_CONTEXT
+        .scope(copy_context(&context), async {
+            let selected = plan(&context, &repo, &["a"]).await;
+            let wave = context
+                .store
+                .get_wave(&selected.waves[0].wave_id)
+                .await
+                .unwrap()
+                .unwrap();
+            write_plan(&repo, &wave, PlanChange::Workflow("research".into()))
+                .await
+                .unwrap();
+        })
+        .await;
+    let state = provider.lock().await;
+    let content = state.projects[old_id("a")]["content"].as_str().unwrap();
+    let plan = crate::pm::parse_project_content(content).unwrap();
+    assert_eq!(plan.workflow, "research");
+    assert_eq!(plan.krs[0].text, "Retain proof");
+    assert!(state.projects[old_id("b")]["content"]
+        .as_str()
+        .unwrap()
+        .contains("workflow: feature"));
     server.abort();
 }

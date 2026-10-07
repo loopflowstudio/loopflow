@@ -31,7 +31,7 @@ is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill
 that does everything.
 
-Direct launch from a TTY runs interactively. `--mode batch` and automated
+Direct launch from a TTY runs interactively. `-b` and automated
 flow execution run the same skill headlessly. Define the inputs and useful
 change independently of the caller. When judgment is unavailable, make supported
 corrections and leave consequential choices explicit. Use a reviewer protocol
@@ -48,7 +48,7 @@ Draft the affected usage docs and skill guidance first, then follow the simpler
 interaction through types, APIs, and infrastructure. Product clarity is valuable
 even without deleting code.
 Keep proposed alternatives distinct from accepted requirements and verified
-behavior. The work and updated plan supply evidence; `loop-decide` owns navigation
+behavior. The work and updated plan supply evidence; `loop-or-next` owns navigation
 when the Flow declares a decision step.
 
 ## Flows
@@ -73,23 +73,11 @@ Skills that need another Work's perspective launch it directly with
 explain the failure in ordinary output and stop. The Wave operator
 reads existing logs and discusses unresolved judgment in its own chat.
 
-Run a step interactively with `human: true`. Give it an `id` stable within
-its expanded Flow so the conversation can be reopened:
-
-```yaml
-- kickoff
-- step:
-    id: review_design
-    name: review-design
-    human: true
-```
-
-The human and agent clarify the design in that conversation. The agent saves
-feedback with `lf ready "feedback and remaining work"`; the human ends
-the review with `lf session complete <session-id>`. The Flow carries that
-feedback to its next step. Provider exit or readiness alone leaves it waiting.
-Human steps have no navigation verdict or backward edge. Put a deciding step
-after the review when its feedback should choose between continuing and more work.
+Keep design and review in the Task conversation. Operational Flows reject
+`human: true` steps, including inside composed Flows and XOR alternatives, before
+launching work. Save agreed feedback and remaining work in the conversation;
+Session completion controls are retired. Inspect the exact
+Flow and its effects before selecting further work.
 
 Mechanical git/PR operations ride along as `cmd:` steps:
 
@@ -118,17 +106,10 @@ useful action with its proof. Link related notes. Update the relevant account
 and mark superseded conclusions while preserving useful evidence. Notes remain
 available across steps, regardless of which skill wrote them or runs next.
 
-A review's ready summary points to that material:
-
-```sh
-lf ready "See scratch/search-feedback.md: implement the agreed empty state; verify recovery after clearing the query"
-```
-
-Loop-decide starts at those paths, then reconciles the current design and other
-relevant scratch evidence. A note recommends work; the deciding occurrence
-records navigation through the Flow protocol. There is no required handoff
-filename or control file. Recursive scratch Markdown is assembled into fresh
-conversation context; a running agent can reread files updated since its launch.
+Discuss the review's note paths and takeaway in the ongoing conversation. A note
+recommends work; the caller selects the next action after inspecting its evidence.
+There is no required handoff filename or control file. Recursive scratch Markdown
+is assembled into fresh context; a running agent can reread updated files.
 
 ### Branching (xor)
 
@@ -149,7 +130,7 @@ one path runs:
 ```
 
 The `router:` skill reads the available evidence and returns `{"path":"NAME"}`
-under the schema declared by its captured branch. Routing instructions and path descriptions are appended
+as its message asks. Routing instructions and path descriptions are appended
 to its captured prompt. The choice belongs to the selected native turn and takes effect
 when it succeeds; a retry must supply its own candidate. A path
 with no `flow:`, `skill:`, or inline `steps:` (like `silence`) is a clean no-op
@@ -162,65 +143,120 @@ commands; Task binding adds context and Task authority. Task and ordinary Flow
 execution interpret backward edges through the same transition rules.
 
 ```bash
-lf feature
-lf --task DES-123 flow start feature
+lf pursue
+lf task run DES-123 pursue
 ```
 
-A loop is a backward edge in that Flow. It returns from a deciding step to an
-earlier step; the intervening steps form its body. Give the destination and
-deciding step stable ids:
+A loop is a backward edge in that Flow. `loop: <target>` runs a deciding step
+last and returns to an earlier step; the steps between form its body:
 
 ```yaml
-- step:
-    id: implement
-    name: implement
+- implement
 - compress
 - flow: refresh
-- step:
-    id: decide
-    name: loop-decide
-    repeat:
-      from: implement
+- loop: implement
 - pr-publish
 ```
 
-One pass runs implement, compress, refresh (sync → realign), and loop-decide.
-The work and updated plan supply evidence; loop-decide chooses Advance or Iterate through the
-[decision protocol](lf-reference.md#flow-decisions-and-recovery). Iterate returns to `from`
+`loop` names a preceding step by its skill. When that skill runs more than once,
+give one occurrence an `id` and loop to that. `step:` replaces the default
+`loop-or-next` decider:
+
+```yaml
+- step: {name: implement, id: first}
+- implement
+- loop: first
+  step: my-decider
+```
+
+One pass runs implement, compress, refresh (sync → realign), and loop-or-next.
+The work and updated plan supply evidence; loop-or-next chooses Advance or Iterate through the
+[decision protocol](lf-reference.md#flow-decisions-and-recovery). Iterate returns to the target
 with direction; Advance leaves the loop and publishes. This is `pursue`: one
 implementation loop with no human review or outer return edge.
 
-`code` composes `pursue` followed by a human `pr-review` walkthrough. `feature`
-adds design review before `pursue`, then a human demo, the final gate and landing.
-Completing either delivery review does not restart the pursuit. Existing saved
-Flows retain their captured steps; these definitions govern new invocations.
-
 At the deciding occurrence, return `{"decision":"advance","summary":"evidence","reason":null}`
 or `{"decision":"iterate","summary":"next action and proof","reason":null}`, or
-`{"decision":"blocked","summary":null,"reason":"question and evidence"}`. The provider receives
-this schema before generation. The Flow validates and consumes the exact selected
-successful completion; invalid output gets at most two corrective turns in the
-same conversation. Failed turns, older results and command exit cannot navigate.
+`{"decision":"blocked","summary":null,"reason":"question and evidence"}`. The contract
+travels in the step's message, not as a provider schema. The Flow reads the final answer of the turn its
+step captured; invalid output gets at most two corrective turns in the same
+conversation, then the Flow fails. A failed turn cannot navigate.
 
 Backward edges have no pass limit. Iterate follows the edge as long as the
 decision calls for more work; human revision needs no budget reset. Pass counts
 describe history. Missing decisions stop execution. Blocked is a stopped
 decision: return it with a required reason in the final structured result.
 Existing logs and outcomes provide the evidence. The Wave operator resolves
-impediments or discusses missing judgment in its ongoing chat. Explicit retry
-retains the position and pass; unchanged failures do not automatically retry.
+impediments or discusses missing judgment in its ongoing chat. A stopped Flow
+is never retried or resumed; its caller launches fresh work explicitly.
 
-Resume the saved invocation to preserve its captured definition, position,
-direction, and accepted decisions. Edits to the source apply to new invocations.
+Inspect a Flow's Execs and effects before launching further work.
+Edits to the source apply to new Flows.
 Finishing a Flow grants no implicit merge or Task-completion authority and
 does not choose another Flow; author delivery explicitly.
 
-`feature` combines design review with this loop; `pursue` starts at
-implementation. Ordinary and Task invocations capture every XOR router and path
+`pursue` starts at implementation. Ordinary and Task Flows compile every XOR router and path
 before execution and use the same cursor for nested paths and backward edges.
-Recovery reads that captured definition, including paths not yet selected.
 The implementation and recovery fixtures do not establish live provider/Session
 handoff parity; that still requires a configured end-to-end demonstration.
+
+## Workflows
+
+A workflow is a Task's outer shape: nodes where you take part in the Task
+conversation, joined by edges that each run one Flow.
+
+```yaml
+# .lf/workflows/feature.yaml
+nodes:
+  design: review-design      # the skill the conversation uses at this node
+  demo: demo
+edges:
+  - { from: start,  to: design, flow: task-design }
+  - { from: design, to: design, flow: task-design }   # revise the design
+  - { from: design, to: demo,   flow: pursue }
+  - { from: demo,   to: demo,   flow: pursue }        # another pass
+  - { from: demo,   to: end,    flow: ship }          # land
+```
+
+```bash
+lf task run DES-123            # start: the only edge, task-design
+lf task run DES-123 pursue     # at design: build it
+lf task run DES-123 ship       # at demo: land it
+lf task status DES-123         # node, or the edge it is on
+lf task move DES-123 design    # go back without running anything
+```
+
+`start` and `end` are implicit. A node may say what you do there:
+`design: { skill: review-design, description: you review the plan }`;
+without one, the skill's first line stands in. An edge runs anything `lf run` accepts, a
+skill included. Only an edge into `end` may omit `flow:`; take it with
+`lf task run ISSUE end`. A Task with no PR is a workflow with no landing edge,
+like builtin `research`. An edge is named by what it runs, so two edges
+leaving one node run different things.
+
+A Task takes up a workflow on its first `lf task run` when its Project's
+default names one, or when you name one. It keeps the graph as it was then.
+The Task's position is stored. Choosing an edge puts the Task on it; the
+process that ran the edge puts the Task at its target when the Flow succeeds.
+A Flow that stops or fails leaves the Task on the edge, shown as stopped:
+choose that edge again, choose another one leaving the same node, or
+`lf task move ISSUE NODE`. `task move` puts the Task at any node and runs
+nothing: go back for another round, skip ahead, or record a landing that
+settled after its Flow stopped. An edge cannot be chosen while another is
+running. `lf task status ISSUE --json` carries the position, the edges that
+can be chosen now and every move with who made it and its `--reason`. There
+is no approve or complete command. Give feedback in the Task conversation,
+which is told its node's skill and the command for each edge leaving it. `lf --task ISSUE run FLOW` runs a Flow without moving the Task.
+
+Builtins are `feature` (design, demo, land), `code` (demo, land) and
+`research` (findings, no PR). `lf flow list` shows workflows beside Flows with
+their source; `lf flow customize NAME` writes a builtin to `.lf/workflows/` or
+`.lf/flows/` and prints the path. `.lf/workflows/NAME.yaml` wins over a Flow of
+the same name. An invalid file stays listed with its reason.
+
+A Flow that repeats a step passes it `--steers-after STEER`, so the step
+receives only Task direction newer than its last run. The option works on any
+`lf` run.
 
 ## Goals
 

@@ -1,13 +1,9 @@
 //! Shared recovery and execution helpers for Project and Task Work.
 
-use std::time::Duration;
-
 use crate::durable::WorkRef;
 use crate::engine::config::load_config;
 use crate::engine::context_budget::{bound_message, ContextBudgets};
 use crate::store::SharedStore;
-
-pub(crate) const CHILD_STARTUP_GRACE: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]

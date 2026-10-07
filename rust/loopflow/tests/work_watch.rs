@@ -98,7 +98,7 @@ impl Home {
         let payload = serde_json::json!({
             "projects": [{
                 "id": PROJECT, "slug": "reactive", "name": "Reactive", "summary": "",
-                "metric_targets": [], "flow": "feature", "status": "started", "krs": [],
+                "metric_targets": [], "workflow": "feature", "status": "started", "krs": [],
                 "initiative_ids": ["initiative-product"], "team_ids": ["team-product"]
             }],
             "items": items
@@ -534,15 +534,15 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
     );
     watch.session(|record| record["flow_membership"]["kind"] == "independent");
 
-    // A finished turn asks for a reply.
-    event("started", "", Some("turn"), serde_json::json!({}));
-    event(
-        "completed",
-        "",
-        Some("turn"),
-        serde_json::json!({"status": "completed"}),
+    // A question the stream reported is Waiting; its answer ends that.
+    write(
+        "INSERT INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded)
+         SELECT id,driver_generation,CAST(strftime('%s','now') AS INTEGER),0,1,0
+         FROM agent_sessions WHERE id='conversation'",
     );
-    watch.session(|record| record["attention"] == "reply");
+    watch.session(|record| record["attention"] == "waiting");
+    write("UPDATE session_activity SET pending_input=0 WHERE session_id='conversation'");
+    watch.session(|record| record["attention"].is_null());
 
     event(
         "observed",
@@ -550,13 +550,7 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
         None,
         serde_json::json!({"outcome": "interrupted"}),
     );
-    let record = watch.session(|record| record["state"] == "interrupted");
-    assert_eq!(record["attention"], serde_json::Value::Null);
-
-    write("UPDATE agent_sessions SET ready_summary='Ready for review' WHERE id='conversation'");
-    let record = watch.session(|record| record["state"] == "ready");
-    assert_eq!(record["ready_summary"], "Ready for review");
-    assert_eq!(record["attention"], "review");
+    watch.session(|record| record["state"] == "interrupted");
 
     // Transcript lines between those facts were never a reason to read.
     let before = watch.heartbeat()["sessions"];

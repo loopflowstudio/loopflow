@@ -345,23 +345,20 @@ pub(crate) async fn start_tmux_session(
 /// session starts without any of it and receives only what its launch names.
 const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::lf::WORK_DECLARATION_ENV,
-    crate::ops::flow_run::FLOW_STEP_ENV,
     crate::ops::human_session::HUMAN_SESSION_ENV,
     crate::ops::human_session::PREPARED_CAPTURE_ENV,
-    crate::ops::human_session::REVIEW_CAPTURE_ENV,
-    "LF_RUN_ID",
     "LF_RUN_DIR",
+    "LF_RUN_ID",
     "LF_HUMAN_SESSION_RUN",
     "LF_REVIEW_RUN_RESERVATION",
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
     crate::work::wave::context::WAVE_ID_ENV,
     crate::session_record::CAPTURE_KEY_ENV,
-    crate::durable::TASK_WORKER_CLAIM_ENV,
     crate::exec::AGENT_CALLER_ENV,
     crate::ops::git_operation::LF_GIT_OPERATION_ID_ENV,
     crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
-    crate::lf::TASK_SKILL_OPTIONS_ENV,
+    crate::ops::flow_run::FLOW_ID_ENV,
     crate::machine_install::INSTALL_SWITCH_ENV,
     crate::lf::commands::ssh::EXPECTED_HOME_ID_ENV,
     "LF_TERMINAL_ID",
@@ -398,19 +395,6 @@ fn forwarded_authority_env_names() -> Vec<String> {
         names.extend(forwarded.split_whitespace().map(str::to_string));
     }
     names
-}
-
-pub(crate) fn tmux_session_slug(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -555,7 +539,7 @@ mod tests {
         let argv = vec![
             "sh".into(),
             "-c".into(),
-            "printf '%s' \"${LF_RUN_ID-}${LF_RUN_DIR-}${LF_FLOW_STEP-}${LF_BIN-}${LF_HOME-unset}\""
+            "printf '%s' \"${LF_RUN_ID-}${LF_RUN_DIR-}${LF_FLOW_ID-}${LF_BIN-}${LF_HOME-unset}\""
                 .into(),
         ];
         let command = lf_session_shell_command(std::path::Path::new("."), &argv, &[]);
@@ -563,7 +547,7 @@ mod tests {
             .args(["-c", &command])
             .env("LF_RUN_ID", "run_dead")
             .env("LF_RUN_DIR", "/dead/run")
-            .env("LF_FLOW_STEP", "{}")
+            .env("LF_FLOW_ID", "stale-flow")
             .env("LF_BIN", "/stale/lf")
             .env("LF_HOME", "/stale/home")
             .output()
@@ -578,7 +562,7 @@ mod tests {
 
         let command = lf_session_shell_command(std::path::Path::new("."), &argv, &[]);
 
-        assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY LF_WORK_ADVANCE_CLAIM"));
+        assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
     }
@@ -660,7 +644,7 @@ mod tests {
             ],
         );
 
-        assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY LF_WORK_ADVANCE_CLAIM"));
+        assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.ends_with(
             "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"

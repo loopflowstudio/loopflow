@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{bail, Context};
 
 use crate::lf::SessionCommand;
-use crate::ops::human_session::{OpenMode, SessionKind, SessionState};
+use crate::ops::human_session::{OpenMode, SessionState};
 use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
@@ -12,12 +12,7 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
     let worktree = match command {
         SessionCommand::Open { json: false, .. }
         | SessionCommand::Resume { .. }
-        | SessionCommand::ServeConversation { .. }
-        | SessionCommand::ServeFlow { .. } => Some(crate::repo::working_directory()?),
-        SessionCommand::Complete { id } => {
-            let store = runtime.block_on(open_shared_store())?;
-            runtime.block_on(crate::ops::human_session::completion_worktree(&store, id))?
-        }
+        | SessionCommand::ServeConversation { .. } => Some(crate::repo::working_directory()?),
         _ => None,
     };
     let Some(worktree) = worktree else {
@@ -29,7 +24,11 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
-        SessionCommand::Resume { id } => {
+        SessionCommand::Resume { id, message } => {
+            anyhow::ensure!(
+                message.is_none(),
+                "a resume message is a headless turn: lf -b session resume ID MESSAGE"
+            );
             let id = match id {
                 Some(id) => id.clone(),
                 None => {
@@ -76,7 +75,7 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             all,
             interactive,
             history,
-            needs_me,
+            waiting,
             limit,
             offset,
             page,
@@ -89,8 +88,8 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             list(
                 &store,
                 *json,
-                *needs_me,
                 &crate::session::SessionFilter {
+                    waiting: *waiting,
                     repo: if *all {
                         None
                     } else {
@@ -123,11 +122,19 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             };
             open(id, *json, mode).await
         }
-        SessionCommand::Ensure { wave, json } => {
+        SessionCommand::Ensure {
+            wave,
+            task,
+            choose,
+            json,
+        } => {
+            use crate::ops::human_session::primary;
             let store = open_shared_store().await?;
             let repo = crate::repo::find_repo_root()?;
-            let session =
-                crate::ops::human_session::primary::ensure(&store, &repo, wave.as_deref()).await?;
+            let session = match task {
+                Some(task) => primary::ensure_task(&store, &repo, task, choose.as_deref()).await?,
+                None => primary::ensure(&store, &repo, wave.as_deref()).await?,
+            };
             report_primary(&session, *json)
         }
         SessionCommand::Replace { id, json } => {
@@ -135,7 +142,6 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             let session = crate::ops::human_session::primary::replace(&store, id).await?;
             report_primary(&session, *json)
         }
-        SessionCommand::Complete { id } => complete(id).await,
         SessionCommand::Rename {
             id,
             name,
@@ -173,39 +179,9 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        SessionCommand::Ready { summary } => {
-            let text = required_text(summary, "ready summary")?;
-            let store = open_shared_store().await?;
-            crate::ops::human_session::mark_ready(&store, &text).await?;
-            println!("Session is ready for your review.");
-            Ok(())
-        }
-        SessionCommand::ServeFlow {
-            task_id,
-            invocation_id,
-            flow,
-            node_id,
-            skill,
-            iteration,
-        } => {
-            let store = open_shared_store().await?;
-            crate::ops::human_session::serve_flow(
-                store,
-                task_id.clone(),
-                invocation_id.clone(),
-                flow.clone(),
-                node_id.clone(),
-                skill.clone(),
-                *iteration,
-            )
-            .await
-        }
         SessionCommand::ServeConversation { input } => {
             let store = open_shared_store().await?;
             crate::ops::human_session::serve_conversation(&store, input).await
-        }
-        SessionCommand::StopClient { input } => {
-            crate::ops::human_session::stop_session_client(input)
         }
     }
 }
@@ -213,7 +189,6 @@ async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
 async fn list(
     store: &Arc<Store>,
     json: bool,
-    needs_me: bool,
     filter: &crate::session::SessionFilter,
 ) -> anyhow::Result<()> {
     if filter.after.is_some() {
@@ -226,11 +201,7 @@ async fn list(
             .limit
             .checked_add(1)
             .context("Session page limit is too large")?;
-        let mut entries = if needs_me {
-            crate::ops::human_session::list_attention(store, &selection).await?
-        } else {
-            crate::ops::human_session::list(store, &selection).await?
-        };
+        let mut entries = crate::ops::human_session::list(store, &selection).await?;
         let next = if entries.len() > filter.limit {
             entries.pop();
             entries.last().map(|session| session.id.clone())
@@ -246,11 +217,7 @@ async fn list(
         );
         return Ok(());
     }
-    let sessions = if needs_me {
-        crate::ops::human_session::list_attention(store, filter).await?
-    } else {
-        crate::ops::human_session::list(store, filter).await?
-    };
+    let sessions = crate::ops::human_session::list(store, filter).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&sessions)?);
     } else if sessions.is_empty() {
@@ -261,10 +228,9 @@ async fn list(
                 "{}  {:<7} {}  {}",
                 session.id,
                 match session.state {
+                    _ if session.attention.is_some() => "waiting",
                     SessionState::Unknown => "unknown",
-                    SessionState::Waiting => "waiting",
                     SessionState::Active => "active",
-                    SessionState::Ready => "ready",
                     SessionState::Closed => "closed",
                     SessionState::Interrupted => "interrupted",
                 },
@@ -305,19 +271,6 @@ fn report_primary(
             session.work_path.as_deref().unwrap_or("this repository"),
             session.id
         );
-    }
-    Ok(())
-}
-
-async fn complete(id: &str) -> anyhow::Result<()> {
-    let store = open_shared_store().await?;
-    let session = crate::ops::human_session::complete(&store, id).await?;
-    match session.kind {
-        SessionKind::Conversation => println!(
-            "Session {} completed; its provider history remains resumable.",
-            session.id
-        ),
-        SessionKind::Flow => println!("Review completed; feedback returned to the Flow."),
     }
     Ok(())
 }

@@ -195,21 +195,21 @@ Then offer Linear binding as above. Connection creates or links the Initiative
 and preserves existing Projects; it does not provision an initial Project.
 Inspect available Linear status/content: one In Progress Project is the current
 plan, Planned Projects hold future plans, and Completed Projects retain history.
-Tasks use the current Project and its required `flow:` default.
+Tasks use the current Project and its required `workflow:`.
 
 If no current Project exists, report that planning gap. Establishing a chapter
 requires accepted repository-wide direction and plan dispositions: preview with
 `lf repo new-chapter <name> --dry-run --json`, then apply with
 `lf repo new-chapter <name> --json` to apply those dispositions. Every Wave
 participates; do not rotate the repository merely to initialize one Wave. A Wave
-with no Projects receives an empty plan with `flow: feature`, unless an authored
+with no Projects receives an empty plan with `workflow: feature`, unless an authored
 Planned successor supplies its content. Existing successors and predecessors
 retain identity; rotation completes predecessors rather than deleting them.
 
 Author future content in the Planned Linear Project through an available
 provider interface. For an existing current Project,
 `lf update-plan --wave <wave> --plan <plan.json>` replaces its complete
-content, for example `{"metric_targets":[],"flow":"feature","krs":[]}`.
+content, for example `{"metric_targets":[],"workflow":"feature","krs":[]}`.
 There is no future-plan writer or historical chapter selector in these commands.
 Missing access or competing current Projects stays an explicit next action;
 never invent a local chapter store or guess a plan from the newest name.
@@ -220,7 +220,7 @@ Require its exact issue identifier. If Linear is connected and the Task belongs
 to the repository Team and one Wave-owned Project, the durable execution path is:
 
 ```bash
-lf --task <ISSUE-ID> flow start
+lf task run <ISSUE-ID>
 lf task status <ISSUE-ID> --json
 ```
 
@@ -302,7 +302,7 @@ Wave         designer placed on home_...
 Planning     Linear bound; 1 current chapter / 7 open Tasks
 
 Next         lf --wave designer wave/operate
-Also         lf roadmap --wave designer | lf --task DES-123 flow start | lf debug -c
+Also         lf roadmap --wave designer | lf task run DES-123 | lf debug -c
 ```
 
 If something remains unavailable, say exactly which authority is missing and

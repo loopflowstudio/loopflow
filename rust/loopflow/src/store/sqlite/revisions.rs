@@ -134,6 +134,93 @@ mod tests {
         }
     }
 
+    /// The tables the Task conversation work adds, each with the one domain
+    /// its three triggers move.
+    #[test]
+    fn workflow_flow_exec_and_activity_tables_move_their_domains() {
+        let (_dir, store) = store();
+        let conn = store.conn.lock().unwrap();
+        for (table, domain) in [
+            ("flow_execs", "flows"),
+            ("flow_exec_steps", "flows"),
+            ("task_workflows", "planning"),
+            ("task_workflow_moves", "planning"),
+            ("session_activity", "sessions"),
+        ] {
+            let moved: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND tbl_name=?1
+                     AND name LIKE 'store_revision_%' AND sql LIKE ?2",
+                    params![table, format!("%domain = '{domain}'%")],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(moved, 3, "{table} moves {domain}");
+        }
+    }
+
+    #[test]
+    fn a_session_reading_moves_sessions_only_when_waiting_could_change() {
+        let (_dir, store) = store();
+        session(&store, "conversation");
+        let generation = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT driver_generation FROM agent_sessions", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let driver = crate::exec::SessionDriver {
+            exec_id: None,
+            generation,
+            provider_generation: 0,
+            provider_exec_id: ExecId::new(),
+        };
+        let record = |observed_at, open_tools, pending_input, yielded| {
+            let before = store.revisions().unwrap();
+            store
+                .record_session_activity(
+                    "conversation",
+                    &driver,
+                    &crate::session::SessionActivity {
+                        observed_at,
+                        open_tools,
+                        pending_input,
+                        yielded,
+                    },
+                )
+                .unwrap();
+            let after = store.revisions().unwrap();
+            assert_eq!(
+                StoreRevisions {
+                    sessions: before.sessions,
+                    ..after
+                },
+                before
+            );
+            after.sessions - before.sessions
+        };
+        assert_eq!(record(1000, 1, 0, false), 1, "first reading");
+        assert_eq!(record(1005, 1, 0, false), 0, "still streaming");
+        assert_eq!(record(1010, 2, 0, false), 0, "another open tool");
+        assert_eq!(record(1015, 0, 0, false), 1, "last tool returned");
+        // Counting toward quiet from the newest reading, with no write when it arrives.
+        assert_eq!(store.next_quiet_waiting(1020).unwrap(), Some(1135));
+        assert_eq!(record(1020, 0, 0, false), 0, "streaming text");
+        assert_eq!(store.next_quiet_waiting(1025).unwrap(), Some(1140));
+        assert_eq!(
+            store.next_quiet_waiting(1140).unwrap(),
+            None,
+            "already Waiting"
+        );
+        assert_eq!(record(1140, 0, 0, false), 1, "activity after quiet");
+        assert_eq!(record(1145, 0, 1, false), 1, "question asked");
+        assert_eq!(store.next_quiet_waiting(1146).unwrap(), None);
+        assert_eq!(record(1150, 0, 0, false), 1, "question answered");
+        assert_eq!(record(1155, 0, 0, true), 1, "turn handed back");
+    }
+
     #[test]
     fn store_revisions_follow_committed_writes_only() {
         let (_dir, store) = store();

@@ -169,7 +169,6 @@ fn installation_uses_candidate_authority_from_any_checkout() {
             cwd,
             &["home", "install", "promote", "--cli-target", "/unused/lf"],
         );
-        cmd.env("LF_WORK_ADVANCE_CLAIM", "obsolete");
         if let Some(value) = declaration {
             cmd.env("LF_AS", value);
         }
@@ -220,8 +219,8 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
     std::os::unix::fs::symlink("/bin/ps", no_tools.path().join("ps")).unwrap();
     for args in [
         vec!["list"],
-        vec!["flow", "show", "code"],
-        vec!["help", "flow", "code"],
+        vec!["flow", "show", "pursue"],
+        vec!["help", "flow", "pursue"],
         vec!["account", "--cached"],
         vec!["account", "--cached", "--details"],
         vec!["account", "route"],

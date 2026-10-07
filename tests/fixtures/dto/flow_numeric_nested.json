@@ -1,7 +1,7 @@
 {
   "recommended": "nested",
   "record": {
-    "kind": "pinned",
+    "kind": "latest",
     "invocation_id": "numeric-nested-capture",
     "graph": {
       "name": "nested",
@@ -269,8 +269,7 @@
       ]
     ],
     "execution": "running",
-    "reason": "Selected nested check",
-    "restart_required": false
+    "reason": "Selected nested check"
   },
   "controls": []
 }

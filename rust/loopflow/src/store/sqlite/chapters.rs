@@ -27,8 +27,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// A Task is started by its first capture, the worker claim's unpublished
-    /// reservation included.
+    /// A Task is started by its first Run, an unpublished reservation included.
     pub fn task_started(&self, task: &TaskId) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
@@ -48,31 +47,23 @@ impl SqliteStore {
                  OR EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
                     AND json_extract(kind_json,'$.kind')='started')
                  OR EXISTS({})
-                 OR EXISTS(SELECT 1 FROM flow_events WHERE flow_id IN ({})
-                    AND kind='operation_started')",
+                 OR EXISTS(SELECT 1 FROM flow_exec_steps WHERE flow_exec_id IN ({}))",
                 super::task_work::session_ids("?1"),
-                super::task_work::flow_ids("?1"),
-            ),
-            [task.as_str()],
-            |row| row.get(0),
-        )?;
-        let claimed: bool = conn.query_row(
-            &format!(
-                "SELECT EXISTS(SELECT 1 FROM flow_sessions
-                 WHERE {} AND claim_json IS NOT NULL)",
-                super::flows::TASK_INVOCATION
+                super::task_work::exec_ids("?1"),
             ),
             [task.as_str()],
             |row| row.get(0),
         )?;
         let (abandoned, completed): (bool, bool) = conn.query_row(
-            "SELECT work_state='abandoned',work_state='done' FROM tasks WHERE id=?1",
+            &format!(
+                "SELECT state='abandoned',state='done' FROM (SELECT {} AS state FROM tasks t WHERE t.id=?1)",
+                super::durable::task_state_sql("t")
+            ),
             [task.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         Ok(TaskStartEvidence {
             begun,
-            worker_claimed: claimed,
             authored: None,
             published: false,
             abandoned,

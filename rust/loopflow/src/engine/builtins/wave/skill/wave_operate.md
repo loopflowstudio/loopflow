@@ -33,13 +33,13 @@ waiting indefinitely.
 
 Give every started, unfinished Task in the Wave exactly one disposition, with
 its evidence: the first row below that fits. Started is the recorded fact,
-whether or not a worker is alive now. Include Tasks status lists under
+whether or not a driver is alive now. Include Tasks status lists under
 `unavailable_tasks`; they are unknown until read. Unstarted backlog is listed
 as backlog and left alone: starting it is the person's selection.
 
 | Disposition | Evidence and action |
 | --- | --- |
-| moving | A live worker or driver was observed. Leave it alone. A connected conversation or review Session is not a driver. |
+| moving | A live driver was observed. Leave it alone. A connected conversation or review Session is not a driver. |
 | acted | This pass continued, recovered or delivered it through a supported control, then reread status and saw the effect. |
 | waiting on a person | A named review, decision or merge click, with the Session or PR to open. Never completed or approved for them. |
 | waiting on a dependency or capacity | The named Task, PR, check, account or limit. |
@@ -52,40 +52,27 @@ disposition is yours to establish, never a handoff. Its recommended action is
 a suggestion to check against the rules below, not an instruction. No action is
 a valid result only when every started Task already holds a disposition above.
 
-- **Look for a live driver first.** `lf wave status` describes only the Task's
-  managed Flow. Before continuing or retrying anything, read
-  `lf task status <issue> --json` and check every Flow in
-  `execution.work.flows`, including those with `managed: false`, and every Exec
-  in `execution.work.execs` without a `completed_at`, against `lf ps --json`.
-  A live process on any of them makes the Task moving, whoever launched it.
-- **A defined Flow proceeds.** A started Task whose selected Flow has steps
-  left is continued with `lf --task <issue> flow start`, then verified with
-  `lf task status <issue> --json`. It applies only when the Task has no live
-  driver, no pending review on any of its Flows and no hold in
-  `lf task automation`; each of those is its own disposition.
-  If the command refuses, its message is the evidence: the Task waits on a
-  person or is unknown, and you do not work around the refusal.
-- **Recover before reporting a blocker.** Read `lf task status`, the failed
-  step's log and `lf top` or `lf ps --json`. Repair what supported controls can
-  repair, then retry with
-  `lf --task <issue> flow start --reason "<what changed>"`. Retry only on new
-  evidence or a repaired cause; report an unchanged failure with its evidence
-  instead of trying it again.
-- **A Flow ends where it is authored to end.** An accepted launch, a finished
-  Flow and a published PR are evidence to inspect, not Task completion. Report
-  publication, review, landing, Task completion and remaining scope as separate
-  facts. When the Flow finished and the work has not landed, the Task waits on
-  a person: name the PR and what remains. That holds when status recommends
-  `lf pr land` or a next PR: a merge nobody armed, and `lf pr next`, which
-  rotates the Task to a new PR, are the person's to choose. A started Task with
-  no selected Flow waits on a person too. Do not select a Flow for either.
-- **Reviews belong to their Sessions.** Surface a pending review with its
-  Session from `lf session list --needs-me --json`. Complete that exact Session
-  with `lf session complete <id>` only when the participant decides that review
-  with you and its feedback is saved; the following loop-decide owns
-  navigation. Headless, a pending review is a waiting disposition.
+- **Look for a live driver first.** Read `lf task status <issue> --json` and
+  check every Flow in `execution.work.flows` and every unfinished Exec in
+  `execution.work.execs` against `lf ps --json`. A live process makes the Task
+  moving, whoever launched it. Unknown liveness is not idle.
+- **Recover before reporting a blocker.** Read the failed step's log and
+  inspect its effects. Repair a supported cause, then launch only the remaining
+  authorized work with `lf task run <issue> <flow> --reason "<what changed>"`.
+  A stopped Flow is history and cannot be resumed. Retry only on new evidence;
+  report an unchanged failure instead of repeating it.
+- **A Flow ends where authored.** A finished Flow or published PR does not
+  complete the Task. Name what remains and the PR or Task conversation awaiting
+  a decision. A Task on a workflow (`execution.work.workflow`) at a node its
+  last edge reached waits on a person there; rerun an edge that stopped or
+  failed with `lf task run <issue> <flow>`, and take no other edge for them;
+  do not choose a new direction or arm an unapproved merge.
+- **Reviews stay in the Task conversation.** Surface the Session from
+  `lf session list --waiting --json`. Discuss feedback and preserve agreed
+  direction there; closing a Session supplies no navigation authority.
+  Headless, required judgment is a waiting disposition.
 
-Start and continue selected Flows without asking. Do not approve reviews,
+Start authorized remaining work without asking. Do not approve reviews,
 arm a merge, cancel or abandon Tasks, or change direction.
 
 ## Exercise all five functions within the Wave
@@ -131,23 +118,29 @@ disagreement. A draft or failed delivery leaves the handoff pending.
 ## The hierarchy is an intent graph, not a control plane
 
 Tasks progress independently of Wave and repository passes. Neither operation
-is an approval prerequisite. Each Task's selected Flow carries its own steps;
-do not perform them or create another cursor here. Preserve selected Flows,
-review gates, worktrees, placement and execution history.
+is an approval prerequisite. A Task's Flows carry its autonomous work; do not
+perform a Flow's steps here. Preserve Flow history, conversation reviews,
+worktrees, placement and execution history.
 
-- Existing execution is reconciled through Task operations, never a duplicate
-  driver. When the person selects unstarted work, start it with the current
-  Project's Flow unless they chose another.
-- Discuss missing judgment in the ongoing Wave conversation when present.
-  Headless operation reports the reason when it cannot proceed.
-- Read existing Tasks before `lf task create --wave <wave>`. Use `--run` only
-  when execution is intended. Give work an observable outcome.
+- Start selected work with `lf task run <issue-id>`; use the
+  current Project's Flow unless an explicit choice is warranted. Each run
+  is a fresh Flow and returns when it ends; background it with your own tool.
+  Leave a live one running instead of duplicating it.
+- Inspect `lf task status` and existing logs before recovery. Resolve
+  impediments; discuss missing judgment in the ongoing Wave chat when present.
+  Headless operation stops with the reason when it cannot proceed. After a
+  failure, inspect its effects and launch fresh work with
+  `lf task run <issue> <flow> --reason "<what changed>"` only when new
+  evidence warrants it. Unknown liveness is not idle. Preserve historical review
+  evidence; discuss feedback and next work in the ongoing Task conversation.
+- Read existing Tasks before `lf task create --wave <wave>`. Give work an
+  observable outcome.
 - Update the plan through `lf update-plan --wave <wave> --plan
   <plan.json>`; curate durable decisions in `wave/<wave>/MEMORY.md`. Change
   GOAL.md only within accepted direction. Supply the complete content object
-  with `metric_targets`, required nonempty `flow` and `krs`; for example
-  `{"metric_targets":[],"flow":"feature","krs":[]}`. This edits the Wave's
-  one In Progress Linear Project. Preserve authored Flow and other plan fields.
+  with `metric_targets`, required nonempty `workflow` and `krs`; for example
+  `{"metric_targets":[],"workflow":"feature","krs":[]}`. This edits the Wave's
+  one In Progress Linear Project. Preserve the authored workflow and other plan fields.
 - Use supported Task/Work operations for changes, not raw stores, unclaimed
   process signals or a competing worker on this Home. A missing Home stays an
   explicit blocker.

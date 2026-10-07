@@ -204,7 +204,7 @@ struct RegistryQueryTests {
         "work_id": null,
         "slug": "release-feedback",
         "name": "current",
-        "flow": "task-design",
+        "workflow": "task-design",
         "status": "started", "current": true,
         "metric_targets": [],
         "krs": [
@@ -291,7 +291,7 @@ struct RegistryQueryTests {
 
 
 
-        #expect(result.workMap.currentProject?.flow == "task-design")
+        #expect(result.workMap.currentProject?.workflow == "task-design")
         #expect(result.workMap.tasks.items[0].task.identifier == "INF-123")
         #expect(result.workMap.tasks.items[0].reference.issueUrl?.absoluteString.contains("INF-123") == true)
         #expect(result.workMap.tasks.items[0].reference.workspace?.slug == "wire-it")

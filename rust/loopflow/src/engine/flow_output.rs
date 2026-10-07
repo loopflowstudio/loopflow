@@ -5,7 +5,8 @@ use serde_json::{json, Value};
 use crate::engine::transitions::{FlowDecision, FlowVerdict};
 use crate::engine::{ConcreteStep, SkillOutcome};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FlowOutput {
     Decision,
     Route(Vec<String>),
@@ -27,7 +28,7 @@ impl FlowOutput {
 
     pub fn for_step(step: &ConcreteStep) -> Option<Self> {
         match step {
-            ConcreteStep::Skill(skill) if !skill.human && skill.repeat.is_some() => {
+            ConcreteStep::Skill(skill) if !skill.human && skill.returns.is_some() => {
                 Some(Self::Decision)
             }
             ConcreteStep::Xor(branch) => {

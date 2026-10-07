@@ -55,7 +55,7 @@ struct WorkCacheTests {
         let first = WorkModel(query: source.query, repoPath: Self.repo, cache: saving)
         await first.refresh()
         let liveFlow = try #require(first.task(id: "issue-now")?.task.flow)
-        guard case .pinned(let live) = liveFlow.record else { Issue.record("fixture Flow is not pinned"); return }
+        guard case .latest(let live) = liveFlow.record else { Issue.record("fixture Flow has no latest record"); return }
         #expect(live.execution == .running)
         #expect(first.sessions.value?.first?.state == .active)
         #expect(first.task(id: "issue-now")?.task.condition.reason != WorkCache.savedReason)
@@ -64,9 +64,9 @@ struct WorkCacheTests {
         let returning = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("offline") },
                                     repoPath: Self.repo, cache: WorkCache(directory: directory))
         let flow = try #require(returning.task(id: "issue-now")?.task.flow)
-        guard case .pinned(let pinned) = flow.record else { Issue.record("saved Flow is not pinned"); return }
-        #expect(pinned.execution == .unknown)
-        #expect(pinned.current == live.current)
+        guard case .latest(let latest) = flow.record else { Issue.record("saved Flow has no latest record"); return }
+        #expect(latest.execution == .unknown)
+        #expect(latest.current == live.current)
         #expect(flow.controls.allSatisfy { $0.unavailable == WorkCache.savedReason })
         let conditions = returning.roadmap.value?.waves.flatMap { $0.tasks.items.map(\.condition) } ?? []
         #expect(!conditions.isEmpty)
@@ -98,10 +98,10 @@ struct WorkCacheTests {
         await source.recover()
         await returning.refresh()
         #expect(returning.workStatus == .current)
-        guard case .pinned(let pinned) = returning.task(id: "issue-now")?.task.flow.record else {
-            Issue.record("fresh Flow is not pinned"); return
+        guard case .latest(let latest) = returning.task(id: "issue-now")?.task.flow.record else {
+            Issue.record("fresh Flow has no latest record"); return
         }
-        #expect(pinned.execution == .running)
+        #expect(latest.execution == .running)
     }
 
     @Test("A first launch has one loading message")

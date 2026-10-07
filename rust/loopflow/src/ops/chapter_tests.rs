@@ -6,9 +6,6 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use super::{classify_task, TaskDisposition, TaskStartEvidence};
-use crate::durable::FlowSession;
-use crate::engine::invocation::QueuedInvocation;
-use crate::engine::{ConcreteSkill, ConcreteStep, ExecutionCursor, Skill};
 use crate::ops::pm::{pm_sync, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::NullProgress;
 use crate::planning::{LinearIssueId, TaskPlan};
@@ -25,7 +22,7 @@ fn project(id: &str, name: &str, status: ProjectStatus) -> PmProject {
         name: name.into(),
         slug: name.into(),
         summary: String::new(),
-        flow: "feature".into(),
+        workflow: "feature".into(),
         status,
         metric_targets: Vec::new(),
         krs: Vec::new(),
@@ -58,7 +55,6 @@ fn task(state: &str) -> PmItem {
 fn unreviewed_backlog_remains_while_started_work_moves() {
     let mut evidence = TaskStartEvidence {
         begun: false,
-        worker_claimed: false,
         authored: Some(false),
         published: false,
         abandoned: false,
@@ -86,18 +82,12 @@ fn unreviewed_backlog_remains_while_started_work_moves() {
         classify_task(&task("backlog"), &evidence).0,
         TaskDisposition::Move
     );
-    evidence.worker_claimed = true;
-    assert_eq!(
-        classify_task(&task("canceled"), &evidence).0,
-        TaskDisposition::Unresolved
-    );
 }
 
 #[test]
 fn unresolved_abandonment_requires_explicit_settlement() {
     let mut evidence = TaskStartEvidence {
         begun: false,
-        worker_claimed: false,
         authored: Some(false),
         published: false,
         abandoned: true,
@@ -111,12 +101,12 @@ fn unresolved_abandonment_requires_explicit_settlement() {
         classify_task(&task("canceled"), &evidence).0,
         TaskDisposition::Historical
     );
-    evidence.worker_claimed = true;
+    evidence.begun = true;
     assert_eq!(
         classify_task(&task("unstarted"), &evidence).0,
         TaskDisposition::Unresolved
     );
-    evidence.worker_claimed = false;
+    evidence.begun = false;
     evidence.authored = Some(true);
     assert_eq!(
         classify_task(&task("unstarted"), &evidence).0,
@@ -327,7 +317,7 @@ fn provider_fixture() -> Provider {
         let id = old_id(wave).to_owned();
         let name = format!("{title} — previous");
         provider.projects.insert(id.clone(), json!({"id":id,"name":name,"description":"", "archivedAt":null,
-            "content":"flow: feature\n\n## KRs\n- [ ] Retain proof", "status":{"type":"started"},
+            "content":"workflow: feature\n\n## KRs\n- [ ] Retain proof", "status":{"type":"started"},
             "teams":{"nodes":[{"id":"team-1"}]},"initiatives":{"nodes":[{"id":format!("initiative-{wave}")} ]}}));
         for (suffix, state) in [
             ("started", "started"),
@@ -390,7 +380,7 @@ async fn seed_project(
             name: plan.name.clone(),
             prompt_context: plan.prompt_context(),
             pm_snapshot_synced_at: now.unix_timestamp(),
-            flow: plan.flow.clone(),
+            workflow: plan.workflow.clone(),
             status: plan.status,
         },
         iteration: 0,
@@ -482,7 +472,7 @@ async fn local_task(
 async fn local_started_task(
     context: &PmTestContext,
     repo: &std::path::Path,
-) -> (Task, TaskPr, FlowSession) {
+) -> (Task, TaskPr, Vec<crate::ops::flow_run::FlowExec>) {
     let (task, _) = local_task(
         context,
         repo,
@@ -492,53 +482,22 @@ async fn local_started_task(
         "0000000000000000000000000000000000000000",
     )
     .await;
-    let now = OffsetDateTime::now_utc();
-    let flow = context
-        .store
-        .start_task_flow(
-            &task.id,
-            FlowSession {
-                invocation: QueuedInvocation::new(
-                    "captured",
-                    vec![ConcreteStep::Skill(ConcreteSkill {
-                        skill: Skill::named("implement"),
-                        sources: Vec::new(),
-                        id: Some("implement".into()),
-                        human: false,
-                        repeat: None,
-                    })],
-                )
-                .unwrap(),
-                cursor: ExecutionCursor::default(),
-                version: 0,
-                task_id: Some(task.id.clone()),
-                wave_id: Some(task.wave_id.clone()),
-                cwd: repo.into(),
-                message: Some("original input".into()),
-                model: None,
-                selected_capture: None,
-                pending_session_id: None,
-                ready_summary: None,
-                worker_generation: 0,
-                claim: None,
-                failure: None,
-                finished: false,
-                updated_at: now,
-            },
-        )
-        .await
-        .unwrap();
     assert!(!context.store.task_started(&task.id).await.unwrap());
-    let flow = context
-        .store
-        .reserve_attempt(flow.id(), flow.version, None, None)
-        .await
-        .unwrap();
+    // A Flow exec from the checkout is the Task's first recorded work.
+    context.store.sqlite.test_flow(
+        "captured",
+        &repo.to_string_lossy(),
+        &[("commit -m work", Some("succeeded"))],
+        None,
+    );
+    context.store.sqlite.mark_task_started(&task.id).unwrap();
     assert!(context.store.task_started(&task.id).await.unwrap());
+    let flows = context.store.sqlite.task_flows(&task.id).unwrap();
+    assert_eq!(flows.len(), 1);
     let pr = context.store.task_prs(&task.id).await.unwrap().remove(0);
     // Compare persisted values: SQLite stores timestamps at second precision.
     let task = context.store.get_task(&task.id).await.unwrap().unwrap();
-    (task, pr, flow)
+    (task, pr, flows)
 }
 
 fn task_started_at(path: &std::path::Path, task: &TaskId) -> i64 {
@@ -654,7 +613,7 @@ async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content()
     old["content"] = json!(original);
     old["status"]["type"] = json!("planned");
     let mut expected = old.clone();
-    expected["content"] = json!(original.replace("recommended:", "flow:"));
+    expected["content"] = json!(original.replace("recommended:", "workflow:"));
     expected["status"]["type"] = json!("started");
     let provider = Arc::new(Mutex::new(state));
     let (url, server) = serve_fixture(provider.clone()).await;
@@ -697,13 +656,13 @@ async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content()
         .iter()
         .find(|project| project.id == "00000000-0000-4000-8000-000000000001")
         .unwrap();
-    assert_eq!(synced.flow, "custom");
+    assert_eq!(synced.workflow, "custom");
     assert_eq!(synced.krs.len(), 1);
     assert_eq!(synced.krs[0].text, "Keep this KR");
     let retained = store.get_task(&task.id).await.unwrap().unwrap();
     assert_eq!(retained.project_id, task.project_id);
     assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-    assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+    assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
     server.abort();
 }
 
@@ -754,7 +713,7 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
             assert_eq!(retained.plan.id, task.plan.id);
             assert_eq!(retained.plan.title, "a-started");
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
-            assert_eq!(store.task_flow(&task.id).await.unwrap().unwrap(), flow);
+            assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
         })
         .await;
     assert_eq!(provider.lock().await.mutations, 0);
@@ -859,7 +818,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                                 .find(|p| p.id == "00000000-0000-4000-8000-000000000001")
                                 .unwrap();
                             assert_eq!(
-                                (&*current.id, &*current.flow),
+                                (&*current.id, &*current.workflow),
                                 ("00000000-0000-4000-8000-000000000001", "custom")
                             );
                             assert_eq!(
@@ -903,7 +862,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                         let store = super::pm_store().await.unwrap();
                         let task = store.get_task_by_issue("a-started").await.unwrap().unwrap();
                         let prs = store.task_prs(&task.id).await.unwrap();
-                        let flow = store.task_flow(&task.id).await.unwrap();
+                        let flow = store.sqlite.task_flows(&task.id).unwrap();
                         let ctx = super::resolve_context(&repo, "a").await.unwrap();
                         super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
                             .await
@@ -920,14 +879,14 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                         assert_eq!(provider.lock().await.mutations, mutations);
                         assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
                         assert_eq!(store.task_prs(&task.id).await.unwrap(), prs);
-                        assert_eq!(store.task_flow(&task.id).await.unwrap(), flow);
+                        assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);
                         {
                             let state = provider.lock().await;
                             assert_eq!(state.projects.len(), 4);
                             assert_eq!(state.issues.len(), 6);
                             assert_eq!(
                                 state.projects["00000000-0000-4000-8000-000000000001"]["content"],
-                                original.replace("recommended:", "flow:")
+                                original.replace("recommended:", "workflow:")
                             );
                             assert_eq!(
                                 state.projects["00000000-0000-4000-8000-000000000001"]["status"]
@@ -1057,7 +1016,7 @@ async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
                 .await
                 .unwrap();
             assert_eq!(projects[0].status, ProjectStatus::Started);
-            assert_eq!(projects[0].flow, "custom");
+            assert_eq!(projects[0].workflow, "custom");
             {
                 let mut state = provider.lock().await;
                 let mut future = state.projects["00000000-0000-4000-8000-000000000001"].clone();
@@ -1125,7 +1084,7 @@ async fn project_ensure_retries_each_uncertain_mutation_with_one_identity() {
                 assert_eq!(project, repeated);
                 assert_eq!(project.id, pending.successor_id);
                 assert_eq!(project.status, ProjectStatus::Started);
-                assert!(project.flow.is_empty());
+                assert!(project.workflow.is_empty());
                 assert!(project.krs.is_empty());
                 assert_eq!(provider.lock().await.projects.len(), 1);
                 assert_eq!(provider.lock().await.mutations, 3);
@@ -1250,7 +1209,7 @@ async fn project_ensure_activates_exact_backlog_without_changing_content_or_task
             assert!(readiness.observed_at.is_some());
             assert_eq!(first.name, "Summer work — customer requests");
             assert_eq!(first.status, ProjectStatus::Started);
-            assert!(first.flow.is_empty());
+            assert!(first.workflow.is_empty());
             assert_eq!(first.krs.len(), 1);
             let state = provider.lock().await;
             assert_eq!(state.projects[id]["content"], content);

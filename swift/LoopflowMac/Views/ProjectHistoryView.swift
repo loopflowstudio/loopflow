@@ -30,7 +30,7 @@ struct ProjectHistoryView: View {
             ScrollView {
                 if let project = projects.first(where: { $0.id == selected }) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Flow: \(project.flow)")
+                        Text("Workflow: \(project.workflow)")
                         ForEach(project.krs) { kr in
                             Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "circle")
                         }

@@ -46,30 +46,6 @@ import Testing
         #expect(model.visibleWork.orphanSessions(search: "").map(\.id) == ["interactive"])
     }
 
-    @Test("Completion fences an older refresh and stays absent on repeated reads")
-    func completionSurvivesRefresh() async throws {
-        let source = try ControlsSource()
-        let query = RegistryQuery { args, _ in try await source.read(args) }
-        let model = WorkModel(query: query, repoPath: "/src/loopflow")
-        let store = SessionsStore(repoPath: "/src/loopflow", query: query)
-        store.onResolved = { id in model.sessionResolved(id, repo: "/src/loopflow") }
-        await model.refreshSessions()
-        store.reconcile(model.visibleSessions)
-        model.navigation.selectedSessionId = "interactive"
-        await source.holdList()
-        let poll = Task { await model.refreshSessions() }
-        await source.waitForList()
-        #expect(await store.complete("interactive"))
-        await source.releaseList()
-        await poll.value
-        for _ in 0..<2 {
-            await model.refreshSessions()
-            store.reconcile(model.visibleSessions)
-            #expect(model.visibleSessions.isEmpty)
-            #expect(store.sessions.isEmpty)
-            #expect(model.navigation.selectedSessionId == nil)
-        }
-    }
 
     @Test("Preview is inert; confirmation uses exact Task and fences an older poll")
     func bindAfterPreview() async throws {
@@ -154,10 +130,6 @@ private actor ControlsSource {
                 await withCheckedContinuation { pending = $0; waiter?.resume(); waiter = nil }
             }
             return String(decoding: snapshot, as: UTF8.self)
-        }
-        if args.prefix(2) == ["session", "complete"] {
-            rows.removeAll { $0["id"] as? String == args[2] }
-            return "Completed"
         }
         if args.contains("--dry-run") {
             return #"{"session_id":"headless","task_id":"task-exact","identifier":"INF-123","title":"Completed off-roadmap Task"}"#

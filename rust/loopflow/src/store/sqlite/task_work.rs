@@ -4,15 +4,16 @@
 use std::collections::HashMap;
 
 use crate::durable::TaskId;
+use crate::engine::workflow::{WorkflowDefinition, END, START};
 use crate::exec::Exec;
 use crate::id::ExecId;
+use crate::ops::workflow::{
+    Workflow, WorkflowActor, WorkflowMove, WorkflowMoveKind, WorkflowPosition,
+};
 use crate::store::StoreResult;
 use crate::task_work::{TaskSession, TaskWork};
 
 use super::SqliteStore;
-
-// Bound Flows inherit their Task's checkout instead of storing a second path.
-const FLOW_CWD: &str = "COALESCE(af.cwd,(SELECT worktree FROM tasks WHERE id=af.task_id))";
 
 fn tasks(selector: &str) -> String {
     format!("SELECT id,worktree FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
@@ -24,21 +25,11 @@ fn checkout(cwd: &str) -> String {
     format!("tw.worktree!='' AND ({cwd}=rtrim(tw.worktree,'/') OR instr({cwd},rtrim(tw.worktree,'/')||'/')=1)")
 }
 
-pub(super) fn flow_ids(selector: &str) -> String {
-    format!(
-        "SELECT af.id FROM flow_sessions af JOIN ({}) tw ON af.task_id=tw.id OR ({})",
-        tasks(selector),
-        checkout(FLOW_CWD)
-    )
-}
-
 fn session_membership(session: &str) -> String {
     format!(
         "{session}.primary_scope IS NULL
-         AND ({session}.task_id=tw.id OR ({}) OR EXISTS(SELECT 1 FROM flow_sessions af
-         WHERE af.id={session}.flow_session_id AND (af.task_id=tw.id OR ({}))))",
+         AND ({session}.task_id=tw.id OR ({}))",
         checkout(&format!("{session}.cwd")),
-        checkout(FLOW_CWD)
     )
 }
 
@@ -57,12 +48,286 @@ pub(super) fn session_tasks(session: &str) -> String {
     )
 }
 
-fn exec_ids(selector: &str) -> String {
+pub(super) fn exec_ids(selector: &str) -> String {
     format!("SELECT ae.id FROM execs ae JOIN ({}) tw ON ({})
         UNION SELECT se.exec_id FROM session_events se WHERE se.session_id IN ({}) AND se.exec_id IS NOT NULL
-        UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN ({}) AND a.driver_exec_id IS NOT NULL
-        UNION SELECT fe.exec_id FROM flow_events fe WHERE fe.flow_id IN ({}) AND fe.exec_id IS NOT NULL",
-        tasks(selector), checkout("ae.cwd"), session_ids(selector), session_ids(selector), flow_ids(selector))
+        UNION SELECT a.driver_exec_id FROM agent_sessions a WHERE a.id IN ({}) AND a.driver_exec_id IS NOT NULL",
+        tasks(selector), checkout("ae.cwd"), session_ids(selector), session_ids(selector))
+}
+
+pub(super) fn flows_of_task(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<Vec<crate::ops::flow_run::FlowExec>> {
+    super::flow_inventory::flows_in(
+        conn,
+        &format!("e.id IN ({})", exec_ids("?1")),
+        &[&task.as_str()],
+    )
+}
+
+/// The Task's workflow row: its definition, the node it waits at or left,
+/// and the edge it is on with the Exec carrying it.
+type WorkflowRow = (WorkflowDefinition, String, Option<(u32, crate::exec::Exec)>);
+
+fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<WorkflowRow>> {
+    use rusqlite::OptionalExtension;
+    let Some((graph, node, edge, exec)) = conn
+        .query_row(
+            "SELECT graph,node,edge,exec_id FROM task_workflows WHERE task_id=?1",
+            [task.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<u32>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        )
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    let edge = match edge.zip(exec) {
+        Some((edge, exec)) => Some((
+            edge,
+            conn.query_row(
+                &format!("{} WHERE e.id=?1", super::execs::EXEC_SELECT),
+                [exec],
+                super::execs::read_exec,
+            )?,
+        )),
+        None => None,
+    };
+    Ok(Some((serde_json::from_str(&graph)?, node, edge)))
+}
+
+fn workflow_moves(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<WorkflowMove>> {
+    conn.prepare(
+        "SELECT m.workflow,m.kind,m.from_node,m.to_node,m.edge,m.exec_id,e.caller_session_id,m.note,m.at
+         FROM task_workflow_moves m LEFT JOIN execs e ON e.id=m.exec_id
+         WHERE m.task_id=?1 ORDER BY m.seq",
+    )?
+    .query_and_then([task.as_str()], |row| {
+        let kind: String = row.get(1)?;
+        let kind = WorkflowMoveKind::parse(&kind).ok_or_else(|| {
+            crate::store::StoreError::InvalidData(format!("unknown workflow move {kind:?}"))
+        })?;
+        // An arrival is the edge's own; any other move is its caller's.
+        let session_id = row
+            .get::<_, Option<String>>(6)?
+            .filter(|_| kind != WorkflowMoveKind::Arrived);
+        Ok(WorkflowMove {
+            workflow: row.get(0)?,
+            kind,
+            from: row.get(2)?,
+            to: row.get(3)?,
+            edge: row.get(4)?,
+            exec_id: row.get(5)?,
+            actor: match (kind, &session_id) {
+                (WorkflowMoveKind::Arrived, _) => WorkflowActor::Edge,
+                (_, Some(_)) => WorkflowActor::Conversation,
+                (_, None) => WorkflowActor::Person,
+            },
+            session_id,
+            note: row.get(7)?,
+            at: row.get(8)?,
+        })
+    })?
+    .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_workflow_move(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+    workflow: &str,
+    kind: WorkflowMoveKind,
+    (from, to): (&str, &str),
+    edge: Option<u32>,
+    by: Option<&ExecId>,
+    note: Option<&str>,
+) -> StoreResult<()> {
+    conn.execute(
+        "INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,exec_id,note,at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+        rusqlite::params![
+            task.as_str(),
+            workflow,
+            kind.as_str(),
+            from,
+            to,
+            edge,
+            by,
+            note,
+            crate::store::rows::now_unix()
+        ],
+    )?;
+    Ok(())
+}
+
+/// How a Task reaches `end`.
+#[derive(Debug, Clone)]
+pub(crate) enum EndMove {
+    /// The edge the calling process carried it along succeeded.
+    Arrive,
+    /// It leaves by an edge that runs nothing.
+    Choose { workflow: Workflow, edge: u32 },
+    /// It is put there. A Task with no Workflow is put at the end of one
+    /// with nothing between.
+    Set,
+}
+
+fn choose_edge_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    workflow: &Workflow,
+    edge: u32,
+    by: Option<&ExecId>,
+    note: Option<&str>,
+) -> StoreResult<bool> {
+    let chosen = &workflow.definition.edges[edge as usize];
+    let stopped = match &workflow.position {
+        WorkflowPosition::Node { .. } => None,
+        WorkflowPosition::Edge { exec_id, .. } => Some(exec_id.as_str()),
+    };
+    let carried = chosen.flow.is_some();
+    let left = tx.execute(
+        "UPDATE task_workflows SET node=?2,edge=?3,exec_id=?4,updated_at=?5
+         WHERE task_id=?1 AND node=?6 AND exec_id IS ?7",
+        rusqlite::params![
+            task.as_str(),
+            if carried { &chosen.from } else { &chosen.to },
+            carried.then_some(edge),
+            by.filter(|_| carried),
+            crate::store::rows::now_unix(),
+            chosen.from,
+            stopped
+        ],
+    )?;
+    if left == 0 {
+        return Ok(false);
+    }
+    append_workflow_move(
+        tx,
+        task,
+        &workflow.definition.name,
+        WorkflowMoveKind::Chose,
+        (&chosen.from, &chosen.to),
+        Some(edge),
+        by,
+        note,
+    )?;
+    Ok(true)
+}
+
+fn arrive_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, by: &ExecId) -> StoreResult<()> {
+    let Some((definition, _, Some((edge, carrier)))) = workflow_row(tx, task)? else {
+        return Ok(());
+    };
+    if &carrier.id != by {
+        return Ok(());
+    }
+    let arrived = &definition.edges[edge as usize];
+    tx.execute(
+        "UPDATE task_workflows SET node=?2,edge=NULL,exec_id=NULL,updated_at=?3 WHERE task_id=?1",
+        rusqlite::params![task.as_str(), arrived.to, crate::store::rows::now_unix()],
+    )?;
+    append_workflow_move(
+        tx,
+        task,
+        &definition.name,
+        WorkflowMoveKind::Arrived,
+        (&arrived.from, &arrived.to),
+        Some(edge),
+        Some(by),
+        None,
+    )
+}
+
+fn set_node_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    node: &str,
+    by: Option<&ExecId>,
+    note: Option<&str>,
+) -> StoreResult<bool> {
+    let Some((definition, from, edge)) = workflow_row(tx, task)? else {
+        return Ok(false);
+    };
+    tx.execute(
+        "UPDATE task_workflows SET node=?2,edge=NULL,exec_id=NULL,updated_at=?3 WHERE task_id=?1",
+        rusqlite::params![task.as_str(), node, crate::store::rows::now_unix()],
+    )?;
+    append_workflow_move(
+        tx,
+        task,
+        &definition.name,
+        WorkflowMoveKind::Set,
+        (&from, node),
+        edge.map(|(edge, _)| edge),
+        by,
+        note,
+    )?;
+    Ok(true)
+}
+
+fn stands_at_end(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1 AND node=?2 AND edge IS NULL)",
+        [task.as_str(), END],
+        |row| row.get(0),
+    )?)
+}
+
+/// Make `how` for the Task. Returns whether this move put it at `end`: false
+/// when it already stood there, or when the move no longer applied.
+pub(super) fn reach_end_in(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskId,
+    how: &EndMove,
+    by: Option<&ExecId>,
+    note: Option<&str>,
+) -> StoreResult<bool> {
+    if stands_at_end(tx, task)? {
+        return Ok(false);
+    }
+    match how {
+        EndMove::Arrive => {
+            if let Some(by) = by {
+                arrive_in(tx, task, by)?;
+            }
+        }
+        EndMove::Choose { workflow, edge } => {
+            choose_edge_in(tx, task, workflow, *edge, by, note)?;
+        }
+        EndMove::Set => {
+            if !set_node_in(tx, task, END, by, note)? {
+                let unplanned = crate::engine::workflow::unplanned();
+                tx.execute(
+                    "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,?4)",
+                    rusqlite::params![
+                        task.as_str(),
+                        serde_json::to_string(&unplanned)?,
+                        END,
+                        crate::store::rows::now_unix()
+                    ],
+                )?;
+                append_workflow_move(
+                    tx,
+                    task,
+                    &unplanned.name,
+                    WorkflowMoveKind::Set,
+                    (START, END),
+                    None,
+                    by,
+                    note,
+                )?;
+            }
+        }
+    }
+    stands_at_end(tx, task)
 }
 
 /// Every unfinished Exec paired with each Task it belongs to: the same
@@ -77,16 +342,11 @@ fn open_exec_tasks() -> String {
             WHERE completed_at IS NULL),
         sessions AS (SELECT DISTINCT se.exec_id AS exec,se.session_id AS session
             FROM open CROSS JOIN session_events se ON se.exec_id=open.id
-            UNION SELECT a.driver_exec_id,a.id FROM open CROSS JOIN agent_sessions a ON a.driver_exec_id=open.id),
-        flows AS (SELECT DISTINCT fe.exec_id AS exec,fe.flow_id AS flow
-            FROM open CROSS JOIN flow_events fe ON fe.exec_id=open.id)
+            UNION SELECT a.driver_exec_id,a.id FROM open CROSS JOIN agent_sessions a ON a.driver_exec_id=open.id)
         SELECT open.id,tw.id FROM open JOIN tasks tw ON {}
         UNION SELECT s.exec,tw.id FROM sessions s JOIN agent_sessions a ON a.id=s.session
-            JOIN tasks tw ON ({session})
-        UNION SELECT f.exec,tw.id FROM flows f JOIN flow_sessions af ON af.id=f.flow
-            JOIN tasks tw ON af.task_id=tw.id OR ({})",
-        checkout("open.cwd"),
-        checkout(FLOW_CWD)
+            JOIN tasks tw ON ({session})",
+        checkout("open.cwd")
     )
 }
 
@@ -103,36 +363,25 @@ fn members(
 ) -> StoreResult<(Vec<TaskSession>, Vec<crate::durable::FlowInventoryEntry>)> {
     let sessions = tx
         .prepare(&format!(
-            "SELECT s.id,s.title,s.kind,s.interactive,s.flow_session_id,s.completed_at,
-            COALESCE(s.flow_session_id=(SELECT current_invocation_id FROM tasks WHERE id=?1),0)
+            "SELECT s.id,s.title,s.interactive,{},s.completed_at
             FROM agent_sessions s WHERE s.id IN ({}) ORDER BY s.created_at,s.id",
+            super::sessions::SESSION_FLOW,
             session_ids("?1")
         ))?
         .query_and_then([task.as_str()], |row| {
             Ok(TaskSession {
                 id: row.get(0)?,
                 title: row.get(1)?,
-                kind: serde_json::from_value(serde_json::Value::String(row.get(2)?))?,
-                interactive: row.get(3)?,
-                flow_session_id: row.get(4)?,
-                completed_at: row.get(5)?,
-                managed: row.get(6)?,
+                interactive: row.get(2)?,
+                flow_id: row.get(3)?,
+                completed_at: row.get(4)?,
             })
         })?
         .collect::<StoreResult<Vec<_>>>()?;
-    let mut flows = tx
-        .prepare(&format!(
-            "SELECT {},{} {} WHERE f.id IN ({}) ORDER BY f.id",
-            super::flows::FLOW_METADATA_COLUMNS,
-            super::flow_inventory::INVENTORY_EXTRA,
-            super::flow_inventory::INVENTORY_FROM,
-            flow_ids("?1")
-        ))?
-        .query_map([task.as_str()], super::flow_inventory::read_entry)?
-        .collect::<rusqlite::Result<StoreResult<Vec<_>>>>()??;
-    for flow in &mut flows {
-        flow.managed &= flow.summary.task_id.as_ref() == Some(task);
-    }
+    let flows = flows_of_task(tx, task)?
+        .iter()
+        .map(|flow| super::flow_inventory::entry_in(tx, flow))
+        .collect::<StoreResult<Vec<_>>>()?;
     Ok((sessions, flows))
 }
 
@@ -164,11 +413,16 @@ impl SqliteStore {
             ))?
             .query_map([task.as_str()], super::execs::read_exec)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        let workflow = workflow_row(&tx, task)?;
+        let history = workflow_moves(&tx, task)?;
         tx.commit()?;
+        drop(conn);
+        let workflow = workflow.map(|row| self.read_workflow(row, history));
         Ok(TaskWork {
             sessions,
             flows,
             execs,
+            workflow,
         })
     }
 
@@ -208,24 +462,153 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let (sessions, flows) = members(&tx, task)?;
+        let workflow = workflow_row(&tx, task)?;
+        let history = workflow_moves(&tx, task)?;
         tx.commit()?;
+        drop(conn);
+        let workflow = workflow.map(|row| self.read_workflow(row, history));
         Ok(TaskWork {
+            workflow,
             sessions,
             flows,
             execs: open.by_task.get(task.as_str()).cloned().unwrap_or_default(),
         })
     }
 
-    /// Exact Flow membership is used only to exempt the completing worker from
-    /// its own completion gate. Causal ancestry does not establish membership.
-    pub(crate) fn flow_exec_ids(&self, flow: &str) -> StoreResult<Vec<crate::id::ExecId>> {
+    /// Whether an Exec with no recorded exit may still have its process.
+    /// Unknown is not stopped.
+    pub(crate) fn exec_may_run(&self, exec: &crate::exec::Exec) -> bool {
+        crate::journal::exec_process_evidence(self, &exec.id)
+            != crate::journal::ProcessIdentityEvidence::Dead
+    }
+
+    /// The Task's Workflow with its history.
+    pub(crate) fn workflow(&self, task: &TaskId) -> StoreResult<Option<Workflow>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT exec_id FROM flow_events WHERE flow_id=?1 AND exec_id IS NOT NULL
-            UNION SELECT e.exec_id FROM session_events e JOIN agent_sessions s ON s.id=e.session_id
-                WHERE s.flow_session_id=?1 AND e.exec_id IS NOT NULL
-            UNION SELECT driver_exec_id FROM agent_sessions WHERE flow_session_id=?1 AND driver_exec_id IS NOT NULL")?;
-        let rows = query.query_map([flow], |row| row.get(0))?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let Some(row) = workflow_row(&conn, task)? else {
+            return Ok(None);
+        };
+        let history = workflow_moves(&conn, task)?;
+        drop(conn);
+        Ok(Some(self.read_workflow(row, history)))
+    }
+
+    /// Whether the carrying Flow still runs is its Exec's, read here.
+    fn read_workflow(
+        &self,
+        (definition, node, edge): WorkflowRow,
+        history: Vec<WorkflowMove>,
+    ) -> Workflow {
+        let position = match edge {
+            None => WorkflowPosition::Node { node },
+            Some((edge, exec)) => WorkflowPosition::Edge {
+                edge,
+                exec_id: exec.id.to_string(),
+                running: exec.completed_at.is_none() && self.exec_may_run(&exec),
+            },
+        };
+        Workflow::new(definition, position, history)
+    }
+
+    /// Take up `definition` for the Task as it is defined now, at `start`.
+    /// It replaces the Task's earlier Workflow; the history stays.
+    pub(crate) fn take_up_workflow(
+        &self,
+        task: &TaskId,
+        definition: &WorkflowDefinition,
+        by: &ExecId,
+        note: Option<&str>,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT OR REPLACE INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,?4)",
+            rusqlite::params![
+                task.as_str(),
+                serde_json::to_string(definition)?,
+                START,
+                crate::store::rows::now_unix()
+            ],
+        )?;
+        append_workflow_move(
+            &tx,
+            task,
+            &definition.name,
+            WorkflowMoveKind::TookUp,
+            (START, START),
+            None,
+            Some(by),
+            note,
+        )?;
+        Ok(tx.commit()?)
+    }
+
+    /// Leave by `edge`, one of `workflow.outgoing`. An edge with a Flow puts
+    /// the Task on it, carried by `by`; one that runs nothing puts it at its
+    /// target. Returns false, writing nothing, when the Task is no longer
+    /// where `workflow` read it, so two choosers cannot both leave.
+    pub(crate) fn choose_workflow_edge(
+        &self,
+        task: &TaskId,
+        workflow: &Workflow,
+        edge: u32,
+        by: &ExecId,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let left = choose_edge_in(&tx, task, workflow, edge, Some(by), note)?;
+        tx.commit()?;
+        Ok(left)
+    }
+
+    /// The edge `by` carried the Task along succeeded: put the Task at its
+    /// target. A Task no longer on that edge stays where it was put.
+    pub(crate) fn arrive_workflow_edge(&self, task: &TaskId, by: &ExecId) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        arrive_in(&tx, task, by)?;
+        Ok(tx.commit()?)
+    }
+
+    /// Put the Task at `node` of its Workflow, running nothing. Returns
+    /// false when the Task has no Workflow.
+    pub(crate) fn set_workflow_node(
+        &self,
+        task: &TaskId,
+        node: &str,
+        by: &ExecId,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let set = set_node_in(&tx, task, node, Some(by), note)?;
+        tx.commit()?;
+        Ok(set)
+    }
+
+    /// The node `by`'s edge enters, while the Task is still on that edge.
+    pub(crate) fn workflow_edge_target(
+        &self,
+        task: &TaskId,
+        by: &ExecId,
+    ) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(match workflow_row(&conn, task)? {
+            Some((definition, _, Some((edge, carrier)))) if &carrier.id == by => {
+                Some(definition.edges[edge as usize].to.clone())
+            }
+            _ => None,
+        })
+    }
+
+    /// Every Flow among the Task's work, oldest first.
+    pub(crate) fn task_flows(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Vec<crate::ops::flow_run::FlowExec>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        flows_of_task(&conn, task)
     }
 
     /// A turn runs in a local provider process, so one that began before this
@@ -385,12 +768,12 @@ mod tests {
             ..Default::default()
         };
         for expected in ["b-repo", "c-wave", "d-orphan"] {
-            let page = store.session_summaries(&filter).unwrap();
+            let page = store.session_summaries(&filter, 0).unwrap();
             assert_eq!(page.len(), 1);
             assert_eq!(page[0].id, expected);
             filter.after = Some(page[0].id.clone());
         }
-        assert!(store.session_summaries(&filter).unwrap().is_empty());
+        assert!(store.session_summaries(&filter, 0).unwrap().is_empty());
     }
 
     #[test]
@@ -419,8 +802,8 @@ mod tests {
                 ("sibling", "/missing/task%_-other", false, false),
                 ("wildcard", "/missing/taskAB", false, false),
             ] {
-                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id,kind,completed_at)
-                    VALUES(?1,?1,'human',1,0,?2,?3,?4,?5,?6)", params![id,cwd,bound.then(|| task.as_str()),bound.then_some(wave.as_str()),"conversation",complete.then_some(2)]).unwrap();
+                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id,completed_at)
+                    VALUES(?1,?1,'human',1,0,?2,?3,?4,?5)", params![id,cwd,bound.then(|| task.as_str()),bound.then_some(wave.as_str()),complete.then_some(2)]).unwrap();
             }
             for id in ["manual", "conversation", "history", "sibling", "wildcard"] {
                 super::super::sessions::test_capture(
@@ -429,19 +812,6 @@ mod tests {
                     &crate::session_record::new_artifact_key(),
                 );
             }
-            for (id, cwd, bound) in [
-                ("managed", "/elsewhere", true),
-                ("independent", "/missing/task%_/sub", false),
-                ("unrelated", "/other", false),
-            ] {
-                conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,cwd,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state)
-                    VALUES(?1,?2,?3,?4,?5,0,0,1,0,1,'current')", params![id,bound.then(||task.as_str()),bound.then_some(wave.as_str()),(!bound).then_some(cwd),serde_json::json!({"id": id,"flow": id,"steps": []}).to_string()]).unwrap();
-            }
-            conn.execute(
-                "UPDATE tasks SET current_invocation_id='managed' WHERE id=?1",
-                [task.as_str()],
-            )
-            .unwrap();
             for (id, cwd) in [
                 (&mechanical, "/missing/task%_"),
                 (&bound_exec, "/elsewhere"),
@@ -458,6 +828,14 @@ mod tests {
             )
             .unwrap();
         }
+        // A Flow is the Task's work when its Execs ran in the checkout.
+        let independent = store.test_flow(
+            "independent",
+            "/missing/task%_/sub",
+            &[("implement", None)],
+            None,
+        );
+        store.test_flow("unrelated", "/other", &[("implement", None)], None);
         let work = store.task_work(&task).unwrap();
         assert_eq!(
             work.sessions
@@ -469,17 +847,21 @@ mod tests {
         assert_eq!(
             work.flows
                 .iter()
-                .map(|f| (f.summary.id.as_str(), f.managed))
+                .map(|f| f.summary.id.as_str())
                 .collect::<Vec<_>>(),
-            [("independent", false), ("managed", true)]
+            [independent.as_str()]
         );
-        assert_eq!(work.execs.len(), 2);
+        assert_eq!(work.flows[0].summary.task_id.as_ref(), Some(&task));
+        assert_eq!(work.execs.len(), 4);
         // The open reading agrees with the full one about unfinished Execs.
-        assert!(store
+        let initial_open = store
             .task_open_work(&task, &store.open_execs().unwrap())
-            .unwrap()
+            .unwrap();
+        assert_eq!(initial_open.execs.len(), 2);
+        assert!(initial_open
             .execs
-            .is_empty());
+            .iter()
+            .all(|exec| exec.completed_at.is_none()));
         let unfinished = ExecId::new();
         {
             let conn = store.conn.lock().unwrap();
@@ -494,12 +876,10 @@ mod tests {
             .task_open_work(&task, &store.open_execs().unwrap())
             .unwrap();
         assert_eq!(open.sessions, store.task_work(&task).unwrap().sessions);
-        assert_eq!(
-            open.execs.iter().map(|exec| &exec.id).collect::<Vec<_>>(),
-            [&unfinished]
-        );
+        assert_eq!(open.execs.len(), 3);
+        assert!(open.execs.iter().any(|exec| exec.id == unfinished));
         // With every Exec unfinished, each membership path agrees: checkout,
-        // Session event, driver and Flow event.
+        // Session event and driver.
         store
             .conn
             .lock()
@@ -516,7 +896,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let all = ids(store.task_work(&task).unwrap());
-        assert_eq!(all.len(), 3);
+        assert_eq!(all.len(), 5);
         assert_eq!(
             ids(store
                 .task_open_work(&task, &store.open_execs().unwrap())
@@ -543,12 +923,15 @@ mod tests {
         );
         assert!(store.session_task_ids("sibling").unwrap().is_empty());
         let summaries = store
-            .session_summaries(&SessionFilter {
-                task: Some("PROOF-1".into()),
-                interactive: None,
-                history: true,
-                ..Default::default()
-            })
+            .session_summaries(
+                &SessionFilter {
+                    task: Some("PROOF-1".into()),
+                    interactive: None,
+                    history: true,
+                    ..Default::default()
+                },
+                0,
+            )
             .unwrap();
         assert_eq!(summaries.len(), work.sessions.len());
         assert!(summaries
@@ -565,40 +948,49 @@ mod tests {
             )
             .unwrap();
         assert_eq!(flows.entries, work.flows);
-        assert!(store
+        // The Flow's step is the only work performed in the checkout.
+        let performed = store
             .execs(
                 &ExecFilter {
                     performed_work: Some(ExecWorkFilter::Task(task.clone())),
                     ..Default::default()
                 },
                 None,
-                NonZeroU32::new(100).unwrap()
+                NonZeroU32::new(100).unwrap(),
             )
-            .unwrap()
-            .entries
-            .is_empty());
+            .unwrap();
+        let (flow, _) = store.flow_exec(independent.as_str()).unwrap().unwrap();
+        assert_eq!(
+            performed
+                .entries
+                .iter()
+                .map(|exec| &exec.id)
+                .collect::<Vec<_>>(),
+            [&flow.steps[0].exec.id]
+        );
 
         let child = TaskId::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'child','PROOF-2','/missing/task%_/child',1)", params![child.as_str(), project.as_str()]).unwrap();
-            conn.execute("INSERT INTO flow_sessions(id,task_id,wave_id,invocation_json,step_index,iteration,position_version,worker_generation,updated_at,state) VALUES('child-flow',?1,?2,?3,0,0,1,0,1,'current')", params![child.as_str(), wave, serde_json::json!({"id":"child-flow","flow":"child","steps":[]}).to_string()]).unwrap();
-            conn.execute(
-                "UPDATE tasks SET current_invocation_id='child-flow' WHERE id=?1",
-                [child.as_str()],
-            )
-            .unwrap();
-            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,flow_session_id,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/elsewhere','child-flow',?1,?2)", params![child.as_str(), wave]).unwrap();
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/missing/task%_/child',?1,?2)", params![child.as_str(), wave]).unwrap();
         }
+        // A nested checkout's work is also its enclosing Task's.
+        let child_flow = store.test_flow(
+            "child",
+            "/missing/task%_/child",
+            &[("implement", None)],
+            None,
+        );
         let work = store.task_work(&task).unwrap();
         assert!(work
             .flows
             .iter()
-            .any(|flow| flow.summary.id == "child-flow" && !flow.managed));
+            .any(|flow| flow.summary.id == child_flow.as_str()));
         assert!(work
             .sessions
             .iter()
-            .any(|session| session.id == "child-session" && !session.managed));
+            .any(|session| session.id == "child-session"));
         let memberships = store.session_task_ids("child-session").unwrap();
         assert!(memberships.contains(&task) && memberships.contains(&child));
         {
@@ -614,12 +1006,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["history"]
         );
-        assert_eq!(
-            work.flows
-                .iter()
-                .map(|flow| flow.summary.id.as_str())
-                .collect::<Vec<_>>(),
-            ["managed"]
-        );
+        assert!(work.flows.is_empty());
     }
 }

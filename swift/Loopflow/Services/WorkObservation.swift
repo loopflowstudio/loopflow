@@ -20,6 +20,11 @@ public struct WorkObservation: Sendable {
     }
 }
 
+public enum WorkObservationError: Error, Sendable {
+    /// Replace the reader only after draining its previous launch authority.
+    case configurationChanged
+}
+
 /// The Work whose activity is shown. Mirrors Rust `WorkActivityScope`.
 public struct WorkActivityScope: Decodable, Equatable, Sendable {
     public let wave: String?
@@ -115,9 +120,16 @@ public struct WorkFrame: Decodable, Sendable {
         }
     }
 
+    /// A Task's work and each of its Flow runs, in the order of `work.flows`.
     public struct TaskPart: Decodable, Sendable {
         public let task: String
         public let work: TaskWork
+        public let flowRuns: [FlowDetail]
+
+        enum CodingKeys: String, CodingKey {
+            case task, work
+            case flowRuns = "flow_runs"
+        }
     }
 
     public struct WavePart: Decodable, Sendable {

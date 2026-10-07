@@ -17,7 +17,7 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
         .env_remove("LF_RUN_DIR")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
-        .env_remove("LF_FLOW_STEP")
+        .env_remove("LF_FLOW_ID")
         .env_remove("LF_HUMAN_SESSION")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_TERMINAL_ID")
@@ -44,7 +44,8 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     }
     assert!(!help.contains("advance"));
     assert!(!help.contains("iterate"));
-    assert!(help.contains("complete"));
+    assert!(!help.contains("complete"));
+    assert!(!help.contains("ready"));
     assert!(help.contains("connect"));
     assert!(!help.contains("accept"));
     assert!(!help.contains("decline"));
@@ -58,26 +59,27 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     assert!(String::from_utf8_lossy(&removed.stderr).contains("unexpected argument '--resume'"));
 
     for args in [
-        &["session", "ready"][..],
-        &["session", "complete"],
-        &["session", "connect"],
-    ] {
-        let output = run(home.path(), args);
-        assert!(!output.status.success());
-        assert!(String::from_utf8_lossy(&output.stderr).contains("required"));
-    }
-
-    for args in [
-        &["session", "connect", "missing-session", "--json"][..],
+        &["session", "ready", "Feedback"][..],
         &["session", "complete", "missing-session"],
+        &["session", "stop-client", "missing-input"],
+        &["session", "serve-flow"],
     ] {
         let output = run(home.path(), args);
         assert!(!output.status.success());
-        assert_eq!(
-            String::from_utf8_lossy(&output.stderr).trim(),
-            "Error: Session missing-session was not found"
-        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains("unrecognized subcommand"));
     }
+    let output = run(home.path(), &["session", "connect"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("required"));
+    let output = run(
+        home.path(),
+        &["session", "connect", "missing-session", "--json"],
+    );
+    assert!(!output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr).trim(),
+        "Error: Session missing-session was not found"
+    );
 }
 
 #[cfg(unix)]
@@ -120,7 +122,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
             "LF_TRACE_ID",
             "LF_PROCESS_ID",
             "LF_HUMAN_SESSION",
-            "LF_FLOW_STEP",
+            "LF_FLOW_ID",
         ] {
             command.env_remove(name);
         }
@@ -415,15 +417,14 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             assert!(failure.contains("sha256"), "{failure}");
             assert!(failure.contains(home.path().to_str().unwrap()), "{failure}");
             assert!(!failure.contains("Local proof"), "prompt leaked: {failure}");
-            let (completed_at, ready_summary): (Option<i64>, Option<String>) = database
+            let completed_at: Option<i64> = database
                 .query_row(
-                    "SELECT completed_at, ready_summary FROM agent_sessions WHERE id = ?1",
+                    "SELECT completed_at FROM agent_sessions WHERE id = ?1",
                     [id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| row.get(0),
                 )
                 .unwrap();
             assert!(completed_at.is_some(), "the exited orphan is retired");
-            assert!(ready_summary.is_none());
         }
     }
 }
@@ -455,10 +456,9 @@ fn prepare_conversation(
                 iterations: None,
                 task_id: None,
                 wave_id: None,
-                flow_session_id: None,
+                flow_id: None,
                 work_source: None,
                 bound_at: None,
-                kind: loopflow::session::SessionKind::Conversation,
                 interactive: true,
                 repo: None,
                 title: title.into(),
@@ -468,7 +468,6 @@ fn prepare_conversation(
                 completed_at: None,
                 created_at: 1,
             },
-            None,
             None,
         )
         .unwrap();
@@ -491,6 +490,33 @@ fn prepare_conversation(
         )
         .unwrap();
     (session.id, input, dir)
+}
+
+#[test]
+fn waiting_lists_only_conversations_waiting_on_a_person() {
+    let home = tempfile::tempdir().unwrap();
+    let cwd = home.path().join("work");
+    std::fs::create_dir(&cwd).unwrap();
+    let (working, _, _) = prepare_conversation(home.path(), &cwd, "codex", "Working");
+    let (asked, _, _) = prepare_conversation(home.path(), &cwd, "codex", "Asked");
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    for (id, pending) in [(&working, 0), (&asked, 1)] {
+        db.execute(
+            "INSERT INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded)
+             SELECT id,driver_generation,unixepoch(),1,?2,0 FROM agent_sessions WHERE id=?1",
+            rusqlite::params![id, pending],
+        )
+        .unwrap();
+    }
+    let list = |flag: &str| run(home.path(), &["session", "list", "--all", "--json", flag]);
+    let waiting = list("--waiting");
+    assert!(waiting.status.success(), "{waiting:?}");
+    let waiting: Vec<serde_json::Value> = serde_json::from_slice(&waiting.stdout).unwrap();
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0]["id"], asked.as_str());
+    assert_eq!(waiting[0]["attention"], "waiting");
+    assert!(listed(home.path(), &working)["attention"].is_null());
+    assert!(!list("--needs-me").status.success());
 }
 
 fn listed(home: &std::path::Path, id: &str) -> serde_json::Value {
@@ -580,19 +606,16 @@ fn session_names_survive_capture_replacement() {
 
     // Capture keys and history prefixes cannot select a conversation mutation.
     for selector in [first_run.as_str(), &first_run[..12]] {
-        for args in [
-            vec!["session", "rename", selector, "Wrong target"],
-            vec!["session", "complete", selector],
-        ] {
-            let rejected = run(home.path(), &args);
-            assert!(!rejected.status.success(), "{rejected:?}");
-            assert!(String::from_utf8_lossy(&rejected.stderr).contains("was not found"));
-        }
+        let rejected = run(
+            home.path(),
+            &["session", "rename", selector, "Wrong target"],
+        );
+        assert!(!rejected.status.success(), "{rejected:?}");
+        assert!(String::from_utf8_lossy(&rejected.stderr).contains("was not found"));
     }
     assert_eq!(listed(home.path(), id)["title"], "Which release target?");
     let suggested = rename(home.path(), &[id, "Release target", "--suggest"]);
     assert_eq!(suggested["id"], id);
-    assert_eq!(suggested["kind"], "conversation");
     assert_eq!(suggested["title"], "Release target");
     let named = rename(home.path(), &[id, "Launch notes"]);
     assert_eq!(named["title_source"], "human");
@@ -665,7 +688,6 @@ fn session_names_survive_capture_replacement() {
     assert!(inside.status.success(), "{inside:?}");
     let inside: serde_json::Value = serde_json::from_slice(&inside.stdout).unwrap();
     assert_eq!(inside["id"], id);
-    assert_eq!(inside["kind"], "conversation");
     assert!(inside.get("run_id").is_none());
     assert_eq!(inside["title"], "Launch notes");
     assert_eq!(inside["title_source"], "human");
@@ -686,16 +708,6 @@ fn session_names_survive_capture_replacement() {
     assert_eq!(all.len(), 1, "{all:?}");
     assert_eq!(readback["state"], "closed", "the exited orphan is retired");
 
-    let completed = run(home.path(), &["session", "complete", &replacement]);
-    assert!(
-        String::from_utf8_lossy(&completed.stderr).contains("was not found"),
-        "{completed:?}"
-    );
-    let again = run(home.path(), &["session", "complete", id]);
-    assert!(
-        String::from_utf8_lossy(&again.stderr).contains("already complete"),
-        "{again:?}"
-    );
     assert!(!home
         .path()
         .join("human-sessions")
@@ -741,8 +753,6 @@ fn resume_shorthand_help_and_empty_worktree() {
         assert!(output.status.success(), "{output:?}");
         assert!(String::from_utf8_lossy(&output.stdout).contains("[ID]"));
     }
-    let flow = run(home.path(), &["flow", "resume", "--help"]);
-    assert!(flow.status.success(), "{flow:?}");
     for args in [&["resume"][..], &["session", "resume"]] {
         let output = command(home.path(), args)
             .current_dir(home.path())
@@ -790,7 +800,6 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
     let (b, input_b, _) = prepare_conversation(home.path(), &repo, "codex", "B");
     let (background, _, _) = prepare_conversation(home.path(), &repo, "codex", "Background");
     let (other, _, _) = prepare_conversation(home.path(), &sibling, "codex", "Other");
-    let (review, _, _) = prepare_conversation(home.path(), &repo, "codex", "Stale review");
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
         "UPDATE agent_sessions SET interactive=0,created_at=9999999999 WHERE id=?1",
@@ -800,11 +809,6 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
     db.execute(
         "UPDATE agent_sessions SET created_at=9999999999 WHERE id=?1",
         [&other],
-    )
-    .unwrap();
-    db.execute(
-        "UPDATE agent_sessions SET kind='flow_review',created_at=9999999999 WHERE id=?1",
-        [&review],
     )
     .unwrap();
     db.execute("UPDATE agent_sessions SET completed_at=2 WHERE id=?1", [&a])

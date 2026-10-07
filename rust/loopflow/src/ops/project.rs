@@ -205,7 +205,7 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
                 .await
                 .map_err(project_error)?;
             let content = ProjectContent {
-                flow: String::new(),
+                workflow: String::new(),
                 krs: Vec::new(),
                 metric_targets: Vec::new(),
             };
@@ -332,33 +332,50 @@ pub(crate) async fn accept_project(
     Ok(project)
 }
 
-pub fn update_plan(repo: &Path, wave: Option<&str>, content: &ProjectContent) -> OpsResult<()> {
-    content.validate().map_err(project_error)?;
+/// What `lf wave update-plan` writes to the Wave's current Project.
+#[derive(Debug)]
+pub enum PlanChange {
+    Replace(ProjectContent),
+    /// Only the workflow; KRs and targets stay as they are.
+    Workflow(String),
+}
+
+pub fn update_plan(repo: &Path, wave: Option<&str>, change: PlanChange) -> OpsResult<()> {
     let wave = crate::work::wave::context::resolve_managed_wave_sync(Some(repo), wave)
         .map_err(project_error)?;
     tokio::runtime::Runtime::new()
         .map_err(project_error)?
-        .block_on(async {
-            let store = super::pm::pm_store().await?;
-            let acquisition = super::pm::lock_wave_planning(&wave).await?;
-            super::metrics::validate_chapter_targets(&wave, &content.metric_targets)
-                .map_err(project_error)?;
-            let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
-            let projects =
-                super::pm::checked_projects_with_store(repo, &ctx, wave.slug(), &store).await?;
-            let project = select_project(&store, &wave, &projects)?;
-            let provider = ctx
-                .client
-                .project_ownership(&project.id)
-                .await
-                .map_err(project_error)?;
-            ctx.client
-                .update_project(&provider.id, &provider.name, content)
-                .await
-                .map_err(project_error)?;
-            super::pm::refresh_pm_snapshot_locked(repo, &wave, &ctx, &store, acquisition).await?;
-            Ok(())
-        })
+        .block_on(write_plan(repo, &wave, change))
+}
+
+pub(crate) async fn write_plan(repo: &Path, wave: &Wave, change: PlanChange) -> OpsResult<()> {
+    let store = super::pm::pm_store().await?;
+    let acquisition = super::pm::lock_wave_planning(wave).await?;
+    let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
+    let projects = super::pm::checked_projects_with_store(repo, &ctx, wave.slug(), &store).await?;
+    let project = select_project(&store, wave, &projects)?;
+    let provider = ctx
+        .client
+        .project_ownership(&project.id)
+        .await
+        .map_err(project_error)?;
+    let content = match change {
+        PlanChange::Replace(content) => content,
+        PlanChange::Workflow(workflow) => ProjectContent {
+            metric_targets: provider.metric_targets.clone(),
+            workflow,
+            krs: provider.krs.clone(),
+        },
+    };
+    content.validate().map_err(project_error)?;
+    super::metrics::validate_chapter_targets(wave, &content.metric_targets)
+        .map_err(project_error)?;
+    ctx.client
+        .update_project(&provider.id, &provider.name, &content)
+        .await
+        .map_err(project_error)?;
+    super::pm::refresh_pm_snapshot_locked(repo, wave, &ctx, &store, acquisition).await?;
+    Ok(())
 }
 
 /// One-time supported import at an explicit mutation boundary. A failed read is

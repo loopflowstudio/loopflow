@@ -13,7 +13,7 @@ use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior
 use time::OffsetDateTime;
 
 use crate::child::AbandonIntent;
-use crate::durable::Author;
+use crate::durable::{Author, TaskState};
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use crate::store::rows::now_unix;
@@ -106,73 +106,17 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn restart_task_flow(
+    /// Put the Task at `end` of its Workflow by `how`, with what completion
+    /// settles beside it. Returns false, writing nothing, when the move no
+    /// longer applies to where the Task stands.
+    pub(crate) fn complete_task(
         &self,
         task: &Task,
-        expected: Option<&crate::durable::FlowSession>,
-        checkpoint_head: &str,
-    ) -> StoreResult<()> {
-        validate_task(task)?;
-        if checkpoint_head.trim().is_empty() {
-            return Err(StoreError::InvalidData(
-                "Task restart requires a checkpoint head".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        super::durable::require_ready_work(
-            &transaction,
-            &crate::durable::WorkRef::Task(task.id.clone()),
-        )?;
-        let current = super::flows::task_flow_in(&transaction, &task.id)?;
-        if current.as_ref() != expected
-            || current
-                .as_ref()
-                .is_some_and(|position| position.claim.is_some())
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Task execution changed before restart; stop the current worker before retrying"
-                    .into(),
-            ));
-        }
-        if let Some(id) = current
-            .as_ref()
-            .and_then(|flow| flow.pending_session_id.as_deref())
-        {
-            let stopped: bool = transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1 AND receipt_key='task_restart:stopped')",
-                [id], |row| row.get(0),
-            )?;
-            if !stopped {
-                return Err(StoreError::InvalidAuthority(
-                    "previous review execution must be retired before restart".into(),
-                ));
-            }
-        }
-        validate_task_project(&transaction, task)?;
-        transaction.execute(
-            &format!(
-                "UPDATE flow_sessions SET state='replaced', ended_at=?2 WHERE {}",
-                super::flows::TASK_INVOCATION
-            ),
-            params![task.id.as_str(), now_unix()],
-        )?;
-        transaction.execute(
-            "UPDATE tasks SET current_invocation_id=NULL,updated_at=?2 WHERE id=?1",
-            params![task.id.as_str(), task.updated_at.unix_timestamp()],
-        )?;
-        insert_task_event_in(
-            &transaction,
-            &task.id,
-            &TaskEventKind::Progress {
-                summary: format!("Task restarted from checkpoint {checkpoint_head}"),
-            },
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn complete_task(&self, task: &Task, skipped_pr: Option<&TaskPr>) -> StoreResult<()> {
+        skipped_pr: Option<&TaskPr>,
+        how: &super::task_work::EndMove,
+        by: Option<&crate::id::ExecId>,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
         validate_task(task)?;
         if let Some(pr) = skipped_pr {
             validate_task_pr(pr)?;
@@ -197,11 +141,26 @@ impl SqliteStore {
                 return Err(StoreError::NotFound);
             }
         }
+        if super::durable::task_state_in(&transaction, &task.id)? == TaskState::Abandoned {
+            return Err(StoreError::InvalidData(format!(
+                "Task {} is abandoned and cannot be completed",
+                task.id
+            )));
+        }
+        if super::task_work::reach_end_in(&transaction, &task.id, how, by, note)? {
+            insert_task_event_in(
+                &transaction,
+                &task.id,
+                &TaskEventKind::Completed {
+                    summary: "Task completed".to_string(),
+                },
+            )?;
+        } else if super::durable::task_state_in(&transaction, &task.id)? != TaskState::Done {
+            return Ok(false);
+        }
         update_task_pm_writeback_in(&transaction, &task.id, &task.pm_writeback, task.updated_at)?;
-        complete_task_work_in(&transaction, task)?;
-        // Cleanup settles the selected Flow after both driver and step exit.
         transaction.commit()?;
-        Ok(())
+        Ok(true)
     }
 
     pub fn task(&self, task_id: &TaskId) -> StoreResult<Option<Task>> {
@@ -303,18 +262,9 @@ impl SqliteStore {
                 "Task PR has a merge request; cancel its delivery before selecting a parent".into(),
             ));
         }
-        let ready: bool = tx.query_row(
-            "SELECT work_state='ready' FROM tasks WHERE id=?1",
-            [child.task_id.as_str()],
-            |row| row.get(0),
-        )?;
-        let claimed: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM flow_sessions WHERE task_id=?1 AND claim_json IS NOT NULL)",
-            [child.task_id.as_str()], |row| row.get(0),
-        )?;
-        if !ready || claimed {
+        if super::durable::task_state_in(&tx, &child.task_id)?.is_terminal() {
             return Err(StoreError::InvalidAuthority(
-                "Task must be ready with its worker claim released before selecting a parent; use the existing Task stop/recovery path".into(),
+                "Task must be ready before selecting a parent".into(),
             ));
         }
         let parent = task_pr_on(&tx, parent_id)?.ok_or(StoreError::NotFound)?;
@@ -737,7 +687,7 @@ impl SqliteStore {
                 project.created_at.unix_timestamp(),
                 project.updated_at.unix_timestamp(),
                 project.iteration,
-                project.plan.flow,
+                project.plan.workflow,
                 project.plan.status.as_str(),
             ],
         )?;
@@ -906,49 +856,6 @@ fn update_task_pm_writeback_in(
     if changed == 0 {
         return Err(StoreError::NotFound);
     }
-    Ok(())
-}
-
-fn complete_task_work_in(conn: &Connection, task: &Task) -> StoreResult<()> {
-    let state: String = conn.query_row(
-        "SELECT work_state FROM tasks WHERE id=?1",
-        [task.id.as_str()],
-        |row| row.get(0),
-    )?;
-    match state.as_str() {
-        "done" => return Ok(()),
-        "ready" => {}
-        "abandoned" => {
-            return Err(StoreError::InvalidData(format!(
-                "Task {} Work is abandoned and cannot be completed",
-                task.id
-            )))
-        }
-        other => {
-            return Err(StoreError::InvalidData(format!(
-                "Task {} Work has invalid state {other:?}",
-                task.id
-            )))
-        }
-    }
-    if conn.execute(
-        "UPDATE tasks SET work_state='done', work_terminal_at=?2
-         WHERE id=?1 AND work_state='ready'",
-        params![task.id.as_str(), now_unix()],
-    )? != 1
-    {
-        return Err(StoreError::InvalidData(format!(
-            "Task {} Work changed while completion was being recorded",
-            task.id
-        )));
-    }
-    insert_task_event_in(
-        conn,
-        &task.id,
-        &TaskEventKind::Completed {
-            summary: "Task completed".to_string(),
-        },
-    )?;
     Ok(())
 }
 
@@ -1743,19 +1650,19 @@ const PROJECT_INSERT: &str = "INSERT INTO projects (
     id, wave_id, external_project_id, project_slug, project_name,
     project_prompt_context, pm_snapshot_synced_at,
     abandon_requested_at, abandon_reason,
-    created_at, updated_at, iteration, flow, status
+    created_at, updated_at, iteration, workflow, status
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
 )";
 const PROJECT_COLUMNS: &str = "SELECT
     id, external_project_id, project_slug, project_name, project_prompt_context,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at, iteration, flow, status
+    created_at, updated_at, iteration, workflow, status
     FROM projects";
 pub(super) const PROJECT_SELECT: &str = "SELECT
     id, external_project_id, project_slug, project_name, project_prompt_context,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at, iteration, flow, status
+    created_at, updated_at, iteration, workflow, status
     FROM projects WHERE id=?1";
 pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     let abandon_intent = match (
@@ -1776,7 +1683,7 @@ pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proje
             name: row.get(3)?,
             prompt_context: row.get(4)?,
             pm_snapshot_synced_at: row.get(6)?,
-            flow: row.get(12)?,
+            workflow: row.get(12)?,
             status: serde_json::from_value(serde_json::Value::String(row.get(13)?))
                 .map_err(|error| invalid_column(13, error))?,
         },

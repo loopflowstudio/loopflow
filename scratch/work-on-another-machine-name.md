@@ -177,13 +177,24 @@ silently merged. Phone use is LOO-396.
 
 ## Open choices
 
-1. Holder for interactive conversations.
-   - A. tmux everywhere. Hard dependency on every machine; degrades Ghostty
-     shell integration and command blocks; reverses a removal.
-   - B. A detached `lf` per Session owning a terminal and a per-Session socket.
-     A resident process with a listener, one per Session, no shared state. Is
-     that inside or outside "do not restore that service"? LOO-283 already
-     lists tmux vs a transparent terminal relay as open.
+1. Holder for interactive conversations. Jack Heart, 2026-10-07: tmux
+   everywhere "made the terminal experience worse", though he is not certain
+   that is always true.
+   - A. tmux everywhere. A second terminal emulator sits between the program
+     and the real terminal, so anything both layers must understand degrades:
+     Ghostty shell integration and command blocks, key encoding, scrollback,
+     selection. Hard dependency on every machine; reverses a removal.
+   - B1. A multiplexer of our own, as herdr does: the holder parses the
+     program's output into a screen model and sends rows to a client that
+     redraws them. Same class of cost as tmux; herdr re-fixes key and mouse
+     encoding every release.
+   - B2. A transparent relay: a detached `lf` per Session owns the terminal
+     device and passes bytes through unchanged to whichever client is attached,
+     so loopflow's own Ghostty surface still does all the emulation. Reattach
+     replays captured bytes or asks the program to repaint. A resident process
+     with a per-Session socket and no shared state. Is that inside or outside
+     "do not restore that service"? LOO-283 already lists tmux vs a transparent
+     terminal relay as open.
    - C. No holder. Attach means resume; keep the Codex engine alive on hangup,
      which needs no terminal relay. An in-flight interactive Claude turn is
      lost and shown as interrupted.
@@ -204,9 +215,23 @@ silently merged. Phone use is LOO-396.
 
 ## Delete — do not maintain
 
+Jack Heart, 2026-10-07: a redesign cleans up in the same diff. Where several
+building blocks exist for one job and none quite works, delete them and keep
+the code minimal; do not add another beside them.
+
+Earlier attempts at this job found in source. Whatever open choice 1 selects,
+the ones it replaces go in the same change:
+- Three ways to start something detached, none of which is a reattachable
+  Session: `start_tmux_session` with the hidden `serve-conversation` command;
+  `start_lf_session_inheriting` (setsid, used for landing repair); the Codex
+  engine socket and relay.
+- The remote branch of `human_open_argv`, which no caller reaches.
+- Two Task resolvers: the local-only `--task` path and LOO-334's Linear
+  adoption path.
+- The lease broker's detached-form string check
+  (`reject_detached_account_forwarding`) and the ambient fallback that exports
+  the laptop's raw provider tokens over ssh.
 - `lf home observe`; the hard-coded `~/src/loopflow`; the `user@host` rule.
-- `reject_detached_account_forwarding` once part 3 exists.
-- The ambient fallback that exports the laptop's raw provider tokens over ssh.
 - Random Task id minting for new Tasks.
 - `capture_home_command` (no callers); the `home:` GOAL key (no reader); the
   `/detach` tmux leftover.

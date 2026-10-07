@@ -62,6 +62,10 @@ same panes.
 - Restarting the Claude process on attach is acceptable; interrupting a turn
   "is not ideal but maybe not completely unsolvable. The important thing is
   just that it survives the laptop closing."
+- A launch that asks for an account the machine lacks starts adding that
+  account to the machine: "if we know about account A on this machine, then we
+  should start the process for adding A to the remote machine if it's not
+  there." It never silently runs as a different account.
 - Home may become "machine". Not decided.
 - 2026-10-04/05, product Wave memory: no automatic restart or retry of a turn
   or Flow; the caller owns recovery; `-b` prints and blocks and the caller
@@ -150,6 +154,11 @@ Mac targets: over ssh the login Keychain is locked. Keep everything file-backed
 treat a failed Keychain read as "no key" and mint a new one, which would orphan
 stored tokens; verify and fix before a Mac is a target.
 
+When a launch names account A and the machine does not have A, `lf` starts
+connecting A to that machine with the mechanism in the table, then runs. An
+account the machine already has is kept, never overwritten. A different account
+on the machine is left alone and is not used in A's place.
+
 Today's lease stays for foreground commands on machines not yet connected.
 
 ### 4. Work that outlives its launcher
@@ -222,14 +231,12 @@ silently merged. Phone use is LOO-396.
    identity check and usage polling, has no file form, interactive use
    unverified) versus a normal login with a pasted code (own refresh chain, full
    scope).
-3. A launch asks for account A and the machine has only B: run as B, or stop and
-   offer to connect A?
-4. Home to machine: only what people read and type, or code and schema too? A
+3. Home to machine: only what people read and type, or code and schema too? A
    Home is per data directory and OS user; "machine" already names the install
    scope in code; the `home_` id prefix is persisted.
-5. Tasks that already exist on two machines with different random ids: backfill
+4. Tasks that already exist on two machines with different random ids: backfill
    rule, or leave per-machine?
-6. Shape: one PR, or a keystone (parts 1 and 2) with parts 3 to 6 as follow-ups?
+5. Shape: one PR, or a keystone (parts 1 and 2) with parts 3 to 6 as follow-ups?
 
 ## Delete — do not maintain
 

@@ -214,7 +214,8 @@ fn remote_command(machine: &Machine, args: &[&str], input: Option<&[u8]>) -> Res
     let mut child = Command::new("ssh")
         .args(crate::engine::machine_route::bounded_ssh_args(
             &machine.route,
-        ))
+            false,
+        )?)
         .arg(script)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

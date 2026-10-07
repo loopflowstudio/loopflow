@@ -397,17 +397,14 @@ supersedes its file layout; stale files and settled receipts never select a Proj
 The earlier review remains at
 `e04c83513573cc09883fb2b92ebdb63e06a22c95:scratch/keep-every-wave-ready-for.md`.
 
-October 5 source permits empty Flow and preserves names. Jack Heart's comment
-`5419b87c-bfec-4f42-8914-021483249895` authorizes one historical name-only correction,
-retaining original evidence and strict subsequent conflicts. Atomic ingestion and
-projection retain entity ages; accepted Initiative ownership rejects stale
-full/partial Wave association. Cold detail resolves configured ownership, with
-both durable-identity shortcuts deleted. Shared SQL ownership and focused tests
-preserve foreign/unmapped plans and legitimate same-Wave Task/PR identity.
-Replay/generic writers are deleted; restart retains accepted facts. Rotation now
-accepts confirmed readbacks. Exact source/evidence remains at `d4d77d8e22f4244ad83027ba9c85bb8644a622e6`.
-Reteam accepts full issue and exact Team readbacks, preserving Initiative ownership
-and independently newer facts. Identifier-only writers are deleted.
+October 5: Jack Heart authorized one historical name-only correction
+(`5419b87c-bfec-4f42-8914-021483249895`), preserving evidence and later conflicts.
+Empty Flow is permitted. Atomic ingestion retains ages, accepted Initiative
+ownership and foreign/unmapped plans; cold detail resolves configured ownership.
+Rotation accepts confirmed readbacks; reteam requires exact Team/full issue
+readbacks and preserves newer facts. Deleted identity shortcuts and generic
+writers stay deleted. Detailed source evidence, not installed acceptance:
+`d4d77d8e22f4244ad83027ba9c85bb8644a622e6`.
 
 October 5: queued SQLite workers own Wave guards through commit, including after
 caller cancellation; one shared writer preserves that lifetime. Multi-Wave

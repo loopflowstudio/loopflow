@@ -32,7 +32,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             email,
             chrome_profile,
         } => {
-            let machine = super::ssh::resolve_target(target).await?;
+            let machine = super::ssh::resolve_target(target, false).await?;
             return super::machine_credentials::connect(
                 &machine,
                 *provider,

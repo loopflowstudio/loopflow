@@ -144,6 +144,70 @@ fn execution_unsettled(store: &SharedStore, flow: &FlowSession) -> OpsResult<boo
         }))
 }
 
+async fn has_settled_boundary(store: &SharedStore, flow: &FlowSession) -> OpsResult<bool> {
+    if flow.finished
+        || flow.failure.is_some()
+        || flow.pending_session_id.is_some()
+        || execution_unsettled(store, flow)?
+    {
+        return Ok(false);
+    }
+    // A prior attempt may have persisted the final checkpoint before exiting.
+    if flow.cursor.index == flow.invocation.steps.len() {
+        return Ok(true);
+    }
+    Ok(store
+        .sqlite
+        .flow_operation_completed(flow.id())
+        .map_err(task_error)?
+        && store
+            .operation_landing(flow.id())
+            .await
+            .map_err(task_error)?
+            .is_some_and(|landing| landing.state == crate::pr_landing::PrLandingState::Merged))
+}
+
+/// Consume a completed landing before requiring a checkout for more work.
+pub(super) async fn settle_merged_flow(store: &SharedStore, task: &Task) -> OpsResult<bool> {
+    let Some(flow) = store.task_flow(&task.id).await.map_err(task_error)? else {
+        return Ok(false);
+    };
+    if !has_settled_boundary(store, &flow).await? {
+        return Ok(false);
+    }
+    let _driver = crate::ops::flow_run::driver_lock(flow.id()).map_err(task_error)?;
+    let mut flow = store
+        .flow(flow.id())
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("Flow disappeared during landing settlement"))?;
+    if !has_settled_boundary(store, &flow).await? {
+        return Ok(false);
+    }
+    if let Some(claim) = &flow.claim {
+        flow = store
+            .release_flow(flow.id(), flow.version, Some(claim))
+            .await
+            .map_err(task_error)?;
+    }
+    let mut finished = flow.cursor.index == flow.invocation.steps.len();
+    if !finished {
+        let mut cursor = flow.cursor.clone();
+        finished = cursor.finish(&flow.invocation.steps).map_err(task_error)?;
+        flow = store
+            .checkpoint_flow(flow.id(), flow.version, &cursor, None, None)
+            .await
+            .map_err(task_error)?;
+    }
+    if finished {
+        store
+            .end_flow(flow.id(), flow.version, None, "Recorded work settled")
+            .await
+            .map_err(task_error)?;
+    }
+    Ok(finished)
+}
+
 /// End one Flow by request. Its remaining steps never run and no result is
 /// invented; a recorded failure and every Session and Exec stay in history.
 pub(crate) async fn end_stopped_flow(store: &SharedStore, id: &str) -> OpsResult<()> {

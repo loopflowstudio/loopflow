@@ -369,10 +369,28 @@ fn _validate_executable_steps(steps: &[crate::engine::ConcreteStep]) -> Result<(
     Ok(())
 }
 
-/// Validate installed-state semantics against a migrated snapshot, never the
-/// live database. A migration may repair a persisted flow name, so checking the
-/// pre-migration rows would reject the candidate the migration makes valid.
-fn _read_executable_compatibility(store_path: &Path) -> ExecutableCompatibility {
+/// Validate installed-state semantics against the schema this candidate will
+/// run on. A migration may repair a persisted flow name, so checking the
+/// pre-migration rows would reject the candidate the migration makes valid:
+/// a pending frontier is migrated in a private snapshot, never the live
+/// database. An exact frontier has nothing to apply, so it is read in place —
+/// copying a multi-gigabyte store on every preflight outlived callers'
+/// deadlines and stranded the partial copies in the temporary directory.
+fn _read_executable_compatibility(
+    store_path: &Path,
+    compatibility: &Compatibility,
+) -> ExecutableCompatibility {
+    if matches!(compatibility, Compatibility::Exact { .. }) {
+        return match rusqlite::Connection::open_with_flags(
+            store_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) {
+            Ok(connection) => _executable_compatibility(&connection),
+            Err(error) => ExecutableCompatibility::Unreadable {
+                reason: format!("open shared store for candidate validation: {error}"),
+            },
+        };
+    }
     let directory = match tempfile::tempdir() {
         Ok(directory) => directory,
         Err(error) => {
@@ -471,7 +489,7 @@ pub fn build_preview(store_path: &Path) -> PromotionPreview {
     let candidate = CandidateIdentity::current();
     let database_path = store_path.display().to_string();
     let compatibility = read_store_evidence(store_path);
-    let executable_compatibility = _read_executable_compatibility(store_path);
+    let executable_compatibility = _read_executable_compatibility(store_path, &compatibility);
     let pending_migration_drafts = build_info::pending_migration_drafts();
     let verdict = decide(
         candidate.authority,
@@ -755,6 +773,22 @@ mod compatibility_tests {
         assert!(
             matches!(compatibility, ExecutableCompatibility::Compatible { .. }),
             "a dead-worktree ref must be skipped, not fail promotion: {compatibility:?}"
+        );
+    }
+
+    #[test]
+    fn an_exact_store_is_validated_in_place() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = directory.path().join("loopflow.db");
+        crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
+        let compatibility = super::read_store_evidence(&store);
+        assert!(matches!(compatibility, Compatibility::Exact { .. }));
+
+        let executable = super::_read_executable_compatibility(&store, &compatibility);
+
+        assert_eq!(
+            executable,
+            ExecutableCompatibility::Compatible { references: 0 }
         );
     }
 }

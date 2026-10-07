@@ -89,7 +89,9 @@ Before advancing an existing on-disk database, the runner takes a SQLite backup
 inside the same exclusive transaction and publishes it atomically beside the
 database. The filename carries the previously applied migration and a fingerprint
 of the complete ledger plus product schema, so a backup from another branch-local
-history cannot be mistaken for the state being repaired.
+history cannot be mistaken for the state being repaired. Once a migration
+commits, the two newest backups with that fingerprinted name stay and older ones
+are removed; a file named any other way is never touched.
 
 ## The one rule
 

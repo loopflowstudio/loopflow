@@ -138,10 +138,14 @@ pub fn run(
 ) -> anyhow::Result<()> {
     reject_nested_ssh(lf_args)?;
     let target = resolve_target(target)?;
+    let (lf_args, task_source) = task_source_args(lf_args)?;
     let cmd = std::iter::once("lf".to_string())
         .chain(lf_args.iter().cloned())
         .collect::<Vec<_>>();
     let mut extra_env = Vec::new();
+    if let Some(source) = task_source.as_deref() {
+        extra_env.push((crate::lf::TASK_SOURCE_ENV, source));
+    }
     if let Some(machine_id) = target.machine_id.as_ref().map(MachineId::as_str) {
         extra_env.push((EXPECTED_MACHINE_ID_ENV, machine_id));
     }
@@ -155,6 +159,48 @@ pub fn run(
         &cmd,
         &extra_env,
     )
+}
+
+fn task_source_args(lf_args: &[String]) -> anyhow::Result<(Vec<String>, Option<String>)> {
+    let mut args = lf_args.to_vec();
+    // The normalized CLI owns option parsing, including --task=ISSUE.
+    let command = std::iter::once("lf".to_string())
+        .chain(args.iter().cloned())
+        .collect();
+    let Ok(cli) = crate::lf::Cli::try_parse_from(crate::lf::navigation::normalize_args(command)?)
+    else {
+        return Ok((args, None));
+    };
+    let Some(selector) = cli.task else {
+        return Ok((args, None));
+    };
+    let runtime = tokio::runtime::Runtime::new()?;
+    let source = runtime.block_on(async {
+        let Some(store) = crate::store::open_existing_store().await else {
+            return Ok(None);
+        };
+        crate::ops::task::remote::resolve_source(&std::sync::Arc::new(store), &selector)
+            .await
+            .map_err(anyhow::Error::from)
+    })?;
+    let Some(source) = source else {
+        return Ok((args, None));
+    };
+    // Existing machines may retain different Task IDs; send the portable issue name.
+    let mut index = 0;
+    while index < args.len() {
+        if args[index] == "--" {
+            break;
+        }
+        if args[index] == "--task" && args.get(index + 1) == Some(&selector) {
+            args[index + 1] = source.issue.clone();
+            index += 1;
+        } else if args[index] == format!("--task={selector}") {
+            args[index] = format!("--task={}", source.issue);
+        }
+        index += 1;
+    }
+    Ok((args, Some(serde_json::to_string(&source)?)))
 }
 
 fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
@@ -247,11 +293,7 @@ fn run_with_env(
     let broker = account_lease.map(AccountLeaseBroker::start).transpose()?;
     let remote_handle = broker.as_ref().map(AccountLeaseBroker::remote_handle);
     let user_name = crate::engine::config::participant_name()?.unwrap_or_default();
-    let declaration = std::env::var(crate::lf::WORK_DECLARATION_ENV).ok();
     let mut extra_env = extra_env.to_vec();
-    if let Some(value) = declaration.as_deref() {
-        extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));
-    }
     extra_env.push((crate::engine::config::USER_NAME_ENV, &user_name));
     let preamble = build_preamble(
         &credentials,

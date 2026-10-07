@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::durable::{render_steers, Steer, TaskId, WorkRef};
+use crate::durable::{render_steers, Steer, WorkRef};
 use crate::id::WaveId;
 use crate::planning::ProjectPlan;
 use crate::store::SharedStore;
@@ -119,12 +119,7 @@ pub async fn resolve_work_selection(
 
     if let Some(value) = selection.task {
         let value = value.trim();
-        let task = if let Ok(id) = TaskId::parse(value) {
-            store.get_task(&id).await.map_err(run_error)?
-        } else {
-            store.get_task_by_issue(value).await.map_err(run_error)?
-        }
-        .ok_or_else(|| run_error(format!("Task {value:?} is not registered")))?;
+        let task = crate::ops::task::resolve_task(store, repo, value).await?;
         let wave = store
             .get_wave(&task.wave_id)
             .await

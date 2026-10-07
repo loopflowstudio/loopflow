@@ -72,6 +72,14 @@ impl ProjectId {
 }
 
 impl TaskId {
+    pub fn from_issue(issue: &crate::planning::LinearIssueId) -> Self {
+        let id = uuid::Uuid::new_v5(
+            &uuid::Uuid::NAMESPACE_URL,
+            format!("https://linear.app/issue/{}", issue.as_str()).as_bytes(),
+        );
+        Self(format!("task_{}", id.simple()))
+    }
+
     pub(crate) fn from_raw(value: impl Into<String>) -> Self {
         Self(value.into())
     }

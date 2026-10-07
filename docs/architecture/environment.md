@@ -52,6 +52,7 @@ shells unset them and tmux never receives them.
 | Variable | Policy |
 |---|---|
 | `LF_ACCOUNT_LEASE`, `LF_ACCOUNT_SELECTION`, `LF_ACCOUNT_LEASE_SOCKET` | Account route for one provider launch or one `lf ssh` command. |
+| `LF_TASK_SOURCE` | One SSH invocation's issue, branch, required commit and planning record, retaining observation time. Contains no local paths or execution authority. |
 | `LF_FORWARDED_PM_TOKEN`, `LF_FORWARDED_PM_PROVIDER`, `LF_FORWARDED_SECRET_NAMES` | Planning credential and named secrets carried over `lf ssh`. |
 | `LF_DISCORD_TOKEN` | Chat bridge token; removed before any provider child. |
 | `LF_CREDENTIAL_SOCKET`, `LF_AUTH_BROWSER_FIFO` | Local credential broker and browser handoff for login. |

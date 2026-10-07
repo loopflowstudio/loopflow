@@ -67,6 +67,18 @@ lf --task EXP-12 run incident # run a Flow without moving the Task
 lf task run EXP-12 --reason "take the smaller approach"
 ```
 
+```bash
+lf ssh mini --task EXP-12 skill implement # adopt the Task and use its pushed branch
+```
+
+An absent Task is adopted by issue name through the same path as `lf task run`.
+SSH carries its planning, branch and required commit; each machine keeps its own
+Workflow and Sessions. Push source work first: missing branches, unpushed commits
+and uncommitted changes are reported without changing them. Repeated launches
+reuse the checkout. An existing target checkout behind the requested commit needs
+`lf sync` there before continuing. New Task IDs derive from the Linear issue ID;
+existing IDs are preserved.
+
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's
 worktree, defaults to its Project's Flow, then starts

@@ -1,5 +1,6 @@
 mod directory;
 mod lifecycle;
+pub(crate) mod remote;
 pub(crate) use lifecycle::{cleanup_completed_task, notice_retained_task, record_abandoned_pr};
 pub use lifecycle::{task_abandon, task_delete, task_repository, task_sweep};
 mod file_save;
@@ -756,6 +757,39 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
     )
 }
 
+pub(crate) async fn find_task(store: &SharedStore, selector: &str) -> OpsResult<Option<Task>> {
+    if let Ok(id) = crate::durable::TaskId::parse(selector) {
+        store.get_task(&id).await.map_err(task_error)
+    } else {
+        store.get_task_by_issue(selector).await.map_err(task_error)
+    }
+}
+
+pub(crate) async fn resolve_task(
+    store: &SharedStore,
+    repo: &Path,
+    selector: &str,
+) -> OpsResult<Task> {
+    if let Some(task) = find_task(store, selector).await? {
+        if let Some(source) = remote::source_for_issue(&task.plan.identifier)? {
+            source.require_pushed(repo)?;
+            restore_task_checkout(store, &task).await?;
+            source.require_checkout(&task)?;
+        }
+        return Ok(task);
+    }
+    if crate::durable::TaskId::parse(selector).is_ok() {
+        return Err(task_error(format!(
+            "Task {selector} is not registered; select its issue name to adopt it on this machine"
+        )));
+    }
+    let repo = repo.to_path_buf();
+    let selector = selector.to_string();
+    tokio::task::spawn_blocking(move || prepare_task(&repo, &selector, TaskExecOptions::default()))
+        .await
+        .map_err(task_error)?
+}
+
 fn prepare_task(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult<Task> {
     let TaskExecOptions {
         wave: expected_wave,
@@ -779,10 +813,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult
         .transpose()?;
     let existing = block_on_task(async {
         let store = task_store().await?;
-        let mut existing = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(|error| task_error(format!("failed to read task registry: {error}")))?;
+        let mut existing = find_task(&store, issue).await?;
         if let Some(task) = &mut existing {
             if let Some(expected) = &expected_wave {
                 let wave = owning_wave(&store, task).await?;
@@ -829,6 +860,9 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult
         Ok(existing)
     })?;
     if let Some(existing) = existing {
+        if let Some(source) = remote::source_for_issue(&existing.plan.identifier)? {
+            source.require_pushed(repo)?;
+        }
         if let Some(parent) = stack_on.as_deref() {
             block_on_task(async {
                 stack_existing_task(&task_store().await?, &existing, parent).await
@@ -838,6 +872,9 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult
             let store = task_store().await?;
             restore_task_checkout(&store, &existing).await
         })?;
+        if let Some(source) = remote::source_for_issue(&existing.plan.identifier)? {
+            source.require_checkout(&existing)?;
+        }
         return Ok(existing);
     }
     // Existing Tasks resolve names in their own checkout during traversal.
@@ -848,8 +885,27 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult
         }
     }
     let main_repo = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
-    let resolved =
-        crate::ops::task_pm::resolve_task(&main_repo, issue, crate::ops::pm::PmRefresh::Auto)?;
+    let source = remote::source_for_issue(issue)?;
+    if let Some(source) = &source {
+        source.require_pushed(&main_repo)?;
+        block_on_task(async {
+            source
+                .accept_planning(&main_repo, &task_store().await?)
+                .await
+        })?;
+    }
+    let mut resolved = crate::ops::task_pm::resolve_task(
+        &main_repo,
+        issue,
+        if source.is_some() {
+            crate::ops::pm::PmRefresh::Never
+        } else {
+            crate::ops::pm::PmRefresh::Auto
+        },
+    )?;
+    if let Some(source) = &source {
+        resolved.item.branch_name = Some(source.branch.clone());
+    }
     if let Some(expected) = &expected_wave {
         if &resolved.wave != expected {
             return Err(task_error(format!(
@@ -874,7 +930,11 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskExecOptions) -> OpsResult
             end,
         },
     ))?;
-    create_prepared_task(main_repo, resolved, prepared)
+    let task = create_prepared_task(main_repo, resolved, prepared)?;
+    if let Some(source) = source {
+        source.require_checkout(&task)?;
+    }
+    Ok(task)
 }
 
 /// Recover checkout files from retained Task placement without replacing history.
@@ -921,9 +981,7 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
     // A different registered path was rejected above; no branch is reset.
     if !crate::engine::worktrees::branch_exists(&repo, &pr.branch)? {
         let remote = format!("refs/remotes/origin/{}", pr.branch);
-        if !ref_exists(&repo, &remote)? && pr.github().is_some() {
-            fetch(&repo, "origin", &pr.branch)?;
-        }
+        fetch_task_refs(&repo)?;
         let base = if ref_exists(&repo, &remote)? {
             remote
         } else {
@@ -1052,6 +1110,7 @@ async fn prepare_new_task(
     let branch = item
         .and_then(|item| item.branch_name.as_deref())
         .filter(|branch| !branch.is_empty());
+    fetch_task_refs(main_repo)?;
     let mut plan = plan_branch_placement(main_repo, segment, branch)
         .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
     // Fail before filing an issue; execution checks again after provider work.
@@ -1121,19 +1180,6 @@ async fn prepare_new_task(
     } else {
         None
     };
-    if plan.strategy == PlacementStrategy::Create && github.is_some() {
-        // A fresh clone may know the PR before fetching its branch.
-        fetch(
-            main_repo,
-            "origin",
-            &format!(
-                "refs/heads/{}:refs/remotes/origin/{}",
-                plan.branch, plan.branch
-            ),
-        )
-        .map_err(task_error)?;
-        plan.strategy = PlacementStrategy::CheckoutExisting;
-    }
     if plan.strategy != PlacementStrategy::Create {
         let branch_ref = if ref_exists(main_repo, &format!("refs/heads/{}", plan.branch))? {
             format!("refs/heads/{}", plan.branch)
@@ -1178,6 +1224,31 @@ fn create_prepared_task(
             .map_err(task_error)?
             .ok_or_else(|| task_error("owning Wave is not initialized"))?;
         let acquisition = super::pm::lock_wave_planning(&wave).await?;
+        // An explicit remote issue can seed an unselected machine. Read accepted
+        // planning, not the transported record, and preserve existing rotation.
+        if remote::source_for_issue(&resolved.item.identifier)?.is_some()
+            && resolved.project.status == crate::pm::ProjectStatus::Started
+            && crate::store::sqlite::project_selection::read_project_binding(
+                &store.sqlite,
+                wave.id(),
+            )
+            .map_err(task_error)?
+            .is_none()
+            && store
+                .pending_project_transition(wave.id())
+                .await
+                .map_err(task_error)?
+                .is_none()
+        {
+            crate::store::sqlite::project_selection::write_project_binding(
+                &store.sqlite,
+                wave.id(),
+                None,
+                &resolved.project.id,
+                &acquisition,
+            )
+            .map_err(task_error)?;
+        }
         let project =
             super::project::resolve_project_for_task(&store, &wave, &resolved.project.id).await?;
         let project_workflow = project.plan.workflow.clone();
@@ -1210,7 +1281,9 @@ fn create_prepared_task(
         }
         let now = time::OffsetDateTime::now_utc();
         let mut task = Task {
-            id: crate::work::task::TaskId::new(),
+            id: crate::work::task::TaskId::from_issue(
+                &LinearIssueId::new(resolved.item.id.clone()).map_err(task_error)?,
+            ),
             plan: TaskPlan {
                 id: LinearIssueId::new(resolved.item.id.clone()).map_err(task_error)?,
                 identifier: resolved.item.identifier.clone(),
@@ -2160,6 +2233,22 @@ pub(crate) fn request_task_pr_merge(
 /// Whether the repository has at least one configured git remote.
 fn has_remote(repo: &Path) -> OpsResult<bool> {
     Ok(!git_output(repo, &["remote"])?.trim().is_empty())
+}
+
+pub(crate) fn fetch_task_refs(repo: &Path) -> OpsResult<()> {
+    if crate::engine::git::has_origin(repo)? {
+        git_output(
+            repo,
+            &[
+                "fetch",
+                "--prune",
+                "origin",
+                "+refs/heads/*:refs/remotes/origin/*",
+            ],
+        )
+        .map_err(|error| task_error(format!("failed to fetch task base and branches: {error}")))?;
+    }
+    Ok(())
 }
 
 /// Resolve `(base_ref, base_commit)` for a new Task PR. With a remote, fetch and

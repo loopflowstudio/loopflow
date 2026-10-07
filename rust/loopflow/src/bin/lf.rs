@@ -1546,6 +1546,7 @@ fn dispatch(
                 end: end.clone(),
             },
         )?;
+        std::env::remove_var(loopflow::lf::TASK_SOURCE_ENV);
         let Some(flow) = flow else {
             // An edge that runs nothing: setting out on it is the whole move.
             println!(
@@ -1564,6 +1565,8 @@ fn dispatch(
         let directory = loopflow::repo::working_directory()?;
         let repo = loopflow::ops::task::task_repository(&directory, Some(task))?;
         let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
+        // The source is input to this invocation, never a descendant's requirement.
+        std::env::remove_var(loopflow::lf::TASK_SOURCE_ENV);
         if let Some(cwd) = cli.bound_cwd.clone() {
             binding.cwd = cwd;
         }

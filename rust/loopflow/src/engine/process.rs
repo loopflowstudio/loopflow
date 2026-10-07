@@ -374,6 +374,7 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::ops::flow_run::FLOW_ID_ENV,
     crate::installation::INSTALL_SWITCH_ENV,
     crate::lf::commands::ssh::EXPECTED_MACHINE_ID_ENV,
+    crate::lf::TASK_SOURCE_ENV,
     "LF_TERMINAL_ID",
     "LF_TERMINAL_TTY",
     "LOOPFLOW_DIRECTIVE_FILE",

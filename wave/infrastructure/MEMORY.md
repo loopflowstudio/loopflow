@@ -535,27 +535,30 @@ names drive shell/tmux clearing. Earlier branch evidence remains at
 LOO-370's October 6 completion above supersedes this section's pending-delivery
 claim; it establishes no physical capture conversion.
 
-## Task worktree membership (LOO-358, branch evidence 2026-09-30)
+## Task worktree membership (LOO-358; reconciled 2026-10-07)
 
-Jack Heart selected the Task's checkout as its general work set: every
-AgentSession, FlowSession and Exec there, plus explicit binds. The shared Rust
-SQLite reader supplies Task status and Desktop membership; the app does not
-reconstruct ownership from paths. Membership is additive, includes descendants
-at component boundaries and closed history, and survives a missing checkout.
-It changes neither recorded usage attribution nor process/Flow authority.
+Jack Heart selected checkout membership plus explicit binds. Rust owns its shared
+reader; membership grants no process or Flow authority. Current architecture
+supersedes the managed-Flow distinction. Prior proofs and unresolved Desktop
+acceptance remain at
+`e50dbd749e3207599f9937ce45653f4c6f33a5cd:wave/infrastructure/MEMORY.md`.
 
-The managed Flow remains one marked member for worker progression, claims,
-Task review settlement and worker delivery authority. Independent unfinished
-Flows, pending Ask/review Sessions and live or unresolved Execs preserve work
-during completion, recovery and cleanup. General membership cannot settle or
-signal them. Current mechanics live in the architecture reference; this branch
-entry is not evidence of shipment or configured Desktop acceptance.
+## Tasks across machines (LOO-412, 2026-10-07)
 
-## Synced planning integration (LOO-334, 2026-09-30)
+Jack Heart authorized source implementation and publication for review only.
+New Task IDs derive from Linear issue IDs; existing IDs stay. Branch, commit
+and planning facts travel; Workflow, paths and execution authority stay local.
+Fetch before remote placement decisions, including branches without PRs.
+Keep copied observation ages and target removal evidence. Cold adoption seeds
+only an unselected Wave's exact issue Project; existing selection and rotation
+remain authoritative. Public-dispatch fixtures prove no real SSH or installation. Later slices own
+credentials and disconnect survival.
 
-Main's landed cutover supersedes the intermediate-schema bridge. Retained
-integration detail: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
-Planning preserves Task/PR identity without inferring execution progress.
+## Synced planning integration (LOO-334)
+
+Main supersedes the intermediate-schema bridge. Task/PR identity remains independent
+of planning progress; prior evidence is at
+`57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 
@@ -894,10 +897,9 @@ Wave learning stays with its identified owner, never miscellaneous .lf notes.
 
 ## Prompt reduction boundary (2026-09-24)
 
-`719226ef4:wave/infrastructure/MEMORY.md` retains the source references.
-Historical identity, execution eligibility and consumed launch evidence remain
-separate. LOO-287's architecture pass and weekly observations remain unproved;
-local deletion and checks establish no KR. Intelligence owns prompt assembly.
+`719226ef4:wave/infrastructure/MEMORY.md` retains LOO-287's unproved architecture
+review and weekly observations. Intelligence owns prompt assembly; local deletion
+establishes no KR or historical launch authority.
 
 ## Installation and command scope (curated 2026-10-02)
 

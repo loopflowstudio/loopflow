@@ -595,7 +595,7 @@ def test_sandbox_paths_do_not_change_test_binary_hash_or_comparison_command(
     monkeypatch.setattr(
         performance,
         "_native_command",
-        lambda _, env: [
+        lambda _, env, optimized=False: [
             "/usr/bin/env",
             f"HOME={env['HOME']}",
             sys.executable,

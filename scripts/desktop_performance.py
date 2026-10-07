@@ -43,6 +43,8 @@ BUILD_COMMAND = [
     "--jobs",
     "4",
 ]
+# Optimized comparisons retain testing support for the @testable imports.
+OPTIMIZED_FLAGS = ["-c", "release", "-Xswiftc", "-enable-testing"]
 
 
 def _sources() -> str:
@@ -1044,7 +1046,9 @@ def _checkout_inputs(database: Path, prefix: list[str], policy: Path, git: Path)
     }
 
 
-def _native_command(test_filter: str, environment: dict[str, str]) -> list[str]:
+def _native_command(
+    test_filter: str, environment: dict[str, str], optimized: bool = False
+) -> list[str]:
     environment["LOOPFLOW_TEST_GIT"] = str(_benchmark_git())
     swift = Path(subprocess.check_output(["xcrun", "--find", "swift"], text=True).strip())
     platform_path = Path(
@@ -1062,7 +1066,7 @@ def _native_command(test_filter: str, environment: dict[str, str]) -> list[str]:
         "--test-bundle-path",
         str(
             REPO
-            / "swift/.build/debug/LoopflowSwiftPackageTests.xctest"
+            / f"swift/.build/{'release' if optimized else 'debug'}/LoopflowSwiftPackageTests.xctest"
             / "Contents/MacOS/LoopflowSwiftPackageTests"
         ),
         "--testing-library",
@@ -1185,6 +1189,7 @@ def _run_native(
     repo: Path | None = None,
     issue: str | None = None,
     xctrace: bool = True,
+    optimized: bool = False,
 ) -> None:
     environment = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
     isolated = output / "home"
@@ -1254,11 +1259,12 @@ def _run_native(
                 (output / "resources-finished").touch(exist_ok=True)
 
         try:
-            code, outcome = _run_process(BUILD_COMMAND, environment, log, timeout=600)
+            build = BUILD_COMMAND + (OPTIMIZED_FLAGS if optimized else [])
+            code, outcome = _run_process(build, environment, log, timeout=900)
             if code != 0 or outcome:
                 metadata.update(outcome=outcome or "failed", exit_code=code)
                 return
-            command = _native_command(test_filter, environment)
+            command = _native_command(test_filter, environment, optimized)
             bundle_index = command.index("--test-bundle-path") + 1
             metadata["command"] = command[bundle_index - 2 :]
             metadata["sandbox_command"] = command
@@ -1315,6 +1321,7 @@ def _run(
     repo: Path | None = None,
     issue: str | None = None,
     xctrace: bool = True,
+    optimized: bool = False,
 ) -> int:
     output.mkdir(parents=True, exist_ok=False)
     metadata = {
@@ -1324,8 +1331,8 @@ def _run(
         "cli_sha256": hashlib.sha256(cli.read_bytes()).hexdigest(),
         "started_at": datetime.now(timezone.utc).isoformat(),
         "host": {"name": platform.node(), "os": platform.platform(), "arch": platform.machine()},
-        "build_mode": "SwiftPM debug -gnone",
-        "build_command": BUILD_COMMAND,
+        "build_mode": f"SwiftPM {'release' if optimized else 'debug'} -gnone",
+        "build_command": BUILD_COMMAND + (OPTIMIZED_FLAGS if optimized else []),
         "command": None,
         "source_before": _sources(),
         "measurement_source": hashlib.sha256(
@@ -1366,7 +1373,16 @@ def _run(
     else:
         try:
             _run_native(
-                output, metadata, samples, soak_seconds, cli, snapshot, repo, issue, xctrace
+                output,
+                metadata,
+                samples,
+                soak_seconds,
+                cli,
+                snapshot,
+                repo,
+                issue,
+                xctrace,
+                optimized,
             )
         except (OSError, RuntimeError, ValueError) as error:
             metadata.update(outcome="failed", reason=str(error))
@@ -1469,6 +1485,11 @@ def main() -> int:
         action="store_true",
         help="Diagnostic RSS/signposts only; leaves hitch/hang coverage unmeasured",
     )
+    run.add_argument(
+        "--optimized",
+        action="store_true",
+        help="Release-configuration Swift; never compared with debug runs",
+    )
     run.add_argument("--snapshot", type=Path)
     run.add_argument("--repo", type=Path)
     run.add_argument("--issue")
@@ -1534,6 +1555,7 @@ def main() -> int:
             args.repo.resolve() if args.repo else None,
             args.issue,
             not args.no_xctrace,
+            args.optimized,
         )
     summary = _report(args.output, args.baseline)
     print(args.output / "report.md")

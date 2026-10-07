@@ -31,6 +31,9 @@ uv run python scripts/desktop_performance.py run --snapshot /tmp/task-snapshot -
 uv run python scripts/desktop_performance.py run --snapshot /tmp/task-snapshot --lf /path/to/optimized-lf --repo /path/to/repo --issue LOO-368 --samples 21 --output /tmp/task-after --baseline /tmp/task-before
 ```
 
+Add `--optimized` to both runs for release-configuration Swift measurements.
+The receipt records the build mode; compare matching modes only.
+
 The app appends to `<Home>/desktop-cache/timings/launches.ndjson` and
 `reads.ndjson` whenever it runs outside a test mode; `timings.py` only reads
 them. Each file keeps its newest half past 256 KB. Lines hold durations, `lf`

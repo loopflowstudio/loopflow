@@ -1706,7 +1706,7 @@ fn execute_command(
                 | loopflow::lf::MachineCommand::Status { .. }
                 | loopflow::lf::MachineCommand::Rename { .. }
                 | loopflow::lf::MachineCommand::Remove { .. }),
-        }) => loopflow::lf::commands::machine::run(cmd),
+        }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
         Some(Commands::Installation {
             cmd: loopflow::lf::InstallationCommand::SyncSkills { yes, no_prune },
         }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune),

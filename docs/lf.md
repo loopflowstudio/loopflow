@@ -389,4 +389,7 @@ lf ssh mini session list
 Save an SSH destination once, then use its label. List, rename and remove saved
 connections with `lf machine list`, `lf machine rename mini builder` and
 `lf machine remove builder`. Removing a connection leaves remote work running.
+Interactive add offers to install a missing `lf`; an existing installation stays
+untouched. Status reports connection failures and recovery commands without prompting.
+Connections are reused for 60 idle seconds through Loopflow's private SSH socket.
 See [machine connections](architecture/machines.md) for repository paths and version checks.

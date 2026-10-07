@@ -134,7 +134,7 @@ pub fn run(
 ) -> anyhow::Result<()> {
     reject_nested_ssh(lf_args)?;
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
-    let target = runtime.block_on(resolve_target(target))?;
+    let target = runtime.block_on(resolve_target(target, forward_agent))?;
     let cmd = std::iter::once("lf".to_string())
         .chain(lf_args.iter().cloned())
         .collect::<Vec<_>>();
@@ -213,12 +213,15 @@ fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn resolve_target(target: &str) -> anyhow::Result<crate::durable::Machine> {
+async fn resolve_target(
+    target: &str,
+    forward_agent: bool,
+) -> anyhow::Result<crate::durable::Machine> {
     let store = crate::store::open_existing_store()
         .await
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
     let machine = super::machine::find_machine(&store, target).await?;
-    let probe = super::machine::probe(&machine.route).await?;
+    let probe = super::machine::probe(&machine.route, forward_agent).await?;
     super::machine::report_version(&machine.route, &probe.version);
     let reached = probe.id?;
     if reached != machine.id {
@@ -588,11 +591,12 @@ enum SshOutcome {
     CommandFailure(i32),
 }
 
-fn ssh_args(dest: &str, forward_agent: bool, broker: Option<&AccountLeaseBroker>) -> Vec<String> {
+fn ssh_args(
+    dest: &str,
+    forward_agent: bool,
+    broker: Option<&AccountLeaseBroker>,
+) -> anyhow::Result<Vec<String>> {
     let mut args: Vec<String> = Vec::new();
-    if forward_agent {
-        args.push("-A".to_string());
-    }
     if let Some(broker) = broker {
         args.push("-R".to_string());
         args.push(format!(
@@ -607,9 +611,12 @@ fn ssh_args(dest: &str, forward_agent: bool, broker: Option<&AccountLeaseBroker>
         args.push("-o".to_string());
         args.push("ExitOnForwardFailure=yes".to_string());
     }
-    args.extend(crate::engine::machine_route::bounded_ssh_args(dest));
+    args.extend(crate::engine::machine_route::bounded_ssh_args(
+        dest,
+        forward_agent,
+    )?);
     args.push("bash -s".to_string());
-    args
+    Ok(args)
 }
 
 /// Classify an ssh exit code. `255` is ssh's reserved transport-error code;
@@ -623,17 +630,6 @@ fn classify_exit(code: Option<i32>) -> SshOutcome {
     }
 }
 
-/// A sanitized, host-named error for a transport-phase failure. Carries no
-/// credential value; ssh's own reason is already on the inherited stderr.
-fn connection_error(host: &str) -> anyhow::Error {
-    anyhow!(
-        "lf machine ssh could not reach '{host}': ssh failed during connection/transport \
-         (bounded by BatchMode + ConnectTimeout={}s). See the ssh error above; check \
-         the host is reachable, its key is known, and key auth works.",
-        crate::engine::machine_route::SSH_CONNECT_TIMEOUT_SECS
-    )
-}
-
 /// Pipe the preamble into `ssh [-A] <host> bash -s`, streaming stdout/stderr and
 /// classifying the remote exit code. Agent forwarding (`-A`) is opt-in. Bounded
 /// so an unreachable or misconfigured host fails fast instead of hanging.
@@ -644,24 +640,49 @@ fn run_ssh(
     preamble: &str,
 ) -> anyhow::Result<SshOutcome> {
     let mut child = Command::new("ssh")
-        .args(ssh_args(dest, forward_agent, broker))
+        .args(ssh_args(dest, forward_agent, broker)?)
         .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
         .context("failed to spawn ssh")?;
 
-    child
+    let written = child
         .stdin
         .take()
         .ok_or_else(|| anyhow!("ssh stdin unavailable"))?
-        .write_all(preamble.as_bytes())
-        .context("failed to write preamble to ssh")?;
-
-    let status = child.wait().context("ssh did not complete")?;
-    match classify_exit(status.code()) {
+        .write_all(preamble.as_bytes());
+    if written.is_err() {
+        let _ = child.kill();
+    }
+    let status = child.wait().context("ssh did not complete");
+    // Multiplexed -R routes belong to the master and otherwise survive this
+    // command. Cancel only this broker's route; never close the shared master.
+    if let Some(broker) = broker {
+        let cancelled = Command::new("ssh")
+            .args(["-O", "cancel", "-R"])
+            .arg(format!(
+                "{}:{}",
+                broker.remote_socket().display(),
+                broker.local_socket().display()
+            ))
+            .args(crate::engine::machine_route::bounded_ssh_args(
+                dest,
+                forward_agent,
+            )?)
+            .stdin(Stdio::null())
+            .output();
+        if !cancelled.is_ok_and(|output| output.status.success()) {
+            eprintln!("Could not remove the SSH account-forwarding route on {dest}; its local broker is closing.");
+        }
+    }
+    written.context("failed to write preamble to ssh")?;
+    match classify_exit(status?.code()) {
         outcome @ (SshOutcome::Success | SshOutcome::CommandFailure(_)) => Ok(outcome),
-        SshOutcome::ConnectionFailure => Err(connection_error(dest)),
+        SshOutcome::ConnectionFailure => Err(super::machine::transport_failure(
+            dest,
+            "SSH transport closed; see the SSH error above",
+        )),
     }
 }
 
@@ -894,7 +915,7 @@ mod tests {
 
     #[test]
     fn ssh_args_bound_the_connection() {
-        let args = ssh_args("jack@mini-heart", false, None);
+        let args = ssh_args("jack@mini-heart", false, None).unwrap();
         // Primary hang killer: never block on an interactive prompt.
         assert!(args.iter().any(|a| a == "BatchMode=yes"));
         // Connect handshake and stalled-session bounds.
@@ -915,7 +936,7 @@ mod tests {
 
     #[test]
     fn ssh_args_opt_in_agent_forwarding() {
-        let args = ssh_args("host", true, None);
+        let args = ssh_args("host", true, None).unwrap();
         assert_eq!(args.first().unwrap(), "-A");
     }
 
@@ -928,16 +949,6 @@ mod tests {
         // A real remote command code is propagated, not swallowed as transport.
         assert_eq!(classify_exit(Some(1)), SshOutcome::CommandFailure(1));
         assert_eq!(classify_exit(Some(42)), SshOutcome::CommandFailure(42));
-    }
-
-    #[test]
-    fn connection_error_names_host_without_leaking_credentials() {
-        let err = connection_error("mini-heart").to_string();
-        assert!(err.contains("mini-heart"));
-        assert!(err.contains("connection/transport"));
-        // Nothing credential-shaped in the sanitized message.
-        assert!(!err.contains("TOKEN"));
-        assert!(!err.contains("password"));
     }
 
     #[test]

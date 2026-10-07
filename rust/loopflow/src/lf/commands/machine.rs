@@ -2,6 +2,7 @@
 
 use anyhow::{anyhow, Context};
 use serde::Serialize;
+use std::io::{self, IsTerminal, Write};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -9,12 +10,12 @@ use crate::durable::{Machine, MachineId};
 use crate::lf::MachineCommand;
 use crate::store::Store;
 
-pub fn run(cmd: &MachineCommand) -> anyhow::Result<()> {
+pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(run_async(cmd))
+    runtime.block_on(run_async(cmd, batch))
 }
 
-async fn run_async(cmd: &MachineCommand) -> anyhow::Result<()> {
+async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     if let MachineCommand::User { json } = cmd {
         let name = crate::engine::config::load_user_name()?;
         if *json {
@@ -55,7 +56,24 @@ async fn run_async(cmd: &MachineCommand) -> anyhow::Result<()> {
             if label.trim().is_empty() || repo.trim().is_empty() {
                 return Err(anyhow!("label and repository must be nonempty"));
             }
-            let probe = probe(target).await?;
+            let probe = match probe(target, false).await {
+                Err(error)
+                    if error
+                        .downcast_ref::<ConnectionFailure>()
+                        .is_some_and(|failure| failure.kind == FailureKind::MissingLf)
+                        && !batch
+                        && !*json
+                        && io::stdin().is_terminal()
+                        && io::stderr().is_terminal() =>
+                {
+                    if !confirm_install(target)? {
+                        return Err(error);
+                    }
+                    install_remote(target).await?;
+                    probe(target, false).await?
+                }
+                result => result?,
+            };
             report_version(target, &probe.version);
             let route = if target == "local" {
                 "ssh://local"
@@ -85,7 +103,7 @@ async fn run_async(cmd: &MachineCommand) -> anyhow::Result<()> {
             };
             let mut statuses = Vec::new();
             for machine in machines {
-                let result = probe(&machine.route).await;
+                let result = probe(&machine.route, false).await;
                 let (remote_version, error) = match result {
                     Ok(probe) => {
                         let error = match probe.id {
@@ -181,36 +199,182 @@ pub(super) struct Probe {
 pub(super) const REMOTE_PATH: &str =
     "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"";
 
-pub(super) async fn probe(target: &str) -> anyhow::Result<Probe> {
+// Public installer, identical to the first-install command in README.md.
+const INSTALL_COMMAND: &str = "curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FailureKind {
+    NeedsSignIn,
+    HostKeyUnknown,
+    HostKeyChanged,
+    Unreachable,
+    MissingLf,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+struct ConnectionFailure {
+    kind: FailureKind,
+    message: String,
+}
+
+fn connection_failure(target: &str, kind: FailureKind, detail: &str) -> anyhow::Error {
+    let ssh = format!(
+        "ssh -o ControlPath=none -- {}",
+        super::ssh::sh_quote(target)
+    );
+    let guidance = match kind {
+        FailureKind::NeedsSignIn => format!("needs-sign-in: run `{ssh}` to set up SSH key access, then retry"),
+        FailureKind::HostKeyUnknown => format!("host-key unknown: run `{ssh}` and verify the host fingerprint before accepting it"),
+        FailureKind::HostKeyChanged => format!("host-key changed: run `{ssh}` to inspect the conflict; verify the new fingerprint with the machine owner before repairing the known_hosts entry SSH identifies"),
+        FailureKind::Unreachable => format!("unreachable: run `{ssh}` to check the address, network and SSH service"),
+        FailureKind::MissingLf => format!("no lf on the remote: run `{}`", install_command(target)),
+    };
+    ConnectionFailure {
+        kind,
+        message: format!(
+            "machine {target:?}: {guidance}{}",
+            if detail.is_empty() {
+                String::new()
+            } else {
+                format!("; {detail}")
+            }
+        ),
+    }
+    .into()
+}
+
+pub(super) fn transport_failure(target: &str, detail: &str) -> anyhow::Error {
+    let lower = detail.to_ascii_lowercase();
+    let kind = if lower.contains("remote host identification has changed")
+        || lower.contains("offending")
+        || lower.contains("host key has changed")
+    {
+        FailureKind::HostKeyChanged
+    } else if lower.contains("host key verification failed")
+        || lower.contains("no matching host key is known")
+        || lower.contains("no ") && lower.contains("host key is known")
+    {
+        FailureKind::HostKeyUnknown
+    } else if lower.contains("permission denied")
+        || lower.contains("authentication failed")
+        || lower.contains("too many authentication failures")
+        || lower.contains("sign_and_send_pubkey")
+    {
+        FailureKind::NeedsSignIn
+    } else {
+        FailureKind::Unreachable
+    };
+    connection_failure(target, kind, detail)
+}
+
+pub(super) async fn probe(target: &str, forward_agent: bool) -> anyhow::Result<Probe> {
     if target.is_empty() || target.contains('\0') {
         return Err(anyhow!("SSH destination cannot be empty or contain NUL"));
     }
-    let command = format!("{REMOTE_PATH}; lf --version && lf machine id");
+    let command = format!(
+        "{REMOTE_PATH}; command -v lf >/dev/null 2>&1 || {{ echo lf-not-installed; exit 127; }}; lf --version && lf machine id"
+    );
     let mut child = tokio::process::Command::new("ssh");
     child
-        .args(crate::engine::machine_route::bounded_ssh_args(target))
+        .env("LC_ALL", "C")
+        .args(crate::engine::machine_route::bounded_ssh_args(
+            target,
+            forward_agent,
+        )?)
         .arg(command)
         .stdin(Stdio::null())
         .kill_on_drop(true);
     let output = tokio::time::timeout(Duration::from_secs(20), child.output())
         .await
-        .map_err(|_| anyhow!("machine {target:?} did not answer within 20 seconds"))?
+        .map_err(|_| {
+            connection_failure(
+                target,
+                FailureKind::Unreachable,
+                "did not answer within 20 seconds",
+            )
+        })?
         .context("could not run ssh")?;
+    let detail = String::from_utf8_lossy(&output.stderr);
+    if output.status.code() == Some(255) || output.status.code().is_none() {
+        return Err(transport_failure(target, detail.trim()));
+    }
     let text = String::from_utf8(output.stdout)?;
     let mut lines = text.lines();
-    let version = lines.next().and_then(|line| line.strip_prefix("lf "))
-        .ok_or_else(|| anyhow!("machine {target:?} did not return its lf version: {}; check SSH key access and update with `{}`", String::from_utf8_lossy(&output.stderr).trim(), update_command(target)))?.to_string();
+    let version = lines.next().and_then(|line| line.strip_prefix("lf "));
+    if text.trim() == "lf-not-installed" && output.status.code() == Some(127) {
+        return Err(connection_failure(
+            target,
+            FailureKind::MissingLf,
+            detail.trim(),
+        ));
+    }
+    let version = version
+        .ok_or_else(|| {
+            anyhow!(
+                "machine {target:?} did not return its lf version: {}; update with `{}`",
+                detail.trim(),
+                update_command(target)
+            )
+        })?
+        .to_string();
     let id = if output.status.success() {
         MachineId::parse(lines.next().unwrap_or_default())
             .map_err(|error| anyhow!("machine {target:?} did not return its identity: {error}"))
     } else {
         Err(anyhow!(
             "machine {target:?} identity probe failed: {}; update with `{}`",
-            String::from_utf8_lossy(&output.stderr).trim(),
+            detail.trim(),
             update_command(target)
         ))
     };
     Ok(Probe { id, version })
+}
+
+fn install_command(target: &str) -> String {
+    format!(
+        "ssh -- {} {}",
+        super::ssh::sh_quote(target),
+        super::ssh::sh_quote(INSTALL_COMMAND)
+    )
+}
+
+fn confirm_install(target: &str) -> anyhow::Result<bool> {
+    eprint!("No lf on {target}. Install it with the published installer? [Y/n]: ");
+    io::stderr().flush()?;
+    let mut answer = String::new();
+    if io::stdin().read_line(&mut answer)? == 0 {
+        return Ok(false);
+    }
+    Ok(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "" | "y" | "yes"
+    ))
+}
+
+async fn install_remote(target: &str) -> anyhow::Result<()> {
+    // Recheck on the target: another add may have installed it while we asked.
+    let command =
+        format!("{REMOTE_PATH}; if ! command -v lf >/dev/null 2>&1; then {INSTALL_COMMAND}; fi");
+    let status = tokio::process::Command::new("ssh")
+        .args(crate::engine::machine_route::bounded_ssh_args(
+            target, false,
+        )?)
+        .arg(command)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .status()
+        .await
+        .context("could not run remote installer")?;
+    if !status.success() {
+        return Err(anyhow!(
+            "remote installer failed on {target:?}; retry with `{}`",
+            install_command(target)
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn report_version(target: &str, remote: &str) {

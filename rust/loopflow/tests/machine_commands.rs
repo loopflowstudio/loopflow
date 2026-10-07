@@ -1,8 +1,10 @@
 //! Public commands with isolated stores and a simulated SSH endpoint.
 use std::fs;
+use std::io::Write;
+use std::os::fd::FromRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use serde_json::Value;
 
@@ -59,9 +61,10 @@ esac
         );
     }
 
-    fn run(&self, args: &[&str]) -> Output {
+    fn command(&self, args: &[&str]) -> Command {
         let home = self.root.path().join("local");
-        Command::new(env!("CARGO_BIN_EXE_lf"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        command
             .env_clear()
             .env("HOME", &home)
             .env("LF_HOME", &home)
@@ -71,9 +74,60 @@ esac
                 format!("{}:/usr/bin:/bin", self.root.path().join("bin").display()),
             )
             .current_dir(&home)
-            .args(args)
+            .args(args);
+        command
+    }
+
+    fn run(&self, args: &[&str]) -> Output {
+        self.command(args).output().unwrap()
+    }
+
+    fn terminal(&self, args: &[&str], answer: &str) -> Output {
+        let mut master = -1;
+        let mut slave = -1;
+        // SAFETY: valid output pointers; null selects default terminal settings.
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        // SAFETY: openpty returned two fresh owned descriptors.
+        let mut master = unsafe { fs::File::from_raw_fd(master) };
+        // SAFETY: slave is the other fresh owned descriptor from openpty.
+        let slave = unsafe { fs::File::from_raw_fd(slave) };
+        master.write_all(answer.as_bytes()).unwrap();
+        self.command(args)
+            .stdin(Stdio::from(slave.try_clone().unwrap()))
+            .stderr(Stdio::from(slave))
             .output()
             .unwrap()
+    }
+
+    fn missing_remote(&self) {
+        let bin = self.root.path().join("remote/.local/bin");
+        fs::rename(bin.join("lf"), bin.join("lf-published")).unwrap();
+        // The download side effect is replaced, not the add/install/probe workflow.
+        executable(
+            &bin.join("curl"),
+            &format!(
+                r#"#!/bin/sh
+cat <<'INSTALLER'
+cp '{}' '{}'
+echo installed > '{}'
+INSTALLER
+"#,
+                bin.join("lf-published").display(),
+                bin.join("lf").display(),
+                self.root.path().join("installed").display()
+            ),
+        );
     }
 
     fn json(&self, args: &[&str]) -> Value {
@@ -213,4 +267,95 @@ fn unregistered_and_changed_machines_cannot_receive_a_command() {
         .run(&["machine", "observe", "anything", "mini"])
         .status
         .success());
+}
+
+#[test]
+fn failures_name_the_recovery_without_prompting_or_registering() {
+    for (diagnostic, category) in [
+        ("Permission denied (publickey).", "needs-sign-in"),
+        ("No ED25519 host key is known for mini and you have requested strict checking.\nHost key verification failed.", "host-key unknown"),
+        ("WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!\nHost key verification failed.", "host-key changed"),
+        ("connect to host mini port 22: Connection refused", "unreachable"),
+    ] {
+        let fixture = Machines::new();
+        assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+        executable(&fixture.root.path().join("bin/ssh"), &format!("#!/bin/sh\ncat >&2 <<'ERROR'\n{diagnostic}\nERROR\nexit 255\n"));
+        let status = fixture.json(&["machine", "status", "--json"]);
+        let error = status[0]["error"].as_str().unwrap();
+        assert!(error.contains(category), "{error}");
+        assert!(error.contains("ssh -o ControlPath=none -- 'mini'"), "{error}");
+        let add = fixture.run(&["machine", "add", "other", "--repo", "."]);
+        assert!(!add.status.success());
+        assert!(String::from_utf8_lossy(&add.stderr).contains(category));
+        assert_eq!(fixture.json(&["machine", "list", "--json"]).as_array().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn missing_lf_never_installs_from_status_batch_json_or_nonterminal() {
+    let fixture = Machines::new();
+    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+    fixture.missing_remote();
+    let status = fixture.json(&["machine", "status", "--json"]);
+    let error = status[0]["error"].as_str().unwrap();
+    assert!(error.contains("no lf on the remote"), "{error}");
+    assert!(error.contains("install.sh"), "{error}");
+    assert!(!fixture
+        .run(&["machine", "add", "mini", "--repo", "."])
+        .status
+        .success());
+    assert!(!fixture
+        .terminal(&["-b", "machine", "add", "mini", "--repo", "."], "\n")
+        .status
+        .success());
+    assert!(!fixture
+        .terminal(&["machine", "add", "mini", "--repo", ".", "--json"], "\n")
+        .status
+        .success());
+    assert!(!fixture.root.path().join("installed").exists());
+}
+
+#[test]
+fn interactive_add_offers_install_defaults_yes_and_records_the_new_identity() {
+    let fixture = Machines::new();
+    fixture.missing_remote();
+    assert!(!fixture
+        .terminal(&["machine", "add", "mini", "--repo", "."], "n\n")
+        .status
+        .success());
+    assert!(!fixture.root.path().join("installed").exists());
+    assert_eq!(
+        fixture.json(&["machine", "list", "--json"]),
+        serde_json::json!([])
+    );
+    assert_success(&fixture.terminal(&["machine", "add", "mini", "--repo", "."], "\n"));
+    assert!(fixture.root.path().join("installed").exists());
+    let machines = fixture.json(&["machine", "list", "--json"]);
+    assert_eq!(machines[0]["id"], "home_11111111111111111111111111111111");
+    fs::remove_file(fixture.root.path().join("installed")).unwrap();
+    assert_success(&fixture.terminal(&["machine", "add", "mini", "--repo", "."], "\n"));
+    assert!(!fixture.root.path().join("installed").exists());
+}
+
+#[test]
+fn broken_existing_lf_and_failed_installer_do_not_register_a_machine() {
+    let fixture = Machines::new();
+    fixture.missing_remote();
+    let bin = fixture.root.path().join("remote/.local/bin");
+    executable(&bin.join("lf"), "#!/bin/sh\nexit 127\n");
+    assert!(!fixture
+        .terminal(&["machine", "add", "mini", "--repo", "."], "\n")
+        .status
+        .success());
+    assert!(!fixture.root.path().join("installed").exists());
+    fs::remove_file(bin.join("lf")).unwrap();
+    executable(&bin.join("curl"), "#!/bin/sh\necho 'exit 1'\n");
+    assert!(!fixture
+        .terminal(&["machine", "add", "mini", "--repo", "."], "y\n")
+        .status
+        .success());
+    assert_eq!(
+        fixture.json(&["machine", "list", "--json"]),
+        serde_json::json!([])
+    );
 }

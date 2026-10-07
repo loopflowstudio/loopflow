@@ -25,8 +25,17 @@ The repository must already exist on the remote.
 
 List reads saved connections. Status checks without prompting and shows remote
 and local versions. Different versions produce an explicit remote update command;
-Loopflow does not maintain old-version compatibility or update a peer automatically.
-SSH key authentication and a known host key must already work. Add and status
+Loopflow does not maintain old-version compatibility or replace an existing peer.
+When `add` finds no `lf`, it offers the published installer with a default of yes,
+then reads the new identity. Batch, JSON and nonterminal commands never install.
+
+SSH key authentication and a known host key must already work. Failures identify
+sign-in, unknown or changed host keys, unreachable hosts, or missing `lf`, with a
+command to resolve each. Host-key repairs require verifying the fingerprint.
+Connections share a private OpenSSH control socket and expire after 60 idle
+seconds. Personal SSH control sockets are never reused or closed. Explicit
+agent forwarding uses a separate connection; account-forwarding routes are
+removed after each command. Add and status
 transfer no credentials. SSH requires an added connection and checks its identity
 before forwarding the existing foreground credentials through stdin.
 

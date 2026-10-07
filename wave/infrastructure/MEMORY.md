@@ -27,6 +27,15 @@ Release's operation-entry lesson also applies to command removal: reject the ret
 option beneath a valid current owner; an unknown owner can produce a false pass.
 Corrected installation fixtures still require disposable OS-account isolation.
 
+Jack Heart's PR #1489 review adds private OpenSSH sharing, an interactive
+first-install offer (default yes), and distinct connection failures with recovery
+commands. Existing lf is never replaced; status, batch and JSON never install.
+This supersedes the earlier exclusion of all remote installation. Personal SSH
+masters stay separate. Account-forwarding routes must be cancelled on command
+exit because shared masters outlive commands. Fixtures and loopback SSH prove
+local behavior and reuse only; installation, account continuity and migration
+remain unproved. Republish for review.
+
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 
 Jack Heart authorized autonomous repair through landing. Installed v0.13.9
@@ -66,18 +75,12 @@ Unknown ownership is not permission to delete. Test `session_record` with `LF_*`
 
 ## Retained capture storage and autonomous cleanup (2026-10-05)
 
-Jack Heart requested that Infrastructure resolve LOO-370 without another
-interactive Session. Infrastructure chose to retain one opaque `~/.lf/runs`
-physical capture root and finish the semantic/runtime cleanup against existing
-paths. This explicitly changes the earlier physical-layout replacement
-requirement; it does not satisfy or prove a migration. The Task brief was updated
-and the decision delivered in comment `3829b49e-2ade-4bee-8850-2ae2297399a8`
-on [LOO-370](https://linear.app/loopflow/issue/LOO-370/finish-removing-the-retired-run-model-from-runtime-and-tooling).
-Preserve populated history and one storage owner, remove unnecessary offline
-conversion machinery, and retain the alias/recovery counterevidence in history.
-PR #1450 (`1af81fe03`) is now integrated here: Session identity controls
-conversations while capture keys select history. Installed migration, live
-interruption and release remain unauthorized by this source-delivery decision.
+Infrastructure selected the opaque `runs/` root under Jack Heart's autonomous
+LOO-370 delegation, superseding physical relocation. The Task brief and comment
+`3829b49e-2ade-4bee-8850-2ae2297399a8` record that decision. Capture cutover below
+retains current constraints. Earlier cleanup and permission counterevidence:
+`6b4769a974e52e29c076826cd6724e48b89dd6c4:wave/infrastructure/MEMORY.md`.
+This source decision authorizes no installed conversion or live interruption.
 
 ## Project configuration and review direction (2026-10-05)
 

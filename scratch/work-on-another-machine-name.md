@@ -4,7 +4,7 @@ Jack Heart authorized step 4 on 2026-10-07: implement fresh laptop logins instal
 on an added machine, publish the stacked PR, then stop for review. No landing,
 real login, real credential read or real-account provider contact is authorized.
 LOO-411 / PR #1489 owns the parent machine records. Its later shared connection,
-remote-install offer and failure hints remain parent work (October 7 steer).
+remote-install offer and failure hints are integrated from parent `32607f1d24ad` (October 7 steer).
 
 The full remote-work design and dated decisions remain at
 `8f270beaf3cf752756bb0aaf254cf9a37dbc368d:scratch/work-on-another-machine-name.md`.
@@ -57,8 +57,6 @@ provider-owned refresh, historical captures, current machine records and routes.
 
 ## Remaining work
 
-- LOO-411's announced additions are not yet at the remote parent: `lf sync --plan`
-  currently reports noop. Recheck before publication; integrate when available.
 - Publish the stacked PR and stop for Jack Heart's review. No landing.
 - Gate/CI owns the full affected suite. The focused source checks cover account
   routing, native receipt/registration, byte preservation, command discovery and
@@ -74,4 +72,6 @@ lent routes and injected Codex-token login are deleted. Receiving uses `receive`
 to preserve the established `lf install` shorthand. Release child memory was read
 for preservation and operation-entry lessons; no release work or schedule changed.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, focused `cargo nextest run` (87 tests), and `cargo test -p loopflow --test documented_commands` (3 tests) passed. The earlier 24-test run reported one retained-output-handle leak; the later 87-test run passed without it. Publication remains; real-provider and installed acceptance remain unproved.
+Pre-sync checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, focused `cargo nextest run` (87 tests), and `cargo test -p loopflow --test documented_commands` (3 tests) passed. The earlier 24-test run reported one retained-output-handle leak; the later 87-test run passed without it. Publication remains; real-provider and installed acceptance remain unproved.
+
+Sync check: `cargo test -p loopflow --test machine_commands add_alias_rename_connect_and_remove_preserve_identity -- --exact` passed (1 test); broader verification remains Gate/CI-owned.

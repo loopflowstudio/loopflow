@@ -538,9 +538,21 @@ lf machine connect mini codex work@example.com
 lf --machine mini session list
 ```
 
-`--machine <label-or-id>` runs the entire command on that machine in its saved
-repository. Task, worktree and Wave selectors resolve there.
-`--forward-agent` requires `--machine`; the saved repository is set by `machine add`.
+`--machine <label-or-id>` runs the entire command on that machine. Commands without
+a Work or repository target use its saved repository; `machine add` sets that default.
+`--forward-agent` requires `--machine`.
+
+`lf repo identity` establishes or prints the selected repository plan's opaque ID
+(`--json` returns the ID as a JSON string). It also works before creating any Waves
+or Tasks. `--repository ID` selects that registered plan's local path, including on
+an explicitly selected Machine. Neither operation joins plans by code remote or
+changes a Machine's saved repository.
+
+Known Task launches resolve recorded checkout Machine before delegation. The
+cross-machine path requires the same repository plan to be explicitly bound at
+the destination. Peer selection/exchange and complete remote execution observation
+are still under development; missing local execution is not proof of globally
+unstarted work.
 
 Save an SSH destination once, then use its label. List, rename and remove saved
 connections with `lf machine list`, `lf machine rename mini builder` and

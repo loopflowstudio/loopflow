@@ -21,6 +21,7 @@ pub mod migrations;
 mod pr_landings;
 mod processes;
 pub(crate) mod project_transitions;
+mod repositories;
 pub mod rows;
 mod sessions;
 pub mod sqlite;
@@ -2365,7 +2366,6 @@ mod tests {
         // The first refresh has accepted and loaded its response, then pauses.
         let delayed = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         let predecessor_work = WorkRef::Project(predecessor.id.clone());
-        let retained_placement = store.placement(&predecessor_work).await.unwrap();
         let next_home = crate::durable::MachineId::new();
         store
             .add_machine(&next_home, "ssh://fixture", "ssh://fixture", ".")
@@ -2390,8 +2390,8 @@ mod tests {
         let transferred = store.get_task(&task.id).await.unwrap().unwrap();
         assert_ne!(transferred.project_id, predecessor.id);
         assert_eq!(
-            store.placement(&predecessor_work).await.unwrap(),
-            retained_placement
+            store.placement(&predecessor_work).await.unwrap().machine_id,
+            next_home
         );
         assert_eq!(
             store
@@ -3049,11 +3049,7 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let home = crate::durable::MachineId::new();
-        store
-            .add_machine(&home, "ssh://fixture", "ssh://fixture", ".")
-            .await
-            .unwrap();
+        let home = store.local_machine().await.unwrap().id;
         store
             .place_work(&WorkRef::Project(project.id.clone()), &home)
             .await

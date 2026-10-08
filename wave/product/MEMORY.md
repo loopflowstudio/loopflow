@@ -52,14 +52,14 @@ Shared Work replaces repository pairing; never rewrite a Machine default per
 request. Started Tasks stay on their Machine; inheritance remains unapproved.
 Exact targets do not protect unsent drafts; retain LOO-387's boundary.
 
-October 8: LOO-427's checkout-location cut (`21ce4e495`, `f8d3386da`, integrated
-at `f5f742058`) leaves unknown location unavailable. Its later working tree
-removes copied placements and prototypes nearest stored assignment, with explicit,
-legacy and local-default provenance. Legacy rows remain overrides, not inferred
-intent; equal-valued choices can be deliberate narrower assignments. This is an
-uncompiled prototype, not Jack's acceptance of inheritance. Read-side location
-safety does not establish routing: Task preparation still allocates/restores
-locally. Shared repository identity, routing, Desktop control and composed proof
+October 8: LOO-427's checkout cut (`21ce4e495`, `f8d3386da`, integrated at
+`f5f742058`) leaves unknown location unavailable. Its uncompiled prototype removes
+copied placements, preserves legacy overrides and adds repository-plan identity
+plus known-Task SSH routing without rewriting Machine defaults. Inheritance is
+not Jack's acceptance. Review exposed the remaining boundary: no local checkout
+cannot prove a peer never started the Task. Execution-location observation must
+precede applying delegation to imported Work; never synchronize runtime to solve
+it. Peer binding/exchange, complete routing, Desktop control and composed proof
 remain. Product has no child memories in this checkout.
 
 Jack selected execution-machine local operations and Git-ref Task sync: 406 owns

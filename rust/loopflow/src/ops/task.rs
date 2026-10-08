@@ -765,6 +765,16 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
                     })?
             }
         };
+        let destination = store
+            .task_execution_route(&task.id)
+            .await
+            .map_err(task_error)?;
+        if destination.machine_id != store.local_machine().await.map_err(task_error)?.id {
+            return Err(task_error(format!(
+                "Task {} executes on Machine {}; launch it through `lf --task {}` so the command reaches its recorded destination",
+                task.plan.identifier, destination.machine_id, task.id,
+            )));
+        }
         let wave = owning_wave(&store, &task).await?;
         let canonical = crate::repository::CanonicalRepo::discover(&main).map_err(task_error)?;
         if crate::repository::CanonicalRepo::discover(Path::new(wave.repo())).map_err(task_error)?
@@ -5865,7 +5875,7 @@ mod tests {
     }
 
     #[test]
-    fn task_checkout_machine_records_preparing_machine_not_assignment() {
+    fn task_checkout_machine_requires_destination_and_retains_it_after_delegation() {
         let repo = loopflow_test_support::TestRepo::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let fixture = runtime.block_on(task_fixture_at("LOCATION-1", repo.path().into()));
@@ -5899,8 +5909,24 @@ mod tests {
         pr.id = TaskPrId::new();
         pr.task_id = task.id.clone();
         pr.branch = "another-branch".into();
+        assert!(store
+            .place_task(&task.id, &worktree, "another", &pr)
+            .is_err());
+        assert!(store.task(&task.id).unwrap().unwrap().worktree.is_none());
+        store
+            .place_work(
+                &WorkRef::Project(task.project_id.clone()),
+                &preparing_machine,
+            )
+            .unwrap();
         let task = store
             .place_task(&task.id, &worktree, "another", &pr)
+            .unwrap();
+        store
+            .place_work(
+                &WorkRef::Project(task.project_id.clone()),
+                &assigned_machine,
+            )
             .unwrap();
         assert_eq!(
             store

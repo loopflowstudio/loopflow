@@ -270,14 +270,17 @@ fn admit_ci_fix(
                 return Err(repair_error("Task automation is held"));
             }
             let local = store.local_machine().await.map_err(repair_error)?;
-            let placement = store
-                .placement(&crate::durable::WorkRef::Task(task_id.clone()))
-                .await
-                .map_err(repair_error)?;
-            if placement.machine_id != local.id {
+            let machine = store
+                .sqlite
+                .task_checkouts()
+                .map_err(repair_error)?
+                .into_iter()
+                .find(|checkout| checkout.task_id == *task_id)
+                .and_then(|checkout| checkout.machine_id)
+                .ok_or_else(|| repair_error("Task checkout Machine is unknown"))?;
+            if machine != local.id {
                 return Err(repair_error(format!(
-                    "Task is placed on Machine {}",
-                    placement.machine_id
+                    "Task checkout belongs to Machine {machine}"
                 )));
             }
             if let Some(reason) = super::task_automation::admission_blocker(

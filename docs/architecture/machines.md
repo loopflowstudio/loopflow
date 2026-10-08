@@ -19,8 +19,9 @@ lf machine rename mini builder
 lf machine remove builder
 ```
 
-`--machine <label-or-id>` runs the entire command on that machine in its saved
-repository. Task, worktree and Wave selectors resolve there. `--forward-agent` requires `--machine`; the saved repository is set by `machine add`.
+`--machine <label-or-id>` transports the entire command. Unscoped commands use
+its saved repository; Work-addressed commands carry a repository plan ID instead.
+`--forward-agent` requires `--machine`; `machine add` sets the saved default.
 
 Quote a remote `~/` path (`--repo '~/src/project'`) to avoid local shell expansion.
 Without `--repo`, add uses the local checkout's path relative to the local home.
@@ -82,9 +83,27 @@ and `provenance`; historical rows remain `legacy` because an explicit choice can
 be distinguished from a copied value. With no assignment, the root Wave supplies
 a `local_default`. Delegation does not move a checkout or launch a process. `lf wave status` reads
 planning, Task conditions, metrics and Session history; no process needs to be running.
-Work-directed launch/restore routing is not implemented by this resolver. Started
-Tasks must continue on their recorded execution Machine rather than following a
-later delegation edit; shared repository identity and that routing cut remain open.
+The current routing prototype uses recorded checkout Machine before delegation
+for known Task launches and checkout preparation. `task run`, `task checkout` and
+global `--task` share that read before Workflow/checkout effects. Allocation checks
+the effective destination again in its transaction; unknown historical checkout
+Machine is unavailable, never a local default.
+
+`RepositoryId` identifies the selected repository plan. `repository_plans` binds
+that ID to the Machine-local repository locator; it contains no copied Work or
+execution. Existing repository paths receive distinct opaque IDs; new Wave writes
+use the same binding, and `lf repo identity` covers repositories without Work.
+Peer binding is explicit and cannot replace an existing plan. A shared code remote
+or equal clone name supplies no identity. `--repository ID` resolves at the target
+before Process admission, so SSH need not change the Machine's saved default.
+LOO-412 still owns user/shared selection and importing the same identity.
+
+This is not complete distributed routing: a peer's absence of a checkout is not
+proof of an unstarted Task. Planning exchange excludes execution. An observed
+execution-location read, including unavailable/freshness state, must precede
+applying delegation to imported Work. The prototype handles recorded locations;
+remote observation and alias acquisition/rerouting remain unfinished. Do not infer
+a global execution destination from the current delegation alone.
 
 Task checkout location is recorded separately: `tasks.checkout_machine_id` and
 `worktree` identify the Machine and path prepared for execution. New checkouts

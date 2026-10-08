@@ -1426,6 +1426,22 @@ mod tests {
                 ("unknown".into(), "/repo/unknown".into(), None),
             ]
         );
+        let provenance: String = conn
+            .query_row(
+                "SELECT provenance FROM work_placements WHERE task_id='t'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(provenance, "legacy");
+        let repository: String = conn
+            .query_row(
+                "SELECT id FROM repository_plans WHERE repo='/repo'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        crate::durable::RepositoryId::parse(&repository).unwrap();
         assert_eq!(history(), before);
         validate_foreign_keys(&conn).unwrap();
     }

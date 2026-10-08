@@ -121,6 +121,10 @@ pub struct Cli {
     #[arg(long, value_name = "LABEL_OR_ID")]
     pub machine: Option<String>,
 
+    /// Select a registered repository plan on this Machine, not a clone name
+    #[arg(long, value_name = "ID")]
+    pub repository: Option<crate::durable::RepositoryId>,
+
     /// Forward the SSH agent to the selected machine
     #[arg(long, requires = "machine")]
     pub forward_agent: bool,
@@ -260,6 +264,7 @@ impl Cli {
             diff: self.diff,
             max_turns: self.max_turns,
             machine: self.machine.clone(),
+            repository: self.repository.clone(),
             forward_agent: self.forward_agent,
             wave: self.wave.clone(),
             task: self.task.clone(),
@@ -1423,6 +1428,11 @@ pub enum CiCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum RepoCommand {
+    /// Establish or print this repository's selected planning identity
+    Identity {
+        #[arg(long)]
+        json: bool,
+    },
     /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
     Connect {
         /// Wave name (auto-detected if omitted)

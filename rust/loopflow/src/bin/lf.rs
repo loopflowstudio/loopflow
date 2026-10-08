@@ -1418,6 +1418,9 @@ fn run() -> anyhow::Result<()> {
         }
     };
     init_tracing(cli.verbose);
+    if matches!(cli.command, Some(Commands::Open)) {
+        loopflow::lf::commands::open::require_supported()?;
+    }
     if cli.task.is_none() && cli.wt.is_none() {
         if let Some(result) = loopflow::lf::navigation::inspect(&cli) {
             return finish_command(result);
@@ -1507,6 +1510,12 @@ fn run() -> anyhow::Result<()> {
         };
     }
 
+    let _repository_cwd = cli
+        .repository
+        .as_ref()
+        .map(|id| CwdGuard::enter(&loopflow::lf::commands::work_route::repository_path(id)?))
+        .transpose()?;
+
     // Process admission records this process's cwd. Each operation resolves the
     // repository it needs after dispatch; machine inspection needs no Git.
     let directory = std::env::current_dir()?;
@@ -1541,6 +1550,9 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Remote commands prove they reached the saved machine before dispatch.
     loopflow::lf::commands::machine::validate_expected_machine_process()?;
 
+    if loopflow::lf::commands::work_route::dispatch(&cli, args)? {
+        return Ok(());
+    }
     let mut direct_binding = None;
     let mut _work_declaration = None;
     let mut _bound_cwd = None;

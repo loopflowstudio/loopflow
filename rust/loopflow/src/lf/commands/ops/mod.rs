@@ -900,6 +900,7 @@ pub fn refresh_status(wave: Option<&str>) -> Result<String> {
 
 pub fn run_repo(cmd: &RepoCommand) -> Result<()> {
     match cmd {
+        RepoCommand::Identity { json } => crate::lf::commands::work_route::identity(*json),
         RepoCommand::Connect {
             wave,
             all,

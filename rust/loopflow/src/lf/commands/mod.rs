@@ -30,6 +30,7 @@ pub mod usage;
 pub mod util;
 pub mod waves;
 pub(crate) mod work_catalog;
+pub mod work_route;
 pub mod work_watch;
 
 /// One drill over the Wave → Project → Task Work hierarchy.

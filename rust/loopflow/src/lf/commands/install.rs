@@ -329,9 +329,9 @@ fn _read_executable_references(
 ) -> rusqlite::Result<Vec<(String, String, String, String)>> {
     let mut statement = conn.prepare(
         "SELECT 'wave', w.id, 'wave/operate', w.repo
-         FROM work_placements placement
-         JOIN waves w ON w.id=placement.wave_id
-         WHERE placement.enabled=1
+         FROM waves w
+         LEFT JOIN work_placements placement ON w.id=placement.wave_id
+         WHERE COALESCE(placement.enabled,1)=1
            AND w.work_state='ready'
            AND w.retired_at IS NULL
          ORDER BY 1, 2, 3, 4",
@@ -732,6 +732,29 @@ mod compatibility_tests {
             read_store_evidence(&store),
             Compatibility::Incompatible { .. } | Compatibility::Unreadable { .. }
         ));
+    }
+
+    #[test]
+    fn executable_references_include_waves_without_copied_assignments() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE waves(id TEXT,name TEXT,repo TEXT,work_state TEXT,retired_at INTEGER);
+            CREATE TABLE work_placements(wave_id TEXT,enabled INTEGER);
+            INSERT INTO waves VALUES('inherited','inherited','/repo','ready',NULL),
+                ('disabled','disabled','/repo','ready',NULL),
+                ('retired','retired','/repo','ready',1);
+            INSERT INTO work_placements VALUES('disabled',0);",
+        )
+        .unwrap();
+        assert_eq!(
+            super::_read_executable_references(&conn).unwrap(),
+            vec![(
+                "wave".into(),
+                "inherited".into(),
+                "wave/operate".into(),
+                "/repo".into()
+            )]
+        );
     }
 
     #[test]

@@ -78,10 +78,6 @@ impl SqliteStore {
             serde_json::json!(current.project_id),
             serde_json::json!(destination),
         )?;
-        super::durable::inherit_task_placement(
-            &tx,
-            &super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?,
-        )?;
         tx.commit()?;
         Ok(())
     }

@@ -58,6 +58,8 @@ pub enum DurableDataError {
     InvalidId(String),
 }
 
+// Identity of one selected repository plan, never derived from a code remote.
+durable_id!(RepositoryId, "repo_");
 durable_id!(ProjectId, "proj_");
 durable_id!(TaskId, "task_");
 // Opaque IDs retain their released spelling, including references in scheduled jobs.
@@ -103,6 +105,13 @@ impl WorkRef {
     }
 }
 
+/// A launch destination read from planning and recorded execution, not a claim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskExecutionRoute {
+    pub repository_id: RepositoryId,
+    pub machine_id: MachineId,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Machine {
     pub label: Option<String>,
@@ -118,9 +127,23 @@ pub struct Machine {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Placement {
     pub work: WorkRef,
+    /// The ancestor (or Work itself) supplying this assignment.
+    pub source: WorkRef,
+    pub provenance: PlacementProvenance,
     pub machine_id: MachineId,
     #[serde(with = "time::serde::rfc3339")]
     pub placed_at: OffsetDateTime,
+}
+
+/// How the source assignment was established; inheritance is `source != work`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlacementProvenance {
+    Explicit,
+    /// Released rows cannot distinguish an explicit choice from a copied parent.
+    Legacy,
+    /// No authored assignment exists in the ancestry.
+    LocalDefault,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -68,6 +68,7 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        super::repositories::ensure_repository_in(&tx, repo)?;
         let workflows = read_workflows(Path::new(repo))?;
         let mut parent: Option<WaveId> = None;
         let mut prefix = String::new();
@@ -99,7 +100,6 @@ impl SqliteStore {
                     let wave = authored_id.unwrap_or_default();
                     let now = now_unix();
                     tx.execute("INSERT INTO waves(id,name,repo,created_at,parent_wave_id) VALUES(?1,?2,?3,?4,?5)", params![wave, part, repo, now, parent])?;
-                    durable::create_wave_work(&tx, &wave, now)?;
                     wave
                 }
             };

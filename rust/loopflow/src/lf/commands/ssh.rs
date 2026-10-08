@@ -11,10 +11,35 @@ use std::process::{Command, Stdio};
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 
 pub fn run(target: &str, forward_agent: bool, lf_args: &[String]) -> anyhow::Result<()> {
+    run_in_repository(target, forward_agent, lf_args, None)
+}
+
+pub fn run_in_repository(
+    target: &str,
+    forward_agent: bool,
+    lf_args: &[String],
+    repository: Option<&crate::durable::RepositoryId>,
+) -> anyhow::Result<()> {
     let cli = parse_remote_command(lf_args)?;
+    if matches!(cli.command, Some(crate::lf::Commands::Open)) {
+        super::open::require_supported()?;
+    }
     let inherited_selection = AccountSelection::from_env()?;
     let runtime = tokio::runtime::Runtime::new()?;
     let target = runtime.block_on(resolve_target(target, forward_agent))?;
+    let work_route = runtime.block_on(super::work_route::resolve(&cli))?;
+    if let Some(route) = &work_route {
+        if route.machine_id != target.id {
+            return Err(anyhow!(
+                "Task executes on Machine {}, not {}; delegation does not move existing work",
+                route.machine_id,
+                target.id
+            ));
+        }
+    }
+    let repository = repository
+        .or(cli.repository.as_ref())
+        .or(work_route.as_ref().map(|route| &route.repository_id));
     let selection = runtime.block_on(super::machine_credentials::prepare_launch(
         &target,
         &inherited_selection,
@@ -35,15 +60,20 @@ pub fn run(target: &str, forward_agent: bool, lf_args: &[String]) -> anyhow::Res
     if let Some(value) = declaration.as_deref() {
         extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));
     }
-    let cmd = std::iter::once("lf".to_string())
-        .chain(resident_args(lf_args, &cli))
-        .collect::<Vec<_>>();
+    let mut cmd = vec!["lf".to_string()];
+    if cli.repository.is_none() {
+        if let Some(repository) = repository {
+            cmd.extend(["--repository".into(), repository.to_string()]);
+        }
+    }
+    cmd.extend(resident_args(lf_args, &cli));
     let preamble = build_preamble(
         &target.route,
-        target
-            .repo
-            .as_deref()
-            .expect("added machines have a repository"),
+        if repository.is_some() {
+            None
+        } else {
+            target.repo.as_deref()
+        },
         &cmd,
         &extra_env,
     );
@@ -122,25 +152,32 @@ pub(super) async fn resolve_target(
     Ok(machine)
 }
 
-fn build_preamble(host: &str, repo: &str, cmd: &[String], extra_env: &[(&str, &str)]) -> String {
+fn build_preamble(
+    host: &str,
+    repo: Option<&str>,
+    cmd: &[String],
+    extra_env: &[(&str, &str)],
+) -> String {
     let mut lines = vec![super::machine::REMOTE_PATH.to_string()];
     for (name, value) in extra_env {
         lines.push(format!("export {name}={}", sh_quote(value)));
     }
     lines.push("LF_REACHED_MACHINE_ID=$(lf machine id) || exit 1".to_string());
     lines.push(r#"[ "$LF_REACHED_MACHINE_ID" = "$LF_EXPECTED_MACHINE_ID" ] || { echo 'remote machine identity changed' >&2; exit 1; }"#.to_string());
-    let path = if repo.starts_with('/') {
-        sh_quote(repo)
-    } else {
-        format!(
-            "\"$HOME\"/{}",
-            sh_quote(repo.strip_prefix("~/").unwrap_or(repo))
-        )
-    };
-    lines.push(format!(
-        "cd -- {path} || {{ echo {} >&2; exit 1; }}",
-        sh_quote(&format!("no repo {repo} on {host}"))
-    ));
+    if let Some(repo) = repo {
+        let path = if repo.starts_with('/') {
+            sh_quote(repo)
+        } else {
+            format!(
+                "\"$HOME\"/{}",
+                sh_quote(repo.strip_prefix("~/").unwrap_or(repo))
+            )
+        };
+        lines.push(format!(
+            "cd -- {path} || {{ echo {} >&2; exit 1; }}",
+            sh_quote(&format!("no repo {repo} on {host}"))
+        ));
+    }
     lines.push(format!(
         "exec {}",
         cmd.iter()
@@ -222,13 +259,64 @@ mod tests {
         assert_eq!(sh_quote("it's here"), "'it'\\''s here'");
         let script = build_preamble(
             "mini",
-            "~/project's checkout",
+            Some("~/project's checkout"),
             &["lf".into(), "session".into(), "list".into()],
             &[("LF_EXPECTED_MACHINE_ID", "home_test")],
         );
         assert!(script.contains("machine identity changed"));
         assert!(!script.contains("TOKEN"));
         assert!(!script.contains("LEASE"));
+    }
+
+    #[test]
+    fn repository_addressed_transport_preserves_arguments_without_entering_machine_default() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let lf = bin.join("lf");
+        std::fs::write(&lf, "#!/bin/sh\nif [ \"$1\" = machine ]; then echo home_fixture; else printf '%s\\n' \"$PWD\" \"$@\"; fi\n").unwrap();
+        std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let script = build_preamble(
+            "fixture",
+            None,
+            &[
+                "lf".into(),
+                "--repository".into(),
+                "repo_exact".into(),
+                "--task".into(),
+                "task_exact".into(),
+                ":".into(),
+                "literal 'draft'; $(false)".into(),
+            ],
+            &[("LF_EXPECTED_MACHINE_ID", "home_fixture")],
+        );
+        let output = std::process::Command::new("/bin/bash")
+            .args(["-c", &script])
+            .env_clear()
+            .env("HOME", dir.path())
+            .env("PATH", "/usr/bin:/bin")
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        let lines = text.lines().collect::<Vec<_>>();
+        assert_eq!(
+            lines[0],
+            dir.path().canonicalize().unwrap().to_str().unwrap()
+        );
+        assert_eq!(
+            &lines[1..],
+            &[
+                "--repository",
+                "repo_exact",
+                "--task",
+                "task_exact",
+                ":",
+                "literal 'draft'; $(false)"
+            ]
+        );
     }
 
     #[test]

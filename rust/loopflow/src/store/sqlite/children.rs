@@ -13,7 +13,7 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transact
 use time::OffsetDateTime;
 
 use crate::child::AbandonIntent;
-use crate::durable::{Author, TaskState};
+use crate::durable::{Author, TaskState, WorkRef};
 use crate::id::WaveId;
 use crate::planning::{LinearIssueId, LinearProjectId, NewTask, ProjectPlan, TaskPlan};
 use crate::store::rows::now_unix;
@@ -25,7 +25,6 @@ use crate::work::task::{
     TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
 };
 
-use super::durable::{inherit_project_placement, inherit_task_placement};
 use super::SqliteStore;
 
 fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewTask>> {
@@ -72,6 +71,14 @@ impl SqliteStore {
         }
         super::durable::require_selected_project(&tx, &task.project_id)?;
         require_task_planning(&tx, &task)?;
+        let local = super::durable::map_local_machine(&tx)?.id;
+        let destination = super::durable::placement_in(&tx, &WorkRef::Task(task_id.clone()))?;
+        if destination.machine_id != local {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Task {task_id} is delegated to Machine {}; no local checkout was allocated",
+                destination.machine_id,
+            )));
+        }
         task.worktree = Some(worktree.to_path_buf());
         task.workspace_slug = workspace_slug.to_string();
         validate_initial_task_pr(&task, pr)?;
@@ -82,10 +89,9 @@ impl SqliteStore {
                 worktree.display().to_string(),
                 workspace_slug,
                 now_unix(),
-                super::durable::map_local_machine(&tx)?.id.as_str()
+                local.as_str()
             ],
         )?;
-        inherit_task_placement(&tx, &task)?;
         insert_task_pr(&tx, pr)?;
         seed_task_linear_observation(&tx, &task)?;
         insert_task_event_in(
@@ -847,7 +853,6 @@ impl SqliteStore {
                 project.plan.summary,
             ],
         )?;
-        inherit_project_placement(&transaction, &project.id)?;
         transaction.commit()?;
         Ok(())
     }
@@ -1945,7 +1950,6 @@ impl SqliteStore {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction().unwrap();
         insert_task_row(&tx, &task).unwrap();
-        inherit_task_placement(&tx, &task).unwrap();
         tx.commit().unwrap();
     }
 
@@ -1967,7 +1971,6 @@ impl SqliteStore {
                 ],
             )?;
         }
-        inherit_task_placement(&tx, task)?;
         insert_task_pr(&tx, pr)?;
         seed_task_linear_observation(&tx, task)?;
         let saved = task_on(&tx, &task.id)?.ok_or(StoreError::NotFound)?;

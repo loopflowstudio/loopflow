@@ -38,6 +38,7 @@ mod project_content;
 mod project_rotation;
 pub(crate) mod project_selection;
 mod project_transitions;
+mod repositories;
 mod revisions;
 mod session_events;
 pub(crate) mod sessions;
@@ -716,6 +717,7 @@ impl SqliteStore {
             .map(|dt| dt.unix_timestamp())
             .unwrap_or_else(now_unix);
 
+        repositories::ensure_repository_in(&tx, wave.repo())?;
         validate_wave_parent(
             &tx,
             wave.id(),
@@ -744,7 +746,6 @@ impl SqliteStore {
                 wave.retirement_reason(),
             ],
         )?;
-        durable::create_wave_work(&tx, wave.id(), created_at)?;
         let slug: String = tx.query_row(
             "SELECT slug FROM wave_addresses WHERE id=?1",
             [wave.id()],
@@ -1813,6 +1814,7 @@ impl SqliteStore {
         // and shared planning entity under that alias. Move them atomically;
         // uniqueness conflicts must preserve both observations, never merge them.
         for table in [
+            "repository_plans",
             "waves",
             "pm_projects",
             "pm_items",
@@ -1910,6 +1912,7 @@ impl SqliteStore {
         }
 
         for update in updates {
+            repositories::ensure_repository_in(&tx, &update.target.repo().to_string())?;
             if let Some(collision) = &update.retire_collision {
                 let retired_at = now_unix();
                 tx.execute(

@@ -579,3 +579,16 @@ fn separate_workflow_catalog_preserves_invalid_sources() {
     assert!(entries[1].workflow.is_none() && entries[1].unavailable.is_some());
     assert_eq!(serde_json::to_value(entries).unwrap(), value);
 }
+
+#[test]
+fn placement_retains_assignment_source_and_unknown_history() {
+    use loopflow::durable::{Placement, PlacementProvenance};
+    let wire: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/placements.json")).unwrap();
+    let placements: Vec<Placement> = serde_json::from_value(wire.clone()).unwrap();
+    assert_ne!(placements[0].work, placements[0].source);
+    assert_eq!(placements[0].provenance, PlacementProvenance::Explicit);
+    assert_eq!(placements[1].provenance, PlacementProvenance::Legacy);
+    assert_eq!(placements[2].provenance, PlacementProvenance::LocalDefault);
+    assert_eq!(serde_json::to_value(placements).unwrap(), wire);
+}

@@ -77,7 +77,6 @@ impl SqliteStore {
                     ],
                 )?;
                 tx.execute("UPDATE projects SET planning_teams=COALESCE((SELECT planning_teams FROM projects WHERE id=?2),'[]'),planning_initiatives=COALESCE((SELECT planning_initiatives FROM projects WHERE id=?2),'[]') WHERE id=?1", params![successor.as_str(),predecessor])?;
-                durable::inherit_project_placement(&tx, &successor)?;
             } else {
                 let previous = super::plan_read::project_in(&tx, &successor)?;
                 PlanningChanges::Project(&successor).record(

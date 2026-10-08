@@ -579,7 +579,6 @@ fn project_accepted_planning(
                 WHERE wave_id=?2 AND project_id=?3),planning_rank) WHERE id=?1",
             params![id.as_str(), wave_id, project.id],
         )?;
-        super::durable::inherit_project_placement(tx, &id)?;
     }
     for item in items {
         if let Some(body) = tx.query_row("SELECT body FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND needs_refresh=0",

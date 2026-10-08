@@ -340,6 +340,7 @@ pub fn with_runtime<T>(
 
 /// Attach ordinary command observation after installation/data selection.
 pub fn admit_process(repo_root: &Path, command: &[String]) {
+    let started = Instant::now();
     let attribution = crate::work::wave::context::process_attribution(Some(repo_root));
     if let Some(failure) = attribution.failure.as_deref() {
         warn!(
@@ -363,6 +364,10 @@ pub fn admit_process(repo_root: &Path, command: &[String]) {
     if current_context().is_none() {
         eprintln!("Process history unavailable: no compatible process ledger for this process");
     }
+    tracing::debug!(
+        elapsed_ms = started.elapsed().as_millis(),
+        "admitted Process"
+    );
 }
 
 fn finish_runtime<T>(directory: &Path, result: &anyhow::Result<T>) {

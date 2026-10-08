@@ -51,34 +51,19 @@ pub(crate) struct SessionCommand {
     pub(crate) cwd: PathBuf,
 }
 
-pub fn launch_session(
-    harness: &str,
-    model: Option<&str>,
-    worktree: &Path,
-    prompt: &str,
-) -> Result<()> {
-    launch_session_with_env(
-        harness,
-        model,
-        worktree,
-        prompt,
-        &BTreeMap::new(),
-        None,
-        None,
-    )
-}
-
-pub(crate) fn launch_session_with_env(
+#[allow(clippy::too_many_arguments)] // Provider inputs plus native skill flags and context file.
+pub(crate) fn launch_session(
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
     prompt: &str,
     environment: &BTreeMap<String, String>,
     provider_session_id: Option<&str>,
+    flags: &[String],
     context_file: Option<&Path>,
 ) -> Result<()> {
     let worktree = absolute_path(worktree);
-    let command = build_session_command(
+    let mut command = build_session_command(
         harness,
         model,
         &worktree,
@@ -86,6 +71,7 @@ pub(crate) fn launch_session_with_env(
         provider_session_id,
         context_file,
     )?;
+    command.args.splice(0..0, flags.iter().cloned());
     spawn_session_command_with_env(&command, environment, provider_session_id, None, None)
 }
 
@@ -97,10 +83,9 @@ pub(crate) fn build_session_command(
     provider_session_id: Option<&str>,
     context_file: Option<&Path>,
 ) -> Result<SessionCommand> {
-    let cwd = worktree.to_path_buf();
     let worktree_arg = worktree.to_string_lossy().to_string();
 
-    match harness {
+    let args = match harness {
         "codex" => {
             let mut args = vec!["-C".to_string(), worktree_arg];
             if let Some(model) = model {
@@ -119,12 +104,10 @@ pub(crate) fn build_session_command(
                     serde_json::to_string(&path.to_string_lossy())?
                 ));
             }
+            // Ported skill frontmatter starts with `---`, which is prompt data.
+            args.push("--".to_string());
             args.push(prompt.to_string());
-            Ok(SessionCommand {
-                program: "codex".to_string(),
-                args,
-                cwd,
-            })
+            args
         }
         "claude" => {
             let mut args = Vec::new();
@@ -147,11 +130,7 @@ pub(crate) fn build_session_command(
             // Claude's variadic --add-dir otherwise consumes the positional prompt.
             args.push("--".to_string());
             args.push(prompt.to_string());
-            Ok(SessionCommand {
-                program: "claude".to_string(),
-                args,
-                cwd,
-            })
+            args
         }
         "opencode" => {
             let mut args = vec![worktree_arg, "--prompt".to_string(), prompt.to_string()];
@@ -159,17 +138,18 @@ pub(crate) fn build_session_command(
                 args.push("--model".to_string());
                 args.push(model.to_string());
             }
-            Ok(SessionCommand {
-                program: "opencode".to_string(),
-                args,
-                cwd,
-            })
+            args
         }
-        _ => Err(anyhow!(
+        _ => bail!(
             "unsupported session launcher harness '{}'. Use claude, codex, or opencode.",
             harness
-        )),
-    }
+        ),
+    };
+    Ok(SessionCommand {
+        program: harness.to_string(),
+        args,
+        cwd: worktree.to_path_buf(),
+    })
 }
 
 pub(crate) fn resume_session(
@@ -656,6 +636,7 @@ fn session_command_status_with_env(
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
 ) -> Result<SessionCommandOutcome> {
+    let started = std::time::Instant::now();
     // Keep admission and client publication on the same side of Session stop.
     // Release before waiting for the child, so stop can settle that client.
     let capture_dir = environment
@@ -737,6 +718,10 @@ fn session_command_status_with_env(
     if let Some((store, session, driver)) = &owned {
         store.record_session_provider_launch(session, driver, true)?;
     }
+    tracing::debug!(
+        elapsed_ms = started.elapsed().as_millis(),
+        "prepared native provider launch"
+    );
     let mut child = match process.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -1839,7 +1824,17 @@ mod tests {
         crate::provider_account::identity::tests::write_claude_identity(&mut account);
         store.upsert_provider_account(&account).await.unwrap();
 
-        launch_session("claude", None, temp.path(), "review it").unwrap();
+        launch_session(
+            "claude",
+            None,
+            temp.path(),
+            "review it",
+            &BTreeMap::new(),
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             std::fs::read_to_string(capture).unwrap(),
@@ -1910,7 +1905,17 @@ mod tests {
             .await
             .unwrap();
 
-        launch_session("opencode", None, temp.path(), "review it").unwrap();
+        launch_session(
+            "opencode",
+            None,
+            temp.path(),
+            "review it",
+            &BTreeMap::new(),
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
 
         assert_eq!(std::fs::read_to_string(capture).unwrap(), "stored-key");
 
@@ -1937,7 +1942,17 @@ mod tests {
             })
             .await
             .unwrap();
-        launch_session("codex", None, temp.path(), "review it").unwrap();
+        launch_session(
+            "codex",
+            None,
+            temp.path(),
+            "review it",
+            &BTreeMap::new(),
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
     }
 
     #[test]

@@ -88,8 +88,8 @@ baseline Session continuity remain required.
   fixture proves this on the headless path; terminal command preparation already
   used that syntax. Valid prompt frontmatter does not turn a single-file prompt
   into a native SKILL.md bundle.
-- Full gate owns the complete pinned-source × harness × surface acceptance,
-  discovery/help agreement, remaining declaration cases and continuity suites.
+- Gate covers the complete pinned-source × harness × surface matrix,
+  discovery/help agreement, declaration cases and continuity suites.
   Focused proofs exercise native Claude terminal, single-file command collision,
   unknown declarations, native Codex outside its catalog, cross-harness custom
   prompt arguments and captured Flow removal. Provider print/exec substitutes
@@ -127,8 +127,9 @@ authority remain intact. No generic recovery or store redesign was introduced.
 Review findings fixed: version probes rejected executable wrappers without a
 version command; plain baselines inherited the preceding provider's cached state.
 The fixture now resets that state and distinguishes total time from first request.
-Residual cost prevents a blanket “strictly better” claim; gate and authored review
-own the remaining acceptance, including whether this tradeoff meets the outcome.
+Residual cost prevents a blanket “strictly better” claim. Jack Heart reviewed
+these limits and subsequently authorized the ship edge; the automated
+acceptance matrix passes as recorded below.
 
 After removing repeated budget counts, serial warm-Machine comparisons still pass
 source, arguments, user context and asset reads, with unchanged 875/122 extra JSON
@@ -140,9 +141,9 @@ structured-reply limits. Prior check details remain at `68ff53aab` in this file.
 
 The requested overhead attribution and bounded compression are implemented.
 Residual cost remains contrary evidence to the unchanged drop-in outcome;
-these samples do not establish that nothing got worse. Full gate owns the
-acceptance matrix above, and authored review owns judgment of that tradeoff.
-No additional product decision is needed for this reconciliation.
+these samples do not establish that nothing got worse. Gate owns the acceptance matrix above. Jack Heart subsequently reviewed the
+PR-base comparison below and authorized landing; no additional product decision
+is pending.
 
 ## Evidence boundary
 
@@ -160,7 +161,6 @@ Release was the only immediate child Wave found; its goal and complete memory
 were read during realignment. Its operation-entry lesson applies: successful
 provider output alone cannot establish the requested launch behavior.
 
-Check (2026-10-08): isolated `cargo test -p loopflow --lib engine::process_prompt` (29) and `engine::context_budget` (4), `cargo build -p loopflow --bin lf`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and contained `launch.py --warm-machine` native Claude-terminal/Codex-headless comparisons PASS; full affected verification belongs to gate.
 
 ## PR-base startup comparison (October 8)
 
@@ -176,4 +176,29 @@ unchanged source is also copied into legacy `.claude/commands` for both versions
 because base cannot discover `.claude/skills`. Base then fails post-provider Git
 status in the ordinary-folder fixture; candidate exits successfully. Compare
 startup boundaries only, not successful end-to-end completion time.
-Check: contained comparison completed 12 launches; launch fidelity passes, base completion fails as described; raw samples, hashes and exact-source archive at `/tmp/loo420-base-comparison/`; full gate remains separate.
+The contained comparison completed twelve launches with the fidelity and base
+completion limits above. Raw samples, hashes and exact-source archive remain at
+`/tmp/loo420-base-comparison/`.
+
+## Gate finding (October 8)
+
+The complete source × harness × surface matrix exposed translated Claude skill
+frontmatter being parsed as a Codex terminal option. The terminal command now
+places `--` before prompt data. The previously failing real-provider launch and
+the native Codex terminal case both pass source, exact arguments, user context and
+bundled asset reads. Eight terminal launcher tests pass.
+No additional dispatch owner or recovery mechanism was added.
+
+The original Rust gate was invalidated by a concurrent ordinary CLI build sharing
+its target directory: materialized-schema fixtures then launched the ordinary
+schema binary. The serial materialized run passed 2,288 of 2,290 tests; its only failures were
+two fixtures tied to the removed version probe. They now use a missing interpreter
+and non-executable provider, preserving spawn-failure and opening-history
+assertions. The complete corrected Session CLI suite passed all fifteen tests. Python's
+nested macOS sandbox check passed directly under its own sandbox after the outer
+network sandbox rejected nesting. Native home continuity for both providers and
+Codex reconnect/stale-client/sibling preservation pass against contained fake APIs.
+Startup measurements are preserved in the benchmark README; these acceptance
+runs alongside builds provide no new latency comparison.
+
+Check (2026-10-08): `scripts/test.py --base 35bb84ef --reuse-passing` architecture and website (76) PASS; Python 406/407 plus the nested-sandbox test directly (1) PASS; serial `materialize_rust_tests.py -- cargo nextest run --all --no-fail-fast --build-jobs 4 --test-threads 4` 2288/2290 plus corrected `--test session_cli_tests` 15/15 PASS (17 installation/platform tests skipped); `cargo fmt --all`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, eight terminal launcher tests, nine mapping assertions, contained `launch.py` eight-case matrix and both captured-source removals, `request_mapping.py` headless/terminal/Flow, both native-home continuity checks and Codex public reconnect PASS; hosted full CI remains with the authored `pr land -c` step. Logs: `/tmp/loo420-gate*.log`, `/tmp/loo420-gate-acceptance/`.

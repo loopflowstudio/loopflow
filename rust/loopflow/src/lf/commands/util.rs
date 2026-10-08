@@ -9,7 +9,6 @@ use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
 use crate::engine::{
     check_cli_available, codex_permission_args, missing_agent_message, workspace_add_dirs,
-    ProcessTarget,
 };
 use crate::provider_auth::Provider;
 use crate::session_record::{ProviderClientRef, ProviderClientStopReason};
@@ -54,32 +53,16 @@ pub(crate) struct SessionCommand {
     pub(crate) cwd: PathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SessionLaunch {
-    command: SessionCommand,
-    ide_url: Option<String>,
-}
-
 pub fn launch_session(
-    target: ProcessTarget,
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
     prompt: &str,
 ) -> Result<()> {
-    launch_session_with_env(
-        target,
-        harness,
-        model,
-        worktree,
-        prompt,
-        &BTreeMap::new(),
-        None,
-    )
+    launch_session_with_env(harness, model, worktree, prompt, &BTreeMap::new(), None)
 }
 
 pub(crate) fn launch_session_with_env(
-    target: ProcessTarget,
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
@@ -87,65 +70,9 @@ pub(crate) fn launch_session_with_env(
     environment: &BTreeMap<String, String>,
     provider_session_id: Option<&str>,
 ) -> Result<()> {
-    let launch = build_session_launch(
-        target,
-        harness,
-        model,
-        worktree,
-        prompt,
-        provider_session_id,
-    )?;
-
-    if target == ProcessTarget::Ide {
-        if let Some(url) = launch.ide_url.as_deref() {
-            match crate::engine::platform::open_url_checked(url) {
-                Ok(()) => return record_interactive_opened(environment),
-                Err(err) => eprintln!("Could not open vendor app ({err}); falling back to TUI."),
-            }
-        } else if harness == "opencode" {
-            eprintln!("OpenCode has no standalone app; opening the TUI.");
-        }
-    }
-
-    spawn_session_command_with_env(
-        &launch.command,
-        environment,
-        provider_session_id,
-        None,
-        None,
-    )
-}
-
-fn build_session_launch(
-    target: ProcessTarget,
-    harness: &str,
-    model: Option<&str>,
-    worktree: &Path,
-    prompt: &str,
-    provider_session_id: Option<&str>,
-) -> Result<SessionLaunch> {
     let worktree = absolute_path(worktree);
     let command = build_session_command(harness, model, &worktree, prompt, provider_session_id)?;
-    let ide_url = if target == ProcessTarget::Ide {
-        build_ide_url(harness, &worktree, prompt)
-    } else {
-        None
-    };
-
-    Ok(SessionLaunch { command, ide_url })
-}
-
-fn build_ide_url(harness: &str, worktree: &Path, prompt: &str) -> Option<String> {
-    let worktree = percent_encode(&worktree.to_string_lossy());
-    let prompt = percent_encode(prompt);
-    match harness {
-        "codex" => Some(format!(
-            "codex://threads/new?path={worktree}&prompt={prompt}"
-        )),
-        "claude" => Some(format!("claude://code/new?folder={worktree}&q={prompt}")),
-        "opencode" => None,
-        _ => None,
-    }
+    spawn_session_command_with_env(&command, environment, provider_session_id, None, None)
 }
 
 pub(crate) fn build_session_command(
@@ -1068,19 +995,6 @@ fn absolute_path(path: &Path) -> PathBuf {
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn percent_encode(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                encoded.push(byte as char);
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
-}
-
 pub(crate) fn short_id(id: &str) -> String {
     id.chars().take(8).collect()
 }
@@ -1638,57 +1552,35 @@ mod tests {
 
     #[test]
     fn session_launch_tui_codex_sets_worktree_model_and_prompt() {
-        let launch = build_session_launch(
-            ProcessTarget::Tui,
-            "codex",
-            Some("o3"),
-            &path(),
-            "fix it",
-            None,
-        )
-        .expect("build launch");
+        let launch = build_session_command("codex", Some("o3"), &path(), "fix it", None)
+            .expect("build launch");
 
-        assert_eq!(launch.command.program, "codex");
-        assert_eq!(launch.command.cwd, path());
-        assert!(launch.command.args.starts_with(&args(&[
-            "-C",
-            "/tmp/loop flow",
-            "-c",
-            "model=\"o3\""
-        ])));
+        assert_eq!(launch.program, "codex");
+        assert_eq!(launch.cwd, path());
+        assert!(launch
+            .args
+            .starts_with(&args(&["-C", "/tmp/loop flow", "-c", "model=\"o3\""])));
+        assert_eq!(launch.args.last().map(String::as_str), Some("fix it"));
         assert_eq!(
-            launch.command.args.last().map(String::as_str),
-            Some("fix it")
-        );
-        assert_eq!(
-            launch.command.args.contains(&"--sandbox".to_string()),
+            launch.args.contains(&"--sandbox".to_string()),
             crate::engine::codex_permission_args(Some(&path()), false, false)
                 .contains(&"--sandbox".to_string())
         );
-        assert_eq!(launch.ide_url, None);
     }
 
     #[test]
     fn bare_tui_harnesses_do_not_select_a_model() {
         for agent in ["claude", "codex", "opencode"] {
             let (harness, model) = crate::engine::parse_agent(agent);
-            let launch = build_session_launch(
-                ProcessTarget::Tui,
-                &harness,
-                model.as_deref(),
-                &path(),
-                "test",
-                None,
-            )
-            .expect("build bare harness launch");
+            let launch = build_session_command(&harness, model.as_deref(), &path(), "test", None)
+                .expect("build bare harness launch");
             assert!(
                 !launch
-                    .command
                     .args
                     .iter()
                     .any(|arg| { arg == "--model" || arg == "-m" || arg.starts_with("model=") }),
                 "bare {agent} selected a model: {:?}",
-                launch.command.args
+                launch.args
             );
         }
     }
@@ -1698,50 +1590,37 @@ mod tests {
         let (_tmp, main, worktree) = git_worktree_fixture();
 
         let launch =
-            build_session_launch(ProcessTarget::Tui, "codex", None, &worktree, "fix it", None)
-                .expect("build launch");
+            build_session_command("codex", None, &worktree, "fix it", None).expect("build launch");
 
         let idx = launch
-            .command
             .args
             .iter()
             .position(|arg| arg == "--add-dir")
             .expect("add-dir flag");
         assert_eq!(
-            PathBuf::from(&launch.command.args[idx + 1])
-                .canonicalize()
-                .unwrap(),
+            PathBuf::from(&launch.args[idx + 1]).canonicalize().unwrap(),
             main.canonicalize().unwrap()
         );
     }
 
     #[test]
     fn session_launch_tui_claude_runs_in_worktree_with_model_and_prompt() {
-        let launch = build_session_launch(
-            ProcessTarget::Tui,
-            "claude",
-            Some("sonnet"),
-            &path(),
-            "fix it",
-            None,
-        )
-        .expect("build launch");
+        let launch = build_session_command("claude", Some("sonnet"), &path(), "fix it", None)
+            .expect("build launch");
 
         assert_eq!(
-            launch.command,
+            launch,
             SessionCommand {
                 program: "claude".to_string(),
                 args: args(&["--model", "sonnet", "--", "fix it"]),
                 cwd: path(),
             }
         );
-        assert_eq!(launch.ide_url, None);
     }
 
     #[test]
     fn session_launch_tui_claude_assigns_a_resumable_provider_session() {
-        let launch = build_session_launch(
-            ProcessTarget::Tui,
+        let launch = build_session_command(
             "claude",
             None,
             &path(),
@@ -1751,7 +1630,7 @@ mod tests {
         .expect("build launch");
 
         assert_eq!(
-            launch.command.args,
+            launch.args,
             args(&[
                 "--session-id",
                 "01234567-89ab-cdef-0123-456789abcdef",
@@ -1945,29 +1824,19 @@ mod tests {
     fn session_launch_tui_claude_adds_main_repo_for_worktree_metadata() {
         let (_tmp, main, worktree) = git_worktree_fixture();
 
-        let launch = build_session_launch(
-            ProcessTarget::Tui,
-            "claude",
-            Some("sonnet"),
-            &worktree,
-            "fix it",
-            None,
-        )
-        .expect("build launch");
+        let launch = build_session_command("claude", Some("sonnet"), &worktree, "fix it", None)
+            .expect("build launch");
 
         let idx = launch
-            .command
             .args
             .iter()
             .position(|arg| arg == "--add-dir")
             .expect("add-dir flag");
         assert_eq!(
-            PathBuf::from(&launch.command.args[idx + 1])
-                .canonicalize()
-                .unwrap(),
+            PathBuf::from(&launch.args[idx + 1]).canonicalize().unwrap(),
             main.canonicalize().unwrap()
         );
-        assert!(launch.command.args.ends_with(&args(&["--", "fix it"])));
+        assert!(launch.args.ends_with(&args(&["--", "fix it"])));
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -2026,7 +1895,7 @@ mod tests {
         crate::provider_account::identity::tests::write_claude_identity(&mut account);
         store.upsert_provider_account(&account).await.unwrap();
 
-        launch_session(ProcessTarget::Tui, "claude", None, temp.path(), "review it").unwrap();
+        launch_session("claude", None, temp.path(), "review it").unwrap();
 
         assert_eq!(
             std::fs::read_to_string(capture).unwrap(),
@@ -2099,14 +1968,7 @@ mod tests {
             .await
             .unwrap();
 
-        launch_session(
-            ProcessTarget::Tui,
-            "opencode",
-            None,
-            temp.path(),
-            "review it",
-        )
-        .unwrap();
+        launch_session("opencode", None, temp.path(), "review it").unwrap();
 
         assert_eq!(std::fs::read_to_string(capture).unwrap(), "stored-key");
 
@@ -2133,13 +1995,12 @@ mod tests {
             })
             .await
             .unwrap();
-        launch_session(ProcessTarget::Tui, "codex", None, temp.path(), "review it").unwrap();
+        launch_session("codex", None, temp.path(), "review it").unwrap();
     }
 
     #[test]
     fn session_launch_tui_opencode_sets_worktree_prompt_and_model() {
-        let launch = build_session_launch(
-            ProcessTarget::Tui,
+        let launch = build_session_command(
             "opencode",
             Some("moonshotai/kimi-k2"),
             &path(),
@@ -2149,7 +2010,7 @@ mod tests {
         .expect("build launch");
 
         assert_eq!(
-            launch.command,
+            launch,
             SessionCommand {
                 program: "opencode".to_string(),
                 args: args(&[
@@ -2162,61 +2023,6 @@ mod tests {
                 cwd: path(),
             }
         );
-        assert_eq!(launch.ide_url, None);
-    }
-
-    #[test]
-    fn session_launch_ide_codex_builds_scheme_with_encoded_path_and_prompt() {
-        let launch = build_session_launch(
-            ProcessTarget::Ide,
-            "codex",
-            None,
-            &path(),
-            "fix & test\nnow",
-            None,
-        )
-        .expect("build launch");
-
-        assert_eq!(
-            launch.ide_url.as_deref(),
-            Some("codex://threads/new?path=%2Ftmp%2Floop%20flow&prompt=fix%20%26%20test%0Anow")
-        );
-        assert_eq!(launch.command.program, "codex");
-    }
-
-    #[test]
-    fn session_launch_ide_claude_builds_code_scheme_with_encoded_folder_and_prompt() {
-        let launch = build_session_launch(
-            ProcessTarget::Ide,
-            "claude",
-            None,
-            &path(),
-            "fix & test\nnow",
-            None,
-        )
-        .expect("build launch");
-
-        assert_eq!(
-            launch.ide_url.as_deref(),
-            Some("claude://code/new?folder=%2Ftmp%2Floop%20flow&q=fix%20%26%20test%0Anow")
-        );
-        assert_eq!(launch.command.program, "claude");
-    }
-
-    #[test]
-    fn session_launch_ide_opencode_falls_back_to_cli_shape() {
-        let launch = build_session_launch(
-            ProcessTarget::Ide,
-            "opencode",
-            None,
-            &path(),
-            "fix it",
-            None,
-        )
-        .expect("build launch");
-
-        assert_eq!(launch.command.program, "opencode");
-        assert_eq!(launch.ide_url, None);
     }
 
     #[test]

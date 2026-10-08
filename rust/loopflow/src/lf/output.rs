@@ -153,7 +153,7 @@ pub fn format_reproducible_command(
     docs: &[String],
     clipboard: bool,
     no_loopflow: bool,
-    model: Option<&str>,
+    agent: Option<&str>,
 ) -> String {
     let mut parts = vec!["lf".to_string()];
     if let Some(s) = skill {
@@ -171,8 +171,8 @@ pub fn format_reproducible_command(
     if no_loopflow {
         parts.push("--no-loopflow".to_string());
     }
-    if let Some(m) = model {
-        parts.push(format!("-m {}", m));
+    if let Some(agent) = agent {
+        parts.push(format!("-a {}", agent));
     }
     parts.join(" ")
 }
@@ -261,7 +261,7 @@ mod tests {
         );
         assert_eq!(
             cmd,
-            "lf implement --wave rust --docs src/ -c --no-loopflow -m claude:opus"
+            "lf implement --wave rust --docs src/ -c --no-loopflow -a claude:opus"
         );
     }
 }

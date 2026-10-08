@@ -53,6 +53,15 @@ LF_HOME="$(mktemp -d)" target/debug/lf wave list --json
 Children stay in that Machine. Experiments start empty; Loopflow does not upgrade,
 repair or preserve them. Use a fresh directory when its schema changes.
 
+## Select an agent
+
+```bash
+lf -a codex debug
+lf --agent claude:opus debug
+```
+
+`--agent` / `-a` selects the harness and optional model as `harness[:model]`.
+
 ## Select where work happens
 
 ```bash

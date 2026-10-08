@@ -69,7 +69,10 @@ showed directory or command. Native resume's Running, branch, directory and hook
 worked. Three steers repeat one observation; first-content naming remains Jack's
 hypothesis. Owner: LOO-422. Source: Jack's October 7 [LOO-421](https://linear.app/loopflow/issue/LOO-421)
 steers, especially comment `592307f3-4f29-4233-93c6-26c298583abf`; no raw capture
-was supplied. No follow-ups were filed or updated here; that deliverable remains open.
+was supplied. Host title/status derivation remains unresolved; the snapshots and
+reports establish labels, not their precedence or source. Upstream #1490 reads
+OSC 7501 in Desktop; lf emission remains unfinished, so it does not resolve the
+cmux finding. No follow-ups were filed or updated here; that deliverable remains open.
 
 **Keyboard checks:** in dedicated cmux/Ghostty workspaces, run a standalone skill,
 taskless conversation and two-step Flow; exercise fresh disposable Task checkout

@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Loopflow: prototype A, the plain list</title>
+<link rel="icon" href="../../website/static/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@latest/css/pico.min.css">
+<style>:root { --pico-font-size: 100%; }</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="../../website/static/style.css">
+<style>
+/* Prototype A only: a narrow reading column, plain lists, plain questions. */
+.home-page .col { max-width: 860px; margin-inline: auto; }
+.home-page .a-hero { padding: 84px 0 30px; }
+.home-page .a-hero h1 { display: flex; align-items: center; gap: 18px; margin-bottom: 26px; }
+.home-page .a-hero h1 img { width: .78em; height: .78em; }
+.home-page .a-hero .claim { font: 400 clamp(26px, 2.8vw, 36px)/1.2 var(--font-serif); color: var(--burgundy); letter-spacing: -.01em; margin-bottom: 16px; }
+.home-page .a-hero .lede { max-width: 700px; font-size: 19px; line-height: 1.55; color: #333; margin-bottom: 30px; }
+.home-page .a-hero .note { font: 12px/1.6 var(--font-mono); color: var(--text-secondary); margin: 16px 0 0; }
+.home-page .block h2 { font-size: clamp(30px, 3.2vw, 42px); margin-bottom: 12px; }
+.home-page .block .lede { margin-bottom: 26px; }
+.home-page .plain { list-style: none; margin: 0 0 30px; padding: 22px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font: 13.5px/1.7 var(--font-mono); color: #333; }
+.home-page .plain li { list-style: none; margin: 0 0 9px; padding-left: 2ch; text-indent: -2ch; }
+.home-page .plain li:last-child { margin-bottom: 0; }
+.home-page .plain li::before { content: "- "; color: var(--text-secondary); }
+.home-page .plain b { color: var(--text); font-weight: 500; }
+.home-page .plain b::after { content: ":"; }
+.home-page .more { font: 12px/1.6 var(--font-mono); color: var(--text-secondary); display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 14px 0 0; }
+.home-page .more a, .home-page .faq a { text-decoration: underline; text-underline-offset: 4px; }
+.home-page .shot { max-width: 1100px; margin: 34px auto 0; }
+.home-page .faq { margin: 0; border-top: 1px solid var(--border); }
+.home-page .faq > div { padding: 22px 0; border-bottom: 1px solid var(--border); }
+.home-page .faq dt { font: 600 16px/1.4 var(--font-sans); margin: 0 0 8px; color: var(--text); }
+.home-page .faq dd { margin: 0; font-size: 15px; line-height: 1.65; color: #333; max-width: 700px; }
+.home-page .faq code { font-size: .92em; }
+.home-page .a-start { display: block; padding: 70px 0; border-top: 0; margin-top: 30px; }
+.home-page .a-start h2 { font-size: clamp(30px, 3.2vw, 42px); margin: 0 0 18px; }
+@media (max-width: 860px) {
+    .home-page .a-hero { padding: 48px 0 20px; }
+    .home-page .a-hero h1 { font-size: 52px; gap: 14px; }
+    .home-page .a-hero .lede { font-size: 17px; }
+    .home-page .plain { font-size: 12.5px; }
+    .home-page .a-start { padding: 48px 0; }
+}
+</style>
+</head>
+<body>
+<div class="home-page">
+  <header>
+    <a href="http://localhost:5001/" class="brand"><img src="../../website/static/logo.svg" alt="">loopflow</a>
+    <nav aria-label="Main navigation">
+      <a href="#agents" class="optional">For your agents</a>
+      <a href="#you" class="optional">For you</a>
+      <a href="http://localhost:5001/docs">Docs</a>
+      <details><summary>Company</summary>
+        <div class="menu">
+          <a href="http://localhost:5001/studio">Loopflow Studio</a>
+          <a href="http://localhost:5001/etude">Etude</a>
+          <a href="http://localhost:5001/fantasia">Fantasia</a>
+          <a href="http://localhost:5001/about">About</a>
+        </div>
+      </details>
+      <a href="https://github.com/loopflowstudio/loopflow" class="optional">GitHub ↗</a>
+      <a href="#start" class="button solid">Install</a>
+    </nav>
+  </header>
+
+  <main id="main-content" class="home">
+    <section class="a-hero col">
+      <h1><img src="../../website/static/logo.svg" alt="">loopflow</h1>
+      <p class="claim">A software engineering CLI for your agents.</p>
+      <p class="lede">Ask your agents to build software and they can do it through this one command, breaking the work into concrete steps you can trace and pick back up.</p>
+      <div class="actions">
+        <a href="#start" class="button solid">Install ↓</a>
+        <a href="https://github.com/loopflowstudio/loopflow" class="button">GitHub ↗</a>
+      </div>
+      <p class="note">Free and open source. The coding agent it drives has its own cost.</p>
+    </section>
+
+    <section id="agents" class="block col">
+      <p class="eyebrow">In the terminal</p>
+      <h2>For your agents</h2>
+      <p class="lede">Give your agents the tools to do things the right way.</p>
+      <ul class="plain">
+        <li><b>Every part of the work</b> planning, designing, prototyping, implementing, testing, optimizing, researching, landing.</li>
+        <li><b>Flows</b> A Flow is a file that puts those parts in order.</li>
+        <li><b>Steps</b> Each step is its own session, with a commit between them.</li>
+        <li><b>Tasks</b> Each task gets its own working copy, branch, and pull request. Its sessions stay with it.</li>
+        <li><b>Workflows</b> A workflow names the points where you take part in a task’s conversation and the Flow that runs between each.</li>
+        <li><b>Checks</b> Checks run on each change. After a task’s pull request is handed off for landing, a failed required check can start a repair in the same task.</li>
+        <li><b>Written down</b> Instructions are Markdown and sequences are YAML, kept in your repository, or use the built-ins.</li>
+        <li><b>As much or as little of you</b> Stay in one session and steer as you go, come in at design and demo, or let it run. Choose per task or per project.</li>
+        <li><b>Your models</b> Claude Code, Codex, or OpenCode, on your own accounts.</li>
+        <li><b>Your machines</b> Runs locally, and over SSH where you choose.</li>
+        <li><b>Your methods</b> Skills and workflows are files in your repo (or use the built-ins). MIT licensed.</li>
+        <li><b>Your terminal</b> lf is a command. Run it in the terminal you already use.</li>
+      </ul>
+<pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> skill design "Add CSV export"<span class="c">  # one session</span>
+<span class="p">$</span> <b>lf</b> run ship-api                 <span class="c">  # a Flow: sessions in order</span>
+<span class="p">$</span> <b>lf</b> flow list                    <span class="c">  # the Flows you have</span>
+<span class="p">$</span> <b>lf</b> task create --title "Add CSV export"
+<span class="p">$</span> <b>lf</b> task run EXP-12              <span class="c">  # a task's next step</span>
+<span class="p">$</span> <b>lf</b> task status EXP-12
+<span class="p">$</span> <b>lf</b> session list                 <span class="c">  # every conversation</span>
+<span class="p">$</span> <b>lf</b> wave status exports          <span class="c">  # the plan</span>
+<span class="p">$</span> <b>lf</b> pr land                      <span class="c">  # merge it</span></pre>
+      <p class="more">
+        <a href="http://localhost:5001/docs/authoring">Skills and workflows ↗</a>
+        <a href="http://localhost:5001/docs/authoring#flows">Write your own Flow ↗</a>
+        <a href="http://localhost:5001/architecture/delivery">Worktrees and delivery ↗</a>
+      </p>
+    </section>
+
+    <section id="you" class="block">
+      <div class="col">
+        <p class="eyebrow">On your Mac, or in cmux or herdr</p>
+        <h2>For you</h2>
+        <p class="lede">Stay in flow while you work with agents.</p>
+        <ul class="plain">
+          <li><b>Loopflow</b> A free, open-source podium for conducting your software orchestra, with native macOS and terminal interfaces.</li>
+          <li><b>On screen</b> What needs your attention is on screen, and the rest is not.</li>
+          <li><b>Loopflow for Mac</b> Laid out around your work, with each conversation filed under the task it belongs to.</li>
+          <li><b>Long-lived sessions</b> A session stays with a workstream and its results. Come back to it and the work is where you left it.</li>
+          <li><b>Isolated jobs</b> Routine process and autonomous development run as separate jobs, each in its own working copy.</li>
+          <li><b>Waves</b> A lasting objective, with its plan and its memory. Have as many Waves as you like.</li>
+          <li><b>Notes</b> Reviewed notes carry goals and lessons into later sessions, so you do not rebuild context by hand.</li>
+          <li><b>Projects</b> What the Wave is doing now: its tasks, its key results, and the workflow its tasks follow.</li>
+        </ul>
+      </div>
+      <div class="shot">
+        <div class="window">
+          <img src="../../website/static/wave-surface.png" alt="Loopflow for Mac showing a goal, its key results, and ten tasks with their status" width="2880" height="1800" loading="lazy">
+        </div>
+        <p class="capture-label">Actual capture, unedited. The Mac app includes the command line tool; the command line tool does not need the Mac app.</p>
+      </div>
+    </section>
+
+    <section id="faq" class="block col">
+      <h2>FAQ</h2>
+      <dl class="faq">
+        <div>
+          <dt>Is Loopflow a terminal?</dt>
+          <dd>No. A terminal is where your agents run. Loopflow is what they do there and how you follow it. <code>lf</code> is a command, so it runs in the terminal you already use, cmux and herdr included.</dd>
+        </div>
+        <div>
+          <dt>Which coding agents does it work with?</dt>
+          <dd>Claude Code, Codex, or OpenCode, on your own accounts. Loopflow uses the one you have installed and signed in.</dd>
+        </div>
+        <div>
+          <dt>What does my agent actually do with it?</dt>
+          <dd>It runs <code>lf</code> commands. There is one for each part of building software: planning, designing, prototyping, implementing, testing, optimizing, researching, landing. Each step is its own session, with a commit between them.</dd>
+        </div>
+        <div>
+          <dt>What is a Flow?</dt>
+          <dd>A file that puts those parts in order. <code>lf flow list</code> shows the Flows you have and <code>lf run</code> starts one. Flows are YAML, kept in your repository, or you can use the built-ins.</dd>
+        </div>
+        <div>
+          <dt>How much do I have to be involved?</dt>
+          <dd>Stay in one session and steer as you go, come in at design and demo, or let it run. Choose per task or per project.</dd>
+        </div>
+        <div>
+          <dt>Do I need the Mac app?</dt>
+          <dd>No. The command line tool does not need the Mac app. The Mac app includes the command line tool.</dd>
+        </div>
+        <div>
+          <dt>Is it free?</dt>
+          <dd>Yes. Loopflow is free and open source, MIT licensed. Claude Code, Codex, and OpenCode have their own cost.</dd>
+        </div>
+        <div>
+          <dt>Where does it run?</dt>
+          <dd>On macOS or Linux. It runs locally, and over SSH where you choose. The Mac app is for macOS.</dd>
+        </div>
+        <div>
+          <dt>What are Waves, Projects, Tasks and Workflows?</dt>
+          <dd>Names for how the work is kept in order. A Wave is a lasting objective, with its plan and its memory. A Project is what the Wave is doing now. A Task is one outcome, with its own working copy, branch, and pull request. A Workflow names the points where you take part in a task. <a href="http://localhost:5001/docs/waves">Tasks and Waves ↗</a></dd>
+        </div>
+      </dl>
+    </section>
+
+    <section id="start" class="start a-start col">
+      <h2>Install</h2>
+<pre tabindex="0" aria-label="Install Loopflow" class="term"><span class="c"># macOS or Linux, with Claude Code, Codex, or OpenCode installed</span>
+<span class="p">$</span> curl -fsSL https://loopflow.studio/install.sh | sh
+<span class="p">$</span> <b>lf</b> init</pre>
+      <p class="capture-label install-links">
+        <a href="http://localhost:5001/docs/getting-started">Getting started ↗</a>
+        <a href="https://github.com/loopflowstudio/loopflow">Source ↗</a>
+        <a href="https://downloads.loopflow.studio/Loopflow-latest.dmg">Download for Mac</a>
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <span>Loopflow · An open-source software instrument.</span>
+    <div>
+      <a href="http://localhost:5001/studio">Loopflow Studio</a>
+      <a href="http://localhost:5001/docs/getting-started">Get started ↗</a>
+      <a href="https://github.com/loopflowstudio/loopflow">Source ↗</a>
+    </div>
+  </footer>
+</div>
+</body>
+</html>

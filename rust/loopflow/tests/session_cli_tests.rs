@@ -276,7 +276,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             let rejected = bin.join("rejecting-lf");
             std::fs::write(
                 &rejected,
-                "#!/bin/sh\necho 'unexpected argument --tui' >&2\nexit 2\n",
+                "#!/bin/sh\necho 'fixture launcher rejected invocation' >&2\nexit 2\n",
             )
             .unwrap();
             std::fs::set_permissions(&rejected, std::fs::Permissions::from_mode(0o755)).unwrap();

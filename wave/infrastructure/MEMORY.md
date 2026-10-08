@@ -870,10 +870,9 @@ Wave learning stays with its identified owner, never miscellaneous .lf notes.
 
 ## Prompt reduction boundary (2026-09-24)
 
-`719226ef4:wave/infrastructure/MEMORY.md` retains the source references.
-Historical identity, execution eligibility and consumed launch evidence remain
-separate. LOO-287's architecture pass and weekly observations remain unproved;
-local deletion and checks establish no KR. Intelligence owns prompt assembly.
+`719226ef4:wave/infrastructure/MEMORY.md` retains the evidence. Intelligence owns
+prompt assembly. LOO-287's architecture/weekly proof remains open; historical
+identity, execution eligibility and consumed launch evidence stay separate.
 
 ## Installation and command scope (curated 2026-10-02)
 
@@ -932,7 +931,11 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
 - **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly**. `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
 - **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
-- **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.
+- **Source history must reconstruct every applied release frontier.** Preserve
+  an unknown store frontier and its old binary; match embedded SQL against the
+  ledger before ratifying history. Draft-bearing candidates cannot promote;
+  schema-complete exact-frontier repairs need no migration. The July 20 recovery
+  and #1123 evidence remain at `ec126964d:wave/infrastructure/MEMORY.md` under Gotchas.
 - **Tests must survive draft migration materialization** (learned 2026-07-21).
   Release-equivalent Rust tests delete ordinal-free drafts and compile the
   generated canonical batch. Test fixtures resolve migration SQL by its draft
@@ -953,12 +956,10 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
   Linear moves an issue, historical Task Runs retain their evidence but lose
   automated PR and completion authority; fail closed before side effects and
   preserve the full Work, Run, Steer, and PR history for remediation.
-- **Historical continuity currently short-circuits daily telemetry** (observed
-  2026-08-23). `telemetry-daily` stops in `doctor` on the same eight 2026-08-04
-  through 2026-08-11 gap days before its scorecard runs. LOO-241 owns making
-  continuity obligation-aware. Fresh receipts are new evidence for that Task,
-  not grounds for duplicate daily Tasks; retry its Work only from a Turn with
-  valid Run execution context.
+- **Historical continuity blocked daily telemetry** on August 23. LOO-241's
+  original eight-gap failure remains at `ec126964d:wave/infrastructure/MEMORY.md`
+  under Gotchas; current continuity judges the latest due interval, as recorded
+  under Shipped history. Fresh failures belong to existing work, not duplicate Tasks.
 - **Release orchestration and product publication are separate evidence**
   (observed 2026-08-23). A cron receipt proves only the scheduled target's
   terminal state. `lf release status` remained at tag `v0.12.14` with a
@@ -1010,24 +1011,30 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 
 ## Direct invocation and large inputs (curated 2026-10-08)
 
-Jack Heart selected all assembled context in one system file, including skills
-and Task briefs; no split, fallback or lf-side refusal wording. The historical
-Claude block was a first-response error inside its terminal. Jack requested
-queue preparation then landing of PR #1498 and Task completion, superseding the
-review-only boundary; unobserved checks remain unproved and do not hold landing.
+Jack Heart's LOO-429 decision supersedes 428's argv/fixed-system constraints:
+all assembled context in one system/instructions file, short user trigger, no
+split, fallback or lf-side refusal wording. PR #1498 owns transport/oversized
+acceptance. Claude readback proves neither plan mode, cmux nor the combined
+candidate; shared transport proves no native resume. Jack authorized 429 landing
+despite gaps, then 428 queue/landing October 8.
 
-Jack's cmux screenshot shows Claude reading the exact fixture marker, OpenCode
-and the first Infrastructure memory heading. Its title was “Supplied context
-instructions”; auto mode supplies no plan-mode proof. Codex exited 2 on duplicate
-`--dangerously-bypass-hook-trust` before responding. LOO-428 owns that repair;
-retry its configured wrapper path afterward. Plan mode, Codex readback/title and
-native resume remain unverified. LOO-422 owns broader titles.
+Jack approved setup-free Codex coexistence: temporary native capture profile,
+bounded wrapper-trust parser probe, unchanged saved config/trust. Normal exit
+removes the profile; interruption may leave it unselected. Codex 0.160.1 composes
+profile/CLI hooks; two CLI tables replace each other; config bypass is ignored.
+Native PTYs prove capture, launch hooks and reconnect. Fresh reconnect hooks
+are absent even without lf; earlier assertions reread launch receipts. Actual
+cmux/installation remain unproved; preserve live Sessions. Launch receipts prove
+neither fresh reconnect hooks nor host tracking.
 
-Terminal, batch and persistent harnesses share one context-file writer; stubs
-prove transport/retention, not native resume.
-`44fe36620:wave/infrastructure/MEMORY.md` retains caller-checkpoint,
-common-loading and Claude-stdin evidence; rejected Codex `turn/start` waiting
-remains unresolved. Claude success proves no repair.
+Flow output prints position/name and messages; verbose adds accounting/INFO,
+never prompts. Started commits with Flow registration. Jack removed `--tui`
+October 8: terminal defaults interactive, `-i` forces it, `-b` stays headless;
+`default`'s override and #1500's stale forwarding are removed. Dated gate/PTY,
+website and static proofs: `9ab5b6a52:wave/infrastructure/MEMORY.md`, this heading;
+CI owns the full materialized matrix. LOO-422 owns OSC 7501 simplification after
+adoption. Preserve caller checkpoints/common invocation loading. Codex rejected-turn
+recovery remains unresolved; homepage capture follows installation.
 
 LOO-420: Jack Heart's October 8 comments `5f149330-5f5d-4a71-bb05-289b13fe2d94`
 and `76407cd0-b271-45e7-8953-62abe7f9df2b` correct the overexpanded scope:

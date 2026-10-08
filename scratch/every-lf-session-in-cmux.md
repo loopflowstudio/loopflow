@@ -1,5 +1,17 @@
 # Session titles (LOO-439)
 
+## Delivery direction — October 8, 2026
+
+After the walkthrough and shared self-rename instruction change, Jack Heart
+requested “land it,” then clarified “task advance.” Advance the existing `code`
+workflow from `demo` through `ship` (gate, then `pr land -c`). This supersedes
+the earlier stop-at-demo/no-landing boundary. Complete after verified merge.
+Unobserved presentation and installed behavior remain unproved; the request
+does not invent visual acceptance. Preserve account-free checks and existing
+cmux windows. Integrate current main's removal of `--tui` without restoring it;
+the recorded live demo used an older branch binary. Local review artifact:
+`scratch/pr-review.html`. Shared self-rename guidance now belongs in `LOOPFLOW.md`.
+
 ## Accepted scope — October 8, 2026
 
 Jack Heart requested implementation through demo, without provider accounts,
@@ -19,6 +31,12 @@ presentation and retained latest-message hooks remain host acceptance. Request
 excerpts are the implementation choice; title quality needs Jack's demo judgment.
 
 ## Implementation and ownership
+
+Jack Heart's October 8 review requested self-rename guidance on every lf surface.
+The guidance now lives in shared `LOOPFLOW.md`, removed from `human-present.md`:
+read `session_id` from `LF_AGENT_CALLER`, then use `lf session rename ... --suggest`.
+This preserves human names and applies wherever shared operating context is
+included, including headless and chat. Plain native hooks remain separate.
 
 SQLite's Session name owns lf presentation. `engine::naming` uses a three-word
 excerpt of the attributed request, excluding common articles and terminal controls,
@@ -54,7 +72,7 @@ to gate; helper fixtures establish merging and repeated installation only.
 | How the Session starts | Titled? | Evidence or missing capability |
 | --- | --- | --- |
 | lf interactive, Task | Yes: Task id and purpose | Public CLI/PTY fixture; live cmux rendering still unavailable. |
-| lf interactive, taskless | Yes: Session name | Same fixture proves agreement with `lf session list` and rename commands received by a cmux stub. |
+| lf interactive, taskless | Yes: Session name | Live cmux workspace/tab agree with `lf session list`, including a running rename; provider stand-in. |
 | lf headless, Task or taskless | Yes in Loopflow | Shared capture creation names every agent Session before provider launch; no terminal title without a terminal. |
 | New plain Claude TUI | Yes | Real 2.1.295 TUI emits request title; manual rename survives the next turn. |
 | New plain `claude -p` | Yes | Real 2.1.295 headless run saves `Plan store migration` in native history. |
@@ -102,18 +120,45 @@ a PTY; this proves no native TUI or rendered host. Lifecycle/capture/attribution
 and request/Goal identity. Gate retains driver replacement, missing cmux executable,
 captured-Flow launch and installation-entry acceptance.
 
-The October 8 demo attempt again failed before creating its unfocused workspace:
-the caller must originate inside cmux. A separate workspace with `--focus false` remains the only
-authorized live host demo. Sidebar/tab/window agreement, latest-message line,
-herdr and configured-shim behavior remain unobserved. Live lf rename updates
+Earlier October 8 attempts could not create an unfocused workspace; the later
+demo below supersedes that access blocker. Window-bar agreement, latest-message
+line, herdr and configured-shim behavior remain unobserved. Live lf rename updates
 workspace/tab names only; window-bar propagation needs observation. No
-unsynchronized terminal writer is planned. No publication, landing or acceptance
-is claimed. Release's entry-point lesson applies: native callback, actual hook,
+unsynchronized terminal writer is planned. No publication, landing or human
+acceptance is claimed. Release's entry-point lesson applies: native callback, actual hook,
 TUI/headless launch, installation and configured-host proofs are distinct.
 The installation helper is reached after published promotion when skill sync is
 enabled; its unit tests do not exercise that entry point or recovery. Gate's
 installation proof requires disposable OS-account isolation, as `account_home`
 does not follow fixture `HOME` or `LF_HOME`.
+
+## Live cmux demo — October 8, 2026
+
+The branch binary launched a new taskless Session in a separate cmux workspace
+with `--focus false`, an empty private Home and a Claude executable stand-in.
+The request was `Plan store migration for archived tasks`. `lf session list`,
+cmux's workspace title and its terminal tab title all read `Plan store migration`.
+While the Session remained running, `lf session rename` changed all three to
+`Release notes`. Structured before/after host readbacks passed assertions; the
+demo remained unselected in both snapshots. The active surface changed between
+readbacks, so global focus continuity is not claimed. No provider
+accounts, native settings or existing workspaces were changed.
+
+Evidence: `/tmp/lf-cmux-demo-owapn43t/` contains `launch.py`, `metadata.json`,
+`sessions-before.json`, `rename.json`, `before.json` and `after.json`, plus the
+isolated Session store. Workspace `workspace:1000000039`, surface
+`surface:1000000102`, remains available as `Release notes` for visual review.
+Its provider stand-in waits for one line of input, then exits. The initial
+inert workspace closed after its command exited; it supplied no title proof.
+
+Jack Heart has not yet supplied visual feedback or acceptance of this demo.
+The host readback proves workspace/tab naming, not rendered sidebar readability
+or the window bar. A stand-in cannot prove cmux's native latest-message hooks.
+Task-prefix coverage remains the earlier CLI fixture. No design change was
+agreed. Recommended next action: visually inspect this workspace's sidebar,
+tab and window bar, then demonstrate a native fake-API conversation through
+configured shims to check the latest-message line. Plain terminal/herdr
+presentation and installation-entry acceptance retain their separate boundaries.
 
 ## Delete — do not maintain
 

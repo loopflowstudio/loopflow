@@ -170,12 +170,15 @@ pub(crate) fn preview_process_prompt(
             arguments: skill_arguments.clone(),
         });
     let task_prompt = if skill_invocation.is_some() {
-        let mut context = components.clone();
-        context.skill = None;
-        if context.message.as_deref() == Some(skill_arguments.as_str()) {
-            context.message = None;
+        let mut parts = crate::engine::prompt::format_content_sections(&components);
+        if let Some(message) = components
+            .message
+            .as_deref()
+            .filter(|message| *message != skill_arguments)
+        {
+            parts.push(crate::engine::prompt::render_message(message));
         }
-        format_claude_task_prompt(&context)
+        parts.join("\n\n")
     } else {
         format_claude_task_prompt(&components)
     };

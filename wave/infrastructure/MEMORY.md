@@ -1054,10 +1054,11 @@ unresolved; Claude success proves no repair.
 
 LOO-420: Jack Heart selected native same-harness invocation, translated ports,
 inlined builtins, `--agent`/`-a`, terminal/headless and same-conversation use through
-review, without landing. Missing transport/admission cannot narrow scope. The unified
-catalog replaces external/npx/rams and Flow resolvers; captured source/declarations
-own selection and attribution. Export preserves third-party files; Claude's
-`agent: Explore` never selects an lf harness. Jack removed `--ide` after installed
+review, without landing. Missing transport/admission cannot narrow scope. One
+catalog replaces external/npx/rams and Flow resolvers. Retain source, declarations
+and arguments together; later rediscovery can change execution and attribution.
+Export preserves third-party files; `agent: Explore` never selects lf's harness.
+Jack removed `--ide` after installed
 0.13.9 launches lacked native identity and both reconnects failed. Preserve history;
 launcher success proves no engine exit.
 
@@ -1085,10 +1086,10 @@ not recall.
 Claude's hook maps context to system on tested Sonnet/Opus; queued user context
 survives resume without resupply or answer leakage. PTY injection submits drafts;
 inbox slash text stays unexpanded. A replacement terminal remains unapproved.
-Headless resume now reserves capture and claims driver atomically. CLI fixtures
-preserve held-owner captures on both harnesses; store/capture proofs cover losing
-claims, handoff and failed publication without provider completion. This is not
-held-owner delivery, uncertain-acknowledgement recovery or installed continuity.
-Resume context still follows caller cwd despite retained Session placement.
-Release's entry-point lesson applies: admission and provider success are separate.
+Headless resume atomically reserves capture and claims driver. CLI fixtures retain
+held-owner captures on both harnesses; store/capture proofs cover losing claims,
+handoff and failed publication. Preserving a refused input is not delivery through
+its owner, uncertain-acknowledgement recovery or installed continuity. Resume context
+still follows caller cwd despite retained Session placement. Release's entry-point
+lesson applies: admission, acknowledgement and application need separate proof.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

@@ -98,7 +98,7 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
             entries.push(Entry {
                 name: name.clone(),
                 kind: "skill".into(),
-                source: source.display_source(repo),
+                source: definition_source(repo, source.path.as_deref()),
                 description,
                 invocation: definition_invocation(tree, name, DefinitionKind::Skill),
             });

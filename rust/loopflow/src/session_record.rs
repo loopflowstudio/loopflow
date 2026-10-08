@@ -2122,17 +2122,7 @@ impl CaptureHandle {
             store.claim_session_input(next, expected.as_ref(), &process_lfid, replace_provider)?;
         // Continue the Session's attribution; the manifest still describes the
         // actual process cwd supplied by the caller.
-        spec.subjects = crate::ops::human_session::work_selector(&next)
-            .map(|selector| SubjectAttribution {
-                selector,
-                source: if next.work_source == Some(crate::session::WorkSource::Inherited) {
-                    AttributionSource::Inherited
-                } else {
-                    AttributionSource::Declared
-                },
-            })
-            .into_iter()
-            .collect();
+        spec.subjects = crate::ops::human_session::capture_subjects(&next);
         let result = Self::begin_reserved_at(
             &home,
             spec,

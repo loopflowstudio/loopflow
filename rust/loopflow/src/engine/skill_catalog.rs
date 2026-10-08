@@ -45,18 +45,6 @@ impl SkillSource {
         crate::engine::flow::skill_from_source(self)
     }
 
-    pub fn display_source(&self, repo: &Path) -> String {
-        self.path
-            .as_ref()
-            .map(|path| {
-                path.strip_prefix(repo)
-                    .unwrap_or(path)
-                    .display()
-                    .to_string()
-            })
-            .unwrap_or_else(|| "builtin".to_string())
-    }
-
     pub fn read(&self) -> Result<String, LoadError> {
         match &self.path {
             Some(path) => Ok(fs::read_to_string(path)?),

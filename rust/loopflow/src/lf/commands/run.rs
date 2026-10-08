@@ -65,7 +65,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     }
     turn.resume = Some(session.id);
     turn.skill_input = None;
-    turn.resolved_skill = None;
+    turn.resolved_invocation = None;
     run(None, Some(message), &turn)
 }
 
@@ -321,23 +321,14 @@ fn build_prompt_at(
     );
 
     let discover_start = Instant::now();
-    let invocation = cli
-        .skill_input
-        .as_deref()
-        .map(crate::engine::skill_invocation::SkillInvocation::read)
-        .transpose()?;
-    let discovered_skill = match &invocation {
+    let invocation = cli.resolved_invocation.as_ref();
+    let discovered_skill = match invocation {
         Some(invocation) => Some(invocation.skill.clone()),
-        None => match &cli.resolved_skill {
-            Some(skill) => Some(skill.clone()),
-            None => skill
-                .map(|name| crate::lf::discovery::discover_skill(&repo_root, name))
-                .transpose()?,
-        },
+        None => skill
+            .map(|name| crate::lf::discovery::discover_skill(&repo_root, name))
+            .transpose()?,
     };
-    let arguments = invocation
-        .as_ref()
-        .map_or(arguments, |invocation| invocation.arguments.as_str());
+    let arguments = invocation.map_or(arguments, |invocation| invocation.arguments.as_str());
     debug!(
         elapsed_ms = discover_start.elapsed().as_millis(),
         "discovered skill"
@@ -1527,6 +1518,12 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn retained_skill_context_keeps_its_source_after_catalog_selection_changes() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = EnvGuard::new();
+        let _home = EnvGuard::clear(&["LF_HOME", "HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        std::env::set_var("HOME", home.path());
         let repo = tempfile::tempdir().unwrap();
         let native = repo.path().join(".claude/skills/audit/SKILL.md");
         std::fs::create_dir_all(native.parent().unwrap()).unwrap();
@@ -1538,12 +1535,39 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         std::fs::create_dir_all(replacement.parent().unwrap()).unwrap();
         std::fs::write(replacement, "Replacement instructions").unwrap();
 
-        let components = PromptComponents {
-            repo_root: repo.path().display().to_string(),
-            skill: Some(skill),
-            ..PromptComponents::default()
+        let invocation = crate::engine::skill_invocation::SkillInvocation {
+            skill,
+            arguments: "  exact \"arguments\"  ".into(),
         };
-        let context = attributed_context(&components, "", "Original audit instructions", &[]);
+        let cli = Cli {
+            batch: true,
+            agent: Some("claude".into()),
+            // Target selection already consumed this now-absent transport file.
+            skill_input: Some(repo.path().join("removed-input.json")),
+            resolved_invocation: Some(invocation.clone()),
+            ..Cli::default()
+        };
+        let built = build_prompt_at(
+            Some("audit"),
+            Some("Retain this Work direction"),
+            "different caller arguments",
+            &cli,
+            repo.path().into(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(built.agent_config.skill_invocation, Some(invocation));
+        assert!(built
+            .agent_config
+            .task_prompt
+            .contains("Retain this Work direction"));
+        assert!(!built
+            .agent_config
+            .task_prompt
+            .contains("Replacement instructions"));
+        // Inline attribution uses the same retained components; native input
+        // records its source on the invocation instead of the context message.
+        let context = attributed_context(&built.components, "", "Original audit instructions", &[]);
         let asset = context
             .task
             .assets

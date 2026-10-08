@@ -276,17 +276,7 @@ pub(crate) fn publish_prepared_input(
             repo: None,
             worktree: Some(session.cwd.clone()),
             skill: session.skill.clone(),
-            subjects: work_selector(session)
-                .map(|selector| crate::session_record::SubjectAttribution {
-                    selector,
-                    source: if session.work_source == Some(WorkSource::Inherited) {
-                        crate::session_record::AttributionSource::Inherited
-                    } else {
-                        crate::session_record::AttributionSource::Declared
-                    },
-                })
-                .into_iter()
-                .collect(),
+            subjects: capture_subjects(session),
             flow,
             work: None,
         },
@@ -621,7 +611,23 @@ async fn conversation_launch_args(store: &SharedStore, session: &AgentSession) -
     args
 }
 
-pub(crate) fn work_selector(session: &AgentSession) -> Option<String> {
+pub(crate) fn capture_subjects(
+    session: &AgentSession,
+) -> Vec<crate::session_record::SubjectAttribution> {
+    work_selector(session)
+        .map(|selector| crate::session_record::SubjectAttribution {
+            selector,
+            source: if session.work_source == Some(WorkSource::Inherited) {
+                crate::session_record::AttributionSource::Inherited
+            } else {
+                crate::session_record::AttributionSource::Declared
+            },
+        })
+        .into_iter()
+        .collect()
+}
+
+fn work_selector(session: &AgentSession) -> Option<String> {
     match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(format!("task:{task}")),
         (None, Some(wave)) => Some(format!("wave:{wave}")),

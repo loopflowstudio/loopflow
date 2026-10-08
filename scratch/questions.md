@@ -60,8 +60,9 @@ Jack Heart (October 8) requested no duplicate Task data types and explicit
 optional placement/identity and local follow-up filing/completion, not DTO merging
 alone. Existing LOO-406 types are reused; its active checkout is unchanged.
 
-October 8 source recheck: LOO-406 at `cbdb9a43b` still lacks the coherent common
-writer. Its local-save path retains the old end/completion coupling; integration
+October 8 source recheck: LOO-406 at `de000c24f`, with staged source changes and
+an unresolved design merge, still lacks the coherent common writer. Its
+local-save path retains the old end/completion coupling; integration
 must preserve LOO-418's independent trigger. Its recorded failing concurrent
 reopening regression exposes an outbound read/write race, not covered by this
 branch's passing observation tests. The design records the precise integration

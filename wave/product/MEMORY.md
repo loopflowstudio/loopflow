@@ -11,11 +11,11 @@ October 8: end triggers completion; status, Workflow position and Process livene
 are independent. Linear completion preserves execution; failed end requests retry
 without replaying the Flow. Reopening supersedes old completion intent.
 
-LOO-406's common writer remains unfinished. Adopt local save/optional sync without
-end coupling. Its failing regression overwrites reopening between provider read
-and mutation; matching readback and observation tests prove no concurrency
-guarantee. Research remains open; neither automatic propagation nor preservation
-of concurrent changes has been relaxed.
+LOO-406's writer remains unfinished (`de000c24f` plus uncommitted changes).
+Preserve local save/optional sync without
+end coupling. Its recorded failing regression overwrites concurrent reopening;
+matching readback proves no concurrency guarantee. Neither automatic propagation
+nor concurrent-change preservation has been relaxed.
 
 Task owns placement and one optional PR, preserving history and unresolved scope.
 LOO-385 overlaps without closure authority. Jack accepted ship or the next
@@ -27,12 +27,12 @@ Linear due dates, including removal; retry intent stays immutable. Failed promot
 retains confirmed copy. Handoffs preserve child edits; Task placement owns the
 validated PR copy. Admission records performed location; Flow/Started commit atomically.
 
-Gate repaired held-error and unrelated-landing fixture drift. A composed fixture
-now proves simulated merge → linked follow-up → independent completion → actual
-Flow arrival, reading one Home through CLI/monitor and Rust/Swift decoder/view
-checks. Completion keeps the running edge; the driver records arrival. Captured
-wire evidence is `tests/fixtures/dto/task_lifecycle.json`. Local-only integration,
-provider concurrency, full gate and native acceptance remain unproven.
+The composed fixture at `432f37065` proves simulated merge → linked follow-up →
+independent completion → actual Flow arrival across CLI/monitor and Rust/Swift.
+Its capture is `tests/fixtures/dto/task_lifecycle.json`. Reads reuse delivery
+evidence; settlement rechecks it transactionally. Local-only integration, provider
+concurrency, full gate and native acceptance remain unproven. Earlier gate repairs
+and fixture limits remain in that commit's design.
 
 ## Terminal-host adoption (2026-10-07)
 

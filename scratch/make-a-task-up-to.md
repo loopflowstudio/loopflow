@@ -1,6 +1,14 @@
 # One Task, up to one PR
 
-LOO-418 · completion trigger implemented locally; shared planning integration remains · reconciled 2026-10-08
+LOO-418 · composed lifecycle proved headlessly; shared planning integration remains · reconciled 2026-10-08
+
+The composed fixture requested by the preceding review is committed at
+`432f37065`; its projection/timeout simplifications are checkpointed at
+`99a133733`. Existing Rust and Swift results cover that population. The remaining
+implementation boundary is LOO-406's common local writer and the local-only
+lifecycle, preserving independent completion and durable end requests. Provider
+concurrency, full affected gate, stacked/due-return demonstration and Jack's
+complete demo review remain; the composed fixture does not satisfy those checks.
 
 ## Decision and intended experience
 
@@ -50,7 +58,10 @@ directly; merging DTOs alone will not make either path work without Linear. Veri
 PR-less and merged-with-follow-up Tasks through both CLI and Desktop, including
 local filing/completion without provider calls. No second filing or completion
 implementation should survive. LOO-406 was rechecked read-only on October 8 at
-`cbdb9a43b`, with uncommitted design updates; no live Task/PR state was refreshed.
+`de000c24f`, with staged source changes and an unresolved merge in its design.
+Its source and questions still report an incomplete common-writer boundary;
+that checkout supplies evidence, not an integration commit. No live Task/PR
+state was refreshed.
 Saved Tasks now share offline checkout preparation. Completion and reopening save
 locally before provider I/O, while the coherent common-writer cut remains
 unavailable. It deletes `complete_planning_task`,
@@ -644,58 +655,14 @@ automatic filing of unrelated improvements, landing this branch and claimed
 production acceptance remain excluded. Gate findings and remaining acceptance
 are recorded below; the Docker installation ran in isolation.
 
-Earlier lookup, placement, Workflow-move and PR-projection compression findings
-remain at `37a7568cc:scratch/make-a-task-up-to.md`; the independent completion
-contract supersedes the alias model. No production code changes in this fixture pass.
-
-Synced main at `812d8cc55`, retaining placement before Process admission and
-applying main's `cli.agent` rename there. Earlier focused lifecycle, Rust/Swift DTO,
-filing, placement, stack and migration evidence is retained at
-`89e1198c5:scratch/make-a-task-up-to.md`.
-
-Review (2026-10-08): confirmed follow-up links incorrectly copied the immutable
-filing date instead of Linear's observed due date. Confirmation now records the
-provider date, including removal; the retry receipt retains its original payload.
-The lost-response/changed-chapter regression covers both date edits and removal.
-
-Range verification now reads Task placement directly, without reading or creating
-a temporary PR. Completion reconciliation uses its existing gate once; the store
-still checks disposition transactionally. Filing reuses its initial PR read.
-Review also corrected the CI repair prompt's completion promise and the Desktop
-mock's malformed optional-PR JSON; its existing decode test proves the repair.
-Earlier post-sync checks are retained at `6d18dad0a:scratch/make-a-task-up-to.md`.
-
-October 8 review corrections: waited landing shares CI repair admission with the
-watcher and release. Recorded Flow drivers and the Task carrier waiting for the
-calling command do not block its repair; other live work and pending provider
-turns still do. A busy checkout is reported without persisting a false delivery
-failure that could stop another waiter. The combined CLI fixture proves repair
-without a watcher, refusal over unrelated work, a watcher's harmless busy pass,
-one repair and arrival at follow-through. The mock changes CI evidence; it is not
-a live provider repair. Initial fixture failures were missing canonical planning
-scope and an invalid mock GitHub branch response, both corrected in the fixture.
-Held exit 3 now survives the Flow driver and prevents automatic whole-Flow retries.
-Bare and waited land return success for a merged Task PR, including a completed
-Task and explicit worktree selection, without clearing newly written scratch.
-
-Gate review (2026-10-08): a blanket error conversion made genuine waited-landing
-failures held, suppressing Task-runner retries. Only timeout, deliberate blockage,
-closed-without-merge and checkout-busy results now stop without retry; storage
-failures remain failures. The real loop's timeout retains its original request.
-A second defect joined every mechanical step to recent landing timestamps: after
-a hold, an unrelated first command could stop a fresh Flow. Only the parsed
-nonwaiting land command now checks pending delivery at its resolved checkout;
-short command spellings and explicit worktree selection use the ordinary parser.
-The regression retains an old request with a later observation timestamp.
-
-Other gate failures came from obsolete fixtures: missing explicit nullable due
-dates and workspace base commits, PR placeholders in research completion, old
-placement writers and command inventories, and expecting confirmed presentation
-from a failed publication. The populated-upgrade test now starts before the Task's
-draft instead of applying the draft twice. No production invariant was relaxed.
-
-The prior gate's exact results and repaired failures remain at
-`37441026a:scratch/make-a-task-up-to.md`; they cover the predecessor model.
+Earlier compression, sync and gate repair details remain at
+`432f3706575543c981a1a52da58ef4ce4874443f:scratch/make-a-task-up-to.md`,
+“Implementation defaults and delivery boundary.” That history retains failed
+fixtures and their corrections: observed due dates versus immutable filing input,
+confirmed publication copy, waiting-controller repair admission, held versus failed
+landing outcomes, and preventing unrelated mechanical steps from adopting a prior
+landing. Those checks cover the predecessor model; current composed evidence and
+remaining integration obligations are below.
 
 Implementation review (2026-10-08): status reads previously reconciled completion,
 so merely inspecting a Task could settle its pending request. They now read
@@ -744,4 +711,14 @@ LOO-406's common writer and concurrent-reopening guarantee, full affected gate,
 stacked/due-return demo and Jack's review remain. The reopening regression was not
 rerun or resolved here. Landing remains unauthorized.
 
-Check (2026-10-08): `cargo test -p loopflow --lib ops::task::follow_through::tests` — 2 passed; `cargo test -p loopflow --test dto_fixtures composed_lifecycle` — 1 passed; `swift test --package-path swift --filter 'composedTaskLifecycle|composedLifecycleDelivery'` — 2 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and context budgets passed. Full gate/demo deferred; prior 53-test evidence: `37a7568cc:scratch/make-a-task-up-to.md`.
+Compression review (2026-10-08): Task status derives follow-through and its latest
+event from one history read. Status and Wave projections evaluate completion
+eligibility from their already loaded PR and follow-through; the shared pure
+calculation replaces redundant reads without adding stored state. Settlement
+keeps its fresh read and transactional validation. Waited landing has one timeout
+around observation and polling, with storage failures still distinct from held
+expiry. The composed fixture reuses the existing environment guard; the README
+now describes independent completion. No predecessor completion writer changed.
+LOO-406 integration, its reopening regression and provider guarantee remain open.
+
+Check (2026-10-08): reused compression results for unchanged code: `cargo test -p loopflow --lib ops::task::follow_through::tests` — 2 passed; `cargo test -p loopflow --lib landing_wait` — 4 passed; `cargo test -p loopflow --test dto_fixtures composed_lifecycle` — 1 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. Swift decoder/view evidence: `432f37065:scratch/make-a-task-up-to.md`. Realign: `git diff --check` and `lf context --skill realign` passed; full gate/demo deferred.

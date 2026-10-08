@@ -6839,7 +6839,8 @@ mod tests {
                 .store
                 .sqlite
                 .task_comments(&fixture.task.id)
-                .unwrap();
+                .unwrap()
+                .comments;
             let body = &comments
                 .iter()
                 .find(|comment| comment.id == id)

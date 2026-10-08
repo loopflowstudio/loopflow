@@ -36,6 +36,7 @@ mod project_transitions;
 mod revisions;
 mod session_events;
 pub(crate) mod sessions;
+mod task_comments;
 pub(crate) mod task_state_delivery;
 mod task_work;
 

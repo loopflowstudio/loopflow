@@ -611,8 +611,7 @@ impl Reader {
                             .ok_or_else(|| anyhow!("Flow {id} has no driver record"))?;
                         flow_processes.push(process.detail(entry));
                     }
-                    let record = store.get_task(&task).await?.context("Task is missing")?;
-                    let comments = crate::ops::pm::read_task_comments(store, &record)?;
+                    let comments = store.sqlite.task_comments(&task)?;
                     WorkContent::Task(Some(Box::new(TaskPart {
                         comments,
                         task: selector,

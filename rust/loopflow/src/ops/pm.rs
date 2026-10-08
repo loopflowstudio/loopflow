@@ -1234,9 +1234,8 @@ pub(crate) async fn task_comment_async(
     if let Some(message) = message {
         super::task::append_task_comment(&store, &task, message, steer)?;
     }
-    let mut thread = read_task_comments(&store, &task)?;
-    if message.is_none() && task.plan.linear_id.is_some() {
-        thread.refresh_error = match tokio::time::timeout(
+    let refresh_error = if message.is_none() && task.plan.linear_id.is_some() {
+        match tokio::time::timeout(
             std::time::Duration::from_secs(5),
             super::linear_observe::refresh_task_comments(&store, &task),
         )
@@ -1245,43 +1244,16 @@ pub(crate) async fn task_comment_async(
             Ok(Ok(())) => None,
             Ok(Err(error)) => Some(error.to_string()),
             Err(_) => Some("Comment refresh timed out; showing saved comments".into()),
-        };
-        thread.comments = store
-            .sqlite
-            .task_comments(&task.id)
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        let current = read_task_comments(&store, &task)?;
-        thread.pending_sync = current.pending_sync;
-        thread.conflicts = current.conflicts;
-    }
+        }
+    } else {
+        None
+    };
+    let mut thread = store
+        .sqlite
+        .task_comments(&task.id)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    thread.refresh_error = refresh_error;
     Ok(thread)
-}
-
-pub(crate) fn read_task_comments(
-    store: &Store,
-    task: &crate::work::task::Task,
-) -> OpsResult<TaskComments> {
-    let error = |error: crate::store::StoreError| OpsError::Message(error.to_string());
-    Ok(TaskComments {
-        identifier: task.plan.identifier.clone(),
-        comments: store.sqlite.task_comments(&task.id).map_err(error)?,
-        pending_sync: if task.plan.linear_id.is_some() {
-            store
-                .sqlite
-                .pending_task_comments(&task.id)
-                .map_err(error)?
-                .into_iter()
-                .map(|comment| comment.id)
-                .collect()
-        } else {
-            Vec::new()
-        },
-        conflicts: store
-            .sqlite
-            .task_comment_conflicts(&task.id)
-            .map_err(error)?,
-        refresh_error: None,
-    })
 }
 
 pub(crate) async fn pm_create_task_idempotent<T, F, Fut>(

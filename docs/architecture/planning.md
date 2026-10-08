@@ -420,7 +420,8 @@ lf --wave product wave/operate "review the current priorities"
 ```
 
 SQLite owns every Task comment. A save records the comment and its stable delivery
-UUID in one transaction, before contacting Linear. Mapped Tasks show pending sync;
+UUID in one transaction, before contacting Linear. CLI and Desktop read the thread,
+pending IDs and conflict bodies from one SQLite snapshot. Mapped Tasks show pending sync;
 a foreground Task Session or Desktop Task connection delivers saved comments and
 acquires incoming comments independently. Lost replies are resolved by exact UUID,
 issue and body. Incoming comments enter the same thread without echoing locally

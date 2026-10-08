@@ -42,7 +42,12 @@ decision. Acceptance is unchanged. The schema accepts UUIDs for issue/Project cr
 
 Comment resolution retains both full comments and its choice. Keeping the local
 body queues one new UUID; retry reuses it without repeating direction or overwriting
-the provider comment. Late echoes cannot erase conflicts. Ownership deletion,
+the provider comment. Late echoes cannot erase conflicts. The uncommitted reduction
+after `fe07245a3` moves comments out of personal planning and reads thread, pending
+IDs and conflicts in one SQLite snapshot shared by CLI/Desktop. This retains the
+mapped-only projection; it does not implement unified ownership or unmapped export.
+Resolution's store/operation proofs leave public CLI/Desktop interaction unproved.
+Ownership deletion,
 fields, provider-first abandonment and unmapped export remain unfinished. Watcher
 reconnect proves local retention only; no composed native/Flow/Desktop or installed
 outcome is established. Release's operation-entry lesson applies.
@@ -798,37 +803,19 @@ and verify before reopening. The private-copy converter's live sidecar reads
 plus SQLite backup are not atomic. Preserve native IDs, pending reviews, selected
 captures and manually transferred Tasks; import neither old turns nor driver authority.
 
-- **Three owners.** Exec is one actual lf process. AgentSession is one
-  conversation, interactive or headless, surviving driver and engine
-  replacement. FlowSession is one started Flow. History is subordinate to its
-  owner and has no lifecycle of its own.
-- **Every Flow step is an Exec** (2026-09-29): "why not have lf flows actually
-  launch skill execs?" A skill step runs the same `lf skill` command a person
-  would run; an op runs its own command. Flow running skills without an Exec was
-  "a big leak" that reimplemented skill machinery; close it fully. Where direct
-  and Task-step behavior differ, "run directly seems like it wins there always."
-- **Parents are processes.** An agent-issued lf command's parent is the lf
-  process driving that agent ("to be clear i still want being called by an
-  agent process to give you the right parent-lf process"). The word parent means
-  Exec to Exec only; loop and template relations need other words.
-  Implementation matches Session/provider generation and origin to the current driver;
-  a replaced provider retains its proven historical parent. Causal ancestry
-  grants neither Task attribution nor Flow settlement authority. The final
-  schema omits the unused caller-turn token and its intermediate archive;
-  selected native events identify Flow completions.
-- **Definitions compile; runs are skills and ops.** A Flow definition may
-  reference other Flows; starting it compiles them into one graph (Jack's word).
-  A subflow is "more of a lens than an operational entity". Loop passes are not
-  child FlowSessions either (2026-09-30, reversing the earlier "runtime nesting
-  creates parents" rule): a pass is a node and iteration position. The direct
-  ownership migration creates this final shape. Earlier child-pass archive and
-  intermediate-schema conversions are deleted under Jack's compression decision;
-  their older proof is not proof of the final three-draft conversion. Retry keeps
-  its pass, Iterate advances return counters, and one FlowSession owns progression.
-- **An ID names an object.** A captured input is not an object: it is an event
-  in AgentSession history that names its Exec. `RunId` and its side table were
-  deleted. Prefer the word Exec over launch or run where the thing is one agent
-  start under one lf process.
+September 29–30's detailed owner/compilation decisions and superseded schema
+proofs remain at `fe07245a3614334aea71dc40e802b54b47ccaf17:wave/infrastructure/MEMORY.md`
+under this heading. Current Process vocabulary supersedes Exec/FlowSession names:
+one actual lf Process, one durable AgentSession conversation and one compiled
+Flow graph with step Processes. History has no independent lifecycle. Skill steps
+use ordinary `lf skill`; operations use their own commands. Parent means Process
+ancestry, matched to Session/provider generation and origin, never Task or Flow
+authority. Replacement preserves proven historical ancestry. Loop passes are
+node/iteration positions, not child Flows; retry keeps the pass and iteration
+advances its counters. Captured input belongs to Session history and names its
+Process; deleted RunId and intermediate conversion owners stay deleted. Older
+proofs establish no final-frontier conversion.
+
 - **Flow decisions are typed results** of the selected successful turn,
   modelled on PydanticAI and Jev: the step declares its output schema. The
   in-turn decide and route commands are removed; Jack said the command "felt
@@ -1063,8 +1050,9 @@ Preserve first accepted usage and conflicting-repeat partiality. Window by the
 owning fact's terminal time; publish measured coverage beside percentiles.
 Unknown authority cannot be inferred from observer time or trace prose.
 
-Wave/Project/Task map to provider-native planning objects; goals/memory/definitions
-remain in Git and plans in their authorized owner. Historical label migration
+LOO-406's October 8 direction selects local Wave/Project/Task ownership with optional
+provider mappings and explicit ingestion of Git-authored definitions; that cutover
+remains unfinished. Historical label migration
 and old command names are archived, not current instructions. KRs are explicit
 judgments, never inferred completion. Preserve unrelated provider associations;
 ambiguous moves remain diagnoses. Standing frontier plans need not acquire an

@@ -30,6 +30,7 @@ mod plan_read;
 mod planning;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;
+mod planning_peers;
 mod pr_landings;
 mod processes;
 mod program_status;

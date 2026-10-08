@@ -1,214 +1,92 @@
-//! Portable planning only: no checkout, Workflow, Session or process fields.
-//!
-//! Each field retains its current alternatives and the identities of superseded
-//! writes. Merging unions that causal context, so a delayed completion cannot
-//! replace a reopening that observed it. Concurrent writes remain alternatives;
-//! resolving them is a new write after observing all alternatives. No clock or
-//! Git merge-base selects a winner. Superseded values remain in Git history.
-//!
-//! The common local writer must persist these change identities and causal context
-//! atomically with mutations/imports. Export must never mint a new identity for
-//! a retry. This module performs no storage, execution or provider effects.
+//! Immutable planning mutations, not execution records. Causality precedes clocks;
+//! concurrent Linear observations win, otherwise the latest clock/identity wins.
+//! Losing values stay in the document and are available for recovery.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct PlanningChangeId(String);
-
-impl PlanningChangeId {
-    pub fn new(id: String) -> Result<Self, PlanningExchangeError> {
-        if id.trim().is_empty() {
-            return Err(PlanningExchangeError::Invalid(
-                "empty planning change identity",
-            ));
-        }
-        Ok(Self(id))
-    }
-}
-
-/// A causal field. Multiple distinct values are an explicit unresolved conflict.
-/// Retired identities are retained indefinitely; omission is not retirement.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PlanningField<T: Ord> {
-    current: BTreeMap<PlanningChangeId, BTreeSet<T>>,
-    retired: BTreeSet<PlanningChangeId>,
-}
-
-impl<T: Clone + Ord> PlanningField<T> {
-    pub fn new(change: PlanningChangeId, value: T) -> Self {
-        Self {
-            current: BTreeMap::from([(change, BTreeSet::from([value]))]),
-            retired: BTreeSet::new(),
-        }
-    }
-
-    pub fn values(&self) -> BTreeSet<&T> {
-        self.current.values().flatten().collect()
-    }
-
-    /// None means conflicting values, never an absent/default planning value.
-    pub fn resolved(&self) -> Option<&T> {
-        let mut values = self.current.values().flatten();
-        let first = values.next()?;
-        values.all(|value| value == first).then_some(first)
-    }
-
-    /// A writer can replay its current write, but cannot reuse a past identity.
-    pub fn write(
-        &mut self,
-        change: PlanningChangeId,
-        value: T,
-    ) -> Result<(), PlanningExchangeError> {
-        let current = BTreeMap::from([(change.clone(), BTreeSet::from([value]))]);
-        if self.current == current {
-            return Ok(());
-        }
-        if self.retired.contains(&change) || self.current.contains_key(&change) {
-            return Err(PlanningExchangeError::ReusedChange);
-        }
-        let previous = std::mem::replace(&mut self.current, current);
-        self.retired.extend(previous.into_keys());
-        Ok(())
-    }
-
-    pub fn merge(&self, incoming: &Self) -> Self {
-        let retired: BTreeSet<_> = self.retired.union(&incoming.retired).cloned().collect();
-        let mut current: BTreeMap<_, BTreeSet<T>> = BTreeMap::new();
-        for (change, values) in self.current.iter().chain(&incoming.current) {
-            if retired.contains(change) {
-                continue;
-            }
-            current
-                .entry(change.clone())
-                .or_default()
-                .extend(values.iter().cloned());
-        }
-        Self { current, retired }
-    }
-
-    fn validate(&self) -> Result<(), PlanningExchangeError> {
-        if self.current.is_empty()
-            || self.current.values().any(BTreeSet::is_empty)
-            || self.current.keys().any(|id| self.retired.contains(id))
-            || self
-                .current
-                .keys()
-                .chain(&self.retired)
-                .any(|id| id.0.trim().is_empty())
-        {
-            return Err(PlanningExchangeError::Invalid(
-                "invalid planning field causal context",
-            ));
-        }
-        Ok(())
-    }
-}
-
-/// Wave and Project move together so reconciliation cannot invent a pairing.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PlanningMembership {
-    pub wave_id: String,
-    pub project_id: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PlanningIssue {
-    pub id: String,
-    pub identifier: String,
-}
-
-/// Shared planning disposition; importing it must not move a local Workflow.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum PlanningDisposition {
-    Open,
-    Completed { summary: String },
-    Abandoned { reason: String },
-    Deleted,
+pub enum PlanningKind {
+    Wave,
+    Project,
+    Task,
+    Comment,
+}
+
+impl PlanningKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Wave => "wave",
+            Self::Project => "project",
+            Self::Task => "task",
+            Self::Comment => "comment",
+        }
+    }
+
+    /// The portable allowlist deliberately excludes execution, paths and controls.
+    pub fn fields(self) -> &'static [&'static str] {
+        match self {
+            Self::Wave => &["name", "parent_wave_id", "current_project_id"],
+            Self::Project => &[
+                "wave_id",
+                "external_project_id",
+                "project_slug",
+                "project_name",
+                "project_summary",
+                "project_prompt_context",
+                "workflow",
+                "status",
+                "planning_rank",
+                "planning_initiatives",
+                "planning_teams",
+            ],
+            Self::Task => &[
+                "project_id",
+                "external_issue_id",
+                "issue_identifier",
+                "issue_title",
+                "issue_description",
+                "planning_rank",
+                "planning_assignee",
+                "disposition",
+                "planning_deleted_at",
+                "planning_url",
+                "planning_branch_name",
+                "planning_team_id",
+            ],
+            Self::Comment => &["task_id", "content"],
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PlanningComment {
-    /// None preserves unresolved attribution, without inferring a machine owner.
-    pub author: Option<String>,
-    pub body: String,
+pub struct PlanningObject {
+    pub kind: PlanningKind,
+    pub id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PortableTask {
-    pub title: PlanningField<String>,
-    pub brief: PlanningField<String>,
-    pub membership: PlanningField<PlanningMembership>,
-    pub issue: PlanningField<Option<PlanningIssue>>,
-    pub disposition: PlanningField<PlanningDisposition>,
-    /// Immutable comment IDs deduplicate delivery; conflicting bytes stay explicit.
-    pub comments: BTreeMap<String, BTreeSet<PlanningComment>>,
+pub struct PlanningMutation {
+    pub object: PlanningObject,
+    pub field: String,
+    pub value: Value,
+    /// Hybrid logical milliseconds, advanced beyond every observed mutation.
+    pub clock: i64,
+    pub linear: bool,
+    /// Observed heads of this field, not a global revision or Git ancestry.
+    pub parents: BTreeSet<String>,
 }
 
-impl PortableTask {
-    pub fn merge(&self, incoming: &Self) -> Self {
-        let mut comments = self.comments.clone();
-        for (id, values) in &incoming.comments {
-            comments
-                .entry(id.clone())
-                .or_default()
-                .extend(values.iter().cloned());
-        }
-        Self {
-            title: self.title.merge(&incoming.title),
-            brief: self.brief.merge(&incoming.brief),
-            membership: self.membership.merge(&incoming.membership),
-            issue: self.issue.merge(&incoming.issue),
-            disposition: self.disposition.merge(&incoming.disposition),
-            comments,
-        }
-    }
-
-    fn validate(&self) -> Result<(), PlanningExchangeError> {
-        self.title.validate()?;
-        self.brief.validate()?;
-        self.membership.validate()?;
-        self.issue.validate()?;
-        self.disposition.validate()?;
-        if self
-            .comments
-            .iter()
-            .any(|(id, values)| id.trim().is_empty() || values.is_empty())
-            || self.membership.values().iter().any(|membership| {
-                membership.wave_id.trim().is_empty()
-                    || membership
-                        .project_id
-                        .as_ref()
-                        .is_some_and(|id| id.trim().is_empty())
-            })
-            || self.issue.values().iter().any(|issue| {
-                issue.as_ref().is_some_and(|issue| {
-                    issue.id.trim().is_empty() || issue.identifier.trim().is_empty()
-                })
-            })
-        {
-            return Err(PlanningExchangeError::Invalid(
-                "invalid portable planning identity",
-            ));
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanningSnapshot {
-    /// Existing durable Task IDs, never IDs inferred from issue names at import.
-    pub tasks: BTreeMap<String, PortableTask>,
+    pub changes: BTreeMap<String, PlanningMutation>,
 }
 
 impl PlanningSnapshot {
@@ -223,28 +101,117 @@ impl PlanningSnapshot {
         Ok(serde_json::to_vec(self)?)
     }
 
-    /// Pure reconciliation. Unknown/omitted Tasks and comments always survive.
-    pub fn merge(&self, incoming: &Self) -> Self {
-        let mut tasks = self.tasks.clone();
-        for (id, task) in &incoming.tasks {
-            tasks
-                .entry(id.clone())
-                .and_modify(|existing| *existing = existing.merge(task))
-                .or_insert_with(|| task.clone());
+    /// Omission is never deletion. Reused identities reject the document without
+    /// replacing either original; independent writes need distinct identities.
+    pub fn merge(&self, incoming: &Self) -> Result<Self, PlanningExchangeError> {
+        self.validate()?;
+        incoming.validate()?;
+        let mut merged = self.clone();
+        for (id, change) in &incoming.changes {
+            if merged.changes.get(id).is_some_and(|saved| saved != change) {
+                return Err(PlanningExchangeError::ReusedChange(id.clone()));
+            }
+            merged.changes.insert(id.clone(), change.clone());
         }
-        Self { tasks }
+        Ok(merged)
     }
 
-    fn validate(&self) -> Result<(), PlanningExchangeError> {
-        for (id, task) in &self.tasks {
-            if id.trim().is_empty() {
-                return Err(PlanningExchangeError::Invalid(
-                    "empty portable Task identity",
-                ));
+    pub fn heads(&self) -> BTreeMap<(PlanningObject, String), BTreeSet<String>> {
+        let retired: BTreeSet<_> = self.changes.values().flat_map(|c| &c.parents).collect();
+        let mut heads: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
+        for (id, change) in &self.changes {
+            if !retired.contains(id) {
+                heads
+                    .entry((change.object.clone(), change.field.clone()))
+                    .or_default()
+                    .insert(id.clone());
             }
-            task.validate()?;
+        }
+        heads
+    }
+
+    pub fn resolved(&self) -> BTreeMap<PlanningObject, BTreeMap<String, Value>> {
+        let mut objects: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
+        for ((object, field), heads) in self.heads() {
+            // Causal successors retire predecessors regardless of origin/clock.
+            let winner = heads
+                .iter()
+                .max_by_key(|id| {
+                    let change = &self.changes[*id];
+                    (change.linear, change.clock, *id)
+                })
+                .expect("a field has at least one head");
+            objects
+                .entry(object)
+                .or_default()
+                .insert(field, self.changes[winner].value.clone());
+        }
+        objects
+    }
+
+    pub fn validate(&self) -> Result<(), PlanningExchangeError> {
+        for (id, change) in &self.changes {
+            if id.is_empty()
+                || change.object.id.is_empty()
+                || change.clock < 0
+                || !change.object.kind.fields().contains(&change.field.as_str())
+            {
+                return Err(PlanningExchangeError::Invalid("invalid planning mutation"));
+            }
+            validate_value(change)?;
+            for parent in &change.parents {
+                let previous = self
+                    .changes
+                    .get(parent)
+                    .ok_or(PlanningExchangeError::Invalid(
+                        "missing planning predecessor",
+                    ))?;
+                if previous.object != change.object
+                    || previous.field != change.field
+                    || previous.clock >= change.clock
+                {
+                    return Err(PlanningExchangeError::Invalid("invalid planning causality"));
+                }
+            }
         }
         Ok(())
+    }
+}
+
+fn validate_value(change: &PlanningMutation) -> Result<(), PlanningExchangeError> {
+    let value = &change.value;
+    let text = |value: &Value| value.is_null() || value.is_string();
+    let valid = match change.field.as_str() {
+        "planning_rank" => value.as_u64().is_some_and(|rank| rank <= u32::MAX as u64),
+        "planning_deleted_at" => value.is_null() || value.as_i64().is_some_and(|at| at >= 0),
+        "planning_initiatives" | "planning_teams" => value
+            .as_str()
+            .is_some_and(|text| serde_json::from_str::<Vec<String>>(text).is_ok()),
+        "disposition" => value.as_object().is_some_and(|group| {
+            group.len() == 3
+                && group.get("planning_state").is_some_and(text)
+                && group.get("planning_completed_at").is_some_and(text)
+                && group
+                    .get("planning_completed")
+                    .is_some_and(|v| matches!(v.as_i64(), Some(0 | 1)))
+        }),
+        "content" => value.as_object().is_some_and(|group| {
+            group.len() == 3
+                && group.get("body").is_some_and(Value::is_string)
+                && group
+                    .get("author")
+                    .and_then(Value::as_str)
+                    .is_some_and(|a| serde_json::from_str::<Value>(a).is_ok())
+                && group.get("created_at").is_some_and(text)
+        }),
+        _ => text(value),
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(PlanningExchangeError::Invalid(
+            "invalid planning field value",
+        ))
     }
 }
 
@@ -254,6 +221,6 @@ pub enum PlanningExchangeError {
     Json(#[from] serde_json::Error),
     #[error("{0}")]
     Invalid(&'static str),
-    #[error("planning change identity was already used; retain the original write")]
-    ReusedChange,
+    #[error("planning change {0} has conflicting contents; retain the original write")]
+    ReusedChange(String),
 }

@@ -1,353 +1,166 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use loopflow::engine::planning_exchange::{
-    PlanningChangeId, PlanningComment, PlanningDisposition, PlanningField, PlanningMembership,
-    PlanningSnapshot, PortableTask,
+    PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot,
 };
-use loopflow::engine::planning_git::{PlanningGit, PlanningPublication};
-use loopflow_test_support::TestRepo;
+use serde_json::json;
 
-fn change(id: &str) -> PlanningChangeId {
-    PlanningChangeId::new(id.into()).unwrap()
-}
-
-fn task() -> PortableTask {
-    PortableTask {
-        title: PlanningField::new(change("creation"), "Original title".into()),
-        brief: PlanningField::new(change("creation"), "Original brief".into()),
-        membership: PlanningField::new(
-            change("creation"),
-            PlanningMembership {
-                wave_id: "wave-infrastructure".into(),
-                project_id: Some("project-chapter".into()),
+fn write(
+    snapshot: &mut PlanningSnapshot,
+    id: &str,
+    field: &str,
+    value: &str,
+    clock: i64,
+    linear: bool,
+) {
+    let object = PlanningObject {
+        kind: PlanningKind::Task,
+        id: "task-existing".into(),
+    };
+    let parents = snapshot
+        .heads()
+        .remove(&(object.clone(), field.into()))
+        .unwrap_or_default();
+    snapshot.changes.insert(
+        id.into(),
+        PlanningMutation {
+            object,
+            field: field.into(),
+            value: if field == "disposition" {
+                json!({"planning_state":value,"planning_completed":0,"planning_completed_at":null})
+            } else {
+                json!(value)
             },
-        ),
-        issue: PlanningField::new(change("creation"), None),
-        disposition: PlanningField::new(change("creation"), PlanningDisposition::Open),
-        comments: BTreeMap::new(),
-    }
-}
-
-fn snapshot(task: PortableTask) -> PlanningSnapshot {
-    PlanningSnapshot {
-        tasks: BTreeMap::from([("task-existing-id".into(), task)]),
-    }
-}
-
-fn comment(task: &mut PortableTask, id: &str, body: &str) {
-    task.comments
-        .entry(id.into())
-        .or_default()
-        .insert(PlanningComment {
-            author: Some("Jack Heart".into()),
-            body: body.into(),
-        });
-}
-
-fn complete(task: &mut PortableTask, id: &str) {
-    task.disposition
-        .write(
-            change(id),
-            PlanningDisposition::Completed {
-                summary: "Delivered".into(),
-            },
-        )
-        .unwrap();
-}
-
-#[test]
-fn independent_fields_comments_and_creations_combine_without_minting_ids() {
-    let mut laptop = task();
-    let mut worker = laptop.clone();
-    laptop
-        .title
-        .write(change("title-edit"), "New title".into())
-        .unwrap();
-    worker
-        .brief
-        .write(change("brief-edit"), "New brief".into())
-        .unwrap();
-    comment(&mut laptop, "laptop-comment", "Laptop direction");
-    comment(&mut worker, "worker-comment", "Worker finding");
-    let left = snapshot(laptop);
-    let mut right = snapshot(worker);
-    right.tasks.insert("follow-up-id".into(), task());
-    // Divergent historical identities remain distinct even with matching contents.
-    right.tasks.insert("legacy-id".into(), task());
-    let merged = left.merge(&right);
-    let task = &merged.tasks["task-existing-id"];
-    assert_eq!(task.title.resolved().unwrap(), "New title");
-    assert_eq!(task.brief.resolved().unwrap(), "New brief");
-    assert_eq!(task.comments.len(), 2);
-    assert_eq!(merged.tasks.len(), 3);
-    assert_eq!(merged, right.merge(&left));
-    assert_eq!(merged, merged.merge(&left).merge(&right));
-    assert_eq!(
-        merged,
-        PlanningSnapshot::from_bytes(&merged.to_bytes().unwrap()).unwrap()
+            clock,
+            linear,
+            parents,
+        },
     );
 }
 
+fn value(snapshot: &PlanningSnapshot, field: &str) -> serde_json::Value {
+    let value = snapshot.resolved()[&PlanningObject {
+        kind: PlanningKind::Task,
+        id: "task-existing".into(),
+    }][field]
+        .clone();
+    if field == "disposition" {
+        value["planning_state"].clone()
+    } else {
+        value
+    }
+}
+
 #[test]
-fn contested_disposition_preserves_both_inputs_without_blocking_comments() {
-    let mut laptop = task();
-    let mut worker = laptop.clone();
-    complete(&mut laptop, "complete");
-    worker
-        .disposition
-        .write(
-            change("cancel"),
-            PlanningDisposition::Abandoned {
-                reason: "Direction changed".into(),
-            },
-        )
-        .unwrap();
-    comment(
+fn concurrent_edits_converge_without_losing_independent_fields_or_losing_values() {
+    let mut base = PlanningSnapshot::default();
+    write(&mut base, "initial", "issue_title", "Initial", 1, false);
+    let mut laptop = base.clone();
+    let mut worker = base;
+    write(&mut laptop, "left", "issue_title", "Laptop", 2, false);
+    write(&mut worker, "right", "issue_title", "Worker", 3, false);
+    write(
         &mut worker,
-        "finding",
-        "Keep this even while disposition conflicts",
+        "brief",
+        "issue_description",
+        "Independent",
+        4,
+        false,
     );
-    let merged = laptop.merge(&worker);
-    assert_eq!(merged.disposition.resolved(), None);
-    assert_eq!(merged.disposition.values().len(), 2);
-    assert_eq!(merged.comments["finding"].len(), 1);
-    let mut resolved = merged.clone();
-    resolved
-        .disposition
-        .write(change("resolve"), PlanningDisposition::Open)
-        .unwrap();
-    assert_eq!(resolved.merge(&worker).merge(&laptop), resolved);
+    let merged = laptop.merge(&worker).unwrap();
+    assert_eq!(merged, worker.merge(&laptop).unwrap());
+    assert_eq!(merged.merge(&laptop).unwrap(), merged);
+    assert_eq!(value(&merged, "issue_title"), "Worker");
+    assert_eq!(value(&merged, "issue_description"), "Independent");
+    assert_eq!(merged.changes["left"].value, "Laptop");
+    assert_eq!(
+        PlanningSnapshot::from_bytes(&merged.to_bytes().unwrap()).unwrap(),
+        merged
+    );
 }
 
 #[test]
-fn observed_reopening_survives_delayed_completion_and_exchange_order() {
-    let initial = task();
-    let mut completed = initial.clone();
-    complete(&mut completed, "complete");
+fn observed_reopening_beats_delayed_completion_and_linear_beats_concurrent_peer() {
+    let mut completed = PlanningSnapshot::default();
+    write(
+        &mut completed,
+        "complete",
+        "disposition",
+        "completed",
+        1,
+        true,
+    );
     let mut reopened = completed.clone();
-    reopened
-        .disposition
-        .write(change("reopen"), PlanningDisposition::Open)
-        .unwrap();
-    let mut unrelated = initial.clone();
-    comment(&mut unrelated, "delayed-comment", "Still useful");
-    let result = reopened.merge(&completed).merge(&unrelated);
+    write(&mut reopened, "reopen", "disposition", "open", 2, false);
     assert_eq!(
-        result.disposition.resolved(),
-        Some(&PlanningDisposition::Open)
+        value(&completed.merge(&reopened).unwrap(), "disposition"),
+        "open"
     );
-    assert_eq!(result, reopened.merge(&completed.merge(&unrelated)));
-    assert_eq!(result, unrelated.merge(&reopened).merge(&completed));
-    assert_eq!(result.comments.len(), 1);
-    // An unobserved reopening is concurrent even though its value equals the base.
-    let mut independent_reopen = initial;
-    independent_reopen
-        .disposition
-        .write(change("independent-reopen"), PlanningDisposition::Open)
-        .unwrap();
-    assert_eq!(
-        completed.merge(&independent_reopen).disposition.resolved(),
-        None
+    let mut observed = completed.clone();
+    write(
+        &mut observed,
+        "linear-reopen",
+        "disposition",
+        "Linear open",
+        3,
+        true,
     );
-}
-
-#[test]
-fn omission_never_deletes_and_explicit_deletion_keeps_task_contents() {
-    let mut original = task();
-    comment(&mut original, "comment", "Retained history");
-    let mut deleted = original.clone();
-    deleted
-        .disposition
-        .write(change("delete"), PlanningDisposition::Deleted)
-        .unwrap();
-    let omitted = PlanningSnapshot {
-        tasks: BTreeMap::new(),
-    };
-    let original = snapshot(original);
-    assert_eq!(original.merge(&omitted), original);
-    let deleted = snapshot(deleted);
-    let result = deleted.merge(&original).merge(&omitted);
-    assert_eq!(result, deleted);
-    let retained = &result.tasks["task-existing-id"];
-    assert_eq!(retained.title.resolved().unwrap(), "Original title");
-    assert_eq!(retained.comments.len(), 1);
+    write(
+        &mut reopened,
+        "later",
+        "disposition",
+        "Peer completed",
+        100,
+        false,
+    );
+    let merged = reopened.merge(&observed).unwrap();
+    assert_eq!(value(&merged, "disposition"), "Linear open");
     assert_eq!(
-        retained.disposition.resolved(),
-        Some(&PlanningDisposition::Deleted)
+        merged.changes["later"].value["planning_state"],
+        "Peer completed"
     );
 }
 
 #[test]
-fn immutable_comment_identity_deduplicates_replay_and_retains_conflicting_bytes() {
-    let mut left = task();
-    comment(&mut left, "same-comment", "First content");
-    let mut right = task();
-    comment(&mut right, "same-comment", "Conflicting content");
-    assert_eq!(left.merge(&left), left);
-    let merged = left.merge(&right);
-    assert_eq!(merged.comments["same-comment"].len(), 2);
-    assert_eq!(merged.merge(&left).merge(&right), merged);
-}
-
-#[test]
-fn same_value_concurrent_writes_keep_both_causes_until_resolution() {
-    let original = task();
-    let mut left = original.clone();
-    let mut right = original;
-    complete(&mut left, "left-complete");
-    complete(&mut right, "right-complete");
-    let mut merged = left.merge(&right);
-    assert!(merged.disposition.resolved().is_some());
-    merged
-        .disposition
-        .write(change("reopen"), PlanningDisposition::Open)
-        .unwrap();
-    assert_eq!(merged.merge(&left).merge(&right), merged);
-    assert!(merged
-        .disposition
-        .write(change("left-complete"), PlanningDisposition::Open)
-        .is_err());
-}
-
-#[test]
-fn conflicting_change_identity_survives_replay_until_explicit_resolution() {
-    let left = PlanningField::new(change("same-edit"), "First title");
-    let right = PlanningField::new(change("same-edit"), "Other title");
-    let conflict = left.merge(&right);
+fn equal_values_retain_both_causes_and_ties_use_stable_identity() {
+    let mut left = PlanningSnapshot::default();
+    let mut right = PlanningSnapshot::default();
+    write(&mut left, "a", "issue_title", "Same", 1, false);
+    write(&mut right, "b", "issue_title", "Same", 1, false);
+    let mut merged = left.merge(&right).unwrap();
+    write(&mut merged, "c", "issue_title", "Next", 2, false);
     assert_eq!(
-        conflict.values(),
-        BTreeSet::from([&"First title", &"Other title"])
+        merged.changes["c"].parents,
+        BTreeSet::from(["a".into(), "b".into()])
     );
-    assert_eq!(conflict.resolved(), None);
-    assert_eq!(conflict, right.merge(&left));
-    assert_eq!(conflict, conflict.merge(&left).merge(&right));
-
-    let mut resolved = conflict.clone();
-    assert!(resolved.write(change("same-edit"), "First title").is_err());
-    assert_eq!(resolved, conflict);
-    resolved
-        .write(change("resolution"), "Chosen title")
-        .unwrap();
-    assert_eq!(resolved.merge(&conflict), resolved);
-    assert_eq!(resolved.resolved(), Some(&"Chosen title"));
-}
-
-#[test]
-fn membership_conflict_never_invents_a_wave_project_pair() {
-    let mut left = task();
-    let mut right = left.clone();
-    let a = PlanningMembership {
-        wave_id: "wave-a".into(),
-        project_id: Some("project-a".into()),
-    };
-    let b = PlanningMembership {
-        wave_id: "wave-b".into(),
-        project_id: Some("project-b".into()),
-    };
-    left.membership.write(change("move-a"), a.clone()).unwrap();
-    right.membership.write(change("move-b"), b.clone()).unwrap();
+    assert_eq!(value(&merged.merge(&left).unwrap(), "issue_title"), "Next");
+    right.changes.get_mut("b").unwrap().value = json!("Tie winner");
     assert_eq!(
-        left.merge(&right).membership.values(),
-        BTreeSet::from([&a, &b])
+        value(&left.merge(&right).unwrap(), "issue_title"),
+        "Tie winner"
     );
 }
 
 #[test]
-fn portable_decode_rejects_execution_fields_and_invalid_causal_context() {
-    let bytes = snapshot(task()).to_bytes().unwrap();
-    for field in [
-        "worktree",
-        "workflow",
-        "sessions",
-        "processes",
-        "claims",
-        "controls",
-    ] {
-        let mut json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        json["tasks"]["task-existing-id"][field] = serde_json::json!("machine-local");
-        assert!(PlanningSnapshot::from_bytes(&serde_json::to_vec(&json).unwrap()).is_err());
-    }
-    let mut json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    json["tasks"]["task-existing-id"]["title"]["retired"] = serde_json::json!(["creation"]);
-    assert!(PlanningSnapshot::from_bytes(&serde_json::to_vec(&json).unwrap()).is_err());
-}
-
-#[test]
-fn causal_conflicts_and_resolution_survive_git_publication_and_fresh_repository() {
-    let first = TestRepo::new();
-    first.push();
-    let origin = first.bare_path().to_str().unwrap();
-    let second = TestRepo::new();
-    let laptop = PlanningGit::new(first.path(), origin).unwrap();
-    let worker = PlanningGit::new(second.path(), origin).unwrap();
-    let initial = snapshot(task());
-    let base = laptop
-        .save(&initial.to_bytes().unwrap(), None, None)
-        .unwrap();
-    assert_eq!(
-        laptop.publish(&base.revision).unwrap(),
-        PlanningPublication::Confirmed
-    );
-    let fetched = worker.fetch().unwrap().unwrap();
-    let mut left = initial;
-    let mut right = PlanningSnapshot::from_bytes(&fetched.bytes).unwrap();
-    complete(left.tasks.get_mut("task-existing-id").unwrap(), "complete");
-    let worker_task = right.tasks.get_mut("task-existing-id").unwrap();
-    worker_task
-        .disposition
-        .write(
-            change("cancel"),
-            PlanningDisposition::Abandoned {
-                reason: "Changed".into(),
-            },
-        )
-        .unwrap();
-    comment(worker_task, "comment", "Keep while conflicted");
-    let left_revision = laptop
-        .save(&left.to_bytes().unwrap(), Some(&base.revision), None)
-        .unwrap();
-    let right_revision = worker
-        .save(&right.to_bytes().unwrap(), None, Some(&fetched.revision))
-        .unwrap();
-    assert_eq!(
-        laptop.publish(&left_revision.revision).unwrap(),
-        PlanningPublication::Confirmed
-    );
-    let PlanningPublication::Pending {
-        remote: Some(remote),
-    } = worker.publish(&right_revision.revision).unwrap()
-    else {
-        panic!("stale publication must retain both inputs");
-    };
-    let merged = right.merge(&PlanningSnapshot::from_bytes(&remote.bytes).unwrap());
-    assert_eq!(
-        merged.tasks["task-existing-id"].disposition.resolved(),
-        None
-    );
-    let revision = worker
-        .save(
-            &merged.to_bytes().unwrap(),
-            Some(&right_revision.revision),
-            Some(&remote.revision),
-        )
-        .unwrap();
-    assert_eq!(
-        worker.publish(&revision.revision).unwrap(),
-        PlanningPublication::Confirmed
-    );
-    // A fresh repository has no SQLite checkpoint or remembered merge base.
-    let fresh = TestRepo::new();
-    let reader = PlanningGit::new(fresh.path(), origin).unwrap();
-    let recovered = reader.fetch().unwrap().unwrap();
-    let mut recovered = PlanningSnapshot::from_bytes(&recovered.bytes).unwrap();
-    assert_eq!(recovered, merged);
-    recovered
-        .tasks
-        .get_mut("task-existing-id")
+fn conflicting_identity_missing_ancestors_and_execution_fields_are_rejected() {
+    let mut saved = PlanningSnapshot::default();
+    write(&mut saved, "a", "issue_title", "Saved", 1, false);
+    let mut reused = saved.clone();
+    reused.changes.get_mut("a").unwrap().value = json!("Replacement");
+    assert!(saved.merge(&reused).is_err());
+    let mut incomplete = saved.clone();
+    incomplete
+        .changes
+        .get_mut("a")
         .unwrap()
-        .disposition
-        .write(change("reopen"), PlanningDisposition::Open)
-        .unwrap();
-    assert_eq!(recovered.merge(&left).merge(&right), recovered);
-    assert_eq!(recovered.tasks["task-existing-id"].comments.len(), 1);
+        .parents
+        .insert("missing".into());
+    assert!(incomplete.to_bytes().is_err());
+    let mut execution = saved.clone();
+    execution.changes.get_mut("a").unwrap().field = "worktree".into();
+    assert!(execution.to_bytes().is_err());
+    let empty = PlanningSnapshot {
+        changes: BTreeMap::new(),
+    };
+    assert_eq!(saved.merge(&empty).unwrap(), saved);
 }

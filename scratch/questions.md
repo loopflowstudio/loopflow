@@ -15,7 +15,17 @@ at `b040c7c8d:scratch/questions.md`.
 - Planning remote selection must be explicit before ordinary commands can publish;
   no real planning data goes to the public code remote. Current transport tests
   use synthetic documents and disposable local remotes.
-- Remove retained copied-planning adoption and issue-derived identity together
-  with their replacement consumers on the integrated common writer.
+- Implementation choice: causality precedes a hybrid logical clock and stable
+  change-ID tie-break. No initiating host has blanket preference over collaborators;
+  positive Linear-origin observations win concurrent peer writes. Preserve losing
+  mutations. Stable user-key provisioning and safe joining remain unimplemented.
+- `new_migration.py` identified the inherited LOO-406 draft as this Task's draft.
+  Git's explicit stack boundary establishes that it belongs to the parent;
+  LOO-412 therefore has one separate `planning_peers.sql` draft depending on it.
+- Review found unfinished legacy-provider association and protected membership
+  projection: the importer currently rolls back the entire document. Independent
+  progress through those conflicts remains required before public integration.
 
-Retained pre-reconciliation check: `uv run --no-sync python scripts/test_network.py target/debug/deps/task_remote_tests-a43e8c3875a7fb96 --exact machine_selector_runs_a_skill_in_the_adopted_checkout_and_reuses_it --nocapture` — pass after merging main; proves adoption only.
+The source/destination primitives remain unpublished. Current verification and
+remaining integration are in the existing design; previous adoption-only evidence
+is retained at `5d336868f:scratch/questions.md`.

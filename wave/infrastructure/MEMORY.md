@@ -626,21 +626,22 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-08)
 
-Jack Heart selected local stores with bidirectional planning sync through one
-custom Git ref, superseding host callbacks. Share identity, briefs, comments and
-completion; never replicate execution, paths or controls. Imported completion
-cannot move a local Workflow. LOO-412 owns transport/machine integration; LOO-406
-owns the common local writer and optional Linear sync. No real planning publication
-to the public code remote is selected. Publication remains for review, never landing.
+Jack Heart selected bidirectional local planning sync through a custom Git ref,
+superseding host callbacks. LOO-412 owns transport/machine integration; LOO-406
+owns common storage and optional Linear. Share planning, never execution, paths,
+Workflow position or controls. Imported completion grants no execution authority.
+Jack authorized review-only publication and stacking on `e68f2a423`/`84664e661`,
+not public-remote planning export or landing. Plan ownership above governs sharing.
 
-Jack Heart authorized stacking on LOO-406 and continuing pursue. Published parent
-`e68f2a423` contains the common ownership cut `84664e661`; the earlier missing-writer
-diagnosis is superseded. Peer export/import, ordering and checkpoints belong to
-LOO-412, not a new prerequisite for LOO-406. Reuse its saved-plan writers.
-Jack's conflict and user-keyed destination decisions under Plan ownership govern
-this transport too. Retain losing edits; mandatory manual resolution is superseded.
-Transport fixtures establish no SQLite import or public dispatch. Remaining proof:
-`scratch/work-on-another-machine-name.md`. Preserve identity and execution history.
+Unverified source replaces copied planning and issue-derived IDs with transactional
+peer mutations/imports and destination-specific refs. Causality precedes Linear
+preference, then clock/ID; losing values survive. No passing Rust or installed proof.
+Destination binding, safe joining, foreground exchange/presentation, legacy-ID
+association and independent progress through projection conflicts remain unfinished.
+The importer currently rolls back on duplicate provider mappings or protected
+ancestry moves; that is not accepted conflict behavior. Public acquisition and
+composed Linear/execution preservation still need proof. Design:
+`scratch/work-on-another-machine-name.md`; earlier evidence: `5d336868f`, this heading.
 
 ## Synced planning integration (LOO-334)
 

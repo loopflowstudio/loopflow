@@ -89,16 +89,20 @@ lf task run EXP-12 --reason "take the smaller approach"
 ```
 
 ```bash
-lf --machine mini --task EXP-12 skill implement # adopt the Task and use its pushed branch
+lf --machine mini --task EXP-12 skill implement # use the Task's pushed branch
 ```
 
-An absent Task is adopted by issue name through the same path as `lf task run`.
-SSH carries its planning, branch and required commit; each machine keeps its own
-Workflow and Sessions. Push source work first: missing branches, unpushed commits
-and uncommitted changes are reported without changing them. Repeated launches
-reuse the checkout. An existing target checkout behind the requested commit needs
-`lf sync` there before continuing. New Task IDs derive from the Linear issue ID;
-existing IDs are preserved.
+The target needs the same saved planning identity before launch. SSH carries only
+that identity, its identifier, branch and required commit—not a copied planning
+record. Push source work first: missing branches, unpushed commits and uncommitted
+changes are reported without changing them. Repeated launches reuse the checkout;
+a target behind the required commit needs `lf sync` there. Existing IDs and local
+execution history remain unchanged.
+
+Custom-ref planning synchronization is under implementation. The common store now
+retains peer mutation identities and imports planning atomically without moving
+Workflows. Destination setup and automatic exchange are not yet exposed; an absent
+remote Task reports that planning must synchronize instead of bootstrapping a copy.
 
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's

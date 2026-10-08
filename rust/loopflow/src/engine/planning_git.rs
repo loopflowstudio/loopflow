@@ -11,10 +11,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::engine::process::ProcessGroupGuard;
+use sha2::{Digest, Sha256};
 
-const SHARED_REF: &str = "refs/loopflow/planning";
-const LOCAL_REF: &str = "refs/loopflow/planning-local";
-const OBSERVED_REF: &str = "refs/loopflow/planning-observed";
 const MAX_DOCUMENT: usize = 16 * 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(30);
 
@@ -67,21 +65,50 @@ type Result<T> = std::result::Result<T, PlanningGitError>;
 pub struct PlanningGit {
     repo: PathBuf,
     remote: String,
+    reference: String,
+    local_ref: String,
+    observed_ref: String,
 }
 
 impl PlanningGit {
-    pub fn new(repo: &Path, remote: &str) -> Result<Self> {
+    pub fn new(repo: &Path, remote: &str, reference: &str) -> Result<Self> {
         if remote.is_empty() || remote.starts_with('-') {
             return Err(PlanningGitError::Invalid("select a planning Git remote"));
         }
+        let suffix =
+            reference
+                .strip_prefix("refs/loopflow/planning/")
+                .ok_or(PlanningGitError::Invalid(
+                    "select a user-keyed or shared planning ref",
+                ))?;
+        let valid = if let Some(key) = suffix.strip_prefix("users/") {
+            uuid::Uuid::parse_str(key).is_ok_and(|id| id.to_string() == key)
+        } else if let Some(key) = suffix.strip_prefix("shared/") {
+            !key.is_empty()
+                && key
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
+        } else {
+            false
+        };
+        if !valid {
+            return Err(PlanningGitError::Invalid(
+                "invalid user-keyed or shared planning ref",
+            ));
+        }
+        // Retained history belongs to this destination, never the code checkout.
+        let namespace = format!("{:x}", Sha256::digest(format!("{remote}\0{reference}")));
         Ok(Self {
+            reference: reference.into(),
+            local_ref: format!("refs/loopflow/planning-local/{namespace}"),
+            observed_ref: format!("refs/loopflow/planning-observed/{namespace}"),
             repo: repo.to_path_buf(),
             remote: remote.into(),
         })
     }
 
     pub fn local(&self) -> Result<Option<PlanningDocument>> {
-        self.read_revision(LOCAL_REF)?
+        self.read_revision(&self.local_ref)?
             .map(|revision| self.read_document(revision))
             .transpose()
     }
@@ -90,7 +117,7 @@ impl PlanningGit {
     pub fn fetch(&self) -> Result<Option<PlanningDocument>> {
         let refs = self.checked(
             "discover",
-            &["ls-remote", "--refs", &self.remote, SHARED_REF],
+            &["ls-remote", "--refs", &self.remote, &self.reference],
             &[],
         )?;
         if refs.is_empty() {
@@ -99,7 +126,7 @@ impl PlanningGit {
         // Isolate concurrent fetches. A failed transfer cannot read another
         // invocation's stale FETCH_HEAD or overwrite its temporary reference.
         let temporary = format!("refs/loopflow/planning-fetch-{}", uuid::Uuid::new_v4());
-        let refspec = format!("{SHARED_REF}:{temporary}");
+        let refspec = format!("{}:{temporary}", self.reference);
         let fetched: Result<PlanningDocument> = (|| {
             self.checked(
                 "fetch",
@@ -122,7 +149,7 @@ impl PlanningGit {
                 &[
                     "update-ref",
                     "--create-reflog",
-                    OBSERVED_REF,
+                    &self.observed_ref,
                     document.revision.as_str(),
                 ],
                 &[],
@@ -171,14 +198,14 @@ impl PlanningGit {
             &[
                 "update-ref",
                 "--create-reflog",
-                LOCAL_REF,
+                &self.local_ref,
                 revision.as_str(),
                 expected.map(PlanningRevision::as_str).unwrap_or(""),
             ],
             &[],
         )?;
         if !updated.status.success() {
-            if self.read_revision(LOCAL_REF)?.as_ref() != expected {
+            if self.read_revision(&self.local_ref)?.as_ref() != expected {
                 return Err(PlanningGitError::ConcurrentWrite);
             }
             updated.success("save revision")?;
@@ -192,7 +219,15 @@ impl PlanningGit {
     /// Publish once, without forcing or retrying a write, then inspect the remote.
     /// The caller retains its common-writer pending effect until confirmation.
     pub fn publish(&self, revision: &PlanningRevision) -> Result<PlanningPublication> {
-        let refspec = format!("{}:{SHARED_REF}", revision.as_str());
+        let retained = self.local()?.ok_or(PlanningGitError::Invalid(
+            "no local revision for this planning destination",
+        ))?;
+        if !self.is_ancestor(revision, &retained.revision)? {
+            return Err(PlanningGitError::Invalid(
+                "revision belongs to another planning destination",
+            ));
+        }
+        let refspec = format!("{}:{}", revision.as_str(), self.reference);
         // Any failed response is ambiguous until readback, including a timeout.
         let _push = self.git(
             "publish",

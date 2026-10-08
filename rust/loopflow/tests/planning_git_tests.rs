@@ -21,7 +21,12 @@ fn git(repo: &Path, args: &[&str]) -> String {
 }
 
 fn transport(repo: &Path) -> PlanningGit {
-    PlanningGit::new(repo, "origin").unwrap()
+    PlanningGit::new(
+        repo,
+        "origin",
+        "refs/loopflow/planning/users/00000000-0000-4000-8000-000000000001",
+    )
+    .unwrap()
 }
 
 fn source_state(repo: &Path) -> Vec<Vec<u8>> {
@@ -126,17 +131,23 @@ fn offline_changes_survive_and_fresh_clone_readback_recovers_lost_acknowledgemen
             None,
         )
         .unwrap();
-    let offline = PlanningGit::new(repo.path(), "/nonexistent-loopflow-planning-fixture").unwrap();
+    let unavailable = repo.bare_path().with_extension("offline");
+    fs::rename(repo.bare_path(), &unavailable).unwrap();
     assert_eq!(
-        offline.publish(&saved.revision).unwrap(),
+        online.publish(&saved.revision).unwrap(),
         PlanningPublication::Unconfirmed
     );
-    assert_eq!(offline.local().unwrap(), Some(saved.clone()));
+    assert_eq!(online.local().unwrap(), Some(saved.clone()));
+    fs::rename(&unavailable, repo.bare_path()).unwrap();
     // A successful publication whose response the caller discards.
     online.publish(&saved.revision).unwrap();
     let tip = git(
         repo.path(),
-        &["ls-remote", "origin", "refs/loopflow/planning"],
+        &[
+            "ls-remote",
+            "origin",
+            "refs/loopflow/planning/users/00000000-0000-4000-8000-000000000001",
+        ],
     );
     let fresh = tempfile::tempdir().unwrap();
     git(
@@ -153,7 +164,11 @@ fn offline_changes_survive_and_fresh_clone_readback_recovers_lost_acknowledgemen
         tip,
         git(
             repo.path(),
-            &["ls-remote", "origin", "refs/loopflow/planning"]
+            &[
+                "ls-remote",
+                "origin",
+                "refs/loopflow/planning/users/00000000-0000-4000-8000-000000000001"
+            ]
         )
     );
 }
@@ -218,4 +233,29 @@ fn source_commits_are_rejected_and_absence_does_not_delete_local_data() {
     git(repo.path(), &["push", "origin", ":refs/loopflow/planning"]);
     assert_eq!(planning.fetch().unwrap(), None);
     assert_eq!(planning.local().unwrap(), Some(saved));
+}
+
+#[test]
+fn selected_destinations_never_mix_retained_or_published_plans() {
+    let repo = TestRepo::new();
+    let personal = transport(repo.path());
+    let shared =
+        PlanningGit::new(repo.path(), "origin", "refs/loopflow/planning/shared/team").unwrap();
+    let private = personal.save(b"private fixture", None, None).unwrap();
+    personal.publish(&private.revision).unwrap();
+    assert_eq!(shared.local().unwrap(), None);
+    assert_eq!(shared.fetch().unwrap(), None);
+    assert!(shared.publish(&private.revision).is_err());
+    let joined = shared.save(b"shared fixture", None, None).unwrap();
+    shared.publish(&joined.revision).unwrap();
+    assert_eq!(personal.fetch().unwrap(), Some(private.clone()));
+    assert_eq!(personal.local().unwrap(), Some(private));
+    assert_eq!(shared.fetch().unwrap(), Some(joined));
+    assert!(PlanningGit::new(repo.path(), "origin", "refs/loopflow/planning").is_err());
+    assert!(PlanningGit::new(
+        repo.path(),
+        "origin",
+        "refs/loopflow/planning/users/display-name"
+    )
+    .is_err());
 }

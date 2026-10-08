@@ -18,6 +18,7 @@ mod metrics;
 mod migration_catalog;
 mod migration_schema;
 pub mod migrations;
+mod planning_peers;
 mod pr_landings;
 mod processes;
 pub(crate) mod project_transitions;

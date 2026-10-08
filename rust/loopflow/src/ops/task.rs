@@ -756,21 +756,46 @@ pub(crate) async fn resolve_task(
     repo: &Path,
     selector: &str,
 ) -> OpsResult<Task> {
-    if let Some(task) = store
+    let source = remote::source_for_task(selector)?;
+    if let Some(source) = &source {
+        source.require_pushed(repo)?;
+    }
+    let mut task = store
         .get_task_by_issue(selector)
         .await
-        .map_err(task_error)?
-    {
-        if let Some(source) = remote::source_for_issue(&task.plan.identifier)? {
-            source.require_pushed(repo)?;
-            restore_task_checkout(store, &task).await?;
-            source.require_checkout(&task)?;
+        .map_err(task_error)?;
+    if task.is_none() {
+        if let Some(source) = &source {
+            // Older independently created identities remain local. The explicit
+            // provider alias associates them; matching titles never does.
+            task = store
+                .get_task_by_issue(source.identifier())
+                .await
+                .map_err(task_error)?;
         }
-        return Ok(task);
     }
-    if crate::durable::TaskId::parse(selector).is_ok() {
+    if let Some(task) = task {
+        if task.worktree.is_some() {
+            if let Some(source) = &source {
+                restore_task_checkout(store, &task).await?;
+                source.require_checkout(&task)?;
+            }
+            return Ok(task);
+        }
+        let repo = repo.to_path_buf();
+        let selector = source
+            .as_ref()
+            .map(|source| source.identifier().to_string())
+            .unwrap_or_else(|| task.id.to_string());
+        return tokio::task::spawn_blocking(move || {
+            prepare_task(&repo, &selector, TaskProcessOptions::default())
+        })
+        .await
+        .map_err(task_error)?;
+    }
+    if source.is_some() || crate::durable::TaskId::parse(selector).is_ok() {
         return Err(task_error(format!(
-            "Task {selector} is not registered; select its issue name to adopt it on this machine"
+            "Task {selector} has not synchronized to this machine; synchronize the selected planning destination before launching"
         )));
     }
     let repo = repo.to_path_buf();
@@ -790,7 +815,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
     {
         return Err(task_error("directive cannot be empty"));
     }
-    let source = remote::source_for_issue(issue)?;
+    let source = remote::source_for_task(issue)?;
     if let Some(source) = &source {
         source.require_pushed(repo)?;
     }

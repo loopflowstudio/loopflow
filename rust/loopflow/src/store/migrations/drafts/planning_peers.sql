@@ -1,0 +1,154 @@
+-- depends_on: local_planning
+-- One mutation journal on the common planning writer. No execution is exported.
+CREATE TABLE planning_peer_context (
+    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+    importing INTEGER NOT NULL DEFAULT 0 CHECK(importing IN (0,1)),
+    linear INTEGER NOT NULL DEFAULT 0 CHECK(linear IN (0,1))
+);
+INSERT INTO planning_peer_context(singleton) VALUES(1);
+CREATE TABLE planning_peer_changes (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK(kind IN ('wave','project','task','comment')),
+    object_id TEXT NOT NULL,
+    field TEXT NOT NULL,
+    value TEXT NOT NULL CHECK(json_valid(value)),
+    clock INTEGER NOT NULL CHECK(clock>=0),
+    linear INTEGER NOT NULL CHECK(linear IN (0,1)),
+    parents TEXT NOT NULL CHECK(json_valid(parents))
+);
+CREATE INDEX planning_peer_changes_object ON planning_peer_changes(kind,object_id,field);
+CREATE INDEX planning_peer_changes_clock ON planning_peer_changes(clock);
+CREATE TABLE planning_peer_heads (
+    id TEXT PRIMARY KEY REFERENCES planning_peer_changes(id),
+    kind TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    field TEXT NOT NULL
+);
+CREATE INDEX planning_peer_heads_object ON planning_peer_heads(kind,object_id,field);
+CREATE TRIGGER planning_peer_advance AFTER INSERT ON planning_peer_changes BEGIN
+    DELETE FROM planning_peer_heads WHERE id IN (SELECT value FROM json_each(NEW.parents));
+    INSERT INTO planning_peer_heads(id,kind,object_id,field)
+        VALUES(NEW.id,NEW.kind,NEW.object_id,NEW.field);
+END;
+CREATE TABLE planning_peer_imports (
+    repo TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    revision TEXT NOT NULL,
+    PRIMARY KEY(repo,destination)
+);
+
+CREATE TRIGGER peer_wave_insert AFTER INSERT ON waves
+WHEN (SELECT importing FROM planning_peer_context)=0
+BEGIN
+    INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+    SELECT lower(hex(randomblob(16))),'wave',NEW.id,j.key,
+        CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
+        max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
+        (SELECT linear FROM planning_peer_context),
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='wave' AND object_id=NEW.id AND field=j.key)
+    FROM json_each(json_object('name',NEW.name,'parent_wave_id',NEW.parent_wave_id,'current_project_id',NEW.current_project_id)) j ;
+END;
+
+CREATE TRIGGER peer_wave_update AFTER UPDATE ON waves
+WHEN (SELECT importing FROM planning_peer_context)=0
+BEGIN
+    INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+    SELECT lower(hex(randomblob(16))),'wave',NEW.id,j.key,
+        CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
+        max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
+        (SELECT linear FROM planning_peer_context),
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='wave' AND object_id=NEW.id AND field=j.key)
+    FROM json_each(json_object('name',NEW.name,'parent_wave_id',NEW.parent_wave_id,'current_project_id',NEW.current_project_id)) j WHERE j.value IS NOT json_extract(json_object('name',OLD.name,'parent_wave_id',OLD.parent_wave_id,'current_project_id',OLD.current_project_id), '$.' || j.key);
+END;
+
+INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+SELECT lower(hex(randomblob(16))),'wave',r.id,j.key,
+    CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
+    0,0,'[]' FROM waves r, json_each(json_object('name',r.name,'parent_wave_id',r.parent_wave_id,'current_project_id',r.current_project_id)) j;
+
+CREATE TRIGGER peer_project_insert AFTER INSERT ON projects
+WHEN (SELECT importing FROM planning_peer_context)=0
+BEGIN
+    INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+    SELECT lower(hex(randomblob(16))),'project',NEW.id,j.key,
+        CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
+        max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
+        (SELECT linear FROM planning_peer_context),
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=NEW.id AND field=j.key)
+    FROM json_each(json_object('wave_id',NEW.wave_id,'external_project_id',NEW.external_project_id,'project_slug',NEW.project_slug,'project_name',NEW.project_name,'project_summary',NEW.project_summary,'project_prompt_context',NEW.project_prompt_context,'workflow',NEW.workflow,'status',NEW.status,'planning_rank',NEW.planning_rank,'planning_initiatives',NEW.planning_initiatives,'planning_teams',NEW.planning_teams)) j ;
+END;
+
+CREATE TRIGGER peer_project_update AFTER UPDATE ON projects
+WHEN (SELECT importing FROM planning_peer_context)=0
+BEGIN
+    INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+    SELECT lower(hex(randomblob(16))),'project',NEW.id,j.key,
+        CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
+        max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
+        (SELECT linear FROM planning_peer_context),
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=NEW.id AND field=j.key)
+    FROM json_each(json_object('wave_id',NEW.wave_id,'external_project_id',NEW.external_project_id,'project_slug',NEW.project_slug,'project_name',NEW.project_name,'project_summary',NEW.project_summary,'project_prompt_context',NEW.project_prompt_context,'workflow',NEW.workflow,'status',NEW.status,'planning_rank',NEW.planning_rank,'planning_initiatives',NEW.planning_initiatives,'planning_teams',NEW.planning_teams)) j WHERE j.value IS NOT json_extract(json_object('wave_id',OLD.wave_id,'external_project_id',OLD.external_project_id,'project_slug',OLD.project_slug,'project_name',OLD.project_name,'project_summary',OLD.project_summary,'project_prompt_context',OLD.project_prompt_context,'workflow',OLD.workflow,'status',OLD.status,'planning_rank',OLD.planning_rank,'planning_initiatives',OLD.planning_initiatives,'planning_teams',OLD.planning_teams), '$.' || j.key);
+END;
+
+INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+SELECT lower(hex(randomblob(16))),'project',r.id,j.key,
+    CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
+    0,0,'[]' FROM projects r, json_each(json_object('wave_id',r.wave_id,'external_project_id',r.external_project_id,'project_slug',r.project_slug,'project_name',r.project_name,'project_summary',r.project_summary,'project_prompt_context',r.project_prompt_context,'workflow',r.workflow,'status',r.status,'planning_rank',r.planning_rank,'planning_initiatives',r.planning_initiatives,'planning_teams',r.planning_teams)) j;
+
+CREATE TRIGGER peer_task_insert AFTER INSERT ON tasks
+WHEN (SELECT importing FROM planning_peer_context)=0
+BEGIN
+    INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+    SELECT lower(hex(randomblob(16))),'task',NEW.id,j.key,
+        CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
+        max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
+        (SELECT linear FROM planning_peer_context),
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='task' AND object_id=NEW.id AND field=j.key)
+    FROM json_each(json_object('project_id',NEW.project_id,'external_issue_id',NEW.external_issue_id,'issue_identifier',NEW.issue_identifier,'issue_title',NEW.issue_title,'issue_description',NEW.issue_description,'planning_rank',NEW.planning_rank,'planning_assignee',NEW.planning_assignee,'disposition',json_object('planning_state',NEW.planning_state,'planning_completed',NEW.planning_completed,'planning_completed_at',NEW.planning_completed_at),'planning_deleted_at',NEW.planning_deleted_at,'planning_url',NEW.planning_url,'planning_branch_name',NEW.planning_branch_name,'planning_team_id',NEW.planning_team_id)) j ;
+END;
+
+CREATE TRIGGER peer_task_update AFTER UPDATE ON tasks
+WHEN (SELECT importing FROM planning_peer_context)=0
+BEGIN
+    INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+    SELECT lower(hex(randomblob(16))),'task',NEW.id,j.key,
+        CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
+        max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
+        (SELECT linear FROM planning_peer_context),
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='task' AND object_id=NEW.id AND field=j.key)
+    FROM json_each(json_object('project_id',NEW.project_id,'external_issue_id',NEW.external_issue_id,'issue_identifier',NEW.issue_identifier,'issue_title',NEW.issue_title,'issue_description',NEW.issue_description,'planning_rank',NEW.planning_rank,'planning_assignee',NEW.planning_assignee,'disposition',json_object('planning_state',NEW.planning_state,'planning_completed',NEW.planning_completed,'planning_completed_at',NEW.planning_completed_at),'planning_deleted_at',NEW.planning_deleted_at,'planning_url',NEW.planning_url,'planning_branch_name',NEW.planning_branch_name,'planning_team_id',NEW.planning_team_id)) j WHERE j.value IS NOT json_extract(json_object('project_id',OLD.project_id,'external_issue_id',OLD.external_issue_id,'issue_identifier',OLD.issue_identifier,'issue_title',OLD.issue_title,'issue_description',OLD.issue_description,'planning_rank',OLD.planning_rank,'planning_assignee',OLD.planning_assignee,'disposition',json_object('planning_state',OLD.planning_state,'planning_completed',OLD.planning_completed,'planning_completed_at',OLD.planning_completed_at),'planning_deleted_at',OLD.planning_deleted_at,'planning_url',OLD.planning_url,'planning_branch_name',OLD.planning_branch_name,'planning_team_id',OLD.planning_team_id), '$.' || j.key);
+END;
+
+INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+SELECT lower(hex(randomblob(16))),'task',r.id,j.key,
+    CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
+    0,0,'[]' FROM tasks r, json_each(json_object('project_id',r.project_id,'external_issue_id',r.external_issue_id,'issue_identifier',r.issue_identifier,'issue_title',r.issue_title,'issue_description',r.issue_description,'planning_rank',r.planning_rank,'planning_assignee',r.planning_assignee,'disposition',json_object('planning_state',r.planning_state,'planning_completed',r.planning_completed,'planning_completed_at',r.planning_completed_at),'planning_deleted_at',r.planning_deleted_at,'planning_url',r.planning_url,'planning_branch_name',r.planning_branch_name,'planning_team_id',r.planning_team_id)) j;
+
+CREATE TRIGGER peer_comment_insert AFTER INSERT ON task_comments
+WHEN (SELECT importing FROM planning_peer_context)=0
+BEGIN
+    INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+    SELECT lower(hex(randomblob(16))),'comment',NEW.id,j.key,
+        CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
+        max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
+        NEW.provider_revision IS NOT NULL,
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='comment' AND object_id=NEW.id AND field=j.key)
+    FROM json_each(json_object('task_id',NEW.task_id,'content',json_object('body',NEW.body,'author',NEW.author,'created_at',NEW.created_at))) j ;
+END;
+
+CREATE TRIGGER peer_comment_update AFTER UPDATE ON task_comments
+WHEN (SELECT importing FROM planning_peer_context)=0
+BEGIN
+    INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+    SELECT lower(hex(randomblob(16))),'comment',NEW.id,j.key,
+        CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
+        max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
+        NEW.provider_revision IS NOT NULL,
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='comment' AND object_id=NEW.id AND field=j.key)
+    FROM json_each(json_object('task_id',NEW.task_id,'content',json_object('body',NEW.body,'author',NEW.author,'created_at',NEW.created_at))) j WHERE j.value IS NOT json_extract(json_object('task_id',OLD.task_id,'content',json_object('body',OLD.body,'author',OLD.author,'created_at',OLD.created_at)), '$.' || j.key);
+END;
+
+INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
+SELECT lower(hex(randomblob(16))),'comment',r.id,j.key,
+    CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
+    0,0,'[]' FROM task_comments r, json_each(json_object('task_id',r.task_id,'content',json_object('body',r.body,'author',r.author,'created_at',r.created_at))) j;

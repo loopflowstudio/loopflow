@@ -33,9 +33,9 @@ unconfirmed synchronization when disconnected.
 Execution stays local. Never replicate Workflow position, Sessions, Processes,
 claims, controls, checkout paths or PR execution state. Imported completion cannot
 move a local Workflow, settle execution, signal a process or claim an exit.
-Machine/account operations still act on the selected machine. No shared resident,
+Machine/account operations execute on their selected machine. No shared resident,
 terminal relay, automatic turn/Flow retry, hidden arguments or cross-version
-compatibility is included. No code, tests, help or config from herdr/cmux.
+compatibility is included. Jack excluded code, tests, help and config from herdr/cmux.
 
 Ordinary creation establishes identity once; replication preserves it. Retrying
 one creation retains identity while separate same-title creations remain distinct.
@@ -67,45 +67,65 @@ new mutation identities. Import and projection commit together; fetched Git hist
 is not an import acknowledgement. Crashes before commit leave import retryable.
 Pending state distinguishes local save, Git publication and optional Linear delivery.
 
-`engine/planning_git.rs` transports a `planning.json` tree through
-`refs/loopflow/planning`. Local retained/observed refs preserve unpublished and
-incoming history. Fetch isolates each invocation's temporary ref without changing
-source branch, index, checkout or `FETCH_HEAD`. Local saves compare the expected
-tip. Publication never forces or blindly retries; readback distinguishes confirmed,
-competing and unconfirmed outcomes. Concurrent history is reconciled before retry.
-The 16 MiB document bound and 30-second Git deadline are prototype engineering
-choices, not established production limits.
+`engine/planning_git.rs` requires an explicit user-keyed or shared ref under
+`refs/loopflow/planning/`. Retained/observed refs are scoped by remote/ref; changing
+the selected ref cannot reuse another plan's unpublished history. Publication checks
+that the revision belongs to that destination, never forces or blindly retries,
+and distinguishes confirmed, competing and unconfirmed readback. Fetch preserves
+source branch, index, checkout and `FETCH_HEAD`. The 16 MiB document bound and
+30-second Git deadline remain prototype engineering choices.
 
-Integration still needs explicit planning-remote selection and semi-live invocation
-synchronization. The public code remote is not implicitly an authorized planning
-destination. The owning invocation and common writer supply synchronization;
-no extra resident or execution driver. Local writes survive peer disconnection;
-reconnect reconciles retained mutations and uncertain publication without replaying
-turns. Losing a peer does not imply Task completion or provider exit.
+The common SQLite writer now captures immutable field mutations in the same
+transaction using planning-only triggers. Export reads those stable identities.
+Causal predecessors retire observed heads; concurrent Linear-origin observations
+win, otherwise logical time and change ID decide. All losing values remain in the
+journal, not only in Git history. Task disposition and comment content are atomic
+field groups. A derived heads index is checked against the journal on export.
+
+Peer import unions the journal and projects into the existing Wave/Project/Task
+and comment tables with one import checkpoint. Projection suppresses capture echo,
+advances Task optimistic revisions only on changed planning, and never calls an
+execution writer. Repository paths are supplied locally, not transported. The
+single `planning_peers.sql` draft depends on the unchanged parent `local_planning`
+draft; it seeds existing IDs once. These are source changes, not passing Rust proof.
 
 ## Delete — do not maintain
 
-The superseded adoption walkthrough, screenshot set and capture scripts were
-removed after verifying their bytes against `5960415b3`. The historical demo note
-links that evidence; no replacement acceptance is implied.
+The copied `TaskSource.planning` payload, issue-derived `TaskId::from_issue`, UUID-v5
+feature and exclusive adoption tests are removed. SSH now carries saved Task ID,
+identifier and pushed-code requirements only. Placement consumes already imported
+planning and retains branch/commit and dirty-checkout checks. The remote fixture
+uses explicit peer import before dispatch; it does **not** prove automatic sync.
+The earlier walkthrough/captures remain archived at `5960415b3`.
 
-- Replace retained `TaskSource.planning` in `ops/task/remote.rs` with common-writer
-  peer import. The merge removed `accept_planning` and the cold Project bootstrap;
-  delete the remaining copied `PmTaskRecord` payload with replacement consumers.
-  Preserve branch/commit requirements and observation evidence.
-- Replace `TaskId::from_issue` and its exclusive UUID-v5 dependency/tests with
-  ordinary creation's portable identity. Preserve stored IDs and provider aliases.
-- Move `task_source_args` and Task resolution to the integrated identity path;
-  remove issue-only rewriting as a substitute for local-born identity.
-- No planning callback implementation is present in this checkout. Do not restore
-  the superseded full-store socket route. Replace adoption-specific fixtures while
-  retaining their code-placement and preservation assertions on the surviving path.
-- Update `docs/lf.md` and `docs/architecture/environment.md` when consumers move.
-  They currently describe retained adoption, not completed custom-ref sync.
+The manual-conflict-only `PlanningField` model is replaced by immutable mutations
+and deterministic projection. No full-store callback or second planning store
+exists. Docs describe the unfinished public path rather than claiming adoption.
 
-Changing dispatch before the replacement writer exists would leave an unusable
-path. The deletion and replacement remain one coherent cut in this PR, without a
-compatibility mode or another planner as an intermediate deliverable.
+## Remaining integration — October 8
+
+1. Bind an explicitly selected planning remote/ref locally, provision/recover one
+   stable user key across machines, and implement safe shared joining. A code remote
+   is never an implicit destination. Existing local plans must not be silently
+   exported or merged when joining.
+2. Compose Git fetch, transactional import/export, retained publication and readback
+   with foreground invocation lifetimes. Add selected-plan and pending/unconfirmed
+   presentation. The current library components do not exchange on ordinary commands.
+3. Resolve divergent legacy IDs through explicit provider associations without
+   renumbering stored Work. Review found that the current importer rejects a duplicate
+   provider mapping or a protected ancestry move for the whole transaction. Retain
+   failed projection/conflict evidence while letting unrelated objects progress;
+   do not weaken the preservation constraints or treat this as completed acceptance.
+4. Complete optional Linear composition: peer imports must preserve/settle the common
+   pending receipts correctly, including unchanged observed baselines and late local
+   saves. Verify every provider-projection entry point supplies Linear provenance;
+   migration baselines are not fresh provider observations.
+5. Finish public cold-worker dispatch after automatic acquisition, local-born IDs,
+   legacy aliases and populated execution preservation. The earlier callback path
+   is gone; unknown remote planning currently produces a synchronization diagnostic.
+6. Run the focused Rust checks, then gate's complete acceptance and the final
+   walkthrough before republishing #1491. No publication, landing or installation
+   has occurred in this implementation pass.
 
 ## Integration now selected — 2026-10-08
 
@@ -125,8 +145,8 @@ writers, accepted conflict policy and user-keyed planning sections.
 The merge uses saved Task placement, retaining fetch-before-placement and source
 branch/commit checks. Tasks may exist without checkout. The obsolete copied-record
 importer and cold Project selector are removed; new peer sync must provide missing
-planning before launch. Old transport payload/issue-derived helpers and adoption
-fixtures still need replacement. This intermediate integration is not ready for
+planning before launch. Automatic peer acquisition and the remaining legacy-association handling
+are still absent. This intermediate integration is not ready for
 publication as a working remote path; complete the end-to-end cut before review.
 
 Jack's accepted destination policy: user-keyed planning by default, explicit opt-in
@@ -139,11 +159,9 @@ collaborators. Choose deterministic ties and retain losers. Ref separation is no
 access control; private planning needs an access-controlled destination. Synthetic
 fixtures remain the only authorized publication target.
 
-Remaining work is the replacement/integration cut, destination binding, semi-live
-exchange with pending/error presentation, and public machine dispatch. Reuse 406's
-local readers, field receipts and foreground sync patterns. Its known unseen-Linear-
-write race is contrary evidence about provider atomicity, not a missing product
-choice or reason to block independent peer integration.
+The remaining-integration list above owns the unfinished cut. LOO-406's known
+unseen-Linear-write race remains contrary evidence about provider atomicity,
+not a missing product decision or reason to block independent peer integration.
 
 ## Acceptance for review
 
@@ -174,9 +192,4 @@ public command coverage here, not only exchange and transport tests.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Previous verification: 15 pure/Git transport fixtures plus fmt/Clippy passed before
-stack integration; that proves neither SQLite import nor public dispatch. The
-post-stack compile and focused proof are recorded below when complete. Gate owns
-full integration acceptance after the replacement consumers exist.
-
-Post-stack check (2026-10-08): `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, and the worktree-built lib test `ops::task::tests::task_checkout_pins_upstream_without_requiring_clean_canonical_main` under `scripts/test_network.py` pass. Context fits. Legacy remote adoption fixtures compile but are not replacement-sync acceptance; pursue must replace them and prove the new path before publication.
+Check (October 8): `cargo fmt --all -- --check`, `git diff --check`, and isolated Python SQLite replay (released SQL + parent draft + populated peer upgrade/capture/rollback) pass; Rust build/focused binaries and `cargo clippy --all-targets -- -D warnings` remain unverified because the build-script executable stalled at `_dyld_start`, including fresh executable/path probes; the bounded Clippy attempt expired. Gate needs a capable runner. Earlier passing evidence remains at `5d336868f:scratch/work-on-another-machine-name.md` and does not cover this cut.

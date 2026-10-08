@@ -479,6 +479,10 @@ fn project_accepted_planning(
     items: &[PmItem],
     confirmed_wave: Option<(&WaveId, &str)>,
 ) -> StoreResult<()> {
+    tx.execute(
+        "UPDATE planning_peer_context SET linear=(?1='linear')",
+        [provider],
+    )?;
     let (confirmed_wave, confirmed_initiative) = confirmed_wave.unzip();
     let project_ids = serde_json::to_string(&projects.iter().map(|p| &p.id).collect::<Vec<_>>())?;
     let item_ids = serde_json::to_string(&items.iter().map(|i| &i.id).collect::<Vec<_>>())?;
@@ -659,6 +663,7 @@ fn project_accepted_planning(
                 item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank,item.state,item.completed,item.completed_at,item.revision,item.url,item.branch_name,item.team_id,item.assignee],
         )?;
     }
+    tx.execute("UPDATE planning_peer_context SET linear=0", [])?;
     Ok(())
 }
 

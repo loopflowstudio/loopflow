@@ -104,17 +104,17 @@ async fn task_source_args(lf_args: &[String]) -> anyhow::Result<(Vec<String>, Op
     else {
         return Ok((args, None));
     };
-    // Existing machines may retain different Task IDs; send the portable issue name.
+    // Replication preserves the saved identity, including local-born Tasks.
     let mut index = 0;
     while index < args.len() {
         if args[index] == "--" {
             break;
         }
         if args[index] == "--task" && args.get(index + 1) == Some(&selector) {
-            args[index + 1] = source.issue().to_string();
+            args[index + 1] = source.task_id.to_string();
             index += 1;
         } else if args[index] == format!("--task={selector}") {
-            args[index] = format!("--task={}", source.issue());
+            args[index] = format!("--task={}", source.task_id);
         }
         index += 1;
     }

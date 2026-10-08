@@ -30,9 +30,7 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::{client_async, tungstenite::Message};
 
 use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
-use crate::engine::agent::{
-    build_codex_thread_start_params, system_prompt_with_structured_replies, AgentConfig,
-};
+use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
 use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::lf_tag::LfTagParser;
@@ -89,11 +87,6 @@ enum OutboundRpc {
     Response {
         id: Value,
         result: Value,
-    },
-    /// A server request Loopflow could not satisfy.
-    Failure {
-        id: Value,
-        message: String,
     },
 }
 
@@ -837,10 +830,6 @@ impl Harness for CodexHarness {
             self.should_seed_prompt = false;
             if let Some(launch) = &self.launch {
                 let mut parts = Vec::new();
-                let system_prompt = system_prompt_with_structured_replies(launch);
-                if !system_prompt.trim().is_empty() {
-                    parts.push(system_prompt.trim().to_string());
-                }
                 if !launch.task_prompt.trim().is_empty() {
                     parts.push(launch.task_prompt.trim().to_string());
                 }
@@ -1085,7 +1074,7 @@ impl CodexHarness {
         // Held until the engine has spawned, so a concurrent switch cannot
         // replace the native login between activation and startup.
         let activation = match &self.account_route {
-            Some(route) => route.launch_engine_as(command.as_std_mut()).await?,
+            Some(route) => route.launch_as(command.as_std_mut()).await?,
             None => None,
         };
         // Own process group so stop() can kill everything under the `codex`
@@ -1205,10 +1194,6 @@ impl CodexHarness {
                     OutboundRpc::Response { id, result } => {
                         json!({ "jsonrpc": "2.0", "id": id, "result": result })
                     }
-                    OutboundRpc::Failure { id, message } => json!({
-                        "jsonrpc": "2.0", "id": id,
-                        "error": { "code": -32000, "message": message },
-                    }),
                 };
                 writer_history
                     .lock()
@@ -1385,26 +1370,6 @@ impl CodexHarness {
                 // it per the configured Loopflow response policy. The user's
                 // Codex approval policy decides whether these requests occur.
                 if let Some(id) = value.get("id") {
-                    // The engine's lent token was refused; only its origin
-                    // can renew it.
-                    if method == "account/chatgptAuthTokens/refresh" {
-                        let renewed = match &account_route {
-                            Some(route) => route.renew_engine_login().map_err(|e| e.to_string()),
-                            None => Err("this engine has no lent login".to_string()),
-                        };
-                        let reply = match renewed {
-                            Ok(result) => OutboundRpc::Response {
-                                id: id.clone(),
-                                result,
-                            },
-                            Err(message) => OutboundRpc::Failure {
-                                id: id.clone(),
-                                message,
-                            },
-                        };
-                        let _ = approval_tx.send(reply).await;
-                        continue;
-                    }
                     let result = match approval {
                         ApprovalPolicy::AutoApprove => json!({ "decision": "accept" }),
                     };
@@ -1487,52 +1452,33 @@ impl CodexHarness {
         self.stderr_task = stderr_task;
 
         // Handshake: initialize -> response -> client `initialized`.
-        let engine_login = match &self.account_route {
-            Some(route) => route.engine_login()?,
-            None => None,
-        };
         let init_id = self.next_request_id;
         self.initialize_request_id.store(init_id, Ordering::Relaxed);
-        let mut initialize = json!({
+        let initialize = json!({
             "clientInfo": {
                 "name": "loopflow",
                 "title": "loopflow",
                 "version": env!("CARGO_PKG_VERSION"),
             }
         });
-        // Codex gates signing in with a supplied token behind this capability.
-        if engine_login.is_some() {
-            initialize["capabilities"] = json!({ "experimentalApi": true });
-        }
         self.send_request("initialize", initialize).await?;
         tokio::time::timeout(Duration::from_secs(15), initialized_rx)
             .await
             .map_err(|_| anyhow!("timed out waiting for codex initialize response"))?
             .map_err(|_| anyhow!("codex initialize channel closed"))?;
         self.send_notification("initialized").await?;
-        if let Some(login) = engine_login {
-            let reply = self
-                .send_observed_request("account/login/start", login)
-                .await?;
-            tokio::time::timeout(Duration::from_secs(15), reply.recv())
-                .await
-                .map_err(|_| {
-                    anyhow!("timed out signing the Codex engine in with its lent account")
-                })?
-                .map_err(|_| anyhow!("codex disconnected while signing in"))?
-                .map_err(|error| anyhow!("Codex refused the lent account: {error}"))?;
-        }
 
         let (thread_method, mut thread_params) =
             build_thread_request(launch, self.resume_provider_session_id.as_deref());
-        thread_params.insert(
-            "config".into(),
-            json!({
-                "shell_environment_policy.set": tool_environment,
-                "allow_login_shell": false,
-                "features.shell_snapshot": false,
-            }),
-        );
+        let mut config = json!({
+            "shell_environment_policy.set": tool_environment,
+            "allow_login_shell": false,
+            "features.shell_snapshot": false,
+        });
+        if let Some(path) = crate::engine::agent::write_system_prompt_file(launch, "session")? {
+            config["model_instructions_file"] = json!(path.to_string_lossy());
+        }
+        thread_params.insert("config".into(), config);
         // The thread params include Loopflow's conservative defaults only when
         // Codex config is missing or less permissive. More permissive user or
         // repo config, such as danger-full-access, is left alone.

@@ -62,6 +62,18 @@ lf --agent claude:opus debug
 
 `--agent` / `-a` selects the harness and optional model as `harness[:model]`.
 
+## Run a Flow interactively
+
+```bash
+lf -i -a claude run my-flow
+lf -b -a claude run my-flow # run every step headlessly
+```
+
+Each skill opens in the native agent conversation. Exit the conversation
+successfully to advance to the next step; an interrupted or failed step stops
+the Flow. Without either flag, an attached terminal selects interactive mode,
+just like a standalone skill. Task Flow launches preserve the same choice.
+
 ## Select where work happens
 
 ```bash
@@ -113,10 +125,14 @@ lf flow show ID --processes --json    # one Flow's steps, by its Flow process ID
 lf -b task run EXP-12       # run fresh work
 ```
 
+Claude and Codex terminal launches load the complete assembled context from a
+system instructions file. The first user message is a short execution request;
+Wave memory, scratch, diffs, clipboard, skills and Task briefs stay out of the
+command-line argument. Provider refusals remain visible in the native terminal.
+
 Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
 requests for the same document do not repeat its contents; distinct memory files
-remain separate even when their text matches. IDE launches with Wave documents
-use the assembled prompt so those references reach the provider.
+remain separate even when their text matches.
 
 Launching a Flow for an existing Task uses valid cached planning regardless of age.
 Known invalidation, removal, terminal state or ownership changes still block.
@@ -340,8 +356,8 @@ lf account route set codex work@ personal@
 
 A preference permits fallback; a restriction limits spending. A Flow takes
 one selection per provider and carries it through its child steps. Remote
-launches check destination access with the inherited restrictions. A foreground
-credential lease cannot authorize a detached remote process after it expires.
+launches install missing selected logins in the foreground and use the same
+account on the target. Credentials remain resident there.
 Missing or expired capacity remains unknown, never zero or unlimited.
 
 ## Discover commands
@@ -447,14 +463,13 @@ and survive automatic pruning. Memory updates do not require PRs or a schedule.
 ```bash
 lf machine add mini --repo '~/src/project'
 lf machine status mini
+lf machine connect mini codex work@example.com
 lf --machine mini session list
-lf --machine mini --task LOO-123 implement
-lf --machine mini machine add builder
 ```
 
 `--machine <label-or-id>` runs the entire command on that machine in its saved
-repository. Task, worktree and Wave selectors resolve there. `--secret NAME` and
-`--forward-agent` require `--machine`; the saved repository is set by `machine add`.
+repository. Task, worktree and Wave selectors resolve there.
+`--forward-agent` requires `--machine`; the saved repository is set by `machine add`.
 
 Save an SSH destination once, then use its label. List, rename and remove saved
 connections with `lf machine list`, `lf machine rename mini builder` and

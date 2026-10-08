@@ -5779,7 +5779,7 @@ mod tests {
     #[allow(clippy::await_holding_lock)] // Serializes the isolated registry environment.
     async fn task_preparation_rejects_unpublished_parent_before_allocating_child() {
         let _lock = crate::journal::test_env_lock();
-        let names = ["LF_HOME", "LF_ACCOUNT_LEASE"];
+        let names = ["LF_HOME"];
         let _restore = EnvRestore::capture(&names);
         for name in names {
             std::env::remove_var(name);

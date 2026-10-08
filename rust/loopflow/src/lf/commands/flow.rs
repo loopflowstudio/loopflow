@@ -104,9 +104,6 @@ const TASK_RUN_ATTEMPTS: u32 = 3;
 /// ended.
 pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, cwd: &Path) -> Result<()> {
     let mut args = cli.step_args();
-    if !cli.batch {
-        args.retain(|arg| arg != "--batch");
-    }
     if let Some(wave) = &cli.wave {
         args.extend(["--wave".to_owned(), wave.clone()]);
     }
@@ -167,7 +164,7 @@ fn execute(
     repo: &Path,
     binding: Option<&WorkBinding>,
 ) -> Result<()> {
-    let accounts = crate::provider_account::lease::AccountSelection::from_flags_or_env(
+    let accounts = crate::provider_account::selection::AccountSelection::from_flags_or_env(
         &cli.account,
         &cli.only_account,
     )?;
@@ -251,7 +248,7 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
 /// A driver that dies leaves its Processes as history; nothing resumes it.
 async fn drive(
     driver: &Driver<'_>,
-    accounts: crate::provider_account::lease::AccountSelection,
+    accounts: crate::provider_account::selection::AccountSelection,
 ) -> Result<FlowOutcome> {
     let fields = |extra: LfEventFields| LfEventFields {
         flow: Some(driver.flow.to_owned()),
@@ -636,7 +633,7 @@ impl SkillExecutor for &Driver<'_> {
                 step_cli.agent = skill.skill.agent.clone();
             }
         }
-        // The step is the command a person would type: `lf -b skill <name> [message]`.
+        // Each ordinary skill keeps the caller's mode and inherited terminal.
         let mut args = step_cli.step_args();
         args.extend(["skill".to_owned(), name.clone()]);
         if !message.trim().is_empty() {

@@ -614,7 +614,16 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
     machine_commands.sort();
     assert_eq!(
         machine_commands,
-        ["add", "id", "list", "remove", "rename", "status"]
+        [
+            "add",
+            "connect",
+            "credentials",
+            "id",
+            "list",
+            "remove",
+            "rename",
+            "status"
+        ]
     );
     let help =
         String::from_utf8(success(run(repo.path(), home.path(), &["help", "--all"]))).unwrap();
@@ -758,8 +767,6 @@ fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
         "--account",
         "personal@",
         "--machine=mini",
-        "--secret",
-        "SENTRY_AUTH_TOKEN",
         "--forward-agent",
         "--task",
         "LOO-123",
@@ -772,7 +779,6 @@ fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
     let (cli, command) = machine_invocation(&args).unwrap().unwrap();
     assert_eq!(cli.machine.as_deref(), Some("mini"));
     assert!(cli.account.is_empty());
-    assert_eq!(cli.secret, ["SENTRY_AUTH_TOKEN"]);
     assert!(cli.forward_agent);
     assert_eq!(
         command,

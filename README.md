@@ -164,6 +164,9 @@ lf session rename SESSION "Release notes"
 lf session bind SESSION --task INF-123
 ```
 
+Claude and Codex terminal Sessions load assembled context from a system instructions
+file, keeping the initial command-line message short even with large Wave memory.
+
 A Session keeps the conversation's identity, name, feedback and native history
 across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed

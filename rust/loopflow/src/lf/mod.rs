@@ -77,10 +77,6 @@ pub struct Cli {
     #[arg(long, conflicts_with = "isolate")]
     pub shared: bool,
 
-    /// Internal SSH compatibility and broker-connectivity probe.
-    #[arg(long = "__account-lease-probe", hide = true)]
-    pub account_lease_probe: bool,
-
     /// Skip permission prompts
     #[arg(long)]
     pub yolo: bool,
@@ -119,10 +115,6 @@ pub struct Cli {
     /// Run the command on this saved machine in its repository
     #[arg(long, value_name = "LABEL_OR_ID")]
     pub machine: Option<String>,
-
-    /// Resolve a named Doppler secret locally and forward its value (repeatable)
-    #[arg(long = "secret", requires = "machine")]
-    pub secret: Vec<String>,
 
     /// Forward the SSH agent to the selected machine
     #[arg(long, requires = "machine")]
@@ -185,8 +177,11 @@ impl Cli {
     /// definition remain captured; Work resolves from the declaration or checkout.
     #[doc(hidden)]
     pub fn step_args(&self) -> Vec<String> {
-        let mut args = vec!["--batch".to_string()];
+        let mut args = Vec::new();
         for (flag, enabled) in [
+            ("--batch", self.batch),
+            ("--interactive", self.interactive),
+            ("--tui", self.tui),
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
             ("--no-loopflow", self.no_loopflow),
@@ -244,7 +239,6 @@ impl Cli {
             only_account: self.only_account.clone(),
             isolate: self.isolate,
             shared: self.shared,
-            account_lease_probe: self.account_lease_probe,
             yolo: self.yolo,
             interactive: self.interactive,
             batch: self.batch,
@@ -253,7 +247,6 @@ impl Cli {
             diff: self.diff,
             max_turns: self.max_turns,
             machine: self.machine.clone(),
-            secret: self.secret.clone(),
             forward_agent: self.forward_agent,
             wave: self.wave.clone(),
             task: self.task.clone(),
@@ -346,7 +339,7 @@ pub enum Commands {
         cmd: Option<AccountCommand>,
         /// Limit observations to one provider
         provider: Option<crate::provider_auth::Provider>,
-        /// Inspect cached evidence without contacting providers or the origin broker
+        /// Inspect cached evidence without contacting providers
         #[arg(long)]
         cached: bool,
         /// Include credential sources, browser choices, and timestamps
@@ -1480,6 +1473,19 @@ pub enum ConfigCommand {
 /// Name and connect to machines.
 #[derive(Debug, Subcommand)]
 pub enum MachineCommand {
+    /// Install a separate login on an added machine using this laptop's browser.
+    Connect {
+        target: String,
+        provider: crate::provider_auth::Provider,
+        email: Option<String>,
+        #[arg(long)]
+        chrome_profile: Option<String>,
+    },
+    /// Inspect or receive a machine credential (credential bytes use stdin only).
+    Credentials {
+        #[command(subcommand)]
+        cmd: MachineCredentialCommand,
+    },
     /// Print this machine's stable local Machine identity.
     Id {
         #[arg(long)]
@@ -1512,6 +1518,17 @@ pub enum MachineCommand {
     Rename { label: String, name: String },
     /// Forget a connection without touching remote work
     Remove { label: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MachineCredentialCommand {
+    /// Report whether this account is installed, without logging in.
+    Inspect {
+        provider: crate::provider_auth::Provider,
+        login: String,
+    },
+    /// Receive a fresh login as JSON on stdin; preserve existing accounts.
+    Receive,
 }
 
 #[derive(Debug, Subcommand)]
@@ -2016,17 +2033,6 @@ mod tests {
             "implement",
         ])
         .is_err());
-    }
-
-    #[test]
-    fn account_lease_probe_is_parseable_but_hidden() {
-        let cli = Cli::try_parse_from(["lf", "--__account-lease-probe"])
-            .expect("parse internal account lease probe");
-        assert!(cli.account_lease_probe);
-        assert!(!Cli::command()
-            .render_long_help()
-            .to_string()
-            .contains("__account-lease-probe"));
     }
 
     #[test]

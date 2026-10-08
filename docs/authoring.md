@@ -31,9 +31,9 @@ is. One skill, one job: `design` writes the spec, `implement` builds from
 it, `gate` judges ship-readiness. Chain them rather than writing one skill
 that does everything.
 
-Direct launch from a TTY runs interactively. `-b` and automated
-flow execution run the same skill headlessly. Define the inputs and useful
-change independently of the caller. When judgment is unavailable, make supported
+Direct launch from a TTY runs interactively. Flow steps inherit that choice;
+`-i` requests interactive conversations and `-b` runs headlessly. Define the inputs
+and useful change independently of the caller. When judgment is unavailable, make supported
 corrections and leave consequential choices explicit. Use a reviewer protocol
 only when the caller supplies one.
 

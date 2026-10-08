@@ -119,23 +119,7 @@ impl SkillInvocation {
             .prefix("skill-")
             .tempdir_in(Self::capture_directory(config)?)?
             .keep();
-        let skill_path = self.materialize_claude(&root.join("skills/invoke"))?;
-        if let Some(context) = context {
-            // Native expansion applies to the whole skill body. Encode gathered
-            // text so literal argument and shell syntax remains user data.
-            let context = serde_json::to_string(context)?
-                .replace('$', "\\u0024")
-                .replace('!', "\\u0021")
-                .replace('\u{fffe}', "\\ufffe")
-                .replace('\u{ffff}', "\\uffff");
-            let text = std::fs::read_to_string(&skill_path)?;
-            std::fs::write(
-                &skill_path,
-                format!(
-                    "{text}\n\nAdditional user context (decode this JSON string):\n{context}\n"
-                ),
-            )?;
-        }
+        self.materialize_claude(&root.join("skills/invoke"), context)?;
         let namespace = format!("lf-{}", uuid::Uuid::new_v4().simple());
         std::fs::create_dir(root.join(".claude-plugin"))?;
         std::fs::write(
@@ -160,7 +144,7 @@ impl SkillInvocation {
         .then(|| (source.path.as_path(), self.native_name()))
     }
 
-    fn codex_prompt(&self) -> String {
+    pub(crate) fn codex_prompt(&self) -> String {
         match self.codex_skill() {
             // Explicit Markdown references resolve outside Codex's catalog too;
             // a `skill` input item alone is silently ignored there.
@@ -170,10 +154,6 @@ impl SkillInvocation {
             }
             None => self.translated_input("codex"),
         }
-    }
-
-    pub(crate) fn codex_input(&self) -> Vec<serde_json::Value> {
-        vec![serde_json::json!({"type": "text", "text": self.codex_prompt()})]
     }
 
     pub(crate) fn terminal_input(
@@ -283,12 +263,10 @@ impl SkillInvocation {
             .as_ref()
             .expect("ported skills have a source");
         let directory = origin.path.parent().unwrap_or(Path::new("."));
-        let body = if origin.dialect == SkillDialect::Claude {
-            self.expand_arguments(body)
-                .replace("${CLAUDE_SKILL_DIR}", &directory.display().to_string())
-        } else {
-            self.expand_arguments(body)
-        };
+        let mut body = self.expand_arguments(body);
+        if origin.dialect == SkillDialect::Claude {
+            body = body.replace("${CLAUDE_SKILL_DIR}", &directory.display().to_string());
+        }
         let tools = match (origin.dialect, harness) {
             (SkillDialect::Claude, "codex") => "Claude tool names map to Codex tools: Bash, Read, Grep and Glob use exec_command; Edit and Write use apply_patch; TodoWrite uses update_plan; Task uses spawn_agent when available. Use the available web tool for WebFetch and WebSearch.",
             (SkillDialect::Codex, "claude") => "Codex tool names map to Claude tools: exec_command uses Bash; apply_patch uses Edit or Write; update_plan uses TodoWrite when available; spawn_agent uses Task. Use WebFetch and WebSearch for web requests.",
@@ -393,7 +371,7 @@ impl SkillInvocation {
     }
 
     /// Keep the Flow's captured text and resolve resources at their original directory.
-    fn materialize_claude(&self, directory: &Path) -> std::io::Result<PathBuf> {
+    fn materialize_claude(&self, directory: &Path, context: Option<&str>) -> anyhow::Result<()> {
         std::fs::create_dir_all(directory)?;
         let target = directory.join("SKILL.md");
         let original = self
@@ -402,11 +380,24 @@ impl SkillInvocation {
             .as_ref()
             .and_then(|source| source.path.parent())
             .unwrap_or(Path::new("."));
-        let text = self
+        let mut text = self
             .source_text()
             .replace("${CLAUDE_SKILL_DIR}", &original.display().to_string());
-        std::fs::write(&target, format!("{text}\n\nResolve supporting files and parent-relative paths from the original skill directory: {}\n", original.display()))?;
-        Ok(target)
+        text.push_str(&format!("\n\nResolve supporting files and parent-relative paths from the original skill directory: {}\n", original.display()));
+        if let Some(context) = context {
+            // Native expansion applies to the whole skill body. Encode gathered
+            // text so literal argument and shell syntax remains user data.
+            let context = serde_json::to_string(context)?
+                .replace('$', "\\u0024")
+                .replace('!', "\\u0021")
+                .replace('\u{fffe}', "\\ufffe")
+                .replace('\u{ffff}', "\\uffff");
+            text.push_str(&format!(
+                "\n\nAdditional user context (decode this JSON string):\n{context}\n"
+            ));
+        }
+        std::fs::write(&target, text)?;
+        Ok(())
     }
 }
 
@@ -510,8 +501,8 @@ mod tests {
             invocation.source_text()
         );
         let snapshot = repo.path().join("snapshot");
-        let file = invocation.materialize_claude(&snapshot).unwrap();
-        let text = std::fs::read_to_string(file).unwrap();
+        invocation.materialize_claude(&snapshot, None).unwrap();
+        let text = std::fs::read_to_string(snapshot.join("SKILL.md")).unwrap();
         assert!(text.starts_with(original));
         assert!(text.contains(&bundle.display().to_string()));
         assert_eq!(

@@ -1056,7 +1056,8 @@ publication failure. Launcher success proves no provider exit.
 Queue/custody and PTY observations remain historical at `1e4ae02a5`; compression
 at `754efacb2` removed dispatch receipt recovery, queues, engine restart and
 provider-only probes (`31e0640eb`). Baseline native/sibling history and stale-client
-rejection remain. Replay-argument checks moved to the ordinary lf fixture.
+rejection remain. Exact arguments are checked in model requests; the unused
+replay parser and its exclusive tests are removed.
 Removing a path includes its exclusive probes; provider-only success proves no
 operation boundary. Deleted resource bundles are not preserved by links.
 

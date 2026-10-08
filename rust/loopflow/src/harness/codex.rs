@@ -866,7 +866,7 @@ impl Harness for CodexHarness {
             .ok_or_else(|| anyhow!("codex thread not started"))?;
         let mut input = vec![json!({ "type": "text", "text": turn_text })];
         if let Some(invocation) = invocation {
-            input.extend(invocation.codex_input());
+            input.push(json!({ "type": "text", "text": invocation.codex_prompt() }));
         }
 
         let params = json!({ "threadId": thread_id, "input": input });

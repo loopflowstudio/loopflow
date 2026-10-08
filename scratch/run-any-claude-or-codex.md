@@ -52,6 +52,11 @@ native plugin preparation. Delete Codex's silently ignored out-of-catalog `skill
 input item; both surfaces use explicit native links. No catalog mounts, provider
 registration or additional resolver is needed.
 
+Compression also removes the unused replay-argument parser and its exclusive
+tests; argument fidelity is asserted on actual model requests. Codex owns its
+text-input JSON in the harness. Claude writes each complete snapshot once, and
+catalog selection skips file reads for names already supplied by a higher source.
+
 Previously removed queue, engine-restart, dispatch receipt and PTY/inbox machinery
 remains at `1e4ae02a5` and `7dd9819b2`; provider-only probes at `31e0640eb`;
 unreachable ClaudeHarness plugin state at `dd2cdba82`. Preserve the ordinary lf
@@ -103,4 +108,4 @@ Release was the only immediate child Wave found; its goal and complete memory
 were read during realignment. Its operation-entry lesson applies: successful
 provider output alone cannot establish the requested launch behavior.
 
-Check (2026-10-08): build, isolated skill-invocation tests (4), request-mapping tests (12), contained native-terminal/command-collision/Codex-folder/custom-prompt/Flow fixtures, formatting, Ruff, all-target Clippy and context-budget readback pass (memory 15,942 tokens; scratch 1,639); full affected verification belongs to gate.
+Check (2026-10-08): `cargo build -p loopflow --bin lf`, isolated `cargo test -p loopflow --lib engine::skill -- --test-threads=1` (13), `uv run pytest scripts/benchmarks/skill-invocation/test_request_mapping.py -q` (9), contained `request_mapping.py --terminal --command` and `launch.py --source skill-installer --provider codex --folder .codex/skills`, fmt, Ruff and all-target Clippy pass; earlier custom-prompt/Flow evidence remains at `a63599341`. Full affected verification belongs to gate.

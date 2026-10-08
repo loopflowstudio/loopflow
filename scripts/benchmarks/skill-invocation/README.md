@@ -58,6 +58,6 @@ instruction to call a tool, leaving the first request without its context.
 
 Earlier queue, engine-restart and PTY/inbox probes are archived at `1e4ae02a5`;
 provider-only `probe.py`, `continuity.py` and their exclusive tests at `31e0640eb`.
-The replay-argument parser now lives with the request-mapping check that uses it.
+Exact argument checks read the provider's model request directly.
 Baseline reconnect and plain-provider continuity remain in
 `tests/e2e/codex_connect.py` and `tests/e2e/claude_shared_home.py`.

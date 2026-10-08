@@ -207,9 +207,6 @@ impl SkillCatalog {
         dialect: SkillDialect,
         bundle: bool,
     ) -> Result<(), LoadError> {
-        if is_generated(&path) {
-            return Ok(());
-        }
         let relative = path
             .strip_prefix(root)
             .expect("catalog paths stay beneath their source root");
@@ -224,13 +221,19 @@ impl SkillCatalog {
         let name = name
             .to_string_lossy()
             .replace(std::path::MAIN_SEPARATOR, "/");
+        if self.sources.contains_key(&name) || is_generated(&path) {
+            return Ok(());
+        }
         // Keep an absolute lexical path: a symlink's native name is part of its identity.
         let path = std::path::absolute(path)?;
-        self.sources.entry(name.clone()).or_insert(SkillSource {
-            name,
-            path: Some(path),
-            dialect,
-        });
+        self.sources.insert(
+            name.clone(),
+            SkillSource {
+                name,
+                path: Some(path),
+                dialect,
+            },
+        );
         Ok(())
     }
 }

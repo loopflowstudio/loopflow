@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import shlex
 import shutil
 import signal
@@ -25,19 +24,6 @@ def _output_events(output: str) -> list[dict]:
         except json.JSONDecodeError:
             continue
     return events
-
-
-def _native_arguments(events: list[dict]) -> str | None:
-    arguments = None
-    for event in events:
-        if event.get("type") != "user" or not event.get("isReplay"):
-            continue
-        content = event.get("message", {}).get("content")
-        if isinstance(content, str):
-            match = re.search(r"<command-args>(.*?)</command-args>", content, re.DOTALL)
-            if match:
-                arguments = match.group(1)
-    return arguments
 
 
 def _marker_locations(request: dict, marker: str) -> list[str]:

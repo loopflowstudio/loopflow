@@ -1,24 +1,7 @@
-import json
 from pathlib import Path
 
 import pytest
-from request_mapping import _assess, _native_arguments, _output_events
-
-
-@pytest.mark.parametrize("arguments", [None, "alpha", "alpha\n\ncontext"])
-def test_claude_replay_keeps_arguments_separate_from_answer(arguments):
-    events = [{"type": "result", "result": "<command-args>alpha</command-args>"}]
-    if arguments is not None:
-        events.insert(
-            0,
-            {
-                "type": "user",
-                "isReplay": True,
-                "message": {"content": f"<command-args>{arguments}</command-args>"},
-            },
-        )
-    output = "provider banner\n" + "\n".join(map(json.dumps, events))
-    assert _native_arguments(_output_events(output)) == arguments
+from request_mapping import _assess
 
 
 @pytest.mark.parametrize("role", ["system", "assistant", "user", None])

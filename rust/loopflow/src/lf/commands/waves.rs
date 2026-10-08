@@ -1391,19 +1391,20 @@ async fn snapshot_task_detail(
         None => None,
     };
     let work_status = runtime.as_ref().map(|runtime| runtime.status.work_status());
-    let run_control = crate::ops::task_run::task_run_control(&crate::ops::task_run::TaskRunGate {
-        status: work_status.as_ref(),
-        // Linear completing a Task that never left `start` withdraws it.
-        plan_terminal_reason: item.terminal_reason().filter(|_| {
-            runtime.as_ref().is_none_or(|runtime| {
-                matches!(runtime.status, TaskState::NotReady | TaskState::Ready)
-            })
-        }),
-        worktree_blocker: worktree_blocker
-            .as_ref()
-            .map(|blocker| blocker.reason.as_str()),
-        launch_refusal: launch_refusal.as_deref(),
-    });
+    let run_control =
+        crate::ops::task_run::task_run_control(&crate::ops::task_run::TaskRunEvidence {
+            status: work_status.as_ref(),
+            // Linear completing a Task that never left `start` withdraws it.
+            plan_terminal_reason: item.terminal_reason().filter(|_| {
+                runtime.as_ref().is_none_or(|runtime| {
+                    matches!(runtime.status, TaskState::NotReady | TaskState::Ready)
+                })
+            }),
+            worktree_blocker: worktree_blocker
+                .as_ref()
+                .map(|blocker| blocker.reason.as_str()),
+            launch_refusal: launch_refusal.as_deref(),
+        });
     let workflow_name = match task {
         Some(task) => store
             .sqlite

@@ -9,7 +9,7 @@ pub struct TaskRunControl {
 
 /// Facts beyond the Flow record that decide control legality.
 #[derive(Debug)]
-pub(crate) struct TaskRunGate<'a> {
+pub(crate) struct TaskRunEvidence<'a> {
     /// `None` when no durable Task Work exists yet.
     pub status: Option<&'a WorkStatus>,
     pub plan_terminal_reason: Option<&'a str>,
@@ -17,23 +17,23 @@ pub(crate) struct TaskRunGate<'a> {
     pub launch_refusal: Option<&'a str>,
 }
 
-pub(crate) fn task_run_control(gate: &TaskRunGate) -> TaskRunControl {
-    let terminal = match gate.status {
+pub(crate) fn task_run_control(evidence: &TaskRunEvidence) -> TaskRunControl {
+    let terminal = match evidence.status {
         Some(WorkStatus::Done) => Some("Task is complete"),
         Some(WorkStatus::Abandoned) => Some("Task is abandoned; recover it before running a Flow"),
-        _ => gate.plan_terminal_reason,
+        _ => evidence.plan_terminal_reason,
     };
     TaskRunControl {
         unavailable: terminal
-            .or(gate.worktree_blocker)
-            .or(gate.launch_refusal)
+            .or(evidence.worktree_blocker)
+            .or(evidence.launch_refusal)
             .map(str::to_string),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{task_run_control, TaskRunGate};
+    use super::{task_run_control, TaskRunEvidence};
     use crate::durable::WorkStatus;
 
     #[test]
@@ -63,7 +63,7 @@ mod tests {
                 Some("active process"),
             ),
         ] {
-            let control = task_run_control(&TaskRunGate {
+            let control = task_run_control(&TaskRunEvidence {
                 status: status.as_ref(),
                 plan_terminal_reason: plan,
                 worktree_blocker: checkout,

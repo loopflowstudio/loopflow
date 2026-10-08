@@ -46,6 +46,23 @@ private func captureIfRequested(_ window: NSWindow, name: String) throws {
 @Suite("Task Flow")
 struct TaskFlowTests {
 
+    @Test("Composed lifecycle renders the recorded follow-up before and after Flow arrival")
+    @MainActor
+    func composedLifecycleDelivery() throws {
+        let snapshots = try JSONDecoder().decode(
+            [String: TaskLifecycleCapture].self, from: fixture("task_lifecycle.json"))
+        let merged = TaskDeliveryView(task: try #require(snapshots["merged"]).row)
+        #expect(try merged.inspect().find(text: "Merged · Follow-through pending").string()
+                == "Merged · Follow-through pending")
+        for phase in ["completed", "arrived"] {
+            let view = TaskDeliveryView(task: try #require(snapshots[phase]).row)
+            #expect(try view.inspect().find(text: "Done · Follow-up FIX-2").string()
+                    == "Done · Follow-up FIX-2")
+            #expect(try view.inspect().find(ViewType.Link.self).url().absoluteString
+                    == "https://linear.app/fixture/issue/FIX-2")
+        }
+    }
+
     @Test("Task delivery shows pending work and confirmed follow-up links beside the conversation")
     @MainActor
     func deliveryEvidence() throws {

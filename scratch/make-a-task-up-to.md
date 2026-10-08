@@ -504,7 +504,7 @@ exercise those exact cases.
 One coherent lifecycle landing for LOO-418; internal slices do not authorize a
 serial PR chain. If independent work is split later, each additional PR needs
 its own Task and child-specific design. The original four slices and the independent completion trigger are implemented locally.
-Shared planning integration, combined proof and complete demo remain; these are
+Shared planning integration, local-only lifecycle proof and complete demo remain; these are
 internal slices of the same delivery boundary.
 
 **Remaining work:** integrate LOO-406's common local planning writer once its
@@ -535,8 +535,8 @@ passed; configured/native acceptance is absent and landing is unauthorized.
    open published PR still blocks successful completion.
 3. **Linked follow-through.** Durable filing/retry, dates, waited landing,
    finishing Flows and pending/done projections replace keep-open obligations.
-   The skill and operators must use the independent completion operation. Separate fixtures
-   cover filing and completion; the unified lifecycle proof below remains.
+   The skill and operators must use the independent completion operation. The composed provider fixture now covers filing, independent completion and actual
+   arrival through CLI/monitor and Rust/Swift projections; local-only integration remains.
 4. **Selected design handoff.** Checkout transfers an explicit child design;
    retries preserve edited/deleted child notes and conflicts retain both inputs.
    `task_handoff_tests` covers those boundaries; existing `sync_tests` covers
@@ -570,7 +570,7 @@ also run `cargo test -p loopflow --lib engine::flow_graph::tests`.
 | Accepted Linear completion while a real held Process is running preserves its Process identity, liveness, Workflow edge, Session and checkout; later driver exit records its true result | Public Task/Flow case plus PM observation tests and CLI/monitor/Desktop projection |
 | End is durable before a failed completion; crash/retry finishes only completion, keeps successful Flow history, and exposes the reason; repeated completion is harmless | Task launch, store transactions and operator guidance; verify gate/Flow invocation counts |
 | Newer Linear reopening changes status without Workflow movement; old end and pending retries cannot re-complete it; stale provider observations do not undo newer state; reopening between outbound read and mutation survives | PM revision/writeback and completion trigger tests, including LOO-406's enabled failing concurrent-reopening regression |
-| Real Git fixture plus simulated GitHub merge and Linear mutation crosses store, public CLI JSON, monitor projection and Swift decode/view; no live provider or display is required | New lifecycle case in existing Task launch suite; serialize its resulting wire fixture for both Rust `dto_fixtures` and Swift `DTOFixtureTests`/headless Task view assertions |
+| Real Git fixture plus simulated GitHub merge and Linear mutation crosses store, public CLI JSON, monitor projection and Swift decode/view; no live provider or display is required | Composed case in `ops::task::follow_through::tests::lifecycle`, with a real CLI/Flow and simulated providers; its captured wire population is checked by Rust `dto_fixtures` and Swift `DTOFixtureTests`/headless Task view assertions |
 | Lost creation response, crash before local receipt, simultaneous finishing callers, issue edited/moved and chapter rotated all reuse one child; provider failure leaves explicit pending state | PM/Linear tests, `task_pr_authority_tests` and Task launch integration; assert issue population and Task state, not mock calls |
 | Bare land, waited land and out-of-band merge all converge; wait timeout/interruption does not clear intent, replay gate or complete early; reconciliation between merge and filing retains the checkout for the next step | `land_tests`, `pr_landing` tests and a public CLI held-Flow case |
 | Research reaches done with `pr: null`; retained drafts/commits and Sessions stay reachable; no hidden Working PR is created | `task_initialization_tests`, `task_diff_tests`, Task launch and shared DTO/view fixtures |
@@ -592,7 +592,7 @@ optional current PR with immutable historical rows, post-merge disposition and
 UUID-pinned Linear filing, waited land/finishing Flows, shared due/link projections,
 and explicit design handoff. Focused implementation checks pass. The earlier
 inventory records the starting point; the affected gate ran with focused repairs.
-The combined lifecycle proof and Jack's complete demo remain.
+The local-only integrated lifecycle and Jack's complete demo remain.
 
 Review removed serial store settlement and PR-based placement writers as well as
 CLI rotation. Task placement writes update the validated PR copy in one direction.
@@ -619,7 +619,7 @@ then confirms the original receipt and exactly one provider issue/relation.
 The CLI proves no-PR retained research and post-merge completion within a Flow;
 Swift fixtures prove pending/done links and legacy scope text. These separate
 proofs do not establish a single configured provider-to-monitor-to-native run.
-The unified lifecycle population remains unproven. The real wait loop now has
+The composed simulated-provider population below closes that headless gap; local-only integration remains unproven. The real wait loop now has
 paused-clock timeout proof, and the disposable Docker installation checks passed.
 The initial Docker pass silently selected zero Flow-history tests: removing its
 incorrect `--ignored` selection exposed and passed the actual test.
@@ -630,7 +630,7 @@ Jack's zero-or-one PR and normal post-merge follow-through contract remain
 accepted. October 8 supersedes the alias: end triggers independent completion,
 and Linear completion preserves Workflow and Process state. The current code
 separates completion and position, but still needs the shared local planning
-writer and composed lifecycle proof before the complete demo on the existing PR.
+writer and local-only lifecycle proof before the complete demo on the existing PR.
 
 The implementation uses the proposed polling limits and filing interface,
 removes `-c` and `--next`, and provides explicit `--design` handoff. Dated follow-ups return on the owning Wave's next operation; filing
@@ -644,22 +644,9 @@ automatic filing of unrelated improvements, landing this branch and claimed
 production acceptance remain excluded. Gate findings and remaining acceptance
 are recorded below; the Docker installation ran in isolation.
 
-Review (2026-10-07): the inverse Flow lookup uses indexed Process-bound Session
-rows and shared membership predicates, avoiding a scan of all Process history
-for each Task. That earlier alias added no independent state; October 8 supersedes it. The suspected combined
-`--wt`/`--task` cwd-guard issue is unreachable because Clap rejects the pair;
-no extra guard remains. Fixture corrections selected an authored workflow edge,
-used `flow list --processes`, and decoded the actual flattened inventory DTO.
-This earlier review deferred affected checks to gate; the October 8 results
-below supersede that deferral. Rendered judgment remains with demo.
-
-Compression keeps placement as a returned binding and the driver as the sole
-holder of its Task during execution. Flow registration takes its name from the
-captured graph, removing a second input that could disagree. Historical fixtures
-retain their test-only Started writer because they distinguish retained Flow
-history from admission; production writes Flow and Started together.
-Workflow moves now share one Task lookup and omit the unused repository argument.
-The single-PR projection no longer selects a “latest” PR or compares it with itself.
+Earlier lookup, placement, Workflow-move and PR-projection compression findings
+remain at `37a7568cc:scratch/make-a-task-up-to.md`; the independent completion
+contract supersedes the alias model. No production code changes in this fixture pass.
 
 Synced main at `812d8cc55`, retaining placement before Process admission and
 applying main's `cli.agent` rename there. Earlier focused lifecycle, Rust/Swift DTO,
@@ -725,16 +712,36 @@ superseded alias model. Its notice now distinguishes the implemented trigger fro
 remaining integration; it is not a walkthrough of the current contract. A current
 walkthrough remains part of the complete demo preparation.
 
-The current public offline fixture deliberately cannot write Linear: it verifies
-pending completion, then ingests accepted provider status through the normal
-store writer. Stateful provider fixtures independently prove successful completion,
-lost responses and reopening. Together with the live held Process and atomic
-arrival/store-reopen cases, these cover local trigger and observed-revision behavior;
-they do not establish concurrent provider-write safety or compose post-merge filing,
-local-only planning, monitor and Desktop in one population.
+## Composed headless lifecycle (2026-10-08)
 
-Earlier completion-trigger checks and repaired expectations are retained at
-`5c240c89a:scratch/make-a-task-up-to.md`. They do not prove the unfinished local
-planning integration or unified lifecycle.
+`ops::task::follow_through::tests::lifecycle` builds the branch CLI and holds a
+real Task Flow in a disposable Git repository/Home. Simulated GitHub merge
+observation precedes linked filing through the existing operations against a
+stateful Linear server. Completion records one event while the Flow remains on
+its edge; releasing the step lets the actual driver arrive at end, with one
+successful Flow and the child still unstarted. No predecessor completion writer
+was extended. The fixture shares setup and provider simulation with the existing
+lost-response/chapter-rotation regression, which remains enabled.
 
-Check (2026-10-08): reused the unchanged-code result with inherited `LF_*` cleared, `cargo nextest run -p loopflow --lib --test task_flow_launch_tests --test task_initialization_tests -E 'binary(task_flow_launch_tests) | binary(task_initialization_tests) | test(ops::task_actions::) | test(lf::commands::waves::)' --no-fail-fast` — 53 passed, formatting/Clippy passed; prose-only realign: `git diff --check` and `lf context --skill realign --json` passed within budgets. Full affected gate, LOO-406 integration, unified lifecycle proof and configured demo remain; LOO-406's recorded failing regression was not rerun.
+The same Home supplies public `task status`, `roadmap` and monitor planning/Task
+frames at merged, completed-running and arrived phases. Its generated
+`tests/fixtures/dto/task_lifecycle.json` feeds Rust DTO and Swift decoder/view
+assertions, including the exact follow-up link, due date and pending/done labels.
+Live reruns compare behavioral fields with that capture, excluding volatile IDs,
+paths and clock readings. `TESTING.md` documents regeneration.
+
+Fixture construction first failed on a noncanonical seeded macOS checkout path,
+a mock `gh` lacking version discovery, and missing cached planning; those fixture
+errors are repaired. Swift initially ran before capture generation and failed on
+the missing file; the generated population now passes. Review added release-on-drop
+so an assertion failure cannot strand the held fixture step.
+
+This proves the composed simulated-provider contract, not an autonomous agent's
+filing judgment or a live provider/native Desktop run. The provider operations run
+in-process against the test server while the real Flow is held; the CLI performs
+reads, idempotent completion and actual arrival. Local-only planning composition,
+LOO-406's common writer and concurrent-reopening guarantee, full affected gate,
+stacked/due-return demo and Jack's review remain. The reopening regression was not
+rerun or resolved here. Landing remains unauthorized.
+
+Check (2026-10-08): `cargo test -p loopflow --lib ops::task::follow_through::tests` — 2 passed; `cargo test -p loopflow --test dto_fixtures composed_lifecycle` — 1 passed; `swift test --package-path swift --filter 'composedTaskLifecycle|composedLifecycleDelivery'` — 2 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and context budgets passed. Full gate/demo deferred; prior 53-test evidence: `37a7568cc:scratch/make-a-task-up-to.md`.

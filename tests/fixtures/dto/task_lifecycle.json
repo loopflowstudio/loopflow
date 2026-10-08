@@ -1,0 +1,3839 @@
+{
+  "arrived": {
+    "planning_frame": {
+      "answers": 1,
+      "body": {
+        "roadmap": {
+          "generated_at": "2026-10-08T16:33:20.114767Z",
+          "waves": [
+            {
+              "metric_portfolio": {
+                "contract_issues": [],
+                "metrics": []
+              },
+              "project_readiness": {
+                "activation": null,
+                "observed_at": 1791477199,
+                "pending_successor": null,
+                "project_id": "project-1",
+                "state": "ready"
+              },
+              "projects": {
+                "items": [
+                  {
+                    "current": true,
+                    "id": "project-1",
+                    "krs": [],
+                    "metric_targets": [],
+                    "name": "Provider destination",
+                    "slug": "provider-destination",
+                    "status": "started",
+                    "work_id": "proj_f523403eb745408db4b00f5123e5ac5d",
+                    "workflow": "feature"
+                  }
+                ],
+                "state": "ok",
+                "truncated": false
+              },
+              "tasks": {
+                "items": [
+                  {
+                    "actions": {
+                      "reason": "Task is terminal",
+                      "recommended": "no_action"
+                    },
+                    "condition": {
+                      "evidence_age_secs": 5,
+                      "local_progress": {
+                        "authored_commits": false,
+                        "dirty": true,
+                        "reason": null,
+                        "recovery_required": false,
+                        "state": "observed",
+                        "unsettled": true
+                      },
+                      "observed_at": "2026-10-08T16:33:20.149505Z",
+                      "reason": "Task has uncommitted work",
+                      "state": "blocked",
+                      "unresolved_execution": true
+                    },
+                    "execution": {
+                      "captured": null,
+                      "reason": "Flow delivery finished; nothing further is launched",
+                      "state": "idle",
+                      "step": null
+                    },
+                    "follow_through": {
+                      "intents": [
+                        {
+                          "due": "2026-10-09",
+                          "existing": false,
+                          "issue_id": "3f7994d4-e79f-49ed-9eb8-de451e1eedef",
+                          "key": "installed",
+                          "notes": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
+                          "project_id": "project-1",
+                          "relation_id": "764b8100-9302-4151-96b2-c704f2625498",
+                          "state_id": "todo",
+                          "team_id": "team-1",
+                          "title": "Verify installed release",
+                          "wave": "product"
+                        }
+                      ],
+                      "links": [
+                        {
+                          "due": "2026-10-09",
+                          "identifier": "FIX-2",
+                          "issue_id": "3f7994d4-e79f-49ed-9eb8-de451e1eedef",
+                          "key": "installed",
+                          "url": "https://linear.app/fixture/issue/FIX-2"
+                        }
+                      ],
+                      "needs_conversion": false,
+                      "reason": "Accepted installed check filed",
+                      "scope_notes": []
+                    },
+                    "latest_flow_process": {
+                      "completed": [
+                        0,
+                        1
+                      ],
+                      "current": null,
+                      "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+                      "entry": {
+                        "ended_at": 1791477199,
+                        "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+                        "name": "delivery",
+                        "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+                        "state": "completed",
+                        "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+                        "updated_at": 1791477199,
+                        "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+                      },
+                      "graph": {
+                        "interactions": {
+                          "stages": [],
+                          "transitions": [
+                            {
+                              "from": "@start",
+                              "nodes": [
+                                "0",
+                                "1"
+                              ],
+                              "routes": [
+                                {
+                                  "condition": null,
+                                  "from": "@start",
+                                  "to": "0"
+                                },
+                                {
+                                  "condition": null,
+                                  "from": "0",
+                                  "to": "1"
+                                },
+                                {
+                                  "condition": null,
+                                  "from": "1",
+                                  "to": "@end"
+                                }
+                              ],
+                              "to": "@end"
+                            }
+                          ]
+                        },
+                        "name": "delivery",
+                        "steps": [
+                          {
+                            "human": false,
+                            "id": null,
+                            "key": 0,
+                            "kind": "op",
+                            "label": "__telemetry-scorecard",
+                            "paths": [],
+                            "returns_to": null,
+                            "sources": [
+                              "delivery"
+                            ]
+                          },
+                          {
+                            "human": false,
+                            "id": null,
+                            "key": 1,
+                            "kind": "op",
+                            "label": "task complete FIX-1",
+                            "paths": [],
+                            "returns_to": null,
+                            "sources": [
+                              "delivery"
+                            ]
+                          }
+                        ]
+                      },
+                      "iterations": [
+                        []
+                      ],
+                      "returns": [],
+                      "steps": [
+                        {
+                          "completed_at": 1791477199,
+                          "exit_code": 0,
+                          "iterations": [
+                            []
+                          ],
+                          "key": 0,
+                          "label": "__telemetry-scorecard",
+                          "outcome": "succeeded",
+                          "process_lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+                          "started_at": 1791477198
+                        },
+                        {
+                          "completed_at": 1791477199,
+                          "exit_code": 0,
+                          "iterations": [
+                            []
+                          ],
+                          "key": 1,
+                          "label": "task complete FIX-1",
+                          "outcome": "succeeded",
+                          "process_lfid": "e02ef621-f51c-4792-bc55-ff9399732b8f",
+                          "started_at": 1791477199
+                        }
+                      ]
+                    },
+                    "next_move": {
+                      "owner": "wave",
+                      "reason": "done"
+                    },
+                    "pr": {
+                      "abandoned_at": null,
+                      "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+                      "branch": "main",
+                      "empty": null,
+                      "id": "pr_21fc124185824b7cbcdec291e76d98b6",
+                      "merge_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+                      "phase": "merged",
+                      "publication": {
+                        "github": {
+                          "number": 1,
+                          "url": "https://github.com/loopflowstudio/fixture/pull/1"
+                        },
+                        "merge": null,
+                        "presentation": null,
+                        "requested_at": "2026-10-08T16:33:15Z"
+                      },
+                      "sequence": 1,
+                      "slug": "delivery"
+                    },
+                    "reference": {
+                      "issue_url": "https://linear.app/fixture/issue/FIX-2",
+                      "workspace": {
+                        "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+                        "branch": "main",
+                        "local_exists": true,
+                        "machine_id": "home_c602f38d34689061cdf5b5babe44c142",
+                        "slug": "delivery",
+                        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY"
+                      }
+                    },
+                    "run_control": {
+                      "unavailable": "Task is complete"
+                    },
+                    "runtime": {
+                      "completion_pending": null,
+                      "provider": "codex",
+                      "reason": "done",
+                      "started": true,
+                      "status": "done",
+                      "updated_at": "2026-10-08T16:33:15Z",
+                      "work_id": "task_04c13f31e43242caa369cc4ff9525997"
+                    },
+                    "section": "later",
+                    "task": {
+                      "assignee": null,
+                      "completed": true,
+                      "completed_at": "2026-10-08T00:00:00Z",
+                      "description": "",
+                      "due_date": null,
+                      "follow_up_sources": [],
+                      "id": "source-issue",
+                      "identifier": "FIX-1",
+                      "name": "Deliver the command",
+                      "rank": 0,
+                      "state": "completed"
+                    },
+                    "workflow_name": "delivery"
+                  }
+                ],
+                "state": "ok",
+                "truncated": false
+              },
+              "unavailable_tasks": [],
+              "wave": {
+                "active_tasks": 0,
+                "created_at": "2026-10-08T16:33:15Z",
+                "goal": "Product",
+                "id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6",
+                "machine": {
+                  "created_at": "2026-10-08T16:33:15Z",
+                  "id": "home_c602f38d34689061cdf5b5babe44c142",
+                  "label": null,
+                  "observed_at": "2026-10-08T16:33:15Z",
+                  "repo": null,
+                  "route": "local"
+                },
+                "name": "product",
+                "parent_wave_id": null,
+                "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+                "retired_at": null,
+                "retirement_reason": null,
+                "status": "ready",
+                "superseded_by_wave_id": null
+              }
+            }
+          ]
+        },
+        "waves": [
+          {
+            "active_tasks": 0,
+            "created_at": "2026-10-08T16:33:15Z",
+            "goal": "Product",
+            "id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6",
+            "machine": {
+              "created_at": "2026-10-08T16:33:15Z",
+              "id": "home_c602f38d34689061cdf5b5babe44c142",
+              "label": null,
+              "observed_at": "2026-10-08T16:33:15Z",
+              "repo": null,
+              "route": "local"
+            },
+            "name": "product",
+            "parent_wave_id": null,
+            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+            "retired_at": null,
+            "retirement_reason": null,
+            "status": "ready",
+            "superseded_by_wave_id": null
+          }
+        ]
+      },
+      "home": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp8L4YNy",
+      "part": "planning",
+      "revisions": {
+        "flows": 3,
+        "planning": 51,
+        "processes": 23,
+        "sessions": 0,
+        "usage": 0
+      },
+      "sequence": 2,
+      "unavailable": null
+    },
+    "row": {
+      "actions": {
+        "reason": "Task is terminal",
+        "recommended": "no_action"
+      },
+      "condition": {
+        "evidence_age_secs": 5,
+        "local_progress": {
+          "authored_commits": false,
+          "dirty": true,
+          "reason": null,
+          "recovery_required": false,
+          "state": "observed",
+          "unsettled": true
+        },
+        "observed_at": "2026-10-08T16:33:20.005451Z",
+        "reason": "Task has uncommitted work",
+        "state": "blocked",
+        "unresolved_execution": true
+      },
+      "execution": {
+        "captured": null,
+        "reason": "Flow delivery finished; nothing further is launched",
+        "state": "idle",
+        "step": null
+      },
+      "follow_through": {
+        "intents": [
+          {
+            "due": "2026-10-09",
+            "existing": false,
+            "issue_id": "3f7994d4-e79f-49ed-9eb8-de451e1eedef",
+            "key": "installed",
+            "notes": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
+            "project_id": "project-1",
+            "relation_id": "764b8100-9302-4151-96b2-c704f2625498",
+            "state_id": "todo",
+            "team_id": "team-1",
+            "title": "Verify installed release",
+            "wave": "product"
+          }
+        ],
+        "links": [
+          {
+            "due": "2026-10-09",
+            "identifier": "FIX-2",
+            "issue_id": "3f7994d4-e79f-49ed-9eb8-de451e1eedef",
+            "key": "installed",
+            "url": "https://linear.app/fixture/issue/FIX-2"
+          }
+        ],
+        "needs_conversion": false,
+        "reason": "Accepted installed check filed",
+        "scope_notes": []
+      },
+      "latest_flow_process": {
+        "completed": [
+          0,
+          1
+        ],
+        "current": null,
+        "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+        "entry": {
+          "ended_at": 1791477199,
+          "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+          "name": "delivery",
+          "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+          "state": "completed",
+          "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+          "updated_at": 1791477199,
+          "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+        },
+        "graph": {
+          "interactions": {
+            "stages": [],
+            "transitions": [
+              {
+                "from": "@start",
+                "nodes": [
+                  "0",
+                  "1"
+                ],
+                "routes": [
+                  {
+                    "condition": null,
+                    "from": "@start",
+                    "to": "0"
+                  },
+                  {
+                    "condition": null,
+                    "from": "0",
+                    "to": "1"
+                  },
+                  {
+                    "condition": null,
+                    "from": "1",
+                    "to": "@end"
+                  }
+                ],
+                "to": "@end"
+              }
+            ]
+          },
+          "name": "delivery",
+          "steps": [
+            {
+              "human": false,
+              "id": null,
+              "key": 0,
+              "kind": "op",
+              "label": "__telemetry-scorecard",
+              "paths": [],
+              "returns_to": null,
+              "sources": [
+                "delivery"
+              ]
+            },
+            {
+              "human": false,
+              "id": null,
+              "key": 1,
+              "kind": "op",
+              "label": "task complete FIX-1",
+              "paths": [],
+              "returns_to": null,
+              "sources": [
+                "delivery"
+              ]
+            }
+          ]
+        },
+        "iterations": [
+          []
+        ],
+        "returns": [],
+        "steps": [
+          {
+            "completed_at": 1791477199,
+            "exit_code": 0,
+            "iterations": [
+              []
+            ],
+            "key": 0,
+            "label": "__telemetry-scorecard",
+            "outcome": "succeeded",
+            "process_lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+            "started_at": 1791477198
+          },
+          {
+            "completed_at": 1791477199,
+            "exit_code": 0,
+            "iterations": [
+              []
+            ],
+            "key": 1,
+            "label": "task complete FIX-1",
+            "outcome": "succeeded",
+            "process_lfid": "e02ef621-f51c-4792-bc55-ff9399732b8f",
+            "started_at": 1791477199
+          }
+        ]
+      },
+      "next_move": {
+        "owner": "wave",
+        "reason": "done"
+      },
+      "pr": {
+        "abandoned_at": null,
+        "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+        "branch": "main",
+        "empty": null,
+        "id": "pr_21fc124185824b7cbcdec291e76d98b6",
+        "merge_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+        "phase": "merged",
+        "publication": {
+          "github": {
+            "number": 1,
+            "url": "https://github.com/loopflowstudio/fixture/pull/1"
+          },
+          "merge": null,
+          "presentation": null,
+          "requested_at": "2026-10-08T16:33:15Z"
+        },
+        "sequence": 1,
+        "slug": "delivery"
+      },
+      "reference": {
+        "issue_url": "https://linear.app/fixture/issue/FIX-2",
+        "workspace": {
+          "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+          "branch": "main",
+          "local_exists": true,
+          "machine_id": "home_c602f38d34689061cdf5b5babe44c142",
+          "slug": "delivery",
+          "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY"
+        }
+      },
+      "run_control": {
+        "unavailable": "Task is complete"
+      },
+      "runtime": {
+        "completion_pending": null,
+        "provider": "codex",
+        "reason": "done",
+        "started": true,
+        "status": "done",
+        "updated_at": "2026-10-08T16:33:15Z",
+        "work_id": "task_04c13f31e43242caa369cc4ff9525997"
+      },
+      "section": "later",
+      "task": {
+        "assignee": null,
+        "completed": true,
+        "completed_at": "2026-10-08T00:00:00Z",
+        "description": "",
+        "due_date": null,
+        "follow_up_sources": [],
+        "id": "source-issue",
+        "identifier": "FIX-1",
+        "name": "Deliver the command",
+        "rank": 0,
+        "state": "completed"
+      },
+      "workflow_name": "delivery"
+    },
+    "status": {
+      "execution": {
+        "actions": {
+          "reason": "Task is terminal",
+          "recommended": "no_action"
+        },
+        "agent": null,
+        "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+        "branch": "main",
+        "completion_pending": null,
+        "created_at": [
+          2026,
+          281,
+          16,
+          33,
+          15,
+          0,
+          0,
+          0,
+          0
+        ],
+        "execution": {
+          "captured": null,
+          "reason": "Flow delivery finished; nothing further is launched",
+          "state": "idle",
+          "step": null
+        },
+        "external_project_id": "project-1",
+        "follow_through": {
+          "intents": [
+            {
+              "due": "2026-10-09",
+              "existing": false,
+              "issue_id": "3f7994d4-e79f-49ed-9eb8-de451e1eedef",
+              "key": "installed",
+              "notes": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
+              "project_id": "project-1",
+              "relation_id": "764b8100-9302-4151-96b2-c704f2625498",
+              "state_id": "todo",
+              "team_id": "team-1",
+              "title": "Verify installed release",
+              "wave": "product"
+            }
+          ],
+          "links": [
+            {
+              "due": "2026-10-09",
+              "identifier": "FIX-2",
+              "issue_id": "3f7994d4-e79f-49ed-9eb8-de451e1eedef",
+              "key": "installed",
+              "url": "https://linear.app/fixture/issue/FIX-2"
+            }
+          ],
+          "needs_conversion": false,
+          "reason": "Accepted installed check filed",
+          "scope_notes": []
+        },
+        "issue_id": "source-issue",
+        "issue_identifier": "FIX-1",
+        "latest_event": {
+          "created_at": [
+            2026,
+            281,
+            16,
+            33,
+            19,
+            0,
+            0,
+            0,
+            0
+          ],
+          "id": 7,
+          "kind": {
+            "kind": "completed",
+            "summary": "Completion observed in Linear"
+          },
+          "task_id": "task_04c13f31e43242caa369cc4ff9525997"
+        },
+        "machine_id": "home_c602f38d34689061cdf5b5babe44c142",
+        "observation": {
+          "freshness": "not_required"
+        },
+        "pm_snapshot_synced_at": 1791477199,
+        "pm_writeback": {
+          "state": "current"
+        },
+        "pr": {
+          "abandoned_at": null,
+          "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+          "branch": "main",
+          "ci_observation": null,
+          "created_at": [
+            2026,
+            281,
+            16,
+            33,
+            15,
+            0,
+            0,
+            0,
+            0
+          ],
+          "github_observation": {
+            "checked_at": [
+              2026,
+              281,
+              16,
+              33,
+              18,
+              270020000,
+              0,
+              0,
+              0
+            ],
+            "result": {
+              "state": "fresh"
+            }
+          },
+          "id": "pr_21fc124185824b7cbcdec291e76d98b6",
+          "linear_attachment_id": null,
+          "linear_comment_id": null,
+          "linear_link_error": null,
+          "merge_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+          "parent_pr_id": null,
+          "publication": {
+            "github": {
+              "head_sha": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+              "number": 1,
+              "url": "https://github.com/loopflowstudio/fixture/pull/1"
+            },
+            "merge": null,
+            "presentation": null,
+            "requested_at": [
+              2026,
+              281,
+              16,
+              33,
+              15,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "sequence": 1,
+          "slug": "delivery",
+          "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+          "updated_at": [
+            2026,
+            281,
+            16,
+            33,
+            18,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "project": "provider-destination",
+        "project_id": "proj_f523403eb745408db4b00f5123e5ac5d",
+        "provider": "codex",
+        "status": "done",
+        "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+        "updated_at": [
+          2026,
+          281,
+          16,
+          33,
+          15,
+          0,
+          0,
+          0,
+          0
+        ],
+        "wave": "product",
+        "work": {
+          "flow_processes": [
+            {
+              "ended_at": 1791477199,
+              "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "name": "delivery",
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "state": "completed",
+              "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+              "updated_at": 1791477199,
+              "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+            }
+          ],
+          "processes": [
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "6b2441d9-d5b3-4716-af80-72a728e43271",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 83111,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "dc922761-d552-48e8-86f0-16fd8bc51e45",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "b70a9635-eb00-42e3-b35a-5cdb717a9aca",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 82813,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "a2c8480a-05d6-4515-bab7-d7517dddf2f1",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "dbfb8395-e48c-4bc2-b284-8ad5a1aff6fe",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 82509,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "52f94c48-2a90-49f1-85a4-23ba909d87bc",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"complete\",\"FIX-1\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "e02ef621-f51c-4792-bc55-ff9399732b8f",
+              "outcome": "succeeded",
+              "parent_process_lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "pid": 82975,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "e26e6a83-a7fc-41da-accf-4cac956f1326",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 82655,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "443a54ed-3783-42db-9255-aecde948b8a8",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "completed_at": 1791477198,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "3174ed64-34ad-4a1d-8fbe-d275e069f026",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 81844,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "3e8cfaab-d73d-46bd-b85e-151cc96f0b07",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
+              "completed_at": 1791477198,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "3ad9d3cb-3e4c-455c-a7e3-9dd25f8eca92",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 81983,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "6602b808-1cf2-47ca-84d9-74301a618352",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"--batch\",\"--task\",\"FIX-1\",\"run\",\"delivery\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "outcome": "succeeded",
+              "parent_process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "pid": 81573,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "84a49e35-ffbc-466a-ae89-eaff79185fec",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 82128,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "9dd26c51-5c47-4a78-a764-e2db2aebccc3",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"__telemetry-scorecard\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+              "outcome": "succeeded",
+              "parent_process_lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "pid": 81709,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 81362,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477197,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            }
+          ],
+          "sessions": [],
+          "workflow": {
+            "edges": [
+              {
+                "flow": "delivery",
+                "from": "start",
+                "to": "end"
+              }
+            ],
+            "history": [
+              {
+                "actor": "person",
+                "at": 1791477197,
+                "edge": null,
+                "from": "start",
+                "kind": "took_up",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "start",
+                "workflow": "delivery"
+              },
+              {
+                "actor": "person",
+                "at": 1791477197,
+                "edge": 0,
+                "from": "start",
+                "kind": "chose",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "end",
+                "workflow": "delivery"
+              },
+              {
+                "actor": "edge",
+                "at": 1791477199,
+                "edge": 0,
+                "from": "start",
+                "kind": "arrived",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "end",
+                "workflow": "delivery"
+              }
+            ],
+            "name": "delivery",
+            "nodes": [],
+            "outgoing": [],
+            "position": {
+              "kind": "node",
+              "node": "end"
+            }
+          }
+        },
+        "workspace_slug": "delivery",
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY"
+      },
+      "planning": {
+        "item": {
+          "assignee": null,
+          "branch_name": null,
+          "completed": true,
+          "completed_at": "2026-10-08T00:00:00Z",
+          "description": "",
+          "due_date": null,
+          "id": "source-issue",
+          "identifier": "FIX-1",
+          "name": "Deliver the command",
+          "project": "provider-destination",
+          "project_id": "project-1",
+          "rank": 0,
+          "revision": "2026-10-08T00:00:00Z",
+          "state": "completed",
+          "team_id": "team-1",
+          "url": "https://linear.app/fixture/issue/FIX-2"
+        },
+        "observed_at": 1791477199,
+        "project": {
+          "id": "project-1",
+          "initiative_ids": [
+            "initiative-1"
+          ],
+          "krs": [],
+          "metric_targets": [],
+          "name": "Provider destination",
+          "revision": "2026-10-07T00:00:00Z",
+          "slug": "provider-destination",
+          "status": "started",
+          "summary": "",
+          "team_ids": [
+            "team-1"
+          ],
+          "workflow": "feature"
+        }
+      },
+      "planning_error": null,
+      "planning_stale": false,
+      "planning_state": "available"
+    },
+    "task_frame": {
+      "answers": 1,
+      "body": {
+        "flow_processes": [
+          {
+            "completed": [
+              0,
+              1
+            ],
+            "current": null,
+            "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+            "entry": {
+              "ended_at": 1791477199,
+              "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "name": "delivery",
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "state": "completed",
+              "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+              "updated_at": 1791477199,
+              "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+            },
+            "graph": {
+              "interactions": {
+                "stages": [],
+                "transitions": [
+                  {
+                    "from": "@start",
+                    "nodes": [
+                      "0",
+                      "1"
+                    ],
+                    "routes": [
+                      {
+                        "condition": null,
+                        "from": "@start",
+                        "to": "0"
+                      },
+                      {
+                        "condition": null,
+                        "from": "0",
+                        "to": "1"
+                      },
+                      {
+                        "condition": null,
+                        "from": "1",
+                        "to": "@end"
+                      }
+                    ],
+                    "to": "@end"
+                  }
+                ]
+              },
+              "name": "delivery",
+              "steps": [
+                {
+                  "human": false,
+                  "id": null,
+                  "key": 0,
+                  "kind": "op",
+                  "label": "__telemetry-scorecard",
+                  "paths": [],
+                  "returns_to": null,
+                  "sources": [
+                    "delivery"
+                  ]
+                },
+                {
+                  "human": false,
+                  "id": null,
+                  "key": 1,
+                  "kind": "op",
+                  "label": "task complete FIX-1",
+                  "paths": [],
+                  "returns_to": null,
+                  "sources": [
+                    "delivery"
+                  ]
+                }
+              ]
+            },
+            "iterations": [
+              []
+            ],
+            "returns": [],
+            "steps": [
+              {
+                "completed_at": 1791477199,
+                "exit_code": 0,
+                "iterations": [
+                  []
+                ],
+                "key": 0,
+                "label": "__telemetry-scorecard",
+                "outcome": "succeeded",
+                "process_lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+                "started_at": 1791477198
+              },
+              {
+                "completed_at": 1791477199,
+                "exit_code": 0,
+                "iterations": [
+                  []
+                ],
+                "key": 1,
+                "label": "task complete FIX-1",
+                "outcome": "succeeded",
+                "process_lfid": "e02ef621-f51c-4792-bc55-ff9399732b8f",
+                "started_at": 1791477199
+              }
+            ]
+          }
+        ],
+        "task": "FIX-1",
+        "work": {
+          "flow_processes": [
+            {
+              "ended_at": 1791477199,
+              "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "name": "delivery",
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "state": "completed",
+              "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+              "updated_at": 1791477199,
+              "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+            }
+          ],
+          "processes": [
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "912a855d-6a69-445a-9409-8fa4720e3c77",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 83320,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477200,
+              "trace_id": "a5a2fc31-5798-4308-8b80-dcf51802608d",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
+              "completed_at": 1791477200,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "4e6794ba-76fa-44d3-a896-9508763279df",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 83211,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "aca0af53-3013-408c-9eca-08e1a2105271",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "6b2441d9-d5b3-4716-af80-72a728e43271",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 83111,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "dc922761-d552-48e8-86f0-16fd8bc51e45",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "b70a9635-eb00-42e3-b35a-5cdb717a9aca",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 82813,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "a2c8480a-05d6-4515-bab7-d7517dddf2f1",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "dbfb8395-e48c-4bc2-b284-8ad5a1aff6fe",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 82509,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "52f94c48-2a90-49f1-85a4-23ba909d87bc",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"complete\",\"FIX-1\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "e02ef621-f51c-4792-bc55-ff9399732b8f",
+              "outcome": "succeeded",
+              "parent_process_lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "pid": 82975,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "e26e6a83-a7fc-41da-accf-4cac956f1326",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 82655,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "443a54ed-3783-42db-9255-aecde948b8a8",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "completed_at": 1791477198,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "3174ed64-34ad-4a1d-8fbe-d275e069f026",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 81844,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "3e8cfaab-d73d-46bd-b85e-151cc96f0b07",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
+              "completed_at": 1791477198,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "3ad9d3cb-3e4c-455c-a7e3-9dd25f8eca92",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 81983,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "6602b808-1cf2-47ca-84d9-74301a618352",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"--batch\",\"--task\",\"FIX-1\",\"run\",\"delivery\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "outcome": "succeeded",
+              "parent_process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "pid": 81573,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "84a49e35-ffbc-466a-ae89-eaff79185fec",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 82128,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "9dd26c51-5c47-4a78-a764-e2db2aebccc3",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"__telemetry-scorecard\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+              "outcome": "succeeded",
+              "parent_process_lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "pid": 81709,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 81362,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477197,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            }
+          ],
+          "sessions": [],
+          "workflow": {
+            "edges": [
+              {
+                "flow": "delivery",
+                "from": "start",
+                "to": "end"
+              }
+            ],
+            "history": [
+              {
+                "actor": "person",
+                "at": 1791477197,
+                "edge": null,
+                "from": "start",
+                "kind": "took_up",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "start",
+                "workflow": "delivery"
+              },
+              {
+                "actor": "person",
+                "at": 1791477197,
+                "edge": 0,
+                "from": "start",
+                "kind": "chose",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "end",
+                "workflow": "delivery"
+              },
+              {
+                "actor": "edge",
+                "at": 1791477199,
+                "edge": 0,
+                "from": "start",
+                "kind": "arrived",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "end",
+                "workflow": "delivery"
+              }
+            ],
+            "name": "delivery",
+            "nodes": [],
+            "outgoing": [],
+            "position": {
+              "kind": "node",
+              "node": "end"
+            }
+          }
+        }
+      },
+      "home": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp8L4YNy",
+      "part": "task",
+      "revisions": {
+        "flows": 3,
+        "planning": 51,
+        "processes": 23,
+        "sessions": 0,
+        "usage": 0
+      },
+      "sequence": 3,
+      "unavailable": null
+    }
+  },
+  "completed": {
+    "planning_frame": {
+      "answers": 1,
+      "body": {
+        "roadmap": {
+          "generated_at": "2026-10-08T16:33:19.552975Z",
+          "waves": [
+            {
+              "metric_portfolio": {
+                "contract_issues": [],
+                "metrics": []
+              },
+              "project_readiness": {
+                "activation": null,
+                "observed_at": 1791477199,
+                "pending_successor": null,
+                "project_id": "project-1",
+                "state": "ready"
+              },
+              "projects": {
+                "items": [
+                  {
+                    "current": true,
+                    "id": "project-1",
+                    "krs": [],
+                    "metric_targets": [],
+                    "name": "Provider destination",
+                    "slug": "provider-destination",
+                    "status": "started",
+                    "work_id": "proj_f523403eb745408db4b00f5123e5ac5d",
+                    "workflow": "feature"
+                  }
+                ],
+                "state": "ok",
+                "truncated": false
+              },
+              "tasks": {
+                "items": [
+                  {
+                    "actions": {
+                      "reason": "Task is terminal",
+                      "recommended": "no_action"
+                    },
+                    "condition": {
+                      "evidence_age_secs": 4,
+                      "local_progress": {
+                        "authored_commits": false,
+                        "dirty": true,
+                        "reason": null,
+                        "recovery_required": false,
+                        "state": "observed",
+                        "unsettled": true
+                      },
+                      "observed_at": "2026-10-08T16:33:19.594809Z",
+                      "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard",
+                      "state": "clear",
+                      "unresolved_execution": true
+                    },
+                    "execution": {
+                      "captured": null,
+                      "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard",
+                      "state": "running",
+                      "step": "__telemetry-scorecard"
+                    },
+                    "follow_through": {
+                      "intents": [
+                        {
+                          "due": "2026-10-09",
+                          "existing": false,
+                          "issue_id": "3f7994d4-e79f-49ed-9eb8-de451e1eedef",
+                          "key": "installed",
+                          "notes": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
+                          "project_id": "project-1",
+                          "relation_id": "764b8100-9302-4151-96b2-c704f2625498",
+                          "state_id": "todo",
+                          "team_id": "team-1",
+                          "title": "Verify installed release",
+                          "wave": "product"
+                        }
+                      ],
+                      "links": [
+                        {
+                          "due": "2026-10-09",
+                          "identifier": "FIX-2",
+                          "issue_id": "3f7994d4-e79f-49ed-9eb8-de451e1eedef",
+                          "key": "installed",
+                          "url": "https://linear.app/fixture/issue/FIX-2"
+                        }
+                      ],
+                      "needs_conversion": false,
+                      "reason": "Accepted installed check filed",
+                      "scope_notes": []
+                    },
+                    "latest_flow_process": {
+                      "completed": [],
+                      "current": 0,
+                      "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+                      "entry": {
+                        "ended_at": null,
+                        "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+                        "name": "delivery",
+                        "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+                        "state": "current",
+                        "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+                        "updated_at": 1791477198,
+                        "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+                      },
+                      "graph": {
+                        "interactions": {
+                          "stages": [],
+                          "transitions": [
+                            {
+                              "from": "@start",
+                              "nodes": [
+                                "0",
+                                "1"
+                              ],
+                              "routes": [
+                                {
+                                  "condition": null,
+                                  "from": "@start",
+                                  "to": "0"
+                                },
+                                {
+                                  "condition": null,
+                                  "from": "0",
+                                  "to": "1"
+                                },
+                                {
+                                  "condition": null,
+                                  "from": "1",
+                                  "to": "@end"
+                                }
+                              ],
+                              "to": "@end"
+                            }
+                          ]
+                        },
+                        "name": "delivery",
+                        "steps": [
+                          {
+                            "human": false,
+                            "id": null,
+                            "key": 0,
+                            "kind": "op",
+                            "label": "__telemetry-scorecard",
+                            "paths": [],
+                            "returns_to": null,
+                            "sources": [
+                              "delivery"
+                            ]
+                          },
+                          {
+                            "human": false,
+                            "id": null,
+                            "key": 1,
+                            "kind": "op",
+                            "label": "task complete FIX-1",
+                            "paths": [],
+                            "returns_to": null,
+                            "sources": [
+                              "delivery"
+                            ]
+                          }
+                        ]
+                      },
+                      "iterations": [
+                        []
+                      ],
+                      "returns": [],
+                      "steps": [
+                        {
+                          "completed_at": null,
+                          "exit_code": null,
+                          "iterations": [
+                            []
+                          ],
+                          "key": 0,
+                          "label": "__telemetry-scorecard",
+                          "outcome": null,
+                          "process_lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+                          "started_at": 1791477198
+                        }
+                      ]
+                    },
+                    "next_move": {
+                      "owner": "wave",
+                      "reason": "done"
+                    },
+                    "pr": {
+                      "abandoned_at": null,
+                      "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+                      "branch": "main",
+                      "empty": null,
+                      "id": "pr_21fc124185824b7cbcdec291e76d98b6",
+                      "merge_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+                      "phase": "merged",
+                      "publication": {
+                        "github": {
+                          "number": 1,
+                          "url": "https://github.com/loopflowstudio/fixture/pull/1"
+                        },
+                        "merge": null,
+                        "presentation": null,
+                        "requested_at": "2026-10-08T16:33:15Z"
+                      },
+                      "sequence": 1,
+                      "slug": "delivery"
+                    },
+                    "reference": {
+                      "issue_url": "https://linear.app/fixture/issue/FIX-2",
+                      "workspace": {
+                        "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+                        "branch": "main",
+                        "local_exists": true,
+                        "machine_id": "home_c602f38d34689061cdf5b5babe44c142",
+                        "slug": "delivery",
+                        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY"
+                      }
+                    },
+                    "run_control": {
+                      "unavailable": "Task is complete"
+                    },
+                    "runtime": {
+                      "completion_pending": null,
+                      "provider": "codex",
+                      "reason": "done",
+                      "started": true,
+                      "status": "done",
+                      "updated_at": "2026-10-08T16:33:15Z",
+                      "work_id": "task_04c13f31e43242caa369cc4ff9525997"
+                    },
+                    "section": "later",
+                    "task": {
+                      "assignee": null,
+                      "completed": true,
+                      "completed_at": "2026-10-08T00:00:00Z",
+                      "description": "",
+                      "due_date": null,
+                      "follow_up_sources": [],
+                      "id": "source-issue",
+                      "identifier": "FIX-1",
+                      "name": "Deliver the command",
+                      "rank": 0,
+                      "state": "completed"
+                    },
+                    "workflow_name": "delivery"
+                  }
+                ],
+                "state": "ok",
+                "truncated": false
+              },
+              "unavailable_tasks": [],
+              "wave": {
+                "active_tasks": 0,
+                "created_at": "2026-10-08T16:33:15Z",
+                "goal": "Product",
+                "id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6",
+                "machine": {
+                  "created_at": "2026-10-08T16:33:15Z",
+                  "id": "home_c602f38d34689061cdf5b5babe44c142",
+                  "label": null,
+                  "observed_at": "2026-10-08T16:33:15Z",
+                  "repo": null,
+                  "route": "local"
+                },
+                "name": "product",
+                "parent_wave_id": null,
+                "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+                "retired_at": null,
+                "retirement_reason": null,
+                "status": "ready",
+                "superseded_by_wave_id": null
+              }
+            }
+          ]
+        },
+        "waves": [
+          {
+            "active_tasks": 0,
+            "created_at": "2026-10-08T16:33:15Z",
+            "goal": "Product",
+            "id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6",
+            "machine": {
+              "created_at": "2026-10-08T16:33:15Z",
+              "id": "home_c602f38d34689061cdf5b5babe44c142",
+              "label": null,
+              "observed_at": "2026-10-08T16:33:15Z",
+              "repo": null,
+              "route": "local"
+            },
+            "name": "product",
+            "parent_wave_id": null,
+            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+            "retired_at": null,
+            "retirement_reason": null,
+            "status": "ready",
+            "superseded_by_wave_id": null
+          }
+        ]
+      },
+      "home": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp8L4YNy",
+      "part": "planning",
+      "revisions": {
+        "flows": 2,
+        "planning": 49,
+        "processes": 13,
+        "sessions": 0,
+        "usage": 0
+      },
+      "sequence": 2,
+      "unavailable": null
+    },
+    "row": {
+      "actions": {
+        "reason": "Task is terminal",
+        "recommended": "no_action"
+      },
+      "condition": {
+        "evidence_age_secs": 4,
+        "local_progress": {
+          "authored_commits": false,
+          "dirty": true,
+          "reason": null,
+          "recovery_required": false,
+          "state": "observed",
+          "unsettled": true
+        },
+        "observed_at": "2026-10-08T16:33:19.426738Z",
+        "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard",
+        "state": "clear",
+        "unresolved_execution": true
+      },
+      "execution": {
+        "captured": null,
+        "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard",
+        "state": "running",
+        "step": "__telemetry-scorecard"
+      },
+      "follow_through": {
+        "intents": [
+          {
+            "due": "2026-10-09",
+            "existing": false,
+            "issue_id": "3f7994d4-e79f-49ed-9eb8-de451e1eedef",
+            "key": "installed",
+            "notes": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
+            "project_id": "project-1",
+            "relation_id": "764b8100-9302-4151-96b2-c704f2625498",
+            "state_id": "todo",
+            "team_id": "team-1",
+            "title": "Verify installed release",
+            "wave": "product"
+          }
+        ],
+        "links": [
+          {
+            "due": "2026-10-09",
+            "identifier": "FIX-2",
+            "issue_id": "3f7994d4-e79f-49ed-9eb8-de451e1eedef",
+            "key": "installed",
+            "url": "https://linear.app/fixture/issue/FIX-2"
+          }
+        ],
+        "needs_conversion": false,
+        "reason": "Accepted installed check filed",
+        "scope_notes": []
+      },
+      "latest_flow_process": {
+        "completed": [],
+        "current": 0,
+        "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+        "entry": {
+          "ended_at": null,
+          "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+          "name": "delivery",
+          "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+          "state": "current",
+          "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+          "updated_at": 1791477198,
+          "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+        },
+        "graph": {
+          "interactions": {
+            "stages": [],
+            "transitions": [
+              {
+                "from": "@start",
+                "nodes": [
+                  "0",
+                  "1"
+                ],
+                "routes": [
+                  {
+                    "condition": null,
+                    "from": "@start",
+                    "to": "0"
+                  },
+                  {
+                    "condition": null,
+                    "from": "0",
+                    "to": "1"
+                  },
+                  {
+                    "condition": null,
+                    "from": "1",
+                    "to": "@end"
+                  }
+                ],
+                "to": "@end"
+              }
+            ]
+          },
+          "name": "delivery",
+          "steps": [
+            {
+              "human": false,
+              "id": null,
+              "key": 0,
+              "kind": "op",
+              "label": "__telemetry-scorecard",
+              "paths": [],
+              "returns_to": null,
+              "sources": [
+                "delivery"
+              ]
+            },
+            {
+              "human": false,
+              "id": null,
+              "key": 1,
+              "kind": "op",
+              "label": "task complete FIX-1",
+              "paths": [],
+              "returns_to": null,
+              "sources": [
+                "delivery"
+              ]
+            }
+          ]
+        },
+        "iterations": [
+          []
+        ],
+        "returns": [],
+        "steps": [
+          {
+            "completed_at": null,
+            "exit_code": null,
+            "iterations": [
+              []
+            ],
+            "key": 0,
+            "label": "__telemetry-scorecard",
+            "outcome": null,
+            "process_lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+            "started_at": 1791477198
+          }
+        ]
+      },
+      "next_move": {
+        "owner": "wave",
+        "reason": "done"
+      },
+      "pr": {
+        "abandoned_at": null,
+        "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+        "branch": "main",
+        "empty": null,
+        "id": "pr_21fc124185824b7cbcdec291e76d98b6",
+        "merge_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+        "phase": "merged",
+        "publication": {
+          "github": {
+            "number": 1,
+            "url": "https://github.com/loopflowstudio/fixture/pull/1"
+          },
+          "merge": null,
+          "presentation": null,
+          "requested_at": "2026-10-08T16:33:15Z"
+        },
+        "sequence": 1,
+        "slug": "delivery"
+      },
+      "reference": {
+        "issue_url": "https://linear.app/fixture/issue/FIX-2",
+        "workspace": {
+          "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+          "branch": "main",
+          "local_exists": true,
+          "machine_id": "home_c602f38d34689061cdf5b5babe44c142",
+          "slug": "delivery",
+          "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY"
+        }
+      },
+      "run_control": {
+        "unavailable": "Task is complete"
+      },
+      "runtime": {
+        "completion_pending": null,
+        "provider": "codex",
+        "reason": "done",
+        "started": true,
+        "status": "done",
+        "updated_at": "2026-10-08T16:33:15Z",
+        "work_id": "task_04c13f31e43242caa369cc4ff9525997"
+      },
+      "section": "later",
+      "task": {
+        "assignee": null,
+        "completed": true,
+        "completed_at": "2026-10-08T00:00:00Z",
+        "description": "",
+        "due_date": null,
+        "follow_up_sources": [],
+        "id": "source-issue",
+        "identifier": "FIX-1",
+        "name": "Deliver the command",
+        "rank": 0,
+        "state": "completed"
+      },
+      "workflow_name": "delivery"
+    },
+    "status": {
+      "execution": {
+        "actions": {
+          "reason": "Task is terminal",
+          "recommended": "no_action"
+        },
+        "agent": null,
+        "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+        "branch": "main",
+        "completion_pending": null,
+        "created_at": [
+          2026,
+          281,
+          16,
+          33,
+          15,
+          0,
+          0,
+          0,
+          0
+        ],
+        "execution": {
+          "captured": null,
+          "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard",
+          "state": "running",
+          "step": "__telemetry-scorecard"
+        },
+        "external_project_id": "project-1",
+        "follow_through": {
+          "intents": [
+            {
+              "due": "2026-10-09",
+              "existing": false,
+              "issue_id": "3f7994d4-e79f-49ed-9eb8-de451e1eedef",
+              "key": "installed",
+              "notes": "Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1\n\nRun the released command; retain failures.",
+              "project_id": "project-1",
+              "relation_id": "764b8100-9302-4151-96b2-c704f2625498",
+              "state_id": "todo",
+              "team_id": "team-1",
+              "title": "Verify installed release",
+              "wave": "product"
+            }
+          ],
+          "links": [
+            {
+              "due": "2026-10-09",
+              "identifier": "FIX-2",
+              "issue_id": "3f7994d4-e79f-49ed-9eb8-de451e1eedef",
+              "key": "installed",
+              "url": "https://linear.app/fixture/issue/FIX-2"
+            }
+          ],
+          "needs_conversion": false,
+          "reason": "Accepted installed check filed",
+          "scope_notes": []
+        },
+        "issue_id": "source-issue",
+        "issue_identifier": "FIX-1",
+        "latest_event": {
+          "created_at": [
+            2026,
+            281,
+            16,
+            33,
+            19,
+            0,
+            0,
+            0,
+            0
+          ],
+          "id": 7,
+          "kind": {
+            "kind": "completed",
+            "summary": "Completion observed in Linear"
+          },
+          "task_id": "task_04c13f31e43242caa369cc4ff9525997"
+        },
+        "machine_id": "home_c602f38d34689061cdf5b5babe44c142",
+        "observation": {
+          "freshness": "not_required"
+        },
+        "pm_snapshot_synced_at": 1791477199,
+        "pm_writeback": {
+          "state": "current"
+        },
+        "pr": {
+          "abandoned_at": null,
+          "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+          "branch": "main",
+          "ci_observation": null,
+          "created_at": [
+            2026,
+            281,
+            16,
+            33,
+            15,
+            0,
+            0,
+            0,
+            0
+          ],
+          "github_observation": {
+            "checked_at": [
+              2026,
+              281,
+              16,
+              33,
+              18,
+              270020000,
+              0,
+              0,
+              0
+            ],
+            "result": {
+              "state": "fresh"
+            }
+          },
+          "id": "pr_21fc124185824b7cbcdec291e76d98b6",
+          "linear_attachment_id": null,
+          "linear_comment_id": null,
+          "linear_link_error": null,
+          "merge_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+          "parent_pr_id": null,
+          "publication": {
+            "github": {
+              "head_sha": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+              "number": 1,
+              "url": "https://github.com/loopflowstudio/fixture/pull/1"
+            },
+            "merge": null,
+            "presentation": null,
+            "requested_at": [
+              2026,
+              281,
+              16,
+              33,
+              15,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "sequence": 1,
+          "slug": "delivery",
+          "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+          "updated_at": [
+            2026,
+            281,
+            16,
+            33,
+            18,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "project": "provider-destination",
+        "project_id": "proj_f523403eb745408db4b00f5123e5ac5d",
+        "provider": "codex",
+        "status": "done",
+        "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+        "updated_at": [
+          2026,
+          281,
+          16,
+          33,
+          15,
+          0,
+          0,
+          0,
+          0
+        ],
+        "wave": "product",
+        "work": {
+          "flow_processes": [
+            {
+              "ended_at": null,
+              "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "name": "delivery",
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "state": "current",
+              "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+              "updated_at": 1791477198,
+              "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+            }
+          ],
+          "processes": [
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "dbfb8395-e48c-4bc2-b284-8ad5a1aff6fe",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 82509,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "52f94c48-2a90-49f1-85a4-23ba909d87bc",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "completed_at": 1791477198,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "3174ed64-34ad-4a1d-8fbe-d275e069f026",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 81844,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "3e8cfaab-d73d-46bd-b85e-151cc96f0b07",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
+              "completed_at": 1791477198,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "3ad9d3cb-3e4c-455c-a7e3-9dd25f8eca92",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 81983,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "6602b808-1cf2-47ca-84d9-74301a618352",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"--batch\",\"--task\",\"FIX-1\",\"run\",\"delivery\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "outcome": null,
+              "parent_process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "pid": 81573,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "84a49e35-ffbc-466a-ae89-eaff79185fec",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 82128,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "9dd26c51-5c47-4a78-a764-e2db2aebccc3",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"__telemetry-scorecard\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+              "outcome": null,
+              "parent_process_lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "pid": 81709,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 81362,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477197,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            }
+          ],
+          "sessions": [],
+          "workflow": {
+            "edges": [
+              {
+                "flow": "delivery",
+                "from": "start",
+                "to": "end"
+              }
+            ],
+            "history": [
+              {
+                "actor": "person",
+                "at": 1791477197,
+                "edge": null,
+                "from": "start",
+                "kind": "took_up",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "start",
+                "workflow": "delivery"
+              },
+              {
+                "actor": "person",
+                "at": 1791477197,
+                "edge": 0,
+                "from": "start",
+                "kind": "chose",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "end",
+                "workflow": "delivery"
+              }
+            ],
+            "name": "delivery",
+            "nodes": [],
+            "outgoing": [],
+            "position": {
+              "edge": 0,
+              "kind": "edge",
+              "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "running": true
+            }
+          }
+        },
+        "workspace_slug": "delivery",
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY"
+      },
+      "planning": {
+        "item": {
+          "assignee": null,
+          "branch_name": null,
+          "completed": true,
+          "completed_at": "2026-10-08T00:00:00Z",
+          "description": "",
+          "due_date": null,
+          "id": "source-issue",
+          "identifier": "FIX-1",
+          "name": "Deliver the command",
+          "project": "provider-destination",
+          "project_id": "project-1",
+          "rank": 0,
+          "revision": "2026-10-08T00:00:00Z",
+          "state": "completed",
+          "team_id": "team-1",
+          "url": "https://linear.app/fixture/issue/FIX-2"
+        },
+        "observed_at": 1791477199,
+        "project": {
+          "id": "project-1",
+          "initiative_ids": [
+            "initiative-1"
+          ],
+          "krs": [],
+          "metric_targets": [],
+          "name": "Provider destination",
+          "revision": "2026-10-07T00:00:00Z",
+          "slug": "provider-destination",
+          "status": "started",
+          "summary": "",
+          "team_ids": [
+            "team-1"
+          ],
+          "workflow": "feature"
+        }
+      },
+      "planning_error": null,
+      "planning_stale": false,
+      "planning_state": "available"
+    },
+    "task_frame": {
+      "answers": 1,
+      "body": {
+        "flow_processes": [
+          {
+            "completed": [],
+            "current": 0,
+            "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+            "entry": {
+              "ended_at": null,
+              "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "name": "delivery",
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "state": "current",
+              "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+              "updated_at": 1791477198,
+              "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+            },
+            "graph": {
+              "interactions": {
+                "stages": [],
+                "transitions": [
+                  {
+                    "from": "@start",
+                    "nodes": [
+                      "0",
+                      "1"
+                    ],
+                    "routes": [
+                      {
+                        "condition": null,
+                        "from": "@start",
+                        "to": "0"
+                      },
+                      {
+                        "condition": null,
+                        "from": "0",
+                        "to": "1"
+                      },
+                      {
+                        "condition": null,
+                        "from": "1",
+                        "to": "@end"
+                      }
+                    ],
+                    "to": "@end"
+                  }
+                ]
+              },
+              "name": "delivery",
+              "steps": [
+                {
+                  "human": false,
+                  "id": null,
+                  "key": 0,
+                  "kind": "op",
+                  "label": "__telemetry-scorecard",
+                  "paths": [],
+                  "returns_to": null,
+                  "sources": [
+                    "delivery"
+                  ]
+                },
+                {
+                  "human": false,
+                  "id": null,
+                  "key": 1,
+                  "kind": "op",
+                  "label": "task complete FIX-1",
+                  "paths": [],
+                  "returns_to": null,
+                  "sources": [
+                    "delivery"
+                  ]
+                }
+              ]
+            },
+            "iterations": [
+              []
+            ],
+            "returns": [],
+            "steps": [
+              {
+                "completed_at": null,
+                "exit_code": null,
+                "iterations": [
+                  []
+                ],
+                "key": 0,
+                "label": "__telemetry-scorecard",
+                "outcome": null,
+                "process_lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+                "started_at": 1791477198
+              }
+            ]
+          }
+        ],
+        "task": "FIX-1",
+        "work": {
+          "flow_processes": [
+            {
+              "ended_at": null,
+              "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "name": "delivery",
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "state": "current",
+              "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+              "updated_at": 1791477198,
+              "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+            }
+          ],
+          "processes": [
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "b70a9635-eb00-42e3-b35a-5cdb717a9aca",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 82813,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "a2c8480a-05d6-4515-bab7-d7517dddf2f1",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "dbfb8395-e48c-4bc2-b284-8ad5a1aff6fe",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 82509,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "52f94c48-2a90-49f1-85a4-23ba909d87bc",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
+              "completed_at": 1791477199,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "e26e6a83-a7fc-41da-accf-4cac956f1326",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 82655,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477199,
+              "trace_id": "443a54ed-3783-42db-9255-aecde948b8a8",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "completed_at": 1791477198,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "3174ed64-34ad-4a1d-8fbe-d275e069f026",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 81844,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "3e8cfaab-d73d-46bd-b85e-151cc96f0b07",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
+              "completed_at": 1791477198,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "3ad9d3cb-3e4c-455c-a7e3-9dd25f8eca92",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 81983,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "6602b808-1cf2-47ca-84d9-74301a618352",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"--batch\",\"--task\",\"FIX-1\",\"run\",\"delivery\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "outcome": null,
+              "parent_process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "pid": 81573,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "84a49e35-ffbc-466a-ae89-eaff79185fec",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 82128,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "9dd26c51-5c47-4a78-a764-e2db2aebccc3",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"__telemetry-scorecard\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+              "outcome": null,
+              "parent_process_lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "pid": 81709,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 81362,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477197,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            }
+          ],
+          "sessions": [],
+          "workflow": {
+            "edges": [
+              {
+                "flow": "delivery",
+                "from": "start",
+                "to": "end"
+              }
+            ],
+            "history": [
+              {
+                "actor": "person",
+                "at": 1791477197,
+                "edge": null,
+                "from": "start",
+                "kind": "took_up",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "start",
+                "workflow": "delivery"
+              },
+              {
+                "actor": "person",
+                "at": 1791477197,
+                "edge": 0,
+                "from": "start",
+                "kind": "chose",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "end",
+                "workflow": "delivery"
+              }
+            ],
+            "name": "delivery",
+            "nodes": [],
+            "outgoing": [],
+            "position": {
+              "edge": 0,
+              "kind": "edge",
+              "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "running": true
+            }
+          }
+        }
+      },
+      "home": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp8L4YNy",
+      "part": "task",
+      "revisions": {
+        "flows": 2,
+        "planning": 49,
+        "processes": 13,
+        "sessions": 0,
+        "usage": 0
+      },
+      "sequence": 3,
+      "unavailable": null
+    }
+  },
+  "merged": {
+    "planning_frame": {
+      "answers": null,
+      "body": {
+        "roadmap": {
+          "generated_at": "2026-10-08T16:33:18.755944Z",
+          "waves": [
+            {
+              "metric_portfolio": {
+                "contract_issues": [],
+                "metrics": []
+              },
+              "project_readiness": {
+                "activation": null,
+                "observed_at": 1791477195,
+                "pending_successor": null,
+                "project_id": "project-1",
+                "state": "ready"
+              },
+              "projects": {
+                "items": [
+                  {
+                    "current": true,
+                    "id": "project-1",
+                    "krs": [],
+                    "metric_targets": [],
+                    "name": "Provider destination",
+                    "slug": "provider-destination",
+                    "status": "started",
+                    "work_id": "proj_f523403eb745408db4b00f5123e5ac5d",
+                    "workflow": "feature"
+                  }
+                ],
+                "state": "ok",
+                "truncated": false
+              },
+              "tasks": {
+                "items": [
+                  {
+                    "actions": {
+                      "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up --none REASON`",
+                      "recommended": "no_action"
+                    },
+                    "condition": {
+                      "evidence_age_secs": 3,
+                      "local_progress": {
+                        "authored_commits": false,
+                        "dirty": true,
+                        "reason": null,
+                        "recovery_required": false,
+                        "state": "observed",
+                        "unsettled": true
+                      },
+                      "observed_at": "2026-10-08T16:33:18.792693Z",
+                      "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard",
+                      "state": "clear",
+                      "unresolved_execution": true
+                    },
+                    "execution": {
+                      "captured": null,
+                      "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard",
+                      "state": "running",
+                      "step": "__telemetry-scorecard"
+                    },
+                    "follow_through": {
+                      "intents": [],
+                      "links": [],
+                      "needs_conversion": false,
+                      "reason": null,
+                      "scope_notes": []
+                    },
+                    "latest_flow_process": {
+                      "completed": [],
+                      "current": 0,
+                      "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+                      "entry": {
+                        "ended_at": null,
+                        "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+                        "name": "delivery",
+                        "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+                        "state": "current",
+                        "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+                        "updated_at": 1791477198,
+                        "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+                      },
+                      "graph": {
+                        "interactions": {
+                          "stages": [],
+                          "transitions": [
+                            {
+                              "from": "@start",
+                              "nodes": [
+                                "0",
+                                "1"
+                              ],
+                              "routes": [
+                                {
+                                  "condition": null,
+                                  "from": "@start",
+                                  "to": "0"
+                                },
+                                {
+                                  "condition": null,
+                                  "from": "0",
+                                  "to": "1"
+                                },
+                                {
+                                  "condition": null,
+                                  "from": "1",
+                                  "to": "@end"
+                                }
+                              ],
+                              "to": "@end"
+                            }
+                          ]
+                        },
+                        "name": "delivery",
+                        "steps": [
+                          {
+                            "human": false,
+                            "id": null,
+                            "key": 0,
+                            "kind": "op",
+                            "label": "__telemetry-scorecard",
+                            "paths": [],
+                            "returns_to": null,
+                            "sources": [
+                              "delivery"
+                            ]
+                          },
+                          {
+                            "human": false,
+                            "id": null,
+                            "key": 1,
+                            "kind": "op",
+                            "label": "task complete FIX-1",
+                            "paths": [],
+                            "returns_to": null,
+                            "sources": [
+                              "delivery"
+                            ]
+                          }
+                        ]
+                      },
+                      "iterations": [
+                        []
+                      ],
+                      "returns": [],
+                      "steps": [
+                        {
+                          "completed_at": null,
+                          "exit_code": null,
+                          "iterations": [
+                            []
+                          ],
+                          "key": 0,
+                          "label": "__telemetry-scorecard",
+                          "outcome": null,
+                          "process_lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+                          "started_at": 1791477198
+                        }
+                      ]
+                    },
+                    "next_move": {
+                      "owner": "task",
+                      "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard"
+                    },
+                    "pr": {
+                      "abandoned_at": null,
+                      "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+                      "branch": "main",
+                      "empty": null,
+                      "id": "pr_21fc124185824b7cbcdec291e76d98b6",
+                      "merge_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+                      "phase": "merged",
+                      "publication": {
+                        "github": {
+                          "number": 1,
+                          "url": "https://github.com/loopflowstudio/fixture/pull/1"
+                        },
+                        "merge": null,
+                        "presentation": null,
+                        "requested_at": "2026-10-08T16:33:15Z"
+                      },
+                      "sequence": 1,
+                      "slug": "delivery"
+                    },
+                    "reference": {
+                      "issue_url": "https://linear.app/fixture/issue/FIX-2",
+                      "workspace": {
+                        "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+                        "branch": "main",
+                        "local_exists": true,
+                        "machine_id": "home_c602f38d34689061cdf5b5babe44c142",
+                        "slug": "delivery",
+                        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY"
+                      }
+                    },
+                    "run_control": {
+                      "unavailable": null
+                    },
+                    "runtime": {
+                      "completion_pending": null,
+                      "provider": "codex",
+                      "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard",
+                      "started": true,
+                      "status": "active",
+                      "updated_at": "2026-10-08T16:33:15Z",
+                      "work_id": "task_04c13f31e43242caa369cc4ff9525997"
+                    },
+                    "section": "now",
+                    "task": {
+                      "assignee": null,
+                      "completed": false,
+                      "completed_at": null,
+                      "description": "",
+                      "due_date": null,
+                      "follow_up_sources": [],
+                      "id": "source-issue",
+                      "identifier": "FIX-1",
+                      "name": "Deliver the command",
+                      "rank": 0,
+                      "state": "unstarted"
+                    },
+                    "workflow_name": "delivery"
+                  }
+                ],
+                "state": "ok",
+                "truncated": false
+              },
+              "unavailable_tasks": [],
+              "wave": {
+                "active_tasks": 1,
+                "created_at": "2026-10-08T16:33:15Z",
+                "goal": "Product",
+                "id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6",
+                "machine": {
+                  "created_at": "2026-10-08T16:33:15Z",
+                  "id": "home_c602f38d34689061cdf5b5babe44c142",
+                  "label": null,
+                  "observed_at": "2026-10-08T16:33:15Z",
+                  "repo": null,
+                  "route": "local"
+                },
+                "name": "product",
+                "parent_wave_id": null,
+                "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+                "retired_at": null,
+                "retirement_reason": null,
+                "status": "ready",
+                "superseded_by_wave_id": null
+              }
+            }
+          ]
+        },
+        "waves": [
+          {
+            "active_tasks": 1,
+            "created_at": "2026-10-08T16:33:15Z",
+            "goal": "Product",
+            "id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6",
+            "machine": {
+              "created_at": "2026-10-08T16:33:15Z",
+              "id": "home_c602f38d34689061cdf5b5babe44c142",
+              "label": null,
+              "observed_at": "2026-10-08T16:33:15Z",
+              "repo": null,
+              "route": "local"
+            },
+            "name": "product",
+            "parent_wave_id": null,
+            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+            "retired_at": null,
+            "retirement_reason": null,
+            "status": "ready",
+            "superseded_by_wave_id": null
+          }
+        ]
+      },
+      "home": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp8L4YNy",
+      "part": "planning",
+      "revisions": {
+        "flows": 2,
+        "planning": 31,
+        "processes": 8,
+        "sessions": 0,
+        "usage": 0
+      },
+      "sequence": 1,
+      "unavailable": null
+    },
+    "row": {
+      "actions": {
+        "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up --none REASON`",
+        "recommended": "no_action"
+      },
+      "condition": {
+        "evidence_age_secs": 3,
+        "local_progress": {
+          "authored_commits": false,
+          "dirty": true,
+          "reason": null,
+          "recovery_required": false,
+          "state": "observed",
+          "unsettled": true
+        },
+        "observed_at": "2026-10-08T16:33:18.650473Z",
+        "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard",
+        "state": "clear",
+        "unresolved_execution": true
+      },
+      "execution": {
+        "captured": null,
+        "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard",
+        "state": "running",
+        "step": "__telemetry-scorecard"
+      },
+      "follow_through": {
+        "intents": [],
+        "links": [],
+        "needs_conversion": false,
+        "reason": null,
+        "scope_notes": []
+      },
+      "latest_flow_process": {
+        "completed": [],
+        "current": 0,
+        "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+        "entry": {
+          "ended_at": null,
+          "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+          "name": "delivery",
+          "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+          "state": "current",
+          "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+          "updated_at": 1791477198,
+          "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+        },
+        "graph": {
+          "interactions": {
+            "stages": [],
+            "transitions": [
+              {
+                "from": "@start",
+                "nodes": [
+                  "0",
+                  "1"
+                ],
+                "routes": [
+                  {
+                    "condition": null,
+                    "from": "@start",
+                    "to": "0"
+                  },
+                  {
+                    "condition": null,
+                    "from": "0",
+                    "to": "1"
+                  },
+                  {
+                    "condition": null,
+                    "from": "1",
+                    "to": "@end"
+                  }
+                ],
+                "to": "@end"
+              }
+            ]
+          },
+          "name": "delivery",
+          "steps": [
+            {
+              "human": false,
+              "id": null,
+              "key": 0,
+              "kind": "op",
+              "label": "__telemetry-scorecard",
+              "paths": [],
+              "returns_to": null,
+              "sources": [
+                "delivery"
+              ]
+            },
+            {
+              "human": false,
+              "id": null,
+              "key": 1,
+              "kind": "op",
+              "label": "task complete FIX-1",
+              "paths": [],
+              "returns_to": null,
+              "sources": [
+                "delivery"
+              ]
+            }
+          ]
+        },
+        "iterations": [
+          []
+        ],
+        "returns": [],
+        "steps": [
+          {
+            "completed_at": null,
+            "exit_code": null,
+            "iterations": [
+              []
+            ],
+            "key": 0,
+            "label": "__telemetry-scorecard",
+            "outcome": null,
+            "process_lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+            "started_at": 1791477198
+          }
+        ]
+      },
+      "next_move": {
+        "owner": "task",
+        "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard"
+      },
+      "pr": {
+        "abandoned_at": null,
+        "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+        "branch": "main",
+        "empty": null,
+        "id": "pr_21fc124185824b7cbcdec291e76d98b6",
+        "merge_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+        "phase": "merged",
+        "publication": {
+          "github": {
+            "number": 1,
+            "url": "https://github.com/loopflowstudio/fixture/pull/1"
+          },
+          "merge": null,
+          "presentation": null,
+          "requested_at": "2026-10-08T16:33:15Z"
+        },
+        "sequence": 1,
+        "slug": "delivery"
+      },
+      "reference": {
+        "issue_url": "https://linear.app/fixture/issue/FIX-2",
+        "workspace": {
+          "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+          "branch": "main",
+          "local_exists": true,
+          "machine_id": "home_c602f38d34689061cdf5b5babe44c142",
+          "slug": "delivery",
+          "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY"
+        }
+      },
+      "run_control": {
+        "unavailable": null
+      },
+      "runtime": {
+        "completion_pending": null,
+        "provider": "codex",
+        "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard",
+        "started": true,
+        "status": "active",
+        "updated_at": "2026-10-08T16:33:15Z",
+        "work_id": "task_04c13f31e43242caa369cc4ff9525997"
+      },
+      "section": "now",
+      "task": {
+        "assignee": null,
+        "completed": false,
+        "completed_at": null,
+        "description": "",
+        "due_date": null,
+        "follow_up_sources": [],
+        "id": "source-issue",
+        "identifier": "FIX-1",
+        "name": "Deliver the command",
+        "rank": 0,
+        "state": "unstarted"
+      },
+      "workflow_name": "delivery"
+    },
+    "status": {
+      "execution": {
+        "actions": {
+          "reason": "Task FIX-1 cannot complete until its gates close: Merged · Follow-through pending; file follow-ups or record `lf task follow-up --none REASON`",
+          "recommended": "no_action"
+        },
+        "agent": null,
+        "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+        "branch": "main",
+        "completion_pending": null,
+        "created_at": [
+          2026,
+          281,
+          16,
+          33,
+          15,
+          0,
+          0,
+          0,
+          0
+        ],
+        "execution": {
+          "captured": null,
+          "reason": "Step Process cc6e3940-0657-433b-b3d5-b2c5ff8d49ab is running __telemetry-scorecard",
+          "state": "running",
+          "step": "__telemetry-scorecard"
+        },
+        "external_project_id": "project-1",
+        "follow_through": {
+          "intents": [],
+          "links": [],
+          "needs_conversion": false,
+          "reason": null,
+          "scope_notes": []
+        },
+        "issue_id": "source-issue",
+        "issue_identifier": "FIX-1",
+        "latest_event": {
+          "created_at": [
+            2026,
+            281,
+            16,
+            33,
+            18,
+            0,
+            0,
+            0,
+            0
+          ],
+          "id": 2,
+          "kind": {
+            "kind": "pr_merged",
+            "merge_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+            "number": 1,
+            "pr_id": "pr_21fc124185824b7cbcdec291e76d98b6",
+            "sequence": 1,
+            "url": "https://github.com/loopflowstudio/fixture/pull/1"
+          },
+          "task_id": "task_04c13f31e43242caa369cc4ff9525997"
+        },
+        "machine_id": "home_c602f38d34689061cdf5b5babe44c142",
+        "observation": {
+          "freshness": "not_required"
+        },
+        "pm_snapshot_synced_at": 1791477195,
+        "pm_writeback": {
+          "state": "current"
+        },
+        "pr": {
+          "abandoned_at": null,
+          "base_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+          "branch": "main",
+          "ci_observation": null,
+          "created_at": [
+            2026,
+            281,
+            16,
+            33,
+            15,
+            0,
+            0,
+            0,
+            0
+          ],
+          "github_observation": {
+            "checked_at": [
+              2026,
+              281,
+              16,
+              33,
+              18,
+              270020000,
+              0,
+              0,
+              0
+            ],
+            "result": {
+              "state": "fresh"
+            }
+          },
+          "id": "pr_21fc124185824b7cbcdec291e76d98b6",
+          "linear_attachment_id": null,
+          "linear_comment_id": null,
+          "linear_link_error": null,
+          "merge_commit": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+          "parent_pr_id": null,
+          "publication": {
+            "github": {
+              "head_sha": "0b64a4ea2a6bc9f02beac9ef905622717c3680fe",
+              "number": 1,
+              "url": "https://github.com/loopflowstudio/fixture/pull/1"
+            },
+            "merge": null,
+            "presentation": null,
+            "requested_at": [
+              2026,
+              281,
+              16,
+              33,
+              15,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "sequence": 1,
+          "slug": "delivery",
+          "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+          "updated_at": [
+            2026,
+            281,
+            16,
+            33,
+            18,
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        "project": "provider-destination",
+        "project_id": "proj_f523403eb745408db4b00f5123e5ac5d",
+        "provider": "codex",
+        "status": "active",
+        "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+        "updated_at": [
+          2026,
+          281,
+          16,
+          33,
+          15,
+          0,
+          0,
+          0,
+          0
+        ],
+        "wave": "product",
+        "work": {
+          "flow_processes": [
+            {
+              "ended_at": null,
+              "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "name": "delivery",
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "state": "current",
+              "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+              "updated_at": 1791477198,
+              "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+            }
+          ],
+          "processes": [
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "3174ed64-34ad-4a1d-8fbe-d275e069f026",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 81844,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "3e8cfaab-d73d-46bd-b85e-151cc96f0b07",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"--batch\",\"--task\",\"FIX-1\",\"run\",\"delivery\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "outcome": null,
+              "parent_process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "pid": 81573,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"__telemetry-scorecard\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+              "outcome": null,
+              "parent_process_lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "pid": 81709,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 81362,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477197,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            }
+          ],
+          "sessions": [],
+          "workflow": {
+            "edges": [
+              {
+                "flow": "delivery",
+                "from": "start",
+                "to": "end"
+              }
+            ],
+            "history": [
+              {
+                "actor": "person",
+                "at": 1791477197,
+                "edge": null,
+                "from": "start",
+                "kind": "took_up",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "start",
+                "workflow": "delivery"
+              },
+              {
+                "actor": "person",
+                "at": 1791477197,
+                "edge": 0,
+                "from": "start",
+                "kind": "chose",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "end",
+                "workflow": "delivery"
+              }
+            ],
+            "name": "delivery",
+            "nodes": [],
+            "outgoing": [],
+            "position": {
+              "edge": 0,
+              "kind": "edge",
+              "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "running": true
+            }
+          }
+        },
+        "workspace_slug": "delivery",
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY"
+      },
+      "planning": {
+        "item": {
+          "assignee": null,
+          "branch_name": null,
+          "completed": false,
+          "completed_at": null,
+          "description": "",
+          "due_date": null,
+          "id": "source-issue",
+          "identifier": "FIX-1",
+          "name": "Deliver the command",
+          "project": "provider-destination",
+          "project_id": "project-1",
+          "rank": 0,
+          "revision": "2026-10-07T00:00:00Z",
+          "state": "unstarted",
+          "team_id": "team-1",
+          "url": "https://linear.app/fixture/issue/FIX-2"
+        },
+        "observed_at": 1791477195,
+        "project": {
+          "id": "project-1",
+          "initiative_ids": [
+            "initiative-1"
+          ],
+          "krs": [],
+          "metric_targets": [],
+          "name": "Provider destination",
+          "revision": "2026-10-07T00:00:00Z",
+          "slug": "provider-destination",
+          "status": "started",
+          "summary": "",
+          "team_ids": [
+            "team-1"
+          ],
+          "workflow": "feature"
+        }
+      },
+      "planning_error": null,
+      "planning_stale": false,
+      "planning_state": "available"
+    },
+    "task_frame": {
+      "answers": 1,
+      "body": {
+        "flow_processes": [
+          {
+            "completed": [],
+            "current": 0,
+            "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+            "entry": {
+              "ended_at": null,
+              "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "name": "delivery",
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "state": "current",
+              "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+              "updated_at": 1791477198,
+              "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+            },
+            "graph": {
+              "interactions": {
+                "stages": [],
+                "transitions": [
+                  {
+                    "from": "@start",
+                    "nodes": [
+                      "0",
+                      "1"
+                    ],
+                    "routes": [
+                      {
+                        "condition": null,
+                        "from": "@start",
+                        "to": "0"
+                      },
+                      {
+                        "condition": null,
+                        "from": "0",
+                        "to": "1"
+                      },
+                      {
+                        "condition": null,
+                        "from": "1",
+                        "to": "@end"
+                      }
+                    ],
+                    "to": "@end"
+                  }
+                ]
+              },
+              "name": "delivery",
+              "steps": [
+                {
+                  "human": false,
+                  "id": null,
+                  "key": 0,
+                  "kind": "op",
+                  "label": "__telemetry-scorecard",
+                  "paths": [],
+                  "returns_to": null,
+                  "sources": [
+                    "delivery"
+                  ]
+                },
+                {
+                  "human": false,
+                  "id": null,
+                  "key": 1,
+                  "kind": "op",
+                  "label": "task complete FIX-1",
+                  "paths": [],
+                  "returns_to": null,
+                  "sources": [
+                    "delivery"
+                  ]
+                }
+              ]
+            },
+            "iterations": [
+              []
+            ],
+            "returns": [],
+            "steps": [
+              {
+                "completed_at": null,
+                "exit_code": null,
+                "iterations": [
+                  []
+                ],
+                "key": 0,
+                "label": "__telemetry-scorecard",
+                "outcome": null,
+                "process_lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+                "started_at": 1791477198
+              }
+            ]
+          }
+        ],
+        "task": "FIX-1",
+        "work": {
+          "flow_processes": [
+            {
+              "ended_at": null,
+              "id": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "name": "delivery",
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "state": "current",
+              "task_id": "task_04c13f31e43242caa369cc4ff9525997",
+              "updated_at": 1791477198,
+              "wave_id": "60e9d6ea-037a-4746-9d12-0b602e6e93a6"
+            }
+          ],
+          "processes": [
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "completed_at": 1791477198,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "3174ed64-34ad-4a1d-8fbe-d275e069f026",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 81844,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "3e8cfaab-d73d-46bd-b85e-151cc96f0b07",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"roadmap\",\"--all\",\"--json\"]",
+              "completed_at": 1791477198,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": 0,
+              "lfid": "3ad9d3cb-3e4c-455c-a7e3-9dd25f8eca92",
+              "outcome": "succeeded",
+              "parent_process_lfid": null,
+              "pid": 81983,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "6602b808-1cf2-47ca-84d9-74301a618352",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"--batch\",\"--task\",\"FIX-1\",\"run\",\"delivery\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "outcome": null,
+              "parent_process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "pid": 81573,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"monitor\",\"work\",\"--watch\",\"--json\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "84a49e35-ffbc-466a-ae89-eaff79185fec",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 82128,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "9dd26c51-5c47-4a78-a764-e2db2aebccc3",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"__telemetry-scorecard\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "cc6e3940-0657-433b-b3d5-b2c5ff8d49ab",
+              "outcome": null,
+              "parent_process_lfid": "72f22c44-f000-46b6-8bf8-f9d1e81f50c5",
+              "pid": 81709,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477198,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            },
+            {
+              "caller_provider_generation": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.make-a-task-up-to/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "error": null,
+              "exit_code": null,
+              "lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "outcome": null,
+              "parent_process_lfid": null,
+              "pid": 81362,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpIfnSjY",
+              "signal": null,
+              "started_at": 1791477197,
+              "trace_id": "b2b1cc6a-e3d9-45f6-b2be-502d1674f91b",
+              "via_agent": false
+            }
+          ],
+          "sessions": [],
+          "workflow": {
+            "edges": [
+              {
+                "flow": "delivery",
+                "from": "start",
+                "to": "end"
+              }
+            ],
+            "history": [
+              {
+                "actor": "person",
+                "at": 1791477197,
+                "edge": null,
+                "from": "start",
+                "kind": "took_up",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "start",
+                "workflow": "delivery"
+              },
+              {
+                "actor": "person",
+                "at": 1791477197,
+                "edge": 0,
+                "from": "start",
+                "kind": "chose",
+                "note": null,
+                "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+                "session_id": null,
+                "to": "end",
+                "workflow": "delivery"
+              }
+            ],
+            "name": "delivery",
+            "nodes": [],
+            "outgoing": [],
+            "position": {
+              "edge": 0,
+              "kind": "edge",
+              "process_lfid": "bfebd629-3ed3-4ee3-b67d-04b54d746c55",
+              "running": true
+            }
+          }
+        }
+      },
+      "home": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp8L4YNy",
+      "part": "task",
+      "revisions": {
+        "flows": 2,
+        "planning": 31,
+        "processes": 8,
+        "sessions": 0,
+        "usage": 0
+      },
+      "sequence": 4,
+      "unavailable": null
+    }
+  }
+}

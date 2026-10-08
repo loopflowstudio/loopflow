@@ -1,8 +1,7 @@
 # product wave memory
 
-Renamed from `concerto` in the 2026-07-08 wave/project/task restructure. The wave's
-scope widened past the Mac app: product now owns the shared API and every surface
-(CLI, Mac, iOS, agent turns, workers). Older “Concerto” notes mean the Mac surface.
+Formerly `concerto` (2026-07-08); Product owns shared APIs across CLI, Mac,
+iOS, agents and workers. Older “Concerto” notes mean Mac.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-08)
 
@@ -13,26 +12,27 @@ are independent. Linear completion preserves execution; failed end requests retr
 without replaying the Flow. Reopening supersedes old completion intent.
 
 LOO-406's common writer remains unfinished. Adopt local save/optional sync without
-restoring end coupling. Its failing regression
-exposes completion overwriting a provider reopening between read and mutation;
-matching readback proves no concurrency guarantee. Local trigger/observation tests
-do not cover that interval. Provider-guarantee research remains open; no relaxation
-of automatic propagation or concurrent-change preservation is accepted.
+end coupling. Its failing regression overwrites reopening between provider read
+and mutation; matching readback and observation tests prove no concurrency
+guarantee. Research remains open; neither automatic propagation nor preservation
+of concurrent changes has been relaxed.
 
-Task owns placement and one optional PR; history and unresolved scope survive.
+Task owns placement and one optional PR, preserving history and unresolved scope.
 LOO-385 overlaps without closure authority. Jack accepted ship or the next
-Task/Wave pass finishing delivery; no new watcher or implicit wake. Full lifecycle
-proof on #1499 precedes demo. Landing remains unauthorized.
+Task/Wave pass finishing delivery, without a watcher or implicit wake. Full
+lifecycle proof on #1499 precedes demo; landing remains unauthorized.
 
-Retries pin UUIDs and destination/payload before mutation. Confirmed links use
-Linear's observed due date, including removal; the retry payload stays immutable.
-Failed draft promotion retains confirmed copy. Selected design handoffs preserve
-child edits. Task placement owns the validated PR copy, never the reverse.
-Admission records performed location; Flow registration and Started are atomic.
+Retries pin UUIDs, destination and payload before mutation. Links use observed
+Linear due dates, including removal; retry intent stays immutable. Failed promotion
+retains confirmed copy. Handoffs preserve child edits; Task placement owns the
+validated PR copy. Admission records performed location; Flow/Started commit atomically.
 
-Gate repaired fixture drift: I/O failures are not held; recent landings cannot
-hold unrelated Flow steps. Isolated checks prove no unified or native acceptance.
-The design retains evidence and gaps.
+Gate repaired held-error and unrelated-landing fixture drift. A composed fixture
+now proves simulated merge → linked follow-up → independent completion → actual
+Flow arrival, reading one Home through CLI/monitor and Rust/Swift decoder/view
+checks. Completion keeps the running edge; the driver records arrival. Captured
+wire evidence is `tests/fixtures/dto/task_lifecycle.json`. Local-only integration,
+provider concurrency, full gate and native acceptance remain unproven.
 
 ## Terminal-host adoption (2026-10-07)
 

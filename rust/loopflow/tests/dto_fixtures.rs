@@ -617,3 +617,66 @@ fn task_delivery_preserves_pending_filings_links_and_due_unstarted_follow_ups() 
     missing.as_object_mut().unwrap().remove("follow_through");
     assert!(serde_json::from_value::<RoadmapTask>(missing).is_err());
 }
+
+#[test]
+fn composed_lifecycle_preserves_completion_before_workflow_arrival() {
+    use loopflow::lf::commands::waves::RoadmapTask;
+    use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
+    use loopflow::ops::task::TaskStatus;
+    let captures: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_lifecycle.json"
+    ))
+    .unwrap();
+    for phase in ["merged", "completed", "arrived"] {
+        let capture = &captures[phase];
+        let status: TaskStatus = serde_json::from_value(capture["status"].clone()).unwrap();
+        let row: RoadmapTask = serde_json::from_value(capture["row"].clone()).unwrap();
+        let planning: WorkFrame =
+            serde_json::from_value(capture["planning_frame"].clone()).unwrap();
+        let task: WorkFrame = serde_json::from_value(capture["task_frame"].clone()).unwrap();
+        assert!(planning.unavailable.is_none() && task.unavailable.is_none());
+        let WorkContent::Task(Some(task)) = task.content else {
+            panic!("Task frame missing")
+        };
+        let WorkContent::Planning(Some(plan)) = planning.content else {
+            panic!("planning frame missing")
+        };
+        let execution = status.execution.unwrap();
+        assert_eq!(task.work.workflow, execution.work.workflow);
+        assert_eq!(row.runtime.as_ref().unwrap().status, execution.status);
+        assert_eq!(row.follow_through, execution.follow_through);
+        let loopflow::lf::commands::waves::Evidence::Ok { items, .. } =
+            &plan.roadmap.waves[0].tasks
+        else {
+            panic!("Task plan unavailable")
+        };
+        let projected = items
+            .iter()
+            .find(|row| row.task.identifier == "FIX-1")
+            .unwrap();
+        assert_eq!(projected.runtime.as_ref().unwrap().status, execution.status);
+        assert_eq!(projected.follow_through, execution.follow_through);
+        if phase != "merged" {
+            assert_eq!(execution.status, loopflow::durable::TaskState::Done);
+            assert!(execution.follow_through.resolved());
+            assert_eq!(execution.follow_through.links.len(), 1);
+            assert_eq!(execution.follow_through.links[0].identifier, "FIX-2");
+            assert_eq!(
+                execution.follow_through.links[0].due.as_deref(),
+                Some("2026-10-09")
+            );
+        }
+    }
+    assert_eq!(
+        captures["merged"]["status"]["execution"]["work"]["workflow"],
+        captures["completed"]["status"]["execution"]["work"]["workflow"]
+    );
+    assert_eq!(
+        captures["completed"]["status"]["execution"]["work"]["workflow"]["position"]["running"],
+        true
+    );
+    assert_eq!(
+        captures["arrived"]["status"]["execution"]["work"]["workflow"]["position"],
+        serde_json::json!({"kind":"node","node":"end"})
+    );
+}

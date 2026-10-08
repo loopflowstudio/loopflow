@@ -70,6 +70,14 @@ Run the affected controller progression and CLI behavior tests as well as graph
 checks; use authored fixture Flows when a test needs a fixed sequence independent
 of product defaults.
 
+The composed delivery fixture runs a real CLI/Flow against an isolated Home and
+simulated providers, then checks its captured CLI and monitor population in Rust
+and Swift. It builds the CLI with Cargo so a unit-test binary cannot accidentally
+launch an installed version. Regenerate its wire capture with
+`LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow --lib merged_follow_up_completion_and_arrival`,
+then run `cargo test -p loopflow --test dto_fixtures composed_lifecycle` and
+`swift test --package-path swift --filter 'composedTaskLifecycle|composedLifecycleDelivery'`.
+
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
 before arming; the earlier gate did not cover the newly combined behavior.

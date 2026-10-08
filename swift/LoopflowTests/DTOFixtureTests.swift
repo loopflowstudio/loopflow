@@ -8,6 +8,46 @@ import Testing
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
 
+    @Test("Composed delivery keeps completion independent of the running Flow and its arrival")
+    func composedTaskLifecycle() throws {
+        let snapshots = try JSONDecoder().decode(
+            [String: TaskLifecycleCapture].self, from: loadFixtureData("task_lifecycle.json"))
+        let merged = try #require(snapshots["merged"])
+        let completed = try #require(snapshots["completed"])
+        let arrived = try #require(snapshots["arrived"])
+        #expect(merged.row.runtime?.status != .done)
+        #expect(completed.row.runtime?.status == .done)
+        #expect(arrived.row.runtime?.status == .done)
+        let before = try merged.taskPart()
+        let during = try completed.taskPart()
+        let after = try arrived.taskPart()
+        #expect(before.work.workflow == during.work.workflow)
+        guard case .edge(_, _, true) = during.work.workflow?.position else {
+            Issue.record("Completed Task lost its live edge")
+            return
+        }
+        #expect(after.work.workflow?.position == .node("end"))
+        #expect(after.work.workflow?.history.last?.kind == .arrived)
+        #expect(before.flowProcesses.count == 1 && after.flowProcesses.count == 1)
+        #expect(before.flowProcesses[0].entry.id == after.flowProcesses[0].entry.id)
+        #expect(after.flowProcesses[0].steps.allSatisfy { $0.outcome == "succeeded" })
+        for capture in [merged, completed, arrived] {
+            guard case .planning(let plan?) = capture.planningFrame.content else {
+                Issue.record("Missing planning frame")
+                return
+            }
+            let row = try #require(plan.roadmap.waves.flatMap { $0.tasks.items }
+                .first { $0.task.identifier == "FIX-1" })
+            #expect(row.runtime?.status == capture.row.runtime?.status)
+            #expect(row.followThrough == capture.row.followThrough)
+            #expect(row.pr?.id == merged.row.pr?.id)
+        }
+        #expect(completed.row.followThrough.links.count == 1)
+        #expect(completed.row.followThrough.links[0].identifier == "FIX-2")
+        #expect(completed.row.followThrough.links[0].due == "2026-10-09")
+        #expect(arrived.row.followThrough == completed.row.followThrough)
+    }
+
     @Test("Follow-through remains pending until confirmed, with dated unstarted follow-ups")
     func taskDeliveryFixture() throws {
         let rows = try JSONDecoder().decode([String: RoadmapTask].self, from: loadFixtureData("task_delivery_rows.json"))
@@ -602,4 +642,24 @@ func sessionInputHistoryFixture() throws {
     #expect(value.providers[1].outcome == "completed")
     #expect(value.providers[1].usage.inputTokens == 0)
     #expect(value.status == "failed → completed")
+}
+
+// Written by the Rust composed lifecycle test from one disposable Home.
+struct TaskLifecycleCapture: Decodable {
+    let row: RoadmapTask
+    let planningFrame: WorkFrame
+    let taskFrame: WorkFrame
+
+    enum CodingKeys: String, CodingKey {
+        case row
+        case planningFrame = "planning_frame"
+        case taskFrame = "task_frame"
+    }
+
+    func taskPart() throws -> WorkFrame.TaskPart {
+        guard case .task(let part?) = taskFrame.content else {
+            throw CocoaError(.coderReadCorrupt)
+        }
+        return part
+    }
 }

@@ -23,8 +23,8 @@ Implemented defaults below remain unreviewed by Jack:
 
 The original four slices, landing corrections and independent completion trigger
 are present. Earlier checks cover the predecessor; current focused evidence is
-in the design. Unified lifecycle proof, LOO-406 integration and
-the complete demo remain. No landing or installed-Home
+in the design. The composed simulated-provider lifecycle now has CLI/monitor and Rust/Swift
+proof. Local-only lifecycle proof, LOO-406 integration and the complete demo remain. No landing or installed-Home
 migration is authorized.
 
 Implementation choice: `task follow-up --key` identifies an obligation across retries; the default is `follow-up`, and additional obligations use distinct keys. The receipt pins the initial Team/state as well as Project and content.

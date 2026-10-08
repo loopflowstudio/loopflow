@@ -1089,13 +1089,13 @@ Completion/interruption stay distinct. Seven requests include two titles;
 historical expansion is not new application. This proves correlation, not idempotency,
 external effects or LF admission.
 
-LF retains a native message ID, capture, exact input and dispatch provenance
-before its fenced send. Capture alone is insufficient: retries can send different
-continuations under it. Reconnect reads receipts without resubmission; store proofs retain uncertain
-writes and missing/duplicate matches.
-LF’s fake-API handoff proof preserves text, capture, siblings and ancestry with a
-controlled terminal client; held-owner admission, LF dropped-ack/draft recovery
-and native expansion remain unproved.
-Resume still clears structured invocation; pending consumption, catalog/resources
-and Claude parity remain unfinished. Receipt observation grants no authority.
+LF retains message ID, capture, exact input and provenance before its first
+captured start per writer; later starts remain fenced without that mapping.
+Retries can send different continuations within one capture.
+Reconnect observes without resubmission; store proofs retain
+uncertain writes and missing/duplicate matches. LF's controlled-client handoff
+preserves text, capture, siblings and ancestry; held-owner admission, dropped-ack/draft
+recovery and native expansion remain unproved. Resume clears structured invocation;
+pending consumption, catalog/resources and Claude parity remain unfinished.
+Observation grants no authority.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

@@ -340,8 +340,11 @@ uv run python scripts/test_network.py uv run --offline --script \
 ```
 
 The headless LF writer retains exact outgoing input, its capture, native message
-ID, Process and provider generation before sending. `session connect` recovers
-native user messages across all turn pages without resubmitting. Missing and
+ID, Process and provider generation before its first captured `turn/start`.
+It consumes the launch's seed capture once; later starts on that writer remain
+fenced but have no retained input mapping. This is not pending-input consumption.
+`session connect` recovers native user messages across all turn pages without
+resubmitting. Missing and
 duplicate receipts remain recorded uncertainty; receipt observation grants no
 new driver, native-turn origin, completion or external-effect claim.
 

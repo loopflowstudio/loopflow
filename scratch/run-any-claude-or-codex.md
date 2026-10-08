@@ -7,13 +7,13 @@ same-harness invocation, translated cross-harness ports, inlined builtins,
 ## Status and decisions
 
 PR #1497 merged as `b6bc42998`; PR 2 preserves follow-up.
-Reconciled October 8 against probe `54b309ab6` and compression `b5f26fee8`.
+Reconciled October 8 against receipt retention `efd635728` and compression
+`d5b943701`, retaining provider probe `54b309ab6` and its `b5f26fee8` cleanup.
 `cbb402869` retains the resume-workspace repair and steering counterexample.
 The probe supersedes the earlier feedback's unproved lost-reply boundary: it proves
 provider-level recovery and terminal draft preservation. LF now retains native
 message correlation and recovers receipt evidence across driver handoffs; pending
 skill admission and native-boundary consumption remain unimplemented.
-The locally available main ref remains `812d8cc55`; no newer upstream state was fetched.
 Catalog consolidation and Claude headless native dispatch through canonical commands
 and taskless Flows are implemented locally. Headless continuation atomically admits its driver and next capture and
 assembles context in the saved Session workspace. Codex native delivery, terminal transport and
@@ -147,9 +147,13 @@ The probe and its limitations live in the benchmark README.
    `continue_with_context` replaces input and claims a driver atomically through
    `claim_session_input`. Those paths prove safe continuation/refusal, not pending
    structured delivery through a held owner. Codex `send_input` still emits only
-   text. Its writer now adds a durable native message ID, but does not consume
-   pending structured input. The next integration proof must traverse LF admission
-   and that owner, not just repeat the socket experiment.
+   text. Its writer consumes `seed_capture.take()` on the first captured
+   `turn/start` only. Later starts on that writer remain fenced but do not acquire
+   a capture-to-message mapping. Pending consumption therefore needs each admitted
+   input's retained capture, invocation, context and native message identity at
+   dispatch; extending `send_input` alone cannot supply that association.
+   The next integration proof must traverse LF admission and that owner, not just
+   repeat the socket experiment.
    Capture identity must correlate dispatch with native history before retry;
    RPC ids and turn-id acknowledgements alone cannot do that. A lost reply stays
    uncertain until native evidence resolves it. The Codex probe establishes native
@@ -164,8 +168,12 @@ The probe and its limitations live in the benchmark README.
    completion authority. Pending-input settlement must still validate exactly
    one receipt against retained skill/path, arguments and context. Native
    completion/interruption and external effects remain separate facts.
-   Prove active-capture preservation and LF driver handoff end to end before any
-   automatic resubmission. Missing or duplicate native receipts remain uncertain.
+   Acceptance combines held-owner admission without active-capture replacement,
+   boundary consumption, an LF start reply dropped after provider acceptance,
+   caller cancellation and driver handoff, and native terminal draft preservation.
+   Recovery reads the retained dispatch and native history without resubmission;
+   missing or duplicate receipts remain uncertain. The provider-only probe and
+   store fixture do not compose into this LF proof.
    No migration, new queue owner, extra Session or provider protocol
    extension is selected. Same-Session invocation syntax remains unselected.
    Claude's plain headless path uses file-backed stdin through `_run_agent_once`;
@@ -192,8 +200,10 @@ dispatch is not Task acceptance.
 
 ## LF receipt recovery (October 8)
 
-The headless Codex writer commits `codex_input_dispatch` in Session history before
-its socket write, under the existing driver fence. A failed write leaves that
+The headless Codex writer commits `codex_input_dispatch` for its first captured
+`turn/start` in Session history before the socket write, under the existing driver
+fence. It takes the launch's seed capture once; subsequent starts on the same
+writer have no retained input mapping. A failed write leaves that
 intent; reusing its native message ID is rejected without another send. No queue,
 input replacement, migration, automatic retry or new driver is introduced.
 A fresh continuation can share a capture while retaining a different native ID.
@@ -298,4 +308,4 @@ MEMORY.md were read. Its operation-entry and false-success lessons apply to nati
 dispatch and admission. Related Intelligence context/attribution findings were
 read selectively; no provider state refresh or upstream fetch was performed.
 
-Check (2026-10-08, compress): `cargo build -p loopflow --bin lf`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all -- --check`, isolated focused `cargo test` (15 unit + 3 discovery/CLI tests), `git diff --check` and `lf context --skill compress --json` pass; gate/review retain pending-input admission, LF lost-ack/draft proofs, native fidelity, costs and third-party acceptance.
+Check (2026-10-08, realign): `git diff --check` and `lf context --skill realign --json` pass within budget; unchanged code reuses `d5b943701`'s recorded build, Clippy, formatting and 18 focused tests; LF admission/recovery, native fidelity, costs and third-party acceptance remain for implementation and gate/review.

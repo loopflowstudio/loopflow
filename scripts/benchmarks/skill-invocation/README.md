@@ -192,8 +192,14 @@ assertion intentionally fails. Neither is a claim that paths are interchangeable
 
 ## Codex captured-path counterexample
 
+Prepare the script environment before running with external networking denied:
+
 ```sh
-uv run python scripts/test_network.py uv run --no-sync python \
+uv run --script scripts/benchmarks/skill-invocation/codex_request_mapping.py --help
+```
+
+```sh
+uv run python scripts/test_network.py uv run --offline --script \
   scripts/benchmarks/skill-invocation/codex_request_mapping.py
 ```
 
@@ -217,7 +223,7 @@ No global-root replacement or shared-engine rejection was added to production.
 ### Additive Codex catalog selection
 
 ```sh
-uv run python scripts/test_network.py uv run --no-sync python \
+uv run python scripts/test_network.py uv run --offline --script \
   scripts/benchmarks/skill-invocation/codex_request_mapping.py --additive alias
 ```
 
@@ -246,7 +252,7 @@ replacement; provider receipts govern these version-specific observations.
 ## Structured steering and redelivery
 
 ```sh
-uv run python scripts/test_network.py uv run --no-sync python \
+uv run python scripts/test_network.py uv run --offline --script \
   scripts/benchmarks/skill-invocation/codex_request_mapping.py --redelivery
 ```
 
@@ -271,6 +277,59 @@ an idempotency contract.
 Current-owner skill delivery needs a native turn boundary and durable correlation
 before any retry. Widening LF's text-only `send_current` would retain both faults.
 Existing best-effort Task steers are not a Session skill-input queue.
+
+## Native turn recovery and terminal drafts
+
+```sh
+uv run python scripts/test_network.py uv run --offline --script \
+  scripts/benchmarks/skill-invocation/codex_request_mapping.py --boundary
+uv run --with 'websockets>=15,<16' pytest -q \
+  scripts/benchmarks/skill-invocation/test_codex_request_mapping.py \
+  scripts/benchmarks/skill-invocation/test_request_mapping.py
+```
+
+October 8, Codex 0.160.1: the invoking connection completes a baseline turn,
+then sends a native skill at the next turn boundary with exact arguments and
+separate context. A Unix-socket proxy discards the `turn/start` reply before it
+reaches that connection. The caller cancels its pending wait and disconnects
+while the fake API holds the model response. A successor connects to the same
+engine and reads history without issuing another turn.
+
+The installed schema's `clientUserMessageId` is retained as `clientId` on the
+native user message. The probe uses a capture-shaped opaque value here, rather
+than inferring identity from prompt text or JSON-RPC ids. History supplies exactly
+one matching user message, selected skill path, arguments and context; the earlier
+turn remains unchanged. One case completes, and another explicitly interrupts the
+recovered turn. Both retain their identities and distinct outcomes after the
+fixture engine stops and a new engine reads persisted history. Neither resubmits
+input. Missing or duplicate receipts cannot establish successful application.
+This establishes receipt correlation, not provider idempotency for repeated ids.
+
+The successful case also attaches Codex's real native terminal to that same thread,
+waits for its resume reply, types an unfinished draft, and leaves it in the editor
+while the external invocation runs. Only afterward does the fixture press Enter:
+native history contains the exact draft on its own turn. It is absent from the
+skill request. The terminal exits cleanly. The harness separates typing `/exit`
+from Enter so Codex's paste handling does not leave the exit command in the editor.
+No replacement terminal or production PTY injection was introduced.
+
+Seven fake-API requests were observed: two baselines, two native skill turns, the
+preserved draft and two native title-generation requests. The last two remain in
+the report; five conversation requests are not the total cost. Reading a previous
+expansion in the draft's history is not another expansion. Regression tests keep
+assistant echoes, repeated text, duplicate receipts and historical expansion from
+becoming false-positive recovery evidence.
+
+These are provider-level proofs with existing on-disk skills, private homes and
+no credentials or live model. They do not establish LF capture admission, active
+capture preservation, driver fencing/handoff, captured catalog placement, native
+controls in full, arbitrary bundle fidelity, external effects exactly once, or
+Claude delivery. LF must connect its retained invocation to this native field
+under its existing ownership rules; passive history grants no new authority.
+No automatic retries were added. The official
+[App Server reference](https://learn.chatgpt.com/docs/app-server) supplies the
+thread/read, turn/start and socket interfaces; the generated 0.160.1 schema and
+real-client receipts establish the correlation field used here.
 
 ## Decisions and remaining work
 

@@ -7,9 +7,10 @@ same-harness invocation, translated cross-harness ports, inlined builtins,
 ## Status and decisions
 
 PR #1497 merged as `b6bc42998`; PR 2 preserves follow-up.
-Reconciled October 8 against `d6848011f` and the pending catalog/parser
-compression. The resume-workspace repair and structured-steering counterexample
-are committed in `cbb402869`; compression after `d6848011f` remains uncommitted.
+Reconciled October 8 against compression checkpoint `b2228bce8` and the native
+turn-boundary probe. `cbb402869` retains the resume-workspace repair and steering
+counterexample. The new probe proves Codex provider-level lost-reply recovery and
+terminal draft preservation; LF admission/dispatch integration remains unimplemented.
 The locally available main ref remains `812d8cc55`; no newer upstream state was fetched.
 Catalog consolidation and Claude headless native dispatch through canonical commands
 and taskless Flows are implemented locally. Headless continuation atomically admits its driver and next capture and
@@ -25,7 +26,7 @@ system instructions; fixed LF instructions remain separate.
 [Probe documentation](../scripts/benchmarks/skill-invocation/README.md) owns
 receipts and limits. Earlier plans and assumptions remain in the branch history,
 including `423ff2ec2` before the resume-workspace repair and `d6848011f` before
-the pending compression.
+compression.
 
 ## Native terminal admission: evidence and remaining choice
 
@@ -116,26 +117,48 @@ declarations and source/resource semantics. No temporary repository mount or
 native-name rewrite was added to production. The original engine-global prototype
 remains deleted; a unique alias is a draft approach, not accepted fidelity loss.
 
+## Codex native turn-boundary proof (October 8)
+
+The credential-free `--boundary` probe now drops the start reply in a socket proxy,
+cancels the waiter, disconnects it and recovers from native history on a successor
+connection to the same engine. Codex 0.160.1 accepts `clientUserMessageId` and retains
+it as a user message's `clientId`, including after engine restart. Exactly one
+matching receipt preserves the selected path, arguments and separate context;
+prior turns remain unchanged. Completion and explicit interruption remain distinct.
+No resubmission occurs, so this proves correlation, not idempotency of repeated ids.
+A real attached Codex terminal retains an unfinished draft across the skill turn,
+then submits it intact afterward and exits zero. No replacement terminal is used.
+
+The seven observed model requests include two native title requests. These counts
+remain visible; no cost or live-model claim follows. Fixtures use an existing
+on-disk skill. LF admission, active-capture preservation, driver fences, captured
+catalog/source fidelity and Claude parity remain separate implementation work.
+The probe and its limitations live in the benchmark README.
+
 ## Remaining implementation
 
-1. **Current-owner delivery; revised approach, still unproved:** admit retained `SkillInvocation` plus
-   context into the Session's own history without replacing its active capture.
+1. **Current-owner delivery; provider transport proved, LF integration outstanding:**
+   admit retained `SkillInvocation` plus context into the Session's own history without replacing its active capture.
    Its existing driver must consume pending input at a native turn boundary.
    The caller must not start another driver or steal an in-progress draft.
    Capture identity must correlate dispatch with native history before retry;
    RPC ids and turn-id acknowledgements alone cannot do that. A lost reply stays
-   uncertain until native evidence resolves it. Prove native receipt recovery,
-   cancellation, handoff and exactly-once application before implementing automatic
-   resubmission. No migration, new queue owner, extra Session or provider protocol
+   uncertain until native evidence resolves it. The Codex probe establishes native
+   receipt recovery, caller cancellation, connection handoff and draft preservation.
+   LF must use the retained capture key as `clientUserMessageId` at its existing
+   owner, then reconcile exactly one matching user receipt before settling delivery.
+   Prove active-capture preservation and LF driver handoff end to end before any
+   automatic resubmission. Missing or duplicate native receipts remain uncertain.
+   No migration, new queue owner, extra Session or provider protocol
    extension is selected. Same-Session invocation syntax remains unselected.
    Claude's plain headless path uses file-backed stdin through `_run_agent_once`;
    only Codex/OpenCode enter `_run_harness_once`. Changing the Harness trait alone
-   would miss Claude's canonical launch too. Native terminal consumption remains
+   would miss Claude's canonical launch too. Claude native terminal consumption remains
    unresolved; a replacement terminal and fidelity losses remain unapproved.
    October 8's Codex steering probe rules out `send_current` as this transport:
    both single and duplicate steers omit native expansion, and identical RPC ids
-   repeat input. Both replies were collected; actual lost-reply recovery remains
-   untested. Existing Task steers retain their separate best-effort text behavior.
+   repeat input. The new lost-reply proof uses `turn/start` at a boundary, not
+   steering. Existing Task steers retain their separate best-effort text behavior.
 2. Native Codex selection and terminal transport. The additive alias remains a
    provider-only candidate with unresolved placement, lifetime and name semantics.
    Terminal delivery must preserve native controls and unfinished drafts. Neither
@@ -162,7 +185,7 @@ removing `SkillSource::display_source`. Driver custody and publication fences
 remain unchanged. String-only next-turn input remains a deletion target; text steering retains
 its separate meaning and cannot acquire skill invocation by changing its type.
 
-The pending compression removes `SkillScope`, which only tests consumed; selected paths
+Checkpoint `b2228bce8` removes `SkillScope`, which only tests consumed; selected paths
 already prove repository/personal precedence and embedded selection. It deletes
 the retired listing tuple adapter and `builtin_skills` wrapper. Skill loading now
 splits and parses declarations once, removing `SkillFrontmatter` and its three
@@ -200,7 +223,7 @@ not live-model or installed acceptance. Held-owner and taskless correction proof
 still pass. Review retained the provider cwd in the manifest because replay uses
 it, and corrected nested Wave selection to use the full slug.
 
-## Replacement boundary
+## Delete — do not maintain
 
 - `Harness::send_input(&str)` and its next-turn consumers remain until structured
   native-boundary delivery has a proven recovery contract, then are replaced.
@@ -247,4 +270,4 @@ MEMORY.md were read. Its operation-entry and false-success lessons apply to nati
 dispatch and admission. Related Intelligence context/attribution findings were
 read selectively; no provider state refresh or upstream fetch was performed.
 
-Check (2026-10-08): pending compression's recorded build, 37 focused tests, `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` pass; reused without rerun for prose-only realignment. `git diff --check` and `lf context --skill realign --json` pass within budgets. Prior resume/redelivery results remain at `d6848011f`; gate/review own full fidelity, cost and third-party acceptance.
+Check (2026-10-08): isolated Codex `--boundary`/`--redelivery` and Claude `--channel terminal` pass; 14 probe regressions and Ruff pass. `lf context --skill implement --json` fits (memory 15,974/16,000; scratch 4,043/12,000 tokens). Compression’s recorded Rust build/focused tests/fmt/Clippy remain applicable; gate/review own full fidelity, cost and third-party acceptance.

@@ -143,6 +143,7 @@ class _Terminal:
         )
         os.close(slave)
         self._query_tail = b""
+        self.output = bytearray()
 
     def pump(self, seconds: float) -> None:
         deadline = time.monotonic() + seconds
@@ -157,6 +158,8 @@ class _Terminal:
                     raise
                 if not data:
                     return
+                self.output.extend(data)
+                del self.output[:-65536]
                 # Answer each cursor query once, including queries split across reads.
                 data = self._query_tail + data
                 for _ in range(data.count(b"\x1b[6n")):
@@ -175,9 +178,15 @@ class _Terminal:
     def close(self) -> bool:
         try:
             if self.process.poll() is None:
-                self.write(b"\x15/exit\r")
+                self.write(b"\x15/exit")
+                self.pump(0.5)
+                self.write(b"\r")
                 self.pump(3)
-            return self.process.poll() == 0
+            # PTY EOF can precede waitpid observing the child's exit.
+            try:
+                return self.process.wait(timeout=1) == 0
+            except subprocess.TimeoutExpired:
+                return False
         finally:
             if self.process.poll() is None:
                 os.killpg(self.process.pid, signal.SIGKILL)

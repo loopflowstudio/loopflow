@@ -671,25 +671,18 @@ authority and pin the compiled CLI in fixtures. Synthetic passes prove no live
 OAuth or installed outcome. State remains Home-local; no installed repair is
 authorized.
 
-## Account auth consolidation (LOO-320, curated 2026-10-04)
+## Account auth consolidation (LOO-320, curated 2026-10-08)
 
-Jack Heart approved LOO-320's scope and delivery; cross-account continuation,
-native refresh coordination and headroom ranking were excluded. Detailed branch
-proofs and retained failures remain in
-[the October 4 source memory](https://github.com/loopflowstudio/loopflow/blob/49f8385f0f41194434ce208a2b63ea10b570e723/wave/infrastructure/MEMORY.md#account-auth-consolidation-loo-320-branch-evidence-2026-09-27).
-Current mechanics belong in [subscriptions](../../docs/subscriptions.md).
-
-Native providers own OAuth and callback completion; a printed OSC URL or cached
-login cannot prove the current attempt succeeded. Cached inspection must avoid
-launch, decryption/import, broker contact and directory creation. Persist usage
-windows with their original time/owner; missing windows and reset success never
-prove new capacity. Record selected account before native Session discovery.
-
-Browser login without pasted code, first-time connection, remembered Linear
-profile targeting and live Claude/Codex windows remain unproved; the configured
-Claude probe returned `invalid_grant`. No source binary may migrate the installed
-Home. Synthetic passes establish no live or installed outcome. Remaining caveats:
-`abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
+Jack Heart approved delivery, excluding cross-account continuation, native refresh
+coordination and headroom ranking. Native OAuth/callback ownership, side-effect-free
+cached inspection and usage-window provenance: [subscriptions](../../docs/subscriptions.md).
+Selected account precedes native Session discovery. Missing windows or reset success
+prove no capacity; printed URLs and cached login prove no current OAuth success.
+Browser login without pasted code, first connection, remembered Linear profile and
+live Claude/Codex windows remain unproved; Claude returned `invalid_grant`.
+No branch binary may migrate the installed Home; fixtures prove no installed outcome.
+Exact constraints and archived evidence: `b2228bce8:wave/infrastructure/MEMORY.md`
+under this heading, retaining the October 4 source and original caveat references.
 
 ## Task deletion and command ownership (LOO-305, curated 2026-10-08)
 
@@ -1089,10 +1082,16 @@ saved Session cwd for context, provider and replayable capture; LF Process cwd
 records the caller. Native identity and historical bytes survive. Capture cwd
 cannot substitute for Process provenance.
 
-Codex 0.160.1 structured steers omit native expansion; identical RPC ids repeat
-input. Five fake-API requests include a fresh-turn expansion control. Both replies
-were collected: unsafe redelivery is proved, actual lost-reply recovery is not.
-Widening `send_current` cannot supply native skill delivery; native-boundary
-admission and receipt correlation remain unproved. Admission, acknowledgement
-and application differ.
+Codex 0.160.1 structured steers omit native expansion; repeated RPC ids duplicate
+input. `send_current` is not native skill delivery. The later socket probe drops
+a `turn/start` reply before delivery, cancels its waiter, and reconnects to the same
+engine. Existing `clientUserMessageId` survives as native user-message `clientId`,
+including engine restart. Exactly one receipt retains skill/path, arguments and
+context; completion and interruption remain distinct. An attached native terminal
+preserves its unfinished draft, submits it afterward and exits zero. Seven fake-API
+requests include two title requests; earlier expansions in history are not new
+applications. No resubmission, live-model or external-effect proof is claimed.
+LF capture admission, driver fencing/handoff, captured catalog/resource fidelity
+and Claude parity remain unfinished. Correlation grants neither idempotency nor
+authority; missing or duplicate receipts stay uncertain. No automatic retry was added.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

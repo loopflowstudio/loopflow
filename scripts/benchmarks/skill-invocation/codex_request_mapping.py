@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["websockets>=15,<16"]
+# ///
 """Inspect captured Codex skill paths against a credential-free local API."""
 
 import argparse
@@ -9,11 +13,14 @@ import signal
 import tempfile
 import threading
 import uuid
+from contextlib import AsyncExitStack, suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from continuity import _request, _send, _until
-from request_mapping import _run
+from request_mapping import _run, _Terminal
+from websockets.asyncio.client import unix_connect
+from websockets.asyncio.server import unix_serve
 
 
 async def _turn(process: asyncio.subprocess.Process, workspace: Path, inputs: list[dict]) -> None:
@@ -39,12 +46,14 @@ async def _native(
     additive: str | None,
     source: Path,
     delivery: tuple[threading.Event, threading.Event] | None = None,
+    boundary: bool = False,
 ) -> dict:
+    endpoint = workspace.parent / "engine.sock"
     process = await asyncio.create_subprocess_exec(
         codex,
         "app-server",
         "--listen",
-        "stdio://",
+        f"unix://{endpoint}" if boundary else "stdio://",
         cwd=workspace,
         env=env,
         stdin=asyncio.subprocess.PIPE,
@@ -53,6 +62,59 @@ async def _native(
         start_new_session=True,
     )
     try:
+        if boundary:
+            async with asyncio.timeout(15):
+                while not endpoint.exists():
+                    if process.returncode is not None:
+                        raise RuntimeError("fixture engine exited before opening its socket")
+                    await asyncio.sleep(0.02)
+            checks = {}
+            retained = []
+            for interrupt in [False, True]:
+                case, thread_id, capture = await _boundary_delivery(
+                    endpoint, workspace, source, context, delivery, interrupt, codex, env
+                )
+                prefix = "interrupted" if interrupt else "completed"
+                checks.update({f"{prefix}_{key}": value for key, value in case.items()})
+                retained.append((prefix, thread_id, capture))
+            os.killpg(process.pid, signal.SIGTERM)
+            await asyncio.wait_for(process.wait(), 5)
+            process = await asyncio.create_subprocess_exec(
+                codex,
+                "app-server",
+                "--listen",
+                "stdio://",
+                cwd=workspace,
+                env=env,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            await _request(
+                process,
+                "initialize",
+                {
+                    "clientInfo": {"name": "lf_boundary_recovery", "version": "1"},
+                    "capabilities": {"experimentalApi": True},
+                },
+            )
+            await _send(process, {"method": "initialized"})
+            for status, thread_id, capture in retained:
+                history = await _request(
+                    process,
+                    "thread/read",
+                    {
+                        "threadId": thread_id,
+                        "includeTurns": True,
+                    },
+                )
+                receipts = _invocation_receipts(history["thread"], capture)
+                checks[f"{status}_identity_survives_engine_restart"] = len(receipts) == 1
+                checks[f"{status}_outcome_survives_engine_restart"] = (
+                    len(receipts) == 1 and receipts[0][0]["status"] == status
+                )
+            return checks
         await _request(
             process,
             "initialize",
@@ -147,6 +209,277 @@ async def _native(
             await process.wait()
 
 
+async def _ws_until(socket, matches) -> dict:
+    async with asyncio.timeout(20):
+        async for message in socket:
+            event = json.loads(message)
+            if matches(event):
+                return event
+            if "method" in event and "id" in event:
+                raise RuntimeError(f"unexpected provider request: {event['method']}")
+    raise RuntimeError("fixture connection ended before the expected event")
+
+
+async def _ws_request(socket, method: str, params: dict, ident: str | None = None) -> dict:
+    ident = ident or uuid.uuid4().hex
+    await socket.send(json.dumps({"id": ident, "method": method, "params": params}))
+    reply = await _ws_until(socket, lambda event: event.get("id") == ident)
+    if "error" in reply:
+        raise RuntimeError(f"{method}: {reply['error'].get('message')}")
+    return reply["result"]
+
+
+async def _initialize_socket(socket) -> None:
+    await _ws_request(
+        socket,
+        "initialize",
+        {
+            "clientInfo": {"name": "lf_boundary_fixture", "version": "1"},
+            "capabilities": {"experimentalApi": True},
+        },
+    )
+    await socket.send(json.dumps({"method": "initialized"}))
+
+
+def _invocation_receipts(thread: dict, capture: str) -> list[tuple[dict, dict]]:
+    return [
+        (turn, item)
+        for turn in thread["turns"]
+        for item in turn["items"]
+        if item["type"] == "userMessage" and item.get("clientId") == capture
+    ]
+
+
+async def _boundary_delivery(
+    endpoint: Path,
+    workspace: Path,
+    source: Path,
+    context: str,
+    delivery: tuple[threading.Event, threading.Event],
+    interrupt: bool,
+    codex: str,
+    env: dict[str, str],
+) -> tuple[dict, str, str]:
+    received, release = delivery
+    received.clear()
+    release.clear()
+    dropped = asyncio.Event()
+    terminal_ready = asyncio.Event()
+    lost_id = uuid.uuid4().hex
+    capture = f"run_{uuid.uuid4().hex}"
+    dropped_count = 0
+
+    async def relay(client) -> None:
+        nonlocal dropped_count
+        async with unix_connect(str(endpoint), uri="ws://localhost") as upstream:
+            resume_id = None
+
+            async def forward_inputs() -> None:
+                nonlocal resume_id
+                async for message in client:
+                    rpc = json.loads(message)
+                    if rpc.get("method") == "thread/resume":
+                        resume_id = rpc["id"]
+                    await upstream.send(message)
+
+            async def forward_outputs() -> None:
+                nonlocal dropped_count
+                async for message in upstream:
+                    rpc = json.loads(message)
+                    if resume_id is not None and rpc.get("id") == resume_id and "result" in rpc:
+                        terminal_ready.set()
+                    if rpc.get("id") == lost_id:
+                        # Fault injection: no reply bytes reach the invoking client.
+                        dropped_count += 1
+                        dropped.set()
+                        continue
+                    await client.send(message)
+
+            tasks = [asyncio.create_task(forward_inputs()), asyncio.create_task(forward_outputs())]
+            try:
+                await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+    proxy = workspace.parent / "loss.sock"
+    terminal = None
+    draft = "UNSUBMITTED_DRAFT_" + uuid.uuid4().hex
+    checks = {}
+
+    async def close_terminal() -> None:
+        checks["terminal_exit_zero"] = await asyncio.to_thread(terminal.close)
+        if not checks["terminal_exit_zero"]:
+            print(
+                json.dumps({"terminal_tail": terminal.output[-5000:].decode(errors="replace")}),
+                flush=True,
+            )
+
+    async with unix_serve(relay, str(proxy)), AsyncExitStack() as cleanup:
+        async with unix_connect(str(proxy), uri="ws://localhost") as owner:
+            await _initialize_socket(owner)
+            thread = await _ws_request(
+                owner,
+                "thread/start",
+                {"cwd": str(workspace), "approvalPolicy": "never", "sandbox": "read-only"},
+            )
+            thread_id = thread["thread"]["id"]
+            await _ws_request(
+                owner,
+                "turn/start",
+                {
+                    "threadId": thread_id,
+                    "input": [{"type": "text", "text": "Complete the baseline turn."}],
+                },
+            )
+            await _ws_until(owner, lambda event: event.get("method") == "turn/completed")
+            before = await _ws_request(
+                owner,
+                "thread/read",
+                {
+                    "threadId": thread_id,
+                    "includeTurns": True,
+                },
+            )
+            if not interrupt:
+                terminal = _Terminal(
+                    [
+                        codex,
+                        "resume",
+                        "--remote",
+                        f"unix://{proxy}",
+                        "--no-alt-screen",
+                        thread_id,
+                    ],
+                    workspace,
+                    env,
+                )
+                cleanup.push_async_callback(close_terminal)
+                async with asyncio.timeout(15):
+                    while not terminal_ready.is_set():
+                        await asyncio.to_thread(terminal.pump, 0.1)
+                await asyncio.to_thread(terminal.pump, 0.5)
+                terminal.write(draft.encode())
+                await asyncio.to_thread(terminal.pump, 0.5)
+            pending = asyncio.create_task(
+                _ws_request(
+                    owner,
+                    "turn/start",
+                    {
+                        "threadId": thread_id,
+                        "clientUserMessageId": capture,
+                        "input": [
+                            {"type": "skill", "name": "audit", "path": str(source)},
+                            {"type": "text", "text": "$audit alpha"},
+                            {"type": "text", "text": context},
+                        ],
+                    },
+                    lost_id,
+                )
+            )
+            try:
+                await asyncio.wait_for(dropped.wait(), 15)
+                if not await asyncio.to_thread(received.wait, 15):
+                    raise RuntimeError("fake API did not receive the skill turn")
+                pending.cancel()
+                with suppress(asyncio.CancelledError):
+                    await pending
+            finally:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+        # A different connection inherits only the retained invocation and thread.
+        # The engine is still running; the lost reply's turn id is unavailable.
+        async with unix_connect(str(endpoint), uri="ws://localhost") as successor:
+            await _initialize_socket(successor)
+            history = await _ws_request(
+                successor,
+                "thread/read",
+                {
+                    "threadId": thread_id,
+                    "includeTurns": True,
+                },
+            )
+            matches = _invocation_receipts(history["thread"], capture)
+            content = matches[0][1]["content"] if len(matches) == 1 else []
+            checks.update(
+                {
+                    "reply_dropped": dropped_count == 1,
+                    "caller_cancelled": pending.cancelled(),
+                    "same_thread": history["thread"]["id"] == thread_id,
+                    "one_native_invocation": len(matches) == 1,
+                    "skill_receipt": any(
+                        item.get("type") == "skill" and item.get("path") == str(source)
+                        for item in content
+                    ),
+                    "exact_arguments": any(item.get("text") == "$audit alpha" for item in content),
+                    "separate_context": any(item.get("text") == context for item in content),
+                    "prior_turn_unchanged": history["thread"]["turns"][0]
+                    == before["thread"]["turns"][0],
+                }
+            )
+            print(json.dumps({"boundary_recovery": checks}), flush=True)
+            if interrupt and len(matches) == 1:
+                await _ws_request(
+                    successor,
+                    "turn/interrupt",
+                    {
+                        "threadId": thread_id,
+                        "turnId": matches[0][0]["id"],
+                    },
+                )
+            release.set()
+            expected_status = "interrupted" if interrupt else "completed"
+            async with asyncio.timeout(15):
+                while True:
+                    history = await _ws_request(
+                        successor,
+                        "thread/read",
+                        {
+                            "threadId": thread_id,
+                            "includeTurns": True,
+                        },
+                    )
+                    matches = _invocation_receipts(history["thread"], capture)
+                    if len(matches) == 1 and matches[0][0]["status"] == expected_status:
+                        break
+                    await asyncio.sleep(0.02)
+            checks["outcome_without_resubmission"] = True
+            checks["exactly_two_turns"] = len(history["thread"]["turns"]) == 2
+            if terminal:
+                try:
+                    await asyncio.to_thread(terminal.pump, 0.5)
+                    terminal.write(b"\r")
+                    async with asyncio.timeout(15):
+                        while True:
+                            await asyncio.to_thread(terminal.pump, 0.1)
+                            history = await _ws_request(
+                                successor,
+                                "thread/read",
+                                {
+                                    "threadId": thread_id,
+                                    "includeTurns": True,
+                                },
+                            )
+                            turns = history["thread"]["turns"]
+                            if len(turns) == 3 and turns[-1]["status"] == "completed":
+                                break
+                    checks["terminal_draft_preserved"] = any(
+                        item["type"] == "userMessage"
+                        and any(block.get("text") == draft for block in item["content"])
+                        for item in turns[-1]["items"]
+                    )
+                finally:
+                    await cleanup.aclose()
+            print(
+                json.dumps(
+                    {"boundary_case": "interrupted" if interrupt else "completed", "checks": checks}
+                ),
+                flush=True,
+            )
+            return checks, thread_id, capture
+
+
 async def _steer_redelivery(
     process: asyncio.subprocess.Process,
     workspace: Path,
@@ -222,8 +555,20 @@ def _skill_paths(request: dict) -> list[str]:
     ]
 
 
+def _last_user_texts(request: dict) -> list[str]:
+    user = next(
+        (item for item in reversed(request.get("input", [])) if item.get("role") == "user"),
+        {},
+    )
+    return [block.get("text", "") for block in user.get("content", [])]
+
+
 def _probe(
-    lf: Path | None, codex: str, additive: str | None = None, redelivery: bool = False
+    lf: Path | None,
+    codex: str,
+    additive: str | None = None,
+    redelivery: bool = False,
+    boundary: bool = False,
 ) -> bool:
     requests = []
     received, release = threading.Event(), threading.Event()
@@ -232,9 +577,20 @@ def _probe(
         def log_message(self, format: str, *args: object) -> None:
             pass
 
+        def handle(self) -> None:
+            try:
+                super().handle()
+            except (BrokenPipeError, ConnectionResetError):
+                if not boundary:
+                    raise
+                # The interruption case deliberately closes its model stream.
+
         def do_POST(self) -> None:
             requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
-            if redelivery and len(requests) in (1, 3):
+            native_turn = any(
+                text.startswith("<skill>\n") for text in _last_user_texts(requests[-1])
+            )
+            if (redelivery and len(requests) in (1, 3)) or (boundary and native_turn):
                 received.set()
                 if not release.wait(20):
                     self.send_error(504, "steering probe did not release the fixture")
@@ -317,9 +673,50 @@ def _probe(
                         context,
                         additive,
                         skill,
-                        (received, release) if redelivery else None,
+                        (received, release) if redelivery or boundary else None,
+                        boundary,
                     )
                 )
+                if boundary:
+                    native_requests = [
+                        request
+                        for request in requests
+                        if any(text.startswith("<skill>\n") for text in _last_user_texts(request))
+                    ]
+                    title_requests = [
+                        request
+                        for request in requests
+                        if any(
+                            text.startswith("Generate a concise, single-line task title")
+                            for text in _last_user_texts(request)
+                        )
+                    ]
+                    checks.update(
+                        expected_conversation_requests=len(requests) - len(title_requests) == 5,
+                        native_expansion=len(native_requests) == 2
+                        and all(
+                            _skill_paths(request) == [str(skill)]
+                            and any(marker in text for text in _last_user_texts(request))
+                            for request in native_requests
+                        ),
+                        draft_not_submitted_with_skill=len(native_requests) == 2
+                        and all(
+                            "UNSUBMITTED_DRAFT_" not in json.dumps(request)
+                            for request in native_requests
+                        ),
+                    )
+                    print(
+                        json.dumps(
+                            {
+                                "mode": "boundary",
+                                "requests": len(requests),
+                                "title_requests": len(title_requests),
+                                "checks": checks,
+                            }
+                        ),
+                        flush=True,
+                    )
+                    return all(checks.values())
                 if redelivery:
                     texts = (
                         [
@@ -456,6 +853,7 @@ def _probe(
                 print(json.dumps({"registration": registration}))
             return all(checks.values())
     finally:
+        release.set()
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
@@ -479,15 +877,24 @@ def main() -> int:
         action="store_true",
         help="Check duplicate structured steering with an identical RPC id",
     )
+    parser.add_argument(
+        "--boundary",
+        action="store_true",
+        help="Lose a native turn reply, cancel its waiter and recover on a new connection",
+    )
     args = parser.parse_args()
     if not args.codex:
         parser.error("codex is required")
-    if sum([bool(args.lf), bool(args.additive), args.redelivery]) > 1:
-        parser.error("--lf, --additive and --redelivery are separate probes")
+    if sum([bool(args.lf), bool(args.additive), args.redelivery, args.boundary]) > 1:
+        parser.error("--lf, --additive, --redelivery and --boundary are separate probes")
     return (
         0
         if _probe(
-            args.lf.resolve() if args.lf else None, args.codex, args.additive, args.redelivery
+            args.lf.resolve() if args.lf else None,
+            args.codex,
+            args.additive,
+            args.redelivery,
+            args.boundary,
         )
         else 1
     )

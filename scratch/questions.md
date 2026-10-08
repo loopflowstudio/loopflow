@@ -28,8 +28,16 @@ while retaining the LF Process caller cwd. Its CLI fixture proves this boundary.
 2026-10-08: the real Codex client's single structured steer omits native skill
 expansion; duplicate RPC ids repeat model input. The same source expands on a
 fresh turn. Extending `send_current` cannot satisfy native skill invocation or
-exactly-once application. The revised native-boundary queue/recovery approach
-remains unproved, including admission during an unfinished native terminal draft.
+exactly-once application. The native-boundary queue/recovery approach still needs
+LF integration. The later
+Codex socket probe proves lost-reply correlation through `clientUserMessageId`,
+connection handoff and native terminal draft preservation; it does not prove LF
+admission or driver authority.
 No replacement terminal, weaker fidelity, automatic ambiguous retry or new
 provider protocol is selected. This is observed implementation evidence, not a
 new product decision attributed to Jack Heart.
+
+2026-10-08: use the retained capture key with Codex’s existing `clientUserMessageId`
+as the candidate native receipt correlation. This is a reversible implementation
+choice, not a new decision attributed to Jack Heart. The provider probe passes;
+production admission, fencing and ambiguity handling remain unimplemented.

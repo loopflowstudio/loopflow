@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::git::{is_ancestor, is_clean, ref_exists, rev_parse};
 use crate::ops::{OpsError, OpsResult};
-use crate::store::{PlanningState, PmTaskRecord, SharedStore};
+use crate::store::{PmTaskRecord, SharedStore};
 use crate::work::task::Task;
 
 use super::{fetch_task_refs, task_error};
@@ -32,16 +32,16 @@ impl TaskSource {
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {} has no active PR", task.plan.identifier)))?;
-        if !is_clean(&task.worktree)? {
+        if !is_clean(task.worktree()?)? {
             return Err(task_error(format!("Task {} has uncommitted work on branch {}; commit and push it before running it on another machine", task.plan.identifier, pr.branch)));
         }
-        let commit = rev_parse(&task.worktree, "HEAD")?;
-        require_pushed_code(&task.worktree, &task.plan.identifier, &pr.branch, &commit)?;
+        let commit = rev_parse(task.worktree()?, "HEAD")?;
+        require_pushed_code(task.worktree()?, &task.plan.identifier, &pr.branch, &commit)?;
         Ok(Some(Self {
             branch: pr.branch,
             commit,
             planning: crate::ops::pm::read_task_planning_async(
-                &task.worktree,
+                task.worktree()?,
                 &task.plan.identifier,
                 crate::ops::pm::PmRefresh::Auto,
             )
@@ -53,69 +53,16 @@ impl TaskSource {
         &self.planning.item.identifier
     }
 
-    pub async fn accept_planning(&self, repo: &Path, store: &SharedStore) -> OpsResult<()> {
-        let scope = crate::repository::CanonicalRepo::discover(repo)
-            .map_err(task_error)?
-            .to_string();
-        // Existing accepted facts and invalidations remain authoritative on this machine.
-        if store
-            .pm_task_observation(&scope, "linear", &self.planning.item.id)
-            .await
-            .map_err(task_error)?
-            .state
-            != PlanningState::Unavailable
-        {
-            return Ok(());
-        }
-        let project = self
-            .planning
-            .project
-            .as_ref()
-            .ok_or_else(|| task_error("SSH Task has no Project"))?;
-        let initiative = crate::ops::pm::singular_project_initiative(project)?;
-        let name = crate::ops::pm::wave_for_initiative(repo, &initiative)?;
-        let team = crate::ops::pm::repository_team_id(repo)?;
-        crate::pm::validate_project_ownership(&name, &initiative, Some(&team), project)
-            .map_err(task_error)?;
-        if self.planning.item.team_id != team {
-            return Err(task_error("SSH Task belongs to another repository Team"));
-        }
-        let wave = crate::work::wave::ensure_wave_row(store, repo, &name)
-            .await
-            .map_err(task_error)?;
-        let acquisition = crate::ops::pm::lock_wave_planning(&wave).await?;
-        // Recheck under the planning lock. A local refresh may have won the race.
-        if store
-            .pm_task_observation(&scope, "linear", &self.planning.item.id)
-            .await
-            .map_err(task_error)?
-            .state
-            == PlanningState::Unavailable
-        {
-            store
-                .put_pm_task(
-                    &scope,
-                    "linear",
-                    self.planning.clone(),
-                    Some((wave.id().clone(), initiative)),
-                    Some(acquisition),
-                )
-                .await
-                .map_err(task_error)?;
-        }
-        Ok(())
-    }
-
     pub fn require_pushed(&self, repo: &Path) -> OpsResult<()> {
         require_pushed_code(repo, self.issue(), &self.branch, &self.commit)
     }
 
     pub fn require_checkout(&self, task: &Task) -> OpsResult<()> {
-        let branch = crate::engine::git::current_branch(&task.worktree)?;
+        let branch = crate::engine::git::current_branch(task.worktree()?)?;
         if branch.as_deref() != Some(&self.branch)
-            || !is_ancestor(&task.worktree, &self.commit, "HEAD")?
+            || !is_ancestor(task.worktree()?, &self.commit, "HEAD")?
         {
-            return Err(task_error(format!("Task {} needs branch {} at commit {}; run `lf sync` in {} before continuing; existing work is preserved", self.issue(), self.branch, self.commit, task.worktree.display())));
+            return Err(task_error(format!("Task {} needs branch {} at commit {}; run `lf sync` in {} before continuing; existing work is preserved", self.issue(), self.branch, self.commit, task.worktree()?.display())));
         }
         Ok(())
     }

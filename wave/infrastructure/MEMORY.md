@@ -639,9 +639,8 @@ diagnosis is superseded. Peer export/import, ordering and checkpoints belong to
 LOO-412, not a new prerequisite for LOO-406. Reuse its saved-plan writers.
 Jack's conflict and user-keyed destination decisions under Plan ownership govern
 this transport too. Retain losing edits; mandatory manual resolution is superseded.
-Fifteen fixtures prove transport/reconciliation only. SQLite import, semi-live
-arrival and public dispatch remain unproved: `scratch/work-on-another-machine-name.md`.
-Preserve IDs, history and pushed code; no automatic turn/Flow retry.
+Transport fixtures establish no SQLite import or public dispatch. Remaining proof:
+`scratch/work-on-another-machine-name.md`. Preserve identity and execution history.
 
 ## Synced planning integration (LOO-334)
 

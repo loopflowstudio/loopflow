@@ -52,19 +52,20 @@ one-shot code requirement constrains initial placement, not later local commits.
 
 ## Reconciliation and transport
 
-`engine/planning_exchange.rs` retains current and superseded change identities
-per portable field. Observed reopening supersedes completion; concurrent values
-remain explicit conflicts. Equal concurrent values retain both causes. A resolution
-is a new write observing all alternatives, never a clock or Git merge-base choice.
-Wave/Project membership travels as a pair. Comment IDs suppress duplicate delivery;
-omission never deletes. Explicit deletion retains identity, content and evidence.
+Jack Heart's October 8 conflict decisions in LOO-406 supersede mandatory manual
+winner selection: Linear wins observed planning conflicts. Without Linear, prefer
+the host where appropriate, otherwise last-write-wins with try-not-to-clobber and
+recoverable losing edits. Independent creations/comments accumulate and different
+fields survive. A delayed completion must not overwrite an observed newer reopening.
+The existing causal exchange module is an implementation starting point, not an
+accepted requirement to expose manual conflicts or to block on LOO-406 APIs.
+Simplify or replace it to implement the selected policy; retain original evidence.
 
-The common writer must persist causal context atomically with each ordinary
-mutation. Export reuses those IDs. Import commits causal state, projections and
-its checkpoint together, preserving conflicts while independent updates proceed.
-Fetched Git history is not an import acknowledgement. Crashes before SQLite commit
-leave import retryable. Pending effects distinguish local persistence, Git
-publication confirmation and optional Linear synchronization.
+Extend the common SQLite writers here with the peer ordering, stable identities and
+atomic import/export checkpoint needed by Git synchronization. Export must not mint
+new mutation identities. Import and projection commit together; fetched Git history
+is not an import acknowledgement. Crashes before commit leave import retryable.
+Pending state distinguishes local save, Git publication and optional Linear delivery.
 
 `engine/planning_git.rs` transports a `planning.json` tree through
 `refs/loopflow/planning`. Local retained/observed refs preserve unpublished and
@@ -88,10 +89,10 @@ The superseded adoption walkthrough, screenshot set and capture scripts were
 removed after verifying their bytes against `5960415b3`. The historical demo note
 links that evidence; no replacement acceptance is implied.
 
-- Replace `TaskSource.planning`, `TaskSource::accept_planning` in
-  `ops/task/remote.rs`, and the `ops/task.rs` bootstrap call with common-writer
-  peer import. Delete the copied `PmTaskRecord` owner in the same integration cut;
-  preserve branch/commit requirements and observation evidence.
+- Replace retained `TaskSource.planning` in `ops/task/remote.rs` with common-writer
+  peer import. The merge removed `accept_planning` and the cold Project bootstrap;
+  delete the remaining copied `PmTaskRecord` payload with replacement consumers.
+  Preserve branch/commit requirements and observation evidence.
 - Replace `TaskId::from_issue` and its exclusive UUID-v5 dependency/tests with
   ordinary creation's portable identity. Preserve stored IDs and provider aliases.
 - Move `task_source_args` and Task resolution to the integrated identity path;
@@ -106,43 +107,43 @@ Changing dispatch before the replacement writer exists would leave an unusable
 path. The deletion and replacement remain one coherent cut in this PR, without a
 compatibility mode or another planner as an intermediate deliverable.
 
-## Missing dependency and remaining implementation
+## Integration now selected — 2026-10-08
 
-LOO-406's committed head checked on October 8 is
-`4f9a8ea17020dfe3fe21c1d199e60d6602a57059`, newer than the previously inspected
-`a3324396b`. Placement and Flow entry now share `require_task_launch` /
-`require_task_planning`, consuming saved planning in SQLite without provider
-resolution. Missing inventory permits saved work; retained invalidation, removal
-and membership mismatch still apply. Terminal planning prevents new work while
-an active Workflow retains its position. Integration must reuse this admission
-path rather than restore provider lookup or copied-planning bootstrap.
+Jack Heart requested stacking on LOO-406 and continuing pursue. `lf task checkout
+LOO-412 --stack-on LOO-406` selected PR #1503; `lf sync --manual` integrated its
+published `e68f2a423bdabf91acadea72f23f01b3f383f244`. The common ownership cut
+`84664e661` deletes `PlanningAuthority`, personal-plan storage and split writers.
+Saved readers, ordinary creation/edit/comment/disposition and placement now share
+local identity. This supersedes the missing-writer diagnosis at `4f9a8ea17`.
 
-`planning.rs` still declares Local/Linear authority and
-`store/sqlite/local_planning.rs` branches on it. Its migration retains creation,
-comment and state-delivery records, but no causal peer import/export/checkpoint
-contract. This admission change is not the common-writer cut; no dependency merge
-has occurred. The dependency's committed memory also records a still-failing
-`task_completion_preserves_linear_reopening_during_delivery`: unconditional
-Linear delivery can overwrite a concurrent reopening and matching readback can
-falsely acknowledge it. LOO-406 owns that repair/investigation. Git ancestry
-confirmation establishes publication only; it supplies no SQLite import or
-optional Linear conflict-preservation proof.
+LOO-412 owns peer export/import, ordering and checkpoints on those writers. These
+are implementation work here, not a new dependency for LOO-406 to deliver. Do not
+wait for all Linear delivery to finish or create a second planner. Source evidence:
+`e68f2a423:scratch/explore-loopflow-s-own-store.md`, common ownership, preserved
+writers, accepted conflict policy and user-keyed planning sections.
 
-Required coherent committed API from LOO-406:
+The merge uses saved Task placement, retaining fetch-before-placement and source
+branch/commit checks. Tasks may exist without checkout. The obsolete copied-record
+importer and cold Project selector are removed; new peer sync must provide missing
+planning before launch. Old transport payload/issue-derived helpers and adoption
+fixtures still need replacement. This intermediate integration is not ready for
+publication as a working remote path; complete the end-to-end cut before review.
 
-1. Ordinary create/edit/comment/disposition writes save stable mutation IDs,
-   causal context and pending synchronization in the same SQLite transaction.
-2. Export reads those identities without reminting them; peer import atomically
-   merges facts, retains conflicts and records the import checkpoint.
-3. Planning disposition can be imported without changing local Workflow or
-   execution. Existing IDs, aliases, comments and history survive import.
+Jack's accepted destination policy: user-keyed planning by default, explicit opt-in
+to a common shared plan, same records/APIs. A common code remote never combines
+plans implicitly. LOO-412 owns stable key provisioning/recovery and local remote/ref
+binding; never derive identity from Git display name or a per-machine random user.
+Joining an existing plan must not silently upload or merge the current local plan.
+Shared ordering cannot grant an initiating host blanket precedence over other
+collaborators. Choose deterministic ties and retain losers. Ref separation is not
+access control; private planning needs an access-controlled destination. Synthetic
+fixtures remain the only authorized publication target.
 
-After that boundary exists, LOO-412 still needs the deletion/integration cut,
-remote selection, semi-live synchronization, pending/error presentation and public
-machine dispatch. No dependency merge or ordinary sync activation has occurred.
-Fifteen pure/Git fixtures cover reconciliation and transport, not SQLite import
-or public dispatch. The independent transport work cannot substitute for this
-missing common writer.
+Remaining work is the replacement/integration cut, destination binding, semi-live
+exchange with pending/error presentation, and public machine dispatch. Reuse 406's
+local readers, field receipts and foreground sync patterns. Its known unseen-Linear-
+write race is contrary evidence about provider atomicity, not a missing product
+choice or reason to block independent peer integration.
 
 ## Acceptance for review
 
@@ -161,7 +162,8 @@ public command coverage here, not only exchange and transport tests.
    loss or turn replay. Lose a publication response and recover by readback. Crash
    after fetch but before import, then prove atomic retry.
 4. Preserve conflicting edits/dispositions while independent updates propagate.
-   Resolve explicitly; delayed completion cannot undo observed reopening. Cover
+   Apply the selected deterministic policy and retain losing edits; delayed
+   completion cannot undo observed reopening. Cover
    equal-value concurrent writes, conflicting ID reuse, omission and deletion.
 5. Public `--machine` launches by issue/local selector and label/ID on a blank
    worker see pushed code and reuse placement. Cover local-born identity,
@@ -172,11 +174,9 @@ public command coverage here, not only exchange and transport tests.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Reconciled 2026-10-08: causal merge skips retired changes before copying values;
-its regression retains conflicting reuse of a change ID through replay and explicit
-resolution. Per-change value sets are necessary. Only tests consume exchange and
-transport; public dispatch still consumes adoption. The newer LOO-406 admission
-path changes the integration target, not the missing-writer boundary. Existing
-Rust checks below remain applicable because this reconciliation changes prose only.
+Previous verification: 15 pure/Git transport fixtures plus fmt/Clippy passed before
+stack integration; that proves neither SQLite import nor public dispatch. The
+post-stack compile and focused proof are recorded below when complete. Gate owns
+full integration acceptance after the replacement consumers exist.
 
-Check (2026-10-08): retained `cargo test -p loopflow --test planning_exchange_tests --test planning_git_tests --no-run` build, both binaries via `uv run --no-sync python scripts/test_network.py` (15 passes), fmt and Clippy passes; prose reconciliation: `git diff --check` and `lf context --skill realign --json` pass within budget. Integration acceptance remains with gate after the common writer is available.
+Post-stack check (2026-10-08): `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, and the worktree-built lib test `ops::task::tests::task_checkout_pins_upstream_without_requiring_clean_canonical_main` under `scripts/test_network.py` pass. Context fits. Legacy remote adoption fixtures compile but are not replacement-sync acceptance; pursue must replace them and prove the new path before publication.

@@ -217,7 +217,10 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
     let tasks = runtime.block_on(target_store.list_tasks(None)).unwrap();
     assert_eq!(tasks.len(), 1);
     let task = &tasks[0];
-    assert_eq!(task.id, TaskId::from_issue(&fixture.task.plan.id));
+    assert_eq!(
+        task.id,
+        TaskId::from_issue(fixture.task.plan.linear_id.as_ref().unwrap())
+    );
     assert_ne!(task.id, fixture.task.id);
     assert_eq!(
         runtime
@@ -233,17 +236,23 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
         2
     );
     let seen = fs::read_to_string(target.path().join(".lf/seen-checkout")).unwrap();
-    assert!(seen.lines().all(|path| Path::new(path) == task.worktree));
+    assert!(seen
+        .lines()
+        .all(|path| Path::new(path) == task.worktree().unwrap()));
     assert_eq!(
-        loopflow::engine::git::current_branch(&task.worktree)
+        loopflow::engine::git::current_branch(task.worktree().unwrap())
             .unwrap()
             .as_deref(),
         Some(branch)
     );
 
     // A later source commit must not reset a retained, dirty target checkout.
-    fs::write(task.worktree.join("local-notes"), "keep local work").unwrap();
-    let retained_head = loopflow::engine::git::rev_parse(&task.worktree, "HEAD").unwrap();
+    fs::write(
+        task.worktree().unwrap().join("local-notes"),
+        "keep local work",
+    )
+    .unwrap();
+    let retained_head = loopflow::engine::git::rev_parse(task.worktree().unwrap(), "HEAD").unwrap();
     repo.create_file("implementation.txt", "new pushed implementation\n");
     repo.stage_all();
     repo.commit("Further source work");
@@ -256,11 +265,11 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
         "{error}"
     );
     assert_eq!(
-        loopflow::engine::git::rev_parse(&task.worktree, "HEAD").unwrap(),
+        loopflow::engine::git::rev_parse(task.worktree().unwrap(), "HEAD").unwrap(),
         retained_head
     );
     assert_eq!(
-        fs::read_to_string(task.worktree.join("local-notes")).unwrap(),
+        fs::read_to_string(task.worktree().unwrap().join("local-notes")).unwrap(),
         "keep local work"
     );
 }
@@ -328,17 +337,21 @@ fn cold_machines_adopt_pushed_code_once_with_the_same_task_id() {
             .unwrap()
             .unwrap();
         assert_eq!(task.id, expected_id);
-        assert_eq!(task.plan.pm_snapshot_synced_at, 1791360000);
-        assert_eq!(first.cwd, task.worktree);
+        assert_eq!(task.plan.pm_snapshot_synced_at, Some(1791360000));
+        assert_eq!(&first.cwd, task.worktree().unwrap());
         assert_eq!(
-            fs::read_to_string(task.worktree.join("implementation.txt")).unwrap(),
+            fs::read_to_string(task.worktree().unwrap().join("implementation.txt")).unwrap(),
             "already implemented\n"
         );
         assert_eq!(
-            loopflow::engine::git::rev_parse(&task.worktree, "HEAD").unwrap(),
+            loopflow::engine::git::rev_parse(task.worktree().unwrap(), "HEAD").unwrap(),
             head
         );
-        fs::write(task.worktree.join("local-notes"), "keep local work").unwrap();
+        fs::write(
+            task.worktree().unwrap().join("local-notes"),
+            "keep local work",
+        )
+        .unwrap();
         let second = runtime
             .block_on(resolve_work_binding(&store, &checkout, "task:FIX-1"))
             .unwrap();
@@ -352,7 +365,7 @@ fn cold_machines_adopt_pushed_code_once_with_the_same_task_id() {
             2
         );
         assert_eq!(
-            fs::read_to_string(task.worktree.join("local-notes")).unwrap(),
+            fs::read_to_string(task.worktree().unwrap().join("local-notes")).unwrap(),
             "keep local work"
         );
         let workflows: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -361,7 +374,7 @@ fn cold_machines_adopt_pushed_code_once_with_the_same_task_id() {
             .unwrap();
         assert_eq!(workflows, 0);
         std::env::remove_var("LF_TASK_SOURCE");
-        fs::remove_dir_all(task.worktree).unwrap();
+        fs::remove_dir_all(task.worktree().unwrap()).unwrap();
     }
 }
 
@@ -450,7 +463,10 @@ fn machine_selector_names_unpushed_source_work_before_connecting_and_keeps_legac
         .block_on(resolve_work_binding(&store, repo.path(), "task:INF-123"))
         .unwrap();
     assert_eq!(binding.work.id(), fixture.task.id.as_str());
-    assert_ne!(fixture.task.id, TaskId::from_issue(&fixture.task.plan.id));
+    assert_ne!(
+        fixture.task.id,
+        TaskId::from_issue(fixture.task.plan.linear_id.as_ref().unwrap())
+    );
     repo.create_file("unfinished.txt", "source work");
     let args = ["--task", "INF-123", "context", "--json"].map(str::to_string);
     let invoke = || {

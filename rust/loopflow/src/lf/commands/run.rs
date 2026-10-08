@@ -447,7 +447,14 @@ fn build_prompt_at(
     let prompt = prepared.prompt;
 
     let mut components = prepared.components;
-    components.message_context = message_context;
+    components.message_context = message_context.or_else(|| {
+        task_message.as_ref().map(|_| {
+            (
+                crate::trace::ContextAssetKind::Goal,
+                crate::trace::ContextScope::Task,
+            )
+        })
+    });
     components.steers = steers;
     let deduplication_decisions = prepared.deduplication_decisions;
     let effective_system =
@@ -457,6 +464,7 @@ fn build_prompt_at(
         &effective_system,
         &agent_config.task_prompt,
         &deduplication_decisions,
+        Some(arguments),
     );
     Ok(PromptBuild {
         repo_root,
@@ -745,6 +753,7 @@ pub(crate) fn attributed_context(
     system_prompt: &str,
     task_prompt: &str,
     deduplication_decisions: &[crate::trace::ContextDecision],
+    request: Option<&str>,
 ) -> crate::trace::PreparedTurnContext {
     use crate::engine::prompt::{DiffTier, DocumentSource};
     use crate::trace::{
@@ -930,6 +939,18 @@ pub(crate) fn attributed_context(
                 "vendor_skill",
             );
         }
+    }
+    // Bound launches append the caller's request to inherited Work context.
+    // Attribute it separately before the enclosing Goal claims the same bytes.
+    if let Some(request) = request {
+        push(
+            request,
+            Kind::UserMessage,
+            Scope::User,
+            "user message".into(),
+            None,
+            "message",
+        );
     }
     if let Some(message) = &components.message {
         // Steers ride inside the launch message; claim them before it does.
@@ -1621,7 +1642,13 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .contains("Replacement instructions"));
         // Inline attribution uses the same retained components; native input
         // records its source on the invocation instead of the context message.
-        let context = attributed_context(&built.components, "", "Original audit instructions", &[]);
+        let context = attributed_context(
+            &built.components,
+            "",
+            "Original audit instructions",
+            &[],
+            None,
+        );
         let asset = context
             .task
             .assets
@@ -1796,7 +1823,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ..Default::default()
         };
         let system = crate::engine::format_prompt(&components);
-        let prepared = attributed_context(&components, &system, "", &[]);
+        let prepared = attributed_context(&components, &system, "", &[], None);
         assert_eq!(prepared.system.as_ref().unwrap().text, system);
         for (kind, expected) in [
             (ContextAssetKind::Scratch, "> &#36;kickoff"),
@@ -1844,7 +1871,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ..Default::default()
         };
         let system = crate::engine::format_prompt(&components);
-        let prepared = attributed_context(&components, &system, "", &[]);
+        let prepared = attributed_context(&components, &system, "", &[], None);
 
         let block = prepared
             .system
@@ -1895,7 +1922,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ..PromptComponents::default()
         };
 
-        let prepared = attributed_context(&components, "MEMORY", "outer MEMORY remainder", &[]);
+        let prepared =
+            attributed_context(&components, "MEMORY", "outer MEMORY remainder", &[], None);
 
         assert_eq!(
             prepared.system.unwrap().assets[0].kind,

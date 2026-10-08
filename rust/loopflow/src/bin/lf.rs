@@ -1697,6 +1697,9 @@ fn execute_command(
         Some(Commands::ProviderSession) => {
             loopflow::lf::commands::session_history::observe_provider_session()
         }
+        Some(Commands::SessionTitle { provider }) => {
+            loopflow::lf::commands::session_history::name_native_session(provider)
+        }
         Some(Commands::Session {
             cmd:
                 loopflow::lf::SessionCommand::Resume {

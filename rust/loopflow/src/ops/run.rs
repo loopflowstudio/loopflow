@@ -443,6 +443,7 @@ mod tests {
                 &prepared.config.system_prompt,
                 &prepared.config.task_prompt,
                 &prepared.deduplication_decisions,
+                None,
             );
             assert_eq!(
                 context

@@ -110,6 +110,25 @@ to reproduce a matrix failure or when release guidance requires it.
 
 ## External network isolation
 
+`tests/e2e/native_titles.py` exercises real Claude/Codex TUIs against a local fake
+API with fresh provider and Loopflow homes. Pass `--lf`, `--native`, `--provider`
+and `--output`; prepare its inline dependencies with `uv run ... --help`, then run
+it through `scripts/test_network.py` with `uv run --offline`. It checks first-request
+OSC titles and native manual rename. `--headless` checks new `claude -p` and
+`codex exec` conversations, saving naming readback beside stdout/stderr. Claude
+saves the name; Codex currently records the missing embedded naming endpoint.
+Old conversations and resume repair are out of scope. No installed
+accounts, host shims, or cmux windows participate.
+The probe uses native terminal-title defaults and checks the latest OSC title,
+so an earlier correct title cannot hide a later overwrite. The TUI probe does not
+cover embedded Codex or the configured shim; `--headless` records `codex exec` separately.
+
+`uv run python scripts/test_task_installation.py --native-titles` builds a
+release-shaped candidate only inside Docker and exercises published promotion
+under a disposable OS account. It checks preview, existing settings and symlinks,
+failed hook installation, same-candidate retry and repeated installation. CI's
+installation job runs this proof; it never touches the host installation.
+
 ```bash
 uv sync
 uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/

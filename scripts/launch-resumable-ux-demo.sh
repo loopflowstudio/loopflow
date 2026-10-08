@@ -14,7 +14,6 @@ mkdir -p "$demo_home"
 run_lf() {
   env \
     -u LF_BIN \
-    -u LF_ACCOUNT_LEASE \
     -u LF_ACCOUNT_SELECTION \
     -u LF_RUN_ID \
     -u LF_RUN_DIR \

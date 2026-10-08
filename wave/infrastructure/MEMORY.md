@@ -1074,6 +1074,8 @@ fresh reconnect hooks, and native composition establishes no host tracking.
 
 Flow readability and transactional Started remain. Superseded argv diagnostics
 are removed; 429 owns oversized-context proof. Earlier limits and prompt history: `64ea39be9:wave/infrastructure/MEMORY.md` and `44fe36620` there.
+Jack Heart removed `--tui` on October 8: terminal is the interactive default;
+`-i` forces interactive execution and `-b` remains headless. Native PTYs pass.
 Preserve caller-owned checkpointing and common invocation loading. Codex
 rejected-turn recovery remains unresolved. Homepage capture follows installation.
 

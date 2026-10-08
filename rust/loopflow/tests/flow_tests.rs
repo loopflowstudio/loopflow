@@ -728,7 +728,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let launch = run_lf(
             repo.path(),
             home.path(),
-            &["--tui", "skill", "identity-proof", "--no-loopflow"],
+            &["-i", "skill", "identity-proof", "--no-loopflow"],
             Some(&path),
         );
         assert!(
@@ -1330,7 +1330,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 
     // In the Task's checkout, a plain launch binds to that Task.
     repo.create_branch("task-binding");
-    let bound = launch(repo.path(), &["--tui", "binding-work", "--no-loopflow"]);
+    let bound = launch(repo.path(), &["-i", "binding-work", "--no-loopflow"]);
     let listed = session(&bound);
     assert_eq!(
         listed["work"],
@@ -1350,7 +1350,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 
     // A checkout no Task owns stays unbound and retires on exit.
     let unrelated = repo.create_named_worktree("unregistered");
-    let unbound = launch(&unrelated, &["--tui", "binding-work", "--no-loopflow"]);
+    let unbound = launch(&unrelated, &["-i", "binding-work", "--no-loopflow"]);
     let history = json(&["session", "list", "--all", "--history", "--json"]);
     let retired = history
         .as_array()
@@ -1366,13 +1366,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     repo.checkout("task-binding");
     let explicit = launch(
         repo.path(),
-        &[
-            "--task",
-            "INF-124",
-            "--tui",
-            "binding-work",
-            "--no-loopflow",
-        ],
+        &["--task", "INF-124", "-i", "binding-work", "--no-loopflow"],
     );
     assert_eq!(
         session(&explicit)["work"],
@@ -1408,7 +1402,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     runtime
         .block_on(task.store.update_task_pr(&landed))
         .unwrap();
-    let after_landing = launch(repo.path(), &["--tui", "binding-work", "--no-loopflow"]);
+    let after_landing = launch(repo.path(), &["-i", "binding-work", "--no-loopflow"]);
     assert_eq!(
         session(&after_landing)["work"],
         serde_json::json!({"kind": "task", "id": task.task.id})

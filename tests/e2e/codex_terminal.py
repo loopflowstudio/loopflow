@@ -159,7 +159,7 @@ trust_level="trusted"
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "TERM": "xterm-256color",
     }
-    args = [str(lf), "--tui", "--no-loopflow", "--diff", "none", "-m", "codex", ":", "hello"]
+    args = [str(lf), "--no-loopflow", "--diff", "none", "-a", "codex", ":", "hello"]
     status = _terminal(args, env, root, root / "launch.txt")
     assert status == 0, (status, root / "launch.txt")
     with sqlite3.connect(root / "lf" / "loopflow.db") as database:
@@ -178,7 +178,7 @@ trust_level="trusted"
     assert not list(native.glob("lf-capture-*.config.toml"))
     assert not (native / "hooks.json").exists()
     status = _terminal(
-        [str(lf), "--tui", "session", "connect", session_id], env, root, root / "resume.txt"
+        [str(lf), "session", "connect", session_id], env, root, root / "resume.txt"
     )
     assert status == 0, (status, root / "resume.txt")
     assert native_id.encode() in (root / "resume.txt").read_bytes()

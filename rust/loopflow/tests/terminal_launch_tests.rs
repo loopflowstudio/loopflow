@@ -36,11 +36,11 @@ exit 0
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args([
-            "--tui",
+            "-i",
             "--no-loopflow",
             "--diff",
             "none",
-            "-m",
+            "-a",
             "codex",
             ":",
             "hello",

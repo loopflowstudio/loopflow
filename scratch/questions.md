@@ -1,22 +1,21 @@
-# LOO-418 design review
+# LOO-418 implementation assumptions
 
-2026-10-07 · unresolved proposals. Accepted decisions and their attribution live
-in [the design](make-a-task-up-to.md).
+2026-10-07 · Jack Heart rejected the premature demo stop. Complete the larger
+lifecycle changes on PR #1499 before demo. The launch/alias-only milestone was
+the agent's scope reduction. Accepted decisions live in [the design](make-a-task-up-to.md).
 
-- Proposed: polling limits and the follow-up filing CLI. Jack Heart accepted
-  waited landing plus follow-through and recovery by the next Task/Wave operation.
-- Proposed: remove redundant `-c` alongside `--next`; no command keeps the
-  source Task open to await production evidence.
-- Proposed: the owning Wave surfaces due follow-ups on its next pass; filing
-  alone does not enable a timer or authorize an arbitrary future run. An explicit
-  unattended check in the brief can be run by that pass. Exact-time wakeups are
-  outside this slice. Jack's judgment on this return path remains necessary.
-- Reversible assumption: `--design PATH` hands a prepared child-specific plan
-  into checkout. Keep current scratch isolation and stack sync. No automatic
-  interpretation of a multi-step Markdown plan or overwriting newer child notes.
-- LOO-385 overlaps the no-PR/Workflow work. Its inspected planning is unstarted;
-  no cancellation, transfer or claim of its acceptance has been made.
+The remaining proposals are implementation defaults, not new decisions attributed
+to Jack or reasons to stop before building the full change:
 
-The launch/status repair and `task complete` alias are implemented locally;
-Jack's demo review remains. Later lifecycle work retains the open choices above.
-No landing is authorized.
+- Use the proposed polling limits and filing CLI; verify retry and interruption.
+- Remove redundant `-c` and serial `--next` with the old PR-chain implementation.
+- Surface due follow-ups on the owning Wave's next operation. Filing installs no
+  timer; an unattended check must already be authorized in its brief. Exact-time
+  wakeups are outside scope. Present this behavior in the complete demo.
+- `--design PATH` transfers the child-specific plan without replacing newer
+  child work. Preserve scratch isolation and stacked sync.
+- LOO-385 overlaps. Recheck before any parallel implementation or external
+  disposition; no closure or transfer is authorized by this work.
+
+Slice 1 and the completion alias are implemented. Slices 2–4 are current work,
+not deferred follow-ups. No landing or installed-Home migration is authorized.

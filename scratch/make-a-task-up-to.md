@@ -1,6 +1,6 @@
 # One Task, up to one PR
 
-LOO-418 · reviewed decisions; first implementation milestone · 2026-10-07
+LOO-418 · full lifecycle implementation; demo after completion · 2026-10-07
 
 ## Decision and intended experience
 
@@ -13,10 +13,11 @@ Jack Heart confirmed the completion rule during design review on October 7:
 `PR merges → file follow-ups or record “none needed” → Task completes`.
 Jack then clarified that no Task at `end` may remain incomplete. Restore
 `lf task complete ISSUE` as an alias for `lf task move ISSUE end`, sharing one
-transition and its checks. Jack subsequently requested continued advancement.
-The first implementation milestone is Flow launch/status correctness and the
-completion alias. The remaining lifecycle mechanisms retain their stated review
-status; this milestone neither completes LOO-418 nor authorizes landing.
+transition and its checks. Jack requested continued advancement, then challenged
+the premature demo stop before the larger lifecycle changes were built. The
+launch/alias milestone was the agent's scope reduction, not Jack's requested
+boundary. The full remaining lifecycle is implementation scope on the same
+PR #1499. Demo follows the complete change; landing remains unauthorized.
 
 The experience: a Task has one outcome, an optional PR link, and one Workflow
 position. After delivery, its page says either **Done · Follow-up LOO-…**, or
@@ -43,9 +44,8 @@ Finally run a research Task to accepted findings and `end`: no PR is created or
 shown. Throughout, launching from a sibling checkout shows the actual Flow under
 the target Task, without the Started warning.
 
-The first implementation demonstration is the sibling-checkout Flow launch
-repair (slice 1 below). It is useful independently, but is not completion of
-LOO-418's larger contract.
+The sibling-checkout launch repair is implemented and supplies supporting proof.
+The next demo covers the complete lifecycle above, after slices 2–4 are built.
 
 ## Inventory and findings
 
@@ -292,8 +292,8 @@ the child visibly blocked/unknown. Time passing is never proof of success.
 Use an already installed Wave schedule or its ongoing conversation. Do not add a
 resident, a per-follow-up scheduler, or enable a schedule as a side effect of
 filing. If no schedule is installed, report “next Wave pass; no automatic check
-scheduled.” Exact unattended “tomorrow at 09:00” service is excluded; Jack's
-review must confirm whether this return-to-Wave behavior is sufficient.
+scheduled.” Exact unattended “tomorrow at 09:00” service is excluded. Implement
+this conservative return path and show it in the complete lifecycle demo.
 
 ### 5. Record the actual execution location once
 
@@ -347,7 +347,7 @@ commands must use the new command contract.
 
 ### Delete — do not maintain (remaining lifecycle slices)
 
-These cuts belong to slices 2–4, beyond the current launch/alias milestone.
+These cuts are the remaining implementation scope in this PR, slices 2–4.
 Delete each predecessor with its consumer cutover:
 
 - `PrCommand::Next`, next-slug CLI fields, `AfterMerge` runtime branching,
@@ -400,14 +400,14 @@ serial PR chain. If independent work is split later, each additional PR needs
 its own Task and child-specific design. Slice 1 and the completion alias are
 implemented locally; slices 2–4 remain, apart from that alias.
 
-**Current milestone:** slice 1 and the `task complete` alias from slice 3,
-through focused verification and demo. The alias shares today's end operation;
-it still rejects dirty checkouts and unpublished commits. The empty research
-edge can retain dirty files, but committed findings still encounter the working
-PR placeholder. Optional PR placement arrives with slice 2; mandatory post-merge
-follow-through checks arrive with slice 3. This milestone is not the complete Task.
-Jack has not settled the remaining product choices under Remaining review
-boundary; this milestone does not require them.
+**Current scope:** finish slices 2–4 on PR #1499, preserving slice 1 and its
+evidence. The current alias still rejects dirty checkouts and unpublished
+commits; that limitation must be removed for PR-less research through optional
+placement in slice 2. Mandatory post-merge follow-through belongs to slice 3.
+An internal slice is no longer a demo stop or a reason to advance past unfinished
+lifecycle work. Review the complete target against every acceptance row below.
+The implementation defaults below resolve the remaining proposals for building;
+they are not additional decisions attributed to Jack.
 
 1. **First demonstration — truthful Flow launch (implemented locally).**
    `task_flow_launch_tests` holds a real mechanical Flow in a disposable Home:
@@ -467,16 +467,29 @@ crash or access loss; this design claims neither. No new performance metric is
 needed for these bounded reads and existing UI surfaces. Gate should verify
 that ordinary Task reads add no per-follow-up subprocess or network call.
 
-## Remaining review boundary
+## Implementation defaults and delivery boundary
 
 Jack's zero-or-one PR and post-merge follow-through check are accepted: file
 follow-ups or record none needed before completing every merged Task. Jack also
 accepted the landing Flow/operator recovery approach and clarified that end is
-completion, with `task complete` an alias for moving to end. Remaining proposals
-include polling limits, filing interface, removing `-c`, explicit design handoff,
-and due follow-ups returning to the owning Wave without enabling a schedule.
-Live migration, closing LOO-385, automatic filing of unrelated improvements,
-publishing/landing this branch and claimed production acceptance are excluded.
+completion, with `task complete` an alias for moving to end. Jack's correction
+keeps the full lifecycle under implementation before demo, on the existing PR.
+
+Use the proposed polling limits and filing interface as implementation defaults,
+remove redundant `-c` and serial `--next`, and implement explicit `--design`
+handoff. Dated follow-ups return on the owning Wave's next operation; filing
+does not install a schedule, and unattended execution requires a concrete check
+already authorized in the brief. These are reversible implementation choices,
+not separate approvals attributed to Jack. Validate them in the complete demo;
+do not stop this implementation merely because they were previously proposals.
+Preserve the liveness, retry, history and migration protections above.
+
+Update the same PR through pursue. Live Home migration, closing LOO-385,
+automatic filing of unrelated improvements, landing this branch and claimed
+production acceptance remain excluded. Full affected verification belongs to
+gate; unavailable Docker installation coverage stays with capable CI. An actual
+failure or new consequential ambiguity must be reported, not hidden by reducing
+the Task's intended outcome.
 
 Review (2026-10-07): the inverse Flow lookup uses indexed Process-bound Session
 rows and shared membership predicates, avoiding a scan of all Process history

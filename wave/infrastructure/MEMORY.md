@@ -1,5 +1,20 @@
 # infrastructure wave memory
 
+## Retire provisional performance gates (2026-10-07)
+
+Jack Heart retired numeric performance targets, benchmark/soak requirements and
+deeper optimization follow-ups while the product surface is changing. They must
+not keep delivered Tasks open or trigger more optimization. Preserve existing
+measurements as evidence; retiring a target does not mean it passed. Actual hangs,
+data loss and other functional correctness failures remain actionable.
+
+This supersedes the performance acceptance requirements in LOO-304, LOO-375,
+LOO-376 and the timing portion of LOO-371. LOO-378's unpublished work stays
+preserved and paused. Task briefs hold the revised scope. LOO-408's reconciliation
+must respect this decision rather than resurrecting these measurements as
+production follow-ups. Scheduled release delivery and demonstrated storage
+failures remain separate outcomes, not retired latency budgets.
+
 ## Storage footprint (LOO-390, 2026-10-06)
 
 Jack Heart authorized autonomous investigation, cleanup and delivery. Findings,
